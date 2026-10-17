@@ -1103,13 +1103,23 @@ func (p spannerProvider) Detail(ctx context.Context, project string, path []stri
 	case 1:
 		return p.instanceDetail(ctx, project, path[0])
 	case 2:
-		if isSpannerPartitionPath(path) {
+		switch path[1] {
+		case spannerPartitions:
 			return p.spannerPartitionsPage(ctx, project, path[0])
+		case spannerBackups:
+			return p.spannerBackupsPage(ctx, project, path[0])
+		case spannerConfigs:
+			return console.Detail{Unavailable: "open a configuration from the instance's Instance configurations tab"}, nil
 		}
 		return p.databaseDetail(ctx, project, path[0], path[1])
 	case 3:
-		if isSpannerPartitionPath(path) {
+		switch path[1] {
+		case spannerPartitions:
 			return p.spannerPartitionDetail(ctx, project, path[0], path[2])
+		case spannerBackups:
+			return p.spannerBackupDetail(ctx, project, path[0], path[2])
+		case spannerConfigs:
+			return p.spannerConfigDetail(ctx, project, path[0], path[2])
 		}
 		return p.spannerTableDetail(ctx, project, path[0], path[1], path[2])
 	}
@@ -1173,6 +1183,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 	databases.Total = len(databases.Items)
 
 	partitions, operations, configs, configGroup := p.spannerInstanceSections(ctx, instAdmin, project, instanceID, inst.GetConfig())
+	backupSections := spannerBackupSections(ctx, dbAdmin, instanceID, name)
 	groups := []console.PropertyGroup{{
 		Heading: "Instance",
 		Properties: []console.Property{
@@ -1199,6 +1210,9 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 			{ID: "databases", Label: "Databases", Listing: databases},
 			partitions,
 			operations,
+			backupSections[0],
+			backupSections[1],
+			backupSections[2],
 			{
 				ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 				Groups: groups,
@@ -1207,6 +1221,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 					"so capacity is not a setting that has an effect here.",
 			},
 			configs,
+			spannerConfigOperationsSection(ctx, instAdmin, project),
 		},
 	}, nil
 }
@@ -1298,6 +1313,7 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 	if t := db.GetCreateTime(); t != nil {
 		created = t.AsTime().Format(time.RFC3339)
 	}
+	dbSections := spannerDatabaseBackupSections(ctx, dbAdmin, instanceID, dbID, dbName)
 
 	return console.Detail{
 		Summary: []console.Property{
@@ -1323,6 +1339,8 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 					},
 				}},
 			},
+			dbSections[0],
+			dbSections[1],
 		},
 	}, nil
 }
@@ -1763,23 +1781,35 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 	if project == "" {
 		return nil
 	}
-	if isSpannerPartitionPath(path) {
-		if len(path) == 3 {
-			return []console.Action{spannerDeletePartitionAction(true)}
+	if isSpannerChildPath(path) {
+		if len(path) != 3 {
+			return nil
+		}
+		switch path[1] {
+		case spannerPartitions:
+			acts := []console.Action{spannerDeletePartitionAction(true)}
+			if edit, ok := p.spannerEditPartitionAction(ctx, project, path[0], path[2]); ok {
+				acts = append([]console.Action{edit}, acts...)
+			}
+			return acts
+		case spannerBackups:
+			return spannerBackupActions()
+		case spannerConfigs:
+			return p.spannerConfigActions(ctx, project, path[2])
 		}
 		return nil
 	}
 	switch len(path) {
 	case 1:
-		acts := []console.Action{spannerCreatePartitionAction(), {
-			ID: "dropinstance", Label: "Delete instance", Destructive: true,
-		}}
+		acts := []console.Action{spannerCreatePartitionAction()}
+		acts = append(acts, p.spannerInstanceExtraActions(ctx, project, path[0])...)
+		acts = append(acts, console.Action{ID: "dropinstance", Label: "Delete instance", Destructive: true})
 		if edit, ok := p.spannerEditInstanceAction(ctx, project, path[0]); ok {
 			acts = append([]console.Action{edit}, acts...)
 		}
 		return acts
 	case 2:
-		acts := []console.Action{spannerDDLAction(path[0], path[1]), {
+		acts := []console.Action{spannerDDLAction(path[0], path[1]), spannerCreateScheduleAction(), {
 			ID: "dropdatabase", Label: "Drop database", Destructive: true,
 		}}
 		if edit, ok := p.spannerDropProtectionAction(ctx, project, path[0], path[1]); ok {
@@ -1801,6 +1831,9 @@ func (p spannerProvider) ActAt(ctx context.Context, project string, path []strin
 		return p.createInstance(ctx, project, values)
 	}
 	if handled, err := p.spannerAdminAct(ctx, project, path, action, values); handled {
+		return err
+	}
+	if handled, err := p.spannerBackupAct(ctx, project, path, action, values); handled {
 		return err
 	}
 
@@ -2613,6 +2646,7 @@ func (p bigtableProvider) QueryForm(path []string) (string, []console.Field) {
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
 			Pattern: `^[0-9]{1,4}$`,
 			Help:    fmt.Sprintf("At most %d.", detailLimit)},
+		bigtableSQLField(),
 	}
 }
 
@@ -2631,6 +2665,9 @@ func (p bigtableProvider) Build(ctx context.Context, project string, path []stri
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
+	if sql := strings.TrimSpace(values["sql"]); sql != "" {
+		return p.bigtableSQL(ctx, project, sql)
+	}
 	c, err := p.newData(ctx, project)
 	if err != nil {
 		out.Unavailable = "cannot reach Bigtable: " + err.Error()

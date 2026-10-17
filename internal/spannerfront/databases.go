@@ -23,7 +23,11 @@ import (
 // FAILED_PRECONDITION.
 
 // databaseClaimed are the DatabaseAdmin methods the front answers.
-var databaseClaimed = map[string]bool{"GetDatabase": true, "ListDatabases": true, "UpdateDatabase": true, "DropDatabase": true}
+var databaseClaimed = map[string]bool{"GetDatabase": true, "ListDatabases": true, "UpdateDatabase": true, "DropDatabase": true,
+	"CreateDatabase": true, "UpdateDatabaseDdl": true, "GetDatabaseDdl": true, "ListDatabaseRoles": true, "ListDatabaseOperations": true,
+	"CreateBackup": true, "CopyBackup": true, "GetBackup": true, "UpdateBackup": true, "DeleteBackup": true, "ListBackups": true,
+	"ListBackupOperations": true, "RestoreDatabase": true,
+	"CreateBackupSchedule": true, "GetBackupSchedule": true, "UpdateBackupSchedule": true, "DeleteBackupSchedule": true, "ListBackupSchedules": true}
 
 var databaseNameRe = regexp.MustCompile(`^(projects/[^/]+/instances/[^/]+)/databases/[^/]+$`)
 
@@ -42,6 +46,7 @@ func (d databases) GetDatabase(ctx context.Context, req *databasepb.GetDatabaseR
 	d.s.mu.Lock()
 	defer d.s.mu.Unlock()
 	db.EnableDropProtection = d.s.protected[db.GetName()]
+	d.s.overlayRestore(db)
 	return db, nil
 }
 
@@ -54,6 +59,7 @@ func (d databases) ListDatabases(ctx context.Context, req *databasepb.ListDataba
 	defer d.s.mu.Unlock()
 	for _, db := range resp.Databases {
 		db.EnableDropProtection = d.s.protected[db.GetName()]
+		d.s.overlayRestore(db)
 	}
 	return resp, nil
 }
@@ -71,8 +77,11 @@ func (d databases) DropDatabase(ctx context.Context, req *databasepb.DropDatabas
 	}
 	d.s.mu.Lock()
 	delete(d.s.protected, req.GetDatabase())
+	delete(d.s.restored, req.GetDatabase())
 	d.s.mu.Unlock()
 	d.s.dropPolicies(req.GetDatabase())
+	d.s.dropRoles(req.GetDatabase())
+	d.s.dropSchedules(req.GetDatabase())
 	return resp, nil
 }
 
@@ -145,4 +154,12 @@ func (s *Instances) record(op *longrunningpb.Operation) *longrunningpb.Operation
 		s.opOrder = s.opOrder[1:]
 	}
 	return proto.Clone(op).(*longrunningpb.Operation)
+}
+
+// overlayRestore sets the restore information of a database restored from
+// a backup. s.mu is held.
+func (s *Instances) overlayRestore(db *databasepb.Database) {
+	if info, ok := s.restored[db.GetName()]; ok {
+		db.RestoreInfo = proto.Clone(info).(*databasepb.RestoreInfo)
+	}
 }

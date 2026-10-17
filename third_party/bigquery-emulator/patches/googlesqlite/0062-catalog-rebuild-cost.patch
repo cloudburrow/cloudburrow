@@ -1,0 +1,492 @@
+CloudBurrow patch 62 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1525). Applies after patch 0056; needs patches
+0036 (change tables) and 0002.
+
+A DROP TABLE cost the square of the number of tables the engine held.
+Catalog.existsTable, which every table registration asks first, listed
+the SimpleCatalog's every table name through the wasm bridge
+(TableNames), and the root catalog holds each table under several name
+paths and each dataset's INFORMATION_SCHEMA views; a DROP rebuilds the
+whole catalog (resetCatalog), registering every table again, and a DROP
+TABLE rebuilt it twice, once for the table and once for its change
+table (0036). Measured natively on an Apple silicon Mac: a DROP TABLE
+took 18 ms with no other table, 0.67 s with 200 and 2.5 s with 400, and
+a CREATE TABLE 2 ms and 25 ms. Through CloudBurrow's front, which keeps
+a deleted table's history in a table of its own and makes and drops a
+scratch table for a load into a partition, an instance that had run the
+BigQuery compat suite a while took tens of seconds to delete a dataset
+and to run a load.
+
+The catalog now keeps the names each SimpleCatalog holds (tableNames),
+listed once and kept as tables are added (a SimpleCatalog never removes
+one; resetCatalog starts over with its new catalogs), and the
+SimpleTable built for each spec and each INFORMATION_SCHEMA view
+(tableHandles, infoSchemaHandles), which a rebuild adds again rather
+than building anew; and a DROP TABLE deletes the table's spec and its
+change table's in one rebuild (DeleteTableSpecs). The same DROP TABLE
+takes 9 ms with no other table and 26 ms with 400, and a CREATE TABLE
+2 ms and 4 ms. What the catalog resolves is unchanged.
+catalog_rebuild_test.go fails without the patch (a DROP with 300 tables
+took 1.3 s) and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -127,6 +127,32 @@
+ 	// collides across hierarchy levels (e.g. two sub-catalogs both
+ 	// locally named "INFORMATION_SCHEMA").
+ 	subCatalogs map[*googlesql.SimpleCatalog]map[string]*googlesql.SimpleCatalog
++	// tableNames are the names each SimpleCatalog holds a table under,
++	// lowercased, as existsTable reads them. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1525): existsTable listed the catalog's
++	// every table name through the wasm bridge (TableNames) for each
++	// name it checked, and the root catalog holds every table under
++	// several names and every dataset's INFORMATION_SCHEMA views, so
++	// adding a table cost the size of the catalog, and rebuilding it
++	// (resetCatalog, at each DROP) its square: measured natively, a
++	// DROP TABLE took 18 ms with no other table and 2.5 s with 400.
++	// Each catalog's names are listed once, the first time one is
++	// checked, and kept as addTableName adds them; a SimpleCatalog
++	// never removes a table, and resetCatalog starts this over with
++	// the catalogs.
++	tableNames map[*googlesql.SimpleCatalog]map[string]struct{}
++	// tableHandles are the SimpleTables built for the specs in tables,
++	// by spec, and infoSchemaHandles those of the INFORMATION_SCHEMA
++	// views, by storage name, so that resetCatalog adds the handles it
++	// has rather than building each again through the wasm bridge,
++	// which was most of what a rebuild still cost once existsTable read
++	// tableNames (CloudBurrow patch, #1525). A spec is not changed once
++	// made (CREATE OR REPLACE and ALTER make another), so its handle
++	// holds its columns; a view's columns are fixed. A SimpleCatalog
++	// holds the tables it is given without owning them, so a handle
++	// outlives the catalog a rebuild retires.
++	tableHandles      map[*TableSpec]*googlesql.SimpleTable
++	infoSchemaHandles map[string]*googlesql.SimpleTable
+ 	// propertyGraphs records property-graph definitions registered
+ 	// through CREATE PROPERTY GRAPH. Currently a metadata-only
+ 	// store; full GRAPH_EXPAND / AGG integration is not yet wired.
+@@ -1781,7 +1807,7 @@
+ 		if c.existsTable(cat, path[0]) {
+ 			return
+ 		}
+-		_ = cat.AddTable2(path[0], table)
++		_ = c.addTableName(cat, path[0], table)
+ 		return
+ 	}
+ 	subName := path[0]
+@@ -2017,14 +2043,22 @@
+ }
+ 
+ func (c *Catalog) DeleteTableSpec(ctx context.Context, conn *Conn, name string) error {
++	return c.DeleteTableSpecs(ctx, conn, name)
++}
++
++// DeleteTableSpecs deletes the specs of names with one rebuild of the
++// catalog. CloudBurrow patch (cloudburrow/cloudburrow#1525).
++func (c *Catalog) DeleteTableSpecs(ctx context.Context, conn *Conn, names ...string) error {
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+ 
+-	if err := c.deleteTableSpecByName(name); err != nil {
++	if err := c.deleteTableSpecsByName(names); err != nil {
+ 		return err
+ 	}
+-	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", name)); err != nil {
+-		return err
++	for _, name := range names {
++		if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", name)); err != nil {
++			return err
++		}
+ 	}
+ 	return nil
+ }
+@@ -2060,15 +2094,18 @@
+ 	return spec, exists
+ }
+ 
+-func (c *Catalog) deleteTableSpecByName(name string) error {
+-	spec, exists := c.tableMap[name]
+-	if !exists {
+-		return fmt.Errorf("failed to find table spec from map by %s", name)
++func (c *Catalog) deleteTableSpecsByName(names []string) error {
++	gone := make(map[string]bool, len(names))
++	for _, name := range names {
++		spec, exists := c.tableMap[name]
++		if !exists {
++			return fmt.Errorf("failed to find table spec from map by %s", name)
++		}
++		gone[c.formatNamePath(spec.NamePath)] = true
+ 	}
+ 	tables := make([]*TableSpec, 0, len(c.tables))
+-	specName := c.formatNamePath(spec.NamePath)
+ 	for _, table := range c.tables {
+-		if specName == c.formatNamePath(table.NamePath) {
++		if gone[c.formatNamePath(table.NamePath)] {
+ 			continue
+ 		}
+ 		tables = append(tables, table)
+@@ -2177,7 +2214,16 @@
+ 	// pressure that pins thousands of catalogs in the wasm heap until
+ 	// it exhausts and `wasm_alloc` starts returning OOB.
+ 	c.subCatalogs = map[*googlesql.SimpleCatalog]map[string]*googlesql.SimpleCatalog{}
++	c.tableNames = map[*googlesql.SimpleCatalog]map[string]struct{}{}
++	// The handles of the tables kept, and none of the others'.
++	handles := make(map[*TableSpec]*googlesql.SimpleTable, len(tables))
+ 	for _, spec := range tables {
++		if h, ok := c.tableHandles[spec]; ok {
++			handles[spec] = h
++		}
++	}
++	c.tableHandles = handles
++	for _, spec := range tables {
+ 		if err := c.addTableSpec(spec); err != nil {
+ 			return err
+ 		}
+@@ -2384,12 +2430,19 @@
+ }
+ 
+ func (c *Catalog) addTableSpecRecursive(cat *googlesql.SimpleCatalog, spec *TableSpec) error {
+-	table, err := c.tableHandleForSpec(spec)
+-	if err != nil {
+-		return err
+-	}
++	table := c.tableHandles[spec] // CloudBurrow patch (#1525)
+ 	if table == nil {
+-		return fmt.Errorf("failed to build table %q", spec.TableName())
++		var err error
++		if table, err = c.tableHandleForSpec(spec); err != nil {
++			return err
++		}
++		if table == nil {
++			return fmt.Errorf("failed to build table %q", spec.TableName())
++		}
++		if c.tableHandles == nil {
++			c.tableHandles = map[*TableSpec]*googlesql.SimpleTable{}
++		}
++		c.tableHandles[spec] = table
+ 	}
+ 	return c.addTableSpecRecursiveImpl(cat, spec, table)
+ }
+@@ -2416,7 +2469,7 @@
+ 		}
+ 		fullTableName := strings.Join(spec.NamePath, ".")
+ 		if !c.existsTable(cat, fullTableName) {
+-			if err := cat.AddTable2(fullTableName, table); err != nil {
++			if err := c.addTableName(cat, fullTableName, table); err != nil {
+ 				return fmt.Errorf("failed to register table %q: %w", fullTableName, err)
+ 			}
+ 		}
+@@ -2439,7 +2492,7 @@
+ 	if c.existsTable(cat, tableName) {
+ 		return nil
+ 	}
+-	if err := cat.AddTable2(tableName, table); err != nil {
++	if err := c.addTableName(cat, tableName, table); err != nil {
+ 		return fmt.Errorf("failed to register table %q: %w", tableName, err)
+ 	}
+ 	return nil
+@@ -2452,9 +2505,10 @@
+ // through, so handle.Name() is the storage name everywhere — no
+ // side map / pointer-identity machinery needed at format time.
+ //
+-// We deliberately do NOT cache the handle across calls: a recreated
++// We deliberately do NOT cache the handle by name: a recreated
+ // table may reuse the same storage name with a different column set,
+-// and an old cached handle would then expose stale columns.
++// and an old cached handle would then expose stale columns. It is kept
++// by spec (tableHandles), which a recreated table does not share.
+ func (c *Catalog) tableHandleForSpec(spec *TableSpec) (*googlesql.SimpleTable, error) {
+ 	storageName := spec.TableName()
+ 	columns := []*googlesql.SimpleColumn{}
+@@ -2794,24 +2848,50 @@
+ }
+ 
+ func (c *Catalog) existsTable(cat *googlesql.SimpleCatalog, name string) bool {
+-	// Checks presence on the *wasm-side* SimpleCatalog via TableNames().
+-	// The earlier implementation short-circuited against c.tableMap,
+-	// which caused AddTable to be skipped for tables that were already
+-	// recorded on the Go side but never propagated into the wasm
+-	// catalog — the analyzer then couldn't find them.
+-	names, err := cat.TableNames()
+-	if err != nil {
+-		return false
+-	}
+-	target := strings.ToLower(name)
+-	for _, n := range names {
+-		if strings.ToLower(n) == target {
+-			return true
+-		}
++	// Checks presence on the *wasm-side* SimpleCatalog, whose names
++	// tableNamesOf lists once and addTableName keeps (CloudBurrow
++	// patch, #1525). The earlier implementation short-circuited against
++	// c.tableMap, which caused AddTable to be skipped for tables that
++	// were already recorded on the Go side but never propagated into
++	// the wasm catalog — the analyzer then couldn't find them.
++	_, ok := c.tableNamesOf(cat)[strings.ToLower(name)]
++	return ok
++}
++
++// tableNamesOf is the names cat holds a table under (tableNames), listed
++// from the wasm side the first time. CloudBurrow patch (#1525).
++func (c *Catalog) tableNamesOf(cat *googlesql.SimpleCatalog) map[string]struct{} {
++	if names, ok := c.tableNames[cat]; ok {
++		return names
+ 	}
+-	return false
++	list, err := cat.TableNames()
++	if err != nil {
++		return nil // not kept: listed again at the next check, as before
++	}
++	names := make(map[string]struct{}, len(list))
++	for _, n := range list {
++		names[strings.ToLower(n)] = struct{}{}
++	}
++	if c.tableNames == nil {
++		c.tableNames = map[*googlesql.SimpleCatalog]map[string]struct{}{}
++	}
++	c.tableNames[cat] = names
++	return names
+ }
+ 
++// addTableName adds table to cat under name and keeps the name in
++// tableNames. CloudBurrow patch (#1525).
++func (c *Catalog) addTableName(cat *googlesql.SimpleCatalog, name string, table *googlesql.SimpleTable) error {
++	names := c.tableNamesOf(cat) // listed before the add, so the add is not missed
++	if err := cat.AddTable2(name, table); err != nil {
++		return err
++	}
++	if names != nil {
++		names[strings.ToLower(name)] = struct{}{}
++	}
++	return nil
++}
++
+ func (c *Catalog) existsFunction(cat *googlesql.SimpleCatalog, name string) bool {
+ 	names, err := cat.FunctionNames()
+ 	if err != nil {
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -238,18 +238,23 @@
+ 
+ // dropChangeTable drops the change table of the table named name, if it
+ // has one.
+-func dropChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, name string) error {
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1525): it returns the change
++// table's name when the catalog holds it, for the caller to delete with
++// the table's own spec in one rebuild of the catalog (DeleteTableSpecs),
++// rather than deleting it itself, which rebuilt the catalog once more.
++func dropChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, name string) (string, error) {
+ 	if isChangeTableName(name) {
+-		return nil
++		return "", nil
+ 	}
+ 	change := name + changeTableSuffix
+ 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", change)); err != nil {
+-		return err
++		return "", err
+ 	}
+ 	if _, exists := catalog.tableMap[change]; exists {
+-		return catalog.DeleteTableSpec(ctx, conn, change)
++		return change, nil
+ 	}
+-	return nil
++	return "", nil
+ }
+ 
+ // registerChangeTimeFunctions registers on conn the functions the change
+--- a/internal/info_schema_catalog.go
++++ b/internal/info_schema_catalog.go
+@@ -48,22 +48,31 @@
+ // formatter can identify the scan later.
+ func (c *Catalog) registerInfoSchemaView(project, dataset string, view *infoSchemaView) error {
+ 	storageName := fmt.Sprintf("%s.%s.INFORMATION_SCHEMA.%s", project, dataset, view.Name)
+-	columns := []*googlesql.SimpleColumn{}
+-	for _, col := range view.Columns {
+-		typ, err := infoSchemaSimpleTypeForColumn(col)
+-		if err != nil {
+-			return err
++	// CloudBurrow patch (#1525): the handle built before, if any
++	// (Catalog.infoSchemaHandles).
++	tbl := c.infoSchemaHandles[storageName]
++	if tbl == nil {
++		columns := []*googlesql.SimpleColumn{}
++		for _, col := range view.Columns {
++			typ, err := infoSchemaSimpleTypeForColumn(col)
++			if err != nil {
++				return err
++			}
++			simpleCol, err := googlesql.NewSimpleColumn(storageName, col.Name, typ, false, false)
++			if err != nil {
++				return err
++			}
++			columns = append(columns, simpleCol)
+ 		}
+-		simpleCol, err := googlesql.NewSimpleColumn(storageName, col.Name, typ, false, false)
+-		if err != nil {
+-			return err
++		tbl = newSimpleTableWithColumns(storageName, columns)
++		if tbl == nil {
++			return fmt.Errorf("failed to construct INFORMATION_SCHEMA table %q", storageName)
+ 		}
+-		columns = append(columns, simpleCol)
++		if c.infoSchemaHandles == nil {
++			c.infoSchemaHandles = map[string]*googlesql.SimpleTable{}
++		}
++		c.infoSchemaHandles[storageName] = tbl
+ 	}
+-	tbl := newSimpleTableWithColumns(storageName, columns)
+-	if tbl == nil {
+-		return fmt.Errorf("failed to construct INFORMATION_SCHEMA table %q", storageName)
+-	}
+ 	// The SimpleTable's Name() is its registry key. Each
+ 	// (project, dataset, view) trio maps to a unique storageName,
+ 	// so name-keyed lookups stay stable across analyzer descents.
+@@ -81,7 +90,7 @@
+ 		sub := c.getOrCreateSubCatalog(cat, head)
+ 		fullName := joinDot(path)
+ 		if !c.existsTable(cat, fullName) {
+-			if err := cat.AddTable2(fullName, tbl); err != nil {
++			if err := c.addTableName(cat, fullName, tbl); err != nil {
+ 				return fmt.Errorf("failed to register INFORMATION_SCHEMA alias %q: %w", fullName, err)
+ 			}
+ 		}
+@@ -102,7 +111,7 @@
+ 	if c.existsTable(cat, path[0]) {
+ 		return nil
+ 	}
+-	return cat.AddTable2(path[0], tbl)
++	return c.addTableName(cat, path[0], tbl)
+ }
+ 
+ func joinDot(path []string) string {
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -342,14 +342,21 @@
+ 			// Without IF EXISTS the analyzer rejects an unknown object before
+ 			// we get here, so reaching this point means the spec really is
+ 			// missing; fall through so DeleteTableSpec surfaces the error.
+-		}
+-		if err := a.catalog.DeleteTableSpec(ctx, conn, a.name); err != nil {
+-			return fmt.Errorf("failed to delete table spec: %w", err)
+ 		}
+-		// CloudBurrow patch (cloudburrow/cloudburrow#1418).
+-		if err := dropChangeTable(ctx, conn, a.catalog, a.name); err != nil {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1418): the change
++		// table goes with the table; and (#1525) both specs in one
++		// rebuild of the catalog.
++		change, err := dropChangeTable(ctx, conn, a.catalog, a.name)
++		if err != nil {
+ 			return fmt.Errorf("failed to drop the change history of %s: %w", a.name, err)
++		}
++		names := []string{a.name}
++		if change != "" {
++			names = append(names, change)
+ 		}
++		if err := a.catalog.DeleteTableSpecs(ctx, conn, names...); err != nil {
++			return fmt.Errorf("failed to delete table spec: %w", err)
++		}
+ 		conn.deleteTable(spec)
+ 	case "FUNCTION":
+ 		spec, exists := a.catalog.FunctionSpec(a.name)
+--- /dev/null
++++ b/catalog_rebuild_test.go
+@@ -0,0 +1,93 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++	"time"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestCatalogRebuildKeepsTables is CloudBurrow's regression test of its
++// patch 0062 (cloudburrow/cloudburrow#1525): the catalog keeps the names
++// each of its catalogs holds and the handle of each table, so a DROP
++// TABLE, which rebuilds the catalog, costs about the same with many
++// tables as with few, and the rebuilt catalog answers as before: the
++// tables kept resolve by every name path, the dropped one does not, a
++// table made again under a dropped name has its new columns, and
++// INFORMATION_SCHEMA still lists the tables.
++func TestCatalogRebuildKeepsTables(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) time.Duration {
++		t.Helper()
++		start := time.Now()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		return time.Since(start)
++	}
++	scalar := func(q string) string {
++		t.Helper()
++		var s string
++		if err := db.QueryRowContext(ctx, q).Scan(&s); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		return s
++	}
++	// The cost of a DROP with no other table, then with 300 more.
++	drop := func(tag string) time.Duration {
++		t.Helper()
++		var d time.Duration
++		for i := 0; i < 3; i++ {
++			exec(fmt.Sprintf("CREATE TABLE `p.scratch.%s%d` (n INT64)", tag, i))
++			d += exec(fmt.Sprintf("DROP TABLE `p.scratch.%s%d`", tag, i))
++		}
++		return d / 3
++	}
++	few := drop("few")
++	for i := 0; i < 300; i++ {
++		exec(fmt.Sprintf("CREATE TABLE `p.d%d.t%d` (n INT64, s STRING)", i/30, i))
++	}
++	exec("INSERT INTO `p.d0.t0` (n, s) VALUES (1, 'a')")
++	many := drop("many")
++	t.Logf("a DROP TABLE: %v with no other table, %v with 300", few, many)
++	// Measured with the patch: 9 ms and 26 ms; without it, 18 ms and
++	// 1.3 s. The bound leaves room for a slow machine.
++	if many > 10*few+500*time.Millisecond {
++		t.Errorf("a DROP TABLE took %v with 300 tables and %v with none", many, few)
++	}
++
++	exec("DROP TABLE `p.d0.t1`")
++	for _, q := range []string{"SELECT s FROM `p.d0.t0`", "SELECT s FROM `p`.`d0`.`t0`", "SELECT s FROM d0.t0"} {
++		if got := scalar(q); got != "a" {
++			t.Errorf("%s = %q after a DROP, want a", q, got)
++		}
++	}
++	if _, err := db.QueryContext(ctx, "SELECT * FROM `p.d0.t1`"); err == nil || !strings.Contains(err.Error(), "not found") {
++		t.Errorf("the dropped table: %v, want not found", err)
++	}
++	exec("CREATE TABLE `p.d0.t1` (x STRING, y INT64)")
++	exec("INSERT INTO `p.d0.t1` (x, y) VALUES ('b', 2)")
++	if got := scalar("SELECT FORMAT('%s%d', x, y) FROM `p.d0.t1`"); got != "b2" {
++		t.Errorf("the table made again = %q, want b2", got)
++	}
++	exec("DROP TABLE `p.d0.t2`")
++	if got := scalar("SELECT FORMAT('%s%d', x, y) FROM `p.d0.t1`"); got != "b2" {
++		t.Errorf("the table made again, after another DROP = %q, want b2", got)
++	}
++	if _, err := db.QueryContext(ctx, "SELECT n FROM `p.d0.t1`"); err == nil {
++		t.Error("the table made again still has its old column n")
++	}
++	if got := scalar("SELECT STRING_AGG(table_name, ',' ORDER BY table_name) FROM d0.INFORMATION_SCHEMA.TABLES WHERE table_name IN ('t0', 't1', 't2', 't3')"); got != "t0,t1,t3" {
++		t.Errorf("INFORMATION_SCHEMA.TABLES = %q, want t0,t1,t3", got)
++	}
++}

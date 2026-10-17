@@ -300,7 +300,7 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 // TestCloudSQLRefusedMethods (#1462): what needs Compute Engine,
 // Google-managed networking, another service or another engine is refused
 // 501 through the official client, naming what is missing.
-// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.connect.resolve (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.ListServerCertificates (unimplemented), sql.instances.addServerCertificate (unimplemented), sql.instances.RotateServerCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.instances.demote (unimplemented), sql.instances.demoteMaster (unimplemented), sql.instances.switchover (unimplemented), sql.instances.reencrypt (unimplemented), sql.projects.instances.getDiskShrinkConfig (unimplemented), sql.projects.instances.performDiskShrink (unimplemented), sql.projects.instances.resetReplicaSize (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented), sql.projects.instances.startExternalSync (unimplemented), sql.projects.instances.verifyExternalSyncSettings (unimplemented)
+// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.connect.resolve (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.ListServerCertificates (unimplemented), sql.instances.addServerCertificate (unimplemented), sql.instances.RotateServerCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.instances.demote (unimplemented), sql.instances.demoteMaster (unimplemented), sql.instances.switchover (unimplemented), sql.instances.reencrypt (unimplemented), sql.projects.instances.getDiskShrinkConfig (unimplemented), sql.projects.instances.performDiskShrink (unimplemented), sql.projects.instances.resetReplicaSize (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
 func TestCloudSQLRefusedMethods(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -367,14 +367,6 @@ func TestCloudSQLRefusedMethods(t *testing.T) {
 		}},
 		{"rescheduleMaintenance", "maintenance", func() error {
 			_, err := svc.Projects.Instances.RescheduleMaintenance(p, i, &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{}).Do()
-			return err
-		}},
-		{"startExternalSync", "external primary", func() error {
-			_, err := svc.Projects.Instances.StartExternalSync(p, i, &sqladmin.SqlInstancesStartExternalSyncRequest{}).Do()
-			return err
-		}},
-		{"verifyExternalSyncSettings", "external primary", func() error {
-			_, err := svc.Projects.Instances.VerifyExternalSyncSettings(p, i, &sqladmin.SqlInstancesVerifyExternalSyncSettingsRequest{}).Do()
 			return err
 		}},
 	} {

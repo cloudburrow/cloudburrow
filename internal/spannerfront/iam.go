@@ -30,8 +30,8 @@ import (
 // documents for TestIamPermissions on a missing instance), and its policy
 // goes with it: DropDatabase drops a database's, DeleteInstance the
 // instance's and its databases'. Policies are kept in memory, as the
-// emulator keeps its instances. Backups and database roles, which the
-// emulator does not keep, are UNIMPLEMENTED.
+// emulator keeps its instances. The front's backups (backups.go) and
+// database roles (roles.go) have policies too, and a backup's goes with it.
 
 var (
 	iamInstanceRe = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+$`)
@@ -56,9 +56,12 @@ func (s *Instances) iamTarget(ctx context.Context, resource string, database boo
 		_, err := s.emuDB.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: resource})
 		return err
 	case database && iamBackupRe.MatchString(resource):
-		return status.Errorf(codes.Unimplemented, "IAM on backups is not served here: %s", noBackups)
+		if _, _, ok := s.backupCopy(resource); !ok {
+			return backupNotFound(resource)
+		}
+		return nil
 	case database && iamRoleRe.MatchString(resource):
-		return status.Error(codes.Unimplemented, "IAM on database roles is not served here: the emulator keeps no database roles")
+		return s.roleExists(ctx, resource)
 	case database:
 		return status.Errorf(codes.InvalidArgument, "Invalid resource %q: want projects/{project}/instances/{instance}/databases/{database}.", resource)
 	}

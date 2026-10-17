@@ -1,0 +1,594 @@
+CloudBurrow patch 59 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1508).
+
+The bug: COLLATE in DDL (`s STRING COLLATE 'und:ci'`, a table's DEFAULT
+COLLATE) and the COLLATE function failed 400 "COLLATE is not supported",
+and a STRING column with the collation 'und:ci' compared by code point:
+`WHERE s = 'aBC'` did not match 'Abc', and GROUP BY, DISTINCT, ORDER BY,
+joins, MIN/MAX and COUNT(DISTINCT) ignored the collation.
+
+The fix, as BigQuery's collation reference documents
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts):
+- the analyzer and the catalog's builtins have the annotation framework
+  and collation support on, so COLLATE analyzes, the analyzer's own
+  COLLATE function replaces googlesqlite's stand-in (which gave its
+  result no collation), and the analyzer propagates collation and
+  refuses what the reference refuses (two different collations
+  compared);
+- a CREATE TABLE records each STRING column's collation (its COLLATE, or
+  the table's DEFAULT COLLATE unless its COLLATE is '') in
+  ColumnSpec.Collation, and the catalog
+  gives the column that collation as an annotation (needs go-googlesql
+  patch 0003);
+- the formatter compares und:ci values case-folded: a comparison's
+  STRING arguments (=, !=, <, BETWEEN, IN, LIKE, STARTS_WITH, ...) through
+  LOWER, GROUP BY (and so DISTINCT) on the folded key, ORDER BY by a new
+  SQLite collation, googlesqlite_collate_ci, MIN and MAX as MIN_BY and
+  MAX_BY of the folded value (so the value itself is returned), and
+  COUNT(DISTINCT) of the folded value.
+Its test collation_test.go fails without it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/collation_test.go
+@@ -0,0 +1,80 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++)
++
++// TestCollationUndCI is CloudBurrow patch 59's regression test
++// (cloudburrow/cloudburrow#1508): a STRING with the collation 'und:ci'
++// compares case-insensitively in comparisons, IN, LIKE, joins, GROUP BY,
++// DISTINCT, ORDER BY, MIN/MAX and COUNT(DISTINCT), as BigQuery's
++// collation reference documents; COLLATE in DDL, a table's DEFAULT
++// COLLATE and the COLLATE function give it, and COLLATE(x, '') takes it
++// away. Before the patch COLLATE failed "COLLATE is not supported" and
++// every comparison was by code point.
++func TestCollationUndCI(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=collation_und_ci")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, q := range []string{
++		"CREATE TABLE `p.d.t` (s STRING COLLATE 'und:ci', n INT64)",
++		"INSERT INTO `p.d.t` (s, n) VALUES ('Abc', 1), ('aBC', 2), ('b', 3), ('B', 4), (NULL, 5)",
++		"CREATE TABLE `p.d.u` (s STRING, n INT64) DEFAULT COLLATE 'und:ci'",
++		"INSERT INTO `p.d.u` (s, n) VALUES ('Abc', 1)",
++		"CREATE TABLE `p.d.e` (s STRING COLLATE '', u STRING) DEFAULT COLLATE 'und:ci'",
++		"INSERT INTO `p.d.e` (s, u) VALUES ('Abc', 'Abc')",
++		"CREATE TABLE `p.d.plain` (s STRING)",
++		"INSERT INTO `p.d.plain` (s) VALUES ('Abc'), ('aBC')",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for _, tc := range []struct{ q, want string }{
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE s = 'ABC'", "2"},
++		// COLLATE '' keeps the table's DEFAULT COLLATE off the column.
++		{"SELECT COUNT(*) FROM `p.d.e` WHERE s = 'ABC'", "0"},
++		{"SELECT COUNT(*) FROM `p.d.e` WHERE u = 'ABC'", "1"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE s != 'ABC'", "2"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE s IN ('ABC', 'x')", "2"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE s LIKE 'ab%'", "2"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE s < 'b'", "2"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE s BETWEEN 'a' AND 'ABZ'", "2"},
++		{"SELECT COUNT(*) FROM (SELECT s FROM `p.d.t` WHERE s IS NOT NULL GROUP BY s)", "2"},
++		{"SELECT COUNT(*) FROM (SELECT DISTINCT s FROM `p.d.t` WHERE s IS NOT NULL)", "2"},
++		{"SELECT COUNT(DISTINCT s) FROM `p.d.t`", "2"},
++		{"SELECT STRING_AGG(CAST(n AS STRING), ',') FROM (SELECT n FROM `p.d.t` WHERE s IS NOT NULL ORDER BY s, n)", "1,2,3,4"},
++		{"SELECT COUNT(*) FROM `p.d.t` a JOIN `p.d.t` b ON a.s = b.s", "8"},
++		{"SELECT LOWER(MIN(s)) FROM `p.d.t`", "abc"},
++		{"SELECT LOWER(MAX(s)) FROM `p.d.t`", "b"},
++		{"SELECT MIN(s) FROM `p.d.t` WHERE n IN (3, 2)", "aBC"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE s = 'ABC'", "1"},
++		{"SELECT COUNT(*) FROM `p.d.plain` WHERE s = 'ABC'", "0"},
++		{"SELECT COUNT(*) FROM `p.d.plain` WHERE COLLATE(s, 'und:ci') = 'ABC'", "2"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE COLLATE(s, '') = 'Abc'", "1"},
++		{"SELECT COLLATE('a', 'und:ci') = 'A'", "true"},
++		{"SELECT UPPER(s) = 'ABC' FROM `p.d.t` WHERE n = 1", "true"},
++		{"SELECT s FROM `p.d.t` WHERE n = 2", "aBC"},
++	} {
++		var v any
++		if err := db.QueryRowContext(ctx, tc.q).Scan(&v); err != nil {
++			t.Errorf("%s: %v", tc.q, err)
++			continue
++		}
++		if got := fmt.Sprint(v); got != tc.want {
++			t.Errorf("%s = %s, want %s", tc.q, got, tc.want)
++		}
++	}
++	// A comparison of two different collations is refused.
++	_, err = db.QueryContext(ctx, "SELECT COLLATE('a', 'und:ci') = COLLATE('A', 'binary')")
++	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "collation") {
++		t.Errorf("mixed collations: err %v, want a collation conflict", err)
++	}
++}
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -132,6 +132,11 @@
+ 	googlesql.LanguageFeatureFeatureCreateTablePartitionBy,
+ 	googlesql.LanguageFeatureFeatureCreateTableClusterBy,
+ 	googlesql.LanguageFeatureFeatureColumnDefaultValue,
++	// Collation (cloudburrow/cloudburrow#1508): COLLATE in DDL and the
++	// COLLATE function, and collation propagated to the functions,
++	// GROUP BY and ORDER BY that compare collated STRING values.
++	googlesql.LanguageFeatureFeatureV13AnnotationFramework,
++	googlesql.LanguageFeatureFeatureV13CollationSupport,
+ 	// Function-set feature flags. Enable the families we have
+ 	// runtime support for so the analyzer recognises the new
+ 	// builtins (LAX_*, EDIT_DISTANCE, MAX_BY / MIN_BY, etc.)
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -198,6 +198,9 @@
+ 			googlesql.LanguageFeatureFeatureProtoExtensionsWithNew,
+ 			googlesql.LanguageFeatureFeatureProtoExtensionsWithSet,
+ 			googlesql.LanguageFeatureFeatureEnumValueDescriptorProto,
++			// CloudBurrow patch (cloudburrow/cloudburrow#1508): COLLATE.
++			googlesql.LanguageFeatureFeatureV13AnnotationFramework,
++			googlesql.LanguageFeatureFeatureV13CollationSupport,
+ 		} {
+ 			_ = opts.EnableLanguageFeature(f)
+ 		}
+@@ -850,9 +853,9 @@
+ 	// syntactic sugar (no FN_COLLATE function ID). We surface it as a
+ 	// scalar so the analyzer can resolve the call sites used by the
+ 	// upstream string_functions Examples.
+-	registerRoot("collate", googlesql.FunctionEnums_ModeScalar,
+-		mkArg(googlesql.TypeKindTypeString),
+-		[]*googlesql.FunctionArgumentType{mkArg(googlesql.TypeKindTypeString), mkArg(googlesql.TypeKindTypeString)})
++	// CloudBurrow patch (cloudburrow/cloudburrow#1508): with collation
++	// support on, the analyzer's own COLLATE gives its result the
++	// collation, which this one did not.
+ 	registerRoot("tokenize_fulltext", googlesql.FunctionEnums_ModeScalar,
+ 		mkArg(googlesql.TypeKindTypeBytes),
+ 		[]*googlesql.FunctionArgumentType{mkArg(googlesql.TypeKindTypeString)})
+@@ -2464,7 +2467,12 @@
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1277): the
+ 		// ingestion-time pseudo-columns (applyIngestionPartitionRewrite)
+ 		// are pseudo-columns, which SELECT * leaves out.
+-		columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, isIngestionPseudoColumn(column.Name), true)))
++		// CloudBurrow patch (#1508): a collated column's annotation.
++		if col := newCollatedColumn(storageName, column.Name, typ, column.Collation, isIngestionPseudoColumn(column.Name)); col != nil {
++			columns = append(columns, col)
++		} else {
++			columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, isIngestionPseudoColumn(column.Name), true)))
++		}
+ 		colIndex[column.Name] = int32(i)
+ 	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1460): a change table's
+@@ -2525,9 +2533,13 @@
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		columns = append(columns, m1(googlesql.NewSimpleColumn(
+-			tableName, column.Name, typ, isIngestionPseudoColumn(column.Name), true,
+-		)))
++		if col := newCollatedColumn(tableName, column.Name, typ, column.Collation, isIngestionPseudoColumn(column.Name)); col != nil {
++			columns = append(columns, col) // CloudBurrow patch (#1508)
++		} else {
++			columns = append(columns, m1(googlesql.NewSimpleColumn(
++				tableName, column.Name, typ, isIngestionPseudoColumn(column.Name), true,
++			)))
++		}
+ 		colIndex[column.Name] = int32(i)
+ 	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1460): a change table's
+--- /dev/null
++++ b/internal/collation.go
+@@ -0,0 +1,208 @@
++package internal
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1508): collation.
++//
++// BigQuery compares the values of a STRING with the collation 'und:ci'
++// case-insensitively: its comparisons, IN, LIKE, joins, GROUP BY,
++// DISTINCT and ORDER BY
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts).
++// The analyzer (FEATURE_V_1_3_COLLATION_SUPPORT) reads COLLATE in DDL,
++// the COLLATE function and the collation of a table's columns
++// (ColumnSpec.Collation, an annotation on the catalog's column),
++// propagates it as the reference documents, refuses it where a function
++// does not support it, and records it on each function call, GROUP BY
++// and ORDER BY that compares collated values. The formatter compares
++// those values case-folded: a function's STRING arguments through
++// LOWER, and GROUP BY and ORDER BY by the googlesqlite_collate_ci
++// collation.
++
++import (
++	"strings"
++	"sync"
++
++	"github.com/goccy/go-googlesql"
++)
++
++// ciCollation is BigQuery's case-insensitive collation; ” (and
++// 'binary') is the default, which compares by code point.
++const ciCollation = "und:ci"
++
++// isCI reports whether c is und:ci.
++func isCI(c *googlesql.ResolvedCollation) bool {
++	if c == nil {
++		return false
++	}
++	name, err := c.CollationName()
++	return err == nil && strings.EqualFold(name, ciCollation)
++}
++
++// ciAt reports whether the i-th collation of list is und:ci.
++func ciAt(list []*googlesql.ResolvedCollation, i int) bool {
++	return i < len(list) && isCI(list[i])
++}
++
++// collatedComparisons are the functions whose STRING arguments, under
++// und:ci, compare case-folded. The others that take a collation
++// (REPLACE, SPLIT, NULLIF, ...) are run as they are, by code point.
++var collatedComparisons = map[string]bool{
++	"$equal": true, "$not_equal": true, "$less": true, "$less_or_equal": true, "$greater": true,
++	"$greater_or_equal": true, "$between": true, "$in": true, "$like": true, "$not_like": true,
++	"$is_distinct_from": true, "$is_not_distinct_from": true, "starts_with": true, "ends_with": true,
++	"strpos": true, "instr": true, "$case_with_value": true,
++}
++
++// foldCollatedArgs returns args with each STRING argument case-folded
++// when call compares them under und:ci.
++func foldCollatedArgs(call *googlesql.ResolvedFunctionCallBase, args []string) []string {
++	list, err := call.CollationList()
++	if err != nil || len(list) == 0 || !isCI(list[0]) {
++		return args
++	}
++	fn, err := call.Function()
++	if err != nil || fn == nil {
++		return args
++	}
++	name, _ := fn.FullName(false)
++	if !collatedComparisons[strings.ToLower(name)] {
++		return args
++	}
++	argList, _ := call.ArgumentList()
++	out := append([]string(nil), args...)
++	for i, arg := range argList {
++		if i >= len(out) || arg == nil {
++			break
++		}
++		if typ, _ := arg.Type(); typ != nil && m1(typ.IsString()) {
++			out[i] = "googlesqlite_lower(" + out[i] + ")"
++		}
++	}
++	return out
++}
++
++// collationOf returns the collation of a column's annotated type, or "".
++func collationOf(annotations *googlesql.AnnotationMap) string {
++	if annotations == nil {
++		return ""
++	}
++	ca, err := googlesql.NewCollationAnnotation()
++	if err != nil {
++		return ""
++	}
++	id, err := ca.Id()
++	if err != nil {
++		return ""
++	}
++	v, err := annotations.GetAnnotation(id)
++	if err != nil || v == nil {
++		return ""
++	}
++	s, _ := v.StringValue()
++	return s
++}
++
++// literalString returns the STRING literal expr is, or "".
++func literalString(expr googlesql.ResolvedExprNode) string {
++	lit, ok := expr.(*googlesql.ResolvedLiteral)
++	if !ok || lit == nil {
++		return ""
++	}
++	v, err := lit.Value()
++	if err != nil || v == nil {
++		return ""
++	}
++	s, _ := v.StringValue()
++	return s
++}
++
++// newCollatedColumn returns a catalog column of typ with the collation,
++// or nil when it has none or typ is not a STRING.
++func newCollatedColumn(tableName, name string, typ googlesql.Googlesql_TypeNode, collation string, isPseudo bool) *googlesql.SimpleColumn {
++	if collation == "" || !m1(typ.IsString()) {
++		return nil
++	}
++	am := scalarCollationMap(collation, typ)
++	if am == nil {
++		return nil
++	}
++	col, err := googlesql.NewSimpleColumn2(tableName, name, &googlesql.AnnotatedType{AnnotationMap: am, Type_: typ}, isPseudo, true)
++	if err != nil {
++		return nil
++	}
++	return col
++}
++
++// scalarCollations keeps the annotation map of each collation a STRING
++// column is given, owned by the type factory, for the process: the
++// catalog's columns point at it.
++var scalarCollations = struct {
++	sync.Mutex
++	am map[string]*googlesql.AnnotationMap
++}{am: map[string]*googlesql.AnnotationMap{}}
++
++func scalarCollationMap(collation string, typ googlesql.Googlesql_TypeNode) *googlesql.AnnotationMap {
++	scalarCollations.Lock()
++	defer scalarCollations.Unlock()
++	if am, ok := scalarCollations.am[collation]; ok {
++		return am
++	}
++	// The map is the type factory's, as the analyzer's are.
++	ca, err := googlesql.NewCollationAnnotation()
++	if err != nil {
++		return nil
++	}
++	id, err := ca.Id()
++	if err != nil {
++		return nil
++	}
++	proto, err := googlesql.NewAnnotationMapProto()
++	if err != nil {
++		return nil
++	}
++	ap, err := proto.AddAnnotations()
++	if err != nil || ap.SetId(int64(id)) != nil {
++		return nil
++	}
++	v, err := ap.MutableValue()
++	if err != nil {
++		return nil
++	}
++	sv, err := googlesql.NewSimpleValueString(collation)
++	if err != nil || sv.Serialize(v) != nil {
++		return nil
++	}
++	am, err := tf().DeserializeAnnotationMap(proto)
++	if err != nil || am == nil {
++		return nil
++	}
++	scalarCollations.am[collation] = am
++	return am
++}
++
++// collatedAggregate rewrites an aggregate over und:ci STRING values:
++// MIN and MAX compare case-folded and return one of the values as it is
++// (MIN_BY / MAX_BY of the folded value), and COUNT(DISTINCT) counts the
++// folded values. It returns the call unchanged otherwise.
++func collatedAggregate(call *googlesql.ResolvedFunctionCallBase, funcName string, args []string, distinct bool) (string, []string) {
++	list, err := call.CollationList()
++	if err != nil || len(list) == 0 || !isCI(list[0]) || len(args) == 0 {
++		return funcName, args
++	}
++	argList, _ := call.ArgumentList()
++	if len(argList) == 0 || argList[0] == nil {
++		return funcName, args
++	}
++	if typ, _ := argList[0].Type(); typ == nil || !m1(typ.IsString()) {
++		return funcName, args
++	}
++	out := append([]string(nil), args...)
++	switch funcName {
++	case "googlesqlite_min", "googlesqlite_max":
++		out = append([]string{args[0], "googlesqlite_lower(" + args[0] + ")"}, args[1:]...)
++		return funcName + "_by", out
++	case "googlesqlite_count":
++		if distinct {
++			out[0] = "googlesqlite_lower(" + args[0] + ")"
++		}
++	}
++	return funcName, out
++}
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -369,6 +369,9 @@
+ 	if err != nil {
+ 		return "", err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1508): und:ci
++	// comparisons compare case-folded (collation.go).
++	args = foldCollatedArgs(n.node.ResolvedFunctionCallBase, args)
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1116): the JSON
+ 	// encoders are given their argument's type (json_encoding.go).
+ 	if typedJSONFuncs[funcName] {
+@@ -736,6 +739,9 @@
+ 	if spec, exists := funcMap[funcName]; exists {
+ 		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1508): MIN, MAX and
++	// COUNT(DISTINCT) of und:ci values (collation.go).
++	funcName, args = collatedAggregate(n.node.ResolvedFunctionCallBase, funcName, args, m1(n.node.Distinct()))
+ 	var opts []string
+ 	for _, item := range m1(n.node.OrderByItemList()) {
+ 		columnRef := m1(item.ColumnRef())
+@@ -1873,12 +1879,18 @@
+ 	}
+ 	groupByColumns := []string{}
+ 	groupByColumnMap := map[string]struct{}{}
+-	for _, col := range m1(n.node.GroupByList()) {
++	// CloudBurrow patch (#1508): an und:ci key groups case-folded.
++	groupByCollations := m1(n.node.CollationList())
++	for i, col := range m1(n.node.GroupByList()) {
+ 		if _, err := newNode(col).FormatSQL(ctx); err != nil {
+ 			return "", err
+ 		}
+ 		colName := uniqueColumnName(ctx, m1(col.Column()))
+-		groupByColumns = append(groupByColumns, fmt.Sprintf("`%s`", colName))
++		if ciAt(groupByCollations, i) {
++			groupByColumns = append(groupByColumns, fmt.Sprintf("googlesqlite_lower(`%s`)", colName))
++		} else {
++			groupByColumns = append(groupByColumns, fmt.Sprintf("`%s`", colName))
++		}
+ 		groupByColumnMap[colName] = struct{}{}
+ 	}
+ 	columns := []string{}
+@@ -2306,10 +2318,15 @@
+ 			}
+ 			orderByColumns = append(orderByColumns, fmt.Sprintf("(CASE WHEN `%[1]s` IS NULL THEN 0 WHEN typeof(`%[1]s`) = 'text' THEN 1 ELSE 2 END)%[2]s", colName, dir))
+ 		}
+-		if m1(item.IsDescending()) {
+-			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate DESC", colName))
++		// CloudBurrow patch (#1508): an und:ci item sorts case-folded.
++		collate := "googlesqlite_collate"
++		if isCI(m1(item.Collation())) {
++			collate = "googlesqlite_collate_ci"
++		}
++		if m1(item.IsDescending()) {
++			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE %s DESC", colName, collate))
+ 		} else {
+-			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate", colName))
++			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE %s", colName, collate))
+ 		}
+ 	}
+ 	formattedInput, err := formatInput(input)
+--- a/internal/function_register.go
++++ b/internal/function_register.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"fmt"
++	"strings"
+ 	"sync"
+ 
+ 	"github.com/goccy/go-json"
+@@ -211,6 +212,32 @@
+ 	}); err != nil {
+ 		return fmt.Errorf("failed to register collate function: %w", err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1508): und:ci, which
++	// compares STRING values case-folded (collation.go).
++	if err := sqlitex.RegisterCollation(conn, "googlesqlite_collate_ci", func(a, b string) int {
++		va, _ := DecodeValue(a)
++		vb, _ := DecodeValue(b)
++		if va != nil && vb != nil {
++			sa, ea := va.ToString()
++			sb, eb := vb.ToString()
++			if ea == nil && eb == nil {
++				if _, ok := va.(value.StringValue); ok {
++					return strings.Compare(strings.ToLower(sa), strings.ToLower(sb))
++				}
++			}
++		}
++		eq, _ := va.EQ(vb)
++		if eq {
++			return 0
++		}
++		cond, _ := va.GT(vb)
++		if cond {
++			return 1
++		}
++		return -1
++	}); err != nil {
++		return fmt.Errorf("failed to register collate function: %w", err)
++	}
+ 
+ 	for _, values := range normalFuncMap {
+ 		for _, v := range values {
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -216,6 +216,10 @@
+ 	// TableFieldSchema.defaultValueExpression reads back. CloudBurrow
+ 	// patch (cloudburrow/cloudburrow#1340).
+ 	DefaultSQL string `json:"defaultSql,omitempty"`
++	// Collation is a STRING column's collation, "und:ci", or "" for the
++	// default (collation.go). CloudBurrow patch
++	// (cloudburrow/cloudburrow#1508).
++	Collation string `json:"collation,omitempty"`
+ }
+ 
+ // TVFSpec captures a `CREATE TABLE FUNCTION` definition so the call
+@@ -705,7 +709,7 @@
+ 	}, nil
+ }
+ 
+-func newColumnsFromDef(ctx context.Context, def []*googlesql.ResolvedColumnDefinition) []*ColumnSpec {
++func newColumnsFromDef(ctx context.Context, def []*googlesql.ResolvedColumnDefinition, defaultCollation string) []*ColumnSpec {
+ 	columns := []*ColumnSpec{}
+ 	for _, columnNode := range def {
+ 		annotation, _ := columnNode.Annotations()
+@@ -724,12 +728,31 @@
+ 			}
+ 			defaultSQL, _ = dv.Sql()
+ 		}
++		// CloudBurrow patch (#1508): the column's COLLATE, else the
++		// table's DEFAULT COLLATE for a STRING column. A column whose
++		// COLLATE is '' keeps none: "A column with empty collation
++		// doesn't inherit the table's default collation".
++		typ := m1(columnNode.Type())
++		collation, named := "", false
++		if col, _ := columnNode.Column(); col != nil {
++			collation = collationOf(m1(col.TypeAnnotationMap()))
++			named = collation != ""
++		}
++		if !named && annotation != nil {
++			if expr, _ := annotation.CollationName(); expr != nil {
++				collation, named = literalString(expr), true
++			}
++		}
++		if !named && typ != nil && m1(typ.IsString()) {
++			collation = defaultCollation
++		}
+ 		columns = append(columns, &ColumnSpec{
+ 			Name:        m1(columnNode.Name()),
+-			Type:        newType(m1(columnNode.Type())),
++			Type:        newType(typ),
+ 			IsNotNull:   isNotNull,
+ 			DefaultExpr: defaultExpr,
+ 			DefaultSQL:  defaultSQL,
++			Collation:   collation,
+ 		})
+ 	}
+ 	return columns
+@@ -766,7 +789,7 @@
+ 	return &TableSpec{
+ 		IsTemp:     isTemp,
+ 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
+-		Columns:    withStreamedAtColumn(newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())), isTemp || ifNotExists),
++		Columns:    withStreamedAtColumn(newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()), tableDefaultCollation(stmt)), isTemp || ifNotExists),
+ 		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
+ 		CreateMode: m1(stmt.CreateMode()),
+ 		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
+@@ -945,7 +968,7 @@
+ 	// EXISTS, which may name a table made without it.
+ 	isTemp := resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp
+ 	ifNotExists := m1(stmt.CreateMode()) == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists
+-	columns := newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()))
++	columns := newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()), tableDefaultCollation(stmt))
+ 	if with := withStreamedAtColumn(columns, isTemp || ifNotExists); len(with) > len(columns) {
+ 		columns = with
+ 		outputColumns = append(outputColumns, "NULL AS `"+streamedAtColumn+"`")
+@@ -1012,3 +1035,15 @@
+ 		FieldTypes:    fieldTypes,
+ 	}
+ }
++
++// tableDefaultCollation returns a CREATE TABLE's DEFAULT COLLATE, or ""
++// (CloudBurrow patch, #1508).
++func tableDefaultCollation(stmt interface {
++	CollationName() (googlesql.ResolvedExprNode, error)
++}) string {
++	expr, err := stmt.CollationName()
++	if err != nil || expr == nil {
++		return ""
++	}
++	return literalString(expr)
++}

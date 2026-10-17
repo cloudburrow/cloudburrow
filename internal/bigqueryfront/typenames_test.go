@@ -27,7 +27,7 @@ func TestGoogleSQLTypeNamesAreSentAsLegacyNames(t *testing.T) {
 	if !sameJSON(e.tables["ds.t"], `{"type":"TABLE","schema":`+legacy+`}`) {
 		t.Errorf("the table reads %s, want the legacy names", e.tables["ds.t"])
 	}
-	if len(e.log) != 1 || !e.sent(`^POST \S+/datasets/ds/tables .*"description":"d"`) || e.sent(`INT64|BOOL"|STRUCT|DECIMAL`) {
+	if len(writesOf(e.log)) != 1 || !e.sent(`^POST \S+/datasets/ds/tables .*"description":"d"`) || e.sent(`INT64|BOOL"|STRUCT|DECIMAL`) {
 		t.Errorf("tables.insert sent %v", e.log)
 	}
 
@@ -48,8 +48,8 @@ func TestGoogleSQLTypeNamesAreSentAsLegacyNames(t *testing.T) {
 	e = newStateEmulator()
 	e.datasets["ds"] = true
 	body := `{"tableReference":{"tableId":"v"},"schema":` + legacy + `}`
-	if code, _ := do(t, Wrap(e), "POST", base+"/datasets/ds/tables", body); code != 200 || len(e.log) != 1 ||
-		!strings.HasSuffix(e.log[0], body) {
+	if code, _ := do(t, Wrap(e), "POST", base+"/datasets/ds/tables", body); code != 200 || len(writesOf(e.log)) != 1 ||
+		!strings.HasSuffix(writesOf(e.log)[0], body) {
 		t.Errorf("legacy names: %d, sent %v", code, e.log)
 	}
 
@@ -73,7 +73,7 @@ func TestGoogleSQLTypeNamesAreSentAsLegacyNames(t *testing.T) {
 	e = newStateEmulator()
 	e.datasets["ds"] = true
 	code, got = do(t, Wrap(e), "POST", base+"/datasets/ds/tables", `{"tableReference":{"tableId":"w"},"schema":{"fields":[{"name":"n","type":"INT65"}]}}`)
-	if code != 400 || !strings.Contains(errMsg(got), `"INT65"`) || len(e.log) != 0 {
+	if code != 400 || !strings.Contains(errMsg(got), `"INT65"`) || len(writesOf(e.log)) != 0 {
 		t.Errorf("an unknown type: %d %v, sent %v", code, got, e.log)
 	}
 }
@@ -111,4 +111,16 @@ func TestViewsNameTheirTablesWithADataset(t *testing.T) {
 			}
 		}
 	}
+}
+
+// writesOf is log without its GETs: tables.insert reads the dataset's
+// default collation (#1459, collation.go).
+func writesOf(log []string) []string {
+	var w []string
+	for _, l := range log {
+		if !strings.HasPrefix(l, "GET ") {
+			w = append(w, l)
+		}
+	}
+	return w
 }

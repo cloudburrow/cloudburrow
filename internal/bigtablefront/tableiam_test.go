@@ -55,8 +55,8 @@ func TestTableIAM(t *testing.T) {
 	if _, err := ac.TableIAM("missing").Policy(ctx); status.Code(err) != codes.NotFound {
 		t.Errorf("a missing table = %v, want NotFound", err)
 	}
-	if _, err := ac.AuthorizedViewIAM("t", "v").Policy(ctx); status.Code(err) != codes.Unimplemented {
-		t.Errorf("an authorized view = %v, want Unimplemented", err)
+	if _, err := ac.AuthorizedViewIAM("t", "v").Policy(ctx); status.Code(err) != codes.NotFound {
+		t.Errorf("a missing authorized view = %v, want NotFound", err)
 	}
 	if err := ac.DeleteTable(ctx, "t"); err != nil {
 		t.Fatal(err)

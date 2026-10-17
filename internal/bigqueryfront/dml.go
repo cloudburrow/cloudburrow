@@ -163,6 +163,12 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
+		if code, reason, msg := queryCollationRefusal(q.Query); code != 0 { // #1508, collationddl.go
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.refuseLinkedQuery(w, r, q, insert) { // #1423, loglinks.go
 		return
 	}
@@ -178,6 +184,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.withDefaultTimeZone(w, r, q, insert) { // #1417, timezone.go
+		return
+	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withDefaultCollation(w, r, q, insert) { // #1459, collation.go
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withDefaultTableKey(w, r, q, insert) { // #1456, projectdefaults.go
@@ -294,6 +303,11 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && strings.Contains(q.Query, ";") &&
+		checkDDL(q.Query).statements > 1 { // #1459, scriptdryrun.go
+		f.dryRunScript(w, r, q, insert)
+		return
+	}
 	if q.UseLegacySQL != nil && *q.UseLegacySQL || dryRun(r, insert) {
 		f.serveQuery(w, r, q, insert)
 		return
@@ -339,6 +353,15 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	}
 	if v.code != 0 {
 		f.serveQuery(w, r, q, insert)
+		return
+	}
+	if v.statements > 1 && !txnRequest(r) && sessionOf(r) == nil && splitCures(q.Query) {
+		// #1459, scriptflow.go: every other script of several statements
+		// with no TEMP table or function is carried out a statement at a
+		// time too, as BigQuery runs a script: each statement a child job,
+		// and a failure keeps what the statements before it did, through
+		// jobs.query as through a query job.
+		f.runScript(w, r, q, insert)
 		return
 	}
 	if !txnRequest(r) { // #1249, scriptflow.go; after checkDDL, which refuses what runScript would
@@ -715,7 +738,8 @@ func parseDML(sql string) (dmlStmt, bool) {
 // with one source, a table or a subquery, it is run as
 // MERGE target USING source ON cond WHEN MATCHED THEN UPDATE SET ...,
 // which updates the same rows, each target row the source matches. A FROM
-// clause of several items (a comma or a JOIN) is fromGap (501). With no
+// clause of several items (a comma or a JOIN) is a subquery of them
+// (fromItemNames, #1459), one CloudBurrow does not read fromGap (501). With no
 // WHERE it is sent on as it is: BigQuery requires one.
 func updateFrom(sql string, t []token, d dmlStmt, set, from int) (dmlStmt, bool) {
 	text := func(a, b int) string { return sql[t[a].pos:t[b-1].end] }
@@ -731,11 +755,43 @@ func updateFrom(sql string, t []token, d dmlStmt, set, from int) (dmlStmt, bool)
 			return dmlStmt{}, false
 		}
 		e = c + 1
+		if !t[s+1].is("SELECT") && !t[s+1].is("WITH") {
+			e = -1 // a parenthesized join, not a subquery
+		}
 	} else if src, e = path(t, s); e == s {
 		e = -1
 	}
 	if e < 0 || aliasEnd(t, e, "WHERE") != where {
-		d.fromGap = "UPDATE ... FROM with a FROM clause of more than one table or subquery (a comma, a JOIN or UNNEST)"
+		// #1459: several FROM items (a comma, a JOIN, UNNEST) are one
+		// source, a subquery that selects each item's range variable as a
+		// column of its name: a table's row as a STRUCT, an UNNEST's
+		// element, a WITH OFFSET's offset. The statement's u.col then
+		// reads field col of the source's column u, the same value.
+		names, bare, ok := fromItemNames(t, from+1, where)
+		if !ok || len(names) == 0 {
+			d.fromGap = "UPDATE ... FROM with a FROM clause CloudBurrow does not read (only tables, subqueries and UNNEST " +
+				"joined by commas or JOIN ... ON/USING)"
+			return d, true
+		}
+		target := d.targetText
+		if d.targetText == d.pathText && len(d.target) > 0 {
+			target += " AS " + quotePath(d.target[len(d.target)-1:])
+		}
+		cols := make([]string, len(names))
+		for i, n := range names {
+			cols[i] = quotePath([]string{n})
+		}
+		// A table with no alias is named by its table name, which the
+		// front's qualified path (`p.ds.u`) no longer gives it, as above.
+		var items strings.Builder
+		last := t[from+1].pos
+		for _, b := range bare {
+			items.WriteString(sql[last:t[b.end-1].end] + " AS " + quotePath([]string{b.name}))
+			last = t[b.end-1].end
+		}
+		items.WriteString(sql[last:t[where-1].end])
+		d.asMerge = "MERGE " + target + " USING (SELECT " + strings.Join(cols, ", ") + " FROM " + items.String() +
+			") AS `_cb_from` ON " + text(where+1, len(t)) + " WHEN MATCHED THEN UPDATE SET " + text(set+1, from)
 		return d, true
 	}
 	// A table with no alias is named in the statement by its table name,
@@ -752,6 +808,121 @@ func updateFrom(sql string, t []token, d dmlStmt, set, from int) (dmlStmt, bool)
 	d.asMerge = "MERGE " + target + " USING " + source + " ON " + text(where+1, len(t)) +
 		" WHEN MATCHED THEN UPDATE SET " + text(set+1, from)
 	return d, true
+}
+
+// fromItemNames reads the FROM items at t[i:end] of an UPDATE ... FROM
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax#update_statement,
+// "from_clause"): tables, subqueries and UNNEST, each with or without an
+// alias (a table's is its name's last part), and a WITH OFFSET alias,
+// joined by commas or [INNER|CROSS|LEFT|RIGHT|FULL [OUTER]] JOIN with ON
+// or USING. It returns the names the statement can refer to them by, and
+// false for what it does not read (FOR SYSTEM_TIME AS OF, TABLESAMPLE, a
+// parenthesized join).
+// bareItem is a FROM item's table with no alias: the index after its
+// path, and its name, the path's last part.
+type bareItem struct {
+	end  int
+	name string
+}
+
+func fromItemNames(t []token, i, end int) (names []string, bare []bareItem, ok bool) {
+	isJoinWord := func(k int) bool {
+		for _, w := range []string{"JOIN", "INNER", "CROSS", "LEFT", "RIGHT", "FULL", "OUTER"} {
+			if t[k].is(w) {
+				return true
+			}
+		}
+		return false
+	}
+	alias := func(k int) (string, int) {
+		switch {
+		case k+1 < end && t[k].is("AS") && (t[k+1].kind == tokWord || t[k+1].kind == tokQuoted):
+			return t[k+1].text, k + 2
+		case k < end && (t[k].kind == tokQuoted || t[k].kind == tokWord && !isJoinWord(k) &&
+			!t[k].is("ON") && !t[k].is("USING") && !t[k].is("WITH") && !t[k].is("FOR") && !t[k].is("TABLESAMPLE")):
+			return t[k].text, k + 1
+		}
+		return "", k
+	}
+	for i < end {
+		name := ""
+		switch {
+		case t[i].punct("("):
+			c := closeParen(t, i)
+			if c < 0 || c >= end || i+1 < end && !t[i+1].is("SELECT") && !t[i+1].is("WITH") {
+				return nil, nil, false
+			}
+			i = c + 1
+		case t[i].is("UNNEST") && i+1 < end && t[i+1].punct("("):
+			c := closeParen(t, i+1)
+			if c < 0 || c >= end {
+				return nil, nil, false
+			}
+			i = c + 1
+		default:
+			parts, e := path(t, i)
+			if len(parts) == 0 || e == i {
+				return nil, nil, false
+			}
+			name, i = parts[len(parts)-1], e
+			if a, _ := alias(i); a == "" {
+				bare = append(bare, bareItem{end: i, name: name})
+			}
+		}
+		if a, k := alias(i); a != "" {
+			name, i = a, k
+		}
+		if name != "" {
+			names = append(names, name)
+		}
+		if i+1 < end && t[i].is("WITH") && t[i+1].is("OFFSET") {
+			i += 2
+			if a, k := alias(i); a != "" {
+				names = append(names, a)
+				i = k
+			} else {
+				names = append(names, "offset")
+			}
+		}
+		if i < end && t[i].is("ON") {
+			k, depth := i+1, 0
+		on:
+			for ; k < end; k++ {
+				switch {
+				case t[k].punct("(") || t[k].punct("["):
+					depth++
+				case t[k].punct(")") || t[k].punct("]"):
+					depth--
+				case depth == 0 && (t[k].punct(",") || isJoinWord(k)):
+					break on
+				}
+			}
+			i = k
+		} else if i+1 < end && t[i].is("USING") && t[i+1].punct("(") {
+			c := closeParen(t, i+1)
+			if c < 0 || c >= end {
+				return nil, nil, false
+			}
+			i = c + 1
+		}
+		switch {
+		case i >= end:
+			return names, bare, true
+		case t[i].punct(","):
+			i++
+		case isJoinWord(i):
+			for i < end && isJoinWord(i) && !t[i].is("JOIN") {
+				i++
+			}
+			if i >= end || !t[i].is("JOIN") {
+				return nil, nil, false
+			}
+			i++
+		default:
+			return nil, nil, false
+		}
+	}
+	return nil, nil, false
 }
 
 // parseMerge reads a MERGE statement's tokens t (parseDML).

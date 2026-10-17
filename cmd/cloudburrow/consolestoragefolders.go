@@ -163,14 +163,14 @@ func (p storageProvider) hnsFolderActions(ctx context.Context, path []string) []
 	}
 	empty, err := folderEmpty(ctx, s, path[1], path[2])
 	actions := folderRowActions(path[2], err == nil && empty)
-	if _, err := s.ManagedFolders.Get(path[1], path[2]).Context(ctx).Do(); err == nil {
-		actions = append(actions, deleteManagedFolderAction(path[2]))
+	if mf, err := s.ManagedFolders.Get(path[1], path[2]).Context(ctx).Do(); err == nil {
+		actions = append(actions, editManagedFolderAction(mf), deleteManagedFolderAction(path[2]))
 	}
 	return actions
 }
 
 // hnsFolderRow is one folder row of an HNS bucket's browser.
-func (p storageProvider) hnsFolderRow(ctx context.Context, s *storagev1.Service, bucket, prefix, name string, path []string, managed bool) console.Resource {
+func (p storageProvider) hnsFolderRow(ctx context.Context, s *storagev1.Service, bucket, prefix, name string, path []string, managed *storagev1.ManagedFolder) console.Resource {
 	full := prefix + name + "/"
 	empty, err := folderEmpty(ctx, s, bucket, full)
 	row := console.Resource{
@@ -180,9 +180,9 @@ func (p storageProvider) hnsFolderRow(ctx context.Context, s *storagev1.Service,
 		Target:  folderPath(bucket, full),
 		Actions: folderRowActions(full, err == nil && empty),
 	}
-	if managed {
+	if managed != nil {
 		row.Fields["Type"] = "Managed folder"
-		row.Actions = append(row.Actions, deleteManagedFolderAction(full))
+		row.Actions = append(row.Actions, editManagedFolderAction(managed), deleteManagedFolderAction(full))
 	}
 	return row
 }
@@ -454,7 +454,7 @@ func (p storageProvider) folderSummary(ctx context.Context, bucket, name string)
 // folders from folders.list, each with its row actions, then the objects.
 // A managed folder that is no folder (one made with nothing in it) is
 // listed as the browser lists it elsewhere.
-func (p storageProvider) hnsObjects(ctx context.Context, out console.Listing, bucket, prefix string, path []string, items []objectJSON, managed map[string]bool) (console.Listing, error) {
+func (p storageProvider) hnsObjects(ctx context.Context, out console.Listing, bucket, prefix string, path []string, items []objectJSON, managed map[string]*storagev1.ManagedFolder) (console.Listing, error) {
 	names, err := p.hnsFolders(ctx, bucket, prefix)
 	if err != nil {
 		return out, fmt.Errorf("cannot list the folders of %s: %w", bucket, err)
@@ -479,7 +479,7 @@ func (p storageProvider) hnsObjects(ctx context.Context, out console.Listing, bu
 			Opens:   append(append([]string{}, path...), name),
 			Fields:  map[string]string{"Type": "Managed folder", "Size": "—", "Updated": "—"},
 			Target:  managedFolderPath(bucket, full),
-			Actions: []console.Action{deleteManagedFolderAction(full)},
+			Actions: []console.Action{editManagedFolderAction(managed[name]), deleteManagedFolderAction(full)},
 		})
 	}
 	out.Items = append(out.Items, objectRows(bucket, prefix, items)...)

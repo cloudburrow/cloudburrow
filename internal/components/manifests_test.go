@@ -132,7 +132,7 @@ func TestBigtableIsServedThroughItsFront(t *testing.T) {
 	if b.Port != BigtablePort || b.Front.UpstreamPort != BigtableEmulatorPort || b.Front.Image != "dev.local/cloudburrow-storage:abc" {
 		t.Errorf("port %d, front upstream %d, image %q", b.Port, b.Front.UpstreamPort, b.Front.Image)
 	}
-	want := "bigtable-front --listen 0.0.0.0:8086 --upstream 127.0.0.1:8096"
+	want := "bigtable-front --listen 0.0.0.0:8086 --upstream 127.0.0.1:8096 --state-dir " + FrontStateDir
 	if got := strings.Join(b.Front.Args, " "); got != want {
 		t.Errorf("front args = %q, want %q", got, want)
 	}
@@ -364,5 +364,35 @@ func TestPersistentDatastoreIsFrontedAndWaitsForTheOldEmulator(t *testing.T) {
 	m := b.Manifest("ns", "i")
 	if !strings.Contains(m, "name: front") || !strings.Contains(m, "persistentVolumeClaim") {
 		t.Errorf("manifest has no front or no volume:\n%s", m)
+	}
+}
+
+// TestFrontsKeepTheirStateOnALimitedEmptyDir (#1514): the Spanner, Bigtable
+// and Firestore fronts are told their state directory, and their pods
+// mount it on an emptyDir with a sizeLimit.
+func TestFrontsKeepTheirStateOnALimitedEmptyDir(t *testing.T) {
+	c := NewLifecycleComponent("", config.Config{Services: []config.Service{config.ServiceSpanner, config.ServiceBigtable, config.ServiceFirestore}}, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	seen := map[string]bool{}
+	for _, b := range c.Backends() {
+		if b.Name != "spanner" && b.Name != "bigtable" && b.Name != "firestore" {
+			continue
+		}
+		seen[b.Name] = true
+		if b.Front == nil || b.Front.StateDir != FrontStateDir || b.Front.StateSizeLimit != FrontStateSizeLimit {
+			t.Fatalf("%s front = %+v; want its state in %s, limited to %s", b.Name, b.Front, FrontStateDir, FrontStateSizeLimit)
+		}
+		if args := strings.Join(b.Front.Args, " "); !strings.Contains(args, "--state-dir "+FrontStateDir) {
+			t.Errorf("%s front args %q do not name the state directory", b.Name, args)
+		}
+		m := b.Manifest("cloudburrow", "test")
+		for _, want := range []string{"mountPath: " + FrontStateDir, "emptyDir:\n            sizeLimit: " + FrontStateSizeLimit} {
+			if !strings.Contains(m, want) {
+				t.Errorf("%s manifest lacks %q:\n%s", b.Name, want, m)
+			}
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("backends seen: %v", seen)
 	}
 }

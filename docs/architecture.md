@@ -130,6 +130,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
 | `internal/embedding/` | Runs the community ONNX int8 conversion of EmbeddingGemma for the Vertex-style `:predict` embedding endpoint (#41), labelled as NOT an official Google artifact; the ONNX Runtime and tokenizer need cgo and the `onnx` build tag, and the default build answers 501. |
 | `internal/frontready/` | The readiness path a front serves for the backend beside it (#1114): the BigQuery and Pub/Sub emulators listen on their pod's loopback alone, so no other pod reaches them past their fronts, and Kubernetes, which probes at the pod's IP, asks their readiness of the front, which dials them on loopback. |
+| `internal/frontstate/` | The state directory the Spanner, Bigtable and Firestore fronts keep their records and data copies in (#1514), on a size-limited emptyDir of their pod: one records file replaced whole by a rename, and a file per backup, snapshot or deleted table, written once; and the reset path `cloudburrow reset` clears it through. |
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |

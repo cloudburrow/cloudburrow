@@ -181,9 +181,9 @@ func TestGRPCAppendTakeoverSupersedes(t *testing.T) {
 		t.Errorf("changing custom_placement_config = %v, want INVALID_ARGUMENT", err)
 	}
 	_, err = c.UpdateBucket(ctx, &pb.UpdateBucketRequest{Bucket: &pb.Bucket{Name: "projects/_/buckets/zonal",
-		IpFilter: &pb.Bucket_IpFilter{Mode: proto.String("Enabled")}}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"ip_filter"}}})
-	if grpcstatus.Code(err) != codes.Unimplemented {
-		t.Errorf("ip_filter = %v, want UNIMPLEMENTED", err)
+		IpFilter: &pb.Bucket_IpFilter{Mode: proto.String("On")}}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"ip_filter"}}})
+	if grpcstatus.Code(err) != codes.InvalidArgument {
+		t.Errorf("ip_filter mode On = %v, want INVALID_ARGUMENT", err)
 	}
 }
 

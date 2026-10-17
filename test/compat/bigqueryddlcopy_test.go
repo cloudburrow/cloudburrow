@@ -39,7 +39,8 @@ func bqValue(ctx context.Context, c *bigquery.Client, sql string) string {
 // FUNCTION of it fails "Already Exists" (409 duplicate; a failed job),
 // CREATE OR REPLACE replaces it, one whose body does not analyse fails
 // and keeps the old one, IF NOT EXISTS does nothing, and in a script after
-// other statements it is 501 before anything runs. The same for a table
+// other statements, which the front carries out a statement at a time
+// since #1459, it is run in its turn as it is alone (before, 501). The same for a table
 // function (#1047, #1061): 501 against the pinned v0.8.1, whose engine freed
 // table functions (#1043) and could not drop one.
 func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
@@ -79,19 +80,20 @@ func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 	if got := bqValue(ctx, c, "SELECT "+d+".h(1)"); got != "[12]" {
 		t.Errorf("after the failed CREATE OR REPLACE, h(1) = %s, want [12]", got)
 	}
-	for _, sql := range []string{
-		// A DECLARE, not a query, first: a script whose earlier statement is a
-		// query is run statement by statement (#1249).
-		"DECLARE z INT64 DEFAULT 1; CREATE FUNCTION " + d + ".h(x INT64) AS (x + 3)",
-		"CREATE OR REPLACE FUNCTION " + d + ".h(x INT64) AS (x + 3); SELECT 1",
-	} {
-		for _, insert := range []bool{false, true} {
-			err := bqRun(ctx, c, sql, insert)
-			wantReason(t, fmt.Sprintf("%s (query job %v)", sql, insert), err, http.StatusNotImplemented, "notImplemented")
+	// In a script (#1459): CREATE FUNCTION of it fails the script
+	// duplicate, and CREATE OR REPLACE replaces it.
+	for _, insert := range []bool{false, true} {
+		sql := "DECLARE z INT64 DEFAULT 1; CREATE FUNCTION " + d + ".h(x INT64) AS (x + 3)"
+		if got := errReason(bqRun(ctx, c, sql, insert)); got != "duplicate" {
+			t.Errorf("%s (query job %v): %s, want duplicate", sql, insert, got)
 		}
-	}
-	if got := bqValue(ctx, c, "SELECT "+d+".h(1)"); got != "[12]" {
-		t.Errorf("after the 501s, h(1) = %s, want [12]", got)
+		sql = fmt.Sprintf("CREATE OR REPLACE FUNCTION %s.h(x INT64) AS (x + %d); SELECT 1", d, 3+insertN(insert))
+		if err := bqRun(ctx, c, sql, insert); err != nil {
+			t.Errorf("%s (query job %v): %v", sql, insert, err)
+		}
+		if got, want := bqValue(ctx, c, "SELECT "+d+".h(1)"), fmt.Sprintf("[%d]", 4+insertN(insert)); got != want {
+			t.Errorf("after the script's CREATE OR REPLACE (query job %v), h(1) = %s, want %s", insert, got, want)
+		}
 	}
 
 	// A table function (#1047): made, called, CREATE of it again 409, IF
@@ -130,11 +132,13 @@ func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 		t.Errorf("after the failed CREATE OR REPLACE TABLE FUNCTION, tf(1) = %s, want [12]", got)
 	}
 	for _, insert := range []bool{false, true} {
-		err := bqRun(ctx, c, "CREATE OR REPLACE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x AS y); SELECT 1", insert)
-		wantReason(t, fmt.Sprintf("CREATE OR REPLACE TABLE FUNCTION in a script (query job %v)", insert), err, http.StatusNotImplemented, "notImplemented")
-	}
-	if got := bqValue(ctx, c, "SELECT * FROM "+d+".tf(1)"); got != "[12]" {
-		t.Errorf("after the 501s, tf(1) = %s, want [12]", got)
+		sql := fmt.Sprintf("CREATE OR REPLACE TABLE FUNCTION %s.tf(x INT64) AS (SELECT x + %d AS y); SELECT 1", d, 20+insertN(insert))
+		if err := bqRun(ctx, c, sql, insert); err != nil {
+			t.Errorf("CREATE OR REPLACE TABLE FUNCTION in a script (query job %v): %v", insert, err)
+		}
+		if got, want := bqValue(ctx, c, "SELECT * FROM "+d+".tf(1)"), fmt.Sprintf("[%d]", 21+insertN(insert)); got != want {
+			t.Errorf("after the script's CREATE OR REPLACE TABLE FUNCTION (query job %v), tf(1) = %s, want %s", insert, got, want)
+		}
 	}
 }
 
@@ -145,8 +149,10 @@ func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 // a table and a function (which is then gone), in a script whose other
 // statements do not name it; RESTRICT of one with a table fails
 // resourceInUse and keeps it; one that does not exist fails notFound, or
-// with IF EXISTS does nothing; a script whose other statements name it is
-// 501 and nothing is run.
+// with IF EXISTS does nothing. Since #1459 a script whose other statements
+// name it is carried out a statement at a time, as BigQuery runs it: the
+// DROP SCHEMA is kept when a later statement fails (before, 501 and
+// nothing run).
 func TestBigQueryDropSchema(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -237,17 +243,18 @@ func TestBigQueryDropSchema(t *testing.T) {
 		if got := errReason(bqRun(ctx, c, "DROP SCHEMA "+fn, insert)); got != "resourceInUse" || !exists(fn) {
 			t.Errorf("DROP SCHEMA of a dataset with a function (query job %v): %s, still there %v", insert, got, exists(fn))
 		}
-		// A script that fails keeps the dataset.
+		// A script that fails after its DROP SCHEMA keeps the drop.
 		err = bqRun(ctx, c, "DROP SCHEMA "+fn+" CASCADE; SELECT * FROM nope.nope", insert)
-		if got := errReason(err); got != "notImplemented" || !exists(fn) {
+		if err == nil || errReason(err) == "notImplemented" || exists(fn) {
 			t.Errorf("a failed script with DROP SCHEMA (query job %v): %v, still there %v", insert, err, exists(fn))
 		}
 
+		// A later statement that names the dropped dataset fails not found.
 		err = bqRun(ctx, c, "DROP SCHEMA "+script+" CASCADE; SELECT COUNT(*) FROM "+script+".t", insert)
-		wantReason(t, fmt.Sprintf("a script that names the dataset (query job %v)", insert), err, http.StatusNotImplemented, "notImplemented")
-		if !exists(script) {
-			t.Errorf("the 501 dropped %s", script)
+		if err == nil || !strings.Contains(err.Error(), "not found") || exists(script) {
+			t.Errorf("a script that names the dataset after dropping it (query job %v): %v, still there %v", insert, err, exists(script))
 		}
+		mk(script, true)
 		if err := bqRun(ctx, c, "SELECT 1; DROP SCHEMA "+script+" CASCADE; SELECT 2", insert); err != nil || exists(script) {
 			t.Errorf("DROP SCHEMA CASCADE in a script (query job %v): %v, still there %v", insert, err, exists(script))
 		}
@@ -656,4 +663,12 @@ func errReason(err error) string {
 		return ge.Errors[0].Reason
 	}
 	return ""
+}
+
+// insertN is 1 for a query job, else 0.
+func insertN(insert bool) int {
+	if insert {
+		return 1
+	}
+	return 0
 }

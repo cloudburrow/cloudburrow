@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
@@ -267,4 +268,36 @@ func knownProjects(defaultProject string, registered func() []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// frontStateResetter clears what the Spanner, Bigtable or Firestore front
+// keeps (#1514) through its frontstate.ResetPath: its records and data
+// copies, in memory and in its state directory. Bigtable's front drops the
+// tables of its instances too, since only it holds the instances; the
+// Spanner and Firestore emulators' own instances, databases and documents
+// are not touched, as before.
+type frontStateResetter struct {
+	name   string
+	tunnel *netfwd.Forwarder
+}
+
+func (s *frontStateResetter) Name() string { return s.name }
+
+func (s *frontStateResetter) Reset(ctx context.Context) error {
+	if s.tunnel == nil || s.tunnel.HostAddr() == "" {
+		return fmt.Errorf("the %s tunnel is not running", s.name)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+s.tunnel.HostAddr()+frontstate.ResetPath, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("reset the %s front: %s", s.name, resp.Status)
+	}
+	return nil
 }

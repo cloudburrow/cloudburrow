@@ -24,17 +24,17 @@ Do not edit these files by hand.
 | [Vertex AI PredictionService](vertexai.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 78 | 0 | 9 | 0 | 0 | 0 | 22 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 27 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 22 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Firestore Admin API](firestoreadmin.md) | 32 | 17 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Firestore Admin API](firestoreadmin.md) | 32 | 25 | 0 | 7 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 84 | 39 | 45 | 0 | 0 | 0 | 0 | 0 |
-| [Spanner](spanner.md) | 65 | 41 | 24 | 0 | 0 | 0 | 0 | 0 |
+| [Bigtable](bigtable.md) | 84 | 78 | 6 | 0 | 0 | 0 | 0 | 0 |
+| [Spanner](spanner.md) | 65 | 62 | 3 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 56 | 0 | 24 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 58 | 0 | 22 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 7 | 0 | 3 | 0 | 0 | 0 | 0 |
-| [Backup and DR Service API (v1)](backupdr.md) | 61 | 38 | 0 | 23 | 0 | 0 | 0 | 0 |
+| [Backup and DR Service API (v1)](backupdr.md) | 61 | 39 | 0 | 22 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

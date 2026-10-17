@@ -226,7 +226,8 @@ func (p spannerProvider) spannerInstanceSections(ctx context.Context, instAdmin 
 			inUse = "Yes"
 		}
 		cfgs.Items = append(cfgs.Items, console.Resource{
-			Name: lastSegment(c.GetName()),
+			Name:  lastSegment(c.GetName()),
+			Opens: []string{instanceID, spannerConfigs, lastSegment(c.GetName())},
 			Fields: map[string]string{
 				"Display name": orDash(c.GetDisplayName()),
 				"Type":         c.GetConfigType().String(),
@@ -238,7 +239,7 @@ func (p spannerProvider) spannerInstanceSections(ctx context.Context, instAdmin 
 	sort.SliceStable(cfgs.Items, func(i, j int) bool { return cfgs.Items[i].Name < cfgs.Items[j].Name })
 	cfgs.Total = len(cfgs.Items)
 	configs = console.Section{ID: "instance-configs", Label: "Instance configurations", Listing: cfgs,
-		Note: "The configurations this project's instances and partitions can use. The emulator serves one."}
+		Note: "The configurations this project's instances and partitions can use: open one for its replicas; a custom one is renamed and deleted there."}
 
 	if configName != "" {
 		group := console.PropertyGroup{Heading: "Instance configuration"}
@@ -379,7 +380,7 @@ func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, pa
 	values map[string]string) (handled bool, err error) {
 	switch action {
 	case "dropprotection":
-		if len(path) != 2 || isSpannerPartitionPath(path) {
+		if len(path) != 2 || isSpannerChildPath(path) {
 			return true, errors.New("Drop protection is a database's action")
 		}
 		return true, p.spannerSetDropProtection(ctx, project, path[0], path[1], values["enabled"] == "true")
@@ -389,7 +390,7 @@ func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, pa
 		}
 		return true, p.spannerEditInstance(ctx, project, path[0], values)
 	case "updateddl":
-		if len(path) != 2 || isSpannerPartitionPath(path) {
+		if len(path) != 2 || isSpannerChildPath(path) {
 			return true, errors.New("Update schema is a database's action")
 		}
 		statements, err := splitSpannerDDL(values["statements"])

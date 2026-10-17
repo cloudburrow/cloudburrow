@@ -27,6 +27,10 @@ var compatEnvExceptions = map[string]string{
 	// fetches unless asked (`up -local-ai-embeddings`); set it to run
 	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
 	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
+	// The stand-in App Engine app (#1506): the test serves it, so it is the
+	// --appengine-url the instance was started with, chosen by whoever
+	// started it; no instance reports one the test could listen on.
+	"CLOUDBURROW_TEST_APPENGINE_URL": "opt-in: the --appengine-url the instance was started with, which the test listens on",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
@@ -348,6 +352,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SINK_LOGGING":             "127.0.0.1:9009",
 		"SINK_STORAGE":             "http://127.0.0.1:50003",
 		"SINK_PUBSUB":              "127.0.0.1:50004",
+		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {

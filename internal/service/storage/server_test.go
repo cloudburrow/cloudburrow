@@ -58,12 +58,12 @@ func do(t *testing.T, method, url, host string) (*http.Response, []byte) {
 // A discovery method that is not built answers 501 notImplemented naming it.
 func TestStorageUnknownMethodIsNotImplemented(t *testing.T) {
 	h := newTestServer(t)
-	resp, b := do(t, "GET", h.URL+"/storage/v1/b/x/rapidCaches", "")
+	resp, b := do(t, "GET", h.URL+"/storage/v1/b/x/o/o/iam", "")
 	var e jsonErr
 	_ = json.Unmarshal(b, &e)
 	if resp.StatusCode != 501 || len(e.Error.Errors) != 1 || e.Error.Errors[0].Reason != "notImplemented" ||
-		!strings.Contains(e.Error.Message, "storage.rapidCaches.list") {
-		t.Errorf("GET rapidCaches = %d %s; want 501 notImplemented naming storage.rapidCaches.list", resp.StatusCode, b)
+		!strings.Contains(e.Error.Message, "storage.objects.getIamPolicy") {
+		t.Errorf("GET object iam = %d %s; want 501 notImplemented naming storage.objects.getIamPolicy", resp.StatusCode, b)
 	}
 	for _, c := range []struct{ method, path, names string }{
 		{"GET", "/storage/v1/b/x/o/dir%2Fobj/iam", "storage.objects.getIamPolicy"},
@@ -85,7 +85,7 @@ func TestStorageUnknownMethodIsNotImplemented(t *testing.T) {
 // <Error><Code>…</Code><Message>…</Message></Error>.
 func TestStorageErrorEnvelopeShapes(t *testing.T) {
 	h := newTestServer(t)
-	resp, b := do(t, "GET", h.URL+"/storage/v1/b/x/rapidCaches", "")
+	resp, b := do(t, "GET", h.URL+"/storage/v1/b/x/o/o/iam", "")
 	_ = resp
 	var e jsonErr
 	if err := json.Unmarshal(b, &e); err != nil || e.Error.Code != 501 || len(e.Error.Errors) != 1 ||
@@ -243,7 +243,7 @@ func TestStorageEveryUnbuiltMethodIsNotImplemented(t *testing.T) {
 			t.Errorf("%s %s (%s) = %d %s; want 501 naming %s", m.Verb, m.Path, m.ID, resp.StatusCode, b, m.ID)
 		}
 	}
-	if n < 9 {
+	if n < 3 {
 		t.Errorf("only %d unbuilt methods were checked", n)
 	}
 }

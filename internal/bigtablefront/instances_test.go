@@ -154,9 +154,8 @@ func TestInstanceAdmin(t *testing.T) {
 	if err := iac.DeleteInstance(ctx, "my-inst"); status.Code(err) != codes.NotFound {
 		t.Errorf("second DeleteInstance: %v, want NotFound", err)
 	}
-	// The methods neither the emulator nor the front implement are refused,
-	// not forwarded to a panic.
-	if _, err := iac.LogicalViews(ctx, "my-inst"); status.Code(err) != codes.Unimplemented {
-		t.Errorf("LogicalViews: %v, want Unimplemented", err)
+	// A deleted instance's logical views go with it.
+	if _, err := iac.LogicalViews(ctx, "my-inst"); status.Code(err) != codes.NotFound {
+		t.Errorf("LogicalViews after DeleteInstance: %v, want NotFound", err)
 	}
 }

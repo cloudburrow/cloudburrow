@@ -127,6 +127,10 @@ type Front struct {
 	// front's container: it outlives a restart of that container and goes
 	// with the pod, as a non-persistent backend's state does (#898).
 	StateDir string
+	// StateSizeLimit, when set, is the emptyDir's sizeLimit (#1514): the
+	// kubelet evicts a pod whose emptyDir grows past it, so a front that
+	// keeps data copies there cannot fill the node's disk.
+	StateSizeLimit string
 	// BackendLivenessPath, when set, is a path on the front's port that the
 	// front fails (503) when it has seen the backend fail for good (#989).
 	// Without SuperviseBackend it is the backend container's liveness
@@ -529,7 +533,11 @@ spec:
 		fmt.Fprintf(&sb, "        - name: data\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())
 	}
 	if b.Front != nil && b.Front.StateDir != "" {
-		sb.WriteString("        - name: front-state\n          emptyDir: {}\n")
+		if b.Front.StateSizeLimit != "" {
+			fmt.Fprintf(&sb, "        - name: front-state\n          emptyDir:\n            sizeLimit: %s\n", b.Front.StateSizeLimit)
+		} else {
+			sb.WriteString("        - name: front-state\n          emptyDir: {}\n")
+		}
 	}
 	if b.supervised() {
 		sb.WriteString("        - name: supervisor\n          emptyDir: {}\n")

@@ -395,20 +395,49 @@ resource "google_organization_iam_binding" "o" {
 	}
 }
 
-// covers: sql.instances.insert
+// covers: sql.instances.insert, sql.instances.get, sql.instances.delete
 //
-// TestTerraformSQLSourceRepresentationRefused (#1304): a
+// TestTerraformSQLSourceRepresentationRefused (#1304, #1501): a MySQL
 // google_sql_source_representation_instance, a record of a server outside
-// Cloud SQL, is refused 501 by this instance with why, and nothing is
-// created: CloudBurrow runs every instance's server itself.
+// Cloud SQL, applies, is read back as an ON_PREMISES_INSTANCE with its host
+// and port, and is destroyed; a PostgreSQL one is refused 501 with why
+// (Cloud SQL replicates from an external MySQL server; PostgreSQL migrates
+// through Database Migration Service), and nothing is created.
 func TestTerraformSQLSourceRepresentationRefused(t *testing.T) {
 	h := New(t)
+	svc := sqlAdminService(t, h)
 	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("needs --services cloudsql")
 	}
-	svc := sqlAdminService(t, h)
 	m := newTFModule(t)
-	name := fmt.Sprintf("tf-ext-%d", time.Now().UnixNano()%1e6)
+	n := time.Now().UnixNano() % 1e6
+	my, name := fmt.Sprintf("tf-extmy-%d", n), fmt.Sprintf("tf-ext-%d", n)
+	m.write(fmt.Sprintf(`
+resource "google_sql_source_representation_instance" "my" {
+  project          = %q
+  name             = %q
+  region           = "us-central1"
+  database_version = "MYSQL_8_0"
+  host             = "10.0.0.6"
+  port             = 3306
+  username         = "repl"
+  password         = "not-a-secret"
+}
+`, m.project, my))
+	m.must("init", "-input=false", "-no-color")
+	m.must("apply", "-auto-approve", "-input=false", "-no-color")
+	got, err := svc.Instances.Get(m.project, my).Do()
+	if err != nil || got.InstanceType != "ON_PREMISES_INSTANCE" || got.OnPremisesConfiguration == nil ||
+		got.OnPremisesConfiguration.HostPort != "10.0.0.6:3306" || got.OnPremisesConfiguration.Password != "" {
+		t.Fatalf("the MySQL source representation instance: %+v %v", got, err)
+	}
+	if out := m.must("plan", "-detailed-exitcode", "-input=false", "-no-color"); !strings.Contains(out, "No changes") {
+		t.Errorf("a plan after apply is not empty:\n%s", lastLines(out, 30))
+	}
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	_, err = svc.Instances.Get(m.project, my).Do()
+	wantHTTP(t, "instances.get of the destroyed instance", err, http.StatusNotFound)
+
 	m.write(fmt.Sprintf(`
 resource "google_sql_source_representation_instance" "ext" {
   project          = %q
@@ -421,7 +450,6 @@ resource "google_sql_source_representation_instance" "ext" {
   password         = "not-a-secret"
 }
 `, m.project, name))
-	m.must("init", "-input=false", "-no-color")
 	out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color")
 	if err == nil {
 		t.Fatalf("the apply succeeded:\n%s", lastLines(out, 30))

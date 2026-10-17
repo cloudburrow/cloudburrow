@@ -82,10 +82,21 @@ func (a *Admin) serveREST(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case strings.HasSuffix(p, "/databases") && (v == "restore" || v == "clone"):
+		parent := strings.TrimSuffix(p, "/databases")
 		if v == "restore" {
-			reply(a.RestoreDatabase(ctx, nil))
+			req := &adminpb.RestoreDatabaseRequest{}
+			if !body(req) {
+				return
+			}
+			req.Parent = parent
+			reply(a.RestoreDatabase(ctx, req))
 		} else {
-			reply(a.CloneDatabase(ctx, nil))
+			req := &adminpb.CloneDatabaseRequest{}
+			if !body(req) {
+				return
+			}
+			req.Parent = parent
+			reply(a.CloneDatabase(ctx, req))
 		}
 		return
 	case restDatabase.MatchString(p):
@@ -104,14 +115,29 @@ func (a *Admin) serveREST(w http.ResponseWriter, r *http.Request) {
 		case v == "" && m == http.MethodDelete:
 			reply(a.DeleteDatabase(ctx, &adminpb.DeleteDatabaseRequest{Name: p, Etag: q.Get("etag")}))
 			return
-		case v == "exportDocuments":
-			reply(a.ExportDocuments(ctx, nil))
+		case v == "exportDocuments" && m == http.MethodPost:
+			req := &adminpb.ExportDocumentsRequest{}
+			if !body(req) {
+				return
+			}
+			req.Name = p
+			reply(a.ExportDocuments(ctx, req))
 			return
-		case v == "importDocuments":
-			reply(a.ImportDocuments(ctx, nil))
+		case v == "importDocuments" && m == http.MethodPost:
+			req := &adminpb.ImportDocumentsRequest{}
+			if !body(req) {
+				return
+			}
+			req.Name = p
+			reply(a.ImportDocuments(ctx, req))
 			return
-		case v == "bulkDeleteDocuments":
-			reply(a.BulkDeleteDocuments(ctx, nil))
+		case v == "bulkDeleteDocuments" && m == http.MethodPost:
+			req := &adminpb.BulkDeleteDocumentsRequest{}
+			if !body(req) {
+				return
+			}
+			req.Name = p
+			reply(a.BulkDeleteDocuments(ctx, req))
 			return
 		}
 	// indexes
@@ -205,9 +231,18 @@ func (a *Admin) serveREST(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	// backups
-	case strings.Contains(p, "/backups"):
-		writeError(w, refuse("Backups", noBackups))
+	case strings.HasSuffix(p, "/backups") && backupLocationRe.MatchString(strings.TrimSuffix(p, "/backups")) && v == "" && m == http.MethodGet:
+		reply(a.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: strings.TrimSuffix(p, "/backups"), Filter: q.Get("filter")}))
 		return
+	case backupNameRe.MatchString(p) && v == "":
+		switch m {
+		case http.MethodGet:
+			reply(a.GetBackup(ctx, &adminpb.GetBackupRequest{Name: p}))
+			return
+		case http.MethodDelete:
+			reply(a.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: p}))
+			return
+		}
 	case strings.Contains(p, "/userCreds"):
 		writeError(w, refuse("User credentials", noCreds))
 		return

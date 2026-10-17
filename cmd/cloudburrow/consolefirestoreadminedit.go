@@ -242,14 +242,20 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 			{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
 			{Name: "field", Label: "Field path", Type: "text", Required: true},
 		}, add...)
-		return []console.Action{
+		return append([]console.Action{
 			{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)},
 			{ID: "createindex", Label: "Create index", Fields: createIndexFields()},
 			{ID: "addfield", Label: "Add field override", Fields: add},
 			{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()},
-		}
+		}, firestoreTransferActions()...)
 	}
 	if len(path) == 3 {
+		if path[1] == firestoreBackupsSegment {
+			if _, err := backupNamed(ctx, c, db, path[2]); err != nil {
+				return nil
+			}
+			return firestoreBackupActions()
+		}
 		if path[1] != firestoreSchedulesSegment {
 			return nil
 		}
@@ -289,6 +295,9 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 	defer c.Close()
 	db := p.dbName(project, path[0])
 	if ok, err := actSchedule(ctx, c, db, path, action, values); ok {
+		return err
+	}
+	if ok, err := actTransfer(ctx, c, db, path, action, values); ok {
 		return err
 	}
 	switch {

@@ -42,7 +42,7 @@ func (f front) keepExtras(dataset, table, created string) *keptExtras {
 	project := projectOf(f.base)
 	var e keptExtras
 	if f.tables != nil {
-		if s := f.tables.get(streamKey(project, dataset, table), created); s != (tableSetting{}) {
+		if s := f.tables.get(streamKey(project, dataset, table), created); !s.zero() {
 			e.Settings = &s
 		}
 	}

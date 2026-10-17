@@ -113,6 +113,12 @@ type defaultKeyKey struct{}
 // names no kms_key_name, CLONE or COPY: its table's path, and whether it
 // replaces or (ifNotExists) keeps a table that exists.
 func createdTable(sql string) (parts []string, replace, ifNotExists, ok bool) {
+	return createdTableOf(sql, true)
+}
+
+// createdTableOf is createdTable, which with noKey false also reads a
+// statement that names a kms_key_name (#1459, collation.go).
+func createdTableOf(sql string, noKey bool) (parts []string, replace, ifNotExists, ok bool) {
 	t, lexed := lex(sql)
 	if !lexed || len(t) < 3 || !t[0].is("CREATE") {
 		return nil, false, false, false
@@ -122,7 +128,7 @@ func createdTable(sql string) (parts []string, replace, ifNotExists, ok bool) {
 		end--
 	}
 	for _, tok := range t[:end] {
-		if tok.punct(";") || tok.is("kms_key_name") || tok.is("CLONE") || tok.is("COPY") || tok.is("LIKE") {
+		if tok.punct(";") || noKey && tok.is("kms_key_name") || tok.is("CLONE") || tok.is("COPY") || tok.is("LIKE") {
 			return nil, false, false, false
 		}
 	}

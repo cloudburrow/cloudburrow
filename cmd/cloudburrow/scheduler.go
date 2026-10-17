@@ -136,6 +136,10 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	if s.tokens != nil {
 		s.runner.WithTokens(s.tokens)
 	}
+	// App Engine targets go to the server standing in for the app (#1506).
+	if s.cfg.AppEngineURL != "" {
+		s.runner.WithAppEngine(s.cfg.AppEngineURL)
+	}
 
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Scheduler))
 	s.server = grpctransport.New(addr)

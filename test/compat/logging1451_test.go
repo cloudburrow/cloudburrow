@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -157,7 +158,7 @@ func TestLoggingBigQuerySinkExportErrorsAndProtoPayload(t *testing.T) {
 	res := &mrpb.MonitoredResource{Type: "global", Labels: map[string]string{"project_id": project}}
 	if _, err := lc.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Resource: res, Entries: []*loggingpb.LogEntry{
 		{LogName: parent + "/logs/" + logID, Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: num}, Timestamp: timestamppb.New(now), InsertId: "a" + suffix,
-			HttpRequest: &ltype.HttpRequest{RequestMethod: "GET", Status: 200, CacheLookup: true, CacheHit: true, CacheFillBytes: 12}},
+			HttpRequest: &ltype.HttpRequest{RequestMethod: "GET", Status: 200, CacheLookup: true, CacheHit: true, CacheFillBytes: 12, Latency: durationpb.New(1500 * time.Millisecond)}},
 		{LogName: parent + "/logs/" + logID, Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: str}, Timestamp: timestamppb.New(now), InsertId: "b" + suffix},
 		{LogName: parent + "/logs/" + auditID, Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: audit}, Timestamp: timestamppb.New(now), InsertId: "c" + suffix},
 	}}); err != nil {
@@ -171,9 +172,9 @@ func TestLoggingBigQuerySinkExportErrorsAndProtoPayload(t *testing.T) {
 			sink = parent + "/sinks/xerr-parted-" + suffix
 		}
 		// The table holds the first entry only, with httpRequest's cache fields.
-		rows := sinkQueryRows(t, h, bq, fmt.Sprintf("SELECT insertId, jsonPayload.n AS n, httpRequest.cacheHit AS hit, httpRequest.cacheLookup AS lkp, httpRequest.cacheFillBytes AS fill FROM `%s.%s.%s`",
+		rows := sinkQueryRows(t, h, bq, fmt.Sprintf("SELECT insertId, jsonPayload.n AS n, httpRequest.cacheHit AS hit, httpRequest.cacheLookup AS lkp, httpRequest.cacheFillBytes AS fill, httpRequest.latency AS lat FROM `%s.%s.%s`",
 			project, ds, tables[0]), 1)
-		if r := rows[0]; r["insertId"] != "a"+suffix || r["n"] != 1.0 || r["hit"] != true || r["lkp"] != true || r["fill"] != int64(12) {
+		if r := rows[0]; r["insertId"] != "a"+suffix || r["n"] != 1.0 || r["hit"] != true || r["lkp"] != true || r["fill"] != int64(12) || r["lat"] != 1.5 {
 			t.Errorf("%s.%s: %v", ds, tables[0], r)
 		}
 		// The mismatched one is in the error table.

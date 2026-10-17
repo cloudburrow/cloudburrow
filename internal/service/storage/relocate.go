@@ -362,11 +362,13 @@ func (s *Server) cancelOperation(bucket, id string) error {
 		switch op.Type {
 		case createCacheType:
 			tx.Delete(cacheKey(bucket, op.Cache.ID))
+		case createRapidType:
+			tx.Delete(rapidKey(bucket, op.Cache.ID))
 		case relocateType:
 			op.Relocate.State, op.Relocate.Updated = "CANCELLED", now
 		default:
 			// using-anywhere-cache: only a create's operation can be cancelled.
-			return errorf(http.StatusBadRequest, "failedPrecondition", "The operation %s cannot be cancelled: only Anywhere Cache creates and bucket relocations can.", operationName(op))
+			return errorf(http.StatusBadRequest, "failedPrecondition", "The operation %s cannot be cancelled: only Anywhere Cache and Rapid Cache creates and bucket relocations can.", operationName(op))
 		}
 		op.Cancel = true
 		op.finish(now, &opStatus{Code: 1, Message: "The operation was cancelled."})

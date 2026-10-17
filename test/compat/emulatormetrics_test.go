@@ -17,6 +17,11 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/spanner"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // waitEvents polls /admin/events until every method in want is recorded for
@@ -112,7 +117,7 @@ func TestBigtableCallsReachMetricsAndTheRequestLog(t *testing.T) {
 	h := New(t)
 	since := time.Now().Add(-time.Second)
 	table := fmt.Sprintf("metrics%d", time.Now().UnixNano())
-	admin, c := bigtableTable(t, h, table)
+	_, c := bigtableTable(t, h, table)
 	tbl := c.Open(table)
 	mut := bigtable.NewMutation()
 	mut.Set("info", "q", bigtable.Now(), []byte("v"))
@@ -122,8 +127,17 @@ func TestBigtableCallsReachMetricsAndTheRequestLog(t *testing.T) {
 	if err := tbl.ReadRows(h.Context(), bigtable.InfiniteRange(""), func(bigtable.Row) bool { return true }); err != nil {
 		t.Fatalf("ReadRows: %v", err)
 	}
-	if _, err := admin.Backups(h.Context(), "c").Next(); err == nil {
-		t.Fatal("ListBackups succeeded")
+	// A call the front refuses: the session data plane's
+	// GetClientConfiguration (ListBackups, the refused call this used,
+	// is served since #1499). The official client has no method for it,
+	// so it is sent by name.
+	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.Invoke(h.Context(), "/google.bigtable.v2.Bigtable/GetClientConfiguration", &emptypb.Empty{}, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("GetClientConfiguration = %v, want UNIMPLEMENTED", err)
 	}
 	ev := waitEvents(t, h, "bigtable", since, "CreateTable", "MutateRow", "ReadRows")
 	name := fmt.Sprintf("projects/%s/instances/%s/tables/%s", h.Project(), bigtableInstance, table)
@@ -137,9 +151,9 @@ func TestBigtableCallsReachMetricsAndTheRequestLog(t *testing.T) {
 	// no resource, and no project: it is looked for among every project's.
 	url := fmt.Sprintf("http://%s/admin/events?service=bigtable&kind=request&limit=1000&since=%s",
 		h.Endpoint(EnvControl), since.UTC().Format(time.RFC3339Nano))
-	if _, raw := adminDo(t, http.MethodGet, url, "", nil); !strings.Contains(raw, `"target":"/google.bigtable.admin.v2.BigtableTableAdmin/ListBackups"`) ||
+	if _, raw := adminDo(t, http.MethodGet, url, "", nil); !strings.Contains(raw, `"target":"/google.bigtable.v2.Bigtable/GetClientConfiguration"`) ||
 		!strings.Contains(raw, `"code":"UNIMPLEMENTED"`) {
-		t.Errorf("no UNIMPLEMENTED ListBackups in /admin/events: %.500s", raw)
+		t.Errorf("no UNIMPLEMENTED GetClientConfiguration in /admin/events: %.500s", raw)
 	}
 	measuredInConsole(t, h, "bigtable", `cloudburrow_requests_total{service="bigtable",method="MutateRow",code="OK"}`)
 }

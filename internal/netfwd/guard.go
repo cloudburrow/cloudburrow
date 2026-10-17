@@ -134,6 +134,21 @@ func (l *gatedLog) stop() {
 	l.mu.Unlock()
 }
 
+// ClientAddrHeader carries the caller's address through the tunnel, which
+// the emulator would otherwise see as its own loopback address: Cloud
+// Storage's bucket IP filters are evaluated against it (#1505). The guard
+// sets it on every request, replacing any the caller sent, and the emulator
+// trusts it only from a loopback peer.
+const ClientAddrHeader = "X-Cloudburrow-Client-Addr"
+
+func setClientAddr(r *http.Request) {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	r.Header.Set(ClientAddrHeader, host)
+}
+
 // guardHandler checks Host, then proxies to upstream.
 //
 // gRPC (cleartext HTTP/2 with an application/grpc content type) is not
@@ -144,6 +159,7 @@ func (l *gatedLog) stop() {
 func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 	proxy := PassThrough(upstream, logf)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setClientAddr(r)
 		if isGRPC(r) {
 			proxy.ServeHTTP(w, r)
 			return

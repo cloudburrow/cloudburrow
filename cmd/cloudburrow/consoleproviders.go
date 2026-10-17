@@ -432,8 +432,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 		sections = append(sections, console.Section{
 			ID: "request", Label: "Request", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "App Engine HTTP request", Properties: request}},
-			Note: "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404) " +
-				"and is retried by the queue's retry config, as a request to an app that does not exist is.",
+			Note:   appEngineDeliveryNote(p.svc.appEngineURL()),
 		})
 	}
 
@@ -3395,7 +3394,19 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 
 	objects, err := p.objects(ctx, bucket, prefix, path)
 	if err != nil {
-		return console.Detail{Unavailable: err.Error()}, nil
+		// A bucket whose IP filter refuses this console's address still
+		// has its page, whose settings are exempt, so the filter can be
+		// changed (#1505); one that cannot be read at all has none.
+		b, berr := p.readBucket(ctx, bucket)
+		if berr != nil {
+			return console.Detail{Unavailable: err.Error()}, nil
+		}
+		why := err.Error()
+		if b.IPFilter != nil && b.IPFilter.Mode == "Enabled" {
+			why = "The bucket's IP filter is enabled and does not admit this console's address; Edit IP filtering changes it. " + why
+		}
+		objects = console.Listing{Columns: []string{"Size", "Type", "Updated"}, NameColumn: "Name", Noun: "objects",
+			Items: []console.Resource{}, Unavailable: why}
 	}
 
 	// Compose acts on the objects checked in this listing (#790), not on the
@@ -3436,6 +3447,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			// actions (#1444).
 			sections = append(sections, p.cachesSection(ctx, bucket))
 			actions = append(actions, cacheActions()...)
+			// Its Rapid Caches and IP filtering (#1505).
+			sections = append(sections, p.rapidSection(ctx, bucket))
+			actions = append(actions, createRapidAction(), ipFilterAction(meta))
 		}
 		// Its notifications, and Create notification (#791).
 		notifications, create := p.notificationsSection(ctx, project, bucket)
@@ -3502,14 +3516,14 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 			Opens:  append(append([]string{}, path...), name),
 			Fields: map[string]string{"Type": "Folder", "Size": "—", "Updated": "—"},
 		}
-		if managed[name] {
+		if mf := managed[name]; mf != nil {
 			delete(managed, name)
-			// A managed folder can be deleted from its row (#828), at the
-			// path that names it whole.
+			// A managed folder can be edited (#1505) and deleted from its
+			// row (#828), at the path that names it whole.
 			full := prefix + name + "/"
 			row.Fields["Type"] = "Managed folder"
 			row.Target = managedFolderPath(bucket, full)
-			row.Actions = []console.Action{deleteManagedFolderAction(full)}
+			row.Actions = []console.Action{editManagedFolderAction(mf), deleteManagedFolderAction(full)}
 		}
 		return row
 	}
@@ -3642,8 +3656,9 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Metageneration", Value: b.Metageneration},
 			}},
 			{Heading: "Labels", Properties: labels},
+			ipFilterGroup(b.IPFilter),
 		},
-		Note: "Edit bucket changes these through buckets.patch; the location cannot be changed. " +
+		Note: "Edit bucket changes these through buckets.patch, and Edit IP filtering the IP filtering; the location cannot be changed. " +
 			"A managed folder needs uniform bucket-level access.",
 	}
 }
@@ -5411,4 +5426,17 @@ func (aiProvider) Detail(_ context.Context, _ string, path []string) (console.De
 		},
 		Sections: sections,
 	}, nil
+}
+
+// appEngineDeliveryNote says where an App Engine task's attempts go: to the
+// --appengine-url server standing in for the app (#1506), or nowhere.
+func appEngineDeliveryNote(url string) string {
+	if url != "" {
+		return "There is no App Engine here: each attempt is sent to " + url + " (--appengine-url), the local server " +
+			"standing in for the app, with this Host and the X-AppEngine-* headers; a non-2xx answer is retried by the " +
+			"queue's retry config."
+	}
+	return "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404) " +
+		"and is retried by the queue's retry config, as a request to an app that does not exist is. " +
+		"Start the instance with --appengine-url to deliver attempts to a local server standing in for the app."
 }

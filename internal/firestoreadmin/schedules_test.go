@@ -81,8 +81,9 @@ func TestBackupSchedulesOverGRPC(t *testing.T) {
 	if _, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: "projects/p/databases/nope"}); status.Code(err) != codes.NotFound {
 		t.Errorf("list of a missing database: %v, want NotFound", err)
 	}
-	if _, err := c.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: "projects/p/locations/nam5"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ListBackups: %v, want Unimplemented", err)
+	// The fake emulator serves no documents API, so no backup was taken.
+	if lb, err := c.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: "projects/p/locations/nam5"}); err != nil || len(lb.Backups) != 0 {
+		t.Errorf("ListBackups = %v, %v, want none", lb, err)
 	}
 }
 
@@ -121,7 +122,7 @@ func TestBackupSchedulesOverREST(t *testing.T) {
 	if code, _ = do("GET", "http://"+addr+"/v1/"+name, ""); code != 404 {
 		t.Errorf("get after delete = %d, want 404", code)
 	}
-	if code, _ = do("GET", "http://"+addr+"/v1/projects/p/locations/nam5/backups", ""); code != 501 {
-		t.Errorf("list backups = %d, want 501", code)
+	if code, _ = do("GET", "http://"+addr+"/v1/projects/p/locations/nam5/backups", ""); code != 200 {
+		t.Errorf("list backups = %d, want 200", code)
 	}
 }

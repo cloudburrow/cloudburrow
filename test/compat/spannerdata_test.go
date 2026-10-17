@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"sort"
+	"strings"
 	"testing"
 
 	sp "cloud.google.com/go/spanner/apiv1"
@@ -332,9 +333,10 @@ func TestSpannerBatchWrite(t *testing.T) {
 	}
 }
 
-// TestSpannerFetchCacheUpdateIsRefused records what the emulator answers for
-// FetchCacheUpdate, the location-aware routing stream: UNIMPLEMENTED, with an
-// empty message, on the first receive.
+// TestSpannerFetchCacheUpdateIsRefused records what is answered for
+// FetchCacheUpdate, the location-aware routing stream: UNIMPLEMENTED on the
+// first receive. The emulator says nothing; the call front names why
+// (#1498): the emulator is one server, with nowhere to route a client.
 //
 // covers: google.spanner.v1.Spanner/FetchCacheUpdate (unimplemented)
 func TestSpannerFetchCacheUpdateIsRefused(t *testing.T) {
@@ -343,8 +345,8 @@ func TestSpannerFetchCacheUpdateIsRefused(t *testing.T) {
 	if err == nil {
 		_, err = stream.Recv()
 	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Fatalf("FetchCacheUpdate = %v, want Unimplemented", err)
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "routing") {
+		t.Fatalf("FetchCacheUpdate = %v, want Unimplemented naming why", err)
 	}
 	t.Logf("FetchCacheUpdate: %v", err)
 }

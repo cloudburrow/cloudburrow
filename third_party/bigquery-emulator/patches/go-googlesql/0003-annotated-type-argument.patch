@@ -1,0 +1,157 @@
+CloudBurrow patch 3 to github.com/goccy/go-googlesql v0.3.0
+(cloudburrow/cloudburrow#1508).
+
+The bug: a SimpleColumn made from an AnnotatedType (NewSimpleColumn2),
+which is how a catalog column is given a collation, had a garbage type
+and annotation map, and every statement that read it trapped "wasm trap:
+interface conversion: interface {} is nil, not func(*base.Module, int32,
+int32)", a C++ virtual call through a null function pointer. The C++
+bridge reads an AnnotatedType argument as a handle, a pointer to a C++
+AnnotatedType { const Type* type; const AnnotationMap* annotation_map; },
+and copies it; the generated binding marshaled it as a value message of
+two handles, so the bridge took the first of them (the annotation map)
+for the struct: the type was the map's vtable pointer.
+
+The fix: NewSimpleColumn2 lays the struct out in wasm memory and passes
+its handle, and frees it once the call has copied it
+(annotated_type_arg.go). Its test annotated_type_arg_test.go fails
+without it. NewResolvedColumn3 and NewTVFRelationValueTable2 marshal an
+AnnotatedType the same way and are left as they are: nothing CloudBurrow
+runs calls them.
+
+Licence: a modification of goccy/go-googlesql, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/go-googlesql.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/annotated_type_arg.go
+@@ -0,0 +1,43 @@
++package googlesql
++
++import (
++	"encoding/binary"
++
++	wasm2go "github.com/goccy/googlesqlwasm2go"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1508): the C++ bridge reads
++// an AnnotatedType argument as a handle, a pointer to a C++
++// AnnotatedType { const Type* type; const AnnotationMap* annotation_map; }
++// in wasm memory, which it copies. The generated binding marshaled it as
++// a value message of two handles, so the bridge took the first handle
++// (the annotation map) for the struct: the column's type was the map's
++// vtable pointer and its annotation map a word of the map, and reading
++// either called through a null function pointer ("wasm trap: interface
++// conversion: interface {} is nil"). appendAnnotatedTypeArg lays the
++// struct out in wasm memory and appends its handle; free releases it
++// once the call has copied it.
++func appendAnnotatedTypeArg(buf []byte, field uint32, v *AnnotatedType) (out []byte, free func()) {
++	if v == nil {
++		return buf, func() {}
++	}
++	var typ, am uint32
++	if v.Type_ != nil {
++		typ = uint32(v.Type_.rawPtr())
++	}
++	if v.AnnotationMap != nil {
++		am = uint32(v.AnnotationMap.ptr)
++	}
++	m := module()
++	m.mu.Lock()
++	ptr := wasm2go.WasmAlloc(m.g, 8)
++	mem := wasm2go.Memory(m.g)
++	binary.LittleEndian.PutUint32(mem[uint32(ptr):], typ)
++	binary.LittleEndian.PutUint32(mem[uint32(ptr)+4:], am)
++	m.mu.Unlock()
++	return pbAppendHandle(buf, field, uint64(uint32(ptr))), func() {
++		m.mu.Lock()
++		defer m.mu.Unlock()
++		wasm2go.WasmFree(m.g, ptr)
++	}
++}
+--- /dev/null
++++ b/annotated_type_arg_test.go
+@@ -0,0 +1,64 @@
++package googlesql_test
++
++import (
++	"testing"
++
++	"github.com/goccy/go-googlesql"
++)
++
++// TestSimpleColumnAnnotatedType is CloudBurrow patch 3's regression test
++// (cloudburrow/cloudburrow#1508): a column built from an AnnotatedType
++// reads back its type and annotation map, and a query reading it
++// analyzes. Before the patch the column's type was garbage ("unknown C++
++// type") and analyzing `SELECT s` trapped "interface conversion:
++// interface {} is nil".
++func TestSimpleColumnAnnotatedType(t *testing.T) {
++	t.Cleanup(gc)
++	catalog, opts, tf, _ := setupAnalyzer(t)
++	st, err := tf.GetString()
++	if err != nil {
++		t.Fatal(err)
++	}
++	c, err := googlesql.NewCollationMakeScalar("und:ci")
++	if err != nil {
++		t.Fatal(err)
++	}
++	am, err := c.ToAnnotationMap(st)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if am, err = tf.TakeOwnership(am, true); err != nil {
++		t.Fatal(err)
++	}
++	table, err := googlesql.NewSimpleTable("users", 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	col, err := googlesql.NewSimpleColumn2("users", "s", &googlesql.AnnotatedType{AnnotationMap: am, Type_: st}, false, true)
++	if err != nil {
++		t.Fatal(err)
++	}
++	typ, err := col.GetType()
++	if err != nil {
++		t.Fatalf("GetType: %v", err)
++	}
++	if d, err := typ.DebugString(false); err != nil || d != "STRING" {
++		t.Fatalf("type = %q, %v; want STRING", d, err)
++	}
++	cam, err := col.GetTypeAnnotationMap()
++	if err != nil || cam == nil {
++		t.Fatalf("GetTypeAnnotationMap: %v, %v", cam, err)
++	}
++	if d, err := cam.DebugString(); err != nil || d != `{Collation:"und:ci"}` {
++		t.Fatalf("annotation map = %q, %v", d, err)
++	}
++	if err := table.AddColumn2(col, false); err != nil {
++		t.Fatal(err)
++	}
++	if err := catalog.AddTable(table); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := googlesql.AnalyzeStatement("SELECT s FROM users WHERE s = 'A'", opts, catalog, tf); err != nil {
++		t.Fatalf("AnalyzeStatement: %v", err)
++	}
++}
+--- a/googlesql.go
++++ b/googlesql.go
+@@ -316708,10 +316708,13 @@
+ 	var buf []byte
+ 	buf = pbAppendString(buf, 1, tableName)
+ 	buf = pbAppendString(buf, 2, name)
+-	buf = pbAppendSubmessagePtr(buf, 3, annotatedType)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1508): a handle to a C++
++	// AnnotatedType, as the bridge reads it (annotated_type_arg.go).
++	buf, freeAnnotatedType := appendAnnotatedTypeArg(buf, 3, annotatedType)
+ 	buf = pbAppendBool(buf, 4, isPseudoColumn)
+ 	buf = pbAppendBool(buf, 5, isWritableColumn)
+ 	resp, err := invokeMethod(1350, 1, buf, wasm2go.Inv_1350_1)
++	freeAnnotatedType()
+ 	if err != nil {
+ 		return nil, err
+ 	}

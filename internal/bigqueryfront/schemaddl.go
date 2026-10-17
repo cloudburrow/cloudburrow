@@ -3,8 +3,10 @@ package bigqueryfront
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -161,11 +163,15 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 					"SCHEMA %s%s %s. Nothing was run. Run the CREATE SCHEMA as a query of its own first.", ds, what, why))
 				return nil, true
 			}
-			d, msg := schemaOptions(body, ds)
+			d, msg, bad := schemaOptions(body, ds)
+			if bad != "" {
+				writeError(w, http.StatusBadRequest, "invalidQuery", bad)
+				return nil, true
+			}
 			if msg != "" {
 				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: CREATE SCHEMA "+ds+
 					" with "+msg+". Nothing was run. Make the dataset with datasets.insert (Dataset.Create in the Go client) "+
-					"with what it needs: datasets.update and datasets.patch are not implemented here.")
+					"with what it needs.")
 				return nil, true
 			}
 			made[ds] = true
@@ -374,6 +380,40 @@ func currentQuery(r *http.Request, insert bool) (string, bool) {
 	return body.Query, true
 }
 
+// withoutDefaultCollate returns sql with the DEFAULT COLLATE clause of
+// each CREATE SCHEMA statement cut, which the emulator refuses ("CREATE
+// SCHEMA with DEFAULT COLLATE is not supported", measured, #1459): the
+// front has made the dataset with its defaultCollation, and the emulator
+// runs the statement as done.
+func withoutDefaultCollate(sql string) (string, bool) {
+	toks, ok := lex(sql)
+	if !ok {
+		return sql, false
+	}
+	var b strings.Builder
+	last, changed := 0, false
+	for _, stmt := range splitStatements(toks) {
+		body, _, _ := stripControlFlow(stmt)
+		if len(body) < 3 || !body[0].is("CREATE") || !body[1].is("SCHEMA") {
+			continue
+		}
+		i := 2
+		if i+2 < len(body) && body[i].is("IF") && body[i+1].is("NOT") && body[i+2].is("EXISTS") {
+			i += 3
+		}
+		_, i = path(body, i)
+		if i+2 < len(body) && body[i].is("DEFAULT") && body[i+1].is("COLLATE") && body[i+2].kind == tokString {
+			b.WriteString(sql[last:body[i].pos])
+			last, changed = body[i+2].end, true
+		}
+	}
+	if !changed {
+		return sql, false
+	}
+	b.WriteString(sql[last:])
+	return b.String(), true
+}
+
 // newDataset is the datasets.insert body of a dataset a CREATE SCHEMA
 // makes.
 // https://cloud.google.com/bigquery/docs/reference/rest/v2/datasets#Dataset
@@ -386,13 +426,58 @@ type newDataset struct {
 	FriendlyName string            `json:"friendlyName,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	Location     string            `json:"location,omitempty"`
+	// #1459: the other options of schema_option_list, and DEFAULT COLLATE.
+	DefaultCollation               string            `json:"defaultCollation,omitempty"`
+	DefaultEncryptionConfiguration *datasetKey       `json:"defaultEncryptionConfiguration,omitempty"`
+	DefaultPartitionExpirationMs   string            `json:"defaultPartitionExpirationMs,omitempty"`
+	DefaultTableExpirationMs       string            `json:"defaultTableExpirationMs,omitempty"`
+	DefaultRoundingMode            string            `json:"defaultRoundingMode,omitempty"`
+	IsCaseInsensitive              *bool             `json:"isCaseInsensitive,omitempty"`
+	MaxTimeTravelHours             string            `json:"maxTimeTravelHours,omitempty"`
+	StorageBillingModel            string            `json:"storageBillingModel,omitempty"`
+	ResourceTags                   map[string]string `json:"resourceTags,omitempty"`
+}
+
+// datasetKey is a Dataset's defaultEncryptionConfiguration.
+type datasetKey struct {
+	KmsKeyName string `json:"kmsKeyName"`
+}
+
+// schemaOptionField is the Dataset field each option of schema_option_list
+// sets (#1459), beside description, friendly_name, labels and location
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#schema_option_list;
+// the fields: https://cloud.google.com/bigquery/docs/reference/rest/v2/datasets#Dataset).
+// failover_reservation, is_primary and primary_replica, of cross-region
+// replication, are not here: an instance keeps no replica or reservation.
+var schemaOptionField = map[string]string{
+	"default_kms_key_name":              "defaultEncryptionConfiguration.kmsKeyName",
+	"default_partition_expiration_days": "defaultPartitionExpirationMs",
+	"default_rounding_mode":             "defaultRoundingMode",
+	"default_table_expiration_days":     "defaultTableExpirationMs",
+	"is_case_insensitive":               "isCaseInsensitive",
+	"max_time_travel_hours":             "maxTimeTravelHours",
+	"storage_billing_model":             "storageBillingModel",
+	"tags":                              "resourceTags",
+}
+
+// numberLiteral reads val, a number literal with an optional sign.
+func numberLiteral(val []token) (float64, bool) {
+	var b strings.Builder
+	for i, t := range val {
+		if t.kind == tokString || t.kind == tokQuoted || t.kind == tokPunct && !(t.text == "." || i == 0 && (t.text == "-" || t.text == "+")) {
+			return 0, false
+		}
+		b.WriteString(t.text)
+	}
+	n, err := strconv.ParseFloat(b.String(), 64)
+	return n, err == nil && b.Len() > 0
 }
 
 // schemaOptions reads what follows the dataset in a CREATE SCHEMA
 // statement: OPTIONS(name = value, ...) with the options newDataset holds.
 // msg names what the front does not carry out, if any.
 // https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#schema_option_list
-func schemaOptions(t []token, ds string) (d newDataset, msg string) {
+func schemaOptions(t []token, ds string) (d newDataset, msg string, bad string) {
 	d.DatasetReference.DatasetID = ds
 	i := 2
 	if i+2 < len(t) && t[i].is("IF") && t[i+1].is("NOT") && t[i+2].is("EXISTS") {
@@ -400,18 +485,36 @@ func schemaOptions(t []token, ds string) (d newDataset, msg string) {
 	}
 	_, i = path(t, i)
 	if i >= len(t) {
-		return d, ""
+		return d, "", ""
 	}
 	if t[i].is("DEFAULT") {
-		return d, "DEFAULT COLLATE, which sets how the dataset's tables compare strings"
+		// DEFAULT COLLATE collate_specification (#1459): the dataset's
+		// defaultCollation, which a new table and its STRING columns
+		// take (collation.go). BigQuery's one specification is 'und:ci',
+		// and '' for none (https://cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts).
+		c := ""
+		ok := i+2 < len(t) && t[i+1].is("COLLATE")
+		if ok {
+			c, ok = stringLiteral(t[i+2])
+		}
+		if !ok {
+			return d, "DEFAULT followed by other than COLLATE and a string literal, which CloudBurrow does not read", ""
+		}
+		if msg := collationSpecRefused(c); msg != "" { // #1508, collationddl.go
+			return d, "", msg
+		}
+		d.DefaultCollation = c
+		if i += 3; i >= len(t) {
+			return d, "", ""
+		}
 	}
 	if !t[i].is("OPTIONS") || i+1 >= len(t) || !t[i+1].punct("(") {
-		return d, fmt.Sprintf("%q after the dataset's name, which CloudBurrow does not read", t[i].text)
+		return d, fmt.Sprintf("%q after the dataset's name, which CloudBurrow does not read", t[i].text), ""
 	}
 	i += 2
 	for i < len(t) && !t[i].punct(")") {
 		if t[i].kind != tokWord || i+1 >= len(t) || !t[i+1].punct("=") {
-			return d, "OPTIONS that CloudBurrow does not read"
+			return d, "OPTIONS that CloudBurrow does not read", ""
 		}
 		name := strings.ToLower(t[i].text)
 		i += 2
@@ -425,7 +528,7 @@ func schemaOptions(t []token, ds string) (d newDataset, msg string) {
 				s, ok = stringLiteral(val[0])
 			}
 			if !ok {
-				return d, fmt.Sprintf("the option %s set to other than a string literal, which CloudBurrow does not read", name)
+				return d, fmt.Sprintf("the option %s set to other than a string literal, which CloudBurrow does not read", name), ""
 			}
 			switch name {
 			case "description":
@@ -442,20 +545,91 @@ func schemaOptions(t []token, ds string) (d newDataset, msg string) {
 			labels, ok := labelsLiteral(val)
 			if !ok {
 				return d, "the option labels set to other than an array of (key, value) string literals, which " +
-					"CloudBurrow does not read"
+					"CloudBurrow does not read", ""
 			}
 			d.Labels = labels
+		case "default_kms_key_name", "default_rounding_mode", "storage_billing_model":
+			if isNull {
+				break
+			}
+			v, ok := "", len(val) == 1
+			if ok {
+				v, ok = stringLiteral(val[0])
+			}
+			if !ok {
+				return d, fmt.Sprintf("the option %s set to other than a string literal, which CloudBurrow does not read", name), ""
+			}
+			switch name {
+			case "default_kms_key_name":
+				d.DefaultEncryptionConfiguration = &datasetKey{KmsKeyName: v}
+			case "default_rounding_mode":
+				if v != "ROUND_HALF_AWAY_FROM_ZERO" && v != "ROUND_HALF_EVEN" {
+					return d, "", fmt.Sprintf("Invalid value for default_rounding_mode: %q; the supported values are "+
+						"\"ROUND_HALF_AWAY_FROM_ZERO\" and \"ROUND_HALF_EVEN\"", v)
+				}
+				d.DefaultRoundingMode = v
+			default:
+				if v = strings.ToUpper(v); v != "PHYSICAL" && v != "LOGICAL" {
+					return d, "", fmt.Sprintf("Invalid value for storage_billing_model: %q; set PHYSICAL or LOGICAL", v)
+				}
+				d.StorageBillingModel = v
+			}
+		case "default_partition_expiration_days", "default_table_expiration_days", "max_time_travel_hours":
+			if isNull {
+				break
+			}
+			n, ok := numberLiteral(val)
+			if !ok {
+				return d, fmt.Sprintf("the option %s set to other than a number literal, which CloudBurrow does not read", name), ""
+			}
+			switch name {
+			case "max_time_travel_hours":
+				if n != float64(int64(n)) || n < 48 || n > 168 || int64(n)%24 != 0 {
+					return d, "", fmt.Sprintf("Invalid value for max_time_travel_hours: %v; it must be a multiple of 24 "+
+						"between 48 and 168", n)
+				}
+				d.MaxTimeTravelHours = strconv.FormatInt(int64(n), 10)
+			default:
+				if n <= 0 {
+					return d, "", fmt.Sprintf("Invalid value for %s: %v; it must be positive", name, n)
+				}
+				ms := strconv.FormatInt(int64(math.Round(n*24*3600*1000)), 10)
+				if name == "default_table_expiration_days" {
+					d.DefaultTableExpirationMs = ms
+				} else {
+					d.DefaultPartitionExpirationMs = ms
+				}
+			}
+		case "is_case_insensitive":
+			if isNull {
+				break
+			}
+			if len(val) != 1 || !val[0].is("TRUE") && !val[0].is("FALSE") {
+				return d, "the option is_case_insensitive set to other than TRUE or FALSE, which CloudBurrow does not read", ""
+			}
+			b := val[0].is("TRUE")
+			d.IsCaseInsensitive = &b
+		case "tags":
+			if isNull {
+				break
+			}
+			tags, ok := labelsLiteral(val)
+			if !ok {
+				return d, "the option tags set to other than an array of (key, value) string literals, which " +
+					"CloudBurrow does not read", ""
+			}
+			d.ResourceTags = tags
 		default:
-			return d, fmt.Sprintf("the option %s. CloudBurrow makes the dataset with description, friendly_name, labels "+
-				"and location, which the emulator behind it records (measured); %s changes how the dataset's tables "+
-				"behave, which the emulator does not carry out", name, name)
+			return d, fmt.Sprintf("the option %s. CloudBurrow makes the dataset with the options of cross-region "+
+				"replication left out (failover_reservation, is_primary, primary_replica): an instance keeps no "+
+				"replica or reservation", name), ""
 		}
 		i = end
 		if i < len(t) && t[i].punct(",") {
 			i++
 		}
 	}
-	return d, ""
+	return d, "", ""
 }
 
 // labelsLiteral reads [("key", "value"), ...].

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
+// sqlDriverSeq numbers the connector drivers sqlEngine.open registers.
+var sqlDriverSeq atomic.Int64
+
 // sqlEngine is how a test reaches one engine's instances through the
 // official Go connector.
 type sqlEngine struct {
@@ -24,7 +28,9 @@ type sqlEngine struct {
 
 func (e sqlEngine) open(t *testing.T, h *Harness, connName, user, password, db string) *sql.DB {
 	t.Helper()
-	drv := fmt.Sprintf("cloudsql-v-%d", time.Now().UnixNano())
+	// A process-wide counter, not the clock: parallel subtests read the same
+	// nanosecond, and database/sql panics on a driver name registered twice.
+	drv := fmt.Sprintf("cloudsql-v-%d", sqlDriverSeq.Add(1))
 	var register func(string, ...cloudsqlconn.Option) (func() error, error)
 	var dsn string
 	if e.mysql {

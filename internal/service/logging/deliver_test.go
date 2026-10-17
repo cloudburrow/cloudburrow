@@ -18,6 +18,7 @@ import (
 	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -204,7 +205,7 @@ func TestProtoPayloadRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := entryRow(&loggingpb.LogEntry{LogName: "projects/p/logs/cloudaudit.googleapis.com%2Factivity", Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: a},
-		Timestamp: timestamppb.Now(), HttpRequest: &ltype.HttpRequest{CacheHit: true, CacheFillBytes: 9}})
+		Timestamp: timestamppb.Now(), HttpRequest: &ltype.HttpRequest{CacheHit: true, CacheFillBytes: 9, Latency: durationpb.New(1500 * time.Millisecond)}})
 	p, ok := r.values["protopayload_auditlog"].(map[string]any)
 	if !ok {
 		t.Fatalf("row %v", r.values)
@@ -215,13 +216,13 @@ func TestProtoPayloadRow(t *testing.T) {
 		t.Fatalf("protopayload_auditlog %v", p)
 	}
 	h := r.values["httpRequest"].(map[string]any)
-	if h["cacheHit"] != true || h["cacheFillBytes"] != int64(9) {
+	if h["cacheHit"] != true || h["cacheFillBytes"] != int64(9) || h["latency"] != 1.5 {
 		t.Fatalf("httpRequest %v", h)
 	}
 	// Another type: its fields lowercased; an App Engine request log: protoPayload.
-	rl, _ := anypb.New(&applogging.RequestLog{AppId: "app", Status: 200})
+	rl, _ := anypb.New(&applogging.RequestLog{AppId: "app", Status: 200, Latency: durationpb.New(250 * time.Millisecond)})
 	r = entryRow(&loggingpb.LogEntry{Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: rl}, Timestamp: timestamppb.Now()})
-	if p, _ := r.values["protoPayload"].(map[string]any); p["appid"] != "app" || p["status"] != int64(200) {
+	if p, _ := r.values["protoPayload"].(map[string]any); p["appid"] != "app" || p["status"] != int64(200) || p["latency"] != 0.25 {
 		t.Fatalf("RequestLog row %v", r.values)
 	}
 	ld, _ := anypb.New(&legacy.AuditData{EventMessage: "e"})

@@ -94,7 +94,11 @@ func (f front) getDataset(w http.ResponseWriter, r *http.Request, dataset string
 func (f front) updateDataset(w http.ResponseWriter, r *http.Request, dataset string) {
 	path := "/datasets/" + url.PathEscape(dataset)
 	var patch map[string]json.RawMessage
-	_, ok := decode(r, &patch)
+	raw, ok := decode(r, &patch)
+	if msg := datasetCollationRefused(raw); ok && msg != "" { // #1508, collationddl.go
+		writeError(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
 	if !ok || patch == nil {
 		if ok {
 			writeError(w, http.StatusBadRequest, "invalid", "Invalid dataset resource: the request body is not a JSON object.")
@@ -139,6 +143,21 @@ func (f front) updateDataset(w http.ResponseWriter, r *http.Request, dataset str
 			next[k] = v
 		} else {
 			delete(next, k)
+		}
+	}
+	if v, ok := next["maxTimeTravelHours"]; ok || r.Method == http.MethodPut {
+		// #1503, changehistoryretention.go: the history older than the
+		// window it had, or the shorter it gets, is let go of first.
+		old, _ := jsonInt(current["maxTimeTravelHours"])
+		if old <= 0 {
+			old = 168
+		}
+		h, err := jsonInt(v)
+		if !ok || isNull(v) || err != nil || h <= 0 {
+			h = 168
+		}
+		if h != old {
+			f.pruneDataset(r, dataset, min(h, old))
 		}
 	}
 	delete(next, "etag")

@@ -186,7 +186,8 @@ func TestBigQueryReplacingATempTableIs501(t *testing.T) {
 // the script made are held to the column rules, 400 invalidQuery, and the
 // script is not run. Measured first: the emulator made such a table with
 // a column `b!`. A TEMP table with names BigQuery takes is made and read;
-// after a statement that changes data, the columns are not read, 501.
+// after a statement that changes data, the script is carried out a
+// statement at a time (#1459), and the CREATE TEMP TABLE runs in its turn.
 func TestBigQueryTempTableColumnsAreChecked(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -207,10 +208,16 @@ func TestBigQueryTempTableColumnsAreChecked(t *testing.T) {
 				wantReason(t, sql, err, 400, "invalidQuery")
 			}
 		}
-		sql := "CREATE TABLE `" + ds.DatasetID + ".src` AS SELECT 1 AS a; CREATE TEMP TABLE tt AS SELECT a FROM `" + ds.DatasetID + ".src`"
-		wantReason(t, "after a statement that changes data", bqRun(ctx, c, sql, insert), 501, "notImplemented")
-		if tableExists(t, ctx, ds.Table("src")) {
-			t.Error("a statement of a script answered 501 was run")
+		// Since #1459 the script is carried out a statement at a time, each
+		// CREATE TEMP TABLE in its turn: it runs.
+		src := fmt.Sprintf("src%v", insert)
+		sql := "CREATE TABLE `" + ds.DatasetID + "." + src + "` AS SELECT 1 AS a; CREATE TEMP TABLE tt AS SELECT a FROM `" +
+			ds.DatasetID + "." + src + "`; SELECT COUNT(*) FROM tt"
+		if err := bqRun(ctx, c, sql, insert); err != nil {
+			t.Errorf("after a statement that changes data: %v", err)
+		}
+		if !tableExists(t, ctx, ds.Table(src)) {
+			t.Error("the script's CREATE TABLE did not run")
 		}
 	}
 	// Names of this run's own: a failed script leaves its TEMP tables in

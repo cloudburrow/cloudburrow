@@ -33,8 +33,11 @@ type backupDRSQL struct{ s *sqladmin.Server }
 
 func (b backupDRSQL) Instance(project, instance string) (backupdr.Instance, bool) {
 	i, ok := b.s.LookupInstance(project, instance)
-	return backupdr.Instance{DatabaseVersion: i.DatabaseVersion, Tier: i.Tier, CreateTime: i.CreateTime, Region: i.Region}, ok
+	return backupdr.Instance{DatabaseVersion: i.DatabaseVersion, Tier: i.Tier, CreateTime: i.CreateTime, Region: i.Region,
+		BackupEnabled: i.BackupEnabled}, ok
 }
+
+func (b backupDRSQL) Instances(project string) []string { return b.s.InstanceNames(project) }
 
 func (b backupDRSQL) Backup(project, instance, description string) (string, <-chan struct{}, error) {
 	return b.s.TakeBackupDRBackup(project, instance, description)

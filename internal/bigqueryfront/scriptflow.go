@@ -637,6 +637,22 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 		s.txn, s.pending, s.pendingDML = nil, "", false
 		s.last, s.lastQuery = nil, ""
 	}
+	var lastDML *dmlCounts
+	if s.limit == "" && s.notImpl == "" && (flow == nil || !flow.failed) && s.pending != "" && s.pendingDML && kids != nil {
+		// The last statement changes data: a child job of its own, as
+		// BigQuery's, run once; its counts are the parent's too (#1459).
+		n := len(*kids)
+		if fl := s.flush(); fl != nil {
+			flow = fl
+		} else if len(*kids) > n && f.texts != nil {
+			k := (*kids)[len(*kids)-1]
+			if t, ok := f.texts.get(k.project, k.id); ok && t.dml != nil {
+				d := *t.dml
+				lastDML = &d
+			}
+			s.last = nil
+		}
+	}
 	if s.limit != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: s.limit})
 		return
@@ -656,7 +672,9 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 			return
 		}
 		// A query job fails as the statement did: a table not found is
-		// 404 notFound (#1227), anything else 400 invalidQuery.
+		// 404 notFound (#1227), a statement the front refused with a
+		// reason of BigQuery's (duplicate, resourceInUse) with it (#1459),
+		// anything else 400 invalidQuery.
 		status, reason := http.StatusBadRequest, "invalidQuery"
 		var e struct {
 			Error struct {
@@ -665,9 +683,12 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 				} `json:"errors"`
 			} `json:"error"`
 		}
-		if flow.status == http.StatusNotFound && json.Unmarshal(flow.body, &e) == nil && len(e.Error.Errors) > 0 &&
-			e.Error.Errors[0].Reason == "notFound" {
+		_ = json.Unmarshal(flow.body, &e)
+		if flow.status == http.StatusNotFound && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason == "notFound" {
 			status, reason = http.StatusNotFound, "notFound"
+		} else if len(e.Error.Errors) > 0 && (flow.status == http.StatusConflict || flow.status == http.StatusBadRequest) &&
+			(e.Error.Errors[0].Reason == "duplicate" || e.Error.Errors[0].Reason == "resourceInUse") {
+			status, reason = flow.status, e.Error.Errors[0].Reason
 		}
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", status, rowError{Reason: reason, Message: flow.msg})
 		return
@@ -676,9 +697,11 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 	if s.pending != "" && !s.pendingDML {
 		// The last query is a child job too: run once more, as it only
 		// reads (scriptjobs.go). Its failure is the client's request's.
-		s.send(s.pending)
+		s.sendStatement(s.pending)
 	}
-	if insert && s.pending == "" && s.lastQuery != "" {
+	if s.pending == "" && s.lastQuery != "" {
+		// A query job child's answer is a Job (sendStatement): the
+		// client's rows are the query's, run once more.
 		s.pending = s.lastQuery
 	}
 	if s.pending != "" {
@@ -703,12 +726,14 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 		return
 	}
 	// No statement, or a DECLARE or SET, ran last, or a statement that
-	// changed data in an EXCEPTION block: the job is recorded with a
-	// statement that does nothing.
+	// changed data, its own child (above) or in an EXCEPTION block: the
+	// job is recorded with a statement that does nothing, and the last
+	// DML statement's counts.
 	if !setQueryText(r, insert, "DROP TABLE IF EXISTS "+quotePath([]string{resultsDataset, scratchTable()})) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
+	client.dml = lastDML
 	f.forward(w, r, client)
 }
 
@@ -752,7 +777,10 @@ func unsupportedInScript(nodes []scriptNode) string {
 // CLONE, CREATE SCHEMA of a dataset that exists, DROP SCHEMA of a dataset
 // the script names, CREATE FUNCTION of one that exists, DROP FUNCTION,
 // MERGE from a subquery), is so run in its turn, each its own child job,
-// as BigQuery runs each statement of a script.
+// as BigQuery runs each statement of a script. So is every other script of
+// several statements that checkDDL passes (dml.go): sent whole, it would
+// make no child jobs, and the emulator would roll it back whole through
+// jobs.query when a statement failed.
 func splitCures(sql string) bool {
 	if !strings.Contains(sql, ";") {
 		return false
@@ -1237,7 +1265,7 @@ func (s *scriptRun) flush() *scriptFlow {
 	}
 	text, dml := s.pending, s.pendingDML
 	s.pending, s.pendingDML = "", false
-	rec, flow := s.send(text)
+	rec, flow := s.sendStatement(text)
 	if flow != nil {
 		return flow
 	}
@@ -1300,7 +1328,7 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 		s.pending, s.pendingDML, s.last, s.lastQuery = text, dml, nil, ""
 		return nil
 	}
-	rec, flow := s.send(text)
+	rec, flow := s.sendStatement(text)
 	if flow != nil {
 		return flow
 	}
@@ -1315,7 +1343,25 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 }
 
 // send runs text as a query of its own through the front, as jobs.query.
-func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
+func (s *scriptRun) send(text string) (*recorder, *scriptFlow) { return s.sendAs(text, false) }
+
+// sendStatement runs text, a statement of the script in its turn, as send
+// does; a query (SELECT, WITH) of a script whose child jobs are kept is
+// run as a query job instead, so that its child job names the table its
+// results are in, as BigQuery's SELECT child does
+// (configuration.query.destinationTable, #1459). Its answer is then a
+// Job, which no caller reads rows from.
+func (s *scriptRun) sendStatement(text string) (*recorder, *scriptFlow) {
+	job := false
+	if s.children != nil && s.expr == 0 && s.txn == nil && !s.dry && !txnRequest(s.r) {
+		if toks, ok := lex(text); ok && len(toks) > 0 && (toks[0].is("SELECT") || toks[0].is("WITH")) {
+			job = true
+		}
+	}
+	return s.sendAs(text, job)
+}
+
+func (s *scriptRun) sendAs(text string, asJob bool) (*recorder, *scriptFlow) {
 	if !txnRequest(s.r) && s.txn == nil && len(s.goneTemps) > 0 { // transactions.go
 		if toks, _ := lex(text); s.goneTemp(toks) {
 			return nil, &scriptFlow{}
@@ -1332,6 +1378,10 @@ func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
 	opts := queryOptions{Query: text, UseLegacySQL: &legacy, DefaultDataset: s.q.DefaultDataset,
 		ParameterMode: s.q.ParameterMode, QueryParameters: s.q.QueryParameters}
 	body, err := json.Marshal(opts)
+	if err == nil && asJob {
+		body, err = json.Marshal(map[string]any{"configuration": map[string]any{"query": opts},
+			"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": newJobID()}})
+	}
 	if err != nil {
 		return nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: text}
 	}
@@ -1339,8 +1389,11 @@ func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
 	if err != nil {
 		return nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: text}
 	}
+	if asJob {
+		req.URL.Path, req.URL.RawPath = strings.TrimSuffix(req.URL.Path, "/queries")+"/jobs", ""
+	}
 	rec := newRecorder()
-	s.f.runQuery(rec, req, opts, false)
+	s.f.runQuery(rec, req, opts, asJob)
 	var resp map[string]any
 	if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
 		project, id := jobRef(resp)
@@ -1354,7 +1407,11 @@ func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
 			}
 		}
 	}
-	if msg, failed := queryFailure(rec, nil); failed {
+	var job map[string]any
+	if asJob {
+		job = resp
+	}
+	if msg, failed := queryFailure(rec, job); failed {
 		status := rec.status
 		if status == http.StatusOK || status == 0 {
 			status = http.StatusBadRequest

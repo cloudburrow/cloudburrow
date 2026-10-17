@@ -211,6 +211,9 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 	if path[0] == managedFolderPage {
 		return p.managedFolderActions(ctx, path)
 	}
+	if path[0] == rapidCachePage {
+		return p.rapidActions(ctx, path)
+	}
 	switch path[0] {
 	case folderPage:
 		return p.hnsFolderActions(ctx, path)
@@ -246,6 +249,7 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 				actions = append(actions, bucketACLActions(b)...)
 				actions = append(actions, bulkRestoreAction(), filterOperationsAction())
 				actions = append(actions, cacheActions()...)
+				actions = append(actions, createRapidAction(), ipFilterAction(b))
 			}
 			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
 		}
@@ -290,6 +294,13 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 		return restoreObject(ctx, c, path)
 	case "createmanagedfolder":
 		return p.createManagedFolder(ctx, path, values)
+	case "editmanagedfolder":
+		return p.editManagedFolder(ctx, path, values)
+	case "editipfilter":
+		return p.editIPFilter(ctx, path, values)
+	case "createrapidcache", "editrapidcache", "disablerapidcache":
+		_, err := p.ActAtResult(ctx, project, path, action, values)
+		return err
 	case "deletemanagedfolder":
 		if len(path) > 0 && path[0] == folderPage {
 			_, err := p.actOnFolder(ctx, path, action, values)

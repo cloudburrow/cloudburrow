@@ -68,3 +68,22 @@ func TestPartitionAndClusterClausesAreRead(t *testing.T) {
 		t.Errorf("CTAS read as %+v", d)
 	}
 }
+
+// TestQueryAfterOptionsIsRead (#1512): CREATE TABLE ... PARTITION BY ...
+// OPTIONS (...) AS SELECT keeps its query, whose columns the PARTITION BY
+// names; before, the query after OPTIONS was dropped, and the statement
+// failed "Unrecognized name".
+func TestQueryAfterOptionsIsRead(t *testing.T) {
+	for sql, want := range map[string]string{
+		"CREATE TABLE p.t PARTITION BY day OPTIONS (description = 'd') AS SELECT DATE '2024-01-01' AS day":            "SELECT DATE '2024-01-01' AS day",
+		"CREATE OR REPLACE TABLE p.t PARTITION BY day CLUSTER BY n OPTIONS (labels = [('k', 'v')]) AS SELECT 1 AS n;": "SELECT 1 AS n",
+		"CREATE TABLE p.t PARTITION BY day AS SELECT DATE '2024-01-01' AS day":                                        "SELECT DATE '2024-01-01' AS day",
+		"CREATE TABLE p.t (day DATE) PARTITION BY day OPTIONS (description = 'd')":                                    "",
+		"CREATE VIEW p.v OPTIONS (description = 'd') AS SELECT 1 AS n":                                                "",
+	} {
+		d, msg, ok := parseDDLOptions(sql)
+		if !ok || msg != "" || strings.TrimSpace(d.query) != want {
+			t.Errorf("%s: query %q, %q %v; want %q", sql, d.query, msg, ok, want)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -604,6 +605,14 @@ type Config struct {
 	// set it.
 	CloudBuildHostSteps bool `json:"cloudbuildHostSteps,omitempty"`
 
+	// AppEngineURL is the base URL of a local HTTP server standing in for
+	// the App Engine app (#1506): Cloud Tasks and Cloud Scheduler deliver an
+	// App Engine target's request there, at its relative_uri, with the Host
+	// its AppEngineRouting computes and the headers Google documents. Empty,
+	// the default, fails every App Engine attempt with HTTP 404, as for an
+	// app that does not exist.
+	AppEngineURL string `json:"appEngineUrl,omitempty"`
+
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.
@@ -919,6 +928,12 @@ func (c *Config) Validate() error {
 	var problems []FieldError
 	add := func(field, value, msg string) {
 		problems = append(problems, FieldError{Field: field, Value: value, Message: msg})
+	}
+
+	if c.AppEngineURL != "" {
+		if u, err := url.Parse(c.AppEngineURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("appEngineUrl", c.AppEngineURL, "must be an http:// or https:// URL, such as http://localhost:8080")
+		}
 	}
 
 	// Instance name. It becomes a cluster name and a label value, so its

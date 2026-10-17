@@ -49,11 +49,10 @@ func TestTempSessionScript(t *testing.T) {
 	if s, _ := tempSessionScript("CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE MATERIALIZED VIEW ds.mv AS SELECT a FROM t"); s == nil || !s.readsTempFromMV {
 		t.Error("a materialized view of a TEMP table is not refused")
 	}
-	if s, ok := tempSessionScript("CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t"); !ok || s.useSession() {
-		t.Error("a script the emulator runs whole is run as a session's script")
-	}
-	// #1459: what the emulator cannot run whole with a TEMP table is.
+	// #1459: every script with a TEMP table is, a statement at a time.
 	for _, sql := range []string{
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t",
+		"CREATE TEMP FUNCTION f() AS (1); INSERT INTO ds.t VALUES (1); SELECT f()",
 		"CREATE TEMP TABLE t AS SELECT 1 AS a; ALTER TABLE ds.x ADD COLUMN b INT64; SELECT * FROM t",
 		"CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t; SELECT 2",
 		"CREATE TEMP TABLE t AS SELECT 1 AS a; ASSERT (SELECT COUNT(*) FROM t) = 1",

@@ -47,6 +47,7 @@ func TestStorageBucketLabelsAndStorageClassRoundTrip(t *testing.T) {
 // echoed on create, or refused with 400 naming it (the unit test of the same
 // name also checks this list against the discovery schema). Hierarchical
 // namespace is sent with uniform bucket-level access, which it needs (#1203).
+// ipFilter, refused until #1505, is echoed like the others.
 func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 	h := New(t)
 	samples := map[string]string{
@@ -60,7 +61,7 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 		"website":  `{"mainPageSuffix":"index.html"}`,
 		"ipFilter": `{"mode":"Enabled"}`, "acl": `[{"entity":"allUsers","role":"READER"}]`, "defaultObjectAcl": `[{"entity":"allUsers","role":"READER"}]`,
 	}
-	refused := map[string]bool{"ipFilter": true}
+	refused := map[string]bool{}
 	i := 0
 	for k, v := range samples {
 		i++

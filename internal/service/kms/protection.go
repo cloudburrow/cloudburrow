@@ -1,6 +1,8 @@
 package kms
 
 import (
+	"strings"
+
 	"cloud.google.com/go/kms/apiv1/kmspb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -57,11 +59,21 @@ func (k cryptoKey) protectionLevel() kmspb.ProtectionLevel  { return levelOf(k.P
 func (v keyVersion) protectionLevel() kmspb.ProtectionLevel { return levelOf(v.ProtectionLevel) }
 func (j importJob) protectionLevel() kmspb.ProtectionLevel  { return levelOf(j.ProtectionLevel) }
 
-// Key Access Justifications (#1452): key_access_justifications_policy is
-// stored and returned as set, and NOT enforced. An encrypt or decrypt
-// request carries no access justification locally (Google attaches one
-// to calls its own staff make), so there is nothing to check a policy
-// against: every call succeeds whatever the policy allows.
+// Key Access Justifications (#1452, enforced #1506): a key's
+// key_access_justifications_policy is stored and returned as set, and its
+// encrypt, decrypt and sign operations are checked against it, as
+// kmspb.KeyAccessJustificationsPolicy documents: "Zero allowed access
+// reasons means all encrypt, decrypt, and sign operations for the
+// CryptoKey associated with this policy will fail." Every call to this
+// instance is the customer's own, so its reason is CUSTOMER_INITIATED_ACCESS
+// ("Customer uses their account to perform any access to their own data
+// which their IAM policy authorizes", AccessReason): a policy whose
+// allowed_access_reasons lacks it refuses the call. The reasons Google's
+// staff and systems carry (GOOGLE_INITIATED_*, THIRD_PARTY_DATA_REQUEST,
+// ...) never reach a local key. The refusal's code and message are
+// UNVERIFIED: FAILED_PRECONDITION, naming the policy. A key with no policy,
+// and the project and organization default policies, which this instance
+// does not serve, allow every call.
 
 // kajPolicy is a stored key_access_justifications_policy.
 type kajPolicy struct {
@@ -92,4 +104,37 @@ func (p *kajPolicy) proto() *kmspb.KeyAccessJustificationsPolicy {
 		out.AllowedAccessReasons = append(out.AllowedAccessReasons, kmspb.AccessReason(kmspb.AccessReason_value[r]))
 	}
 	return out
+}
+
+// kajRefusal refuses an encrypt, decrypt or sign operation on k that its
+// key_access_justifications_policy does not allow, or returns nil.
+func kajRefusal(k cryptoKey) error {
+	p := k.KAJPolicy
+	if p == nil {
+		return nil
+	}
+	for _, r := range p.Reasons {
+		if r == kmspb.AccessReason_CUSTOMER_INITIATED_ACCESS.String() {
+			return nil
+		}
+	}
+	if len(p.Reasons) == 0 {
+		return apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s's key_access_justifications_policy allows no access reasons, "+
+			"so every encrypt, decrypt and sign operation on it fails", k.Name))
+	}
+	return apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s's key_access_justifications_policy does not allow "+
+		"CUSTOMER_INITIATED_ACCESS, the reason of a call made with your own account; it allows %s", k.Name, strings.Join(p.Reasons, ", ")))
+}
+
+// kajAllows checks the policy of the key that version name belongs to.
+func (s *Server) kajAllows(name string) error {
+	keyName, _, err := parseCryptoKeyVersion("name", name)
+	if err != nil {
+		return apierror.Wrap(err)
+	}
+	var k cryptoKey
+	if err := s.load(dbKey(keyPrefix, keyName), &k, "CryptoKey", keyName); err != nil {
+		return err
+	}
+	return kajRefusal(k)
 }
