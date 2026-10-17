@@ -41,8 +41,8 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 	p.eval(`({ Title: document.querySelector("#product-nav .product-nav-title").textContent,
 	           Pages: [...document.querySelectorAll("#product-nav a")].map((a) => a.textContent),
 	           Current: document.querySelector("#product-nav a[aria-current=page]").textContent })`, &nav)
-	if nav.Title != "Cloud SQL" || strings.Join(nav.Pages, ",") != "PostgreSQL,MySQL" || nav.Current != "MySQL" {
-		t.Errorf("the product navigation is %+v, want Cloud SQL with PostgreSQL and MySQL, on MySQL", nav)
+	if nav.Title != "Cloud SQL" || strings.Join(nav.Pages, ",") != "PostgreSQL,MySQL,Instances" || nav.Current != "MySQL" {
+		t.Errorf("the product navigation is %+v, want Cloud SQL with PostgreSQL, MySQL and Instances, on MySQL", nav)
 	}
 	p.clickText("#view button.primary", "Create database")
 	p.waitFor(`document.querySelector(".modal #f-database") !== null`)

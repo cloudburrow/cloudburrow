@@ -248,10 +248,12 @@ const (
 )
 
 // detachConfirm is what Detach from topic puts at risk, in Google's words
-// (Publisher.DetachSubscription).
+// (Publisher.DetachSubscription). It does not end "This cannot be undone.":
+// the confirmation adds that line itself, and said twice it was (found by
+// TestPubSubDetachedSubscriptionEditThroughTheBrowser).
 const detachConfirm = "Detaching drops every message the subscription retains, and it receives nothing published " +
 	"from now on: pulls from it fail FAILED_PRECONDITION and pushes stop. The subscription is kept, detached, " +
-	"until you delete it. This cannot be undone."
+	"until you delete it."
 
 // DetailActions implements console.PathActor for a subscription's page:
 // Create snapshot, Detach from topic (#1406), Seek to one of its topic's

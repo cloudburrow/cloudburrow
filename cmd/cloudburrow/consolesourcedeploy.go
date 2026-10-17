@@ -122,7 +122,7 @@ func (p runBuildsProvider) withClient(ctx context.Context, fn func(*cloudbuild.C
 // `gcloud builds submit --tag` does.
 func (runBuildsProvider) CreateForm() (string, []console.Field) {
 	return "Run build", []console.Field{
-		{Name: "source", Label: "Source", Type: "text", Required: true, Pattern: "^gs://[^/]+/.+$",
+		{Name: "source", Label: "Source", Type: "text", Required: true, Pattern: "^gs://[^\\/]+/.+$",
 			Help: "gs://bucket/object: a .tar.gz or .zip in this instance's Cloud Storage, with a Dockerfile at its root"},
 		{Name: "image", Label: "Image", Type: "text", Required: true,
 			Help: "the image to build and push, e.g. us-central1-docker.pkg.dev/PROJECT/REPO/IMAGE:TAG; a Cloud Run service naming it runs it"},

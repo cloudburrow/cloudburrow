@@ -45,14 +45,14 @@ COMPAT_SHARDS="storage served run emulators sql acceptance"
 # emulators and sql shards: the Cloud KMS and Cloud Run screens are served
 # only by the run shard's instance (#700), as are Cloud Logging's admin
 # screens (TestLoggingAdmin*, #1226); the BigQuery, Firestore, Datastore
-# (#854) and Spanner screens and the Bigtable screen's actions (#1198) only
-# by the emulators shard's; and the Cloud SQL screens, MySQL (#868) and
+# (#854), Spanner and Memorystore screens and the Bigtable screen's actions
+# (#1198) only by the emulators shard's; and the Cloud SQL screens, MySQL (#868) and
 # PostgreSQL (#995), only by the sql shard's (#1472). The tests these name
 # run there and the rest in storage.
 COMPAT_BROWSER_SHARDS="storage run emulators sql"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
-COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
-COMPAT_BROWSER_SQL_SHARD_TESTS='^TestCloudSQL'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner|Memorystore)'
+COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR)'
 # Browser tests no shard runs: the Studio's local models (#1396) need a
 # -tags onnx build started with -local-ai-embeddings, which no shard builds;
 # they run locally, as the compat suite's local AI tests do (ci.yml never=).
@@ -191,7 +191,11 @@ compat_shard() {
       # its default 3307 (no --cloudsql-connector), the one port Google's
       # Auth Proxy dials, so TestCloudSQLAuthProxyBinary runs here with the
       # binary ci.yml installs from `make cloud-sql-proxy` (#1421).
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage
+      # Secret Manager for the console's Run SQL (Data API), whose password
+      # is a secret version (TestCloudSQLInstanceActionsThroughThePage);
+      # SECRETS is not in TEST_VARS, so the Secret Manager tests stay in
+      # the storage and run shards.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager
       TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"

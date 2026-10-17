@@ -287,13 +287,13 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title` then names the page inside it.
 	for _, product := range []string{
 		"Cloud Tasks",
-		"Secret Manager", "Resource Manager", "Cloud KMS", "Cloud Scheduler",
+		"Secret Manager", "Cloud KMS", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage"} {
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}

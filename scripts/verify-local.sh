@@ -443,9 +443,15 @@ browser_suite() {  # <shard> <dir> <flags...>
   local BROWSER_ENV BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
   # As in CI: the emulators shard's tests also read back through the
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
-  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING; fi
+  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
+  # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
+  # Cloud Logging and BigQuery's official clients.
+  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi
+  # The sql shard's read back through the Cloud SQL Admin API, the Backup
+  # and DR Service and Secret Manager, which holds Run SQL's password.
+  if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
