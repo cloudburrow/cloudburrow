@@ -200,15 +200,15 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		}
 		acts := p.DetailActions(ctx, "", []string{cs.id})
 		if cs.id == "gen1-http" {
-			if len(acts) != 1 || acts[0].ID != functionsTestAction {
-				t.Errorf("a 1st-gen HTTP function's actions = %+v; want Test function", acts)
+			if len(acts) != 3 || acts[2].ID != functionsTestAction {
+				t.Errorf("a 1st-gen HTTP function's actions = %+v; want Edit function, Download source and Test function", acts)
 			}
 			_, err := p.ActAtResult(ctx, "", []string{cs.id}, functionsTestAction, map[string]string{"data": `{"name":"x"}`})
 			if err == nil || !strings.Contains(err.Error(), "not ACTIVE") {
 				t.Errorf("Test function of an OFFLINE function = %v; want the v1 API's refusal", err)
 			}
-		} else if len(acts) != 0 {
-			t.Errorf("an event function's actions = %+v; want none", acts)
+		} else if len(acts) != 2 || acts[0].ID != functionsEditAction || acts[1].ID != functionsDownloadAction {
+			t.Errorf("an event function's actions = %+v; want Edit function and Download source", acts)
 		}
 	}
 
@@ -223,8 +223,8 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		len(fn.GetEventTrigger().GetEventFilters()) != 1 || fn.GetEventTrigger().GetEventFilters()[0].GetValue() != "uploads" {
 		t.Errorf("the 2nd-gen function = %v, %v", fn, err)
 	}
-	if acts := p.DetailActions(ctx, "", []string{"gen2-bucket"}); len(acts) != 0 {
-		t.Errorf("a 2nd-gen function's actions = %+v; want none", acts)
+	if acts := p.DetailActions(ctx, "", []string{"gen2-bucket"}); len(acts) != 2 || acts[0].ID != functionsEditAction {
+		t.Errorf("a 2nd-gen function's actions = %+v; want Edit function and Download source", acts)
 	}
 
 	for _, bad := range []map[string]string{

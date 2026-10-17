@@ -2036,42 +2036,42 @@
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:232 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:235 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:232 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:235 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:232 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:235 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:232 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:235 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:232 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:235 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:232 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:235 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
@@ -8024,6 +8024,7 @@
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
+          "test/compat/bigquerycolumns1490_test.go:27 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
@@ -8166,6 +8167,7 @@
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
+          "test/compat/bigquerycolumns1490_test.go:27 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",

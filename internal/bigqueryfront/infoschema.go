@@ -419,14 +419,19 @@ func columnsRows(project, dataset string, t infoTable) [][]string {
 			sqlOrNull(str(fl, "collation")), sqlOrNull(str(fl, "defaultValueExpression")), sqlOrNull(str(fl, "roundingMode")),
 			"ARRAY<STRUCT<name STRING>>[]", policyTags(fl), sqlString("NO"), "NULL", "NULL", "NULL", "NULL", "NULL", "NULL"))
 	}
-	if tp != nil && partCol == "" { // ingestion time: the pseudo-columns
+	// An ingestion-time partitioned table's pseudo-columns. Their rows
+	// lacked async_generation_status when #1458 added it to the type, so
+	// COLUMNS of any dataset holding such a table failed 400 "Array element
+	// type STRUCT<STRING, ...> does not coerce" (#1490); TestColumnsRowsArity
+	// checks every row against the type.
+	if tp != nil && partCol == "" {
 		pseudo := [][2]string{{"_PARTITIONTIME", "TIMESTAMP"}}
 		if t := strings.ToUpper(str(tp, "type")); t == "" || t == "DAY" {
 			pseudo = append(pseudo, [2]string{"_PARTITIONDATE", "DATE"})
 		}
 		for _, p := range pseudo {
 			rows = append(rows, append(append([]string{}, head...), sqlString(p[0]), "NULL", sqlString("YES"), sqlString(p[1]),
-				sqlString("NEVER"), "NULL", "NULL", sqlString("YES"), "NULL", sqlString("YES"), yesNo(p[0] == "_PARTITIONTIME"), "NULL",
+				sqlString("NEVER"), "NULL", "NULL", asyncGenerationNone, sqlString("YES"), "NULL", sqlString("YES"), yesNo(p[0] == "_PARTITIONTIME"), "NULL",
 				"NULL", "NULL", "NULL", "ARRAY<STRUCT<name STRING>>[]", "ARRAY<STRING>[]", sqlString("NO"), "NULL", "NULL", "NULL",
 				"NULL", "NULL", "NULL"))
 		}
