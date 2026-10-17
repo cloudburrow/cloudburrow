@@ -152,6 +152,10 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if runs := md.RawTrainingRuns(); len(runs) > 0 {
 		run := runs[0]
 		for _, r := range run.Results {
+			if r.ArimaResult != nil {
+				// An ARIMA_PLUS model has no iterations (#1504).
+				continue
+			}
 			iters.Items = append(iters.Items, console.Resource{Name: fmt.Sprint(r.Index), Fields: map[string]string{
 				"Loss": strconv.FormatFloat(r.TrainingLoss, 'g', 8, 64), "Eval loss": evalLoss(r.EvalLoss),
 				"Learn rate": strconv.FormatFloat(r.LearnRate, 'g', 6, 64), "Duration (ms)": fmt.Sprint(r.DurationMs)}})
@@ -237,7 +241,8 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 // components (PCA, ML.PRINCIPAL_COMPONENT_INFO and
 // ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481), or
 // recommendations and factors (MATRIX_FACTORIZATION, #1504), or feature
-// importance (BOOSTED_TREE_*, #1504).
+// importance (BOOSTED_TREE_*, #1504), or forecasts and candidate models
+// (ARIMA_PLUS, ML.FORECAST and ML.ARIMA_EVALUATE, #1504).
 func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
 	model := fmt.Sprintf("MODEL `%s.%s.%s`", p.project, datasetID, modelID)
 	read := func(sql string) (bigquery.Schema, [][]bigquery.Value) {
@@ -332,7 +337,7 @@ func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.C
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "components", Label: "Components", Listing: l}}
-	case "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER":
+	case "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER", "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER":
 		// Each feature's importance (ML.FEATURE_IMPORTANCE, #1504).
 		_, rows := read("SELECT feature, importance_weight, importance_gain, importance_cover FROM ML.FEATURE_IMPORTANCE(" + model + ") ORDER BY feature")
 		if len(rows) == 0 {
@@ -345,6 +350,48 @@ func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.C
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "importance", Label: "Feature importance", Listing: l}}
+	case "ARIMA_PLUS":
+		var out []console.Section
+		schema, fc := read("SELECT * FROM ML.FORECAST(" + model + ") ORDER BY 1, 2 LIMIT 100")
+		if len(fc) > 0 {
+			// The series ID, when there is one, comes before
+			// forecast_timestamp.
+			off := 0
+			if len(schema) > 0 && schema[0].Name != "forecast_timestamp" {
+				off = 1
+			}
+			cols := []string{"Forecast", "Standard error", "Interval"}
+			if off == 1 {
+				cols = append([]string{"Series"}, cols...)
+			}
+			l := console.Listing{Columns: cols, NameColumn: "Time", Noun: "forecasts"}
+			for _, r := range fc {
+				name := fmt.Sprint(r[off])
+				if tm, ok := r[off].(time.Time); ok {
+					name = tm.UTC().Format(time.RFC3339)
+				}
+				fields := map[string]string{"Forecast": num(r[off+1]), "Standard error": num(r[off+2]),
+					"Interval": num(r[off+4]) + " – " + num(r[off+5])}
+				if off == 1 {
+					fields["Series"] = fmt.Sprint(r[0])
+				}
+				l.Items = append(l.Items, console.Resource{Name: name, Fields: fields})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "forecast", Label: "Forecast", Listing: l})
+		}
+		_, ev := read("SELECT FORMAT('ARIMA(%d, %d, %d)%s', non_seasonal_p, non_seasonal_d, non_seasonal_q, IF(has_drift, ' with drift', '')), " +
+			"log_likelihood, AIC, variance FROM ML.ARIMA_EVALUATE(" + model + ") WHERE error_message IS NULL")
+		if len(ev) > 0 {
+			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance"}, NameColumn: "Model", Noun: "candidate models"}
+			for _, r := range ev {
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Log likelihood": num(r[1]),
+					"AIC": num(r[2]), "Variance": num(r[3])}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "candidates", Label: "Candidate models", Listing: l})
+		}
+		return out
 	case "MATRIX_FACTORIZATION":
 		// The highest predicted ratings (ML.RECOMMEND), and each user's
 		// and item's intercept and factor weights (ML.WEIGHTS) (#1504).

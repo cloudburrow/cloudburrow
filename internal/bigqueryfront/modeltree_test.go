@@ -103,3 +103,38 @@ func TestTrainBoostedTree(t *testing.T) {
 		}
 	}
 }
+
+// TestTrainRandomForest: with every row and column a forest's trees are
+// alike, and their average is one tree's weights unscaled (by hand on the
+// step: 0.5 − 2.5/6 and 0.5 + 47.5/6); with the documented sampling the
+// forest is the same each run.
+func TestTrainRandomForest(t *testing.T) {
+	o := defaultMLOptions()
+	o.ModelType, o.LabelCols = "RANDOM_FOREST_REGRESSOR", []string{"y"}
+	o.Set = []string{"model_type", "input_label_cols", "subsample", "colsample_bynode", "num_parallel_tree"}
+	o.Subsample, o.ColsampleNode, o.NumParallelTree = 1, 1, 10
+	applyTreeDefaults(&o)
+	if c, m := checkTreeSampling(o); c != 0 || o.MaxTreeDepth != 15 || o.MaxIterations != 1 {
+		t.Fatalf("options %+v: %s", o, m)
+	}
+	cols, rows := stepRows()
+	tr, fe := trainModel(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	lo, hi := tr.treeMargin([]float64{1, -1}), tr.treeMargin([]float64{1, 1})
+	if len(tr.Trees) != 10 || math.Abs(lo-(0.5-2.5/6)) > 1e-12 || math.Abs(hi-(0.5+47.5/6)) > 1e-12 {
+		t.Fatalf("%d trees, %v %v", len(tr.Trees), lo, hi)
+	}
+	d := defaultMLOptions()
+	d.ModelType, d.LabelCols, d.Set = "RANDOM_FOREST_REGRESSOR", []string{"y"}, []string{"model_type", "input_label_cols"}
+	applyTreeDefaults(&d)
+	if d.NumParallelTree != 100 || d.Subsample != 0.8 || d.ColsampleNode != 0.8 {
+		t.Fatalf("defaults %+v", d)
+	}
+	a, _ := trainModel(d, cols, rows)
+	b, _ := trainModel(d, cols, rows)
+	if len(a.Trees) != 100 || a.treeMargin([]float64{1, 0.3}) != b.treeMargin([]float64{1, 0.3}) {
+		t.Fatalf("forest: %d trees, %v vs %v", len(a.Trees), a.treeMargin([]float64{1, 0.3}), b.treeMargin([]float64{1, 0.3}))
+	}
+}

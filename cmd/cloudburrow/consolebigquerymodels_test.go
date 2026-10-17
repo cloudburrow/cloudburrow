@@ -102,6 +102,8 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"lg": `"modelType":"LOGISTIC_REGRESSION","trainingRuns":[{"evaluationMetrics":{"multiClassClassificationMetrics":{"aggregateClassificationMetrics":{"accuracy":0.9}}}}]`,
 		"pc": `"modelType":"PCA","trainingRuns":[{"evaluationMetrics":{"dimensionalityReductionMetrics":{"totalExplainedVarianceRatio":0.75}}}]`,
 		"bt": `"modelType":"BOOSTED_TREE_REGRESSOR","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"rf": `"modelType":"RANDOM_FOREST_CLASSIFIER","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"ar": `"modelType":"ARIMA_PLUS","trainingRuns":[{"results":[{"index":0,"arimaResult":{"arimaModelInfo":[]}}]}]`,
 		"mf": `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
 	}
 	rows := func(fields, rows string) string {
@@ -128,6 +130,13 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		case strings.Contains(q, "ML.FEATURE_IMPORTANCE"):
 			fmt.Fprint(w, rows(`{"name":"feature","type":"STRING"},{"name":"importance_weight","type":"INTEGER"},{"name":"importance_gain","type":"FLOAT"},`+
 				`{"name":"importance_cover","type":"FLOAT"}`, `{"f":[{"v":"x"},{"v":"20"},{"v":"3.5"},{"v":"10"}]}`))
+		case strings.Contains(q, "ML.FORECAST"):
+			fmt.Fprint(w, rows(`{"name":"forecast_timestamp","type":"TIMESTAMP"},{"name":"forecast_value","type":"FLOAT"},{"name":"standard_error","type":"FLOAT"},`+
+				`{"name":"confidence_level","type":"FLOAT"},{"name":"prediction_interval_lower_bound","type":"FLOAT"},{"name":"prediction_interval_upper_bound","type":"FLOAT"}`,
+				`{"f":[{"v":"1704931200000000"},{"v":"19.5"},{"v":"0.75"},{"v":"0.95"},{"v":"18"},{"v":"21"}]}`))
+		case strings.Contains(q, "ML.ARIMA_EVALUATE"):
+			fmt.Fprint(w, rows(`{"name":"f0_","type":"STRING"},{"name":"log_likelihood","type":"FLOAT"},{"name":"AIC","type":"FLOAT"},{"name":"variance","type":"FLOAT"}`,
+				`{"f":[{"v":"ARIMA(0, 1, 0) with drift"},{"v":"-9.5"},{"v":"23"},{"v":"0.6"}]}`))
 		case strings.Contains(q, "ML.RECOMMEND"):
 			fmt.Fprint(w, rows(`{"name":"predicted_rating","type":"FLOAT"},{"name":"user","type":"INTEGER"},{"name":"item","type":"STRING"}`,
 				`{"f":[{"v":"4.5"},{"v":"7"},{"v":"film"}]}`))
@@ -154,6 +163,8 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"lg": {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
 		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
 		"bt": {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
+		"rf": {"Feature importance", "Splits:20"},
+		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23"},
 		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})

@@ -1,0 +1,187 @@
+package bigqueryfront
+
+import (
+	"math"
+	"strconv"
+	"testing"
+	"time"
+)
+
+// arimaRows are a daily series of vals from 2024-01-01, as DATE values.
+func arimaRows(vals []float64) ([]mlColumn, [][]*string) {
+	cols := []mlColumn{{"d", "DATE"}, {"v", "FLOAT"}}
+	var rows [][]*string
+	day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i, v := range vals {
+		ds, vs := day.AddDate(0, 0, i).Format("2006-01-02"), strconv.FormatFloat(v, 'g', -1, 64)
+		rows = append(rows, []*string{&ds, &vs})
+	}
+	return cols, rows
+}
+
+func arimaOpts(set ...string) mlOptions {
+	o := defaultMLOptions()
+	o.ModelType = "ARIMA_PLUS"
+	o.TS.TimestampCol, o.TS.DataCol = "d", "v"
+	o.Set = append([]string{"model_type", "time_series_timestamp_col", "time_series_data_col"}, set...)
+	applyArimaDefaults(&o)
+	return o
+}
+
+// ar1Series is a deterministic, stationary, wiggly series.
+func ar1Series() []float64 {
+	var v []float64
+	x := 0.0
+	for i := 0; i < 60; i++ {
+		x = 0.6*x + math.Sin(float64(i)*1.7) + 0.5*math.Cos(float64(i)*0.37)
+		v = append(v, 10+x)
+	}
+	return v
+}
+
+// TestTrainArimaAR1: ARIMA(1, 0, 0)'s CSS fit is the least squares
+// regression of y_t on y_{t−1} (by hand: φ = cov/var of the pairs, μ =
+// c/(1 − φ)), and its forecasts are μ + φ^h (y_n − μ), standard error
+// σ √Σ_{j<h} φ^{2j}.
+func TestTrainArimaAR1(t *testing.T) {
+	y := ar1Series()
+	o := arimaOpts("auto_arima", "non_seasonal_order")
+	o.TS.AutoArima, o.TS.Order = false, []int{1, 0, 0}
+	if c, m := checkArimaOptions(o); c != 0 {
+		t.Fatal(m)
+	}
+	cols, rows := arimaRows(y)
+	tr, fe := trainModel(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	a := tr.Arima
+	if a.Frequency != "DAILY" || len(a.Series) != 1 || len(a.Series[0].Cands) != 1 {
+		t.Fatalf("model: %+v", a)
+	}
+	var mx, my float64
+	n := float64(len(y) - 1)
+	for i := 1; i < len(y); i++ {
+		mx += y[i-1] / n
+		my += y[i] / n
+	}
+	var sxy, sxx float64
+	for i := 1; i < len(y); i++ {
+		sxy += (y[i-1] - mx) * (y[i] - my)
+		sxx += (y[i-1] - mx) * (y[i-1] - mx)
+	}
+	phi := sxy / sxx
+	mu := (my - phi*mx) / (1 - phi)
+	var sse float64
+	for i := 1; i < len(y); i++ {
+		r := y[i] - mu - phi*(y[i-1]-mu)
+		sse += r * r
+	}
+	fit := a.Series[0].Cands[0]
+	if math.Abs(fit.AR[0]-phi) > 1e-6 || math.Abs(fit.Mu-mu) > 1e-6 || math.Abs(fit.Sigma2-sse/n) > 1e-9 {
+		t.Fatalf("fit %+v; want φ %v μ %v σ² %v", fit, phi, mu, sse/n)
+	}
+	wantLL := -n / 2 * (math.Log(2*math.Pi*sse/n) + 1)
+	if math.Abs(fit.LogLik-wantLL) > 1e-6 || math.Abs(fit.AIC-(-2*wantLL+6)) > 1e-5 {
+		t.Errorf("log likelihood %v AIC %v; want %v %v", fit.LogLik, fit.AIC, wantLL, -2*wantLL+6)
+	}
+	_, fc, se := a.Series[0].arimaPath(fit, a.Cond, 3)
+	last := y[len(y)-1]
+	var acc float64
+	for h := 1; h <= 3; h++ {
+		acc += math.Pow(fit.AR[0], float64(2*(h-1)))
+		want := fit.Mu + math.Pow(fit.AR[0], float64(h))*(last-fit.Mu)
+		if math.Abs(fc[h-1]-want) > 1e-9 || math.Abs(se[h-1]-math.Sqrt(fit.Sigma2*acc)) > 1e-9 {
+			t.Errorf("h %d: %v ± %v; want %v ± %v", h, fc[h-1], se[h-1], want, math.Sqrt(fit.Sigma2*acc))
+		}
+	}
+}
+
+// TestTrainArimaDrift: ARIMA(0, 1, 0) with drift is a random walk whose
+// drift is the mean difference; it forecasts y_n + h·drift with standard
+// error σ √h.
+func TestTrainArimaDrift(t *testing.T) {
+	y := []float64{1, 3, 4, 7, 8, 11, 12, 15, 17, 18}
+	o := arimaOpts("auto_arima", "non_seasonal_order", "include_drift")
+	o.TS.AutoArima, o.TS.Order, o.TS.IncludeDrift = false, []int{0, 1, 0}, true
+	cols, rows := arimaRows(y)
+	tr, fe := trainModel(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	s := tr.Arima.Series[0]
+	fit := s.Cands[0]
+	drift := (18.0 - 1) / 9
+	var s2 float64
+	for i := 1; i < len(y); i++ {
+		s2 += (y[i] - y[i-1] - drift) * (y[i] - y[i-1] - drift) / 9
+	}
+	if !fit.Drift || math.Abs(fit.Mu-drift) > 1e-7 || math.Abs(fit.Sigma2-s2) > 1e-9 {
+		t.Fatalf("fit %+v; want drift %v σ² %v", fit, drift, s2)
+	}
+	fitted, fc, se := s.arimaPath(fit, tr.Arima.Cond, 2)
+	if !math.IsNaN(fitted[0]) || math.Abs(fitted[1]-(1+fit.Mu)) > 1e-9 {
+		t.Errorf("fitted %v", fitted)
+	}
+	for h := 1; h <= 2; h++ {
+		if math.Abs(fc[h-1]-(18+float64(h)*fit.Mu)) > 1e-9 || math.Abs(se[h-1]-math.Sqrt(s2*float64(h))) > 1e-9 {
+			t.Errorf("h %d: %v ± %v", h, fc[h-1], se[h-1])
+		}
+	}
+}
+
+// TestTrainArimaAuto: auto_arima's candidates are every p + q ≤ 2 (six,
+// twelve with drift when d is 1), the model the lowest AIC; a trend is
+// differenced; a missing day is interpolated.
+func TestTrainArimaAuto(t *testing.T) {
+	y := ar1Series()
+	cols, rows := arimaRows(y)
+	tr, fe := trainModel(arimaOpts(), cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	s := tr.Arima.Series[0]
+	if s.Cands[0].D != 0 || len(s.Cands) != 6 {
+		t.Fatalf("candidates %+v", s.Cands)
+	}
+	for _, c := range s.Cands[1:] {
+		if c.AIC < s.Cands[0].AIC {
+			t.Errorf("candidate %+v beats the model %+v", c, s.Cands[0])
+		}
+	}
+	var trend []float64
+	for i := 0; i < 40; i++ {
+		trend = append(trend, float64(i)*2+math.Sin(float64(i)))
+	}
+	cols, rows = arimaRows(trend)
+	rows = append(rows[:5], rows[6:]...)
+	tr, fe = trainModel(arimaOpts(), cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	s = tr.Arima.Series[0]
+	if s.Cands[0].D != 1 || len(s.Cands) != 12 || len(s.Times) != 40 || s.Observed[5] || s.Data[5] != (trend[4]+trend[6])/2 {
+		t.Fatalf("trend: d %d, %d candidates, %d points, %v", s.Cands[0].D, len(s.Cands), len(s.Times), s.Data[4:7])
+	}
+}
+
+func TestArimaOptions(t *testing.T) {
+	for sql, want := range map[string]int{
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v') AS SELECT 1":                           0,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', holiday_region='US') AS SELECT 1":      501,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', auto_arima=FALSE) AS SELECT 1":         400,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', include_drift=TRUE) AS SELECT 1":       400,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', seasonalities=['WEEKLY']) AS SELECT 1": 501,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', auto_arima=FALSE, " +
+			"non_seasonal_order=(1, 1, 0), include_drift=TRUE) AS SELECT 1": 0,
+	} {
+		toks, _ := lex(sql)
+		d, is, code, msg := parseModelDDL(toks, sql)
+		if !is || code != want {
+			t.Errorf("%s: %d %s; want %d", sql, code, msg, want)
+		}
+		if code == 0 && d.opts.TS.Horizon != 1000 {
+			t.Errorf("%s: horizon %d", sql, d.opts.TS.Horizon)
+		}
+	}
+}

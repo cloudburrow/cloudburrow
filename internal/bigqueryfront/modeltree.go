@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +61,39 @@ func isBoostedTree(typ string) bool {
 	return typ == "BOOSTED_TREE_REGRESSOR" || typ == "BOOSTED_TREE_CLASSIFIER"
 }
 
+func isRandomForest(typ string) bool {
+	return typ == "RANDOM_FOREST_REGRESSOR" || typ == "RANDOM_FOREST_CLASSIFIER"
+}
+
+// isTreeModel reports whether typ is a boosted tree or random forest.
+func isTreeModel(typ string) bool { return isBoostedTree(typ) || isRandomForest(typ) }
+
+// isClassifierType reports whether typ's label is a class.
+func isClassifierType(typ string) bool {
+	return typ == "LOGISTIC_REG" || typ == "BOOSTED_TREE_CLASSIFIER" || typ == "RANDOM_FOREST_CLASSIFIER"
+}
+
+// checkTreeSampling refuses a boosted tree model's sampling other than
+// 1 (its draw would be Google's), and a forest of fewer than two trees.
+func checkTreeSampling(o mlOptions) (int, string) {
+	if isBoostedTree(o.ModelType) {
+		if o.NumParallelTree > 1 {
+			return 501, "Not implemented here: num_parallel_tree other than 1 for a boosted tree model (a boosted random forest draws its trees' rows at random). Nothing was run."
+		}
+		for name, v := range map[string]float64{"subsample": o.Subsample, "colsample_bytree": o.ColsampleTree, "colsample_bylevel": o.ColsampleLevel,
+			"colsample_bynode": o.ColsampleNode} {
+			if v != 0 && v != 1 {
+				return 501, "Not implemented here: " + name + " other than 1.0 for a boosted tree model: it samples rows or columns at random, as Google's " +
+					"XGBoost draws them. CloudBurrow builds every boosted tree on every row and column. Nothing was run."
+			}
+		}
+	}
+	if isRandomForest(o.ModelType) && o.given("num_parallel_tree") && o.NumParallelTree < 2 {
+		return 400, "num_parallel_tree must be at least 2 for a random forest model"
+	}
+	return 0, ""
+}
+
 // applyTreeDefaults sets a boosted tree model's documented defaults that
 // differ from a linear model's.
 func applyTreeDefaults(o *mlOptions) {
@@ -81,6 +115,33 @@ func applyTreeDefaults(o *mlOptions) {
 	if o.TreeMethod == "" {
 		o.TreeMethod = "AUTO"
 	}
+	if o.NumParallelTree == 0 {
+		o.NumParallelTree = 1
+	}
+	for _, v := range []*float64{&o.Subsample, &o.ColsampleTree, &o.ColsampleLevel, &o.ColsampleNode} {
+		if *v == 0 {
+			*v = 1
+		}
+	}
+	if isRandomForest(o.ModelType) {
+		// The documented random forest defaults: one round (no
+		// max_iterations or learn_rate option) of num_parallel_tree 100
+		// trees, each of max_tree_depth 15 on a subsample 0.8 of the rows
+		// and colsample_bynode 0.8 of the columns at each node.
+		o.MaxIterations, o.LearnRate, o.EarlyStop = 1, 1, false
+		if !o.given("num_parallel_tree") {
+			o.NumParallelTree = 100
+		}
+		if !o.given("max_tree_depth") {
+			o.MaxTreeDepth = 15
+		}
+		if !o.given("subsample") {
+			o.Subsample = 0.8
+		}
+		if !o.given("colsample_bynode") {
+			o.ColsampleNode = 0.8
+		}
+	}
 }
 
 // softL1 is XGBoost's ThresholdL1.
@@ -101,6 +162,11 @@ func softL1(g, alpha float64) float64 {
 // computes them), else 1.
 func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][]float64, EY []float64, classifier bool, K int) {
 	t.Strategy = "BOOSTED_TREE"
+	var rng *rand.Rand
+	if isRandomForest(o.ModelType) {
+		t.Strategy = "RANDOM_FOREST"
+		rng = rand.New(rand.NewSource(1504))
+	}
 	t.BaseScore = 0.5
 	if classifier && K == 1 {
 		t.BaseScore = 0
@@ -162,13 +228,18 @@ func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][
 					g[i], h[i] = margin[i][0]-Y[i], 1
 				}
 			}
-			tree := growTree(o, X, g, h, all)
-			t.Trees = append(t.Trees, tree)
-			if K > 1 {
-				t.TreeClass = append(t.TreeClass, k)
+			var grown [][]mlNode
+			for pt := 0; pt < max(o.NumParallelTree, 1); pt++ {
+				grown = append(grown, growTree(o, X, g, h, all, rng))
 			}
-			for i, x := range X {
-				margin[i][k] += treeValue(tree, x)
+			for _, tree := range grown {
+				t.Trees = append(t.Trees, tree)
+				if K > 1 {
+					t.TreeClass = append(t.TreeClass, k)
+				}
+				for i, x := range X {
+					margin[i][k] += treeValue(tree, x)
+				}
 			}
 		}
 		it := mlIteration{Index: round, Loss: loss(X, Y), LearnRate: o.LearnRate, DurationMs: time.Since(start).Milliseconds()}
@@ -219,9 +290,43 @@ func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][
 }
 
 // growTree grows one tree on the rows idx of X for gradients g and
-// hessians h, by the exact greedy method.
-func growTree(o mlOptions, X [][]float64, g, h []float64, idx []int) []mlNode {
+// hessians h, by the exact greedy method. With rng (a random forest) it
+// keeps each row with probability subsample, and draws the columns
+// colsample_bytree of them for the tree, colsample_bylevel of those for
+// each depth, and colsample_bynode of those for each node, each at least
+// one, without replacement, as XGBoost does; a leaf's weight is then
+// divided among the num_parallel_tree trees of the round.
+func growTree(o mlOptions, X [][]float64, g, h []float64, idx []int, rng *rand.Rand) []mlNode {
 	var tree []mlNode
+	scale := o.LearnRate
+	cols := make([]int, 0, len(X[0])-1)
+	for f := 1; f < len(X[0]); f++ {
+		cols = append(cols, f)
+	}
+	draw := func(from []int, frac float64) []int {
+		if rng == nil || frac >= 1 {
+			return from
+		}
+		n := max(1, int(frac*float64(len(from))))
+		s := append([]int(nil), from...)
+		rng.Shuffle(len(s), func(a, b int) { s[a], s[b] = s[b], s[a] })
+		s = s[:n]
+		sort.Ints(s)
+		return s
+	}
+	var levels map[int][]int
+	if rng != nil {
+		scale /= float64(max(o.NumParallelTree, 1))
+		var kept []int
+		for _, i := range idx {
+			if rng.Float64() < o.Subsample {
+				kept = append(kept, i)
+			}
+		}
+		idx = kept
+		cols = draw(cols, o.ColsampleTree)
+		levels = map[int][]int{}
+	}
 	var grow func(idx []int, depth int) int
 	grow = func(idx []int, depth int) int {
 		var G, H float64
@@ -229,13 +334,22 @@ func growTree(o mlOptions, X [][]float64, g, h []float64, idx []int) []mlNode {
 			G, H = G+g[i], H+h[i]
 		}
 		me := len(tree)
-		tree = append(tree, mlNode{Feat: -1, Value: -softL1(G, o.L1) / (H + o.L2) * o.LearnRate, Cover: H})
+		tree = append(tree, mlNode{Feat: -1, Value: -softL1(G, o.L1) / (H + o.L2) * scale, Cover: H})
 		if depth >= o.MaxTreeDepth || len(idx) < 2 {
 			return me
 		}
 		parent := math.Pow(softL1(G, o.L1), 2) / (H + o.L2)
 		best, bestF, bestThr := 0.0, -1, 0.0
-		for f := 1; f < len(X[0]); f++ {
+		use := cols
+		if rng != nil {
+			lv, ok := levels[depth]
+			if !ok {
+				lv = draw(cols, o.ColsampleLevel)
+				levels[depth] = lv
+			}
+			use = draw(lv, o.ColsampleNode)
+		}
+		for _, f := range use {
 			s := append([]int(nil), idx...)
 			sort.SliceStable(s, func(a, b int) bool { return X[s[a]][f] < X[s[b]][f] })
 			var GL, HL float64

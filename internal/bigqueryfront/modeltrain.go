@@ -75,13 +75,22 @@ type mlOptions struct {
 	MinSplitLoss   float64 `json:"minSplitLoss,omitempty"`
 	MinChildWeight float64 `json:"minTreeChildWeight,omitempty"`
 	BoosterType    string  `json:"boosterType,omitempty"`
-	TreeMethod     string  `json:"treeMethod,omitempty"`
+	// The sampling of RANDOM_FOREST_* (modeltree.go); a boosted tree
+	// model's are 1.
+	NumParallelTree int     `json:"numParallelTree,omitempty"`
+	Subsample       float64 `json:"subsample,omitempty"`
+	ColsampleTree   float64 `json:"colsampleBytree,omitempty"`
+	ColsampleLevel  float64 `json:"colsampleBylevel,omitempty"`
+	ColsampleNode   float64 `json:"colsampleBynode,omitempty"`
+	TreeMethod      string  `json:"treeMethod,omitempty"`
 	// MATRIX_FACTORIZATION (modelmf.go).
 	NumFactors   int    `json:"numFactors,omitempty"`
 	FeedbackType string `json:"feedbackType,omitempty"`
 	UserCol      string `json:"userCol,omitempty"`
 	ItemCol      string `json:"itemCol,omitempty"`
 	RatingCol    string `json:"ratingCol,omitempty"`
+	// ARIMA_PLUS (modelarima.go).
+	TS tsOptions `json:"timeSeries"`
 	// Set are the options CREATE MODEL gave, lower case.
 	Set []string `json:"set,omitempty"`
 }
@@ -204,6 +213,8 @@ type mlTrained struct {
 	BaseScore float64    `json:"baseScore,omitempty"`
 	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
 	MF *mfTrained `json:"mf,omitempty"`
+	// Arima is an ARIMA_PLUS model's series and fits (modelarima.go).
+	Arima *arimaTrained `json:"arima,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -258,6 +269,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return trainPCA(opts, cols, rows)
 	case "MATRIX_FACTORIZATION":
 		return trainMF(opts, cols, rows)
+	case "ARIMA_PLUS":
+		return trainArima(opts, cols, rows)
 	}
 	var t mlTrained
 	label := "label"
@@ -284,7 +297,7 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("Unable to find the data split column '%s' in the input data", opts.SplitCol)
 	}
 	t.Label, t.LabelType = cols[li].Name, mlTypeOf(cols[li].Type)
-	logistic := opts.ModelType == "LOGISTIC_REG" || opts.ModelType == "BOOSTED_TREE_CLASSIFIER"
+	logistic := isClassifierType(opts.ModelType)
 	if t.LabelType == "" || (!logistic && !(mlFeature{Type: t.LabelType}).numeric()) || (logistic && t.LabelType != "STRING" && t.LabelType != "BOOL" && t.LabelType != "INT64") {
 		return t, mlInvalid("Label column %s has an unsupported type %s for model type %s", cols[li].Name, cols[li].Type, opts.ModelType)
 	}
@@ -412,7 +425,7 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 	for _, i := range eval {
 		EX, EY = append(EX, encode(i)), append(EY, y[i])
 	}
-	if isBoostedTree(opts.ModelType) {
+	if isTreeModel(opts.ModelType) {
 		K := 1
 		if len(t.Classes) > 2 {
 			K = len(t.Classes)

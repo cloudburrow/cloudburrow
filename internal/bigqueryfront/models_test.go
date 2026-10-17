@@ -149,7 +149,7 @@ func TestParseModelDDL(t *testing.T) {
 		t.Errorf("%+v", d)
 	}
 	for _, bad := range []string{
-		"CREATE MODEL ds.m OPTIONS(model_type='random_forest_regressor') AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_regressor') AS SELECT 1",
 		"CREATE MODEL ds.m OPTIONS(model_type='autoencoder') AS SELECT 1",
 		"CREATE MODEL ds.m OPTIONS(model_type='pca', num_principal_components=2, pca_solver='randomized') AS SELECT 1",
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `us.c` OPTIONS(endpoint='gemini')",
