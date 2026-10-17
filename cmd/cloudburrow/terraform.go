@@ -36,69 +36,81 @@ type terraformEndpoint struct {
 	// verified is true only for rows docs/compatibility.md marks Verified
 	// with a test behind them. `env --format terraform` reads this table too.
 	verified bool
+	// regional names the provider's base paths that carry {{location}}
+	// (Cloud Run v1's is https://{{location}}-run.googleapis.com/): on
+	// loopback the host is {{location}}-<regional>.localhost, which the
+	// provider fills in per resource and which resolves to loopback, so the
+	// server reads the region from the host as it does for gcloud.
+	regional string
 }
 
 var terraformEndpoints = []terraformEndpoint{
-	{config.ServiceStorage, "storage_custom_endpoint", "GOOGLE_STORAGE_CUSTOM_ENDPOINT", "/storage/v1/", true},
-	{config.ServicePubSub, "pubsub_custom_endpoint", "GOOGLE_PUBSUB_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceStorage, "storage_custom_endpoint", "GOOGLE_STORAGE_CUSTOM_ENDPOINT", "/storage/v1/", true, ""},
+	{config.ServicePubSub, "pubsub_custom_endpoint", "GOOGLE_PUBSUB_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Tasks (#366): a queue and its *_iam_member apply, plan clean and
 	// destroy through the JSON API in TestTerraformAppliesAndDestroysThroughTheWrapper.
-	{config.ServiceTasks, "cloud_tasks_custom_endpoint", "GOOGLE_CLOUD_TASKS_CUSTOM_ENDPOINT", "/v2/", true},
+	{config.ServiceTasks, "cloud_tasks_custom_endpoint", "GOOGLE_CLOUD_TASKS_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Secret Manager (#365): a secret and its *_iam_member apply, plan clean
 	// and destroy in TestTerraformAppliesAndDestroysThroughTheWrapper.
-	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
-	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", true},
+	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", true, ""},
+	// Cloud Run v1 (#1293, #1304), the Knative-style API on the same port:
+	// google_cloud_run_domain_mapping applies, becomes Ready, plans clean
+	// and destroys in TestTerraformCloudRunDomainMapping. Its URLs are
+	// regional, {{location}}-run.googleapis.com, and a v1 write needs a
+	// region, so the host is {{location}}-run.localhost on loopback.
+	{config.ServiceRun, "cloud_run_custom_endpoint", "GOOGLE_CLOUD_RUN_CUSTOM_ENDPOINT", "/", true, "run"},
 	// Artifact Registry and Cloud Build v1 (#1304) are served on the Run
 	// port beside Cloud Run (#1347, SourceDeployHandler).
 	// google_artifact_registry_repository applies, plans clean, updates in
 	// place and destroys in TestTerraformArtifactRegistryRepository;
 	// google_cloudbuild_trigger (manual or webhook) and _worker_pool do in
 	// TestTerraformCloudBuildTriggerAndWorkerPool (#1422).
-	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true},
-	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// buildpacks build and a Cloud Run service. google_cloudfunctions2_function
 	// applies, plans clean, updates in place and destroys in
 	// TestTerraformCloudFunctions2Function, gated as the Functions tests are.
-	{config.ServiceRun, "cloudfunctions2_custom_endpoint", "GOOGLE_CLOUDFUNCTIONS2_CUSTOM_ENDPOINT", "/v2/", true},
+	{config.ServiceRun, "cloudfunctions2_custom_endpoint", "GOOGLE_CLOUDFUNCTIONS2_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Cloud Functions v1 (#1428), on the same port over the same machinery:
 	// google_cloudfunctions_function reaches this instance, never Google:
 	// TestTerraformCloudFunctionsFunction applies an HTTP and an event
 	// function, gated as the Functions tests are.
-	{config.ServiceRun, "cloud_functions_custom_endpoint", "GOOGLE_CLOUD_FUNCTIONS_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceRun, "cloud_functions_custom_endpoint", "GOOGLE_CLOUD_FUNCTIONS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud KMS (#425): a key ring, a key and a version apply, plan clean,
 	// update their labels and destroy in TestTerraformKMS, over the JSON API
 	// (#422-#424). The provider's discovery client strips the version from
 	// the base path and appends v1/ itself, so both styles land on /v1/.
-	{config.ServiceKMS, "kms_custom_endpoint", "GOOGLE_KMS_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceKMS, "kms_custom_endpoint", "GOOGLE_KMS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Scheduler (#591): a google_cloud_scheduler_job applies, plans
 	// clean, updates (a PATCH, then :pause) and destroys in
 	// TestTerraformSchedulerAndSubscription, over the JSON API on the gRPC
 	// port.
-	{config.ServiceScheduler, "cloud_scheduler_custom_endpoint", "GOOGLE_CLOUD_SCHEDULER_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceScheduler, "cloud_scheduler_custom_endpoint", "GOOGLE_CLOUD_SCHEDULER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// BigQuery (#1236): a dataset, a table, a view and a routine, with the
 	// table, view and routine *_iam_member, *_iam_binding and *_iam_policy
 	// (ADR-0006, stored, never enforced), apply, plan clean and destroy in
 	// TestTerraformBigQueryIAM, through the front on the REST port. The
 	// provider's argument is big_query_, not bigquery_.
-	{config.ServiceBigQuery, "big_query_custom_endpoint", "GOOGLE_BIG_QUERY_CUSTOM_ENDPOINT", "/bigquery/v2/", true},
+	{config.ServiceBigQuery, "big_query_custom_endpoint", "GOOGLE_BIG_QUERY_CUSTOM_ENDPOINT", "/bigquery/v2/", true, ""},
 	// Cloud Logging (#1246): a google_logging_metric, a
 	// google_logging_project_sink and a google_logging_project_exclusion
 	// apply, plan clean, update and destroy in TestTerraformLogging, over the
 	// JSON API on the gRPC port (#591), against the metrics, sinks and
 	// exclusions #1226 serves. Buckets, views, links and settings stay 501.
-	{config.ServiceLogging, "logging_custom_endpoint", "GOOGLE_LOGGING_CUSTOM_ENDPOINT", "/v2/", true},
+	{config.ServiceLogging, "logging_custom_endpoint", "GOOGLE_LOGGING_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
 	// The Cloud SQL Admin API (#1301): a google_sql_database and a
 	// google_sql_user on an instance `up` runs apply, plan clean and destroy
 	// in TestTerraformSQLDatabaseAndUser. The provider calls v1beta4.
-	{sqlAdminEndpoint, "sql_custom_endpoint", "GOOGLE_SQL_CUSTOM_ENDPOINT", "/sql/v1beta4/", true},
+	{sqlAdminEndpoint, "sql_custom_endpoint", "GOOGLE_SQL_CUSTOM_ENDPOINT", "/sql/v1beta4/", true, ""},
 	// The Backup and DR Service (#1433): google_backup_dr_backup_vault,
 	// _backup_plan and _backup_plan_association apply, plan clean and
 	// destroy in TestTerraformBackupDR.
-	{config.ServiceBackupDR, "backup_dr_custom_endpoint", "GOOGLE_BACKUP_DR_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceBackupDR, "backup_dr_custom_endpoint", "GOOGLE_BACKUP_DR_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -107,38 +119,38 @@ var terraformEndpoints = []terraformEndpoint{
 	// _field apply, plan clean, update and destroy in
 	// TestTerraformFirestoreDatabaseIndexAndField; _backup_schedule answers
 	// 501, locally, never at Google.
-	{config.ServiceFirestore, "firestore_custom_endpoint", "GOOGLE_FIRESTORE_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceFirestore, "firestore_custom_endpoint", "GOOGLE_FIRESTORE_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Spanner (#1331): google_spanner_instance and _database apply, read
 	// back through the official admin clients, plan clean, update in place
 	// and destroy in TestTerraformSpannerInstanceAndDatabase, over the
 	// emulator's REST API, Spanner's second port (Endpoints.SpannerREST),
 	// which the call front in its pod serves.
-	{config.ServiceSpanner, "spanner_custom_endpoint", "GOOGLE_SPANNER_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceSpanner, "spanner_custom_endpoint", "GOOGLE_SPANNER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC
 	// (internal/bigtablefront/rest.go): google_bigtable_app_profile and
 	// google_bigtable_instance_iam_member, _binding and _policy apply, plan
 	// clean, update and destroy in TestTerraformBigtableAppProfileAndIAM.
 	// The provider's instance, table and GC policy resources use the gRPC
 	// clients, which BIGTABLE_EMULATOR_HOST points here (bigtableHost).
-	{config.ServiceBigtable, "bigtable_custom_endpoint", "GOOGLE_BIGTABLE_CUSTOM_ENDPOINT", "/v2/", true},
+	{config.ServiceBigtable, "bigtable_custom_endpoint", "GOOGLE_BIGTABLE_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Memorystore for Redis (#1302): a google_redis_instance applies, is
 	// reached with its AUTH string, plans clean, updates its size and labels
 	// in place and destroys in TestTerraformRedisInstance, over the admin
 	// API's JSON on its port (Endpoints.MemorystoreAdmin), each instance a
 	// Valkey server of its own.
-	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true},
+	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_project_service (#1352): the Service Usage API v1 on its own
 	// port, in TestTerraformProjectService.
-	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true},
-	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
-	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
+	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
 	// in TestTerraformGoogleFolder.
-	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true},
+	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true, ""},
 	// google_tags_tag_key, _tag_value and _tag_binding (#1295): the tags
 	// services are Resource Manager v3, which the provider reaches through
 	// its own tags_ endpoint, in TestTerraformTagsAndLien.
-	{resourceManagerEndpoint, "tags_custom_endpoint", "GOOGLE_TAGS_CUSTOM_ENDPOINT", "/v3/", true},
+	{resourceManagerEndpoint, "tags_custom_endpoint", "GOOGLE_TAGS_CUSTOM_ENDPOINT", "/v3/", true, ""},
 }
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a
@@ -212,7 +224,11 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 			skipped = append(skipped, e.service)
 			continue
 		}
-		set = append(set, terraformURL{e, "http://" + host(ports[e.service]) + e.path})
+		addr := host(ports[e.service])
+		if ip := net.ParseIP(cfg.BindAddress); e.regional != "" && ip != nil && ip.IsLoopback() {
+			addr = net.JoinHostPort("{{location}}-"+e.regional+".localhost", strconv.Itoa(ports[e.service]))
+		}
+		set = append(set, terraformURL{e, "http://" + addr + e.path})
 	}
 	return set, skipped
 }
@@ -273,6 +289,7 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	}
 	if !run {
 		out = append(out,
+			unpointedPrefix{"google_cloud_run_", "this instance does not serve Cloud Run"},
 			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
 			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"},

@@ -151,9 +151,22 @@ func (f *FunctionsServer) checkEventTrigger(t *functionspb.EventTrigger) error {
 		}
 	default:
 		return apierror.Unimplemented("event_trigger.event_type %q is not supported: Pub/Sub's messagePublished and Cloud Storage's "+
-			"finalized, deleted, archived and metadataUpdated are", typ)
+			"finalized, deleted, archived and metadataUpdated are; %s", typ, eventReason(typ))
 	}
 	return nil
+}
+
+// eventReason says why an Eventarc event type is not delivered (#1464).
+func eventReason(typ string) string {
+	switch {
+	case strings.HasPrefix(typ, "google.cloud.audit.log."):
+		return "an audit log trigger fires on the Cloud Audit Logs Google's services write, and this instance's services write none"
+	case strings.HasPrefix(typ, "google.cloud.firestore."), strings.HasPrefix(typ, "google.cloud.datastore."):
+		return "Firestore and Datastore run on Google's emulators, which emit no document change events"
+	case strings.HasPrefix(typ, "google.firebase."):
+		return "Firebase's need Firebase services, which this instance does not serve"
+	}
+	return "Eventarc's other sources (direct events of other Google services, and custom channels) are not served"
 }
 
 func storageBucket(t *functionspb.EventTrigger) string {

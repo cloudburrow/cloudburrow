@@ -36,7 +36,8 @@
         "patches/bigquery-emulator/0020-round-decimal-columns.patch",
         "patches/bigquery-emulator/0021-round-nested-decimal-fields.patch",
         "patches/bigquery-emulator/0022-list-job-configurations.patch",
-        "patches/bigquery-emulator/0034-front-clock.patch"
+        "patches/bigquery-emulator/0034-front-clock.patch",
+        "patches/bigquery-emulator/0037-default-time-zone-header.patch"
       ]
     },
     {
@@ -81,7 +82,8 @@
         "patches/googlesqlite/0035-interval-arithmetic.patch",
         "patches/googlesqlite/0036-change-history.patch",
         "patches/googlesqlite/0041-change-row-identities.patch",
-        "patches/googlesqlite/0044-replaced-history-and-clock.patch"
+        "patches/googlesqlite/0044-replaced-history-and-clock.patch",
+        "patches/googlesqlite/0047-default-time-zone-of-a-query.patch"
       ]
     },
     {

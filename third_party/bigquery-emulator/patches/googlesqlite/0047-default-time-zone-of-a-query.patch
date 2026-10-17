@@ -1,0 +1,640 @@
+CloudBurrow patch 47 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1456). Needs 0021 and 0022.
+
+The bug: the engine had one time zone, UTC (patch 0022), so BigQuery's
+project option default_time_zone, "the default time zone to use in time
+zone-dependent GoogleSQL functions, when a time zone is not specified as
+an argument", could not reach it. CloudBurrow's front wrote the zone into
+the query text where the text showed a TIMESTAMP, and could not where it
+did not: DATE(ts), STRING(ts), EXTRACT(HOUR FROM ts) and CAST(ts AS
+STRING) of a column, DATE_TRUNC(ts, MONTH), CAST(d AS TIMESTAMP) stayed
+in UTC.
+
+The patch adds WithDefaultTimeZone(ctx, zone): a query run with it
+- gives the zone to each call that takes one and is given none, where the
+  resolved argument is a TIMESTAMP (DATE, DATETIME, TIME, STRING, EXTRACT,
+  TIMESTAMP_TRUNC, FORMAT_TIMESTAMP; DATE_TRUNC and DATETIME_TRUNC of a
+  TIMESTAMP run as TIMESTAMP_TRUNC) or where it makes one (TIMESTAMP(x),
+  PARSE_TIMESTAMP, CURRENT_DATE, CURRENT_DATETIME, CURRENT_TIME);
+- does a cast between TIMESTAMP and STRING, DATE, DATETIME or TIME in the
+  zone (googlesqlite_cast's fifth argument; a FORMAT cast with no AT TIME
+  ZONE gets it too);
+- reads a TIMESTAMP literal with no zone, and a string literal cast to
+  TIMESTAMP, in the zone (applyNaiveTimestampIn, before patch 0021's UTC
+  pass);
+- analyzes with literal casts left to the run time
+  (SetFoldLiteralCast(false), a second shared AnalyzerOptions): the
+  analyzer folds CAST(TIMESTAMP '...' AS STRING) and CAST(DATE '...' AS
+  TIMESTAMP) in its own zone, which go-googlesql can build only as UTC.
+"" and "UTC" change nothing. Measured on the emulator with patches 0001
+to 0041, in America/New_York: STRING(ts) of a column holding
+2020-01-01 03:00:00 UTC was "2020-01-01 03:00:00+00", now
+"2019-12-31 22:00:00-05"; default_time_zone_test.go has each form. Still
+UTC: a string literal compared with, or coerced to, a TIMESTAMP column
+(the analyzer coerces it).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/default_time_zone.go
+@@ -0,0 +1,16 @@
++package googlesqlite
++
++import (
++	"context"
++
++	"github.com/goccy/googlesqlite/internal"
++)
++
++// WithDefaultTimeZone returns ctx with zone, a tz database name or an
++// offset ("+05:30"), the default time zone of the queries run with it:
++// BigQuery's default_time_zone. Functions and casts that take a zone and
++// are given none, and TIMESTAMP literals with none, use it; "" or "UTC"
++// keeps UTC. CloudBurrow patch (cloudburrow/cloudburrow#1456).
++func WithDefaultTimeZone(ctx context.Context, zone string) context.Context {
++	return internal.WithDefaultTimeZone(ctx, zone)
++}
+--- /dev/null
++++ b/default_time_zone_test.go
+@@ -0,0 +1,104 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1456): a query run with
++// WithDefaultTimeZone reads and writes TIMESTAMPs in that zone wherever a
++// function or cast takes a zone and is given none, a column's as a
++// literal's; an explicit zone, and a DATETIME, are kept.
++func TestDefaultTimeZoneOfAQuery(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=default_time_zone_of_a_query")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	for _, q := range []string{
++		"CREATE TABLE t (ts TIMESTAMP, d DATE, dt DATETIME, s STRING)",
++		"INSERT INTO t VALUES (TIMESTAMP '2020-01-01 03:00:00+00', DATE '2020-01-01', DATETIME '2020-01-01 00:00:00', '2020-01-01 00:00:00')",
++	} {
++		if _, err := db.Exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	// 2020-01-01 00:00:00 in New York (-05) is 1577854800.
++	cases := []struct{ expr, want string }{
++		{"STRING(ts)", "2019-12-31 22:00:00-05"},
++		{"CAST(DATE(ts) AS STRING)", "2019-12-31"},
++		{"CAST(DATETIME(ts) AS STRING)", "2019-12-31 22:00:00"},
++		{"CAST(TIME(ts) AS STRING)", "22:00:00"},
++		{"CAST(EXTRACT(HOUR FROM ts) AS STRING)", "22"},
++		{"CAST(EXTRACT(DATE FROM ts) AS STRING)", "2019-12-31"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP_TRUNC(ts, DAY)) AS STRING)", "1577768400"},
++		{"FORMAT_TIMESTAMP('%F %T %Z', ts)", "2019-12-31 22:00:00 EST"},
++		{"CAST(UNIX_SECONDS(PARSE_TIMESTAMP('%F %T', s)) AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP(s)) AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP(d)) AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP(dt)) AS STRING)", "1577854800"},
++		{"CAST(ts AS STRING)", "2019-12-31 22:00:00-05"},
++		{"CAST(CAST(ts AS DATE) AS STRING)", "2019-12-31"},
++		{"CAST(CAST(ts AS DATETIME) AS STRING)", "2019-12-31 22:00:00"},
++		{"CAST(CAST(ts AS TIME) AS STRING)", "22:00:00"},
++		{"CAST(UNIX_SECONDS(CAST(d AS TIMESTAMP)) AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(CAST(dt AS TIMESTAMP)) AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(CAST(s AS TIMESTAMP)) AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(SAFE_CAST(s AS TIMESTAMP)) AS STRING)", "1577854800"},
++		{"CAST(ts AS STRING FORMAT 'YYYY-MM-DD HH24')", "2019-12-31 22"},
++		// Literals.
++		{"CAST(UNIX_SECONDS(TIMESTAMP '2020-01-01 00:00:00') AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP '2020-01-01') AS STRING)", "1577854800"},
++		{"CAST(UNIX_SECONDS(CAST('2020-01-01 00:00:00' AS TIMESTAMP)) AS STRING)", "1577854800"},
++		{"STRING(TIMESTAMP '2020-01-01 03:00:00+00')", "2019-12-31 22:00:00-05"},
++		{"CAST(DATE(TIMESTAMP '2020-01-01 03:00:00+00') AS STRING)", "2019-12-31"},
++		{"CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS STRING)", "2019-12-31 22:00:00-05"},
++		{"CAST(UNIX_SECONDS(CAST(DATE '2020-01-01' AS TIMESTAMP)) AS STRING)", "1577854800"},
++		{"CAST(CAST(TIMESTAMP '2020-01-01 03:00:00+00' AS DATE) AS STRING)", "2019-12-31"},
++		{"CAST(DATE_TRUNC(ts, MONTH) AS STRING)", "2019-12-01 00:00:00-05"},
++		// An explicit zone, a zone of its own, and a DATETIME are kept.
++		{"STRING(ts, 'UTC')", "2020-01-01 03:00:00+00"},
++		{"CAST(DATE(ts, 'UTC') AS STRING)", "2020-01-01"},
++		{"CAST(EXTRACT(HOUR FROM ts AT TIME ZONE 'UTC') AS STRING)", "3"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP '2020-01-01 00:00:00+00') AS STRING)", "1577836800"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP(s, 'UTC')) AS STRING)", "1577836800"},
++		{"CAST(DATE(dt) AS STRING)", "2020-01-01"},
++		{"CAST(EXTRACT(HOUR FROM dt) AS STRING)", "0"},
++		{"CAST(CAST(dt AS STRING) AS STRING)", "2020-01-01 00:00:00"},
++	}
++	run := func(ctx context.Context, expr string) (string, error) {
++		var got string
++		err := db.QueryRowContext(ctx, "SELECT "+expr+" FROM t").Scan(&got)
++		return got, err
++	}
++	ctx := googlesqlite.WithDefaultTimeZone(context.Background(), "America/New_York")
++	for _, c := range cases {
++		got, err := run(ctx, c.expr)
++		if err != nil {
++			t.Errorf("%s: %v", c.expr, err)
++			continue
++		}
++		if got != c.want {
++			t.Errorf("%s = %q, want %q", c.expr, got, c.want)
++		}
++	}
++	// An offset zone.
++	off := googlesqlite.WithDefaultTimeZone(context.Background(), "+05:30")
++	for _, c := range []struct{ expr, want string }{
++		{"STRING(ts)", "2020-01-01 08:30:00+05:30"},
++		{"CAST(UNIX_SECONDS(TIMESTAMP '2020-01-01 05:30:00') AS STRING)", "1577836800"},
++	} {
++		if got, err := run(off, c.expr); err != nil || got != c.want {
++			t.Errorf("+05:30: %s = %q, %v; want %q", c.expr, got, err, c.want)
++		}
++	}
++	// No zone, or UTC: UTC.
++	for _, ctx := range []context.Context{context.Background(), googlesqlite.WithDefaultTimeZone(context.Background(), "UTC")} {
++		if got, err := run(ctx, "STRING(ts)"); err != nil || got != "2020-01-01 03:00:00+00" {
++			t.Errorf("UTC: STRING(ts) = %q, %v", got, err)
++		}
++	}
++}
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -54,6 +54,26 @@
+ 	return sharedAnalyzerOpt, sharedAnalyzerOptErr
+ }
+ 
++// zonedAnalyzerOpt is sharedAnalyzerOpt with literal casts left to the
++// run time, for a query with a default time zone (default_time_zone.go):
++// the analyzer folds them in its own zone, UTC. CloudBurrow patch
++// (cloudburrow/cloudburrow#1456).
++var (
++	zonedAnalyzerOptOnce sync.Once
++	zonedAnalyzerOpt     *googlesql.AnalyzerOptions
++	zonedAnalyzerOptErr  error
++)
++
++func getZonedAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
++	zonedAnalyzerOptOnce.Do(func() {
++		zonedAnalyzerOpt, zonedAnalyzerOptErr = newAnalyzerOptions()
++		if zonedAnalyzerOptErr == nil {
++			zonedAnalyzerOptErr = zonedAnalyzerOpt.SetFoldLiteralCast(false)
++		}
++	})
++	return zonedAnalyzerOpt, zonedAnalyzerOptErr
++}
++
+ func NewAnalyzer(catalog *Catalog) (*Analyzer, error) {
+ 	opt, err := getSharedAnalyzerOptions()
+ 	if err != nil {
+@@ -978,6 +998,13 @@
+ // `TIMESTAMP_ADD` and other identifier prefixes are unaffected because
+ // the scanner consumes them as a single word.
+ func applyNaiveTimestampUTC(query string) string {
++	return applyNaiveTimestampIn(query, "+00:00")
++}
++
++// applyNaiveTimestampIn is applyNaiveTimestampUTC with suffix, a zone's
++// (naiveTimestampSuffix), for "+00:00". CloudBurrow patch
++// (cloudburrow/cloudburrow#1456).
++func applyNaiveTimestampIn(query, suffix string) string {
+ 	if !timestampNeedle.MatchString(query) {
+ 		return query
+ 	}
+@@ -995,7 +1022,7 @@
+ 			// zone too.
+ 			if end > i+1 && castToTimestamp(query, i, end) && !timestampHasTZ(query[i+1:end-1]) {
+ 				b.WriteByte(c)
+-				b.WriteString(naiveTimestampUTC(query[i+1 : end-1]))
++				b.WriteString(naiveTimestampIn(query[i+1:end-1], suffix))
+ 				b.WriteByte(query[end-1])
+ 			} else {
+ 				b.WriteString(query[i:end])
+@@ -1030,7 +1057,7 @@
+ 					if end > k+1 && end <= len(query) {
+ 						b.WriteString(query[i:k])
+ 						b.WriteByte(query[k])
+-						b.WriteString(naiveRangeBoundsUTC(query[k+1 : end-1]))
++						b.WriteString(naiveRangeBoundsIn(query[k+1:end-1], suffix))
+ 						b.WriteByte(query[end-1])
+ 						i = end
+ 						continue
+@@ -1053,7 +1080,7 @@
+ 						content := query[k+1 : end-1]
+ 						if !timestampHasTZ(content) {
+ 							b.WriteByte(quote)
+-							b.WriteString(naiveTimestampUTC(content))
++							b.WriteString(naiveTimestampIn(content, suffix))
+ 							b.WriteByte(quote)
+ 						} else {
+ 							b.WriteString(query[k:end])
+@@ -1070,14 +1097,14 @@
+ 	return b.String()
+ }
+ 
+-// naiveTimestampUTC returns s, a TIMESTAMP literal's text with no zone,
+-// in UTC. CloudBurrow patch (cloudburrow/cloudburrow#1188): a date alone
++// naiveTimestampIn returns s, a TIMESTAMP literal's text with no zone,
++// with suffix, a zone (UTC: "+00:00"). CloudBurrow patch (#1188): a date alone
+ // gets a midnight, as the analyzer reads no offset right after a date.
+-func naiveTimestampUTC(s string) string {
++func naiveTimestampIn(s, suffix string) string {
+ 	if dateOnly.MatchString(s) {
+-		return strings.TrimSpace(s) + " 00:00:00+00:00"
++		return strings.TrimSpace(s) + " 00:00:00" + suffix
+ 	}
+-	return s + "+00:00"
++	return s + suffix
+ }
+ 
+ // castToTimestamp reports whether the string literal query[start:end] is
+@@ -1128,10 +1155,10 @@
+ 	return k, true
+ }
+ 
+-// naiveRangeBoundsUTC returns a RANGE<TIMESTAMP> literal's text,
++// naiveRangeBoundsIn returns a RANGE<TIMESTAMP> literal's text,
+ // "[start, end)", with each bound that has no zone in UTC; UNBOUNDED and
+ // NULL bounds, and any text not of that form, are kept.
+-func naiveRangeBoundsUTC(s string) string {
++func naiveRangeBoundsIn(s, suffix string) string {
+ 	t := strings.TrimSpace(s)
+ 	if len(t) < 2 || t[0] != '[' || t[len(t)-1] != ')' {
+ 		return s
+@@ -1143,7 +1170,7 @@
+ 	for i, p := range parts {
+ 		p = strings.TrimSpace(p)
+ 		if p != "" && !strings.EqualFold(p, "UNBOUNDED") && !strings.EqualFold(p, "NULL") && !timestampHasTZ(p) {
+-			p = naiveTimestampUTC(p)
++			p = naiveTimestampIn(p, suffix)
+ 		}
+ 		parts[i] = p
+ 	}
+@@ -1650,9 +1677,20 @@
+ // they do — wildcard-table pre-registration, StmtAction construction
+ // — can itself re-enter Analyze; keeping that outside this critical
+ // section is what prevents a self-deadlock.
+-func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string) (googlesql.ResolvedStatementNode, error) {
++func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string, zoned bool) (googlesql.ResolvedStatementNode, error) {
+ 	wasmAnalyzeMu.Lock()
+ 	defer wasmAnalyzeMu.Unlock()
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): with a default
++	// time zone, the options that leave literal casts to the run time.
++	if zoned {
++		opt, err := getZonedAnalyzerOptions()
++		if err != nil {
++			return nil, err
++		}
++		shared := a.opt
++		a.opt = opt
++		defer func() { a.opt = shared }()
++	}
+ 	a.opt.SetParameterMode(mode)
+ 	if err := a.declareParameterTypes(mode, args); err != nil {
+ 		return nil, fmt.Errorf("failed to declare parameter types: %w", err)
+@@ -1673,12 +1711,21 @@
+ 	if err := a.catalog.Sync(ctx, conn); err != nil {
+ 		return nil, fmt.Errorf("failed to sync catalog: %w", err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): a query with a
++	// default time zone is analyzed with literal casts unfolded.
++	zoned := DefaultTimeZone(ctx) != ""
+ 	// SQL-rewrite pipeline. ORDER IS LOAD-BEARING. The two rewrites
+ 	// with non-uniform signatures (applyMixedParameterRewrite needs the
+ 	// arg slice, applyScriptVariables needs ctx/conn) stay as explicit
+ 	// calls in their exact positions relative to the uniform pipeline
+ 	// steps.
+ 	query, args = applyMixedParameterRewrite(query, args)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): a TIMESTAMP
++	// literal with no zone is read in the query's default zone; the
++	// pipeline's naiveTimestampUTC then leaves it.
++	if zone := DefaultTimeZone(ctx); zone != "" {
++		query = applyNaiveTimestampIn(query, naiveTimestampSuffix(zone))
++	}
+ 	query = applySQLRewritePipeline(query, sqlRewritePipelinePreScriptVars)
+ 	query = applyScriptVariables(ctx, query, conn)
+ 	query = applySQLRewritePipeline(query, sqlRewritePipelinePostScriptVars)
+@@ -1739,7 +1786,7 @@
+ 			for _, ids := range stmtFacts.wildcardTables {
+ 				a.catalog.registerWildcardTableByPath(ids)
+ 			}
+-			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query)
++			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, zoned)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+--- a/internal/cast.go
++++ b/internal/cast.go
+@@ -63,8 +63,11 @@
+ }
+ 
+ func bindCast(args ...value.Value) (value.Value, error) {
+-	if len(args) != 4 {
+-		return nil, fmt.Errorf("CAST: invalid number of arguments: got %d, want 4", len(args))
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): a fifth
++	// argument, the query's default time zone, for a cast between
++	// TIMESTAMP and a civil type.
++	if len(args) != 4 && len(args) != 5 {
++		return nil, fmt.Errorf("CAST: invalid number of arguments: got %d, want 4 or 5", len(args))
+ 	}
+ 	jsonEncodedFromType, err := args[1].ToString()
+ 	if err != nil {
+@@ -85,10 +88,43 @@
+ 	isSafeCast, err := args[3].ToBool()
+ 	if err != nil {
+ 		return nil, err
++	}
++	if len(args) == 5 && args[4] != nil && args[0] != nil {
++		zone, err := args[4].ToString()
++		if err != nil {
++			return nil, err
++		}
++		loc, err := value.ToLocation(zone)
++		if err != nil {
++			return nil, fmt.Errorf("CAST: invalid time zone %q: %w", zone, err)
++		}
++		if v, ok, err := castInZoneOf(args[0], &fromType, &toType, loc); ok || err != nil {
++			if err != nil {
++				if isSafeCast {
++					return nil, nil
++				}
++				return nil, err
++			}
++			return v, nil
++		}
+ 	}
+ 	return CAST(args[0], &fromType, &toType, isSafeCast)
+ }
+ 
++// castInZoneOf casts expr, of fromType, to toType in loc (castInZone),
++// CloudBurrow patch (cloudburrow/cloudburrow#1456).
++func castInZoneOf(expr value.Value, fromType, toType *Type, loc *time.Location) (value.Value, bool, error) {
++	from, err := fromType.ToGoogleSQLType()
++	if err != nil {
++		return nil, false, err
++	}
++	fromValue, err := CastValue(from, expr)
++	if err != nil {
++		return nil, true, err
++	}
++	return castInZone(fromValue, googlesql.TypeKind(toType.Kind), loc)
++}
++
+ // bindCastFormat is CAST(x AS type FORMAT format [AT TIME ZONE zone]).
+ //
+ // CloudBurrow patch (cloudburrow/cloudburrow#1194, #1195): BigQuery's
+--- /dev/null
++++ b/internal/default_time_zone.go
+@@ -0,0 +1,183 @@
++package internal
++
++import (
++	"context"
++	"fmt"
++	"regexp"
++	"strings"
++	"time"
++
++	googlesql "github.com/goccy/go-googlesql"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1456): a default time zone
++// for one query, BigQuery's project option default_time_zone: "the default
++// time zone to use in time zone-dependent GoogleSQL functions, when a time
++// zone is not specified as an argument". The engine knew UTC only (patch
++// 0022). With WithDefaultTimeZone on the query's context:
++//
++//   - a call that takes a zone and is given none gets this one, where its
++//     argument's type is TIMESTAMP (DATE, DATETIME, TIME, STRING, EXTRACT,
++//     TIMESTAMP_TRUNC, DATE_TRUNC, DATETIME_TRUNC, FORMAT_TIMESTAMP), or
++//     where it makes one (TIMESTAMP(string|date|datetime),
++//     PARSE_TIMESTAMP, CURRENT_DATE, CURRENT_DATETIME, CURRENT_TIME);
++//   - a cast between TIMESTAMP and STRING, DATE, DATETIME or TIME;
++//   - a TIMESTAMP literal with no zone, and a STRING literal cast to
++//     TIMESTAMP, read in it.
++//
++// The analyzer's own zone stays UTC (go-googlesql can build no other), so
++// a query with a zone is analyzed with literal casts unfolded
++// (getZonedAnalyzerOptions) and the run time does them.
++
++type defaultTimeZoneKey struct{}
++
++// WithDefaultTimeZone returns ctx with zone, a tz database name or an
++// offset (+05:30), the default zone of the queries run with it. "" and
++// "UTC" leave the default UTC.
++func WithDefaultTimeZone(ctx context.Context, zone string) context.Context {
++	return context.WithValue(ctx, defaultTimeZoneKey{}, zone)
++}
++
++// DefaultTimeZone returns the default zone ctx carries, "" for UTC.
++func DefaultTimeZone(ctx context.Context) string {
++	if ctx == nil {
++		return ""
++	}
++	zone, _ := ctx.Value(defaultTimeZoneKey{}).(string)
++	if strings.EqualFold(zone, "UTC") {
++		return ""
++	}
++	return zone
++}
++
++// zonedFuncs are the functions given the default zone, by name, and the
++// number of arguments of the call that gives none.
++var zonedFuncs = map[string]int{
++	"date": 1, "datetime": 1, "time": 1, "string": 1,
++	"extract": 2, "extract_date": 1,
++	"timestamp_trunc": 2, "date_trunc": 2, "datetime_trunc": 2,
++	"format_timestamp": 2, "parse_timestamp": 2, "timestamp": 1,
++	"current_date": 0, "current_datetime": 0, "current_time": 0,
++}
++
++// zoneArgument is the index of the argument whose type says whether the
++// call takes a zone: a TIMESTAMP; -1 when every call of that arity does.
++var zoneArgument = map[string]int{
++	"date": 0, "datetime": 0, "time": 0, "string": 0,
++	"extract": 0, "extract_date": 0,
++	"timestamp_trunc": -1, "date_trunc": 0, "datetime_trunc": 0,
++	"format_timestamp": -1, "parse_timestamp": -1, "timestamp": -1,
++	"current_date": -1, "current_datetime": -1, "current_time": -1,
++}
++
++// appendDefaultTimeZone gives the call node, named name (its "$" cut),
++// the default zone of ctx when it takes one and its arguments give none.
++func appendDefaultTimeZone(ctx context.Context, name string, node *ResolvedBaseFunctionCallNode, args []string) ([]string, error) {
++	zone := DefaultTimeZone(ctx)
++	if zone == "" {
++		return args, nil
++	}
++	name = strings.TrimPrefix(name, "$")
++	n, ok := zonedFuncs[name]
++	if !ok {
++		return args, nil
++	}
++	list := m1(node.ArgumentList())
++	if len(list) != n {
++		return args, nil
++	}
++	if i := zoneArgument[name]; i >= 0 {
++		if m1(m1(list[i].Type()).Kind()) != googlesql.TypeKindTypeTimestamp {
++			return args, nil
++		}
++	}
++	lit, err := literalFromValue(value.StringValue(zone))
++	if err != nil {
++		return nil, err
++	}
++	return append(args, lit), nil
++}
++
++// castTimeZone returns the SQL of the zone a cast from from to to is done
++// in, "NULL" for UTC.
++func castTimeZone(ctx context.Context, from, to googlesql.TypeKind) (string, error) {
++	zone := DefaultTimeZone(ctx)
++	if zone == "" || !zonedCast(from, to) {
++		return "NULL", nil
++	}
++	return literalFromValue(value.StringValue(zone))
++}
++
++func zonedCast(from, to googlesql.TypeKind) bool {
++	civil := func(k googlesql.TypeKind) bool {
++		switch k {
++		case googlesql.TypeKindTypeString, googlesql.TypeKindTypeDate, googlesql.TypeKindTypeDatetime, googlesql.TypeKindTypeTime:
++			return true
++		}
++		return false
++	}
++	return from == googlesql.TypeKindTypeTimestamp && civil(to) ||
++		to == googlesql.TypeKindTypeTimestamp && civil(from) && from != googlesql.TypeKindTypeTime
++}
++
++// castInZone casts v, of a cast zonedCast takes, in loc; ok is false for
++// any other.
++func castInZone(v value.Value, to googlesql.TypeKind, l *time.Location) (value.Value, bool, error) {
++	if ts, isTS := v.(value.TimestampValue); isTS {
++		t := time.Time(ts).In(l)
++		switch to {
++		case googlesql.TypeKindTypeString:
++			return value.StringValue(value.FormatTimestamp(t, l)), true, nil
++		case googlesql.TypeKindTypeDate:
++			return value.DateValue(t), true, nil
++		case googlesql.TypeKindTypeDatetime:
++			return value.DatetimeValue(t), true, nil
++		case googlesql.TypeKindTypeTime:
++			return value.TimeValue(t), true, nil
++		}
++		return nil, false, nil
++	}
++	if to != googlesql.TypeKindTypeTimestamp {
++		return nil, false, nil
++	}
++	switch x := v.(type) {
++	case value.StringValue:
++		t, err := value.ParseTimestamp(string(x), l)
++		if err != nil {
++			return nil, true, err
++		}
++		return value.TimestampValue(t), true, nil
++	case value.DateValue, value.DatetimeValue:
++		t, err := x.ToTime()
++		if err != nil {
++			return nil, true, err
++		}
++		return value.TimestampValue(civilIn(t, l)), true, nil
++	}
++	return nil, false, nil
++}
++
++// civilIn is the time t's wall clock reads in loc.
++func civilIn(t time.Time, loc *time.Location) time.Time {
++	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
++}
++
++// naiveTimestampSuffix is what a TIMESTAMP literal with no zone gets to be
++// read in zone: an offset, "+05:30", or a name after a space.
++func naiveTimestampSuffix(zone string) string {
++	if m := offsetZone.FindStringSubmatch(zone); m != nil {
++		hh, mm := m[2], m[3]
++		if len(hh) == 1 {
++			hh = "0" + hh
++		}
++		if mm == "" {
++			mm = "00"
++		}
++		return fmt.Sprintf("%s%s:%s", m[1], hh, mm)
++	}
++	return " " + zone
++}
++
++var offsetZone = regexp.MustCompile(`^(?i:UTC)?([+-])(\d{1,2}):?(\d{2})?$`)
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -148,6 +148,7 @@
+ 	}
+ 	funcName := m1(m1(node.Function()).FullName(false))
+ 	funcName = strings.Replace(funcName, ".", "_", -1)
++	builtinName := funcName
+ 
+ 	_, existsCurrentTimeFunc := currentTimeFuncMap[funcName]
+ 	_, existsNormalFunc := normalFuncMap[funcName]
+@@ -203,6 +204,20 @@
+ 			return "", nil, err
+ 		}
+ 		funcName = fname
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): the query's
++	// default time zone, where the call takes a zone and gives none.
++	if !isWindowFunc && funcName != builtinName {
++		var err error
++		n := len(args)
++		if args, err = appendDefaultTimeZone(ctx, builtinName, node, args); err != nil {
++			return "", nil, err
++		}
++		// DATE_TRUNC and DATETIME_TRUNC of a TIMESTAMP, with a zone, are
++		// TIMESTAMP_TRUNC's.
++		if len(args) > n && (builtinName == "date_trunc" || builtinName == "datetime_trunc") {
++			funcName = funcPrefix + "_timestamp_trunc"
++		}
+ 	}
+ 	return funcName, args, nil
+ }
+@@ -1163,7 +1178,12 @@
+ 		if err != nil {
+ 			return "", err
+ 		}
+-		tzSQL := "NULL"
++		// CloudBurrow patch (cloudburrow/cloudburrow#1456): with no AT
++		// TIME ZONE, the query's default zone.
++		tzSQL, err := castTimeZone(ctx, googlesql.TypeKind(fromType.Kind), googlesql.TypeKind(toType.Kind))
++		if err != nil {
++			return "", err
++		}
+ 		if tz := m1(n.node.TimeZone()); tz != nil {
+ 			if tzSQL, err = newNode(tz).FormatSQL(ctx); err != nil {
+ 				return "", err
+@@ -1174,6 +1194,16 @@
+ 			expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), formatSQL, tzSQL,
+ 		), nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): a cast between
++	// TIMESTAMP and a civil type is done in the query's default zone.
++	if tzSQL, err := castTimeZone(ctx, googlesql.TypeKind(fromType.Kind), googlesql.TypeKind(toType.Kind)); err != nil {
++		return "", err
++	} else if tzSQL != "NULL" {
++		return fmt.Sprintf(
++			"googlesqlite_cast(%s, '%s', '%s', %t, %s)",
++			expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), tzSQL,
++		), nil
++	}
+ 	return fmt.Sprintf(
+ 		"googlesqlite_cast(%s, '%s', '%s', %t)",
+ 		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),

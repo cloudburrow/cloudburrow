@@ -312,7 +312,7 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		list := strings.Join(cols, ", ")
 		pcols, pvals := ", _PARTITIONTIME", ", "+ingestionTimeColumn
 		if unit == "DAY" {
-			pcols, pvals = pcols+", _PARTITIONDATE", pvals+", DATE("+ingestionTimeColumn+")"
+			pcols, pvals = pcols+", _PARTITIONDATE", pvals+", DATE("+ingestionTimeColumn+", 'UTC')"
 		}
 		back = f.runDML(r, "INSERT INTO "+quotePath([]string{dataset, table})+" ("+list+pcols+") SELECT "+list+pvals+
 			" FROM "+quotePath([]string{scratch.DatasetID, scratch.TableID}))

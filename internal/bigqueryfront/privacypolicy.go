@@ -41,9 +41,12 @@ import (
 //     USING name: JOIN_ALL, JOIN_ANY, JOIN_BLOCKED and JOIN_NOT_REQUIRED
 //     with BigQuery's documented errors.
 //   - Differential privacy (differential_privacy_policy, SELECT WITH
-//     DIFFERENTIAL_PRIVACY): 501, never answered without the noise. The
-//     front has no noise mechanism or epsilon and delta budget (#1426's
-//     follow-up).
+//     DIFFERENTIAL_PRIVACY): carried out with the noise, the contribution
+//     bounding, the group thresholding and the epsilon and delta budget
+//     (#1455, differentialprivacy.go): a query, a parenthesized subquery or
+//     CTE's query, or a script's statement in its turn (#1482). A table
+//     with a differential_privacy_policy must be read in such a query's
+//     FROM clause.
 //
 // What the front cannot check is refused 501, never run as if the table
 // had no policy: a read of the table in a subquery, CTE or another view's
@@ -63,6 +66,7 @@ type privacyPolicy struct {
 	allowed   []string
 	hasJoin   bool
 	dp        bool
+	dpPolicy  dpPolicy // differentialprivacy.go (#1455)
 }
 
 // parsePrivacyPolicy reads s; why is why the front cannot use it.
@@ -137,8 +141,11 @@ func parsePrivacyPolicy(s string) (p privacyPolicy, why string) {
 			return p, "join_allowed_columns is not an array of column names"
 		}
 	}
-	if pick(raw, "differential_privacy_policy", "differentialPrivacyPolicy") != nil {
+	if dp := pick(raw, "differential_privacy_policy", "differentialPrivacyPolicy"); dp != nil {
 		p.dp = true
+		if p.dpPolicy, why = parseDPPolicy(dp); why != "" {
+			return p, why
+		}
 	}
 	if !p.hasAT && !p.hasJoin && !p.dp {
 		return p, "it has no aggregation_threshold_policy, join_restriction_policy or differential_privacy_policy"
@@ -180,11 +187,6 @@ func privacyRefusal(what, name string) string {
 		"an aggregation threshold and a join restriction only in a query that reads the table or view in its " +
 		"top-level FROM clause (docs/compatibility.md). Nothing was run."
 }
-
-// dpRefusal is the 501 of a differentially private query.
-const dpRefusal = "Not implemented here: differential privacy (SELECT WITH DIFFERENTIAL_PRIVACY, or a table or view " +
-	"with a differential_privacy_policy). CloudBurrow has no noise mechanism and keeps no epsilon or delta budget, " +
-	"and it does not answer such a query without the noise. Nothing was run."
 
 // hasPrivacyClause reports whether sql has SELECT WITH AGGREGATION_THRESHOLD
 // or SELECT WITH DIFFERENTIAL_PRIVACY.
@@ -244,10 +246,32 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		return ""
 	}
+	if f.dpScript(w, r, q, insert, stmts) { // #1482, differentialprivacy.go
+		return true
+	}
+	// A SELECT WITH DIFFERENTIAL_PRIVACY in parentheses, a subquery or a
+	// CTE's (#1482): its noisy rows, a query of literals, take its place.
+	var spans [][2]int
+	var spanReads [][]privacyRead
 	for _, s := range stmts {
+		depth := privacyDepths(s)
 		for i := 0; i+2 < len(s); i++ {
-			if s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY") {
-				return refuse(dpRefusal)
+			if i > 0 && s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY") {
+				end := -1
+				if s[i-1].punct("(") && clause(s) == "" && (len(spans) == 0 || i >= spans[len(spans)-1][1]) {
+					for j := i + 3; j < len(s); j++ {
+						if depth[j] < depth[i] {
+							end = j
+							break
+						}
+					}
+				}
+				if end < 0 {
+					return refuse("Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY other than as a query, a " +
+						"parenthesized subquery or a CTE's query, or in another differentially private query. Nothing was run.")
+				}
+				spans, spanReads = append(spans, [2]int{i, end}), append(spanReads, nil)
+				continue
 			}
 			if i > 0 && s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("AGGREGATION_THRESHOLD") {
 				return refuse("Not implemented here: SELECT WITH AGGREGATION_THRESHOLD other than as a lone query's " +
@@ -255,15 +279,12 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 			}
 		}
 	}
-	var atReads []privacyRead
+	var atReads, dpReads []privacyRead
 	for _, p := range prot {
 		if createsView(p.tr.stmt) {
 			// A view's query reads nothing until the view is read, and a
 			// read of the view is checked (viewReadsPrivate).
 			continue
-		}
-		if p.pol.dp {
-			return refuse(dpRefusal)
 		}
 		s := p.tr.stmt
 		if p.tr.decorator != "" {
@@ -271,6 +292,13 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		if p.tr.next < len(s) && s[p.tr.next].is("FOR") {
 			return fail("Time travel is disabled on " + p.name + ", which has a privacy policy.")
+		}
+		if k := dpSpanOf(spans, p); k >= 0 && p.pol.dp {
+			if p.pol.hasJoin {
+				return refuse(privacyRefusal("a join restriction in a differentially private subquery", p.name))
+			}
+			spanReads[k] = append(spanReads[k], p)
+			continue
 		}
 		if privacyDepths(s)[p.tr.at] != 0 || len(s) > 0 && s[0].is("WITH") {
 			return refuse(privacyRefusal("a read in a subquery or CTE", p.name))
@@ -282,6 +310,14 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 				return fail(msg)
 			}
 		}
+		if p.pol.dp {
+			if clause(s) != "DIFFERENTIAL_PRIVACY" {
+				return fail("You must use SELECT WITH DIFFERENTIAL_PRIVACY for this query because a privacy policy " +
+					"is set on " + p.name + ".")
+			}
+			dpReads = append(dpReads, p)
+			continue
+		}
 		if p.pol.hasAT {
 			if clause(s) != "AGGREGATION_THRESHOLD" {
 				return fail("You must use SELECT WITH AGGREGATION_THRESHOLD for this query because a privacy policy " +
@@ -289,6 +325,51 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 			}
 			atReads = append(atReads, p)
 		}
+	}
+	if len(spans) > 0 {
+		s := stmts[0]
+		finals := make([]string, len(spans))
+		for k, sp := range spans {
+			if len(spanReads[k]) > 1 {
+				return refuse("Not implemented here: a SELECT WITH DIFFERENTIAL_PRIVACY of more than one table or view " +
+					"with a differential_privacy_policy. Nothing was run.")
+			}
+			var at *privacyRead
+			if len(spanReads[k]) == 1 {
+				at = &spanReads[k][0]
+			}
+			final, fl := f.dpResult(r, q, s[sp[0]:sp[1]], at)
+			if fl != nil {
+				f.dpFail(w, r, q, insert, at, fl)
+				return true
+			}
+			finals[k] = final
+		}
+		text := q.Query
+		for k := len(spans) - 1; k >= 0; k-- {
+			text = text[:s[spans[k][0]].pos] + finals[k] + text[s[spans[k][1]-1].end:]
+		}
+		f.runRewritten(w, r, q, insert, text)
+		return true
+	}
+	for _, s := range stmts {
+		if clause(s) != "DIFFERENTIAL_PRIVACY" {
+			continue
+		}
+		if len(stmts) > 1 {
+			return refuse("Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY in a script; CloudBurrow carries it " +
+				"out as a lone query. Nothing was run.")
+		}
+		if len(dpReads) > 1 {
+			return refuse("Not implemented here: a SELECT WITH DIFFERENTIAL_PRIVACY of more than one table or view " +
+				"with a differential_privacy_policy. Nothing was run.")
+		}
+		var at *privacyRead
+		if len(dpReads) == 1 {
+			at = &dpReads[0]
+		}
+		f.enforceDifferentialPrivacy(w, r, q, insert, s, at)
+		return true
 	}
 	var rewrite []token
 	for _, s := range stmts {

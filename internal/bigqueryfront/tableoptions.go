@@ -44,8 +44,10 @@ import (
 //     a CREATE TABLE's columns, decimalddl.go).
 //   - enable_change_history: CHANGES and APPENDS are not served (501).
 //   - privacy_policy: enforced in the front's query rewrite: an
-//     aggregation threshold and a join restriction as BigQuery does,
-//     differential privacy 501 (#1426, privacypolicy.go). A view's too.
+//     aggregation threshold and a join restriction as BigQuery does (#1426,
+//     privacypolicy.go), and differential privacy with the noise and the
+//     epsilon and delta budget (#1455, #1482, differentialprivacy.go). A
+//     view's too.
 //   - storage_uri: the table's data stays in the engine, never written to
 //     Cloud Storage as Apache Iceberg files.
 

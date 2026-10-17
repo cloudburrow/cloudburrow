@@ -228,7 +228,6 @@ func unsupportedBuild(req *runpb.SubmitBuildRequest) error {
 	add(req.GetWorkerPool() != "", "worker_pool")
 	add(req.GetMachineType() != "", "machine_type")
 	if bp := req.GetBuildpackBuild(); bp != nil {
-		add(bp.GetRuntime() != "", "buildpack_build.runtime")
 		add(bp.GetCacheImageUri() != "", "buildpack_build.cache_image_uri")
 		add(bp.GetBaseImage() != "", "buildpack_build.base_image")
 		add(bp.GetEnableAutomaticUpdates(), "buildpack_build.enable_automatic_updates")
@@ -275,6 +274,18 @@ func (b *BuildsServer) SubmitBuild(ctx context.Context, req *runpb.SubmitBuildRe
 		spec.Kind = BuildBuildpacks
 		spec.FunctionTarget = t.BuildpackBuild.GetFunctionTarget()
 		spec.Env = t.BuildpackBuild.GetEnvironmentVariables()
+		// runtime (#1464), such as go123 or nodejs22, is the runtime
+		// Google's builder reads as GOOGLE_RUNTIME, as Cloud Functions
+		// builds with it; a GOOGLE_RUNTIME the caller set wins.
+		if rt := t.BuildpackBuild.GetRuntime(); rt != "" {
+			if _, set := spec.Env["GOOGLE_RUNTIME"]; !set {
+				env := map[string]string{"GOOGLE_RUNTIME": rt}
+				for k, v := range spec.Env {
+					env[k] = v
+				}
+				spec.Env = env
+			}
+		}
 	default:
 		return nil, apierror.InvalidArgument("one of buildpack_build or docker_build is required")
 	}

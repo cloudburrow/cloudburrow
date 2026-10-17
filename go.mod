@@ -34,6 +34,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
@@ -79,6 +80,7 @@ require (
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
+	github.com/golang/glog v1.2.5 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -97,6 +99,7 @@ require (
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/vbatts/tar-split v0.12.1 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	gonum.org/v1/gonum v0.17.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

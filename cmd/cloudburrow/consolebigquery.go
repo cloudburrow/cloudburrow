@@ -178,6 +178,9 @@ func (p bigqueryProvider) Detail(ctx context.Context, project string, path []str
 		if isRoutinePath(path) {
 			return p.routineDetail(ctx, path[0], path[2])
 		}
+		if isModelPath(path) { // #1465, consolebigquerymodels.go
+			return p.modelDetail(ctx, path[0], path[2])
+		}
 	}
 	return console.DeeperThan(2, path), nil
 }
@@ -245,6 +248,7 @@ func (p bigqueryProvider) datasetDetail(ctx context.Context, datasetID string) (
 		Sections: []console.Section{
 			{ID: "tables", Label: "Tables", Listing: tables},
 			p.routinesSection(ctx, ds),
+			p.modelsSection(ctx, ds), // #1465
 			{
 				ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Dataset", Properties: props}},

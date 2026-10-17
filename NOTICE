@@ -25,6 +25,12 @@ internal/console/assets/vendor/xterm/.
 The binary is linked with github.com/creack/pty, Copyright (c) 2011 Keith
 Rarick, under the MIT License.
 
+The binary is linked with Google's differential privacy library
+(github.com/google/differential-privacy/go/v4 v4.1.0), Copyright Google LLC,
+under the Apache License, Version 2.0, and with its dependencies
+github.com/golang/glog (Apache License, Version 2.0) and gonum.org/v1/gonum,
+Copyright The Gonum Authors, under the BSD 3-Clause License.
+
 The binary embeds builds of goccy/bigquery-emulator v0.8.1
 (https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki
 Goshima, under the MIT License, linked with goccy/googlesqlite v0.3.1 and

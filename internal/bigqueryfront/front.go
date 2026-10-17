@@ -224,9 +224,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
+	models := &bqModels{}                           // models.go, #1465
 	if o.stateDir != "" {
 		dropped.keep(droppedStateFile(o.stateDir), o.logf)         // dropped.go, #1460
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
+		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -259,6 +261,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			jobRows.reset()
 			tables.reset()
 			linked.reset()
+			models.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -312,6 +315,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if (front{next: next, records: records, policies: policies}).serveRowPolicies(w, r) { // rowpolicies.go, #1218
 			return
 		}
+		if (front{next: next, records: records, models: models}).serveModels(w, r) { // models.go, #1465
+			return
+		}
 		if tableIDsMayChange(r) {
 			defer ids.change()() // tableids.go, #1063
 		}
@@ -352,7 +358,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
-				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped}
+				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -426,6 +432,20 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		if what := linkedRequestWhat(r.Method, m[4], m[5]); m[3] != "" && what != "" && f.refuseLinkedWrite(w, r, dataset, what) { // #1423, loglinks.go
+			return
+		}
+		if r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables") {
+			// A dataset's models go with it, and keep one without
+			// deleteContents (models.go, #1465).
+			if len(models.list(projectOf(f.base), dataset)) > 0 && r.URL.Query().Get("deleteContents") != "true" {
+				writeError(w, http.StatusBadRequest, "resourceInUse", fmt.Sprintf("Dataset %s:%s is still in use", projectOf(f.base), dataset))
+				return
+			}
+			sw := &statusWriter{ResponseWriter: w}
+			next.ServeHTTP(sw, r)
+			if sw.status/100 == 2 || sw.status == 0 {
+				models.dropDataset(projectOf(f.base), dataset)
+			}
 			return
 		}
 		switch {
@@ -554,6 +574,8 @@ type front struct {
 	// dropped are the deleted tables and datasets kept for their time
 	// travel window (dropped.go, #1460), or nil.
 	dropped *droppedStore
+	// models are the BigQuery ML models (models.go, #1465), or nil.
+	models *bqModels
 }
 
 // Option is an option of Wrap.
@@ -1003,7 +1025,9 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(r.Context(), method, u.String(), rd)
+	// The front's own request runs in UTC, whatever the client query's
+	// default_time_zone (timezone.go, #1456).
+	req, err := http.NewRequestWithContext(inUTC(r.Context()), method, u.String(), rd)
 	if err != nil {
 		return 0, nil
 	}

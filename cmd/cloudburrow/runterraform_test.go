@@ -27,6 +27,15 @@ func TestTerraformSetsRun(t *testing.T) {
 	if !strings.Contains(body, `cloud_run_v2_custom_endpoint = "http://127.0.0.1:9004/v2/"`) {
 		t.Errorf("cloud_run_v2_custom_endpoint is not set to the local endpoint:\n%s", body)
 	}
+	// v1's base path is regional (#1304): the provider fills {{location}}
+	// into the host, and the server reads the region back from it.
+	if !strings.Contains(body, `cloud_run_custom_endpoint = "http://{{location}}-run.localhost:9004/"`) {
+		t.Errorf("cloud_run_custom_endpoint is not the regional local endpoint:\n%s", body)
+	}
+	cfg.BindAddress = "10.0.0.5"
+	if body, _ = terraformProvider(cfg, false); !strings.Contains(body, `cloud_run_custom_endpoint = "http://10.0.0.5:9004/"`) {
+		t.Errorf("off loopback, cloud_run_custom_endpoint is not the plain address:\n%s", body)
+	}
 }
 
 func TestEnvTerraformExportsRun(t *testing.T) {

@@ -312,7 +312,8 @@ built as the builder's own order decides. A source with no marker at all is refu
 any image is pulled, with `build failed: no runtime detected` naming the files looked for and
 `GOOGLE_RUNTIME`. A failed build names the runtime it was built as, such as
 `build failed: exit status 1 (runtime nodejs, detected from package.json)`, followed by the
-tail of pack's log. `SubmitBuild`'s `buildpack_build.runtime` stays `UNIMPLEMENTED`.
+tail of pack's log. `SubmitBuild`'s `buildpack_build.runtime` (#1464) sets `GOOGLE_RUNTIME`,
+unless `environment_variables` sets it; a Cloud Functions build passes its runtime this way.
 
 **Event triggers** (#1414): a function's `eventTrigger` on Pub/Sub
 (`google.cloud.pubsub.topic.v1.messagePublished`) or Cloud Storage
@@ -365,11 +366,26 @@ out, `service_config.*` and `labels` roll out a new revision of the same image, 
 and never enforced (ADR-0006). `locations.list` names the regions; any well-formed region is
 accepted in a name. Functions are kept in memory, and are gone when the instance restarts.
 
+**Secrets, keys, pools and policies** (#1464), as Google documents them:
+`service_config.secret_environment_variables` and `secret_volumes` become the service's
+`secretKeyRef` variables and read-only `secret` volumes, mounted from the instance's Secret
+Manager as Cloud Run's are (a volume with no `versions` mounts the latest as a file named after
+the secret; `project_id` defaults to the function's project, and its project number reads as
+it). `build_config.worker_pool` must be one of Cloud Build's private pools (#1422) in the
+function's region; it is recorded, and the build runs here. `kms_key_name` (also on
+`GenerateUploadUrl`) must be a CryptoKey's name and is stored: nothing is encrypted with it,
+since this instance's Cloud Storage and Cloud Build encrypt nothing with a key.
+`service_config.binary_authorization_policy` is the service's `binaryAuthorization`, stored and
+not enforced. `TestFunctionsFields` (ungated) reads each back; `TestFunctionsSecretsBuildsAndMounts`,
+gated, builds a function that reads its secrets, and has **not yet run**.
+
 **Refused, with the reason** (`UNIMPLEMENTED`): an `eventTrigger` other than Pub/Sub's and Cloud
-Storage's (above), or on an instance without Pub/Sub; GEN_1 functions and
-uploads; `repo_source` and `git_uri`; worker pools, `docker_repository` and a build service
-account; VPC connectors, secret environment variables and volumes, KMS keys and binary
-authorization; `ListFunctions` `filter`, `order_by` and `page_token`; `GetFunction` `revision`.
+Storage's (above), or on an instance without Pub/Sub: audit log triggers (the instance's
+services write no Cloud Audit Logs), Firestore's (its emulator emits no change events),
+Firebase's and Eventarc's other sources; GEN_1 functions and uploads; `repo_source` (a Cloud
+Source Repositories repository, which is not served) and `git_uri`; `docker_repository` and a
+build service account; VPC connectors (Serverless VPC Access is not served); `ListFunctions`
+`filter`, `order_by` and `page_token`; `GetFunction` `revision`.
 An unknown runtime is `INVALID_ARGUMENT`. The tests are `TestFunctionsAPI` (ungated: everything but
 a build that succeeds), `TestFunctionsEventTriggers` and `TestGcloudFunctionsEventTriggers`'
 ungated half (event triggers, #1414), and `TestFunctionsAPIBuildsAndServes`,
@@ -394,9 +410,10 @@ after a failed deploy, `DELETE_IN_PROGRESS`), with `operations/{id}` operations.
 `gcloud-setup`'s `cloudfunctions` override, which already names the Run port; it reads v2
 `ListRuntimes` with `name=… AND environment=GEN_1`, which is served.
 
-Refused with `UNIMPLEMENTED` and the reason: source repositories, VPC networks and connectors,
-secrets, CMEK, build worker pools, `dockerRepository` and Container Registry, a build service
-account, the legacy `object.change` and non-Pub/Sub, non-Storage event sources, call of an event
+Secrets, `kmsKeyName` and `buildWorkerPool` are served as 2nd gen's are (#1464,
+`TestFunctionsV1Fields`). Refused with `UNIMPLEMENTED` and the reason: source repositories, VPC
+networks and connectors, `dockerRepository` and Container Registry, a build service account,
+Firestore and Firebase event sources, the legacy `object.change` and non-Pub/Sub, non-Storage event sources, call of an event
 function (publish to its topic or write to its bucket instead), and past versions. A 1st-gen
 function is updated through v1 only, and a 2nd-gen one through v2. `TestFunctionsV1API` and
 the ungated halves of `TestGcloudFunctionsV1`, `TestConsoleFunctionsV1` and
@@ -404,7 +421,9 @@ the ungated halves of `TestGcloudFunctionsV1`, `TestConsoleFunctionsV1` and
 `TestFunctionsV1BuildsAndServes` and those three tests' deploys from `testdata/function` are gated
 like the other Functions tests and have **not yet run**.
 
-The console's Create function offers the Environment as Google's does: 1st gen creates through
+The console's Create function also takes secret environment variables and volumes, an
+encryption key, a Binary Authorization policy (2nd gen) and a build worker pool, and a
+function's page lists its secrets (#1464). It offers the Environment as Google's does: 1st gen creates through
 the v1 API with an HTTP trigger, a Pub/Sub topic or a Cloud Storage event, the function's page
 shows the v1 `CloudFunction`, and Test function calls a 1st-gen HTTP function through `call`.
 Terraform's `google_cloudfunctions_function` reaches the same API through
