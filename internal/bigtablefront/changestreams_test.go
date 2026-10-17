@@ -190,9 +190,7 @@ func TestChangeStreamRecordsTheWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ts := dcs[0].GetChunks()[0].GetMutation().GetSetCell().GetTimestampMicros(); ts <= 0 || len(r["f"]) < 2 || int64(r["f"][1].Timestamp) != ts {
-		t.Errorf("the logged timestamp %d, the stored cells %v", ts, r["f"])
-	}
+	checkStampedCells(t, dcs[0], dcs[5], r["f"])
 
 	// Resumed from the third record's token: the rest.
 	rs, err = readStream(t, d, ctx, &bigtablepb.ReadChangeStreamRequest{TableName: name, Partition: parts[0],
@@ -207,7 +205,8 @@ func TestChangeStreamRecordsTheWrites(t *testing.T) {
 	}
 
 	// Caught up, a stream sends heartbeats with the token to resume from.
-	hctx, hcancel := context.WithTimeout(ctx, 3*time.Second)
+	// Bounded by ctx, not by a few seconds a loaded machine can overrun.
+	hctx, hcancel := context.WithCancel(ctx)
 	defer hcancel()
 	s, err := d.ReadChangeStream(hctx, &bigtablepb.ReadChangeStreamRequest{TableName: name, Partition: parts[0],
 		StartFrom: &bigtablepb.ReadChangeStreamRequest_ContinuationTokens{ContinuationTokens: &bigtablepb.StreamContinuationTokens{
@@ -248,6 +247,94 @@ func TestChangeStreamRecordsTheWrites(t *testing.T) {
 		!isWholeTable(rs[0].GetCloseStream().GetNewPartitions()[0]) || len(rs[0].GetCloseStream().GetContinuationTokens()) != 1 {
 		t.Errorf("a read of another partition = %v, %v; want a CloseStream with the table's partition", rs, err)
 	}
+}
+
+// checkStampedCells checks the logged timestamps of a server-timestamped
+// SetCell (set) and a later ReadModifyWriteRow (rmw) of the same column
+// against the column's stored cells, newest first. The append is stamped
+// max(now, the cell's timestamp) in milliseconds, so when both land in the
+// same millisecond it replaces the cell rather than adding one (#1575): the
+// column then holds a single cell, at the timestamp both records carry.
+func checkStampedCells(t *testing.T, set, rmw *bigtablepb.ReadChangeStreamResponse_DataChange, cells []bigtable.ReadItem) {
+	t.Helper()
+	setTS := set.GetChunks()[0].GetMutation().GetSetCell().GetTimestampMicros()
+	rmwCell := rmw.GetChunks()[0].GetMutation().GetSetCell()
+	if setTS <= 0 || len(cells) == 0 {
+		t.Fatalf("the logged timestamp %d, the stored cells %v", setTS, cells)
+	}
+	if got := int64(cells[len(cells)-1].Timestamp); got != setTS {
+		t.Errorf("the server-timestamped cell is logged at %d, stored at %d (cells %v)", setTS, got, cells)
+	}
+	if got := int64(cells[0].Timestamp); got != rmwCell.GetTimestampMicros() || string(cells[0].Value) != string(rmwCell.GetValue()) {
+		t.Errorf("the ReadModifyWriteRow cell is logged as %d=%q, stored as %v", rmwCell.GetTimestampMicros(), rmwCell.GetValue(), cells[0])
+	}
+	if want := 2; rmwCell.GetTimestampMicros() == setTS {
+		want = 1
+		if len(cells) != want {
+			t.Errorf("the append in the set's millisecond: %d cells %v, want %d", len(cells), cells, want)
+		}
+	} else if len(cells) != want {
+		t.Errorf("%d cells %v, want %d", len(cells), cells, want)
+	}
+}
+
+// TestChangeStreamAppendInTheSameMillisecond (#1575): a ReadModifyWriteRow
+// in the millisecond of the server-timestamped SetCell before it replaces
+// that cell, and the change stream's two records still replay to what is
+// stored. The front's clock is pinned ahead of the emulator's, so the
+// append always lands on the set's timestamp; TestChangeStreamRecordsTheWrites
+// failed about once in 70 runs when the two fell in one millisecond.
+func TestChangeStreamAppendInTheSameMillisecond(t *testing.T) {
+	addr, f := serveFront(t)
+	pinned := time.Now().Add(time.Hour).Truncate(time.Millisecond)
+	f.changes.now = func() time.Time { return pinned }
+	ctx, ac, c, d := changeStreamClients(t, addr)
+	if err := ac.CreateTableFromConf(ctx, &bigtable.TableConf{TableID: "cs", ChangeStreamRetention: 24 * time.Hour,
+		Families: map[string]bigtable.GCPolicy{"f": bigtable.NoGcPolicy()}}); err != nil {
+		t.Fatal(err)
+	}
+	tbl := c.Open("cs")
+	m := bigtable.NewMutation()
+	m.Set("f", "q", bigtable.ServerTime, []byte("v1"))
+	if err := tbl.Apply(ctx, "r1", m); err != nil {
+		t.Fatal(err)
+	}
+	rmw := bigtable.NewReadModifyWrite()
+	rmw.AppendValue("f", "q", []byte("+"))
+	if _, err := tbl.ApplyReadModifyWrite(ctx, "r1", rmw); err != nil {
+		t.Fatal(err)
+	}
+	name := "projects/p/instances/i/tables/cs"
+	hctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s, err := d.ReadChangeStream(hctx, &bigtablepb.ReadChangeStreamRequest{TableName: name, Partition: wholeTable(),
+		StartFrom: &bigtablepb.ReadChangeStreamRequest_ContinuationTokens{ContinuationTokens: &bigtablepb.StreamContinuationTokens{
+			Tokens: []*bigtablepb.StreamContinuationToken{{Partition: wholeTable(), Token: encodeToken(0)}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dcs []*bigtablepb.ReadChangeStreamResponse_DataChange
+	for len(dcs) < 2 {
+		msg, err := s.Recv()
+		if err != nil {
+			t.Fatalf("ReadChangeStream: %v", err)
+		}
+		if dc := msg.GetDataChange(); dc != nil {
+			dcs = append(dcs, dc)
+		}
+	}
+	if got := describeChange(dcs[0]) + "; " + describeChange(dcs[1]); got != `r1: set f:q="v1"; r1: set f:q="v1+"` {
+		t.Fatalf("the change stream holds %s", got)
+	}
+	r, err := tbl.ReadRow(ctx, "r1", bigtable.RowFilter(bigtable.ColumnFilter("q")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setTS := dcs[0].GetChunks()[0].GetMutation().GetSetCell().GetTimestampMicros(); setTS != pinned.UnixMicro() ||
+		dcs[1].GetChunks()[0].GetMutation().GetSetCell().GetTimestampMicros() != setTS {
+		t.Fatalf("the records are stamped %v and %v, want both at the pinned %d", dcs[0], dcs[1], pinned.UnixMicro())
+	}
+	checkStampedCells(t, dcs[0], dcs[1], r["f"])
 }
 
 // TestChangeStreamChunksLargeValues: a SetCell value larger than a chunk is
