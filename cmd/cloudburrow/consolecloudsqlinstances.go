@@ -328,6 +328,12 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
 		{ID: "project-backups", Label: "Project backups", Kind: console.KindListing, Listing: projectBackupsListing(ctx, svc, project, name)},
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
+	var dbUserActs []console.Action
+	if in.State == "RUNNABLE" {
+		secs, dbNames, userRefs := instanceDatabasesAndUsers(ctx, svc, project, in)
+		d.Sections = append(secs, d.Sections...)
+		dbUserActs = databaseUserActions(in, dbNames, userRefs)
+	}
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
@@ -368,6 +374,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 				Help: "1 to 7 (35 on Enterprise Plus); older log and bases are dropped, and the earliest recovery time moves with them."},
 		}, Note: "The database version and the instance ID cannot be changed."}
 	}
+	d.Actions = append(d.Actions, dbUserActs...)
 	return d, nil
 }
 
@@ -751,6 +758,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 	case "rotate-server-ca":
 		_, err = svc.Instances.RotateServerCa(project, name, &sqladminapi.InstancesRotateServerCaRequest{}).Context(ctx).Do()
 	default:
+		if ok, err := databaseUserAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
 		if ok, err := dataAPIAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}

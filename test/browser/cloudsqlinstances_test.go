@@ -98,6 +98,9 @@ func (p *tab) pageAction(label string, values map[string]string, confirm string)
 //     9.6 to 18 and MySQL 8.0 and 8.4;
 //   - on an instance made with the Data API allowed, Run SQL (Data API)
 //     answers executeSql's rows, read with a Secret Manager password;
+//   - Add user account and Change password make the user Run SQL signs in
+//     as, and Create database and Delete database a database
+//     databases.get reads and then does not;
 //   - Create project backup makes a backup ListBackups lists and the
 //     Project backups tab shows;
 //   - Edit project backup changes a backup GetBackup then reads, and Delete
@@ -140,11 +143,30 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 		}
 	})
 	waitSQL(t, svc, project, op, 10*time.Minute)
-	op, err = svc.Users.Insert(project, name, &sqladmin.User{Name: "browserapi", Password: "Browser-pass1"}).Do()
-	if err != nil {
-		t.Fatal(err)
+
+	// Add user account, then Change password, on the instance's page: Run
+	// SQL below signs in as that user with the changed password.
+	page := "/cloudsql-instances/" + name + "?project=" + project
+	p.navigate(page)
+	p.pageAction("Add user account", map[string]string{"userName": "browserapi", "password": "Browser-tmp1"}, "")
+	if u, err := svc.Users.Get(project, name, "browserapi").Do(); err != nil || u.Name != "browserapi" {
+		t.Fatalf("users.get after Add user account = %+v, %v", u, err)
 	}
-	waitSQL(t, svc, project, op, time.Minute)
+	p.navigate(page)
+	p.pageAction("Change password", map[string]string{"user": "browserapi", "password": "Browser-pass1"}, "")
+	// Create database, which the Databases tab lists, and Delete database.
+	p.navigate(page)
+	p.pageAction("Create database", map[string]string{"dbName": "browserdb"}, "")
+	if db, err := svc.Databases.Get(project, name, "browserdb").Do(); err != nil || db.Name != "browserdb" {
+		t.Fatalf("databases.get after Create database = %+v, %v", db, err)
+	}
+	p.navigate(page)
+	p.clickText(`#view [role="tab"]`, "Databases")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browserdb"))`)
+	p.pageAction("Delete database", map[string]string{"dbName": "browserdb"}, name)
+	if _, err := svc.Databases.Get(project, name, "browserdb").Do(); err == nil {
+		t.Error("Delete database left the database databases.get reads")
+	}
 
 	sm, err := secretmanager.NewClient(ctx, option.WithEndpoint(endpoint(t, envSecrets)), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
@@ -165,7 +187,6 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := "/cloudsql-instances/" + name + "?project=" + project
 	p.navigate(page)
 	p.waitFor(`document.querySelectorAll("#view .page-actions button").length > 0`)
 
