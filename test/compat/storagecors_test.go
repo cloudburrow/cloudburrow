@@ -120,7 +120,11 @@ func TestStorageXMLPreflightMismatch200NoHeaders(t *testing.T) {
 // TestStorageJSONAlwaysAllowsCORS: JSON API endpoints allow an origin that
 // passes CloudBurrow's check whatever the bucket says (#502, #677): a
 // loopback origin the bucket's rule does not name, echoed, with DELETE, GET,
-// HEAD, PATCH, POST and PUT, and no Allow-Credentials.
+// HEAD, PATCH, POST and PUT; a simple request gets
+// Access-Control-Allow-Credentials: true, and an OPTIONS with no
+// Access-Control-Request-Method gets it with 404, as
+// https://docs.cloud.google.com/storage/docs/cross-origin documents
+// (#1595).
 //
 // unverified: storage.objects.list 200: the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed)
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/cross-origin
@@ -137,8 +141,12 @@ func TestStorageJSONAlwaysAllowsCORS(t *testing.T) {
 		t.Errorf("a JSON preflight = %d %v", resp.StatusCode, resp.Header)
 	}
 	list := corsDo(t, h, http.MethodGet, "/storage/v1/b/"+bh.BucketName()+"/o", "", map[string]string{"Origin": origin})
-	if list.StatusCode != http.StatusOK || list.Header.Get("Access-Control-Allow-Origin") != origin || list.Header.Get("Access-Control-Allow-Credentials") != "" {
-		t.Errorf("a JSON list = %d %v; want 200, the origin allowed and no Allow-Credentials", list.StatusCode, list.Header)
+	if list.StatusCode != http.StatusOK || list.Header.Get("Access-Control-Allow-Origin") != origin || list.Header.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Errorf("a JSON list = %d %v; want 200, the origin allowed and Allow-Credentials true", list.StatusCode, list.Header)
+	}
+	empty := corsDo(t, h, http.MethodOptions, "/storage/v1/b/"+bh.BucketName()+"/o", "", map[string]string{"Origin": origin})
+	if empty.StatusCode != http.StatusNotFound || empty.Header.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Errorf("a JSON OPTIONS with no Access-Control-Request-Method = %d %v; want 404 with Allow-Credentials true", empty.StatusCode, empty.Header)
 	}
 }
 
