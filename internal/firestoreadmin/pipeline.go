@@ -116,10 +116,11 @@ var pipelineStages = map[string]bool{
 	"where": true, "select": true, "add_fields": true, "remove_fields": true,
 	"sort": true, "limit": true, "offset": true, "aggregate": true, "distinct": true,
 	"find_nearest": true, "sample": true, "union": true, "unnest": true, "replace_with": true,
+	"literals": true, "let": true, "update": true, "delete": true, "search": true,
 
-	// Not served: full-text search needs a search index, the DML stages
-	// write, and literals and let are not in the reference's stage list.
-	"search": false, "update": false, "delete": false, "literals": false, "let": false, "subcollection": false,
+	// Not served: a subcollection pipeline is a subquery, and subqueries
+	// (the scalar and array functions over a pipeline) are not evaluated.
+	"subcollection": false,
 }
 
 func (a *Admin) executePipeline(ctx context.Context, req *firestorepb.ExecutePipelineRequest) ([]*firestorepb.ExecutePipelineResponse, error) {
@@ -136,15 +137,33 @@ func (a *Admin) executePipeline(ctx context.Context, req *firestorepb.ExecutePip
 	if edition != adminpb.Database_ENTERPRISE {
 		return nil, status.Error(codes.InvalidArgument, "ExecutePipeline requires the Database Edition to be `enterprise`.")
 	}
-	switch req.GetConsistencySelector().(type) {
-	case *firestorepb.ExecutePipelineRequest_Transaction, *firestorepb.ExecutePipelineRequest_NewTransaction:
-		return nil, status.Error(codes.Unimplemented, "ExecutePipeline in a transaction is not served here: the front reads the emulator's documents outside its transactions")
-	case *firestorepb.ExecutePipelineRequest_ReadTime:
-		return nil, status.Error(codes.Unimplemented, "ExecutePipeline at a read_time is not served here: the front reads the emulator's documents as they are now")
-	}
 	sp := req.GetStructuredPipeline()
 	if sp == nil || len(sp.GetPipeline().GetStages()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "structured_pipeline with at least one stage is required.")
+	}
+	// The documents are read in the emulator's transaction, or at the
+	// read time, as Google reads them: the emulator keeps versions and
+	// locks a transaction's reads, and the client commits it there.
+	var tx, newTx []byte
+	var readTime *timestamppb.Timestamp
+	switch sel := req.GetConsistencySelector().(type) {
+	case *firestorepb.ExecutePipelineRequest_Transaction:
+		tx = sel.Transaction
+	case *firestorepb.ExecutePipelineRequest_NewTransaction:
+		c, err := a.docs()
+		if err != nil {
+			return nil, err
+		}
+		b, err := c.BeginTransaction(asOwner(ctx), &firestorepb.BeginTransactionRequest{Database: req.GetDatabase(), Options: sel.NewTransaction})
+		if err != nil {
+			return nil, err
+		}
+		tx, newTx = b.GetTransaction(), b.GetTransaction()
+	case *firestorepb.ExecutePipelineRequest_ReadTime:
+		readTime = sel.ReadTime
+	}
+	if tx != nil && pipelineWrites(sp.GetPipeline()) {
+		return nil, status.Error(codes.InvalidArgument, "Pipeline operations with update(...) and delete() stages aren't supported within a transaction.")
 	}
 	explain, format := "", "text"
 	for k, v := range sp.GetOptions() {
@@ -175,7 +194,7 @@ func (a *Admin) executePipeline(ctx context.Context, req *firestorepb.ExecutePip
 	}
 	now := a.now()
 	start := time.Now()
-	ev := &pipelineRun{a: a, ctx: ctx, db: req.GetDatabase(), now: now}
+	ev := &pipelineRun{a: a, ctx: ctx, db: req.GetDatabase(), now: now, tx: tx, readTime: readTime, plan: explain == "explain"}
 	rows, err := ev.run(sp.GetPipeline())
 	if err != nil {
 		return nil, err
@@ -194,6 +213,7 @@ func (a *Admin) executePipeline(ctx context.Context, req *firestorepb.ExecutePip
 	if len(out) == 0 {
 		out = append(out, &firestorepb.ExecutePipelineResponse{ExecutionTime: exec})
 	}
+	out[0].Transaction = newTx
 	if explain != "" {
 		data, err := anypb.New(wrapperspb.String(ev.explainText(sp.GetPipeline(), explain, format, len(rows), time.Since(start))))
 		if err != nil {
@@ -213,6 +233,8 @@ type row struct {
 	name           string
 	create, update *timestamppb.Timestamp
 	fields         map[string]*firestorepb.Value
+	// vars are the variables bound by let stages and lambdas.
+	vars map[string]*firestorepb.Value
 }
 
 func (r row) document() *firestorepb.Document {
@@ -236,11 +258,18 @@ type pipelineRun struct {
 	docs  []*firestorepb.Document // the database's documents, read once
 	read  bool
 	stats []string
+	// tx and readTime are the request's consistency: its documents are
+	// read in the emulator's transaction tx, or at readTime.
+	tx       []byte
+	readTime *timestamppb.Timestamp
+	// plan is explain mode "explain": the pipeline is planned, and a
+	// write stage writes nothing.
+	plan bool
 }
 
 func (p *pipelineRun) all() ([]*firestorepb.Document, error) {
 	if !p.read {
-		docs, err := p.a.readAll(p.ctx, p.db)
+		docs, err := p.a.readAllAt(p.ctx, p.db, p.tx, p.readTime)
 		if err != nil {
 			return nil, err
 		}
@@ -265,12 +294,15 @@ func (p *pipelineRun) run(pl *firestorepb.Pipeline) ([]row, error) {
 		if !served {
 			return nil, status.Errorf(codes.Unimplemented, "the pipeline stage %q is not served here: CloudBurrow evaluates pipelines itself, and does not have it", name)
 		}
-		input := name == "collection" || name == "collection_group" || name == "database" || name == "documents"
+		input := name == "collection" || name == "collection_group" || name == "database" || name == "documents" || name == "literals"
 		if input != (i == 0) {
 			if input {
 				return nil, status.Errorf(codes.InvalidArgument, "the input stage %q must be the pipeline's first stage.", name)
 			}
-			return nil, status.Errorf(codes.InvalidArgument, "a pipeline must start with an input stage (collection, collection_group, database or documents), not %q.", name)
+			return nil, status.Errorf(codes.InvalidArgument, "a pipeline must start with an input stage (collection, collection_group, database, documents or literals), not %q.", name)
+		}
+		if err := checkStagePlace(pl.GetStages(), i); err != nil {
+			return nil, err
 		}
 		var err error
 		rows, err = p.stage(st, rows)
@@ -574,6 +606,14 @@ func (p *pipelineRun) stage(st *firestorepb.Pipeline_Stage, rows []row) ([]row, 
 		return append(append([]row(nil), rows...), more...), nil
 	case "find_nearest":
 		return p.findNearest(args, opts, rows)
+	case "literals":
+		return p.literals(args)
+	case "let":
+		return p.let(arg(0), rows)
+	case "update", "delete":
+		return p.write(name, arg(0), rows)
+	case "search":
+		return p.search(opts, rows)
 	}
 	return nil, status.Errorf(codes.Internal, "the stage %q is listed as served but has no evaluation", name)
 }
@@ -994,6 +1034,12 @@ func (p *pipelineRun) eval(v *firestorepb.Value, r row) (*firestorepb.Value, err
 		return nil, status.Error(codes.InvalidArgument, "an expression is missing.")
 	case *firestorepb.Value_FieldReferenceValue:
 		return r.field(x.FieldReferenceValue), nil
+	case *firestorepb.Value_VariableReferenceValue:
+		v, ok := r.vars[x.VariableReferenceValue]
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "the variable %q is not defined.", x.VariableReferenceValue)
+		}
+		return v, nil
 	case *firestorepb.Value_FunctionValue:
 		name := x.FunctionValue.GetName()
 		f, ok := pipelineFunctions[name]
