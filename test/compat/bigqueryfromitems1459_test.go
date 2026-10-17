@@ -22,7 +22,10 @@ import (
 // a MERGE from a subquery of a JOIN. Measured first through the front:
 // the UPDATE was 501 "UPDATE ... FROM with a FROM clause of more than one
 // table or subquery", and the DELETE failed 400 "sqlite3: SQL logic error:
-// ambiguous column name: k" (both tables have a column k).
+// ambiguous column name: k" (both tables have a column k). With a
+// default dataset, a table named without an alias in a DML (its
+// subquery's, or a MERGE's target) is known by its name (#1509); measured
+// first, 400 "Unrecognized name: u".
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.tabledata.list
 func TestBigQueryDMLFromSeveralItems(t *testing.T) {
@@ -82,14 +85,13 @@ func TestBigQueryDMLFromSeveralItems(t *testing.T) {
 	run("UPDATE t SET v = 'joined' FROM u AS a, w AS b WHERE t.id = a.id AND a.k = b.k AND b.v = 'X'", "UPDATE", 1)
 	rows("1=joined,2=Y07,3=c")
 
-	// The subqueries' tables have aliases: a table named without one in a
-	// subquery loses its name to the front's qualification (#1509).
-	run("DELETE t WHERE id IN (SELECT u.id FROM u AS u JOIN w AS w ON u.k = w.k WHERE w.v = 'X')", "DELETE", 1)
+	// A table named without an alias is known by its name (#1509).
+	run("DELETE t WHERE id IN (SELECT u.id FROM u JOIN w ON u.k = w.k WHERE w.v = 'X')", "DELETE", 1)
 	rows("2=Y07,3=c")
 	run("DELETE FROM t AS x WHERE EXISTS (SELECT 1 FROM u AS a, w AS b WHERE a.k = b.k AND a.id = x.id)", "DELETE", 1)
 	rows("3=c")
 
-	run("MERGE t AS t USING (SELECT u.id, w.v FROM u AS u JOIN w AS w ON u.k = w.k) s ON t.id = s.id "+
+	run("MERGE t USING (SELECT u.id, w.v FROM u JOIN w ON u.k = w.k) s ON t.id = s.id "+
 		"WHEN NOT MATCHED THEN INSERT (id, v) VALUES (s.id, s.v)", "MERGE", 2)
 	rows("1=X,2=Y,3=c")
 
