@@ -312,7 +312,15 @@ func modelTypeSQL(qs map[string]any) string {
 // message of why it cannot.
 func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, string) {
 	project := projectOf(f.base)
-	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378, #1559)
+	// Nothing pushed down, or a table already made, which an incremental
+	// sync brings up to date (jobstable.go, #1378, #1559): the table of
+	// rows, which the query's WHERE filters as it filters a literal. A
+	// filtered query read a list of every job, which the engine did not
+	// cut (bigquery-emulator patch 0060 cuts it by creation time alone),
+	// so it cost what the project's jobs did (1.0 s at 10,000, #1564);
+	// reading the table costs what the jobs changed since the last sync
+	// do.
+	if filter == nil || f.jobsTable.isMade(project) {
 		if sub := f.everyJobRows(r, project); sub != "" {
 			return sub, 0, ""
 		}
