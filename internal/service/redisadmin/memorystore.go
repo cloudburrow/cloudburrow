@@ -191,6 +191,7 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	}
 	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
+	go s.valkey.autoBackups(ctx)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
@@ -250,6 +251,21 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 	}
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
+	}
+	if r.AutoBackup != "" {
+		ab := &clusterpb.AutomatedBackupConfig{}
+		if protojson.Unmarshal([]byte(r.AutoBackup), ab) == nil {
+			out.AutomatedBackupConfig = convert(ab, &memorystorepb.AutomatedBackupConfig{})
+		}
+	}
+	if col := collectionName(r); col != "" && r.state != clusterpb.Cluster_CREATING {
+		out.BackupCollection = proto.String(col)
+	}
+	switch {
+	case r.Source != "":
+		out.ImportSources = &memorystorepb.Instance_ManagedBackupSource_{ManagedBackupSource: &memorystorepb.Instance_ManagedBackupSource{Backup: r.Source}}
+	case len(r.SourceURIs) > 0:
+		out.ImportSources = &memorystorepb.Instance_GcsSource{GcsSource: &memorystorepb.Instance_GcsBackupSource{Uris: r.SourceURIs}}
 	}
 	if pc := out.PersistenceConfig; pc.GetMode() == memorystorepb.PersistenceConfig_RDB {
 		// Google returns the time snapshots are counted from: the
@@ -572,7 +588,7 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		// A client's AUTH is its access token. IAM is not enforced here
 		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
 	case memorystorepb.Instance_TOKEN_AUTH:
-		return nil, apierror.Unimplemented("authorization_mode TOKEN_AUTH is not served here: token auth users and their tokens are not built")
+		// Token auth users and their tokens (clusterauth.go).
 	default:
 		return nil, apierror.InvalidArgument("authorization_mode %s is not an authorization mode", auth)
 	}
@@ -584,11 +600,20 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	default:
 		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
-	if in.GetKmsKey() != "" || in.GetCrossInstanceReplicationConfig() != nil || in.GetImportSources() != nil ||
-		in.GetBackupCollection() != "" || in.GetMigrationConfig() != nil || in.GetServerCaPool() != "" ||
-		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) ||
-		in.GetAutomatedBackupConfig().GetAutomatedBackupMode() == memorystorepb.AutomatedBackupConfig_ENABLED {
-		return nil, apierror.Unimplemented("kms_key, cross-instance replication, import sources, backups, migration and server CA modes are not served for a Memorystore for Valkey instance here")
+	if in.GetKmsKey() != "" || in.GetMigrationConfig() != nil || in.GetServerCaPool() != "" ||
+		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) {
+		return nil, apierror.Unimplemented("kms_key, migration and server CA modes are not served for a Memorystore for Valkey instance here")
+	}
+	if c := in.GetCrossInstanceReplicationConfig(); c != nil && c.GetInstanceRole() != memorystorepb.CrossInstanceReplicationConfig_NONE &&
+		c.GetInstanceRole() != memorystorepb.CrossInstanceReplicationConfig_INSTANCE_ROLE_UNSPECIFIED {
+		return nil, checkCrossCluster(true)
+	}
+	ab := convert(in.GetAutomatedBackupConfig(), &clusterpb.AutomatedBackupConfig{})
+	if in.GetAutomatedBackupConfig() == nil {
+		ab = nil
+	}
+	if err := checkAutoBackup(ab); err != nil {
+		return nil, err
 	}
 	if err := checkValkeyConfigs(in.GetEngineConfigs()); err != nil {
 		return nil, err
@@ -608,6 +633,21 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		Valkey: &valkeyFields{Mode: mode.String(), NodeType: nt.String(), EngineVersion: version, AuthMode: auth.String(),
 			Updated: now, Persistence: protoJSON(in.GetPersistenceConfig()), Networks: nets, Endpoints: asEndpoints,
 			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(in.GetMaintenancePolicy())}}
+	if auth == memorystorepb.Instance_TOKEN_AUTH {
+		r.AdminPassword = newUID() + newUID()
+	}
+	r.AutoBackup = protoJSON(ab)
+	switch src := in.GetImportSources().(type) {
+	case *memorystorepb.Instance_GcsSource:
+		r.SourceURIs = src.GcsSource.GetUris()
+		r.restore, err = c.readGCS(ctx, r.SourceURIs, "instance.gcs_source.uris")
+	case *memorystorepb.Instance_ManagedBackupSource_:
+		r.Source = src.ManagedBackupSource.GetBackup()
+		r.restore, err = c.readBackup(r.Source, "instance.managed_backup_source.backup")
+	}
+	if err != nil {
+		return nil, err
+	}
 	if tlsOn {
 		if r.TransitCA, r.TransitCAKey, err = newCA(id, now); err != nil {
 			return nil, apierror.Internal(err, "create the CA of instance %s", name)
@@ -673,6 +713,10 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 			set["zone_distribution_config"] = true
 		case "maintenance_policy", "maintenancePolicy":
 			set["maintenance_policy"] = true
+		case "automated_backup_config", "automatedBackupConfig":
+			set["automated_backup_config"] = true
+		case "cross_instance_replication_config", "crossInstanceReplicationConfig":
+			return nil, checkCrossCluster(true)
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode", "mode",
 			"psc_auto_connections", "pscAutoConnections":
 			return nil, apierror.InvalidArgument("update_mask path %q is an immutable field of Instance", p)
@@ -748,6 +792,16 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	if set["maintenance_policy"] {
 		vf.Maintenance = protoJSON(in.GetMaintenancePolicy())
+	}
+	if set["automated_backup_config"] {
+		next.AutoBackup = ""
+		if in.GetAutomatedBackupConfig() != nil {
+			ab := convert(in.GetAutomatedBackupConfig(), &clusterpb.AutomatedBackupConfig{})
+			if err := checkAutoBackup(ab); err != nil {
+				return nil, err
+			}
+			next.AutoBackup = protoJSON(ab)
+		}
 	}
 	if set["node_type"] || set["engine_configs"] || set["persistence_config"] {
 		settings := serverConfigs(next.RedisConfigs)

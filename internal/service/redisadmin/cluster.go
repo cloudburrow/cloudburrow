@@ -21,6 +21,7 @@ import (
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -138,8 +139,24 @@ type clusterRecord struct {
 	Valkey *valkeyFields `json:"valkey,omitempty"`
 	// TransitCA and TransitCAKey, PEM, are the cluster's CA with in-transit
 	// encryption (#1549); "" for none.
-	TransitCA       string `json:"transitCa,omitempty"`
-	TransitCAKey    string `json:"transitCaKey,omitempty"`
+	TransitCA    string `json:"transitCa,omitempty"`
+	TransitCAKey string `json:"transitCaKey,omitempty"`
+	// AdminPassword is the nodes' default user's password with token auth
+	// (clusterauth.go): only the admin plane's; "" for none.
+	AdminPassword string `json:"adminPassword,omitempty"`
+	// TokenUsers are the token auth users, by username.
+	TokenUsers map[string]*tokenUser `json:"tokenUsers,omitempty"`
+	// AclPolicy is the attached ACL policy's name (aclpolicy.go), "" for none.
+	AclPolicy string `json:"aclPolicy,omitempty"`
+	// AutoBackup is the automated_backup_config, protojson; LastAutoBackup
+	// the time of the last automated backup (backups.go).
+	AutoBackup     string    `json:"autoBackup,omitempty"`
+	LastAutoBackup time.Time `json:"lastAutoBackup,omitempty"`
+	// Source is the backup or gs:// files the cluster was created from.
+	Source     string   `json:"source,omitempty"`
+	SourceURIs []string `json:"sourceUris,omitempty"`
+	// restore is the RDB files a create loads once the nodes serve.
+	restore         [][]byte
 	state           clusterpb.Cluster_State
 	message         string
 	pendingShards   int32
@@ -161,6 +178,14 @@ type clusters struct {
 	mu     sync.Mutex
 	byName map[string]*clusterRecord
 	busy   map[string]string
+	// backups, collections and files (without a store) are the backups
+	// (backups.go), read once.
+	backups     map[string]*backupRecord
+	collections map[string]*collectionRecord
+	files       map[string][]byte
+	// policies are the ACL policies (aclpolicy.go), read once.
+	aclOnce  sync.Once
+	policies *aclPolicies
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -187,6 +212,7 @@ func (s *Server) EnableClusters(ctx context.Context, rt ClusterRuntime, dial Clu
 	}
 	s.clusters = &clusters{rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
+	go s.clusters.autoBackups(ctx)
 }
 
 const clusterPrefix = "clusters/"
@@ -464,6 +490,25 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
 	}
+	if r.AutoBackup != "" {
+		ab := &clusterpb.AutomatedBackupConfig{}
+		if protojson.Unmarshal([]byte(r.AutoBackup), ab) == nil {
+			out.AutomatedBackupConfig = ab
+		}
+	}
+	if col := collectionName(r); col != "" && r.state != clusterpb.Cluster_CREATING {
+		out.BackupCollection = proto.String(col)
+	}
+	switch {
+	case r.Source != "":
+		out.ImportSources = &clusterpb.Cluster_ManagedBackupSource_{ManagedBackupSource: &clusterpb.Cluster_ManagedBackupSource{Backup: r.Source}}
+	case len(r.SourceURIs) > 0:
+		out.ImportSources = &clusterpb.Cluster_GcsSource{GcsSource: &clusterpb.Cluster_GcsBackupSource{Uris: r.SourceURIs}}
+	}
+	if r.AclPolicy != "" {
+		out.AclPolicy = r.AclPolicy
+		out.AclPolicyInfo = c.policyInfo(r)
+	}
 	if r.ZoneDistribution != "" {
 		z := &clusterpb.ZoneDistributionConfig{}
 		if json.Unmarshal([]byte(r.ZoneDistribution), z) == nil {
@@ -534,7 +579,8 @@ func (r *clusterRecord) firstPrimary() *clusterNode {
 	return nil
 }
 
-func (r *clusterRecord) password() string { return "" }
+// password is the nodes' default user's: "" but with token auth.
+func (r *clusterRecord) password() string { return r.AdminPassword }
 
 // standalone is whether r's nodes run without cluster mode: a Valkey
 // instance in CLUSTER_DISABLED mode, a primary and its replicas.
@@ -555,6 +601,11 @@ func (r *clusterRecord) spec(server string) Spec {
 	cfg := serverConfigs(r.RedisConfigs)
 	tls := func(s Spec) Spec {
 		s.TransitCA, s.TransitCAKey, s.TransitTrust = r.TransitCA, r.TransitCAKey, r.TransitCA
+		if r.AdminPassword != "" {
+			// The default user's password; the replicas sync with it.
+			s.Password = r.AdminPassword
+			s.Configs["masterauth"] = r.AdminPassword
+		}
 		return s
 	}
 	if r.standalone() {
@@ -639,8 +690,10 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	case clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH:
 		// A client's AUTH is its access token. IAM is not enforced here
 		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
+	case clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH:
+		// Token auth users and their tokens (clusterauth.go).
 	default:
-		return nil, apierror.Unimplemented("authorization_mode %s is not served here", auth)
+		return nil, apierror.InvalidArgument("authorization_mode %s is not an authorization mode", auth)
 	}
 	tlsOn := false
 	switch tm := in.GetTransitEncryptionMode(); tm {
@@ -650,8 +703,14 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	default:
 		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
-	if in.GetKmsKey() != "" || in.GetCrossClusterReplicationConfig() != nil || in.GetImportSources() != nil || in.GetAclPolicy() != "" {
-		return nil, apierror.Unimplemented("kms_key, cross-cluster replication, import sources and ACL policies are not served for a Redis cluster here")
+	if in.GetKmsKey() != "" {
+		return nil, apierror.Unimplemented("kms_key is not served for a Redis cluster here: the nodes' data is Valkey's own, on volumes CloudBurrow does not encrypt")
+	}
+	if err := checkCrossCluster(in.GetCrossClusterReplicationConfig() != nil); err != nil {
+		return nil, err
+	}
+	if err := checkAutoBackup(in.GetAutomatedBackupConfig()); err != nil {
+		return nil, err
 	}
 	if err := checkClusterConfigs(in.GetRedisConfigs()); err != nil {
 		return nil, err
@@ -660,6 +719,24 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	r := &clusterRecord{Name: name, UID: newUID(), Created: c.now(), ShardCount: in.GetShardCount(), ReplicaCount: in.GetReplicaCount(),
 		NodeType: nt.String(), AuthMode: auth.String(), RedisConfigs: copyMap(in.GetRedisConfigs()),
 		DeletionProtect: in.GetDeletionProtectionEnabled(), state: clusterpb.Cluster_CREATING, pendingReplicas: -1}
+	if auth == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH {
+		r.AdminPassword = newUID() + newUID()
+	}
+	r.AutoBackup = protoJSON(in.GetAutomatedBackupConfig())
+	if r.AclPolicy, err = c.attachPolicy(ctx, in.GetAclPolicy(), req.GetParent()); err != nil {
+		return nil, err
+	}
+	switch src := in.GetImportSources().(type) {
+	case *clusterpb.Cluster_GcsSource:
+		r.SourceURIs = src.GcsSource.GetUris()
+		r.restore, err = c.readGCS(ctx, r.SourceURIs, "cluster.gcs_source.uris")
+	case *clusterpb.Cluster_ManagedBackupSource_:
+		r.Source = src.ManagedBackupSource.GetBackup()
+		r.restore, err = c.readBackup(r.Source, "cluster.managed_backup_source.backup")
+	}
+	if err != nil {
+		return nil, err
+	}
 	if tlsOn {
 		if r.TransitCA, r.TransitCAKey, err = newCA(id, c.now()); err != nil {
 			return nil, apierror.Internal(err, "create the CA of cluster %s", name)
@@ -726,7 +803,17 @@ func (c *clusters) create(name, op string) {
 	if err == nil {
 		err = c.form(ctx, &snap, nodes)
 	}
+	if err == nil && op != "" && len(snap.restore) > 0 {
+		// Created from a backup or gs:// RDB files (backups.go).
+		if err = c.load(ctx, &snap, snap.restore); err != nil {
+			err = fmt.Errorf("restore the data: %w", err)
+		}
+	}
 	c.mu.Lock()
+	r.restore = nil
+	if err == nil && op != "" {
+		c.addCollection(r)
+	}
 	delete(c.busy, name)
 	if err != nil {
 		if op != "" {
@@ -787,6 +874,15 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 					return err
 				}
 			}
+		}
+	}
+	c.mu.Lock()
+	users := c.aclUsers(r)
+	c.mu.Unlock()
+	if len(users) > 0 {
+		// Token auth users and ACL policy users, on every node (clusterauth.go).
+		if err := c.syncUsers(ctx, r, users, nodes); err != nil {
+			return err
 		}
 	}
 	if r.standalone() {
@@ -1002,7 +1098,11 @@ func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *cl
 			if len(keys) == 0 {
 				break
 			}
-			args := []any{"MIGRATE", dst.podIP, dst.port, "", 0, 5000, "REPLACE", "KEYS"}
+			args := []any{"MIGRATE", dst.podIP, dst.port, "", 0, 5000, "REPLACE"}
+			if pw := r.password(); pw != "" {
+				args = append(args, "AUTH", pw)
+			}
+			args = append(args, "KEYS")
 			args = append(args, keys...)
 			if _, err := s.Do(ctx, args...); err != nil {
 				return fmt.Errorf("migrate slot %d: %w", slot, err)
@@ -1114,6 +1214,12 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 			set["zone_distribution_config"] = true
 		case "maintenance_policy", "maintenancePolicy":
 			set["maintenance_policy"] = true
+		case "automated_backup_config", "automatedBackupConfig":
+			set["automated_backup_config"] = true
+		case "acl_policy", "aclPolicy":
+			set["acl_policy"] = true
+		case "cross_cluster_replication_config", "crossClusterReplicationConfig":
+			return nil, checkCrossCluster(true)
 		case "labels":
 			// Set by ClusterLabels, beside the transcoder.
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode":
@@ -1181,12 +1287,29 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		keepJSON(&next.Maintenance, in.GetMaintenancePolicy())
 	}
 	if set["authorization_mode"] {
-		switch a := in.GetAuthorizationMode(); a {
-		case clusterpb.AuthorizationMode_AUTH_MODE_DISABLED, clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH:
+		switch a := in.GetAuthorizationMode(); {
+		case a.String() == r.AuthMode:
+		case a == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH || r.AuthMode == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH.String():
+			return nil, apierror.Unimplemented("authorization_mode cannot be changed to or from AUTH_MODE_TOKEN_AUTH here: the nodes' default user's password is set when they start")
+		case a == clusterpb.AuthorizationMode_AUTH_MODE_DISABLED, a == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH:
 			next.AuthMode = a.String()
 		default:
-			return nil, apierror.Unimplemented("authorization_mode %s is not served here", a)
+			return nil, apierror.InvalidArgument("authorization_mode %s is not an authorization mode", a)
 		}
+	}
+	if set["automated_backup_config"] {
+		if err := checkAutoBackup(in.GetAutomatedBackupConfig()); err != nil {
+			return nil, err
+		}
+		next.AutoBackup = protoJSON(in.GetAutomatedBackupConfig())
+	}
+	syncACL := false
+	if set["acl_policy"] && in.GetAclPolicy() != r.AclPolicy {
+		m := clusterRE.FindStringSubmatch(r.Name)
+		if next.AclPolicy, err = c.attachPolicy(ctx, in.GetAclPolicy(), "projects/"+m[1]+"/locations/"+m[2]); err != nil {
+			return nil, err
+		}
+		syncACL = true
 	}
 	if set["node_type"] || set["redis_configs"] {
 		settings := serverConfigs(next.RedisConfigs)
@@ -1212,6 +1335,23 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	}
 	*r = next
 	op := c.newOperation(r.Name, "update")
+	if syncACL && !reshape {
+		// The policy's users on every node (aclpolicy.go), then done.
+		c.busy[r.Name] = op
+		snap, users := *r, c.aclUsers(r)
+		nodes := append([]*clusterNode(nil), r.Nodes...)
+		go func() {
+			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
+			defer cancel()
+			err := c.syncUsers(ctx, &snap, users, nodes)
+			c.mu.Lock()
+			delete(c.busy, snap.Name)
+			out := c.render(r)
+			c.mu.Unlock()
+			c.finish(op, out, err)
+		}()
+		return s.api.operation(op)
+	}
 	if !reshape {
 		c.finish(op, c.render(r), nil)
 		return s.api.operation(op)
