@@ -176,7 +176,7 @@ func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 				Section: retries, Default: fmt.Sprint(r.MaxDoublings),
 				Help: "How many times the interval between retries doubles before it grows linearly."},
 			{Name: "targetURI", Label: "URI override", Type: "text", Section: target,
-				Default: tv.uri, Pattern: `^(https?://[^/?#\s]+[^\s]*)?$`,
+				Default: tv.uri, Pattern: `^(https?://[^\/?#\s]+[^\s]*)?$`,
 				Help: "Optional. A URL whose scheme, host, port, path and query replace the task's on each dispatch " +
 					"(http_target.uri_override); empty for none."},
 			{Name: "targetMode", Label: "URI override mode", Type: "text", Section: target,

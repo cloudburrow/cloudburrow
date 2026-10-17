@@ -29,7 +29,7 @@ func (p cloudSQLMySQLProvider) engine() *sqladmin.MySQL {
 
 func userActions(withHost bool, note string) []console.Action {
 	name := console.Field{Name: "name", Label: "User name", Type: "text", Required: true,
-		Help: "Letters, digits, _, $ and -.", Pattern: `^[A-Za-z_][A-Za-z0-9_$-]{0,62}$`}
+		Help: "Letters, digits, _, $ and -.", Pattern: `^[A-Za-z_][A-Za-z0-9_$\-]{0,62}$`}
 	add := []console.Field{name, {Name: "password", Label: "Password", Type: "password", Help: note}}
 	del := []console.Field{name}
 	if withHost {

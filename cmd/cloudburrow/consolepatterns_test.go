@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -217,4 +220,55 @@ func unescapedLiteralHyphen(class string) (int, bool) {
 		return last, true
 	}
 	return 0, false
+}
+
+// TestEveryPatternLiteralIsValidInTheBrowser scans every Pattern literal in
+// the console's providers, not only the forms createForms lists: the Backup
+// and DR vault ID, the Memorystore and Cloud SQL instance IDs and others
+// shipped an unescaped trailing "-" the list did not reach, and the browser
+// refused Create backup vault's pattern (TestBackupDRVaultAndPlanThroughThePage).
+func TestEveryPatternLiteralIsValidInTheBrowser(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lit := regexp.MustCompile("Pattern:\\s*(?:`([^`]*)`|\"((?:[^\"\\\\]|\\\\.)*)\")")
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range lit.FindAllStringSubmatch(string(b), -1) {
+			pattern := m[1]
+			if m[1] == "" {
+				unq, err := strconv.Unquote(`"` + m[2] + `"`)
+				if err != nil {
+					continue
+				}
+				pattern = unq
+			}
+			for _, class := range characterClasses(pattern) {
+				if pos, bad := unescapedLiteralHyphen(class); bad {
+					t.Errorf("%s: pattern %q has an unescaped literal '-' at position %d of character class [%s], "+
+						"which the browser's v flag rejects", file, pattern, pos, class)
+				}
+				// "/" too must be escaped in a v-flag class: Export's
+				// ^gs://[^/]+/.+$ was refused (TestCloudSQLInstanceActionsThroughThePage).
+				for i := 0; i < len(class); i++ {
+					if class[i] == '\\' {
+						i++
+						continue
+					}
+					if class[i] == '/' {
+						t.Errorf("%s: pattern %q has an unescaped '/' in character class [%s], which the browser's v flag rejects",
+							file, pattern, class)
+						break
+					}
+				}
+			}
+		}
+	}
 }

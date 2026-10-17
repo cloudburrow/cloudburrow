@@ -71,7 +71,7 @@ func (p buildTriggersProvider) find(project, name string) (*cbpb.BuildTrigger, e
 
 func (buildTriggersProvider) CreateForm() (string, []console.Field) {
 	return "Create trigger", []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-zA-Z0-9][-a-zA-Z0-9_]{0,62}$"},
+		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-zA-Z0-9][\\-a-zA-Z0-9_]{0,62}$"},
 		{Name: "region", Label: "Region", Type: "text", Default: "global", Help: "global, or a region such as us-central1"},
 		{Name: "description", Label: "Description", Type: "text"},
 		{Name: "image", Label: "Step image", Type: "text", Required: true, Default: "alpine:3.20",
@@ -193,7 +193,7 @@ func (p buildWorkerPoolsProvider) List(_ context.Context, project string) (conso
 
 func (buildWorkerPoolsProvider) CreateForm() (string, []console.Field) {
 	return "Create worker pool", []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$"},
+		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$"},
 		{Name: "region", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
 		{Name: "machineType", Label: "Machine type", Type: "text", Default: "e2-standard-2"},
 	}
