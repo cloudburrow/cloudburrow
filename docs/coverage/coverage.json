@@ -655,6 +655,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:50 TestRunServiceCloudSQLMySQLVolume",
@@ -881,8 +882,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
-          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:733 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories",
+          "test/compat/artifactregistry_remote_test.go:212 TestGcloudArtifactsRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -915,7 +920,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
+          "test/compat/artifactregistry_formats_test.go:467 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
         ]
       },
@@ -923,7 +928,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository",
+          "test/compat/artifactregistry_formats_test.go:384 TestArtifactRegistryMavenRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -931,8 +936,9 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_formats_test.go:733 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -948,7 +954,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
+          "test/compat/artifactregistry_formats_test.go:467 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -956,7 +962,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
@@ -1004,21 +1010,21 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetMavenArtifact",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+          "test/compat/artifactregistry_formats_test.go:384 TestArtifactRegistryMavenRepository"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetNpmPackage",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1040,7 +1046,10 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_formats_test.go:733 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_remote_test.go:212 TestGcloudArtifactsRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1057,7 +1066,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
@@ -1074,7 +1083,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1082,14 +1091,14 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportAptArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports"
+          "test/compat/artifactregistry_formats_test.go:581 TestArtifactRegistryAptAndYumImports"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportYumArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports",
+          "test/compat/artifactregistry_formats_test.go:581 TestArtifactRegistryAptAndYumImports",
           "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata"
         ]
       },
@@ -1105,7 +1114,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository"
         ]
       },
       {
@@ -1113,22 +1123,24 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListMavenArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+          "test/compat/artifactregistry_formats_test.go:384 TestArtifactRegistryMavenRepository"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListNpmPackages",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
         ]
       },
       {
@@ -1136,7 +1148,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1144,7 +1156,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPythonPackages",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository"
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
         ]
       },
       {
@@ -1174,7 +1187,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1235,7 +1248,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
+          "test/compat/artifactregistry_formats_test.go:467 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -2103,8 +2116,7 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 61
+      "Verified": 76
     },
     "rows": [
       {
@@ -2189,38 +2201,52 @@
       },
       {
         "method": "run.namespaces.instances.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.replaceInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.start",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.stop",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.jobs.create",
@@ -2378,28 +2404,38 @@
       },
       {
         "method": "run.namespaces.workerpools.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.replaceWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.projects.authorizeddomains.list",
@@ -2459,18 +2495,24 @@
       },
       {
         "method": "run.projects.locations.instances.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.projects.locations.instances.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.projects.locations.instances.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.projects.locations.jobs.getIamPolicy",

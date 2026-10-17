@@ -48,8 +48,9 @@ var Regions = []string{
 
 // v1IAMRE is a v1 IAM call on a service or, as projects.locations.jobs
 // (#1420), a job, or, as projects.locations.workerpools (#1533), a worker
-// pool: the project, location, collection, ID and method.
-var v1IAMRE = regexp.MustCompile(`^/v1/projects/([^/]+)/locations/([^/]+)/(services|jobs|workerpools)/([^/:]+):(getIamPolicy|setIamPolicy|testIamPermissions)$`)
+// pool, or, as projects.locations.instances (#1546), an instance: the
+// project, location, collection, ID and method.
+var v1IAMRE = regexp.MustCompile(`^/v1/projects/([^/]+)/locations/([^/]+)/(services|jobs|workerpools|instances)/([^/:]+):(getIamPolicy|setIamPolicy|testIamPermissions)$`)
 
 // v1IAMServer is the v2 server whose IAM methods a v1 IAM call is.
 type v1IAMServer interface {
@@ -111,6 +112,10 @@ func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
 			v1Write(w, err, nil)
 			return
 		}
+	case "instances":
+		// v2's Instances has no IAM methods; the policy is stored beside
+		// the instance as a pool's is (#1546).
+		srv = s.Instances()
 	case "workerpools":
 		// v1's collection is workerpools, v2's workerPools. The pool's v2
 		// IAM methods find the pool, and answer NOT_FOUND for one that

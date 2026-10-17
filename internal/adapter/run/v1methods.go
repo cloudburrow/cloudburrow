@@ -6,10 +6,9 @@ package run
 // moves to served in the same change that builds it, and
 // TestV1EveryUnservedMethodIsNotImplemented holds the false ones to 501.
 //
-// Unserved: v1's Knative-shaped instances and worker pools, and the
-// instances' IAM methods. Both resources are served by v2 (the Instances and
-// WorkerPools services), which gcloud run worker-pools and the console call;
-// tools/coverage/reasons.json says why each v1 form is not.
+// Every method is served: v1's instances and worker pools, and the
+// instances' IAM methods, since #1546, through v2's Instances and
+// WorkerPools servers.
 func V1MethodStatuses() map[string]bool {
 	return map[string]bool{
 		"run.namespaces.authorizeddomains.list":                 true,
@@ -23,13 +22,13 @@ func V1MethodStatuses() map[string]bool {
 		"run.namespaces.executions.delete":                      true,
 		"run.namespaces.executions.get":                         true,
 		"run.namespaces.executions.list":                        true,
-		"run.namespaces.instances.create":                       false,
-		"run.namespaces.instances.delete":                       false,
-		"run.namespaces.instances.get":                          false,
-		"run.namespaces.instances.list":                         false,
-		"run.namespaces.instances.replaceInstance":              false,
-		"run.namespaces.instances.start":                        false,
-		"run.namespaces.instances.stop":                         false,
+		"run.namespaces.instances.create":                       true,
+		"run.namespaces.instances.delete":                       true,
+		"run.namespaces.instances.get":                          true,
+		"run.namespaces.instances.list":                         true,
+		"run.namespaces.instances.replaceInstance":              true,
+		"run.namespaces.instances.start":                        true,
+		"run.namespaces.instances.stop":                         true,
 		"run.namespaces.jobs.create":                            true,
 		"run.namespaces.jobs.delete":                            true,
 		"run.namespaces.jobs.get":                               true,
@@ -48,11 +47,11 @@ func V1MethodStatuses() map[string]bool {
 		"run.namespaces.services.replaceService":                true,
 		"run.namespaces.tasks.get":                              true,
 		"run.namespaces.tasks.list":                             true,
-		"run.namespaces.workerpools.create":                     false,
-		"run.namespaces.workerpools.delete":                     false,
-		"run.namespaces.workerpools.get":                        false,
-		"run.namespaces.workerpools.list":                       false,
-		"run.namespaces.workerpools.replaceWorkerPool":          false,
+		"run.namespaces.workerpools.create":                     true,
+		"run.namespaces.workerpools.delete":                     true,
+		"run.namespaces.workerpools.get":                        true,
+		"run.namespaces.workerpools.list":                       true,
+		"run.namespaces.workerpools.replaceWorkerPool":          true,
 		"run.projects.authorizeddomains.list":                   true,
 		"run.projects.locations.authorizeddomains.list":         true,
 		"run.projects.locations.configurations.get":             true,
@@ -61,9 +60,9 @@ func V1MethodStatuses() map[string]bool {
 		"run.projects.locations.domainmappings.delete":          true,
 		"run.projects.locations.domainmappings.get":             true,
 		"run.projects.locations.domainmappings.list":            true,
-		"run.projects.locations.instances.getIamPolicy":         false,
-		"run.projects.locations.instances.setIamPolicy":         false,
-		"run.projects.locations.instances.testIamPermissions":   false,
+		"run.projects.locations.instances.getIamPolicy":         true,
+		"run.projects.locations.instances.setIamPolicy":         true,
+		"run.projects.locations.instances.testIamPermissions":   true,
 		"run.projects.locations.jobs.getIamPolicy":              true,
 		"run.projects.locations.jobs.setIamPolicy":              true,
 		"run.projects.locations.jobs.testIamPermissions":        true,
