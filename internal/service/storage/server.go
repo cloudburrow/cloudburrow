@@ -230,6 +230,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		// No bucket is named "v2" (bucket names are 3 to 63 characters), so
 		// the Storage Control API's paths take nothing from the XML API.
 		s.serveControl(w, r)
+	case strings.HasPrefix(path, jsonPrefix+"v2/") && isIntelligencePath(strings.TrimPrefix(r.URL.Path, jsonPrefix+"v2/")):
+		// gcloud storage intelligence-configs, under the override
+		// gcloud-setup writes (intelligence.go).
+		s.serveIntelligence(w, r, strings.TrimPrefix(r.URL.Path, jsonPrefix+"v2/"))
 	case strings.HasPrefix(path, jsonPrefix):
 		if err := checkSystemParams(r); err != nil {
 			apierror.WriteStorageJSON(w, err)

@@ -7,8 +7,10 @@ package storage
 // gRPC client calls them (its REST client has no path for Anywhere Caches).
 // As grpc.go does, every call is the JSON API's own handler, served in
 // process (anywherecache.go, relocate.go), so the two APIs share one store.
-// The other StorageControl methods answer UNIMPLEMENTED: folders and managed
-// folders are served on the v2 REST surface (control.go) and the JSON API.
+// The IntelligenceConfig methods (#1519) call the store directly
+// (intelligence.go), as control.go's REST mapping of them does. The other
+// StorageControl methods answer UNIMPLEMENTED: folders and managed folders
+// are served on the v2 REST surface (control.go) and the JSON API.
 
 import (
 	"context"
@@ -341,4 +343,63 @@ func (o *grpcOperations) CancelOperation(ctx context.Context, req *longrunningpb
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
+}
+
+// controlGRPCError is a refusal of the store as the Storage Control API's
+// gRPC status, as control.go maps it on REST.
+func controlGRPCError(err error) error {
+	e, ok := err.(*httpError)
+	if !ok {
+		return grpcstatus.Errorf(codes.Internal, "%v", err)
+	}
+	_, s := controlStatus(e)
+	code := codes.Internal
+	for c := codes.OK; c <= codes.Unauthenticated; c++ {
+		if strings.EqualFold(strings.ReplaceAll(c.String(), "_", ""), strings.ReplaceAll(s, "_", "")) {
+			code = c
+		}
+	}
+	return grpcstatus.Error(code, e.message)
+}
+
+// The IntelligenceConfig methods (intelligence.go), one pair per kind.
+
+func (c *grpcControl) getIntelligence(name, kind string) (*controlpb.IntelligenceConfig, error) {
+	out, err := c.g.s.GetIntelligenceConfig(name, kind)
+	if err != nil {
+		return nil, controlGRPCError(err)
+	}
+	return out, nil
+}
+
+func (c *grpcControl) updateIntelligence(in *controlpb.IntelligenceConfig, paths []string, kind string) (*controlpb.IntelligenceConfig, error) {
+	out, err := c.g.s.UpdateIntelligenceConfig(in, paths, kind)
+	if err != nil {
+		return nil, controlGRPCError(err)
+	}
+	return out, nil
+}
+
+func (c *grpcControl) GetProjectIntelligenceConfig(_ context.Context, req *controlpb.GetProjectIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.getIntelligence(req.GetName(), "projects")
+}
+
+func (c *grpcControl) UpdateProjectIntelligenceConfig(_ context.Context, req *controlpb.UpdateProjectIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.updateIntelligence(req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "projects")
+}
+
+func (c *grpcControl) GetFolderIntelligenceConfig(_ context.Context, req *controlpb.GetFolderIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.getIntelligence(req.GetName(), "folders")
+}
+
+func (c *grpcControl) UpdateFolderIntelligenceConfig(_ context.Context, req *controlpb.UpdateFolderIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.updateIntelligence(req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "folders")
+}
+
+func (c *grpcControl) GetOrganizationIntelligenceConfig(_ context.Context, req *controlpb.GetOrganizationIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.getIntelligence(req.GetName(), "organizations")
+}
+
+func (c *grpcControl) UpdateOrganizationIntelligenceConfig(_ context.Context, req *controlpb.UpdateOrganizationIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.updateIntelligence(req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "organizations")
 }

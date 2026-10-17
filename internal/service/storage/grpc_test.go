@@ -210,7 +210,7 @@ func TestGRPCRegistryMatchesTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	for _, full := range GRPCMethods() {
+	for _, full := range append(GRPCMethods(), ControlGRPCMethods()...) {
 		want, ok := reg[full]
 		if !ok {
 			t.Errorf("%s has no registry entry", full)

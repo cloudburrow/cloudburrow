@@ -132,7 +132,10 @@ var areas = []area{
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
-		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"}},
+		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"},
+		// Folder capabilities (#1519) are v3 REST only: the Go v3 proto
+		// has no Capability, so they are named by their discovery IDs.
+		Extra: []string{"cloudresourcemanager.folders.capabilities.get", "cloudresourcemanager.folders.capabilities.patch"}},
 	// Resource Manager's JSON-only surface: v1 REST, which gcloud projects
 	// and Terraform's google_project and google_project_organization_policy
 	// call (#301, #1296), and liens (#1295), which have no gRPC service. A
@@ -167,7 +170,9 @@ var areas = []area{
 	// is registered under CloudBurrow's own name, since the CLI links the Go
 	// client's copy too, so its methods come from the server's service
 	// descriptor, under the name clients call.
-	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods()},
+	// Storage Control's IntelligenceConfig methods (#1519) are on the same
+	// port; its Anywhere Cache methods are named by the JSON API's rows.
+	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods(), Extra: gcs.ControlGRPCMethods()},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
 	// otherwise. Bigtable's instance admin service (#1331) is the Bigtable

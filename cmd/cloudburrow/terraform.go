@@ -46,6 +46,11 @@ type terraformEndpoint struct {
 
 var terraformEndpoints = []terraformEndpoint{
 	{config.ServiceStorage, "storage_custom_endpoint", "GOOGLE_STORAGE_CUSTOM_ENDPOINT", "/storage/v1/", true, ""},
+	// The Storage Control API's REST mapping (#1519), on the storage port:
+	// google_storage_control_project_, _folder_ and
+	// _organization_intelligence_config apply, plan clean, change and
+	// destroy in TestTerraformStorageIntelligenceConfigs.
+	{config.ServiceStorage, "storage_control_custom_endpoint", "GOOGLE_STORAGE_CONTROL_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	{config.ServicePubSub, "pubsub_custom_endpoint", "GOOGLE_PUBSUB_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Tasks (#366): a queue and its *_iam_member apply, plan clean and
 	// destroy through the JSON API in TestTerraformAppliesAndDestroysThroughTheWrapper.
@@ -159,6 +164,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
 	// in TestTerraformGoogleFolder.
 	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// google_resource_manager_capability (#1519): v3 folders.capabilities,
+	// which the provider reaches through its resource_manager3_ endpoint, in
+	// TestTerraformResourceManagerCapability.
+	{resourceManagerEndpoint, "resource_manager3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER3_CUSTOM_ENDPOINT", "/v3/", true, ""},
 	// google_tags_tag_key, _tag_value and _tag_binding (#1295): the tags
 	// services are Resource Manager v3, which the provider reaches through
 	// its own tags_ endpoint, in TestTerraformTagsAndLien.

@@ -121,7 +121,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// The Cloud Storage gRPC API's proto is registered under
 		// CloudBurrow's own name, so TestGRPCRegistryMatchesTheServer checks
 		// it in its own package (internal/service/storage).
-		if strings.HasPrefix(m, "google.storage.v2.") {
+		if strings.HasPrefix(m, "google.storage.v2.") || strings.HasPrefix(m, "google.storage.control.v2.") {
+			continue
+		}
+		// Folder capabilities are v3 REST only (#1519), checked over HTTP
+		// by TestFolderCapabilities (internal/service/resourcemanager).
+		if strings.HasPrefix(m, "cloudresourcemanager.folders.capabilities.") {
 			continue
 		}
 		methods = append(methods, m)
