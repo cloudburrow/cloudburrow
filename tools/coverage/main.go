@@ -81,6 +81,7 @@ import (
 	_ "cloud.google.com/go/run/apiv2/runpb"
 	_ "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	_ "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	_ "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
@@ -113,6 +114,9 @@ var areas = []area{
 	// repository calls and the builds SubmitBuild runs.
 	{Key: "artifactregistry", Title: "Artifact Registry", Own: true, Services: []string{"google.devtools.artifactregistry.v1.ArtifactRegistry"}},
 	{Key: "cloudbuild", Title: "Cloud Build", Own: true, Services: []string{"google.devtools.cloudbuild.v1.CloudBuild"}},
+	// Secure Source Manager (#1521), on the Run port: a repository is a git
+	// host whose pushes run Cloud Build triggers.
+	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.

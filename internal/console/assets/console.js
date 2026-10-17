@@ -47,6 +47,9 @@ const ROUTES = [
     product: "cloud-build", productTitle: "Cloud Build" },
   { path: "/cloud-build/worker-pools", service: "cloud-build-worker-pools", title: "Worker pools", section: "CI/CD",
     product: "cloud-build", productTitle: "Cloud Build" },
+  // Secure Source Manager's instances and repositories (#1527).
+  { path: "/secure-source-manager", service: "secure-source-manager", title: "Instances", section: "CI/CD",
+    product: "secure-source-manager", productTitle: "Secure Source Manager" },
   { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
@@ -280,6 +283,8 @@ const ICONS = {
   "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
+  // Secure Source Manager: a branch.
+  "secure-source-manager": '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
   // Cloud Functions: braces around a bolt.
   functions: '<path d="M8 4c-2 0-3 1-3 3v2l-2 3 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2l2 3-2 3v2c0 2-1 3-3 3"/><path d="M13 7l-3 5h4l-3 5"/>',
   // Artifact Registry: stacked boxes.

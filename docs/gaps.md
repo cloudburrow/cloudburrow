@@ -20,13 +20,13 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 2 | 0 | 1 | 1 | 0 |
+| Cloud Storage | 6 | 0 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 1 | 1 | 1 |
 | Cloud Tasks | 0 | 0 | 0 | 0 | 0 |
-| Cloud Run | 3 | 0 | 2 | 0 | 1 |
+| Cloud Run | 4 | 0 | 3 | 0 | 1 |
 | Cloud Scheduler | 1 | 0 | 0 | 0 | 1 |
-| Cloud Logging | 1 | 0 | 0 | 1 | 0 |
-| Cloud KMS | 5 | 0 | 1 | 3 | 1 |
+| Cloud Logging | 2 | 0 | 0 | 2 | 0 |
+| Cloud KMS | 7 | 0 | 2 | 4 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 1 | 0 | 0 | 1 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 10 | 7 | 3 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **80** | **22** | **31** | **21** | **6** |
+| **Total** | **88** | **22** | **37** | **23** | **6** |
 
 ## Cloud Storage
 
@@ -50,6 +50,10 @@ and object IAM on the JSON API are excluded (below).
 | Gap | Why open | Size |
 |---|---|---|
 | Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444). Google documents no error for a topic that does not exist (reporting-changes says only to create the topic first; gcloud and Terraform create it), so there is no documented refusal to answer instead; the 501 names the reason (#1505) (#1521) | no emulator support (needs Pub/Sub) | S |
+| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) (#1505) | no emulator support: enforcement needs what is not modelled | S |
+| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) (#1505) | no emulator support (no cache tier) | S |
+| `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) (#1505) | no emulator support (no cache tier) | M |
+| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) (#1505); rechecked (#1521): the notifications insert reference lists no error, only the `storage.buckets.update` permission, and the Pub/Sub notifications guides describe a missing topic or publisher grant only as a delivery failure, so no documented error replaces the 501 | no emulator support (needs Pub/Sub) | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
@@ -97,6 +101,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 | Gap | Why open | Size |
 |---|---|---|
 | Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, which the coverage page shows, as only `DOCKER` repositories are served (#1531); remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
+| Cloud Build: BuildTriggers with a repository source or a `filename` are refused 501 with the reason (their sources name GitHub, GitLab, Bitbucket, Cloud Source Repositories or Developer Connect connections, hosted services no instance runs); a repository whose pushes run builds is served as a Secure Source Manager repository with its `.cloudbuild/triggers.yaml`, as Google documents it, in the console and driven by gcloud and Terraform, its IAM policies stored, not enforced (#1521, #1527); Pub/Sub triggers are built (#1506). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 | Cloud Build: triggers with a repository source or a `filename` are refused 501 with the reason (they need a hosted git service: no Cloud Source Repositories, Secure Source Manager or Developer Connect is served, and Google's repository sources name hosted services, not local paths); Pub/Sub triggers are built (#1506). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) (#1521) | no emulator support: built; the rest is refused with its reason (a hosted git service, or package formats not served) | M |
 
@@ -124,6 +129,7 @@ and log scopes, with their console and the view IAM Terraform resources (#1519).
 | Gap | Why open | Size |
 |---|---|---|
 | A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, `Any` fields but `serviceData` (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built; `Duration` fields are `FLOAT` seconds, as Google's Log Analytics migration guide shows for `httpRequest.latency`, #1506) (#1521) | not documented by Google (the export page lists the `export_errors` columns without types, and `schemaErrorDetail` only as BigQuery's message); needs a live sink | S |
+| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, `Any` fields but `serviceData` (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built; `Duration` fields are `FLOAT` seconds, as Google's Log Analytics migration guide shows for `httpRequest.latency`, #1506); rechecked (#1521): "BigQuery schema for logs" names the error table's fields without types and says only that `schemaErrorDetail` "contains the complete error message returned by BigQuery"; the one `Any` mapping it states is audit logs' `request`, `response` and `metadata` as JSON strings in `*Json` columns, so the rest stays UNVERIFIED | not documented by Google (the export page lists the `export_errors` columns without types, and `schemaErrorDetail` only as BigQuery's message); needs a live sink | S |
 
 ## Cloud KMS
 
@@ -133,6 +139,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 | Gap | Why open | Size |
 |---|---|---|
 | Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) (#1506) (#1521) | no emulator support | M |
+| Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM); rechecked (#1521), still open there: the proto (kms v1.35.0) does define `SingleTenantHsmInstanceProposal.UpgradeKeyTrust` (an ACTIVE `AES_WRAPPING` version's name and a 2FA public key) and `Import`/`ExportTrustedKeyWrappedCryptoKeyVersion` ("the target key pre-wrapped on premises"), and the single-tenant guide names RFC 5649 (`aes-256-kwp`) wrapping, though the REST reference's proposal operations leave `upgradeKeyTrust` out and nothing states the wrapped material's encoding for asymmetric keys; not built yet | no emulator support | M |
+| `key_access_justifications_policy` is enforced (#1506): encrypt, decrypt and sign fail under a policy with no reasons, as documented, or without `CUSTOMER_INITIATED_ACCESS`, a local call's reason; the refusal's code and text (`FAILED_PRECONDITION`) are CloudBurrow's, and project and organization default policies are not served (#1452) | not documented by Google | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
 | Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted (#1445) | needs live GCP | S |

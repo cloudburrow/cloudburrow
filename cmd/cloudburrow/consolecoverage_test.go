@@ -36,7 +36,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "artifact-registry", "functions"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "secure-source-manager", "artifact-registry", "functions"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},

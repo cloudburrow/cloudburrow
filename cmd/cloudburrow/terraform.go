@@ -80,6 +80,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformCloudBuildTriggerAndWorkerPool (#1422).
 	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Secure Source Manager (#1521, #1527), on the Run port under its
+	// prefix: google_secure_source_manager_instance, _repository and their
+	// *_iam_member (stored, never enforced) apply, plan clean, update and
+	// destroy in TestTerraformSecureSourceManager.
+	{config.ServiceRun, "secure_source_manager_custom_endpoint", "GOOGLE_SECURE_SOURCE_MANAGER_CUSTOM_ENDPOINT", "/securesourcemanager/v1/", true, ""},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// buildpacks build and a Cloud Run service. google_cloudfunctions2_function
 	// applies, plans clean, updates in place and destroys in
@@ -314,6 +319,7 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 			unpointedPrefix{"google_cloud_run_", "this instance does not serve Cloud Run"},
 			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
 			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
+			unpointedPrefix{"google_secure_source_manager_", "this instance does not serve Secure Source Manager (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions_", "this instance does not serve Cloud Functions (it is on the Run port)"})
 	}

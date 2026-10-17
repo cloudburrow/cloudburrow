@@ -97,6 +97,11 @@ var gcloudVerified = []struct {
 	// v2/. TestGcloudFunctions drives deploy --gen2, describe, list and
 	// delete, gated as the Functions tests are.
 	{config.ServiceRun, "cloudfunctions", "/", false, false},
+	// Secure Source Manager (#1521, #1527), on the Run port under
+	// /securesourcemanager/, since its v1 paths are Artifact Registry's;
+	// gcloud source-manager appends v1/. TestGcloudSourceManager drives
+	// instances and repos create, describe, list, update and delete.
+	{config.ServiceRun, "securesourcemanager", "/securesourcemanager/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.

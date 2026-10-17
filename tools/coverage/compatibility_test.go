@@ -27,13 +27,15 @@ var compatSections = map[string]string{
 	// Served on the Run port for `gcloud run deploy --source` (#1347).
 	"artifactregistry": "## Cloud Run — `google.cloud.run.v2`",
 	"cloudbuild":       "## Cloud Run — `google.cloud.run.v2`",
-	"functions":        "## Functions and source builds",
-	"functionsv1":      "## Functions and source builds",
-	"scheduler":        "## Cloud Scheduler — `google.cloud.scheduler.v1`",
-	"logging":          "## Cloud Logging — `google.logging.v2`",
-	"kms":              "## Cloud KMS — `google.cloud.kms.v1`",
-	"secretmanager":    "## Secret Manager — `google.cloud.secretmanager.v1`",
-	"resourcemanager":  "## Resource Manager — `google.cloud.resourcemanager.v3`",
+	// Served on the Run port beside them (#1521).
+	"securesourcemanager": "## Cloud Run — `google.cloud.run.v2`",
+	"functions":           "## Functions and source builds",
+	"functionsv1":         "## Functions and source builds",
+	"scheduler":           "## Cloud Scheduler — `google.cloud.scheduler.v1`",
+	"logging":             "## Cloud Logging — `google.logging.v2`",
+	"kms":                 "## Cloud KMS — `google.cloud.kms.v1`",
+	"secretmanager":       "## Secret Manager — `google.cloud.secretmanager.v1`",
+	"resourcemanager":     "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	// v1 REST and liens (#1296, #1295): rows of the same section, naming
 	// each Verified method by its whole discovery ID
 	// (`cloudresourcemanager.projects.getOrgPolicy`).

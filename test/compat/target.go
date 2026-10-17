@@ -208,6 +208,7 @@ var gcloudOverrides = []struct {
 	{"artifactregistry", []string{"RUN"}},
 	{"cloudbuild", []string{"RUN"}},
 	{"cloudfunctions", []string{"RUN"}},
+	{"securesourcemanager", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},
