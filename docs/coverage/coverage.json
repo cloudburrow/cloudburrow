@@ -937,6 +937,7 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
         ]
       },
@@ -1067,7 +1068,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportYumArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports"
+          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports",
+          "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata"
         ]
       },
       {
