@@ -141,6 +141,21 @@ func (f front) updateDataset(w http.ResponseWriter, r *http.Request, dataset str
 			delete(next, k)
 		}
 	}
+	if v, ok := next["maxTimeTravelHours"]; ok || r.Method == http.MethodPut {
+		// #1503, changehistoryretention.go: the history older than the
+		// window it had, or the shorter it gets, is let go of first.
+		old, _ := jsonInt(current["maxTimeTravelHours"])
+		if old <= 0 {
+			old = 168
+		}
+		h, err := jsonInt(v)
+		if !ok || isNull(v) || err != nil || h <= 0 {
+			h = 168
+		}
+		if h != old {
+			f.pruneDataset(r, dataset, min(h, old))
+		}
+	}
 	delete(next, "etag")
 	next["lastModifiedTime"], _ = json.Marshal(strconv.FormatInt(f.now().UnixMilli(), 10))
 	body, err := json.Marshal(next)

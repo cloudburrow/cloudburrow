@@ -278,6 +278,7 @@ func (s *scriptRun) endTransaction(n scriptNode) *scriptFlow {
 		}
 		return flow
 	}
+	s.f.noteTransaction(s.r, s.q, txn.kept) // #1503, changehistorytxn.go
 	return nil
 }
 

@@ -45,8 +45,9 @@ import (
 // statement the client sent. Its costs: every write to every table is
 // written twice (CHANGES needs no history of a table without the option,
 // but APPENDS and time travel read any table's, and the option can be set
-// later), a DELETE or TRUNCATE copies the deleted rows, and the copies
-// are kept for seven days whatever the dataset's time travel window.
+// later), and a DELETE or TRUNCATE copies the deleted rows; what is older
+// than the dataset's time travel window is let go of (#1503,
+// changehistoryretention.go).
 // Measured (#1466, the engine alone, 50,000 rows inserted, 10,000 updated
 // and 10,000 deleted): the same insert time (the analysis dominates), an
 // UPDATE and a DELETE about three times as long, and a database about
@@ -195,6 +196,12 @@ func (f front) changeReads(w http.ResponseWriter, r *http.Request, q queryOption
 		if code != 0 {
 			return fail(c.dataset, code, reasonOf(code, "invalidQuery"), msg)
 		}
+		if c.name == "CHANGES" {
+			// #1503, changehistorytxn.go.
+			if at, ok := committedIn(f.tables.get(streamKey(project, c.dataset, c.table), str(meta, "creationTime")), start, stop); ok {
+				return fail(c.dataset, http.StatusBadRequest, "invalidQuery", committedRefused(ref, at))
+			}
+		}
 		cols := "*"
 		// The engine's START row marks when the change table was made
 		// (googlesqlite patch 0041, timetravel.go).
@@ -276,6 +283,7 @@ func (f front) changeWindow(r *http.Request, q queryOptions, c changeFunc, ref s
 		}
 	}
 	earliest := now - hours*int64(time.Hour/time.Microsecond)
+	_ = f.pruneHistory(r, c.dataset, c.table, earliest) // #1503, changehistoryretention.go: read within the window either way
 	createdMicros := created * 1000
 	// The history starts at the table's creation by the engine's clock,
 	// which follows the front's (the emulator keeps creationTime by the
