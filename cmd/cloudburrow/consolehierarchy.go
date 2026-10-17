@@ -72,7 +72,7 @@ func (p hierarchyProvider) folders() (map[string]resourcemanager.Folder, []resou
 
 const hierarchyNote = "One local organization, " + resourcemanager.OrganizationName + " (" + resourcemanager.OrganizationDomain +
 	"), fixed on every instance; folders nest under it up to 10 deep. A folder is deleted only when it is empty, " +
-	"and is then kept DELETE_REQUESTED for 30 days, when Undelete folder restores it. Folder and organization IAM policies are stored, never enforced and inherited by nothing (ADR-0006, #1368), and read through the API, gcloud and Terraform."
+	"and is then kept DELETE_REQUESTED for 30 days, when Undelete folder restores it. Folder and organization IAM policies are stored, never enforced and inherited by nothing (ADR-0006, #1368); a folder's is on its Permissions tab."
 
 func (p hierarchyProvider) List(context.Context, string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Folder ID", Columns: []string{"Name", "Path", "Parent", "Created"}, Noun: "folders", Note: hierarchyNote}

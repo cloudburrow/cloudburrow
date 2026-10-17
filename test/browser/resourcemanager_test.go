@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"github.com/chromedp/chromedp"
@@ -303,5 +304,89 @@ func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 	}
 	if len(sent) != 2 {
 		t.Errorf("Disable and Enable sent %d actions, want 2: %v", len(sent), sent)
+	}
+}
+
+// TestResourceHierarchyFolderPermissionsThroughTheTab (#1552), in the storage
+// shard. A folder's page has a Permissions tab, as Google's console offers
+// IAM on a folder picked in the resource selector: Grant access there is the
+// v3 Folders API's SetIamPolicy, which its GetIamPolicy reads back, and
+// Remove principal, confirmed by typing the principal back, empties it.
+func TestResourceHierarchyFolderPermissionsThroughTheTab(t *testing.T) {
+	needService(t, "hierarchy")
+	opts := rmClientOptions(t)
+	ctx := context.Background()
+	folders, err := resourcemanager.NewFoldersClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgs, err := resourcemanager.NewOrganizationsClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = folders.Close(); _ = orgs.Close() })
+	org, err := orgs.SearchOrganizations(ctx, &rmpb.SearchOrganizationsRequest{}).Next()
+	if err != nil {
+		t.Fatalf("SearchOrganizations: %v", err)
+	}
+	op, err := folders.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{
+		Parent: org.GetName(), DisplayName: fmt.Sprintf("Perms %d", time.Now().UnixNano()%1e8)}})
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	f, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := folders.DeleteFolder(context.Background(), &rmpb.DeleteFolderRequest{Name: f.GetName()}); err == nil {
+			_, _ = op.Wait(context.Background())
+		}
+	})
+	members := func() map[string]string {
+		pol, err := folders.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: f.GetName()})
+		if err != nil {
+			t.Fatalf("GetIamPolicy of %s: %v", f.GetName(), err)
+		}
+		out := map[string]string{}
+		for _, b := range pol.GetBindings() {
+			for _, m := range b.GetMembers() {
+				out[m] = b.GetRole()
+			}
+		}
+		return out
+	}
+	const role = "roles/resourcemanager.folderViewer"
+	ada := "user:ada@example.com"
+
+	p := open(t)
+	p.navigate("/resource-hierarchy/" + strings.TrimPrefix(f.GetName(), "folders/"))
+	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Permissions")`)
+	p.clickText("#view .tab-strip .tab", "Permissions")
+	p.waitFor(`document.querySelector("#grant-access") !== null`)
+	p.clickText("#view #grant-access", "Grant access")
+	p.waitFor(`document.querySelector(".modal.is-open #f-members") !== null`)
+	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
+		q("#f-members").value = %q; q("#f-members").dispatchEvent(new Event("input", { bubbles: true }));
+		q("#f-role").value = %q; q("#f-role").dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada, role), nil)
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`document.querySelectorAll("#permissions-table tbody tr").length === 1`)
+	if got := members(); got[ada] != role {
+		t.Errorf("after Grant access the Folders API reads %v; want %s holding %s", got, ada, role)
+	}
+
+	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+role), chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
+	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #confirm-input");
+		f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada), nil)
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`document.querySelector("#permissions-table") === null`)
+	if got := members(); len(got) != 0 {
+		t.Errorf("after Remove principal the Folders API reads %v", got)
+	}
+	if sent := p.posts("/api/permissions/hierarchy"); len(sent) != 2 {
+		t.Errorf("the grant and the removal sent %d requests, want 2: %v", len(sent), sent)
 	}
 }
