@@ -38,6 +38,14 @@ type OnPremises struct {
 	CaCertificate     string `json:"caCertificate,omitempty"`
 	ClientCertificate string `json:"clientCertificate,omitempty"`
 	ClientKey         string `json:"clientKey,omitempty"`
+	// SelectedObjects are the databases a PostgreSQL source's sync
+	// migrates (#1524); none is every database but the templates.
+	SelectedObjects []SelectedObject `json:"selectedObjects,omitempty"`
+}
+
+// SelectedObject is one of onPremisesConfiguration.selectedObjects.
+type SelectedObject struct {
+	Database string `json:"database"`
 }
 
 // SourceRep is a source representation instance.
@@ -62,6 +70,11 @@ type ExternalSource struct {
 	Password   string `json:"password,omitempty"`
 	Instance   string `json:"instance,omitempty"`
 	InstanceUp bool   `json:"instanceUp,omitempty"`
+	// Databases are a PostgreSQL source's selectedObjects (#1524).
+	Databases []string `json:"databases,omitempty"`
+	// SyncMode is startExternalSync's: "" (ONLINE), a dump and then
+	// replication, or OFFLINE, the dump alone (#1524).
+	SyncMode string `json:"syncMode,omitempty"`
 }
 
 // instanceServicePrefix and upMySQLService are the Services a created
@@ -72,8 +85,8 @@ const (
 	upMySQLService        = "cloudsql-mysql"
 )
 
-const externalPGWhy = "Cloud SQL replicates from an external server for MySQL; a PostgreSQL source is migrated by Database Migration Service " +
-	"(pglogical), which is not served"
+// upPostgresService is the Service of the PostgreSQL server `up` runs.
+const upPostgresService = "cloudsql"
 
 const dumpFileWhy = "a custom import replicates from a dump file in Cloud Storage written at a binary log position; " +
 	"use a managed import (no dumpFilePath), in which startExternalSync dumps the source's databases itself"
@@ -162,7 +175,9 @@ func (s *Server) insertSource(base, project string, b instanceBody) (any, error)
 	}
 	switch {
 	case strings.HasPrefix(b.DatabaseVersion, "POSTGRES_"):
-		return nil, unimplemented("a PostgreSQL source representation instance", externalPGWhy)
+		if op.DumpFilePath != "" {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: dumpFilePath is for a MySQL source; a PostgreSQL source is seeded by a managed import.")
+		}
 	case strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_"):
 		return nil, unimplemented("databaseVersion "+b.DatabaseVersion, sqlServerVersionWhy)
 	case !strings.HasPrefix(b.DatabaseVersion, "MYSQL_"):
@@ -278,11 +293,13 @@ func (s *Server) sourceRoute(r *http.Request, base, project string, rep *SourceR
 // prepareExternalReplica fills a replica's spec from the source
 // representation instance it replicates from.
 func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Spec) error {
-	if !strings.HasPrefix(rep.DatabaseVersion, "MYSQL_") {
-		return unimplemented("a replica of a PostgreSQL source representation instance", externalPGWhy)
-	}
 	if spec.DatabaseVersion == "" {
 		spec.DatabaseVersion = rep.DatabaseVersion
+	}
+	pg := strings.HasPrefix(rep.DatabaseVersion, "POSTGRES_")
+	if pg != strings.HasPrefix(spec.DatabaseVersion, "POSTGRES_") {
+		return Errorf(http.StatusBadRequest, "Invalid request: the replica's databaseVersion %s is not the engine of its source, %s.",
+			spec.DatabaseVersion, rep.DatabaseVersion)
 	}
 	if !SupportedVersions[spec.DatabaseVersion] {
 		return unimplemented("databaseVersion "+spec.DatabaseVersion, unservedVersionWhy(spec.DatabaseVersion))
@@ -322,6 +339,15 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 		return err
 	}
 	ext := &ExternalSource{Host: host, Port: port, User: user, Password: pass}
+	for _, o := range rep.OnPremises.SelectedObjects {
+		if o.Database != "" {
+			ext.Databases = append(ext.Databases, o.Database)
+		}
+	}
+	upService, enginePort, enginePrefix := upMySQLService, 3306, "MYSQL_"
+	if pg {
+		upService, enginePort, enginePrefix = upPostgresService, 5432, "POSTGRES_"
+	}
 	// hostPort may be another CloudBurrow instance's: the address of its
 	// tunnel on this machine, or its Service in the cluster (sqlinst-NAME,
 	// or cloudsql-mysql for the server `up` runs). The replica's server
@@ -329,12 +355,12 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 	short := strings.SplitN(host, ".", 2)[0]
 	s.emu.RLock()
 	for _, e := range s.engines {
-		if e.Addr() == rep.OnPremises.HostPort || (short == upMySQLService && port == 3306 && strings.HasPrefix(e.DatabaseVersion(), "MYSQL_")) {
+		if e.Addr() == rep.OnPremises.HostPort || (short == upService && port == enginePort && strings.HasPrefix(e.DatabaseVersion(), enginePrefix)) {
 			ext.Instance, ext.InstanceUp = e.Instance(), true
 		}
 	}
 	for n, c := range s.writes.byName {
-		if c.engine.Addr() == rep.OnPremises.HostPort || (short == instanceServicePrefix+n && port == 3306) {
+		if c.engine.Addr() == rep.OnPremises.HostPort || (short == instanceServicePrefix+n && port == enginePort) {
 			ext.Instance, ext.InstanceUp = n, false
 		}
 	}
@@ -370,12 +396,17 @@ func syncError(typ, detail string) map[string]any {
 // replicate from, as verifyExternalSyncSettings does: that it is reachable
 // with the replication user, has the privileges a managed import needs,
 // and logs GTID transactions in row format.
-func verifyExternalSync(ctx context.Context, spec Spec, addr string, started bool) []any {
+// An OFFLINE sync (#1524) only dumps: the binary log and the replication
+// privileges are not checked.
+func verifyExternalSync(ctx context.Context, spec Spec, addr string, started bool, offline bool) []any {
 	errs := []any{}
 	ext := spec.External
 	if started {
 		errs = append(errs, syncError("REPLICA_ALREADY_SETUP", "replication to the replica has already been started"))
 		return errs
+	}
+	if !spec.MySQL() {
+		return verifyPostgresSync(ctx, spec, addr, offline)
 	}
 	cfg := mysql.NewConfig()
 	cfg.User, cfg.Passwd, cfg.Net = ext.User, ext.Password, "tcp"
@@ -400,6 +431,9 @@ func verifyExternalSync(ctx context.Context, spec Spec, addr string, started boo
 		errs = append(errs, syncError("INCOMPATIBLE_DATABASE_VERSION",
 			fmt.Sprintf("the source runs MySQL %s and the replica %s; they must be the same major version", version, spec.DatabaseVersion)))
 	}
+	if offline {
+		logBin, gtid, format = 1, "ON", "ROW"
+	}
 	if logBin != 1 {
 		errs = append(errs, syncError("BINLOG_NOT_ENABLED", "the source's binary log is off (log_bin)"))
 	}
@@ -421,7 +455,11 @@ func verifyExternalSync(ctx context.Context, spec Spec, addr string, started boo
 		grants.WriteString(strings.ToUpper(g) + "\n")
 	}
 	all := strings.Contains(grants.String(), "GRANT ALL PRIVILEGES ON *.*")
-	for _, p := range []string{"REPLICATION SLAVE", "REPLICATION CLIENT", "SELECT", "SHOW VIEW", "RELOAD", "TRIGGER"} {
+	need := []string{"REPLICATION SLAVE", "REPLICATION CLIENT", "SELECT", "SHOW VIEW", "RELOAD", "TRIGGER"}
+	if offline {
+		need = need[2:]
+	}
+	for _, p := range need {
 		if !all && !strings.Contains(grants.String(), p) {
 			errs = append(errs, syncError("INSUFFICIENT_PRIVILEGE", "the replication user "+ext.User+" lacks "+p+" ON *.*"))
 		}
@@ -467,8 +505,7 @@ func decodeSync(r *http.Request) (syncRequest, error) {
 	switch req.SyncMode {
 	case "", "EXTERNAL_SYNC_MODE_UNSPECIFIED", "ONLINE":
 	case "OFFLINE":
-		return req, unimplemented("syncMode OFFLINE", "an offline sync copies the source's data once, with no replication after; "+
-			"an ONLINE sync dumps it and goes on replicating, which is served")
+		// A dump and load, with no replication after (#1524).
 	default:
 		return req, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for syncMode: %s.", req.SyncMode)
 	}
@@ -492,7 +529,7 @@ func (s *Server) verifyExternalSyncSettings(r *http.Request, project, name strin
 	s.emu.RLock()
 	spec := c.spec
 	s.emu.RUnlock()
-	errs := verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), spec.ExternalSyncStarted)
+	errs := verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), spec.ExternalSyncStarted, req.SyncMode == "OFFLINE")
 	if req.VerifyConn {
 		var conn []any
 		for _, e := range errs {
@@ -527,7 +564,7 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: replication to %s has already been started.", name)
 	}
 	if !req.SkipVerification {
-		if errs := verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), false); len(errs) > 0 {
+		if errs := verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), false, req.SyncMode == "OFFLINE"); len(errs) > 0 {
 			var d []string
 			for _, e := range errs {
 				m := e.(map[string]any)
@@ -542,6 +579,12 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress.")
 	}
 	c.spec.ExternalSyncStarted = true
+	ext := *c.spec.External
+	ext.SyncMode = ""
+	if req.SyncMode == "OFFLINE" {
+		ext.SyncMode = "OFFLINE"
+	}
+	c.spec.External = &ext
 	c.state = "MAINTENANCE"
 	err = s.saveLocked()
 	s.emu.Unlock()
@@ -552,3 +595,11 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 	go s.bringUp(name, op["name"].(string))
 	return op, nil
 }
+
+// LogicalDecodingFlags are the Cloud SQL flags Google documents for a
+// Cloud SQL for PostgreSQL instance that is an external primary's source
+// (#1524): cloudsql.logical_decoding sets the server's wal_level to
+// logical; cloudsql.enable_pglogical, which loads pglogical, is recorded,
+// as the sync uses PostgreSQL's built-in logical replication instead
+// (components.CloudSQLInstanceBackend).
+var LogicalDecodingFlags = map[string]bool{"cloudsql.logical_decoding": true, "cloudsql.enable_pglogical": true}

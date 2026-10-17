@@ -44,6 +44,9 @@ type Postgres struct {
 	User     string // the server's superuser
 	Database string // the database it was initialised with
 	HostAddr func() string
+	// Logical is a replica of a PostgreSQL external primary (#1524),
+	// which replicates by subscriptions, not as a standby.
+	Logical bool
 }
 
 func (p *Postgres) Instance() string        { return p.Name }
