@@ -26,9 +26,10 @@ package resourcemanager
 // A policy is kept in the registry's store beside its resource, so it has
 // the registry's persistence and snapshots. It goes with the resource: a
 // project or folder purged after RetentionPeriod loses it, and so does a
-// project ID registered again. /admin/reset clears them (ResetIAM), as it
-// clears every other service's stored policies; the projects themselves are
-// a registry reset does not touch.
+// project ID registered again (purge.go, #1537). /admin/reset clears them
+// (ResetProjectState, which ResetIAM is the IAM part of), as it clears every
+// other service's stored policies; the projects themselves are a registry
+// reset does not touch.
 
 import (
 	"context"
@@ -98,7 +99,7 @@ func (r *Registry) loadIAMLocked(resource string) (*iampolicy.Stored, error) {
 // must exist; one pending deletion has its policy still.
 func (r *Registry) IAMPolicy(resource string) (*iampolicy.Stored, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if _, err := r.iamTargetLocked(resource); err != nil {
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func (r *Registry) IAMPolicy(resource string) (*iampolicy.Stored, error) {
 // every other change to one is.
 func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	deleting, err := r.iamTargetLocked(resource)
 	if err != nil {
 		return nil, err
@@ -145,7 +146,7 @@ func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest)
 // cmd/cloudburrow); the projects, folders and organization stay.
 func (r *Registry) ResetIAM(project string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if project != "" {
 		_ = r.st.Delete(iamKey("projects/" + project))
 		return nil

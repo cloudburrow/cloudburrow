@@ -61,8 +61,7 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 		Items:      out,
 		Total:      len(out),
 		Note: "Projects are a local registry. Deleting one marks it DELETE_REQUESTED for 30 days, " +
-			"when Undelete project on its page restores it, and then removes the registration; " +
-			"never the resources created under it, which live in the services that own them.",
+			"when Undelete project on its page restores it; then it is purged with what every service keeps under it (#1537).",
 	}, nil
 }
 
@@ -135,9 +134,10 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"Absent: billing, which returns UNIMPLEMENTED " +
 			"rather than a plausible answer.\n\n" +
 			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
-			"does, and Undelete project restores it until then. It changes the " +
-			"registration only: resources created under the identifier live in the " +
-			"services that own them, and are not reached by a delete here.",
+			"does, and Undelete project restores it, whole, until then. Then it is " +
+			"purged (or at once with Purge project now): its IAM and org policies, " +
+			"tags, liens, API states and the resources every service that can reset " +
+			"one project keeps under it go too, and its ID is free (#1537).",
 	}
 
 	return console.Detail{
@@ -255,6 +255,10 @@ func (p projectsProvider) Delete(ctx context.Context, project, name string) erro
 // projectUndelete is the Undelete project action on a deleted project.
 const projectUndelete = "undelete"
 
+// projectPurge is Purge project now on a deleted project (#1537): the purge
+// Google makes 30 days after the delete, now, as POST /admin/purge does.
+const projectPurge = "purge"
+
 // DetailActions implements console.PathActor: Undelete project, on a project
 // pending deletion only (#1216).
 func (p projectsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
@@ -266,7 +270,9 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 		return nil
 	}
 	if project.State == resourcemanager.StateDeleteRequested {
-		return []console.Action{{ID: projectUndelete, Label: "Undelete project"}}
+		return []console.Action{{ID: projectUndelete, Label: "Undelete project"},
+			{ID: projectPurge, Label: "Purge project now", Destructive: true,
+				Confirm: "the project and everything kept under it in every service, which Google drops 30 days after the delete; its ID is then free"}}
 	}
 	out := []console.Action{{ID: projectMove, Label: "Move project", Fields: []console.Field{
 		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions()[1:], Default: project.Parent,
@@ -306,6 +312,8 @@ func (p projectsProvider) ActAt(_ context.Context, _ string, path []string, acti
 	case projectUndelete:
 		_, err := p.registry.Undelete(path[0])
 		return err
+	case projectPurge:
+		return p.registry.Purge(path[0])
 	case projectMove:
 		_, err := p.registry.Move(path[0], values["parent"])
 		return err

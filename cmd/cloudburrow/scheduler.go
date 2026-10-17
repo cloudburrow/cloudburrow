@@ -229,6 +229,25 @@ func (r *schedulerResetter) Reset(context.Context) error {
 	return st.Reset()
 }
 
+// ResetProject deletes one project's jobs (#1537). A job's name begins with
+// its project, so this is exact.
+func (r *schedulerResetter) ResetProject(_ context.Context, project string) error {
+	st := r.svc.Store()
+	if st == nil {
+		return errors.New("Cloud Scheduler has not started")
+	}
+	jobs, err := st.List("projects/" + project + "/")
+	if err != nil {
+		return err
+	}
+	for _, j := range jobs {
+		if err := st.Delete(j.Name); err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("delete job %s: %w", j.Name, err)
+		}
+	}
+	return nil
+}
+
 // schedulerSeeder creates Cloud Scheduler jobs from a seed document (#600).
 //
 // Each job becomes the CreateJob request an SDK client would send, is

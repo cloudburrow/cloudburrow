@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -380,6 +381,40 @@ func (r *loggingResetter) Reset(context.Context) error {
 			if err := db.Delete(k); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// ResetProject removes one project's entries, metrics, sinks, exclusions,
+// buckets, views, links and settings (#1537). Every record is kept under
+// logging/{collection}/{project ID, as named}/..., and a project's ID or
+// number names it.
+func (r *loggingResetter) ResetProject(_ context.Context, project string) error {
+	if r.svc == nil || r.svc.store == nil {
+		return errors.New("Cloud Logging is not enabled")
+	}
+	number := strconv.FormatInt(resource.ProjectNumber(project), 10)
+	r.svc.store.ResetProject(project, number)
+	db := r.svc.db
+	if db == nil {
+		return nil
+	}
+	keys, err := db.List("logging/")
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		_, rest, ok := strings.Cut(strings.TrimPrefix(k, "logging/"), "/")
+		if !ok {
+			continue
+		}
+		seg, _, _ := strings.Cut(rest, "/")
+		if seg != project && seg != number {
+			continue
+		}
+		if err := db.Delete(k); err != nil {
+			return err
 		}
 	}
 	return nil

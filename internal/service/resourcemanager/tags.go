@@ -194,7 +194,7 @@ func (r *Registry) CreateLien(in Lien) (Lien, error) {
 		return Lien{}, apierror.InvalidArgument("lien origin is required, at most 200 characters")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	p, err := r.resolveProjectLocked(in.Parent)
 	if err != nil {
 		return Lien{}, err
@@ -231,14 +231,14 @@ func (r *Registry) GetLien(name string) (Lien, error) {
 		return Lien{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.getLien(id)
 }
 
 // Liens lists the liens on a project, oldest first.
 func (r *Registry) Liens(parent string) ([]Lien, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	p, err := r.resolveProjectLocked(parent)
 	if err != nil {
 		return nil, err
@@ -274,7 +274,7 @@ func (r *Registry) DeleteLien(name string) error {
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if _, err := r.getLien(id); err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func (r *Registry) CreateTagKey(in *rmpb.TagKey, validateOnly bool) (*rmpb.TagKe
 		return nil, apierror.InvalidArgument("purpose GCE_FIREWALL requires purpose_data network")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	ns, err := r.tagNamespaceLocked(in.GetParent())
 	if err != nil {
 		return nil, err
@@ -420,7 +420,7 @@ func (r *Registry) tagKeyLocked(name string) (*rmpb.TagKey, string, error) {
 // TagKey returns one tag key.
 func (r *Registry) TagKey(name string) (*rmpb.TagKey, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	k, _, err := r.tagKeyLocked(name)
 	return k, err
 }
@@ -428,14 +428,14 @@ func (r *Registry) TagKey(name string) (*rmpb.TagKey, error) {
 // AllTagKeys returns every tag key.
 func (r *Registry) AllTagKeys() ([]*rmpb.TagKey, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return listProtos(r, tagKeyPrefix, func() *rmpb.TagKey { return &rmpb.TagKey{} })
 }
 
 // TagKeys lists the tag keys under parent.
 func (r *Registry) TagKeys(parent string) ([]*rmpb.TagKey, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	ns, err := r.tagNamespaceLocked(parent)
 	if err != nil {
 		return nil, err
@@ -488,7 +488,7 @@ func (r *Registry) UpdateTagKey(in *rmpb.TagKey, paths []string, validateOnly bo
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	k, id, err := r.tagKeyLocked(in.GetName())
 	if err != nil {
 		return nil, err
@@ -507,7 +507,7 @@ func (r *Registry) UpdateTagKey(in *rmpb.TagKey, paths []string, validateOnly bo
 // DeleteTagKey removes a tag key that has no values.
 func (r *Registry) DeleteTagKey(name, etag string, validateOnly bool) (*rmpb.TagKey, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	k, id, err := r.tagKeyLocked(name)
 	if err != nil {
 		return nil, err
@@ -546,7 +546,7 @@ func (r *Registry) CreateTagValue(in *rmpb.TagValue, validateOnly bool) (*rmpb.T
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	k, _, err := r.tagKeyLocked(in.GetParent())
 	if err != nil {
 		return nil, err
@@ -587,7 +587,7 @@ func (r *Registry) tagValueLocked(name string) (*rmpb.TagValue, string, error) {
 // TagValue returns one tag value.
 func (r *Registry) TagValue(name string) (*rmpb.TagValue, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	v, _, err := r.tagValueLocked(name)
 	return v, err
 }
@@ -595,7 +595,7 @@ func (r *Registry) TagValue(name string) (*rmpb.TagValue, error) {
 // TagValues lists a tag key's values.
 func (r *Registry) TagValues(parent string) ([]*rmpb.TagValue, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if _, _, err := r.tagKeyLocked(parent); err != nil {
 		return nil, err
 	}
@@ -616,7 +616,7 @@ func (r *Registry) TagValues(parent string) ([]*rmpb.TagValue, error) {
 // "{org_id|project_id}/{key_short_name}/{short_name}".
 func (r *Registry) NamespacedTagValue(namespaced string) (*rmpb.TagValue, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.namespacedTagValueLocked(namespaced)
 }
 
@@ -647,7 +647,7 @@ func (r *Registry) UpdateTagValue(in *rmpb.TagValue, paths []string, validateOnl
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	v, id, err := r.tagValueLocked(in.GetName())
 	if err != nil {
 		return nil, err
@@ -667,7 +667,7 @@ func (r *Registry) UpdateTagValue(in *rmpb.TagValue, paths []string, validateOnl
 // nothing.
 func (r *Registry) DeleteTagValue(name, etag string, validateOnly bool) (*rmpb.TagValue, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	v, id, err := r.tagValueLocked(name)
 	if err != nil {
 		return nil, err
@@ -792,7 +792,7 @@ func (r *Registry) CreateTagBinding(in *rmpb.TagBinding, validateOnly bool) (*rm
 		return nil, apierror.InvalidArgument("tag_binding is required")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	target, err := r.canonicalTargetLocked(in.GetParent())
 	if err != nil {
 		return nil, err
@@ -838,7 +838,7 @@ func (r *Registry) CreateTagBinding(in *rmpb.TagBinding, validateOnly bool) (*rm
 // TagBindings lists the bindings on one resource.
 func (r *Registry) TagBindings(parent string) ([]*rmpb.TagBinding, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	target, err := r.canonicalTargetLocked(parent)
 	if err != nil {
 		return nil, err
@@ -868,7 +868,7 @@ func (r *Registry) DeleteTagBinding(name string) error {
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	target, err := r.canonicalTargetLocked(parent)
 	if err != nil {
 		return apierror.NotFound("tag binding %s not found: %v", name, err)
@@ -887,7 +887,7 @@ func (r *Registry) DeleteTagBinding(name string) error {
 // ancestors give it, a nearer value of a key replacing a farther one.
 func (r *Registry) EffectiveTags(parent string) ([]*rmpb.EffectiveTag, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	target, err := r.canonicalTargetLocked(parent)
 	if err != nil {
 		return nil, err
@@ -965,7 +965,7 @@ func (r *Registry) CreateTagHold(parent string, in *rmpb.TagHold, validateOnly b
 		return nil, apierror.InvalidArgument("tag_hold holder and origin are at most 200 characters")
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	_, vid, err := r.tagValueLocked(parent)
 	if err != nil {
 		return nil, err
@@ -1002,7 +1002,7 @@ func (r *Registry) TagHolds(parent, filter string) ([]*rmpb.TagHold, error) {
 		}
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	_, vid, err := r.tagValueLocked(parent)
 	if err != nil {
 		return nil, err
@@ -1038,7 +1038,7 @@ func (r *Registry) DeleteTagHold(name string) error {
 		return apierror.InvalidArgument("tag hold name %q must be tagValues/{id}/tagHolds/{id}", name)
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	k := tagHoldPrefix + vid + "/" + hid
 	if _, err := r.st.Get(k); err != nil {
 		return apierror.NotFound("tag hold %s not found", name)

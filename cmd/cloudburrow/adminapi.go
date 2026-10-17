@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 	"net/http"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,6 +50,9 @@ type adminDeps struct {
 	// registry is the project registry, for its IAM policies' reset (#1368);
 	// read at reset time for the same reason.
 	registry func() *resourcemanager.Registry
+	// serviceUsage is the Service Usage API, for its per-project API
+	// states' reset (#1537); read at reset time for the same reason.
+	serviceUsage func() *serviceusage.Server
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -111,6 +117,11 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		// those; the projects themselves are a registry and stay.
 		api.RegisterResetter(&projectIAMResetter{registry: d.registry})
 	}
+	if d.serviceUsage != nil {
+		// Which APIs each project disabled, and the operations that did it
+		// (#1537), kept in the registry's store.
+		api.RegisterResetter(&serviceUsageResetter{srv: d.serviceUsage})
+	}
 
 	// State snapshots (#289): the services whose state is theirs to keep,
 	// and, for every other enabled service, the reason it is left out.
@@ -159,6 +170,27 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	return api
 }
 
+// purgeTimeout bounds the per-project resets a purge runs: a Pub/Sub or
+// Storage reset goes through a tunnel that may be gone.
+const purgeTimeout = 2 * time.Minute
+
+// wirePurge makes a project's purge delete its state in every service that
+// can reset one project (#1537), as Google drops a purged project's
+// resources, and serves POST /admin/purge from the registry. The registry
+// purges its own state; "resourcemanager" is skipped here for that reason.
+func wirePurge(api *admin.API, reg *resourcemanager.Registry) {
+	reg.OnPurge(func(project string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), purgeTimeout)
+		defer cancel()
+		var errs []error
+		for name, err := range api.PurgeProject(ctx, project, "resourcemanager") {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+		return errors.Join(errs...)
+	})
+	api.SetPurger(func(_ context.Context, project string) error { return reg.Purge(project) })
+}
+
 // adminHandler is the admin API's routes on a mux of their own, with its
 // token check, for the console's fault screen to call in process (#800).
 func adminHandler(api *admin.API) http.Handler {
@@ -200,6 +232,21 @@ func (t *tasksResetter) deleteQueues(prefix string) error {
 		}
 		if err := st.DeleteQueue(q.Name); err != nil {
 			return fmt.Errorf("delete queue %s: %w", q.Name, err)
+		}
+	}
+	// And the project's CMEK configs and batch-create deduplication
+	// records (#1537), which name their project as queues do.
+	if db := t.svc.db; db != nil {
+		for _, kind := range []string{"tasks/cmek/", "tasks/batches/"} {
+			keys, err := db.List(kind + prefix)
+			if err != nil {
+				return err
+			}
+			for _, k := range keys {
+				if err := db.Delete(k); err != nil {
+					return fmt.Errorf("delete %s: %w", k, err)
+				}
+			}
 		}
 	}
 	return nil

@@ -217,6 +217,9 @@ type API struct {
 	// localModels manages the local AI models (#1396), the same manager
 	// the console's Local models page drives; nil until `up` sets it.
 	localModels localai.Actions
+	// purger is POST /admin/purge's (purge.go, #1537); nil without a
+	// project registry.
+	purger func(ctx context.Context, project string) error
 }
 
 // NewAPI returns an admin API.
@@ -241,6 +244,7 @@ func (a *API) RegisterSeeder(s Seeder) { a.seeds[s.Name()] = s }
 func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/reset", a.authorized(a.handleReset))
 	mux.HandleFunc("POST /admin/seed", a.authorized(a.handleSeed))
+	mux.HandleFunc("POST /admin/purge", a.authorized(a.handlePurge))
 	mux.HandleFunc("GET /admin/events", a.authorized(a.handleEvents))
 	mux.HandleFunc("POST /admin/state/export", a.authorized(a.handleStateExport))
 	mux.HandleFunc("POST /admin/state/import", a.authorized(a.handleStateImport))

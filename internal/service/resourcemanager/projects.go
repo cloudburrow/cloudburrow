@@ -97,6 +97,10 @@ const keyPrefix = "resourcemanager/projects/"
 type Registry struct {
 	mu sync.Mutex
 	st store.Store
+	// onPurge are the OnPurge hooks, and purged the projects purged since
+	// r.mu was taken, whose hooks unlock runs (purge.go).
+	onPurge []func(projectID string) error
+	purged  []string
 	// now is the clock deletion and purging read; a test sets it.
 	now func() time.Time
 }
@@ -142,7 +146,7 @@ func (r *Registry) register(p Project) (Project, error) {
 			"project ID %q cannot be stored", p.ProjectID)
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.registerLocked(p)
 }
 
@@ -165,9 +169,12 @@ func (r *Registry) registerLocked(p Project) (Project, error) {
 		p.CreateTime = r.now().UTC().Format(time.RFC3339)
 	}
 	p.DeleteTime = ""
-	// A project made under a purged one's ID starts with no policy, as on
-	// Google (#1368).
-	r.dropIAM(p.Name)
+	// A project made under a purged one's ID starts with nothing the
+	// registry keeps for a project, as on Google (#1368, #1537): state an
+	// earlier version left behind at the purge goes now.
+	if err := r.dropProjectStateLocked(p.ProjectID); err != nil {
+		return Project{}, err
+	}
 
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -187,7 +194,7 @@ func (r *Registry) registerLocked(p Project) (Project, error) {
 // field mask over displayName and labels and nothing else.
 func (r *Registry) Update(id, displayName string, labels map[string]string) (Project, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 
 	// Read under the same lock as the write. Reading through Get would drop the
 	// lock between the two, so two concurrent updates could each write a project
@@ -229,7 +236,7 @@ func (r *Registry) put(p Project) error {
 }
 
 // load reads a project record, purging it when it has been pending deletion
-// for longer than RetentionPeriod. The caller holds r.mu, or reads only.
+// for longer than RetentionPeriod. The caller holds r.mu.
 func (r *Registry) load(id string) (Project, error) {
 	b, err := r.st.Get(key(id))
 	if err != nil {
@@ -241,8 +248,7 @@ func (r *Registry) load(id string) (Project, error) {
 	}
 	if p.State == StateDeleteRequested {
 		if t, err := time.Parse(time.RFC3339, p.DeleteTime); err == nil && !r.now().Before(t.Add(RetentionPeriod)) {
-			_ = r.st.Delete(key(id))
-			r.dropIAM("projects/" + id)
+			r.purgeLocked(id)
 			return Project{}, apierror.NotFound("project %q not found", id)
 		}
 	}
@@ -274,7 +280,7 @@ func (r *Registry) EnsureExists(id string) (Project, error) {
 // GetProject returns it; one past RetentionPeriod is purged and not found.
 func (r *Registry) Get(id string) (Project, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.load(id)
 }
 
@@ -317,13 +323,13 @@ func (r *Registry) Active() ([]Project, error) {
 // (#1216). It is kept for RetentionPeriod, during which Undelete restores it
 // and its ID cannot be used again, and is then purged.
 //
-// It changes the registration and nothing else. Resources created under the
-// identifier live in the services that own them, and a delete here does not
-// reach into those, which is stated rather than implied, because a delete
-// that silently left data behind would be the worse surprise.
+// It changes the registration and nothing else: until the purge the project
+// keeps everything under it, so Undelete restores it whole. The purge drops
+// what the registry and, through OnPurge, the other services keep for it
+// (#1537).
 func (r *Registry) Delete(id string) (Project, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	p, err := r.load(id)
 	if err != nil {
 		return Project{}, err
@@ -344,7 +350,7 @@ func (r *Registry) Delete(id string) (Project, error) {
 // Undelete restores a project pending deletion to ACTIVE.
 func (r *Registry) Undelete(id string) (Project, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	p, err := r.load(id)
 	if err != nil {
 		return Project{}, err
@@ -361,7 +367,7 @@ func (r *Registry) Undelete(id string) (Project, error) {
 // or, empty, nowhere.
 func (r *Registry) Move(id, parent string) (Project, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	p, err := r.load(id)
 	if err != nil {
 		return Project{}, err

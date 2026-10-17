@@ -95,7 +95,7 @@ func (r *Registry) SetFolderCapability(folder, capability string, value bool) (C
 		return Capability{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock() // runs the purge hooks of a management project dropped below
 	f, err := r.loadFolder("folders/" + folder)
 	if err != nil {
 		return Capability{}, err
@@ -120,9 +120,9 @@ func (r *Registry) SetFolderCapability(folder, capability string, value bool) (C
 	case !value && has:
 		f.Capabilities = slices.DeleteFunc(f.Capabilities, func(c string) bool { return c == name })
 		if capability == appManagement && f.ManagementProject != "" {
-			// Permanently: no DELETE_REQUESTED, no undelete.
-			_ = r.st.Delete(key(strings.TrimPrefix(f.ManagementProject, "projects/")))
-			r.dropIAM(f.ManagementProject)
+			// Permanently: no DELETE_REQUESTED, no undelete. A purge, so the
+			// project's state goes with it in every service (#1537).
+			r.purgeLocked(strings.TrimPrefix(f.ManagementProject, "projects/"))
 			f.ManagementProject = ""
 		}
 	default:

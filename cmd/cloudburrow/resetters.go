@@ -23,12 +23,13 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 )
 
-// projectIAMResetter clears the IAM policies Resource Manager stores on
-// projects, folders and the organization (#1368, ADR-0006). The registry
-// itself is not reset: projects are what the other services' state is
-// scoped by.
+// projectIAMResetter clears what Resource Manager stores on projects, folders
+// and the organization: IAM policies (#1368, ADR-0006), and org policies,
+// liens and tags (#1537). The projects and folders are not reset: projects
+// are what the other services' state is scoped by.
 type projectIAMResetter struct {
 	registry func() *resourcemanager.Registry
 }
@@ -39,13 +40,32 @@ func (r *projectIAMResetter) Reset(context.Context) error {
 	return r.ResetProject(context.Background(), "")
 }
 
-// ResetProject clears one project's policy, or every policy for "".
+// ResetProject clears one project's state, or every resource's for "".
 func (r *projectIAMResetter) ResetProject(_ context.Context, project string) error {
 	reg := r.registry()
 	if reg == nil {
 		return nil
 	}
-	return reg.ResetIAM(project)
+	return reg.ResetProjectState(project)
+}
+
+// serviceUsageResetter forgets which APIs each project disabled, and the
+// operations that changed them (#1537).
+type serviceUsageResetter struct {
+	srv func() *serviceusage.Server
+}
+
+func (r *serviceUsageResetter) Name() string { return "serviceusage" }
+
+func (r *serviceUsageResetter) Reset(ctx context.Context) error { return r.ResetProject(ctx, "") }
+
+// ResetProject forgets one project's, or every project's for "".
+func (r *serviceUsageResetter) ResetProject(_ context.Context, project string) error {
+	srv := r.srv()
+	if srv == nil {
+		return nil
+	}
+	return srv.ResetProject(project)
 }
 
 // Resetters for the services /admin/reset did not reach.
