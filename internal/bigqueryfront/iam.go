@@ -203,6 +203,24 @@ func (p *iamPolicies) bindings(key, created string) []iampolicy.Binding {
 	return nil
 }
 
+// ids returns, sorted, the IDs of the resources of kind of the project's
+// dataset that have a policy kept (OBJECT_PRIVILEGES reads those alone,
+// infoschemaprivileges.go): one kept for a resource since gone or made
+// again is dropped when it is next read (currentLocked).
+func (p *iamPolicies) ids(project, dataset, kind string) []string {
+	prefix := iamKey(project, dataset, kind, "")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for key := range p.policies {
+		if id, ok := strings.CutPrefix(key, prefix); ok && id != "" {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // get returns key's policy.
 func (p *iamPolicies) get(key, created string, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
 	p.mu.Lock()

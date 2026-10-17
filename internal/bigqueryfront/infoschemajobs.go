@@ -312,15 +312,15 @@ func modelTypeSQL(qs map[string]any) string {
 // message of why it cannot.
 func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, string) {
 	project := projectOf(f.base)
+	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378, #1559)
+		if sub := f.everyJobRows(r, project); sub != "" {
+			return sub, 0, ""
+		}
+	}
 	listed := &engineList{}
 	jobs, status, msg := f.listedJobs(r, filter, listed)
 	if status != 0 {
 		return "", status, msg
-	}
-	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378)
-		if sub := f.tableRowsOrRetry(r, project, jobs, listed.last); sub != "" {
-			return sub, 0, ""
-		}
 	}
 	kept := filter.apply(project, jobs)
 	if filter != nil && len(kept) > jobsLiteralMax {
@@ -334,7 +334,7 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 				return "", status, msg
 			}
 		}
-		if sub := f.tableRowsOrRetry(r, project, jobs, listed.last); sub != "" {
+		if sub := f.lockedTableRows(r, project, jobs, listed.last); sub != "" {
 			return sub, 0, ""
 		}
 	}
@@ -521,7 +521,13 @@ var regionColumns = map[string]string{"VIEWS": viewsColumns, "TABLES": tablesCol
 	"PARAMETERS": parametersColumns, "ROUTINE_OPTIONS": routineOptionsColumns, "TABLE_SNAPSHOTS": snapshotsColumns,
 	"SEARCH_INDEXES": searchIndexesColumns, "VECTOR_INDEXES": vectorIndexesColumns}
 
-// datasetIDs lists the project's datasets.
+// datasetIDs lists the project's datasets, but the front's own
+// (frontDataset): the region views had the rows of _cloudburrow_dropped's
+// copies of deleted tables (dropped.go), which no client made, and read
+// every one of them (#1559). Measured on an instance late in the CI
+// emulators shard's run (391 copies, 2026-10-17): a query of region
+// OBJECT_PRIVILEGES took 7.7 s, reading each copy's tables.get, and the
+// test's four took 30 s on this machine, more than its minute on CI.
 func (f front) datasetIDs(r *http.Request) ([]string, int, string) {
 	var out []string
 	token := ""
@@ -543,7 +549,9 @@ func (f front) datasetIDs(r *http.Request) ([]string, int, string) {
 			return nil, http.StatusInternalServerError, "cloudburrow: could not list the datasets: " + errorMessage(got, st)
 		}
 		for _, d := range list.Datasets {
-			out = append(out, d.DatasetReference.DatasetID)
+			if id := d.DatasetReference.DatasetID; !frontDataset(id) {
+				out = append(out, id) // not the front's own (#1559)
+			}
 		}
 		if list.NextPageToken == "" || list.NextPageToken == token {
 			break

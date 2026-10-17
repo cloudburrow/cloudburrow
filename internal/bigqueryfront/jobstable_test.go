@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -54,6 +55,8 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 			t.Fatalf("%s: %d %v", q, code, got)
 		}
 	}
+	// auto1 is still running when its row is first written.
+	emu.jobs["auto1"]["status"] = map[string]any{"state": "RUNNING"}
 	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
 	table := "`" + resultsDataset + "`.`" + jobsTableName + "`"
 	run := func(sql string) []string {
@@ -80,10 +83,13 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 	if len(sent) != 1 || strings.Contains(sent[0], table) || !strings.Contains(sent[0], "UNNEST(ARRAY<") {
 		t.Fatalf("filtered JOBS query sent %q, want a literal", sent)
 	}
-	// A job that changed, and one that is gone.
+	// A job that finished since (its row was not DONE), and one deleted
+	// through the front (noteMade): the query lists only those and the
+	// new ones (#1559).
 	emu.jobs["auto1"]["status"] = map[string]any{"state": "DONE", "errorResult": map[string]any{"reason": "x", "message": "y"}}
 	delete(emu.jobs, "auto2")
 	emu.order = append(emu.order[:1], emu.order[2:]...)
+	do(t, h, "DELETE", base+"/jobs/auto2/delete", "")
 	sent = run(count)
 	if len(sent) != 3 || !strings.HasPrefix(sent[0], "DELETE FROM "+table+" WHERE job_id IN (") ||
 		!strings.Contains(sent[0], "'auto1'") || !strings.Contains(sent[0], "'auto2'") ||
@@ -414,5 +420,27 @@ func TestJobsBatchBoundsAnInsert(t *testing.T) {
 		if got := jobsBatch(c.rows); got != c.want {
 			t.Errorf("jobsBatch of %d rows: %d, want %d", len(c.rows), got, c.want)
 		}
+	}
+}
+
+// TestJobsTableOverflowListsEveryJob (#1559): once pending has dropped a
+// change (jobsPendingMax), the next query of every job lists them all.
+func TestJobsTableOverflowListsEveryJob(t *testing.T) {
+	var j jobsTable
+	if j.incremental("p") {
+		t.Fatal("a table not made is synced incrementally")
+	}
+	j.setMade("p", true)
+	if !j.incremental("p") {
+		t.Fatal("a made table is not synced incrementally")
+	}
+	for i := range jobsPendingMax + 1 {
+		j.noteMade("p", fmt.Sprint("job", i))
+	}
+	if j.incremental("p") {
+		t.Fatal("a table whose pending overflowed is synced incrementally")
+	}
+	if !j.incremental("p") {
+		t.Fatal("the overflow outlived the query that lists every job")
 	}
 }

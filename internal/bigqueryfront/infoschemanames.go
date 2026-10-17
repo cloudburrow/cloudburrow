@@ -79,6 +79,11 @@ var nameColumns = map[string]struct {
 	"ROUTINES":        {[]string{"routine_schema", "specific_schema"}, ""},
 	"PARAMETERS":      {[]string{"specific_schema"}, ""},
 	"ROUTINE_OPTIONS": {[]string{"specific_schema"}, ""},
+	// A table's row names its dataset in object_schema and itself in
+	// object_name; a dataset's row has object_schema NULL, which = never
+	// keeps, and names the dataset in object_name (infoschemaprivileges.go,
+	// #1559).
+	"OBJECT_PRIVILEGES": {[]string{"object_schema"}, "object_name"},
 }
 
 // pushedNameFilter is the filter of the reference sql[pos:end] to view,
