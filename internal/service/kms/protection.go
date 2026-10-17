@@ -19,33 +19,20 @@ import (
 // and ImportJob.attestation are always absent, the FULL view included,
 // rather than faked. No quota is applied to either level.
 //
-// EXTERNAL and EXTERNAL_VPC keys are kept in an external key manager that
-// Cloud KMS reaches over the Cloud EKM protocol, which no local key manager
-// speaks. #1469 looked for one to run: Google publishes no specification or
-// reference server of that protocol, its EKM partners' managers are
-// commercial, and no open-source implementation exists (Cosmian KMS serves
-// Workspace client-side encryption and Azure's EKM proxy, not Cloud EKM).
-// A key manager built here would be guessed behaviour, so they stay
-// UNIMPLEMENTED, and so do crypto_key_backend (an
-// EkmConnection for EXTERNAL_VPC, or a single-tenant HSM instance) and
-// external_protection_level_options. HSM_SINGLE_TENANT needs a single-tenant
-// HSM instance, which the HsmManagement service would create; it is
-// UNIMPLEMENTED too.
-
-// errExternal is why the external protection levels are UNIMPLEMENTED.
-const errExternal = "%s %s is not implemented: EXTERNAL and EXTERNAL_VPC keys live in an external key manager reached over the Cloud EKM protocol, and CloudBurrow runs none"
+// EXTERNAL and EXTERNAL_VPC keys are served with the instance acting as
+// the external key manager (external.go, #1469). HSM_SINGLE_TENANT needs a
+// single-tenant HSM instance, which the HsmManagement service would create;
+// it is UNIMPLEMENTED.
 
 // protectionLevelOf validates a requested protection level: unset is
-// SOFTWARE; SOFTWARE and HSM are served, the others are UNIMPLEMENTED naming
-// field.
+// SOFTWARE; SOFTWARE, HSM, EXTERNAL and EXTERNAL_VPC are served, and
+// HSM_SINGLE_TENANT is UNIMPLEMENTED naming field.
 func protectionLevelOf(field string, pl kmspb.ProtectionLevel) (kmspb.ProtectionLevel, error) {
 	switch pl {
 	case kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED, kmspb.ProtectionLevel_SOFTWARE:
 		return kmspb.ProtectionLevel_SOFTWARE, nil
-	case kmspb.ProtectionLevel_HSM:
+	case kmspb.ProtectionLevel_HSM, kmspb.ProtectionLevel_EXTERNAL, kmspb.ProtectionLevel_EXTERNAL_VPC:
 		return pl, nil
-	case kmspb.ProtectionLevel_EXTERNAL, kmspb.ProtectionLevel_EXTERNAL_VPC:
-		return 0, apierror.Unimplemented(errExternal, field, pl)
 	case kmspb.ProtectionLevel_HSM_SINGLE_TENANT:
 		return 0, apierror.Unimplemented("%s %s is not implemented: it needs a single-tenant HSM instance, which CloudBurrow does not provide", field, pl)
 	}

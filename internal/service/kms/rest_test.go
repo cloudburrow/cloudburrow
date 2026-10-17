@@ -37,9 +37,10 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		{"GET", "/v1/projects/demo-project/locations/no-such-region", 404},
 		// GetOperation is served since #1452, for CreateKeyHandle.
 		{"GET", "/v1/projects/demo-project/locations/global/operations/o", 404},
-		// HsmManagement and VerifyConnectivity stay 501 (#1452).
+		// HsmManagement stays 501 (#1452); VerifyConnectivity is served
+		// (#1469), so an absent connection is NOT_FOUND.
 		{"GET", "/v1/projects/demo-project/locations/global/singleTenantHsmInstances", 501},
-		{"GET", "/v1/projects/demo-project/locations/global/ekmConnections/c:verifyConnectivity", 501},
+		{"GET", "/v1/projects/demo-project/locations/global/ekmConnections/c:verifyConnectivity", 404},
 		{"DELETE", kr, 501},
 		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:decrypt", 404}, // decrypt binds cryptoKeys/* only
 		{"POST", kr + ":getIamPolicy", 404},                             // getIamPolicy is GET only

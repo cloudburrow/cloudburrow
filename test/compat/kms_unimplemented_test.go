@@ -133,8 +133,7 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65}}, "algorithm"},
 		"X-Wing": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_KEY_ENCAPSULATION,
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_KEM_XWING}}, "algorithm"},
-		"EXTERNAL":           {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_EXTERNAL)}, "protection_level"},
-		"EXTERNAL_VPC":       {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_EXTERNAL_VPC)}, "protection_level"},
+		"HSM_SINGLE_TENANT":  {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_HSM_SINGLE_TENANT)}, "protection_level"},
 		"import_only":        {&kmspb.CryptoKey{Purpose: sym, ImportOnly: true}, "import_only"},
 		"crypto_key_backend": {&kmspb.CryptoKey{Purpose: sym, CryptoKeyBackend: ring.GetName()}, "crypto_key_backend"},
 	} {
