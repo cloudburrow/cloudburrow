@@ -93,13 +93,15 @@ func TestBigQueryModelsSectionAndPage(t *testing.T) {
 
 // TestBigQueryModelPageResults: a KMEANS model's page shows its
 // centroids, a LOGISTIC_REG model's its confusion matrix, a PCA model's
-// its components, and a MATRIX_FACTORIZATION model's its recommendations
-// and factors, from the ML functions the front answers (#1481, #1504).
+// its components, a MATRIX_FACTORIZATION model's its recommendations and
+// factors, and a boosted tree model's its feature importance, from the ML
+// functions the front answers (#1481, #1504).
 func TestBigQueryModelPageResults(t *testing.T) {
 	models := map[string]string{
 		"km": `"modelType":"KMEANS","trainingRuns":[{"evaluationMetrics":{"clusteringMetrics":{"daviesBouldinIndex":0.1,"meanSquaredDistance":1.5}}}]`,
 		"lg": `"modelType":"LOGISTIC_REGRESSION","trainingRuns":[{"evaluationMetrics":{"multiClassClassificationMetrics":{"aggregateClassificationMetrics":{"accuracy":0.9}}}}]`,
 		"pc": `"modelType":"PCA","trainingRuns":[{"evaluationMetrics":{"dimensionalityReductionMetrics":{"totalExplainedVarianceRatio":0.75}}}]`,
+		"bt": `"modelType":"BOOSTED_TREE_REGRESSOR","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
 		"mf": `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
 	}
 	rows := func(fields, rows string) string {
@@ -123,6 +125,9 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		case strings.Contains(q, "ML.CONFUSION_MATRIX"):
 			fmt.Fprint(w, rows(`{"name":"expected_label","type":"STRING"},{"name":"a","type":"INTEGER"},{"name":"b","type":"INTEGER"}`,
 				`{"f":[{"v":"a"},{"v":"7"},{"v":"1"}]},{"f":[{"v":"b"},{"v":"0"},{"v":"9"}]}`))
+		case strings.Contains(q, "ML.FEATURE_IMPORTANCE"):
+			fmt.Fprint(w, rows(`{"name":"feature","type":"STRING"},{"name":"importance_weight","type":"INTEGER"},{"name":"importance_gain","type":"FLOAT"},`+
+				`{"name":"importance_cover","type":"FLOAT"}`, `{"f":[{"v":"x"},{"v":"20"},{"v":"3.5"},{"v":"10"}]}`))
 		case strings.Contains(q, "ML.RECOMMEND"):
 			fmt.Fprint(w, rows(`{"name":"predicted_rating","type":"FLOAT"},{"name":"user","type":"INTEGER"},{"name":"item","type":"STRING"}`,
 				`{"f":[{"v":"4.5"},{"v":"7"},{"v":"film"}]}`))
@@ -148,6 +153,7 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"km": {"Centroids", "Value:11.5", "a=0.25", "Davies-Bouldin index"},
 		"lg": {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
 		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
+		"bt": {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
 		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})

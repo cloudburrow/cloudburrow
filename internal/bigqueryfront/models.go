@@ -29,10 +29,10 @@ import (
 // ML.TRAINING_INFO (modelfuncs.go). Training is modeltrain.go's.
 //
 // Served model types: LINEAR_REG, LOGISTIC_REG, KMEANS and PCA (#1481),
-// and explicit MATRIX_FACTORIZATION (modelmf.go, #1504). Refused 501
-// with the reason: the other types (their training is Google's, and either
-// undocumented in the detail a faithful result needs, as for boosted
-// trees, DNNs and ARIMA_PLUS, or Google's
+// explicit MATRIX_FACTORIZATION (modelmf.go) and BOOSTED_TREE_* (modeltree.go,
+// #1504). Refused 501 with the reason: the other types (their training is
+// Google's, and either undocumented in the detail a faithful result needs,
+// as for DNNs and ARIMA_PLUS, or Google's
 // infrastructure itself: AUTOML_*, imported TENSORFLOW/ONNX/XGBOOST models
 // read from Cloud Storage, and remote models over a Cloud resource
 // connection, which CloudBurrow has none of); a TRANSFORM clause; and the
@@ -252,7 +252,8 @@ func (md bqModel) resource(full bool) map[string]any {
 		"creationTime":     ms(md.Created),
 		"lastModifiedTime": ms(md.Modified),
 		"modelType": map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA",
-			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION"}[md.Options.ModelType],
+			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION", "BOOSTED_TREE_REGRESSOR": "BOOSTED_TREE_REGRESSOR",
+			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -371,15 +372,23 @@ func (md bqModel) resource(full bool) map[string]any {
 			"learnRateStrategy":     o.LearnRateStrat,
 			"optimizationStrategy":  t.Strategy,
 		}
-		if o.LearnRateStrat == "CONSTANT" {
+		switch {
+		case isBoostedTree(o.ModelType):
+			for _, k := range []string{"learnRateStrategy", "optimizationStrategy", "l1Regularization"} {
+				delete(opts, k)
+			}
+			opts["learnRate"], opts["l1Regularization"], opts["maxTreeDepth"] = o.LearnRate, o.L1, ms(int64(o.MaxTreeDepth))
+			opts["minSplitLoss"], opts["minTreeChildWeight"], opts["boosterType"], opts["treeMethod"] = o.MinSplitLoss, ms(int64(o.MinChildWeight)), o.BoosterType, o.TreeMethod
+			opts["subsample"], opts["numParallelTree"] = 1.0, "1"
+		case o.LearnRateStrat == "CONSTANT":
 			opts["learnRate"] = o.LearnRate
-		} else {
+		default:
 			opts["initialLearnRate"] = o.InitLearnRate
 		}
 		if o.SplitCol != "" {
 			opts["dataSplitColumn"] = o.SplitCol
 		}
-		if o.ModelType == "LOGISTIC_REG" {
+		if o.ModelType == "LOGISTIC_REG" || o.ModelType == "BOOSTED_TREE_CLASSIFIER" {
 			opts["lossType"] = "MEAN_LOG_LOSS"
 		} else {
 			opts["lossType"] = "MEAN_SQUARED_LOSS"
@@ -389,7 +398,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			metrics = map[string]any{"multiClassClassificationMetrics": map[string]any{
 				"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
 					"accuracy": num("accuracy"), "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")}}}
-		case o.ModelType == "LOGISTIC_REG":
+		case o.ModelType == "LOGISTIC_REG" || o.ModelType == "BOOSTED_TREE_CLASSIFIER":
 			metrics = map[string]any{"binaryClassificationMetrics": map[string]any{
 				"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
 					"accuracy": num("accuracy"), "threshold": 0.5, "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")},
@@ -584,8 +593,6 @@ type modelDDL struct {
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
 // why.
 var unsupportedModelTypes = map[string]string{
-	"BOOSTED_TREE_REGRESSOR":         "it is XGBoost trained by Google, with tree-building details BigQuery does not document",
-	"BOOSTED_TREE_CLASSIFIER":        "it is XGBoost trained by Google, with tree-building details BigQuery does not document",
 	"RANDOM_FOREST_REGRESSOR":        "its training is random and Google's",
 	"RANDOM_FOREST_CLASSIFIER":       "its training is random and Google's",
 	"DNN_REGRESSOR":                  "it is a TensorFlow network trained on Google's infrastructure",
@@ -686,13 +693,16 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
 		return d, true, 501, "Not implemented here: model_type " + d.opts.ModelType + ": " + why +
-			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA and MATRIX_FACTORIZATION models. Nothing was run."
+			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION and BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER models. Nothing was run."
 	}
 	if c, m := checkModelOptions(d.opts); c != 0 {
 		return d, true, c, m
 	}
 	if d.opts.ModelType == "MATRIX_FACTORIZATION" {
 		applyMFDefaults(&d.opts)
+	}
+	if isBoostedTree(d.opts.ModelType) {
+		applyTreeDefaults(&d.opts)
 	}
 	if i >= len(stmt) || !stmt[i].is("AS") {
 		return d, true, 400, "CREATE MODEL of model_type " + d.opts.ModelType + " requires a query (AS SELECT ...)"
@@ -848,6 +858,53 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				o.ItemCol = s
 			default:
 				o.RatingCol = s
+			}
+		case "max_tree_depth", "num_parallel_tree":
+			v, ok := num()
+			if !ok || v != float64(int(v)) || v < 1 {
+				return bad()
+			}
+			if name == "num_parallel_tree" {
+				if v != 1 {
+					return 501, "Not implemented here: num_parallel_tree other than 1 (a boosted random forest draws its trees' rows at random). Nothing was run."
+				}
+				continue
+			}
+			o.MaxTreeDepth = int(v)
+		case "min_split_loss", "min_tree_child_weight":
+			v, ok := num()
+			if !ok || v < 0 {
+				return bad()
+			}
+			if name == "min_split_loss" {
+				o.MinSplitLoss = v
+			} else {
+				o.MinChildWeight = v
+			}
+		case "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode":
+			v, ok := num()
+			if !ok || v <= 0 || v > 1 {
+				return bad()
+			}
+			if v != 1 {
+				return 501, "Not implemented here: " + name + " other than 1.0: it samples rows or columns at random, as Google's XGBoost draws them. " +
+					"CloudBurrow builds every tree on every row and column. Nothing was run."
+			}
+		case "booster_type", "tree_method":
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			s = strings.ToUpper(s)
+			switch {
+			case name == "booster_type" && s == "GBTREE":
+				o.BoosterType = s
+			case name == "tree_method" && (s == "AUTO" || s == "EXACT"):
+				o.TreeMethod = s
+			case name == "booster_type" && s == "DART", name == "tree_method" && (s == "APPROX" || s == "HIST"):
+				return 501, "Not implemented here: " + name + " " + s + "; CloudBurrow builds GBTREE boosters by the exact greedy method. Nothing was run."
+			default:
+				return bad()
 			}
 		case "num_factors":
 			v, ok := num()
@@ -1005,7 +1062,8 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				"optimize_strategy, l1_reg, l2_reg, max_iterations, learn_rate_strategy, learn_rate, ls_init_learn_rate, early_stop, " +
 				"min_rel_progress, data_split_method, data_split_eval_fraction, data_split_col, category_encoding_method, num_clusters, " +
 				"kmeans_init_method, kmeans_init_col, distance_type, standardize_features, num_principal_components, " +
-				"pca_explained_variance_ratio, scale_features, pca_solver, feedback_type, user_col, item_col, rating_col and num_factors. Nothing was run."
+				"pca_explained_variance_ratio, scale_features, pca_solver, feedback_type, user_col, item_col, rating_col, num_factors, " +
+				"max_tree_depth, min_split_loss, min_tree_child_weight, booster_type, tree_method, num_parallel_tree, subsample and colsample_*. Nothing was run."
 		}
 	}
 	return 0, ""
@@ -1020,6 +1078,10 @@ var modelTypeOptions = map[string][]string{
 	"KMEANS": {"num_clusters", "kmeans_init_method", "kmeans_init_col", "distance_type", "standardize_features", "max_iterations",
 		"early_stop", "min_rel_progress", "warm_start"},
 	"PCA": {"num_principal_components", "pca_explained_variance_ratio", "scale_features", "pca_solver"},
+	"BOOSTED_TREE_REGRESSOR": {"input_label_cols", "max_iterations", "learn_rate", "l1_reg", "l2_reg", "early_stop", "min_rel_progress",
+		"data_split_method", "data_split_eval_fraction", "data_split_col", "category_encoding_method", "enable_global_explain", "max_tree_depth",
+		"min_split_loss", "min_tree_child_weight", "booster_type", "tree_method", "num_parallel_tree", "subsample", "colsample_bytree",
+		"colsample_bylevel", "colsample_bynode"},
 	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
 		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
@@ -1030,6 +1092,9 @@ func checkModelOptions(o mlOptions) (int, string) {
 	allowed, ok := modelTypeOptions[o.ModelType]
 	if o.ModelType == "LOGISTIC_REG" {
 		allowed, ok = append(append([]string(nil), modelTypeOptions["LINEAR_REG"]...), "auto_class_weights"), true
+	}
+	if o.ModelType == "BOOSTED_TREE_CLASSIFIER" {
+		allowed, ok = append(append([]string(nil), modelTypeOptions["BOOSTED_TREE_REGRESSOR"]...), "auto_class_weights"), true
 	}
 	if !ok {
 		return 400, "Invalid model_type: " + o.ModelType

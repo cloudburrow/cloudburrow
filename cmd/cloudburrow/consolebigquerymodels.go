@@ -236,7 +236,8 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 // confusion matrix (LOGISTIC_REG, ML.CONFUSION_MATRIX) or principal
 // components (PCA, ML.PRINCIPAL_COMPONENT_INFO and
 // ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481), or
-// recommendations and factors (MATRIX_FACTORIZATION, #1504).
+// recommendations and factors (MATRIX_FACTORIZATION, #1504), or feature
+// importance (BOOSTED_TREE_*, #1504).
 func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
 	model := fmt.Sprintf("MODEL `%s.%s.%s`", p.project, datasetID, modelID)
 	read := func(sql string) (bigquery.Schema, [][]bigquery.Value) {
@@ -331,6 +332,19 @@ func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.C
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "components", Label: "Components", Listing: l}}
+	case "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER":
+		// Each feature's importance (ML.FEATURE_IMPORTANCE, #1504).
+		_, rows := read("SELECT feature, importance_weight, importance_gain, importance_cover FROM ML.FEATURE_IMPORTANCE(" + model + ") ORDER BY feature")
+		if len(rows) == 0 {
+			return nil
+		}
+		l := console.Listing{Columns: []string{"Splits", "Mean gain", "Mean cover"}, NameColumn: "Feature", Noun: "features"}
+		for _, r := range rows {
+			l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Splits": fmt.Sprint(r[1]),
+				"Mean gain": num(r[2]), "Mean cover": num(r[3])}})
+		}
+		l.Total = len(l.Items)
+		return []console.Section{{ID: "importance", Label: "Feature importance", Listing: l}}
 	case "MATRIX_FACTORIZATION":
 		// The highest predicted ratings (ML.RECOMMEND), and each user's
 		// and item's intercept and factor weights (ML.WEIGHTS) (#1504).

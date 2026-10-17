@@ -70,6 +70,12 @@ type mlOptions struct {
 	PCAVarRatio   float64 `json:"pcaExplainedVarianceRatio,omitempty"`
 	ScaleFeatures bool    `json:"scaleFeatures"`
 	PCASolver     string  `json:"pcaSolver,omitempty"`
+	// BOOSTED_TREE_* (modeltree.go).
+	MaxTreeDepth   int     `json:"maxTreeDepth,omitempty"`
+	MinSplitLoss   float64 `json:"minSplitLoss,omitempty"`
+	MinChildWeight float64 `json:"minTreeChildWeight,omitempty"`
+	BoosterType    string  `json:"boosterType,omitempty"`
+	TreeMethod     string  `json:"treeMethod,omitempty"`
 	// MATRIX_FACTORIZATION (modelmf.go).
 	NumFactors   int    `json:"numFactors,omitempty"`
 	FeedbackType string `json:"feedbackType,omitempty"`
@@ -191,6 +197,10 @@ type mlTrained struct {
 	// (binary) or the predicted class index (multiclass).
 	EvalY     []float64 `json:"evalY,omitempty"`
 	EvalScore []float64 `json:"evalScore,omitempty"`
+	// Trees are a boosted tree model's trees, BaseScore its starting score
+	// (modeltree.go).
+	Trees     [][]mlNode `json:"trees,omitempty"`
+	BaseScore float64    `json:"baseScore,omitempty"`
 	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
 	MF *mfTrained `json:"mf,omitempty"`
 }
@@ -273,7 +283,7 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("Unable to find the data split column '%s' in the input data", opts.SplitCol)
 	}
 	t.Label, t.LabelType = cols[li].Name, mlTypeOf(cols[li].Type)
-	logistic := opts.ModelType == "LOGISTIC_REG"
+	logistic := opts.ModelType == "LOGISTIC_REG" || opts.ModelType == "BOOSTED_TREE_CLASSIFIER"
 	if t.LabelType == "" || (!logistic && !(mlFeature{Type: t.LabelType}).numeric()) || (logistic && t.LabelType != "STRING" && t.LabelType != "BOOL" && t.LabelType != "INT64") {
 		return t, mlInvalid("Label column %s has an unsupported type %s for model type %s", cols[li].Name, cols[li].Type, opts.ModelType)
 	}
@@ -400,6 +410,13 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 	var EY []float64
 	for _, i := range eval {
 		EX, EY = append(EX, encode(i)), append(EY, y[i])
+	}
+	if isBoostedTree(opts.ModelType) {
+		if len(t.Classes) > 2 {
+			return t, mlUnimplemented("a multiclass BOOSTED_TREE_CLASSIFIER (%d labels): CloudBurrow trains binary boosted tree classifiers", len(t.Classes))
+		}
+		t.trainBoosted(opts, X, Y, EX, EY, logistic)
+		return t, nil
 	}
 	dim := len(X[0])
 	multi := logistic && len(t.Classes) > 2
@@ -1129,6 +1146,13 @@ func rocAUC(y, p []float64) float64 {
 // values, by name (a missing name is NULL): the linear value, or the
 // positive class's probability.
 func (t mlTrained) predictRow(vals map[string]*string) float64 {
+	if len(t.Trees) > 0 {
+		z := t.treeMargin(t.encodeRow(vals))
+		if len(t.Classes) == 2 {
+			return sigmoid(z)
+		}
+		return z
+	}
 	z := t.Intercept
 	for _, ft := range t.Features {
 		x := encodeFeature(ft, vals[strings.ToLower(ft.Name)])
