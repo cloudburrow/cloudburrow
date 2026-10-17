@@ -293,7 +293,15 @@ func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if sent := p.posts("/api/actions/serviceusage"); len(sent) != 2 {
+	// The service reads ENABLED as soon as the server applies the action, which
+	// can be before the browser's request log holds it (main's CI run
+	// 38997107027 counted one), so the count is waited for too.
+	sent := p.posts("/api/actions/serviceusage")
+	for deadline := time.Now().Add(5 * time.Second); len(sent) < 2 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+		sent = p.posts("/api/actions/serviceusage")
+	}
+	if len(sent) != 2 {
 		t.Errorf("Disable and Enable sent %d actions, want 2: %v", len(sent), sent)
 	}
 }
