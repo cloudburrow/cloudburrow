@@ -189,8 +189,8 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 		t.Error("the table was deleted though its replacement failed")
 	}
 
-	// Inside a script it is carried out in its turn, as alone (#1459);
-	// in one with a TEMP function, sent whole, it is 501.
+	// Inside a script it is carried out in its turn, as alone (#1459),
+	// in one with a TEMP function too.
 	emu = &scriptEmulator{tables: map[string]string{tablesBase + "t": `{"type":"TABLE"}`}}
 	code, got = do(t, Wrap(withExprs{emu}), "POST", base+"/queries", queryBody("/queries", "DECLARE z INT64 DEFAULT 1; CREATE OR REPLACE TABLE ds.t (a INT64)"))
 	if code != 200 || !strings.Contains(strings.Join(emu.log, "\n"), "QUERY CREATE OR REPLACE TABLE") {
@@ -198,7 +198,7 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 	}
 	emu = &scriptEmulator{tables: map[string]string{tablesBase + "t": `{"type":"TABLE"}`}}
 	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TEMP FUNCTION tf() AS (1); CREATE OR REPLACE TABLE ds.t (a INT64)"))
-	if code != 501 || errorReason(got) != "notImplemented" || len(emu.tables) != 1 {
+	if code != 200 || !strings.Contains(strings.Join(emu.log, "\n"), "QUERY CREATE OR REPLACE TABLE") {
 		t.Errorf("a replacement inside a script with a TEMP function: %d %v", code, got)
 	}
 
@@ -268,38 +268,8 @@ func (e *listingEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // table that was there before is not checked; a TEMP table is checked
 // before the script (TestTempTableColumnsAreChecked).
 func TestCreateTableAsSelectCheckedAfterTheScript(t *testing.T) {
-	// With a TEMP function, so sent whole (#1459: another is carried out a
-	// statement at a time, each CREATE TABLE checked as it is alone).
-	sql := "DECLARE x INT64 DEFAULT 1; CREATE TEMP FUNCTION tf() AS (1); CREATE TABLE ds.s AS SELECT x AS `a!`; SELECT 2"
-	for _, path := range []string{"/queries", "/jobs"} {
-		emu := &scriptEmulator{tables: map[string]string{}}
-		emu.run = func(q string) (int, string) {
-			if strings.HasPrefix(q, "SELECT * FROM (") {
-				return 400, `{"error":{"code":400,"message":"Unrecognized name: x"}}`
-			}
-			emu.tables[tablesBase+"s"] = `{"type":"TABLE","schema":{"fields":[{"name":"a!","type":"INTEGER"}]}}`
-			return 200, `{"jobComplete":true}`
-		}
-		code, got := do(t, Wrap(emu), "POST", base+path, queryBody(path, sql))
-		wantCode := 400
-		if path == "/jobs" {
-			wantCode = 200
-		}
-		msg := ""
-		if e, ok := got["error"].(map[string]any); ok {
-			msg, _ = e["message"].(string)
-		} else if st, ok := got["status"].(map[string]any); ok {
-			msg, _ = st["errorResult"].(map[string]any)["message"].(string)
-		}
-		if code != wantCode || errorReason(got) != "invalidQuery" || !strings.Contains(msg, `"a!"`) ||
-			!strings.Contains(msg, "The 1 statements after it") {
-			t.Errorf("%s: %d %v", path, code, got)
-		}
-		if _, ok := emu.tables[tablesBase+"s"]; ok {
-			t.Errorf("%s: the table with a refused column is still there", path)
-		}
-	}
-
+	// A script is carried out a statement at a time since #1459, a TEMP
+	// table or function's too, each CREATE TABLE checked as it is alone.
 	emu := &scriptEmulator{tables: map[string]string{tablesBase + "s": `{"type":"TABLE","schema":{"fields":[{"name":"a!","type":"INTEGER"}]}}`},
 		run: func(q string) (int, string) {
 			if strings.HasPrefix(q, "SELECT * FROM (") {

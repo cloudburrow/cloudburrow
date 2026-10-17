@@ -279,18 +279,6 @@ func TestScriptVariablesDoNotOutliveTheScript(t *testing.T) {
 			t.Errorf("%s: jobs.list: %v", path, q)
 		}
 	}
-
-	emu := &jobsEmulator{run: func(q string) (int, string) {
-		name := regexp.MustCompile(`cbvar_[0-9a-f]+_zz`).FindString(q)
-		return 400, `{"error":{"code":400,"message":"Unrecognized name: ` + name + `","errors":[{"reason":"invalidQuery"}]}}`
-	}}
-	// A script with a TEMP function is sent whole, its variables renamed
-	// (#1459: another is carried out a statement at a time).
-	_, got := do(t, Wrap(withExprs{emu}), "POST", base+"/queries", queryBody("/queries",
-		"DECLARE zz INT64; CREATE TEMP FUNCTION f() AS (1); SELECT zz + nope"))
-	if msg, _ := got["error"].(map[string]any)["message"].(string); msg != "Unrecognized name: zz" {
-		t.Errorf("the error: %v", got)
-	}
 }
 
 // TestFailedScriptKeepsWhatItWrote (#935, #1459): BigQuery keeps what the
@@ -382,11 +370,13 @@ func TestReplacingATempTableIs501(t *testing.T) {
 		{"CREATE TEMP TABLE t (a INT64); CREATE OR REPLACE TEMPORARY TABLE _SESSION.t (b INT64)", 200},
 		{"CREATE OR REPLACE TEMP TABLE t2 AS SELECT 1 AS a; SELECT * FROM t2", 200},
 		{"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE ds.t", 200},
-		{"DROP TABLE t; CREATE TEMP TABLE t AS SELECT 1 AS a", 200},
+		// The DROP TABLE runs first, alone, of a table t that is not the
+		// TEMP one, which needs a dataset (#1459).
+		{"DROP TABLE t; CREATE TEMP TABLE t AS SELECT 1 AS a", 400},
 	} {
 		emu := &jobsEmulator{}
 		code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", c.sql))
-		if code != c.want || (code == 501) != (len(emu.log) == 0) {
+		if code != c.want || (code == 501) != (len(emu.log) == 0) && code != 400 {
 			t.Errorf("%s: %d %v, want %d; sent %v", c.sql, code, got, c.want, emu.log)
 		}
 		for _, q := range emu.log {
@@ -403,9 +393,10 @@ func TestReplacingATempTableIs501(t *testing.T) {
 // TestTempTableColumnsAreChecked (#938): the columns of a CREATE TEMP
 // TABLE ... AS SELECT whose query cannot run alone are read by running the
 // statements before it and then its query, when none of them changes
-// data: a name BigQuery refuses is 400 and the script is not run. After a
-// statement that changes data, or when the columns cannot be read, it is
-// 501.
+// data: a name BigQuery refuses is 400, the script failed there. Since
+// #1459 a script with a TEMP table is carried out a statement at a time,
+// so after a statement that changes data, or when the columns cannot be
+// read, each CREATE TEMP TABLE is run, and checked, in its turn.
 func TestTempTableColumnsAreChecked(t *testing.T) {
 	answer := func(names ...string) string {
 		var fields []string
@@ -419,13 +410,11 @@ func TestTempTableColumnsAreChecked(t *testing.T) {
 		want       int
 		ran        bool
 	}{
-		{"DECLARE x INT64 DEFAULT 1; CREATE TEMP TABLE tt AS SELECT x AS `b!`; SELECT * FROM tt", "b!", 400, false},
+		{"DECLARE x INT64 DEFAULT 1; CREATE TEMP TABLE tt AS SELECT x AS `b!`; SELECT * FROM tt", "b!", 400, true},
 		{"DECLARE x INT64 DEFAULT 1; CREATE TEMP TABLE tt AS SELECT x AS b; SELECT * FROM tt", "b", 200, true},
-		{"CREATE TEMP TABLE s AS SELECT 1 AS a; BEGIN CREATE TEMP TABLE tt AS SELECT a AS `c?` FROM s; END", "c?", 400, false},
-		{"CREATE TABLE ds.s AS SELECT 1 AS a; CREATE TEMP TABLE tt AS SELECT a FROM ds.s", "a", 501, false},
-		// The columns could not be read: the script's own answer, if it
-		// fails; 501 if it does not.
-		{"DECLARE x INT64; CREATE TEMP TABLE tt AS SELECT x AS b", "", 501, true},
+		{"CREATE TEMP TABLE s AS SELECT 1 AS a; BEGIN CREATE TEMP TABLE tt AS SELECT a AS `c?` FROM s; END", "c?", 400, true},
+		{"CREATE TABLE ds.s AS SELECT 1 AS a; CREATE TEMP TABLE tt AS SELECT a FROM ds.s", "a", 200, true},
+		{"DECLARE x INT64; CREATE TEMP TABLE tt AS SELECT x AS b", "", 200, true},
 	} {
 		var checks []string
 		emu := &jobsEmulator{}
@@ -442,7 +431,7 @@ func TestTempTableColumnsAreChecked(t *testing.T) {
 			}
 			return 200, `{"jobComplete":true}`
 		}
-		code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", c.sql))
+		code, got := do(t, Wrap(withExprs{emu}), "POST", base+"/queries", queryBody("/queries", c.sql))
 		ran := len(emu.log) > 0 && !strings.Contains(emu.sentQuery(t), "LIMIT 0")
 		if code != c.want || ran != c.ran {
 			t.Errorf("%s: %d %v, want %d; ran %v; sent %v", c.sql, code, got, c.want, ran, emu.log)
@@ -845,32 +834,34 @@ func (e *bareListEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TestFailedScriptResyncsTheCatalog (#955): after a failed script, the
-// front puts the emulator's catalog back in step with its tables: through
-// jobs.query, which the emulator rolls back, to the tables as it lists
-// them; through a query job it commits, its list to the tables as the
-// engine reads them.
+// TestFailedScriptResyncsTheCatalog (#955): after a failed script the
+// emulator ran whole, the front put its catalog back in step with its
+// tables. Since #1459 a script with a TEMP table is carried out a
+// statement at a time, as every other script is: the statements before
+// the failing one are kept, and there is nothing to put back.
 func TestFailedScriptResyncsTheCatalog(t *testing.T) {
 	script := "DROP TABLE ds.keep; CREATE TABLE ds.c1 AS SELECT 1 AS a; CREATE TEMP TABLE g AS SELECT 1 AS a; SELECT * FROM nope.nope"
-	scratch := regexp.MustCompile("`_cloudburrow_replace_[0-9a-f]+\\.t`")
+	scratch := regexp.MustCompile("`_cloudburrow_replace_[0-9a-f]+\\.t`|_cloudburrow_session_[0-9a-f]+")
 	for _, c := range []struct {
 		path string
 		want []string
 	}{
+		// Since #1459 a script with a TEMP table is carried out a
+		// statement at a time too: what each statement before the failing
+		// one did is kept, as in BigQuery, and nothing is put back.
 		{"/queries", []string{
-			"DROP TABLE IF EXISTS `ds.keep`; SELECT * FROM @",
-			"CREATE TABLE IF NOT EXISTS `ds.keep` (`a` INT64 NOT NULL, `s` STRUCT<`b` STRING>, `r` ARRAY<NUMERIC(10, 2)>)",
-			"DROP TABLE IF EXISTS `ds.c1`",
-			"DROP TABLE IF EXISTS `g`",
+			"DROP TABLE ds.keep",
+			"CREATE TABLE ds.c1 AS SELECT 1 AS a",
+			"CREATE TABLE `_cloudburrow_query_results.@s_g` AS SELECT 1 AS a",
+			"SELECT * FROM nope.nope",
+			"SELECT * FROM nope.nope",
 		}},
 		{"/jobs", []string{
-			"SELECT * FROM `ds.keep` LIMIT 0",
-			"CREATE TABLE IF NOT EXISTS `ds.keep` (`a` INT64 NOT NULL, `s` STRUCT<`b` STRING>, `r` ARRAY<NUMERIC(10, 2)>)",
-			"DROP TABLE IF EXISTS `ds.keep`",
-			"SELECT * FROM `ds.c1` LIMIT 0",
-			"DROP TABLE IF EXISTS `ds.c1`; SELECT * FROM @",
-			"CREATE TABLE IF NOT EXISTS `ds.c1` (`a` INT64)",
-			"DROP TABLE IF EXISTS `g`",
+			"DROP TABLE ds.keep",
+			"CREATE TABLE ds.c1 AS SELECT 1 AS a",
+			"CREATE TABLE `_cloudburrow_query_results.@s_g` AS SELECT 1 AS a",
+			"SELECT * FROM nope.nope",
+			"SELECT * FROM nope.nope",
 		}},
 	} {
 		var sent []string
@@ -889,7 +880,12 @@ func TestFailedScriptResyncsTheCatalog(t *testing.T) {
 				// A CREATE's query run alone (ctasColumns).
 				return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"a","type":"INTEGER"}]}}`
 			}
-			sent = append(sent, scratch.ReplaceAllString(q, "@"))
+			sent = append(sent, scratch.ReplaceAllStringFunc(q, func(m string) string {
+				if strings.HasPrefix(m, "_cloudburrow_session_") {
+					return "@s"
+				}
+				return "@"
+			}))
 			if q == "SELECT * FROM `ds.c1` LIMIT 0" {
 				return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"a","type":"INTEGER"}]}}`
 			}

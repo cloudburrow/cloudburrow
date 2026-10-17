@@ -326,15 +326,11 @@ func TestCreateSchemaOfAnExistingDataset(t *testing.T) {
 	}{
 		{"CREATE SCHEMA taken", 409, "duplicate"},
 		{"create schema `p.taken` OPTIONS(description='x')", 409, "duplicate"},
-		// A script with a TEMP function is sent whole; another is carried
-		// out a statement at a time (#1459, TestScriptsCarriedOutInTurn).
-		{"CREATE SCHEMA p.taken; CREATE TEMP FUNCTION tf() AS (1); SELECT 1", 409, "duplicate"},
 		{"CREATE SCHEMA IF NOT EXISTS taken", 200, ""},
 		{"CREATE SCHEMA fresh", 200, ""},
 		{"CREATE SCHEMA other.taken", 200, ""},
-		{"CREATE TEMP FUNCTION tf() AS (1); DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", 501, "notImplemented"}, // #951
-		{"DECLARE z INT64 DEFAULT 1; CREATE TEMP FUNCTION tf() AS (1); CREATE SCHEMA taken", 501, "notImplemented"},
-		{"CREATE TEMP FUNCTION tf() AS (1); CREATE SCHEMA fresh; CREATE SCHEMA fresh", 501, "notImplemented"},
+		// A script, a TEMP function's too, is carried out a statement at
+		// a time (#1459, TestScriptsCarriedOutInTurn).
 		{"CREATE SCHEMA fresh; CREATE SCHEMA IF NOT EXISTS fresh", 200, ""},
 		{"SELECT 'CREATE SCHEMA taken'", 200, ""},
 	} {

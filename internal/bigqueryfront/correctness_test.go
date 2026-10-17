@@ -344,11 +344,8 @@ func TestCreateIfNotExistsOfAnExistingOneDoesNothing(t *testing.T) {
 		{"CREATE TABLE IF NOT EXISTS ds.t (z STRING)", []string{noop}},
 		{"create view if not exists ds.t as select 1 as a", []string{noop}},
 		{"CREATE TABLE IF NOT EXISTS ds.new (a INT64)", []string{""}},
-		// A script with a TEMP function is sent whole (#1459: another is
-		// carried out a statement at a time).
-		{"CREATE TABLE ds.t2 (a INT64); CREATE TABLE IF NOT EXISTS ds.t2 (a INT64); CREATE TEMP FUNCTION tf() AS (1); SELECT 1", []string{"", noop, "", ""}},
-		{"DROP TABLE ds.t; CREATE TABLE IF NOT EXISTS ds.t (a INT64); CREATE TEMP FUNCTION tf() AS (1)", []string{"", "", ""}},
-		{"DROP TABLE ds.other; CREATE TABLE IF NOT EXISTS ds.t (a INT64); CREATE TEMP FUNCTION tf() AS (1)", []string{"", noop, ""}},
+		// A script, a TEMP table or function's too, is carried out a
+		// statement at a time (#1459), each statement as above.
 		{"CREATE TEMP TABLE IF NOT EXISTS t AS SELECT 1 AS a", []string{""}},
 	} {
 		for _, insert := range []bool{false, true} {

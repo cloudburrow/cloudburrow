@@ -391,16 +391,15 @@ func (f front) runTempSession(w http.ResponseWriter, r *http.Request, q queryOpt
 // (#1459): when it has a materialized view statement (#1434), when the
 // front carries the text out a statement at a time (control flow, an
 // ALTER TABLE, a query before the last statement, an ASSERT, EXECUTE
-// IMMEDIATE, @@row_count, OPTIONS, a view's column list), or when the
-// script as written is refused (checkDDL) and its statements are not
-// when each runs alone (splitCures): a CREATE OR REPLACE TEMP TABLE or a
-// DROP TABLE of the script's TEMP table. A TEMP table or
-// function lasts only for the engine request that made it, and the
-// hidden tables and functions of the session for the script. Any other
-// script with a TEMP table goes to the emulator whole, as before.
+// IMMEDIATE, @@row_count, OPTIONS, a view's column list), and for every
+// other script whose statements are not refused when each runs alone
+// (splitCures), as BigQuery runs every script a statement at a time, each
+// a child job, a failure keeping what the statements before it did. A
+// TEMP table or function lasts only for the engine request that made it,
+// and the hidden tables and functions of the session for the script.
 func (s *tempSession) useSession() bool {
 	if s.mv || hasControlFlow(s.text) || runsInTurn(s.text) || earlierQuery(s.text) == scriptSplits {
 		return true
 	}
-	return checkDDL(s.orig).code == http.StatusNotImplemented && splitCures(s.text)
+	return splitCures(s.text)
 }

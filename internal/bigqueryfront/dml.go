@@ -294,6 +294,11 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && strings.Contains(q.Query, ";") &&
+		checkDDL(q.Query).statements > 1 { // #1459, scriptdryrun.go
+		f.dryRunScript(w, r, q, insert)
+		return
+	}
 	if q.UseLegacySQL != nil && *q.UseLegacySQL || dryRun(r, insert) {
 		f.serveQuery(w, r, q, insert)
 		return

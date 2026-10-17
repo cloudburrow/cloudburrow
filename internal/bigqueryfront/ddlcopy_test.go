@@ -415,8 +415,8 @@ func TestDropSchema(t *testing.T) {
 			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA full", "resourceInUse", ""},
 			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA nope", "notFound", ""},
 			{"CREATE TABLE full.u (a INT64); DROP SCHEMA full CASCADE", "", "full"},
-			// With a TEMP function the script is sent whole: 501.
-			{"CREATE TEMP FUNCTION tf() AS (1); DROP SCHEMA full CASCADE; SELECT * FROM full.t", "notImplemented", ""},
+			// With a TEMP function too (#1459, tempsession.go).
+			{"CREATE TEMP FUNCTION tf() AS (1); DROP SCHEMA full CASCADE; SELECT 1", "", "full"},
 			{"DROP SCHEMA full SOMETHING", "notImplemented", ""},
 		} {
 			e := setup()

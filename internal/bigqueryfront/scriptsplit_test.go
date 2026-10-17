@@ -47,8 +47,7 @@ func (e withExprs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // no TEMP table or function is carried out a statement at a time, as
 // BigQuery runs a script: each statement sent alone, each a child job of a
 // parent of statementType SCRIPT; a failure keeps what the statements
-// before it did, through jobs.query too. One with a TEMP function is sent
-// whole.
+// before it did, through jobs.query too. One with a TEMP function so too.
 func TestScriptsCarriedOutInTurn(t *testing.T) {
 	sql := "CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64); SELECT 1"
 	emu := &datasetEmulator{datasets: map[string]string{}}
@@ -105,13 +104,15 @@ func TestScriptsCarriedOutInTurn(t *testing.T) {
 		t.Errorf("the INSERT before the failing statement was not sent alone: %v", fails.log)
 	}
 
-	// With a TEMP function the script is sent whole.
-	whole := &datasetEmulator{datasets: map[string]string{}}
+	// With a TEMP function too (tempsession.go): its hidden name.
+	inTurn := &datasetEmulator{datasets: map[string]string{}}
 	sql = "CREATE TEMP FUNCTION tf() AS (1); CREATE TABLE ds.u (a INT64); SELECT tf()"
-	if code, got := do(t, Wrap(whole), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
+	if code, got := do(t, Wrap(inTurn), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
 		t.Fatalf("%s: %d %v", sql, code, got)
 	}
-	if w := whole.writes(); len(w) != 1 || !strings.Contains(w[0], "CREATE TEMP FUNCTION") || !strings.Contains(w[0], "SELECT tf()") {
-		t.Errorf("%s: sent %q, want it whole", sql, w)
+	w := strings.Join(inTurn.writes(), "\n")
+	if strings.Contains(w, "TEMP") || !strings.Contains(w, "CREATE FUNCTION `_cloudburrow_query_results._cloudburrow_session_") ||
+		!strings.Contains(w, `"CREATE TABLE ds.u (a INT64)"`) {
+		t.Errorf("%s: sent %s, want each statement alone", sql, w)
 	}
 }

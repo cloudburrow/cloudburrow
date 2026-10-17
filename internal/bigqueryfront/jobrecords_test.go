@@ -276,87 +276,39 @@ func TestCSVExtractOfAnEmptyString(t *testing.T) {
 	}
 }
 
-// TestFailedScriptFunctions (#976): a script given to jobs.query that
-// makes a function and then fails has the function taken out of the
-// engine's catalog again when it did not exist before; one that drops a
-// function is 501 before it runs; a query job is left as it is.
+// TestFailedScriptFunctions (#976): a script is carried out a statement
+// at a time since #1459, one with a TEMP function too (tempsession.go),
+// so a function a statement made before a failing one stays, as in
+// BigQuery, and is not taken out of the engine's catalog again; DROP
+// FUNCTION and DROP TABLE FUNCTION (#1061) on their own are sent on.
 func TestFailedScriptFunctions(t *testing.T) {
 	const fail = "SELECT * FROM nope.nope"
-	// Each script has a TEMP function, so it is sent whole (#1459: another
-	// is carried out a statement at a time, which keeps what a statement
-	// before a failing one did, as BigQuery does).
-	const tf = "CREATE TEMP FUNCTION tf() AS (1); "
-	run := func(exists bool) func(string) (int, string) {
-		return func(q string) (int, string) {
-			switch {
-			case strings.HasPrefix(q, "SELECT `ds`.`f`()") && !exists:
-				return 400, `{"error":{"code":400,"message":"failed to analyze: Function not found: ds.f"}}`
-			case strings.HasPrefix(q, "SELECT `ds`.`f`()"):
-				return 400, `{"error":{"code":400,"message":"failed to analyze: No matching signature for function"}}`
-			case strings.HasPrefix(q, "SELECT `ds`."):
-				return 400, `{"error":{"code":400,"message":"failed to analyze: Function not found: ds.x"}}`
-			case strings.Contains(q, "nope.nope"):
-				return 400, `{"error":{"code":400,"message":"Table not found: nope.nope"}}`
-			}
-			return 200, `{"jobComplete":true}`
+	run := func(q string) (int, string) {
+		if strings.Contains(q, "nope.nope") {
+			return 400, `{"error":{"code":400,"message":"Table not found: nope.nope"}}`
 		}
-	}
-	uncataloged := func(emu *jobsEmulator) bool {
-		for _, l := range emu.log {
-			if strings.Contains(l, "DROP FUNCTION IF EXISTS `ds`.`f`; SELECT * FROM") {
-				return true
-			}
+		if strings.HasPrefix(q, "SELECT `ds`.") {
+			return 400, `{"error":{"code":400,"message":"failed to analyze: Function not found: ds.f"}}`
 		}
-		return false
+		return 200, `{"jobComplete":true}`
 	}
-	// A function that exists is not made again: CREATE FUNCTION of it
-	// is refused before anything runs (#986), and it is not taken out.
-	for _, exists := range []bool{false, true} {
-		emu := &jobsEmulator{run: run(exists)}
-		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+"CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
-		// (Of one that exists, later in a script sent whole, 501; without
-		// the TEMP function, 409 as it runs alone, TestCreateFunctionOfAnExistingFunction.)
-		if want := map[bool]int{false: 501, true: 501}[exists]; code != want {
-			t.Errorf("exists=%v: %d, want %d", exists, code, want)
+	emu := &jobsEmulator{run: run}
+	code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TEMP FUNCTION tf() AS (1); CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
+	if code != 400 {
+		t.Errorf("a failed TEMP script: %d, want 400", code)
+	}
+	made := false
+	for _, l := range emu.log {
+		if strings.Contains(l, "DROP FUNCTION IF EXISTS `ds`.`f`") {
+			t.Errorf("the function made before the failure was taken out: %v", emu.log)
 		}
-		if uncataloged(emu) == exists {
-			t.Errorf("exists=%v: sent %v", exists, emu.log)
-		}
+		made = made || strings.Contains(l, `"CREATE FUNCTION ds.f(x INT64) AS (x + 1)"`)
 	}
-	// It succeeds: nothing is taken out.
-	emu := &jobsEmulator{run: run(false)}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+"CREATE FUNCTION ds.f(x INT64) AS (x + 1); SELECT 1")); code != 200 || uncataloged(emu) {
-		t.Errorf("a script that succeeds: %d, sent %v", code, emu.log)
+	if !made {
+		t.Errorf("the CREATE FUNCTION was not run in its turn: %v", emu.log)
 	}
-	// As a query job, which the emulator commits, nothing is taken out;
-	// the function is only looked up (#986).
-	emu = &jobsEmulator{run: run(false)}
-	do(t, Wrap(emu), "POST", base+"/jobs", queryBody("/jobs", tf+"CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
-	if uncataloged(emu) || len(emu.log) != 2 || !strings.HasPrefix(emu.log[1], "jobs ") {
-		t.Errorf("a query job: sent %v", emu.log)
-	}
-	// A table function a failed script made is taken out with DROP TABLE
-	// FUNCTION, which the engine CloudBurrow builds carries out (#1061).
-	emu = &jobsEmulator{run: run(false)}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+"CREATE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); "+fail)); code != 501 ||
-		!strings.Contains(strings.Join(emu.log, "\n"), "DROP TABLE FUNCTION IF EXISTS `ds`.`tf`; SELECT * FROM") {
-		t.Errorf("a failed script that makes a table function: %d, sent %v", code, emu.log)
-	}
-	for _, sql := range []string{"DROP FUNCTION ds.g; SELECT 1", "DROP TABLE FUNCTION IF EXISTS ds.g; " + fail} {
-		emu := &jobsEmulator{run: run(false)}
-		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+sql))
-		ran := false
-		for _, l := range emu.log {
-			ran = ran || !strings.Contains(l, `"SELECT `+"`ds`.")
-		}
-		if code != 501 || ran {
-			t.Errorf("%q: %d, sent %v", sql, code, emu.log)
-		}
-	}
-	// A TEMP function, and DROP FUNCTION and DROP TABLE FUNCTION (#1061)
-	// on their own, are sent on.
-	for _, sql := range []string{"CREATE TEMP FUNCTION f(x INT64) AS (x); " + fail, "DROP FUNCTION ds.g", "DROP TABLE FUNCTION ds.tf"} {
-		emu := &jobsEmulator{run: run(false)}
+	for _, sql := range []string{"DROP FUNCTION ds.g", "DROP TABLE FUNCTION ds.tf"} {
+		emu := &jobsEmulator{run: run}
 		do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
 		if len(emu.log) != 1 {
 			t.Errorf("%q: sent %v", sql, emu.log)

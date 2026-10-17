@@ -123,29 +123,9 @@ func TestCreateSchemaMakesTheDataset(t *testing.T) {
 		}
 	}
 
-	// A script: the dataset is made before it is sent, and a DROP SCHEMA
-	// IF EXISTS of it first, which does nothing, is sent as a statement
-	// that does nothing.
-	for _, sql := range []string{
-		// Each with a TEMP function, so sent whole (#1459: another is
-		// carried out a statement at a time).
-		"CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64); CREATE TEMP FUNCTION tf() AS (1); SELECT 1",
-		"DECLARE x INT64 DEFAULT 1; CREATE TEMP FUNCTION tf() AS (1); BEGIN CREATE SCHEMA fresh; END; CREATE TABLE fresh.t (a INT64)",
-		"DROP SCHEMA IF EXISTS fresh CASCADE; CREATE SCHEMA fresh; CREATE TEMP FUNCTION tf() AS (1); CREATE TABLE fresh.t (a INT64)",
-	} {
-		emu := &datasetEmulator{datasets: map[string]string{}}
-		if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
-			t.Errorf("%s: %d %v", sql, code, got)
-			continue
-		}
-		w := emu.writes()
-		if _, ok := emu.datasets["fresh"]; !ok || len(w) != 2 || !strings.Contains(w[1], "CREATE TABLE fresh.t") {
-			t.Errorf("%s: sent %q", sql, w)
-		}
-		if strings.Contains(w[len(w)-1], "DROP SCHEMA") || strings.HasPrefix(sql, "DROP") && !strings.Contains(w[1], "DROP TABLE IF EXISTS `fresh._cloudburrow_") {
-			t.Errorf("%s: sent %q, want no DROP SCHEMA", sql, w)
-		}
-	}
+	// A script is carried out a statement at a time since #1459, a TEMP
+	// table or function's too (tempsession.go): each CREATE SCHEMA alone,
+	// as above.
 }
 
 // TestCreateSchemaNotCarriedOut (#951): what the front cannot carry out
@@ -158,14 +138,8 @@ func TestCreateSchemaNotCarriedOut(t *testing.T) {
 		{"CREATE SCHEMA fresh OPTIONS(description=CONCAT('a', 'b'))", "description"},
 		{"CREATE SCHEMA fresh OPTIONS(labels=[('k', 1)])", "labels"},
 		{"CREATE SCHEMA fresh OPTIONS(description=b'x')", "description"},
-		// A script whose earlier statement is a query is run statement by
-		// statement (#1249, earlierQuery), so these have DML first; and
-		// one with no TEMP table or function so too (#1459), so these
-		// have a TEMP function, which keeps the script whole.
-		{"CREATE TEMP FUNCTION tf() AS (1); INSERT INTO fresh.t VALUES (1); CREATE SCHEMA fresh", "name it"},
-		{"CREATE TEMP FUNCTION tf() AS (1); INSERT INTO ds.t VALUES (1); RETURN; CREATE SCHEMA fresh", "RETURN"},
-		{"CREATE TEMP FUNCTION tf() AS (1); DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", "DROP SCHEMA"},
-		{"CREATE TEMP FUNCTION tf() AS (1); CREATE SCHEMA fresh; DROP SCHEMA fresh; CREATE SCHEMA fresh", "DROP SCHEMA"},
+		// A script, a TEMP table or function's too, is carried out a
+		// statement at a time since #1459, each CREATE SCHEMA alone.
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{"taken": "{}"}}
 		code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(c.sql))
@@ -186,8 +160,8 @@ func TestCreateSchemaUndoneWhenTheQueryFails(t *testing.T) {
 		name, path, body, answer string
 		code                     int
 	}{
-		{"jobs.query", base + "/queries", schemaQuery("CREATE SCHEMA fresh; CREATE TEMP FUNCTION tf() AS (1); SELECT 1/0"), `{"error":{"code":400,"message":"division by zero"}}`, 400},
-		{"jobs.insert", base + "/jobs", `{"jobReference":{"projectId":"p","jobId":"j"},"configuration":{"query":{"query":"CREATE SCHEMA fresh; CREATE TEMP FUNCTION tf() AS (1); SELECT 1/0","useLegacySql":false}}}`,
+		{"jobs.query", base + "/queries", schemaQuery("CREATE SCHEMA fresh"), `{"error":{"code":400,"message":"division by zero"}}`, 400},
+		{"jobs.insert", base + "/jobs", `{"jobReference":{"projectId":"p","jobId":"j"},"configuration":{"query":{"query":"CREATE SCHEMA fresh","useLegacySql":false}}}`,
 			`{"jobReference":{"projectId":"p","jobId":"j"},"status":{"state":"DONE","errorResult":{"reason":"invalidQuery","message":"division by zero"}}}`, 0},
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{}, code: c.code, answer: c.answer}
