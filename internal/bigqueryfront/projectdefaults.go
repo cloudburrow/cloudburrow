@@ -100,10 +100,11 @@ func (f front) defaultTableKey(r *http.Request, dataset string, raw []byte) []by
 // that names no kms_key_name takes it too (#1456), when the table's
 // dataset has no defaultEncryptionConfiguration. The front runs the
 // statement, then writes the key into the table it made with
-// tables.update, as it writes kms_key_name's (ddloptions.go). Not given
-// the key: a CREATE TABLE in a script of several statements, and the
-// destination table a query, load or copy job makes, whose writes the
-// emulator carries out alone.
+// tables.update, as it writes kms_key_name's (ddloptions.go). A script's
+// CREATE TABLE is given it so too, as the front runs each statement in its
+// turn (scriptflow.go, tempsession.go), and the destination table a query,
+// load or copy job makes is given it by withDefaultJobKey
+// (defaultjobkey.go).
 
 // defaultKeyKey marks a request whose CREATE TABLE is being given the
 // default key, so that runQuery runs it as it would without one.

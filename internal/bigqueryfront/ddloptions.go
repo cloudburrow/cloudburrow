@@ -637,6 +637,18 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 			f.tables.watchTable(streamKey(projectOf(f.base), dataset, table))
 		}
 	}
+	if d.connection != "" { // #1456: file_format and table_format's defaults (icebergConfig)
+		var b map[string]any
+		if json.Unmarshal(meta["biglakeConfiguration"], &b) == nil && b != nil && b["storageUri"] != nil {
+			if b["fileFormat"] == nil {
+				b["fileFormat"] = "PARQUET"
+			}
+			if b["tableFormat"] == nil {
+				b["tableFormat"] = "ICEBERG"
+			}
+			meta["biglakeConfiguration"], _ = json.Marshal(b)
+		}
+	}
 	if d.mv != nil {
 		d.mv.put(meta)
 	}
