@@ -107,9 +107,9 @@ func registryUnimplemented(t *testing.T, prefix string) []string {
 // CloudBurrow does not implement is refused with UNIMPLEMENTED naming the
 // field, through the official client (#396). Rotation schedules, once here,
 // are implemented (#816; TestKMSRotationSchedule), and so are the asymmetric,
-// MAC, raw and ML-KEM purposes (#1212), and HSM protection (#1452); the
-// algorithms Go's standard library does not compute, and the external
-// protection levels, are not.
+// MAC, raw and ML-KEM purposes (#1212), HSM protection (#1452), and the
+// external and single-tenant HSM levels (#1469); the algorithms Go's
+// standard library does not compute are not.
 func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -119,9 +119,6 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 		t.Fatal(err)
 	}
 	sym := kmspb.CryptoKey_ENCRYPT_DECRYPT
-	level := func(pl kmspb.ProtectionLevel) *kmspb.CryptoKeyVersionTemplate {
-		return &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: pl, Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION}
-	}
 	for name, c2 := range map[string]struct {
 		key   *kmspb.CryptoKey
 		field string
@@ -133,7 +130,6 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65}}, "algorithm"},
 		"X-Wing": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_KEY_ENCAPSULATION,
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_KEM_XWING}}, "algorithm"},
-		"HSM_SINGLE_TENANT":  {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_HSM_SINGLE_TENANT)}, "protection_level"},
 		"import_only":        {&kmspb.CryptoKey{Purpose: sym, ImportOnly: true}, "import_only"},
 		"crypto_key_backend": {&kmspb.CryptoKey{Purpose: sym, CryptoKeyBackend: ring.GetName()}, "crypto_key_backend"},
 	} {

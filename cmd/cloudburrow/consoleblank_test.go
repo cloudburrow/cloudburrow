@@ -336,6 +336,11 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		EkmConnectionId: "blank-ekm", EkmConnection: &kmspb.EkmConnection{}}); err != nil {
 		t.Fatal(err)
 	}
+	// A single-tenant HSM instance before its keys are registered (#1469).
+	if _, err := d.kms.API().HsmManagement().CreateSingleTenantHsmInstance(ctx, &kmspb.CreateSingleTenantHsmInstanceRequest{Parent: "projects/" + blankProject + "/locations/global",
+		SingleTenantHsmInstanceId: "blank-hsm", SingleTenantHsmInstance: &kmspb.SingleTenantHsmInstance{QuorumAuth: &kmspb.SingleTenantHsmInstance_QuorumAuth{TotalApproverCount: 3}}}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud Scheduler: a job with no description, through the running API.
 	d.scheduler = &schedulerService{cfg: cfg}

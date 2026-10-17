@@ -443,11 +443,12 @@ func kmsCreateKeyFields() []console.Field {
 	return []console.Field{
 		{Name: "cryptoKeyId", Label: "Key name", Type: "text", Required: true,
 			Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
-		kmsProtectionField("Fixed once the key exists; new versions get it. "+kmsExternalNote, "EXTERNAL", "EXTERNAL_VPC"),
+		kmsProtectionField("Fixed once the key exists; new versions get it. "+kmsExternalNote, "EXTERNAL", "EXTERNAL_VPC", "HSM_SINGLE_TENANT"),
 		kmsPurposeField(),
 		kmsAlgorithmField(),
-		{Name: "cryptoKeyBackend", Label: "EKM connection", Type: "text",
-			Help: "EXTERNAL_VPC only: projects/P/locations/L/ekmConnections/C, in the key ring's location. Empty is the location's default connection."},
+		{Name: "cryptoKeyBackend", Label: "Key backend", Type: "text",
+			Help: "EXTERNAL_VPC: projects/P/locations/L/ekmConnections/C, in the key ring's location; empty is the location's default connection. " +
+				"HSM_SINGLE_TENANT (required): projects/P/locations/L/singleTenantHsmInstances/I, an ACTIVE instance in the key ring's location."},
 		{Name: "skipInitialVersionCreation", Label: "Create without a version", Type: "checkbox",
 			Help: "Required for an EXTERNAL key and for an EXTERNAL_VPC key on a MANUAL connection, whose versions each name their external key."},
 		{Name: "labels", Label: "Labels", Type: "map",

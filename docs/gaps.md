@@ -133,8 +133,7 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 
 | Gap | Why open | Size |
 |---|---|---|
-| HSM_SINGLE_TENANT protection level, and `crypto_key_backend` naming a single-tenant HSM instance (#1469; HSM is served since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) | no emulator support | L |
-| HsmManagement (#1469; EkmService, VerifyConnectivity included, Autokey and AutokeyAdmin are served since #1452 and #1469, and IAM on `ekmConfig` and `ekmConnections`, stored and not enforced, since #1469) | no emulator support | L |
+| Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) | no emulator support | M |
 | `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |

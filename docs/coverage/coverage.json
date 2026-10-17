@@ -2028,8 +2028,8 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Unimplemented": 11,
-      "Verified": 51
+      "Unimplemented": 2,
+      "Verified": 60
     },
     "rows": [
       {
@@ -2131,75 +2131,66 @@
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/ApproveSingleTenantHsmInstanceProposal",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstance",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstanceProposal",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/DeleteSingleTenantHsmInstanceProposal",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/ExecuteSingleTenantHsmInstanceProposal",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/GetSingleTenantHsmInstance",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/GetSingleTenantHsmInstanceProposal",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/ListSingleTenantHsmInstanceProposals",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/ListSingleTenantHsmInstances",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_otherservices_test.go:31 TestKMSOtherServicesAreUnimplemented"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt",
