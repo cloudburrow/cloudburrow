@@ -141,7 +141,7 @@ func (p backupDRProvider) List(ctx context.Context, project string) (console.Lis
 // CreateForm implements console.Creator: Create backup vault.
 func (backupDRProvider) CreateForm() (string, []console.Field) {
 	return "Create backup vault", []console.Field{
-		{Name: "id", Label: "Backup vault ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9-]{0,61}[a-z0-9]`},
+		{Name: "id", Label: "Backup vault ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9\-]{0,61}[a-z0-9]`},
 		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
 		{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true, Default: "86400s",
 			Help: "A duration in seconds, such as 86400s (one day)."},
@@ -334,6 +334,12 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 					Help: "An RFC 3339 time, such as 2026-12-31T00:00:00Z; empty keeps it. It cannot be before the enforced retention ends."},
 				{Name: "enforced", Label: "Enforced retention ends", Type: "text",
 					Help: "An RFC 3339 time; empty keeps it. Enforced retention can be extended, not reduced."}}})
+			// Not "delete…": the console leaves a page after an action whose
+			// ID starts so, and this one deletes a backup, not the page's
+			// data source. Delete association and Delete backup plan alike.
+			acts = append(acts, console.Action{ID: "backupdelete", Label: "Delete backup", Destructive: true,
+				Confirm: "The backup and its dump are deleted; it can no longer be restored.",
+				Fields:  []console.Field{{Name: "backup", Label: "Backup", Type: "select", Required: true, Options: all}}})
 		}
 		return acts
 	}
@@ -393,6 +399,16 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 		acts = append(acts, console.Action{ID: "trigger", Label: "Trigger backup", Fields: []console.Field{
 			{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs},
 			{Name: "rule", Label: "Rule", Type: "select", Required: true, Options: rules}}})
+	}
+	if len(assocs) > 0 {
+		acts = append(acts, console.Action{ID: "assocdelete", Label: "Delete association", Destructive: true,
+			Confirm: "The association is deleted: its instance is no longer backed up. Its data source and backups stay in the vault.",
+			Fields:  []console.Field{{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs}}})
+	}
+	if len(plans) > 0 {
+		acts = append(acts, console.Action{ID: "plandelete", Label: "Delete backup plan", Destructive: true,
+			Confirm: "The backup plan is deleted. A plan an association uses cannot be.",
+			Fields:  []console.Field{{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans}}})
 	}
 	if v, err := p.get(ctx, vault); err == nil {
 		acts = append(acts, console.Action{ID: "editvault", Label: "Edit vault", Fields: []console.Field{
@@ -557,6 +573,15 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		}
 		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"/dataSources/"+path[1]+"/backups/"+v["backup"]+
 			"?updateMask="+strings.Join(mask, ","), body)
+	case "plandelete":
+		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+loc+"/backupPlans/"+url.PathEscape(v["plan"]), nil)
+	case "assocdelete":
+		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+loc+"/backupPlanAssociations/"+url.PathEscape(v["association"]), nil)
+	case "backupdelete":
+		if len(path) != 2 {
+			return errors.New("delete backup is offered on a data source's page")
+		}
+		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+vault+"/dataSources/"+path[1]+"/backups/"+url.PathEscape(v["backup"]), nil)
 	case "trigger":
 		_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations/"+v["association"]+":triggerBackup",
 			map[string]any{"ruleId": v["rule"]})

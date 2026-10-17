@@ -91,7 +91,7 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 		}
 	}
 	return "Create instance", []console.Field{
-		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
 			Help: "Lowercase letters, digits and hyphens, starting with a letter."},
 		{Name: "databaseVersion", Label: "Database version", Type: "select", Required: true, Options: p.versions, Default: def,
 			Help: "Each version is the official image of that major version, pulled when an instance of it is first created."},
@@ -326,21 +326,28 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		d.Summary = append(d.Summary, console.Property{Label: "Server CAs", Value: strings.Join(fps, ", ")})
 	}
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
+		{ID: "project-backups", Label: "Project backups", Kind: console.KindListing, Listing: projectBackupsListing(ctx, svc, project, name)},
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
+	var dbUserActs []console.Action
+	if in.State == "RUNNABLE" {
+		secs, dbNames, userRefs := instanceDatabasesAndUsers(ctx, svc, project, in)
+		d.Sections = append(secs, d.Sections...)
+		dbUserActs = databaseUserActions(in, dbNames, userRefs)
+	}
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
-			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
 				Help: "A new instance with this instance's databases as they were at the binary log position below."},
 			{Name: "binLogFileName", Label: "Binary log file", Type: "text", Required: true, Help: "As SHOW BINARY LOG STATUS names it, such as binlog.000002."},
 			{Name: "binLogPosition", Label: "Position", Type: "number", Required: true, Help: "Every transaction that starts before it is cloned."}}})
 	}
 	if pitr == "On" {
 		d.Actions = append(d.Actions, console.Action{ID: "pitr-restore", Label: "Point-in-time restore", Fields: []console.Field{
-			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
 				Help: "A new instance with this instance's settings and its databases as they were at the time below."},
 			{Name: "pointInTime", Label: "Point in time (UTC, RFC 3339)", Type: "text", Required: true, Default: latest,
 				Help: "Between the earliest recovery time, " + earliest + ", and now, to the microsecond."}}})
@@ -367,6 +374,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 				Help: "1 to 7 (35 on Enterprise Plus); older log and bases are dropped, and the earliest recovery time moves with them."},
 		}, Note: "The database version and the instance ID cannot be changed."}
 	}
+	d.Actions = append(d.Actions, dbUserActs...)
 	return d, nil
 }
 
@@ -455,7 +463,7 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 // replication and Start replication on a read replica (#1330).
 func replicaActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	create := console.Action{ID: "create-replica", Label: "Create read replica", Fields: []console.Field{{Name: "replica",
-		Label: "Replica instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+		Label: "Replica instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
 		Help: "A new instance replicating from this one by the engine's own replication; it takes no writes. " +
 			"A replica of a replica is a cascading replica (#1381)."},
 		{Name: "region", Label: "Region", Type: "text", Default: in.Region, Pattern: "^[a-z]+(-[a-z]+)+[0-9]+$",
@@ -512,7 +520,7 @@ func availabilityOr(a string) string {
 // transferActions are Export and Import (#1380), to and from the
 // instance's Cloud Storage, through instances.export and instances.import.
 func transferActions() []console.Action {
-	uri := console.Field{Name: "uri", Label: "Cloud Storage file", Type: "text", Required: true, Pattern: "^gs://[^/]+/.+$",
+	uri := console.Field{Name: "uri", Label: "Cloud Storage file", Type: "text", Required: true, Pattern: "^gs://[^\\/]+/.+$",
 		Help: "gs://bucket/file in this instance's Cloud Storage; a name ending in .gz is gzip (SQL only)."}
 	fileType := console.Field{Name: "fileType", Label: "Format", Type: "select", Required: true, Options: []string{"SQL", "CSV"}, Default: "SQL"}
 	db := console.Field{Name: "database", Label: "Database", Type: "text",
@@ -572,7 +580,7 @@ func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action 
 	acts := []console.Action{{ID: "create-backup", Label: "Create backup",
 		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text"}}},
 		{ID: "clone", Label: "Clone", Fields: []console.Field{{Name: "destination", Label: "New instance ID", Type: "text", Required: true,
-			Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$", Help: "A new instance with this instance's settings and a copy of its databases as they are now."}}}}
+			Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "A new instance with this instance's settings and a copy of its databases as they are now."}}}}
 	if len(ids) > 0 {
 		acts = append(acts,
 			console.Action{ID: "restore-backup", Label: "Restore", Destructive: true,
@@ -750,6 +758,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 	case "rotate-server-ca":
 		_, err = svc.Instances.RotateServerCa(project, name, &sqladminapi.InstancesRotateServerCaRequest{}).Context(ctx).Do()
 	default:
+		if ok, err := databaseUserAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
 		if ok, err := dataAPIAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}

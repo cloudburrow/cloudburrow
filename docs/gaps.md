@@ -27,7 +27,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
-| Secret Manager | 2 | 1 | 0 | 0 | 1 |
+| Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
 | BigQuery | 29 | 9 | 12 | 8 | 0 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **62** | **14** | **29** | **13** | **6** |
+| **Total** | **61** | **13** | **29** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -149,7 +149,6 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A Cloud Run `secretKeyRef` to a version under a customer-managed key is `UNIMPLEMENTED`: the mounted Kubernetes Secret holds ciphertext (#1453) | not built yet | S |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) (#1445) | needs live GCP | S |
 
 ## Resource Manager
@@ -216,14 +215,14 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | What #1426 leaves of `privacy_policy`: differential privacy (`SELECT WITH DIFFERENTIAL_PRIVACY`, a `differential_privacy_policy`) is 501, no noise mechanism or epsilon/delta budget (#1455); a read of a policy table or view in a subquery, CTE, another view, a script or a non-INNER join is 501 | not built yet | L |
 | What #1466 leaves of change history: `CHANGES` of a table that had a multi-statement transaction committed to it within the range is not refused; changes are kept seven days whatever the dataset's time travel window (only the window's are read) | not built yet | S |
 | `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
-| Autodetect: a JSON column whose values mix types BigQuery does not document detecting, `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
-| CSV: a multi-character delimiter, a non-ASCII delimiter or quote in data that is not ISO-8859-1, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, and `NAME` after skipped rows are built, #1457); JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
+| Autodetect: a JSON column whose values mix types BigQuery does not document detecting (into a `JSON` column the schema gives, mixed values load since #1457), `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
+| CSV: a quote outside ISO-8859-1, a delimiter of several bytes or outside ASCII in UTF-16 or UTF-32 data, a `maxBadRecords` load the emulator still fails on a value the front passes (a number written as a fraction into an INTEGER, a DATETIME or TIMESTAMP), `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, `NAME` after skipped rows, and, in #1457's second part, a delimiter's first byte, a delimiter or quote outside ASCII in UTF-8 data and an empty `STRING` with a `nullMarker` and, under `maxBadRecords`, a BOOL, DATE, TIME or number its column refuses as a bad record are built); JSON: a null field outside the schema (the reference does not say whether a null is an "extra value"), a `maxBadRecords` load the emulator still fails on a value the front passes (a value its column refuses is a bad record since #1457) | no emulator support | M |
 | Parquet: the refused columns left (an INT96 with a part of a microsecond, a DECIMAL that would round, DECIMAL to STRING, a NULL element or a LIST of lists with list inference); a NaN loads and unlisted types are 400 since #1457 | not documented by Google | S |
 | A load of several Cloud Storage objects when the front was given no Cloud Storage (#1457) | no emulator support | S |
-| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (#1458) | not documented by Google | S |
+| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (docs read again 2026-10-16: streaming to a decorator is documented for daily ingestion-time tables only, and schemaUpdateOptions name no rule for these) (#1458) | not documented by Google | S |
 | A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
-| `PARTITIONS` has no byte counts or `last_modified_time`; region `TABLE_STORAGE` has no byte columns or `storage_last_modified_time` (#1458) | no emulator support (no faithful byte counts or write times) | M |
-| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (#1458) | not documented by Google (their STRUCTs) | S |
+| `PARTITIONS`' `last_modified_time` is NULL for an ingestion-time partitioned table's partitions and where the engine's change table holds no write (seven days kept), and its write times do not follow the front's `clock:advance`; region `TABLE_STORAGE` has no physical byte columns, and an older table than 90 days no active or long-term split (#1458) | no emulator support (no compressed sizes; write times kept seven days) | S |
+| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `job_stages`, `object_storage_stats`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `vector_search_statistics` or `external_service_costs` (#1458) | not documented by Google (what a job without such statistics holds) | S |
 | A script the emulator runs whole (no control flow, no query before its last statement, nothing it refuses together) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
 | DML with a `FROM` of several items (#1459) | no emulator support | M |
 | `CREATE SCHEMA` of an existing dataset and `CREATE TABLE … CLONE` later in a multi-statement script (#1459) | no emulator support | M |
@@ -276,7 +275,7 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 | Gap | Why open | Size |
 |---|---|---|
 | The gated full-lifecycle Functions tests are not yet run: the v2 and v1 APIs' build and serve, event triggers, `gcloud functions deploy --gen2`, and the full apply of Terraform's `google_cloudfunctions2_function` and `google_cloudfunctions_function`, and `TestFunctionsSecretsBuildsAndMounts`, a build that mounts Secret Manager secrets; `repo_source` and VPC connectors, and event types no served service emits (audit logs, Firestore, Firebase), stay `UNIMPLEMENTED` with the reason (#1464) | the builder's amd64 images cannot run on arm64 nodes; no dated amd64 run yet | M |
-| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules, IAM), a worker pool's `scaling_mode` (Google publishes no such field), `google_cloudfunctions_function_iam_*` (untested), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the other Cloud Run v1 resources (pointed here, untested), the IAM, audit-config and other resources whose API refuses them (audit configs, tag IAM, Bigtable table IAM and authorized views, log bucket CMEK), and the other resources of the served services | partly verified (the seven batches of #1304 and the verified rows of compatibility.md) | L |
+| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the eight batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 
@@ -292,8 +291,9 @@ Not gaps to close; each stays until its decision is amended.
 
 - **Cloud Storage ACLs and object IAM** (`bucketAccessControls.*`, `objectAccessControls.*`,
   `defaultObjectAccessControls.*`, `objects.*IamPolicy`): 501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504.
-- **IAM Conditions and audit configs** on every policy (Tasks, Secret Manager, KMS, Storage, the
-  console): refused by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365.
+- **IAM Conditions** on every policy (Tasks, Secret Manager, KMS, Storage, the console): refused
+  by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365. **Audit configs** are refused
+  too, except on projects, folders and the organization, where they are stored, not acted on (#1486).
 - **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them.
 - **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
   service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).

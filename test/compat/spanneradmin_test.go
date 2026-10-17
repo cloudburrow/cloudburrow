@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
@@ -262,15 +261,15 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 
 // TestSpannerAdminRefusals records what Google's emulator answers for the
 // admin RPCs it does not implement, as its README documents for backups,
-// backup schedules, IAM, instance configurations and instance partition
+// backup schedules, instance configurations and instance partition
 // updates: each is called through the official admin client, with a
 // well-formed request on a real instance and database, and must answer
-// UNIMPLEMENTED, saying why. The IAM RPCs and the partition update are the
-// emulator's own refusals ("Cloud Spanner Emulator does not support IAM
-// policies.", "... updating instance partitions."); the rest, which the
+// UNIMPLEMENTED, saying why. The partition update is the emulator's own
+// refusal ("... updating instance partitions."); the rest, which the
 // emulator answers with an empty message, the call front refuses itself
 // since #1461, naming the reason (internal/spannerfront). Instance updates,
-// which the emulator refuses too, the front serves (TestSpannerUpdateInstance).
+// which the emulator refuses too, the front serves (TestSpannerUpdateInstance),
+// and so it does IAM policies, stored and not enforced (TestSpannerIAM, #1486).
 //
 // A method the front starts serving fails this test, which is the signal
 // to move it to a test that verifies it.
@@ -281,16 +280,10 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/GetBackup (unimplemented)
@@ -379,19 +372,6 @@ func TestSpannerAdminRefusals(t *testing.T) {
 			_, err = op.Wait(ctx)
 			return err
 		},
-		"InstanceAdmin/GetIamPolicy": func(ctx context.Context) error {
-			_, err := ia.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: f.instance})
-			return err
-		},
-		"InstanceAdmin/SetIamPolicy": func(ctx context.Context) error {
-			_, err := ia.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: f.instance, Policy: &iampb.Policy{}})
-			return err
-		},
-		"InstanceAdmin/TestIamPermissions": func(ctx context.Context) error {
-			_, err := ia.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{
-				Resource: f.instance, Permissions: []string{"spanner.instances.get"}})
-			return err
-		},
 		"DatabaseAdmin/ListDatabaseOperations": func(ctx context.Context) error {
 			_, err := da.ListDatabaseOperations(ctx, &databasepb.ListDatabaseOperationsRequest{Parent: f.instance}).Next()
 			return err
@@ -410,19 +390,6 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		"DatabaseAdmin/InternalUpdateGraphOperation": func(ctx context.Context) error {
 			_, err := da.InternalUpdateGraphOperation(ctx, &databasepb.InternalUpdateGraphOperationRequest{
 				Database: f.database, OperationId: "op1"})
-			return err
-		},
-		"DatabaseAdmin/GetIamPolicy": func(ctx context.Context) error {
-			_, err := da.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: f.database})
-			return err
-		},
-		"DatabaseAdmin/SetIamPolicy": func(ctx context.Context) error {
-			_, err := da.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: f.database, Policy: &iampb.Policy{}})
-			return err
-		},
-		"DatabaseAdmin/TestIamPermissions": func(ctx context.Context) error {
-			_, err := da.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{
-				Resource: f.database, Permissions: []string{"spanner.databases.read"}})
 			return err
 		},
 		"DatabaseAdmin/CreateBackup": func(ctx context.Context) error {
@@ -516,7 +483,7 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		}
 		t.Logf("%s: %v", n, err)
 	}
-	if want := 29; len(calls) != want {
+	if want := 23; len(calls) != want {
 		t.Errorf("%d refusals are called, want %d, one per covers line", len(calls), want)
 	}
 }

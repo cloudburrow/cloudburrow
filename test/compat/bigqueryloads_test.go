@@ -227,20 +227,18 @@ func TestBigQueryCSVLoadOptions(t *testing.T) {
 	if err := load("not_jagged", "1\n", func(*bigquery.ReaderSource) {}); err == nil {
 		t.Error("a short row without allowJaggedRows loaded")
 	}
-	err := load("empty_string", "1,\n", func(s *bigquery.ReaderSource) { s.NullMarker = `\N` })
-	wantReason(t, "an empty STRING value with a nullMarker", err, http.StatusNotImplemented, "notImplemented")
-	err = load("empty_int", ",x\n", func(s *bigquery.ReaderSource) { s.NullMarker = `\N` })
+	// An empty STRING value with a nullMarker loads as an empty string
+	// since #1457 (TestBigQueryCSVEmptyStringWithNullMarker).
+	err := load("empty_int", ",x\n", func(s *bigquery.ReaderSource) { s.NullMarker = `\N` })
 	var be *bigquery.Error
 	if err == nil || !(errors.As(err, &be) && be.Reason == "invalid" || strings.Contains(err.Error(), "invalid")) {
 		t.Errorf("an empty INTEGER value with a nullMarker: %v, want invalid", err)
 	}
-	for _, table := range []string{"empty_string", "empty_int"} {
-		if tableExists(t, ctx, ds.Table(table)) {
-			t.Errorf("the failed load made %s", table)
-		}
+	if tableExists(t, ctx, ds.Table("empty_int")) {
+		t.Error("the failed load made empty_int")
 	}
-	err = load("two_bytes", "1||x\n", func(s *bigquery.ReaderSource) { s.FieldDelimiter = "||" })
-	wantReason(t, "a fieldDelimiter of two characters", err, http.StatusNotImplemented, "notImplemented")
+	// A fieldDelimiter of two characters is its first byte since #1457
+	// (TestBigQueryCSVDelimiterAndQuoteBytes).
 
 	// autodetect with a schema: skipLeadingRows says how many rows are not
 	// data; unset, BigQuery decides from the data, which is 501.

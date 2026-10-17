@@ -64,6 +64,13 @@ func TestViewportsDrawerBadgeAndTableScroll(t *testing.T) {
 		t.Run(fmt.Sprintf("%dpx", vp.width), func(t *testing.T) {
 			p := open(t)
 			p.run(chromedp.EmulateViewport(vp.width, 800), reducedMotion())
+			// Every category open, as someone who browsed the catalogue
+			// leaves it: the drawer is then taller than the window on any
+			// instance, as it is on one with many services, and the deep
+			// link scrolls it to Cloud Scheduler's row.
+			p.navigate("/")
+			p.eval(`(() => { localStorage.setItem("cloudburrow.navmore", "true");
+				localStorage.setItem("cloudburrow.navgroups", JSON.stringify(Object.keys(CATEGORY_ICONS))); return true; })()`, nil)
 			p.navigate("/scheduler/jobs?project=" + project)
 			p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`,
 				fmt.Sprintf(`#view .table-wrap tr[aria-label=%q]`, "Inspect "+job)))
@@ -379,24 +386,41 @@ func (p *tab) assertDrawer(want string) {
 	}
 }
 
-// assertNavPainted: the first navigation link is on screen with its icon and
-// its label both drawn.
+// assertNavPainted: the drawer's row for the current screen, or else its
+// first row inside the drawer's scrolled region, is on screen with its icon
+// and its label both drawn.
+//
+// Not simply the first row: on a deep link the drawer reveals the current
+// screen's category and scrolls its row into view (buildNav), and with
+// enough services, nine on the instance where this was seen, the list is
+// taller than the window, so the Dashboard row is scrolled up out of the
+// list's region, clipped there, and sits under the toolbar. That is the
+// drawer working, not a row left unpainted.
 func (p *tab) assertNavPainted() {
 	p.t.Helper()
+	var found bool
 	p.eval(`(() => { document.querySelectorAll("[data-cb-nav]").forEach((n) => n.removeAttribute("data-cb-nav"));
-		const a = [...document.querySelectorAll("#nav-list a")].find((a) => a.getClientRects().length);
+		const box = document.getElementById("nav-list").getBoundingClientRect();
+		const inside = (a) => { const r = a.getBoundingClientRect();
+			return a.getClientRects().length && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5; };
+		const links = [...document.querySelectorAll("#nav-list a")];
+		const a = links.find((a) => a.getAttribute("aria-current") === "page" && inside(a)) || links.find(inside);
 		if (a) { a.querySelector(".nav-icon").setAttribute("data-cb-nav", "icon");
 		         a.querySelector(".nav-label").setAttribute("data-cb-nav", "label"); }
-		return true; })()`, nil)
+		return !!a; })()`, &found)
+	if !found {
+		p.t.Error("no navigation row lies inside the drawer's visible region")
+		return
+	}
 	for _, part := range []string{"icon", "label"} {
 		sel := fmt.Sprintf(`[data-cb-nav=%q]`, part)
 		if why := p.hitTest(sel); why != "" {
-			p.t.Errorf("the navigation's first link's %s is not on screen: %s", part, why)
+			p.t.Errorf("the navigation row's %s is not on screen: %s", part, why)
 			continue
 		}
 		if img := p.capture(sel); img != nil {
 			if ink := inkShare(img); ink < 0.02 {
-				p.t.Errorf("the navigation's first link's %s is not painted: %.1f%% of its box differs from the drawer", part, ink*100)
+				p.t.Errorf("the navigation row's %s is not painted: %.1f%% of its box differs from the drawer", part, ink*100)
 			}
 		}
 	}

@@ -243,7 +243,7 @@ func (firestoreDatabasesProvider) CreateForm() (string, []console.Field) {
 	return "Create database", []console.Field{
 		{Name: "database", Label: "Database ID", Type: "text", Required: true,
 			Help:    "4 to 63 lowercase letters, numbers and hyphens, starting with a letter and ending with a letter or number.",
-			Pattern: `^[a-z][a-z0-9-]{2,61}[a-z0-9]$`},
+			Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`},
 		{Name: "location", Label: "Location", Type: "text", Required: true, Default: "nam5",
 			Help: "A Firestore location, such as nam5, eur3 or us-east1."},
 		{Name: "concurrency", Label: "Concurrency mode", Type: "select", Default: "PESSIMISTIC",

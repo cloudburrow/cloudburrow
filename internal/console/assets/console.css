@@ -934,6 +934,11 @@ tr.is-operating td:first-child {
 
 .mono { font-family: var(--mono); font-size: var(--text-caption-size); }
 td.mono { word-break: break-word; }
+/* An action's result rows break anywhere: a storage operation's name has no
+   break opportunity, so it ran past the dialog's edge and its ID, which
+   Finalize relocation and Cancel operation ask for, was cut off (found by
+   TestStorageAnywhereCachesThroughTheBrowser). */
+#action-result-table td { overflow-wrap: anywhere; }
 .actions select {
   padding: 8px 12px; font: inherit;
   background: var(--surface); color: var(--text);

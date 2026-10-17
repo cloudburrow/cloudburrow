@@ -36,6 +36,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
 
@@ -84,6 +85,7 @@ type Front struct {
 	// instances serves the instance admin API the emulator does not
 	// (#1331), and served is its methods.
 	instances *instances
+	tableIAM  *tableIAM
 	served    map[string]method
 }
 
@@ -102,6 +104,10 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	f := &Front{upstream: conn, addr: upstream, logf: logf}
 	f.instances = newInstances(f.dropTables)
 	f.served = f.instances.methods()
+	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}}
+	for name, m := range f.tableIAM.methods() {
+		f.served[name] = m
+	}
 	return f, nil
 }
 
@@ -308,6 +314,7 @@ func (f *Front) httpHandler() http.Handler {
 
 // dropTables deletes every table of the instance in the emulator.
 func (f *Front) dropTables(ctx context.Context, instance string) error {
+	f.tableIAM.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)
 	var token string
 	for {

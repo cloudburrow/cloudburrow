@@ -122,3 +122,31 @@ func TestCSVLoadOptionsRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestCSVBadValues (#1457): with maxBadRecords, a record holding a value
+// its column's type refuses is bad and left out; a BOOL in any of the
+// forms BigQuery documents is written as true or false; one bad record
+// more than maxBadRecords fails the load, 400 invalid.
+func TestCSVBadValues(t *testing.T) {
+	const typed = `{"fields":[{"name":"i","type":"INTEGER"},{"name":"f","type":"FLOAT"},{"name":"b","type":"BOOLEAN"},` +
+		`{"name":"d","type":"DATE"},{"name":"t","type":"TIME"}]}`
+	data := "1,1.5,yes,2024-01-02,01:02:03\n" +
+		"x,1,t,2024-01-02,01:02:03\n" + // INTEGER
+		"2,one,t,2024-01-02,01:02:03\n" + // FLOAT
+		"3,1,maybe,2024-01-02,01:02:03\n" + // BOOLEAN
+		"4,1,N,2024-02-30,01:02:03\n" + // DATE
+		"5,1,F,2024-01-02,25:00:00\n" + // TIME
+		"6,-2e3,0,,\n"
+	emu := &csvEmulator{}
+	if w := upload(t, Wrap(emu), loadJobWith(typed, `,"maxBadRecords":5`), data); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	want := `[{"b":"true","d":"2024-01-02","f":"1.5","i":"1","t":"01:02:03"},{"b":"false","d":"","f":"-2e3","i":"6","t":""}]`
+	if got, _ := json.Marshal(emu.rows); string(got) != want {
+		t.Errorf("loaded %s, want %s", got, want)
+	}
+	emu = &csvEmulator{}
+	if w := upload(t, Wrap(emu), loadJobWith(typed, `,"maxBadRecords":4`), data); w.Code != 400 || len(emu.rows) != 0 {
+		t.Errorf("one bad record too many: %d %s, %d rows", w.Code, w.Body, len(emu.rows))
+	}
+}

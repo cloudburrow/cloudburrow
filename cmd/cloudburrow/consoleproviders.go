@@ -1962,7 +1962,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 		},
 		runSecretEnvField("Container"),
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
-		runVolumeFields("Container")[3], runVolumeFields("Container")[4],
+		runVolumeFields("Container")[3], runVolumeFields("Container")[4], runVolumeFields("Container")[5],
 		runSettingsFields("Settings", true)[0], runSettingsFields("Settings", true)[1], runSettingsFields("Settings", true)[2],
 		runSettingsFields("Settings", true)[3], runSettingsFields("Settings", true)[4],
 		{
