@@ -167,7 +167,10 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 		if pid == "" {
 			pid = "CAST(NULL AS STRING)"
 		}
-		bytes := "IFNULL(SUM(" + logicalBytesExpr(pm.Schema.Fields) + "), 0)"
+		bytes := "CAST(NULL AS INT64)"
+		if e := f.tableBytesExpr(r, path, pm.Schema.Fields); e != "" {
+			bytes = "IFNULL(SUM(" + e + "), 0)"
+		}
 		parts := "SELECT " + pid + " AS pid, COUNT(*) AS n, " + bytes + " AS b FROM " + path
 		if id != "" {
 			parts += " GROUP BY 1"

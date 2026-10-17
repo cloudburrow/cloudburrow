@@ -559,12 +559,16 @@ func (f front) storageBytes(r *http.Request, project, dataset string, t infoTabl
 	}
 	name := str(t, "tableId")
 	path := quotePath([]string{project, dataset, name})
-	n, m := f.scalar(r, "SELECT IFNULL(SUM("+logicalBytesExpr(pm.Schema.Fields)+"), 0) FROM "+path)
-	if m != "" {
-		return "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
+	logical, active, long, modified = "NULL", "NULL", "NULL", "NULL"
+	n := int64(0)
+	if e := f.tableBytesExpr(r, path, pm.Schema.Fields); e != "" {
+		var m string
+		if n, m = f.scalar(r, "SELECT IFNULL(SUM("+e+"), 0) FROM "+path); m != "" {
+			return "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
+		}
+		logical = strconv.FormatInt(n, 10)
 	}
-	logical, active, long, modified = strconv.FormatInt(n, 10), "NULL", "NULL", "NULL"
-	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && f.buffers.clock().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
+	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && logical != "NULL" && f.buffers.clock().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
 		active, long = logical, "0"
 	}
 	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)

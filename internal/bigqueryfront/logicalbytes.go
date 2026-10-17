@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"net/http"
 	"strings"
 )
 
@@ -78,4 +79,17 @@ func valueBytesExpr(fl field, v string) string {
 		size = "0"
 	}
 	return "IF(" + v + " IS NULL, 0, " + size + ")"
+}
+
+// tableBytesExpr is logicalBytesExpr of fields if the engine reads it of
+// the table at path, else "": a table whose schema names a column the
+// engine keeps under another name (a query result's "$col1", measured)
+// has no logical bytes the front can count, and gets NULL rather than
+// failing the whole view.
+func (f front) tableBytesExpr(r *http.Request, path string, fields []field) string {
+	e := logicalBytesExpr(fields)
+	if _, msg := f.scalar(r, "SELECT COUNT(*) FROM (SELECT "+e+" AS b FROM "+path+" WHERE FALSE)"); msg != "" {
+		return ""
+	}
+	return e
 }
