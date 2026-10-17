@@ -6,13 +6,14 @@ import (
 )
 
 // TestCollated (#1459): a new table takes its dataset's default collation
-// unless it names one, and its STRING columns, a RECORD's fields too, the
-// table's, unless they name one.
+// unless it names one, and its top-level STRING columns the table's,
+// unless they name one; a RECORD's fields and a REPEATED STRING get none,
+// as the engine collates neither (#1508).
 func TestCollated(t *testing.T) {
 	for _, c := range []struct{ table, dataset, want string }{
-		{`{"schema":{"fields":[{"name":"s","type":"STRING"},{"name":"n","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]},{"name":"k","type":"STRING","collation":"und:ci"}]}}`,
+		{`{"schema":{"fields":[{"name":"s","type":"STRING"},{"name":"n","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]},{"name":"a","type":"STRING","mode":"REPEATED"},{"name":"k","type":"STRING","collation":"und:ci"}]}}`,
 			"und:ci",
-			`{"defaultCollation":"und:ci","schema":{"fields":[{"collation":"und:ci","name":"s","type":"STRING"},{"name":"n","type":"INTEGER"},{"fields":[{"collation":"und:ci","name":"x","type":"STRING"}],"name":"r","type":"RECORD"},{"collation":"und:ci","name":"k","type":"STRING"}]}}`},
+			`{"defaultCollation":"und:ci","schema":{"fields":[{"collation":"und:ci","name":"s","type":"STRING"},{"name":"n","type":"INTEGER"},{"fields":[{"name":"x","type":"STRING"}],"name":"r","type":"RECORD"},{"mode":"REPEATED","name":"a","type":"STRING"},{"collation":"und:ci","name":"k","type":"STRING"}]}}`},
 		// The table names none (''): its columns stay as they are.
 		{`{"defaultCollation":"","schema":{"fields":[{"name":"s","type":"STRING"}]}}`, "und:ci",
 			`{"defaultCollation":"","schema":{"fields":[{"name":"s","type":"STRING"}]}}`},

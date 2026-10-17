@@ -689,6 +689,10 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", msg)
 		return
 	}
+	if msg := datasetCollationRefused(raw); msg != "" { // #1508, collationddl.go
+		writeError(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
 	// The emulator answers an existing dataset with 500 "dataset ... is
 	// already created" (measured); BigQuery answers 409.
 	if status, _ := f.get(r, "/datasets/"+url.PathEscape(id)); status == http.StatusOK {
@@ -750,6 +754,10 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 	raw, ok := decode(r, &body)
 	if !ok {
 		f.next.ServeHTTP(w, r)
+		return
+	}
+	if code, reason, msg := tableCollationRefusal(raw); code != 0 { // #1508, collationddl.go
+		writeError(w, code, reason, msg)
 		return
 	}
 	raw = legacyTableTypes(r, raw, body.Schema) // #1034, typenames.go

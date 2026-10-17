@@ -500,8 +500,8 @@ func schemaOptions(t []token, ds string) (d newDataset, msg string, bad string) 
 		if !ok {
 			return d, "DEFAULT followed by other than COLLATE and a string literal, which CloudBurrow does not read", ""
 		}
-		if c != "" && c != "und:ci" {
-			return d, "", fmt.Sprintf("Invalid collation specification '%s': only 'und:ci' and '' are supported", c)
+		if msg := collationSpecRefused(c); msg != "" { // #1508, collationddl.go
+			return d, "", msg
 		}
 		d.DefaultCollation = c
 		if i += 3; i >= len(t) {

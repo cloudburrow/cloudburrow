@@ -163,6 +163,12 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
+		if code, reason, msg := queryCollationRefusal(q.Query); code != 0 { // #1508, collationddl.go
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.refuseLinkedQuery(w, r, q, insert) { // #1423, loglinks.go
 		return
 	}
