@@ -122,12 +122,16 @@ func TestBigQueryMLDNN(t *testing.T) {
 	}
 	if md, err := c.Dataset(name).Model("ae").Metadata(ctx); err != nil || md.Type != "AUTOENCODER" {
 		t.Errorf("autoencoder Model.Metadata: %v, %v", md, err)
+	} else if lc, err := md.RawLabelColumns(); err != nil || len(lc) != 1 || lc[0].Name != "latent_col_1" ||
+		lc[0].Type == nil || lc[0].Type.TypeKind != "INT64" {
+		t.Errorf("autoencoder labelColumns: %v, %v; want latent_col_1 INT64", lc, err)
 	}
 	lat := mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.PREDICT(MODEL `%s.ae`, (SELECT 1.0 AS a, 2.0 AS b))", name))
 	if len(lat) != 1 || len(lat[0]) != 3 || lat[0]["a"] != 1.0 {
 		t.Errorf("autoencoder ML.PREDICT: %v; want latent_col_1, a and b", lat)
-	} else if _, ok := lat[0]["latent_col_1"].(float64); !ok {
-		t.Errorf("autoencoder ML.PREDICT latent_col_1: %v", lat[0])
+	} else if v, ok := lat[0]["latent_col_1"].(int64); !ok || v < -1 || v > 1 {
+		// INT64, as BigQuery documents it: a TANH unit's value rounded.
+		t.Errorf("autoencoder ML.PREDICT latent_col_1: %v; want an INT64 in [-1, 1]", lat[0])
 	}
 	rl := mlQuery(t, h, c, fmt.Sprintf("SELECT AVG(mean_squared_error) AS mse, AVG(mean_absolute_error) AS mae FROM ML.RECONSTRUCTION_LOSS(MODEL `%s.ae`, TABLE `%s.pair`)", name, name))
 	ev = mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.EVALUATE(MODEL `%s.ae`)", name))

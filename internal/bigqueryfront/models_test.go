@@ -186,3 +186,58 @@ func TestFindMLCalls(t *testing.T) {
 		t.Errorf("%+v", calls)
 	}
 }
+
+// TestRandomSplitFingerprint: FARM_FINGERPRINT gives the values of
+// BigQuery's documented example (hash_functions), and a RANDOM split is
+// the rows whose ABS(FARM_FINGERPRINT) % 100 is under the fraction.
+func TestRandomSplitFingerprint(t *testing.T) {
+	for s, want := range map[string]int64{"1footrue": -1541654101129638711, "2applefalse": 2794438866806483259, "3true": -4880158226897771312} {
+		if got := farmFingerprint(s); got != want {
+			t.Errorf("FARM_FINGERPRINT(%q) = %d; want %d", s, got, want)
+		}
+	}
+	cols := []mlColumn{{"x", "INTEGER"}}
+	var rows [][]*string
+	for i := 0; i < 1000; i++ {
+		rows = append(rows, []*string{sp(strconv.Itoa(i))})
+	}
+	eval := randomSplit(cols, rows, 0.3, false)
+	n := 0
+	for i, e := range eval {
+		f := farmFingerprint("x INT64=" + strconv.Quote(strconv.Itoa(i)))
+		if f < 0 {
+			f = -f
+		}
+		if e != (f%100 < 30) {
+			t.Fatalf("row %d: eval %v; ABS(FARM_FINGERPRINT) %% 100 = %d", i, e, f%100)
+		}
+		if e {
+			n++
+		}
+	}
+	if n < 250 || n > 350 {
+		t.Errorf("%d of 1000 rows in a 0.3 split", n)
+	}
+	// The same rows split the same way each run; another column name, another way.
+	again := randomSplit(cols, rows, 0.3, false)
+	other := randomSplit([]mlColumn{{"y", "INTEGER"}}, rows, 0.3, false)
+	same, moved := true, false
+	for i := range eval {
+		same = same && eval[i] == again[i]
+		moved = moved || eval[i] != other[i]
+	}
+	if !same || !moved {
+		t.Errorf("deterministic %v, depends on the column name %v", same, moved)
+	}
+	// A count: exactly that many rows, those of the smallest ABS.
+	c := randomSplit(cols, rows, 0.1, true)
+	k := 0
+	for _, e := range c {
+		if e {
+			k++
+		}
+	}
+	if k != 100 {
+		t.Errorf("count split: %d rows; want 100", k)
+	}
+}

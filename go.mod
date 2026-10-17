@@ -36,6 +36,7 @@ require (
 	github.com/chromedp/chromedp v0.16.0
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
+	github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.20.6

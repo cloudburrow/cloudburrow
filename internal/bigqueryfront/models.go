@@ -433,6 +433,13 @@ func (md bqModel) resource(full bool) map[string]any {
 			opts["minSplitLoss"], opts["minTreeChildWeight"], opts["boosterType"], opts["treeMethod"] = o.MinSplitLoss, ms(int64(o.MinChildWeight)), o.BoosterType, o.TreeMethod
 			opts["subsample"], opts["numParallelTree"] = o.Subsample, ms(int64(o.NumParallelTree))
 			opts["colsampleBytree"], opts["colsampleBylevel"], opts["colsampleBynode"] = o.ColsampleTree, o.ColsampleLevel, o.ColsampleNode
+			if isBoostedTree(o.ModelType) {
+				enc := o.CategoryEncoding
+				if enc == "" {
+					enc = "LABEL_ENCODING"
+				}
+				opts["categoryEncodingMethod"] = enc
+			}
 			if isRandomForest(o.ModelType) {
 				delete(opts, "learnRate")
 				delete(opts, "boosterType")
@@ -1317,8 +1324,21 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			}
 			o.SplitCol = s
 		case "category_encoding_method":
-			if s, ok := str(); !ok || !strings.EqualFold(s, "ONE_HOT_ENCODING") {
-				return 501, "Not implemented here: category_encoding_method other than ONE_HOT_ENCODING. Nothing was run."
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			s = strings.ToUpper(s)
+			switch s {
+			case "ONE_HOT_ENCODING", "LABEL_ENCODING":
+				// LABEL_ENCODING is checked against the model type
+				// once every option is read (checkModelOptions).
+				o.CategoryEncoding = s
+			case "DUMMY_ENCODING", "TARGET_ENCODING":
+				return 501, "Not implemented here: category_encoding_method " + s + "; CloudBurrow carries out ONE_HOT_ENCODING, and " +
+					"LABEL_ENCODING for a boosted tree model. Nothing was run."
+			default:
+				return bad()
 			}
 		case "enable_global_explain":
 			b, ok := boolv()
@@ -1407,6 +1427,11 @@ func checkModelOptions(o mlOptions) (int, string) {
 		if !found {
 			return 400, "Option " + s + " is not supported for model type " + o.ModelType
 		}
+	}
+	if o.CategoryEncoding == "LABEL_ENCODING" && !isBoostedTree(o.ModelType) {
+		// "Label encoding is supported by boosted tree models"
+		// (https://docs.cloud.google.com/bigquery/docs/auto-preprocessing).
+		return 400, "category_encoding_method LABEL_ENCODING is not supported for model type " + o.ModelType
 	}
 	switch o.ModelType {
 	case "KMEANS":

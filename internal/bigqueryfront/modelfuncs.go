@@ -351,6 +351,18 @@ func (t mlTrained) encodedSQL(ref func(string) string) []string {
 			}
 			continue
 		}
+		if ft.LabelEncoded {
+			if len(ft.Categories) == 0 {
+				out = append(out, "0.0")
+				continue
+			}
+			whens := ""
+			for i, cat := range ft.Categories {
+				whens += fmt.Sprintf(" WHEN %s THEN %d.0", sqlString(cat), i+1)
+			}
+			out = append(out, fmt.Sprintf("(CASE CAST(%s AS STRING)%s ELSE 0.0 END)", col, whens))
+			continue
+		}
 		for _, cat := range ft.Categories {
 			out = append(out, fmt.Sprintf("IF(CAST(%s AS STRING) = %s, 1.0, 0.0)", col, sqlString(cat)))
 		}
@@ -933,13 +945,17 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 				if t.Rows-int(ft.NullCount) > 1 {
 					sd = sqlF(ft.Stddev)
 				}
-				rows = append(rows, fmt.Sprintf("(%s, %s, %s, %s, %s, %s, NULL, %d, 1)", sqlString(ft.Name), sqlF(ft.Min), sqlF(ft.Max),
+				rows = append(rows, fmt.Sprintf("(%s, %s, %s, %s, %s, %s, NULL, %d, NULL)", sqlString(ft.Name), sqlF(ft.Min), sqlF(ft.Max),
 					sqlF(ft.Mean), sqlF(ft.Median), sd, ft.NullCount))
 				continue
 			}
-			rows = append(rows, fmt.Sprintf("(%s, NULL, NULL, NULL, NULL, NULL, %d, %d, %d)", sqlString(ft.Name), len(ft.Categories),
-				ft.NullCount, ft.dims()))
+			rows = append(rows, fmt.Sprintf("(%s, NULL, NULL, NULL, NULL, NULL, %d, %d, NULL)", sqlString(ft.Name), len(ft.Categories),
+				ft.NullCount))
 		}
+		// dimension is "the dimension of the input column if the input
+		// column has a ARRAY<STRUCT> type" and NULL otherwise
+		// (bigqueryml-syntax-feature), whatever the encoding: CloudBurrow
+		// trains on scalar columns only, so it is NULL for every row.
 		return mlRowsSubquery("STRUCT<input STRING, min FLOAT64, max FLOAT64, mean FLOAT64, median FLOAT64, stddev FLOAT64, "+
 			"category_count INT64, null_count INT64, dimension INT64>", rows), 0, ""
 	case "TRAINING_INFO":
