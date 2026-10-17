@@ -14,6 +14,7 @@ import (
 // returns a new etag, and one carrying a stale etag is refused (rule 2;
 // 412 conditionNotMet is the JSON API's code for a failed precondition,
 // UNVERIFIED for this method). A condition is 501 naming the field, and a
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/setIamPolicy
 // version 3 policy without conditions is accepted (rule 3).
 // testIamPermissions returns every requested permission on a bucket that
 // exists (rule 4). The policy is part of the bucket record, so it follows

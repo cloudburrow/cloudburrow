@@ -29,6 +29,7 @@ import (
 // by largest remainder so the counts add up to the instance count; ties go
 // to the split listed first. Google does not document its rounding
 // (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/run/v2/worker_pool_revision_template.proto
 
 const (
 	// labelSplitOf marks a split revision's Deployment and its pods; its

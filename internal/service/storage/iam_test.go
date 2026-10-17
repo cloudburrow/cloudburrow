@@ -50,6 +50,7 @@ func TestStorageBucketIAMRoundTripInProcess(t *testing.T) {
 // A set carrying a stale etag is refused.
 //
 // unverified: storage.buckets.setIamPolicy 412: a stale etag (the JSON API's precondition code; no page states it for this method)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/setIamPolicy
 func TestStorageBucketIAMStaleEtagInProcess(t *testing.T) {
 	_, bh, _ := sdkBucket(t, "iam-stale")
 	ctx := context.Background()

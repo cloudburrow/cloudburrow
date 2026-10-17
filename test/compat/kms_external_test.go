@@ -33,7 +33,9 @@ import (
 // covers: google.cloud.kms.v1.EkmService/CreateEkmConnection, google.cloud.kms.v1.EkmService/UpdateEkmConfig, google.cloud.kms.v1.EkmService/VerifyConnectivity
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion FAILED_PRECONDITION: an invalid external key URI
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: an EXTERNAL key without skip_initial_version_creation
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func TestKMSExternalKeys(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()

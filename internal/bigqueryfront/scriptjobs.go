@@ -284,6 +284,7 @@ func statementTypeOf(text string) string {
 // it is in, innermost first (#1569). BigQuery documents a frame per
 // statement or expression, with its text; that an expression's frame is
 // the expression alone (a DECLARE's DEFAULT, a condition) is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 func (s *scriptRun) place(toks []token) {
 	s.at = s.framesOf(toks)
 }

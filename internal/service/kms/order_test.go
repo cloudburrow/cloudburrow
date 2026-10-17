@@ -16,6 +16,7 @@ import (
 // still UNIMPLEMENTED, and a page token is bound to its order (#407).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/ListKeyRings INVALID_ARGUMENT: an order_by other than name or name desc, or a page token from another order
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/sorting-and-filtering
 func TestOrderByAndItsPageTokens(t *testing.T) {
 	ctx := context.Background()
 	s := NewServer(store.NewMemory())

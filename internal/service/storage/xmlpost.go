@@ -88,6 +88,7 @@ func authAccessID(h string) string {
 
 func missingProject(w http.ResponseWriter) {
 	// UNVERIFIED: the code and Details are what Google answers a service
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/get-service
 	// request with no project, as far as we know; not checked against
 	// production.
 	w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
@@ -445,6 +446,7 @@ func (s *Server) xmlFormPost(w http.ResponseWriter, r *http.Request, bucket stri
 	if b64 := fields["policy"]; b64 != "" {
 		if pol, err = parsePostPolicy(b64); err != nil {
 			// UNVERIFIED: the code Google gives a malformed policy.
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/reference-status
 			writeXMLError(w, http.StatusBadRequest, "InvalidPolicyDocument", "Invalid Policy: "+err.Error())
 			return
 		}
@@ -516,6 +518,7 @@ func (s *Server) xmlFormPost(w http.ResponseWriter, r *http.Request, bucket stri
 	}
 	if pol != nil && pol.hasRange {
 		// UNVERIFIED: the codes follow the XML API's interoperable ones.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/reference-status
 		if blob.Size > pol.maxLen {
 			writeXMLError(w, http.StatusBadRequest, "EntityTooLarge", fmt.Sprintf("Your proposed upload exceeds the maximum allowed size of %d bytes.", pol.maxLen))
 			return
@@ -549,6 +552,7 @@ func (s *Server) xmlFormPost(w http.ResponseWriter, r *http.Request, bucket stri
 		w.WriteHeader(http.StatusOK)
 	case "201":
 		// UNVERIFIED: the PostResponse body follows the interoperable one.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/post-object-forms
 		type postResponse struct {
 			XMLName  xml.Name `xml:"PostResponse"`
 			Location string   `xml:"Location"`

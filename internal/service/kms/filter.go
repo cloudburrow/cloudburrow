@@ -14,6 +14,7 @@ import (
 // names must be one this listing supports, with an operator it supports:
 // otherwise it is UNIMPLEMENTED naming the field, never ignored. A syntax
 // error is INVALID_ARGUMENT (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/sorting-and-filtering
 
 // fieldSupport lists, per field, the operators a listing evaluates. A key
 // ending in "." is a prefix, such as "labels.".

@@ -46,6 +46,8 @@ import (
 //     wrapped under the trusted key, with its CRC32C, which unwraps locally
 //     to the PKCS #8 DER imported (the encoding of asymmetric material is
 //     UNVERIFIED: Cloud KMS documents it for ordinary import only);
+//
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 //   - refused: an export with a wrapping key not yet trusted, a wrapped key
 //     under another key, trusted_wrapping_enabled on an ENCRYPT_DECRYPT key.
 //

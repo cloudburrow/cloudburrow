@@ -82,6 +82,7 @@ var settingsPathRe = regexp.MustCompile(`^/v2/(projects|organizations|folders|bi
 // proto the server is built on has no such field, so gRPC cannot carry it.
 // It is the container's Log Router account, kmsServiceAccountId's
 // (UNVERIFIED: that Google names the same account in both).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/Settings
 func serveSettingsJSON(next http.Handler, w http.ResponseWriter, r *http.Request) {
 	rec := httptest.NewRecorder()
 	next.ServeHTTP(rec, r)

@@ -119,9 +119,8 @@ func TestStorageXMLMultipartListPartsInProcess(t *testing.T) {
 }
 
 // Preconditions are refused with 400 NotImplemented, and completion checks
-// order, ETags and part sizes.
-//
-// unverified: storage.objects.insert 400: XML multipart part order, ETag and size errors (S3's InvalidPartOrder, InvalidPart and EntityTooSmall; no Cloud Storage page states them)
+// order, ETags and part sizes with the codes Google documents
+// (https://cloud.google.com/storage/docs/xml-api/post-object-complete).
 func TestStorageXMLMultipartPreconditionRefusedInProcess(t *testing.T) {
 	h := rawServer(t)
 	if resp, body := xmlDo(t, "POST", h.URL+"/raw/p.bin?uploads", "", map[string]string{"x-goog-if-generation-match": "0"}); resp.StatusCode != 400 || xmlCode(body) != "NotImplemented" {
@@ -132,7 +131,7 @@ func TestStorageXMLMultipartPreconditionRefusedInProcess(t *testing.T) {
 	for want, body := range map[string]string{
 		"InvalidPartOrder": completeBody(etags, 2, 1),
 		"InvalidPart":      strings.Replace(completeBody(etags, 1, 2), etags[1], `"deadbeef"`, 1),
-		"EntityTooSmall":   completeBody(etags, 1, 2),
+		"InvalidArgument":  completeBody(etags, 1, 2),
 		"MalformedXML":     "<nope",
 	} {
 		if resp, got := xmlDo(t, "POST", h.URL+"/raw/p.bin?uploadId="+id, body, nil); resp.StatusCode != 400 || xmlCode(got) != want {

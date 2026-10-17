@@ -52,6 +52,7 @@ import (
 //     dropped. Which text BigQuery gives each of the analyzer's other
 //     errors ("Syntax error: ...", "Function not found: ...", "No matching
 //     signature ...") is UNVERIFIED: the engine's text is kept, as
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/error-messages
 //     BigQuery's analyzer is GoogleSQL too.
 //
 // The engine's errors of a query it runs (division by zero, ERROR()) are

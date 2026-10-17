@@ -295,6 +295,7 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 		item, m, unsup := dpParseItem(sql, s[start:j], depth[start:j])
 		if m == dpExprMarker {
 			// An expression over DP aggregates (#1517): UNVERIFIED. Neither
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 			// BigQuery's reference nor GoogleSQL's documents it; the front
 			// follows what both document of HAVING, a condition on the
 			// aggregates' noisy values, and evaluates the expression on

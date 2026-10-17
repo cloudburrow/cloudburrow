@@ -129,6 +129,7 @@ var purposes = map[kmspb.CryptoKey_CryptoKeyPurpose]bool{
 // ENCRYPT_DECRYPT, where GOOGLE_SYMMETRIC_ENCRYPTION is implied. An algorithm
 // of another purpose is INVALID_ARGUMENT; a documented one not computed here
 // is UNIMPLEMENTED naming it. The codes are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func keyAlgorithm(p kmspb.CryptoKey_CryptoKeyPurpose, a algo) (algo, error) {
 	if a == kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_ALGORITHM_UNSPECIFIED {
 		if p == kmspb.CryptoKey_ENCRYPT_DECRYPT {

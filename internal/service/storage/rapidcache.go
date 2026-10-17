@@ -39,6 +39,7 @@ import (
 // bucket.
 //
 // UNVERIFIED: every refusal's status and message, the operations'
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 // commonMetadata.type, whether a disabled cache can be replaced before its
 // grace period ends, and the default cacheType (rapid-cache).
 

@@ -55,6 +55,7 @@ func TestStorageBucketIAMRoundTrip(t *testing.T) {
 // read-modify-write loops behave as against Google.
 //
 // unverified: storage.buckets.setIamPolicy 412: a stale etag (the JSON API's precondition code; no page states it for this method)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/setIamPolicy
 // covers: storage.buckets.setIamPolicy
 func TestStorageBucketIAMStaleEtag(t *testing.T) {
 	h := New(t)

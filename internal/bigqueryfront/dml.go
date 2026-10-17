@@ -463,7 +463,7 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		d, base = md, d.asMerge
 	}
 	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" {
-		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
+		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "badRequest", Message: msg})
 		return
 	}
 	text := base
@@ -1189,8 +1189,9 @@ func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, ta
 	if n == 0 {
 		return ""
 	}
-	// BigQuery's message as users have reported it, for UPDATE, DELETE
-	// and MERGE alike.
+	// BigQuery's message and reason, badRequest, as its error-messages page
+	// documents them (https://cloud.google.com/bigquery/docs/error-messages,
+	// read 2026-10-17), for UPDATE, DELETE and MERGE alike.
 	return "UPDATE or DELETE statement over table " + projectOf(f.base) + "." + ds + "." + table +
-		" would affect rows in the streaming buffer, which is not supported" // UNVERIFIED wording
+		" would affect rows in the streaming buffer, which is not supported"
 }

@@ -124,6 +124,7 @@ func TestPubSubExactlyOnceCanBeChanged(t *testing.T) {
 // endpoint, seeding nothing.
 // covers: google.pubsub.v1.Subscriber/CreateSubscription, google.pubsub.v1.Subscriber/UpdateSubscription, google.pubsub.v1.Subscriber/ModifyPushConfig
 // unverified: google.pubsub.v1.Subscriber/CreateSubscription INVALID_ARGUMENT: exactly-once delivery with a push endpoint (Google documents the rule, not the code)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/pubsub/docs/exactly-once-delivery
 func TestPubSubRefusesExactlyOnceWithPush(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)

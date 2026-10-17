@@ -18,6 +18,7 @@ import (
 // read the same over REST as over gRPC.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: an unknown field in the JSON body
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/patch
 func TestKMSCreatesOverREST(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -71,6 +72,7 @@ func TestKMSCreatesOverREST(t *testing.T) {
 // and a verb nothing binds is 404.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey INVALID_ARGUMENT: an unknown field in the JSON body
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/patch
 func TestKMSLifecycleOverRESTWire(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()

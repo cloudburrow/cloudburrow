@@ -42,7 +42,9 @@ func rotationFixture(t *testing.T, ringID string) (*Server, *sched.FakeClock, *k
 // naming the rule (#816).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: a rotation_period below 24h or above 876,000h, or without next_rotation_time (message wording)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey INVALID_ARGUMENT: a rotation_period below 24h, or a schedule left with a period and no next_rotation_time (message wording)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func TestKMSRotationScheduleValidation(t *testing.T) {
 	ctx := context.Background()
 	_, _, c, ring := rotationFixture(t, "rv")

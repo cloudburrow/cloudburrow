@@ -40,6 +40,7 @@ import (
 // documentation does not give), and INTERVAL and RANGE (not in the
 // table). The file's writer metadata, page and row group sizes and
 // encodings are the writer's, not BigQuery's (UNVERIFIED): a Parquet
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // reader reads the same rows and types, not the same bytes.
 
 // parquetLeaf is how the front writes a column of a BigQuery type to
@@ -75,6 +76,7 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 		// hold a FLOAT64, and BigQuery's names for FLOAT64 include FLOAT
 		// (the legacy and REST name): DOUBLE, the 64-bit type, which
 		// BigQuery's Parquet load also reads as FLOAT64. UNVERIFIED
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		// against a file BigQuery exported.
 		return parquetLeaf{phys: parquet.Types.Double, logical: pqschema.NoLogicalType{}}, true
 	case "BYTES":
@@ -102,6 +104,7 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 // unparameterized type's FIXED_LEN_BYTE_ARRAY length (16 or 32 bytes),
 // which holds any such precision; the length BigQuery writes is not
 // documented (UNVERIFIED against BigQuery).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 func parquetFieldLeaf(fl field) (parquetLeaf, bool) {
 	leaf, ok := parquetExportType(fl.Type)
 	if p, sc, param := decimalParams(fl); ok && param {
@@ -147,12 +150,18 @@ func parquetUnwritten(fields []field, prefix string) (string, string) {
 //     says GeoParquet metadata is added, but GeoParquet 1.x holds WKB, not
 //     WKT, and its version and CRS are not given: none is written
 //     (UNVERIFIED against BigQuery).
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 //   - INTERVAL, which the Parquet table does not list, is a STRING of its
 //     canonical text "[sign]Y-M [sign]D [sign]H:M:S[.F]" (UNVERIFIED).
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 //   - RANGE, which the table does not list, is a group of two fields of
 //     its element type, start and end, a NULL for an UNBOUNDED bound: the
 //     form BigQuery's Storage Read API gives a RANGE in Arrow (a struct of
 //     start and end), UNVERIFIED for Parquet.
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 func parquetFields(fields []field, nativeGeo bool) []field {
 	out := make([]field, len(fields))
 	for i, fl := range fields {
@@ -294,6 +303,7 @@ func (n *parquetNode) columns() []*parquetColumn {
 // <column>.list (googleapis/google-cloud-php#6308), which is that form.
 // The names "list" and "element" are Parquet's (LogicalTypes.md); the
 // element's and the outer group's repetitions are UNVERIFIED against
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // BigQuery.
 func parquetNodes(fields []field, rep int16, cols *[]*parquetColumn) (pqschema.FieldList, []*parquetNode, error) {
 	var out pqschema.FieldList

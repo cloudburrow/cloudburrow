@@ -22,6 +22,7 @@ import (
 //
 //   - A name is stored and returned ending in "/", as the API returns
 //     managed folder names; one sent without it has it added (UNVERIFIED:
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 //     no page states whether Google adds it or refuses the name).
 //   - A managed folder is made only in a bucket with uniform bucket-level
 //     access enabled, as the managed folders page requires.
@@ -45,6 +46,7 @@ import (
 // rapidCacheConfig clears them all; it bumps the metageneration and takes
 // ifMetagenerationMatch and ifMetagenerationNotMatch. The policies are
 // stored and have no effect, as the caches have none. UNVERIFIED: the
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 // refusals' statuses and messages.
 
 const managedFolderPrefix = "managedfolder/"
@@ -127,6 +129,7 @@ func hasManagedFolders(tx Tx, bucket string) bool {
 
 func managedFolderMissing(bucket, name string) error {
 	// UNVERIFIED: the message; the status is the JSON API's 404.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 	return notFound("The managed folder %s does not exist in bucket %s.", name, bucket)
 }
 
@@ -382,6 +385,7 @@ func (s *Server) managedFoldersInsert(w http.ResponseWriter, r *http.Request) {
 		}
 		if !uniformAccess(b) {
 			// UNVERIFIED: the status and message; the requirement is the
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 			// managed folders page's.
 			return badRequest("Managed folders can only be created in a bucket with uniform bucket-level access enabled; %s does not have it.", bucket)
 		}
@@ -448,6 +452,7 @@ func (s *Server) managedFoldersDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		if !allowNonEmpty && managedFolderInUse(tx, f) {
 			// UNVERIFIED: the status and message. The discovery document
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 			// says only that a non-empty managed folder needs allowNonEmpty.
 			return conflict("The managed folder %s is not empty: objects or managed folders are under it. Delete with allowNonEmpty=true to delete it anyway; the objects are kept.", f.Name)
 		}

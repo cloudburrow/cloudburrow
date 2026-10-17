@@ -32,6 +32,7 @@ func openAppendable(b bucketRecord, o *objectRecord) error {
 	if !zonal(b) {
 		// rapid-bucket: appendable objects are only in Rapid storage
 		// buckets. UNVERIFIED: the status and message.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/rapid/rapid-bucket
 		return errorf(http.StatusPreconditionFailed, "conditionNotMet",
 			"Appendable objects can only be created in a Rapid storage (zonal) bucket; %s is not one.", b.Name)
 	}
@@ -65,6 +66,7 @@ func appendTarget(tx Tx, bucket, name string, gen int64, handle string) (objectR
 		return o, grpcstatus.Errorf(codes.FailedPrecondition, "%s/%s generation %d is finalized and cannot be appended to", bucket, name, gen)
 	case handle != "" && o.AppendHandle != handle:
 		// UNVERIFIED: the status a superseded writer is refused with.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/rapid/rapid-bucket
 		return o, grpcstatus.Errorf(codes.FailedPrecondition, "%s/%s generation %d was taken over by another writer", bucket, name, gen)
 	}
 	return o, nil

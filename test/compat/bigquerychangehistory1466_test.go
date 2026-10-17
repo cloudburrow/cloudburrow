@@ -141,6 +141,7 @@ func TestBigQueryChangeHistoryReplace(t *testing.T) {
 // materialized view or a snapshot; CHANGES's range is at most one day,
 // as given; and the engine's clock follows the front's (#1370's
 // clock:advance). 400 each; the wording is CloudBurrow's, UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/change-history
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryChangeHistoryLimits(t *testing.T) {

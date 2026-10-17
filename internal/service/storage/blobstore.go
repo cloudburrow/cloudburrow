@@ -289,15 +289,16 @@ type nopCloser struct{ *bytes.Reader }
 func (nopCloser) Close() error { return nil }
 
 // storeStatus maps a blob-store limit error to the HTTP status and reason the
-// JSON API answers with. An object over the maximum is 413; Google documents
-// 413 for an entity too large. A local disk quota has no Google equivalent,
-// so 507 insufficientStorage is CloudBurrow's choice.
-//
-// unverified: the reasons for both
+// JSON API answers with. An object over the maximum is 413 uploadTooLarge,
+// as the status-codes page lists it ("Attempt to upload an object larger
+// than 5 TiB", https://cloud.google.com/storage/docs/json_api/v1/status-codes,
+// read 2026-10-17). A local disk quota has no Google equivalent, so 507
+// insufficientStorage is CloudBurrow's choice (UNVERIFIED; the same page
+// lists no 507).
 func storeStatus(err error) (status int, reason string, ok bool) {
 	switch {
 	case errors.Is(err, ErrObjectTooLarge):
-		return 413, "entityTooLarge", true
+		return 413, "uploadTooLarge", true
 	case errors.Is(err, ErrQuota):
 		return 507, "insufficientStorage", true
 	}

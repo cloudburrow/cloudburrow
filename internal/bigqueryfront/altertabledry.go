@@ -28,6 +28,7 @@ import (
 // text. BigQuery's dry run of an ALTER TABLE was not measured: the
 // statement type is the reference's (JobStatistics2.statementType
 // "ALTER_TABLE"), the rest UNVERIFIED. The schema checks the tables.patch
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 // path makes when it is sent (updateTable) are not made in a dry run. A
 // script with an ALTER TABLE in a dry run stays 501 (checkDDL).
 

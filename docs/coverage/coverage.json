@@ -229,7 +229,7 @@
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch11_test.go:518 TestTerraformRegionalSecretDataSources",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
@@ -247,7 +247,7 @@
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch11_test.go:478 TestTerraformRegionalSecretIAM",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
@@ -258,7 +258,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a topic in Secret.topics that does not exist (Pub/Sub's code for the failed TOPIC_CONFIGURED publish)",
-            "test": "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+            "test": "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications"
           }
         ]
       },
@@ -268,7 +268,7 @@
         "tests": [
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch11_test.go:478 TestTerraformRegionalSecretIAM",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
@@ -283,7 +283,7 @@
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -293,7 +293,7 @@
         "tests": [
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
@@ -313,7 +313,7 @@
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -339,7 +339,7 @@
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
@@ -428,7 +428,7 @@
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
@@ -602,13 +602,6 @@
         "tests": [
           "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
-        ],
-        "unverified": [
-          {
-            "code": "ABORTED",
-            "case": "a stale etag, ADR-0006 rule 2",
-            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
-          }
         ]
       },
       {
@@ -616,13 +609,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
-        ],
-        "unverified": [
-          {
-            "code": "OK",
-            "case": "an empty set on a missing job, as iam_policy.proto documents",
-            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
-          }
         ]
       },
       {
@@ -744,13 +730,6 @@
         "tests": [
           "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
-        ],
-        "unverified": [
-          {
-            "code": "ABORTED",
-            "case": "a stale etag, ADR-0006 rule 2",
-            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
-          }
         ]
       },
       {
@@ -758,13 +737,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
-        ],
-        "unverified": [
-          {
-            "code": "OK",
-            "case": "an empty set on a missing service, as iam_policy.proto documents",
-            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
-          }
         ]
       },
       {
@@ -2736,21 +2708,21 @@
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
       },
@@ -2758,7 +2730,7 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2766,14 +2738,14 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2781,55 +2753,55 @@
         "method": "google.cloud.kms.v1.EkmService/CreateEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/GetEkmConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/GetEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/ListEkmConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/VerifyConnectivity",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2837,7 +2809,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ]
       },
       {
@@ -2852,7 +2824,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ]
       },
       {
@@ -2867,7 +2839,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ]
       },
       {
@@ -2902,14 +2874,14 @@
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:154 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
+          "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a ciphertext that does not decrypt",
-            "test": "test/compat/kms_purposes_test.go:154 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted"
+            "test": "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted"
           }
         ]
       },
@@ -2917,19 +2889,19 @@
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricSign",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a key of another purpose",
-            "test": "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
+            "test": "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a digest of the wrong hash, or a data_crc32c that does not match",
-            "test": "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
+            "test": "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
           }
         ]
       },
@@ -2937,63 +2909,63 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
-          "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
+          "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
+          "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
             "code": "ALREADY_EXISTS",
             "case": "the name of a deleted key",
-            "test": "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+            "test": "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "ASYMMETRIC_SIGN with no version_template.algorithm",
-            "test": "test/compat/kms_test.go:366 TestKMSCreateCryptoKeyFields"
+            "test": "test/compat/kms_test.go:374 TestKMSCreateCryptoKeyFields"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a rotation_period below 24h (message wording)",
-            "test": "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule"
+            "test": "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a rotation_period below 24h or above 876,000h, or without next_rotation_time (message wording)",
-            "test": "internal/service/kms/rotation_test.go:46 TestKMSRotationScheduleValidation"
+            "test": "internal/service/kms/rotation_test.go:48 TestKMSRotationScheduleValidation"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an EXTERNAL key without skip_initial_version_creation",
-            "test": "test/compat/kms_external_test.go:37 TestKMSExternalKeys"
+            "test": "test/compat/kms_external_test.go:39 TestKMSExternalKeys"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an unknown field in the JSON body",
-            "test": "test/compat/kms_restcreates_test.go:21 TestKMSCreatesOverREST"
+            "test": "test/compat/kms_restcreates_test.go:22 TestKMSCreatesOverREST"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "destroy_scheduled_duration out of range, negative or fractional",
-            "test": "internal/service/kms/keyfields_test.go:17 TestDestroyScheduledDurationRange"
+            "test": "internal/service/kms/keyfields_test.go:18 TestDestroyScheduledDurationRange"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED",
-            "test": "test/compat/kms_test.go:366 TestKMSCreateCryptoKeyFields"
+            "test": "test/compat/kms_test.go:374 TestKMSCreateCryptoKeyFields"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed parent that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3001,31 +2973,31 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:47 TestKMSResources"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "an invalid external key URI",
-            "test": "test/compat/kms_external_test.go:37 TestKMSExternalKeys"
+            "test": "test/compat/kms_external_test.go:39 TestKMSExternalKeys"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an initial state other than ENABLED or DISABLED",
-            "test": "internal/service/kms/state_test.go:18 TestCreateVersionRefusesOtherInitialStates"
+            "test": "internal/service/kms/state_test.go:19 TestCreateVersionRefusesOtherInitialStates"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed parent that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3033,8 +3005,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping",
+          "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
@@ -3042,14 +3014,14 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3057,17 +3029,17 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decapsulate",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:127 TestKMSDecapsulateMLKEM"
+          "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_test.go:614 TestKMSDecrypt",
-          "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_test.go:630 TestKMSDecrypt",
+          "test/compat/kms_test.go:731 TestKMSDecryptFollowsTheVersionLifecycle",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources"
         ],
@@ -3075,32 +3047,32 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROYED version",
-            "test": "internal/service/kms/lifecycle_test.go:22 TestDecryptIsRefusedOnceDestroyed"
+            "test": "internal/service/kms/lifecycle_test.go:23 TestDecryptIsRefusedOnceDestroyed"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED or DESTROY_SCHEDULED version",
-            "test": "test/compat/gcloudkms_crypto_test.go:28 TestGcloudKMSEncryptDecrypt"
+            "test": "test/compat/gcloudkms_crypto_test.go:31 TestGcloudKMSEncryptDecrypt"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED or DESTROY_SCHEDULED version",
-            "test": "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle"
+            "test": "test/compat/kms_test.go:731 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a CryptoKeyVersion name, or an empty ciphertext",
-            "test": "test/compat/kms_test.go:614 TestKMSDecrypt"
+            "test": "test/compat/kms_test.go:630 TestKMSDecrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a wrong AAD, a tampered ciphertext, or another key's ciphertext",
-            "test": "test/compat/gcloudkms_crypto_test.go:28 TestGcloudKMSEncryptDecrypt"
+            "test": "test/compat/gcloudkms_crypto_test.go:31 TestGcloudKMSEncryptDecrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a wrong AAD, a tampered ciphertext, or another key's ciphertext",
-            "test": "test/compat/kms_test.go:614 TestKMSDecrypt"
+            "test": "test/compat/kms_test.go:630 TestKMSDecrypt"
           }
         ]
       },
@@ -3108,13 +3080,13 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+          "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
-            "case": "a key that still has versions",
-            "test": "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+            "case": "a key that still has versions, or has automatic rotation scheduled (the rules are delete-kms-resources', the code is not)",
+            "test": "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
           }
         ]
       },
@@ -3122,13 +3094,13 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+          "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version that is not DESTROYED",
-            "test": "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+            "test": "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
           }
         ]
       },
@@ -3136,24 +3108,24 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:415 TestKMSDestroyCryptoKeyVersion",
+          "test/compat/kms_test.go:424 TestKMSDestroyCryptoKeyVersion",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROYED version",
-            "test": "internal/service/kms/destroy_test.go:50 TestDestroyFromEachState"
+            "test": "internal/service/kms/destroy_test.go:51 TestDestroyFromEachState"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version already DESTROY_SCHEDULED",
-            "test": "test/compat/kms_test.go:415 TestKMSDestroyCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:424 TestKMSDestroyCryptoKeyVersion"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version whose destroy_time has passed",
-            "test": "internal/service/kms/destroyed_test.go:28 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
+            "test": "internal/service/kms/destroyed_test.go:30 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
           }
         ]
       },
@@ -3161,41 +3133,41 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_test.go:495 TestKMSEncrypt",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_test.go:509 TestKMSEncrypt",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED named version",
-            "test": "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle"
+            "test": "test/compat/kms_test.go:731 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED primary, a DISABLED named version, or a key with no primary",
-            "test": "test/compat/gcloudkms_crypto_test.go:28 TestGcloudKMSEncryptDecrypt"
+            "test": "test/compat/gcloudkms_crypto_test.go:31 TestGcloudKMSEncryptDecrypt"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED primary, a DISABLED named version, or a key with no primary",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:509 TestKMSEncrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:509 TestKMSEncrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "empty plaintext, or plaintext or AAD over 64KiB",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:509 TestKMSEncrypt"
           },
           {
             "code": "NOT_FOUND",
             "case": "a key that does not exist",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:509 TestKMSEncrypt"
           }
         ]
       },
@@ -3203,20 +3175,20 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:258 TestKMSGenerateRandomBytes"
+          "test/compat/kms_purposes_test.go:266 TestKMSGenerateRandomBytes"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a length outside 8 to 1024, or a protection level other than HSM",
-            "test": "test/compat/kms_purposes_test.go:258 TestKMSGenerateRandomBytes"
+            "test": "test/compat/kms_purposes_test.go:266 TestKMSGenerateRandomBytes"
           }
         ]
       },
@@ -3224,10 +3196,10 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup",
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
+          "test/compat/kms_test.go:202 TestKMSNamesAreValidatedBeforeLookup",
+          "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
@@ -3235,22 +3207,22 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name (wrong collection)",
-            "test": "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup"
+            "test": "test/compat/kms_test.go:202 TestKMSNamesAreValidatedBeforeLookup"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup"
+            "test": "test/compat/kms_test.go:202 TestKMSNamesAreValidatedBeforeLookup"
           }
         ]
       },
@@ -3258,29 +3230,29 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:1141 TestKMSGetCryptoKeyVersion",
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled"
+          "test/compat/kms_test.go:1162 TestKMSGetCryptoKeyVersion",
+          "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name, including version IDs 0, -1, 01 and abc",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed version ID (01)",
-            "test": "test/compat/kms_restreads_test.go:24 TestKMSReadsAgreeOverREST"
+            "test": "test/compat/kms_restreads_test.go:27 TestKMSReadsAgreeOverREST"
           },
           {
             "code": "NOT_FOUND",
             "case": "a version number the key does not have",
-            "test": "test/compat/kms_test.go:1141 TestKMSGetCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:1162 TestKMSGetCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3288,7 +3260,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetImportJob",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
+          "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
@@ -3296,7 +3268,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
@@ -3304,32 +3276,32 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "NOT_FOUND",
             "case": "a key ring removed by /admin/reset",
-            "test": "test/compat/kms_test.go:46 TestKMSResources"
+            "test": "test/compat/kms_test.go:47 TestKMSResources"
           },
           {
             "code": "NOT_FOUND",
             "case": "a key ring removed by a project-scoped /admin/reset",
-            "test": "test/compat/kms_test.go:1109 TestKMSProjectResetClearsOnlyThatProject"
+            "test": "test/compat/kms_test.go:1129 TestKMSProjectResetClearsOnlyThatProject"
           },
           {
             "code": "NOT_FOUND",
             "case": "a key ring that did not survive an ephemeral restart",
-            "test": "test/compat/kmsdurability_test.go:90 TestKMSAcrossRestart"
+            "test": "test/compat/kmsdurability_test.go:91 TestKMSAcrossRestart"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "test/compat/kms_restreads_test.go:24 TestKMSReadsAgreeOverREST"
+            "test": "test/compat/kms_restreads_test.go:27 TestKMSReadsAgreeOverREST"
           }
         ]
       },
@@ -3337,10 +3309,10 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetPublicKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_import_test.go:127 TestKMSDecapsulateMLKEM",
-          "test/compat/kms_purposes_test.go:154 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
-          "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM",
+          "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
+          "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
       },
@@ -3348,21 +3320,21 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetRetiredResource",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+          "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a wrapped key that does not unwrap, or a key of the wrong length",
-            "test": "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
+            "test": "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys"
           }
         ]
       },
@@ -3370,17 +3342,17 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:931 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:47 TestKMSResources",
+          "test/compat/kms_test.go:950 TestKMSFullViewAddsNothingForSoftwareKeys",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
@@ -3388,22 +3360,22 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "a filter that does not parse",
-            "test": "internal/service/kms/filter_test.go:18 TestVersionStateFilter"
+            "test": "internal/service/kms/filter_test.go:19 TestVersionStateFilter"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a view that is not a CryptoKeyVersionView",
-            "test": "internal/service/kms/view_test.go:16 TestAnUndefinedViewIsRefused"
+            "test": "internal/service/kms/view_test.go:18 TestAnUndefinedViewIsRefused"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed parent that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3411,30 +3383,30 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:931 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/kms_test.go:47 TestKMSResources",
+          "test/compat/kms_test.go:950 TestKMSFullViewAddsNothingForSoftwareKeys",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a filter that does not parse",
-            "test": "internal/service/kms/filter_names_test.go:19 TestNameAndLabelFilters"
+            "test": "internal/service/kms/filter_names_test.go:20 TestNameAndLabelFilters"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a version_view that is not a CryptoKeyVersionView",
-            "test": "internal/service/kms/view_test.go:16 TestAnUndefinedViewIsRefused"
+            "test": "internal/service/kms/view_test.go:18 TestAnUndefinedViewIsRefused"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed parent that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3442,31 +3414,31 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListImportJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
+          "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListKeyRings",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an order_by other than name or name desc, or a page token from another order",
-            "test": "internal/service/kms/order_test.go:19 TestOrderByAndItsPageTokens"
+            "test": "internal/service/kms/order_test.go:20 TestOrderByAndItsPageTokens"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an unknown query parameter over REST",
-            "test": "test/compat/kms_restreads_test.go:24 TestKMSReadsAgreeOverREST"
+            "test": "test/compat/kms_restreads_test.go:27 TestKMSReadsAgreeOverREST"
           }
         ]
       },
@@ -3474,34 +3446,34 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListRetiredResources",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+          "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/MacSign",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:179 TestKMSMacSignAndVerify"
+          "test/compat/kms_purposes_test.go:185 TestKMSMacSignAndVerify"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/MacVerify",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:179 TestKMSMacSignAndVerify"
+          "test/compat/kms_purposes_test.go:185 TestKMSMacSignAndVerify"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/RawDecrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:210 TestKMSRawEncryptAndDecrypt"
+          "test/compat/kms_purposes_test.go:217 TestKMSRawEncryptAndDecrypt"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "AES-GCM with the wrong additional authenticated data",
-            "test": "test/compat/kms_purposes_test.go:210 TestKMSRawEncryptAndDecrypt"
+            "test": "test/compat/kms_purposes_test.go:217 TestKMSRawEncryptAndDecrypt"
           }
         ]
       },
@@ -3509,25 +3481,25 @@
         "method": "google.cloud.kms.v1.KeyManagementService/RawEncrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:210 TestKMSRawEncryptAndDecrypt"
+          "test/compat/kms_purposes_test.go:217 TestKMSRawEncryptAndDecrypt"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:451 TestKMSRestoreCryptoKeyVersion"
+          "test/compat/kms_test.go:461 TestKMSRestoreCryptoKeyVersion"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version whose destroy_time has passed",
-            "test": "internal/service/kms/restore_test.go:23 TestRestoreBeforeAndAfterDestroyTime"
+            "test": "internal/service/kms/restore_test.go:24 TestRestoreBeforeAndAfterDestroyTime"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "an ENABLED version",
-            "test": "test/compat/kms_test.go:451 TestKMSRestoreCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:461 TestKMSRestoreCryptoKeyVersion"
           }
         ]
       },
@@ -3535,41 +3507,41 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:886 TestKMSUpdateCryptoKey",
+          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
+          "test/compat/kms_test.go:905 TestKMSUpdateCryptoKey",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a rotation_period below 24h, or a schedule left with a period and no next_rotation_time (message wording)",
-            "test": "internal/service/kms/rotation_test.go:46 TestKMSRotationScheduleValidation"
+            "test": "internal/service/kms/rotation_test.go:48 TestKMSRotationScheduleValidation"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a rotation_period below 24h, or with no next_rotation_time (message wording)",
-            "test": "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule"
+            "test": "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an empty mask, an immutable, output-only or unknown path, or an invalid label",
-            "test": "internal/service/kms/update_key_test.go:17 TestUpdateCryptoKeyMask"
+            "test": "internal/service/kms/update_key_test.go:19 TestUpdateCryptoKeyMask"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an unknown field in the JSON body",
-            "test": "test/compat/kms_restcreates_test.go:74 TestKMSLifecycleOverRESTWire"
+            "test": "test/compat/kms_restcreates_test.go:76 TestKMSLifecycleOverRESTWire"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "the immutable destroy_scheduled_duration in the mask",
-            "test": "test/compat/kms_test.go:886 TestKMSUpdateCryptoKey"
+            "test": "test/compat/kms_test.go:905 TestKMSUpdateCryptoKey"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed key that does not exist",
-            "test": "internal/service/kms/update_key_test.go:17 TestUpdateCryptoKeyMask"
+            "test": "internal/service/kms/update_key_test.go:19 TestUpdateCryptoKeyMask"
           }
         ]
       },
@@ -3577,30 +3549,30 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_test.go:322 TestKMSPrimaryMustBeEnabled",
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_test.go:328 TestKMSPrimaryMustBeEnabled",
+          "test/compat/kms_test.go:47 TestKMSResources"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED target version",
-            "test": "internal/service/kms/primary_test.go:18 TestPrimaryRefusesADestroyScheduledVersion"
+            "test": "internal/service/kms/primary_test.go:19 TestPrimaryRefusesADestroyScheduledVersion"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED target version",
-            "test": "test/compat/kms_test.go:322 TestKMSPrimaryMustBeEnabled"
+            "test": "test/compat/kms_test.go:328 TestKMSPrimaryMustBeEnabled"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name or crypto_key_version_id",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "internal/service/kms/names_test.go:61 TestMalformedNamesAreInvalidArgument"
+            "test": "internal/service/kms/names_test.go:79 TestMalformedNamesAreInvalidArgument"
           }
         ]
       },
@@ -3611,8 +3583,8 @@
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
-          "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion",
+          "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_test.go:282 TestKMSUpdateCryptoKeyVersion",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
         ],
@@ -3620,32 +3592,32 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED or DESTROYED version",
-            "test": "internal/service/kms/update_version_test.go:22 TestUpdateVersionRefusesADestroyScheduledVersion"
+            "test": "internal/service/kms/update_version_test.go:23 TestUpdateVersionRefusesADestroyScheduledVersion"
           },
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version whose destroy_time has passed",
-            "test": "internal/service/kms/destroyed_test.go:28 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
+            "test": "internal/service/kms/destroyed_test.go:30 TestAScheduledVersionIsDestroyedAtItsDestroyTime"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed version name",
-            "test": "internal/service/kms/update_version_test.go:75 TestUpdateVersionNames"
+            "test": "internal/service/kms/update_version_test.go:78 TestUpdateVersionNames"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a target state of DESTROYED",
-            "test": "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:282 TestKMSUpdateCryptoKeyVersion"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an update_mask without state",
-            "test": "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:282 TestKMSUpdateCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
             "case": "a well-formed version that does not exist",
-            "test": "internal/service/kms/update_version_test.go:75 TestUpdateVersionNames"
+            "test": "internal/service/kms/update_version_test.go:78 TestUpdateVersionNames"
           }
         ]
       },
@@ -3673,8 +3645,8 @@
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
-          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11",
           "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
@@ -3683,17 +3655,17 @@
           {
             "code": "NOT_FOUND",
             "case": "a key ring that does not exist",
-            "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced"
           },
           {
             "code": "NOT_FOUND",
             "case": "an EkmConnection that does not exist",
-            "test": "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced"
           },
           {
             "code": "UNIMPLEMENTED",
             "case": "an import job, which CloudBurrow does not serve",
-            "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced"
           }
         ]
       },
@@ -3703,8 +3675,8 @@
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
-          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
@@ -3712,12 +3684,12 @@
           {
             "code": "ABORTED",
             "case": "a stale etag on an EkmConnection or ekmConfig",
-            "test": "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced"
           },
           {
             "code": "ABORTED",
             "case": "a stale etag",
-            "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+            "test": "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced"
           }
         ]
       },
@@ -3727,8 +3699,8 @@
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
-          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced"
         ]
       }
     ]
@@ -5675,7 +5647,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "the instance `up` runs (CloudBurrow's own)",
-            "test": "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
+            "test": "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer"
           }
         ]
       },
@@ -5705,7 +5677,7 @@
           "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
           "test/compat/gcloudredis_test.go:143 TestGcloudRedisCustomerManagedKey",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
@@ -5723,7 +5695,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
@@ -5731,7 +5703,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "an instance with AUTH disabled",
-            "test": "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
+            "test": "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer"
           }
         ]
       },
@@ -5748,7 +5720,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption"
         ]
       },
@@ -5835,7 +5807,7 @@
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
-          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -5852,7 +5824,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:97 TestPubSubTopicAndSnapshotListings",
-          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
       {
@@ -5873,7 +5845,7 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
-          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic"
+          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic"
         ]
       },
       {
@@ -5895,7 +5867,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
@@ -5904,13 +5876,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
           "test/compat/pubsubprotobuf_test.go:403 TestConsolePubSubDetachAndProtobufSchema",
-          "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
+          "test/compat/pubsubresetseed_test.go:29 TestPubSubResetDeletesSchemas",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
@@ -5943,15 +5915,15 @@
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
-          "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
-          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/pubsubresetseed_test.go:29 TestPubSubResetDeletesSchemas",
+          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ],
         "unverified": [
           {
             "code": "NOT_FOUND",
             "case": "a schema removed by a project-scoped /admin/reset",
-            "test": "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas"
+            "test": "test/compat/pubsubresetseed_test.go:29 TestPubSubResetDeletesSchemas"
           }
         ]
       },
@@ -5960,7 +5932,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
@@ -6005,7 +5977,7 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
-          "test/compat/pubsubexpiration_test.go:209 TestPubSubExactlyOnceDelivery",
+          "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas"
         ]
       },
@@ -6014,7 +5986,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
@@ -6026,11 +5998,11 @@
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:163 TestPubSubRefusesAnExpirationGoogleRefuses",
-          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:164 TestPubSubRefusesAnExpirationGoogleRefuses",
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubexpiration_test.go:79 TestPubSubSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
-          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubfollowups_test.go:128 TestPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubfollowups_test.go:230 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
@@ -6045,12 +6017,12 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)",
-            "test": "test/compat/pubsubexpiration_test.go:163 TestPubSubRefusesAnExpirationGoogleRefuses"
+            "test": "test/compat/pubsubexpiration_test.go:164 TestPubSubRefusesAnExpirationGoogleRefuses"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "exactly-once delivery with a push endpoint (Google documents the rule, not the code)",
-            "test": "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush"
+            "test": "test/compat/pubsubfollowups_test.go:128 TestPubSubRefusesExactlyOnceWithPush"
           }
         ]
       },
@@ -6088,15 +6060,15 @@
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
-          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubexpiration_test.go:79 TestPubSubSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubfollowups_test.go:230 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
-          "test/compat/pubsubresetseed_test.go:177 TestPubSubExpirationCanBeUpdated",
+          "test/compat/pubsubresetseed_test.go:179 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
@@ -6111,7 +6083,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:97 TestPubSubTopicAndSnapshotListings",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
+          "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad"
         ]
       },
       {
@@ -6121,11 +6093,11 @@
           "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubexpiration_test.go:79 TestPubSubSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
+          "test/compat/pubsubfollowups_test.go:230 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:127 TestPubSubRESTListOverFourMiB",
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
-          "test/compat/pubsubresetseed_test.go:177 TestPubSubExpirationCanBeUpdated",
+          "test/compat/pubsubresetseed_test.go:179 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration"
@@ -6145,7 +6117,7 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:188 TestPubSubModifyPushConfig",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
-          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubfollowups_test.go:128 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
@@ -6157,8 +6129,8 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:209 TestPubSubExactlyOnceDelivery",
-          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery",
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
       {
@@ -6175,7 +6147,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsub_test.go:137 TestPubSubStreamingPull",
-          "test/compat/pubsubexpiration_test.go:209 TestPubSubExactlyOnceDelivery"
+          "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery"
         ]
       },
       {
@@ -6191,8 +6163,8 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
-          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubfollowups_test.go:128 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
@@ -6200,7 +6172,7 @@
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:403 TestConsolePubSubDetachAndProtobufSchema",
-          "test/compat/pubsubresetseed_test.go:177 TestPubSubExpirationCanBeUpdated",
+          "test/compat/pubsubresetseed_test.go:179 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
@@ -6212,7 +6184,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)",
-            "test": "test/compat/pubsubresetseed_test.go:177 TestPubSubExpirationCanBeUpdated"
+            "test": "test/compat/pubsubresetseed_test.go:179 TestPubSubExpirationCanBeUpdated"
           }
         ]
       },
@@ -6330,9 +6302,9 @@
         "method": "storage.anywhereCaches.disable",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
@@ -6340,9 +6312,9 @@
         "method": "storage.anywhereCaches.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
@@ -6350,21 +6322,21 @@
         "method": "storage.anywhereCaches.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a zone outside the bucket's location",
-            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
           },
           {
             "code": "409",
             "case": "a second cache in the zone (ANYWHERE_CACHE_ALREADY_EXISTS)",
-            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6372,23 +6344,23 @@
         "method": "storage.anywhereCaches.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
         ]
       },
       {
         "method": "storage.anywhereCaches.pause",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a cache that is not running",
-            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6396,25 +6368,25 @@
         "method": "storage.anywhereCaches.resume",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
         ]
       },
       {
         "method": "storage.anywhereCaches.update",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "another update while one is pending",
-            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6485,17 +6457,17 @@
           {
             "code": "409",
             "case": "a bucket that holds a managed folder",
-            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
           },
           {
             "code": "409",
             "case": "a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)",
-            "test": "internal/service/storage/buckets_test.go:250 TestStorageNonEmptyBucketDeleteInProcess"
+            "test": "internal/service/storage/buckets_test.go:251 TestStorageNonEmptyBucketDeleteInProcess"
           },
           {
             "code": "409",
             "case": "no page states the JSON API's status for a non-empty bucket; the XML API documents 409 BucketNotEmpty",
-            "test": "test/compat/storage_test.go:412 TestStorageNonEmptyBucketDelete"
+            "test": "test/compat/storage_test.go:413 TestStorageNonEmptyBucketDelete"
           }
         ]
       },
@@ -6503,13 +6475,13 @@
         "method": "storage.buckets.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storage_test.go:474 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:40 TestStorageBucketACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
-          "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
-          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
+          "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
@@ -6544,10 +6516,10 @@
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
-          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
-          "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/storageretention_test.go:171 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -6556,7 +6528,7 @@
           {
             "code": "400",
             "case": "an ipFilter mode other than Enabled or Disabled",
-            "test": "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON"
+            "test": "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON"
           }
         ]
       },
@@ -6572,7 +6544,7 @@
         "method": "storage.buckets.lockRetentionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storageretention_test.go:102 TestStorageLockRetentionPolicyTwice",
+          "test/compat/storageretention_test.go:103 TestStorageLockRetentionPolicyTwice",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy"
         ]
       },
@@ -6580,14 +6552,14 @@
         "method": "storage.buckets.operations.advanceRelocateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:292 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate"
+          "test/compat/storageanywherecache_test.go:300 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a relocation still syncing",
-            "test": "test/compat/storageanywherecache_test.go:292 TestStorageRelocate"
+            "test": "test/compat/storageanywherecache_test.go:300 TestStorageRelocate"
           }
         ]
       },
@@ -6595,16 +6567,16 @@
         "method": "storage.buckets.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:292 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:300 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "an Anywhere Cache update's operation, and a done one",
-            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6612,7 +6584,7 @@
         "method": "storage.buckets.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
@@ -6620,7 +6592,7 @@
         "method": "storage.buckets.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI",
           "test/compat/storageoperationsfilter_test.go:23 TestStorageOperationsListFilter"
         ]
       },
@@ -6630,14 +6602,14 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
-          "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
-          "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storage_test.go:442 TestStorageBucketPatchKeepsOmittedFields",
+          "test/compat/storage_test.go:474 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
-          "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
-          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
+          "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
@@ -6652,19 +6624,19 @@
         "method": "storage.buckets.relocate",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:292 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate"
+          "test/compat/storageanywherecache_test.go:300 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "the bucket's own location",
-            "test": "test/compat/storageanywherecache_test.go:292 TestStorageRelocate"
+            "test": "test/compat/storageanywherecache_test.go:300 TestStorageRelocate"
           },
           {
             "code": "409",
             "case": "a second relocation while one runs",
-            "test": "test/compat/storageanywherecache_test.go:292 TestStorageRelocate"
+            "test": "test/compat/storageanywherecache_test.go:300 TestStorageRelocate"
           }
         ]
       },
@@ -6681,7 +6653,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
-          "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag",
+          "test/compat/storageiam_test.go:60 TestStorageBucketIAMStaleEtag",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -6690,12 +6662,12 @@
           {
             "code": "412",
             "case": "a stale etag (the JSON API's precondition code; no page states it for this method)",
-            "test": "internal/service/storage/iam_test.go:53 TestStorageBucketIAMStaleEtagInProcess"
+            "test": "internal/service/storage/iam_test.go:54 TestStorageBucketIAMStaleEtagInProcess"
           },
           {
             "code": "412",
             "case": "a stale etag (the JSON API's precondition code; no page states it for this method)",
-            "test": "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag"
+            "test": "test/compat/storageiam_test.go:60 TestStorageBucketIAMStaleEtag"
           }
         ]
       },
@@ -6776,15 +6748,15 @@
         "method": "storage.folders.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storagefolders_test.go:105 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI",
           "test/compat/terraform_batch6_test.go:107 TestTerraformStorageFolder"
         ],
         "unverified": [
           {
             "code": "409",
             "case": "a folder holding objects or folders (FAILED_PRECONDITION, 400, on the v2 API)",
-            "test": "test/compat/storagefolders_test.go:102 TestStorageFoldersControl"
+            "test": "test/compat/storagefolders_test.go:105 TestStorageFoldersControl"
           }
         ]
       },
@@ -6792,16 +6764,16 @@
         "method": "storage.folders.deleteRecursive",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:105 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI"
         ]
       },
       {
         "method": "storage.folders.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storagefolders_test.go:105 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI",
           "test/compat/terraform_batch6_test.go:107 TestTerraformStorageFolder"
         ]
       },
@@ -6809,20 +6781,20 @@
         "method": "storage.folders.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storagefolders_test.go:105 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI",
           "test/compat/terraform_batch6_test.go:107 TestTerraformStorageFolder"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a bucket without hierarchical namespace",
-            "test": "test/compat/storagefolders_test.go:102 TestStorageFoldersControl"
+            "test": "test/compat/storagefolders_test.go:105 TestStorageFoldersControl"
           },
           {
             "code": "400",
             "case": "a missing parent without recursive",
-            "test": "test/compat/storagefolders_test.go:102 TestStorageFoldersControl"
+            "test": "test/compat/storagefolders_test.go:105 TestStorageFoldersControl"
           }
         ]
       },
@@ -6830,24 +6802,24 @@
         "method": "storage.folders.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:105 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI"
         ]
       },
       {
         "method": "storage.folders.rename",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:105 TestStorageFoldersControl",
+          "test/compat/storagefolders_test.go:219 TestStorageFoldersJSONAPI"
         ]
       },
       {
         "method": "storage.managedFolders.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
+          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6855,7 +6827,7 @@
           {
             "code": "409",
             "case": "a managed folder with objects or managed folders under it, without allowNonEmpty",
-            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
           }
         ]
       },
@@ -6863,9 +6835,9 @@
         "method": "storage.managedFolders.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
+          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
@@ -6875,7 +6847,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
+          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
@@ -6884,9 +6856,9 @@
         "method": "storage.managedFolders.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
+          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6894,7 +6866,7 @@
           {
             "code": "400",
             "case": "a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)",
-            "test": "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
           }
         ]
       },
@@ -6903,8 +6875,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
+          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
         ]
       },
       {
@@ -6912,7 +6884,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
+          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6920,7 +6892,7 @@
           {
             "code": "412",
             "case": "a stale etag (as for buckets.setIamPolicy)",
-            "test": "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+            "test": "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM"
           }
         ]
       },
@@ -6929,21 +6901,21 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM"
         ]
       },
       {
         "method": "storage.managedFolders.update",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a policy naming a cache the bucket does not have",
-            "test": "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON"
+            "test": "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON"
           }
         ]
       },
@@ -6977,7 +6949,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/storageanywherecache_test.go:470 TestStorageNotificationsWithoutPubSub"
+          "test/compat/storageanywherecache_test.go:478 TestStorageNotificationsWithoutPubSub"
         ]
       },
       {
@@ -7059,7 +7031,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
-          "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:141 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
@@ -7106,20 +7078,14 @@
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
-          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
+          "test/compat/storagemultipart_test.go:90 TestStorageXMLMultipartCompleteRefusals",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
-        ],
-        "unverified": [
-          {
-            "code": "400",
-            "case": "XML multipart part order, ETag and size errors (S3's InvalidPartOrder, InvalidPart and EntityTooSmall; no Cloud Storage page states them)",
-            "test": "internal/service/storage/multipart_test.go:125 TestStorageXMLMultipartPreconditionRefusedInProcess"
-          }
         ]
       },
       {
@@ -7131,8 +7097,8 @@
           "test/compat/storagechannels_test.go:148 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
-          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
+          "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
@@ -7150,7 +7116,7 @@
           {
             "code": "403",
             "case": "a caller outside the bucket's IP filter (the message is not documented)",
-            "test": "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON"
+            "test": "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON"
           }
         ]
       },
@@ -7170,8 +7136,8 @@
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
-          "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/storageretention_test.go:141 TestStorageHoldsBlockDelete",
+          "test/compat/storageretention_test.go:171 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
@@ -7270,8 +7236,8 @@
         "method": "storage.rapidCaches.disable",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
           "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       },
@@ -7279,8 +7245,8 @@
         "method": "storage.rapidCaches.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
           "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       },
@@ -7288,20 +7254,20 @@
         "method": "storage.rapidCaches.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
           "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a zone outside the bucket's location",
-            "test": "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON"
+            "test": "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON"
           },
           {
             "code": "409",
             "case": "a second cache in the zone",
-            "test": "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON"
+            "test": "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON"
           }
         ]
       },
@@ -7309,8 +7275,8 @@
         "method": "storage.rapidCaches.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
           "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       },
@@ -7318,8 +7284,8 @@
         "method": "storage.rapidCaches.update",
         "status": "Verified",
         "tests": [
-          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
           "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       }
@@ -9374,11 +9340,11 @@
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
-          "test/compat/bigquerycolumnbuffer_test.go:219 TestBigQueryPartitionColumnLeftOut",
+          "test/compat/bigquerycolumnbuffer_test.go:221 TestBigQueryPartitionColumnLeftOut",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryenginereasons_test.go:34 TestBigQueryEngineErrorReasons",
-          "test/compat/bigqueryexecimmediate_test.go:155 TestBigQueryExecuteImmediateChildJobs",
+          "test/compat/bigqueryexecimmediate_test.go:156 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/bigqueryextracttypes_test.go:36 TestBigQueryExtractOfEveryType",
@@ -9428,7 +9394,7 @@
           "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigqueryprivacyreads_test.go:33 TestBigQueryPrivacyPolicyReads",
-          "test/compat/bigqueryprivacyrest_test.go:43 TestBigQueryPrivacyPolicyRest",
+          "test/compat/bigqueryprivacyrest_test.go:52 TestBigQueryPrivacyPolicyRest",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
           "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
           "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
@@ -9447,16 +9413,16 @@
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigqueryavrozstd_test.go:87 TestBigQueryAvroZstandardLoad",
-          "test/compat/bigquerychangehistory1466_test.go:146 TestBigQueryChangeHistoryLimits",
+          "test/compat/bigquerychangehistory1466_test.go:147 TestBigQueryChangeHistoryLimits",
           "test/compat/bigquerychangehistory1503_test.go:29 TestBigQueryChangeHistoryCommittedTransaction",
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
-          "test/compat/bigquerychangehistory_test.go:228 TestBigQueryChangeHistoryRefusals",
+          "test/compat/bigquerychangehistory_test.go:229 TestBigQueryChangeHistoryRefusals",
           "test/compat/bigquerychangehistory_test.go:47 TestBigQueryChangeHistory",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycharmapformats_test.go:32 TestBigQueryColumnNameCharacterMapFormats",
           "test/compat/bigquerycloneddl_test.go:196 TestBigQueryCloneDDLOptionsAndSystemTime",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
-          "test/compat/bigquerycolumnbuffer_test.go:219 TestBigQueryPartitionColumnLeftOut",
+          "test/compat/bigquerycolumnbuffer_test.go:221 TestBigQueryPartitionColumnLeftOut",
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
@@ -9490,7 +9456,7 @@
           "test/compat/bigquerydml_test.go:335 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryenginereasons_test.go:34 TestBigQueryEngineErrorReasons",
           "test/compat/bigqueryexecimmediate_test.go:109 TestBigQueryExecuteImmediateErrors",
-          "test/compat/bigqueryexecimmediate_test.go:155 TestBigQueryExecuteImmediateChildJobs",
+          "test/compat/bigqueryexecimmediate_test.go:156 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryexecimmediate_test.go:29 TestBigQueryExecuteImmediateForms",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
@@ -9566,7 +9532,7 @@
           "test/compat/bigqueryprivacypolicy_test.go:190 TestBigQueryPrivacyPolicyJoinRestriction",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigqueryprivacyreads_test.go:33 TestBigQueryPrivacyPolicyReads",
-          "test/compat/bigqueryprivacyrest_test.go:43 TestBigQueryPrivacyPolicyRest",
+          "test/compat/bigqueryprivacyrest_test.go:52 TestBigQueryPrivacyPolicyRest",
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigqueryprojectlimits_test.go:27 TestBigQueryProjectConfigurationEffects",
           "test/compat/bigquerypseudocolumns_test.go:25 TestBigQueryEnginePseudoColumnsAreUnrecognized",
@@ -9613,7 +9579,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/bigqueryexecimmediate_test.go:155 TestBigQueryExecuteImmediateChildJobs",
+          "test/compat/bigqueryexecimmediate_test.go:156 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
           "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
@@ -9639,13 +9605,13 @@
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigqueryavrozstd_test.go:87 TestBigQueryAvroZstandardLoad",
           "test/compat/bigquerychangehistory1466_test.go:103 TestBigQueryChangeHistoryReplace",
-          "test/compat/bigquerychangehistory1466_test.go:146 TestBigQueryChangeHistoryLimits",
+          "test/compat/bigquerychangehistory1466_test.go:147 TestBigQueryChangeHistoryLimits",
           "test/compat/bigquerychangehistory1466_test.go:37 TestBigQueryChangeHistoryRebuilds",
           "test/compat/bigquerychangehistory1503_test.go:101 TestBigQueryChangeHistoryRetention",
           "test/compat/bigquerychangehistory1503_test.go:29 TestBigQueryChangeHistoryCommittedTransaction",
           "test/compat/bigquerychangehistory1548_test.go:22 TestBigQueryChangeHistoryForUpdateColumn",
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
-          "test/compat/bigquerychangehistory_test.go:228 TestBigQueryChangeHistoryRefusals",
+          "test/compat/bigquerychangehistory_test.go:229 TestBigQueryChangeHistoryRefusals",
           "test/compat/bigquerychangehistory_test.go:47 TestBigQueryChangeHistory",
           "test/compat/bigquerycloneddl_test.go:196 TestBigQueryCloneDDLOptionsAndSystemTime",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
@@ -9760,7 +9726,7 @@
           "test/compat/bigqueryprivacypolicy_test.go:190 TestBigQueryPrivacyPolicyJoinRestriction",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigqueryprivacyreads_test.go:33 TestBigQueryPrivacyPolicyReads",
-          "test/compat/bigqueryprivacyrest_test.go:43 TestBigQueryPrivacyPolicyRest",
+          "test/compat/bigqueryprivacyrest_test.go:52 TestBigQueryPrivacyPolicyRest",
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigqueryprojectlimits_test.go:27 TestBigQueryProjectConfigurationEffects",
           "test/compat/bigquerypseudocolumns_test.go:25 TestBigQueryEnginePseudoColumnsAreUnrecognized",
@@ -10074,7 +10040,7 @@
           "test/compat/bigquerycollation1508_test.go:93 TestBigQueryCollationDefaults",
           "test/compat/bigquerycollation1516_test.go:120 TestBigQueryCollationInScriptsAndAlter",
           "test/compat/bigquerycollation1516_test.go:43 TestBigQueryNestedCollation",
-          "test/compat/bigquerycolumnbuffer_test.go:219 TestBigQueryPartitionColumnLeftOut",
+          "test/compat/bigquerycolumnbuffer_test.go:221 TestBigQueryPartitionColumnLeftOut",
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",

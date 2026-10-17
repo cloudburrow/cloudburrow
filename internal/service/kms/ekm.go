@@ -29,6 +29,7 @@ import (
 // Server certificates are parsed as Google documents (Certificate.parsed and
 // the fields only present when it is true). The codes for refused requests
 // are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/ekm_service.proto
 
 const (
 	ekmConnectionPrefix = "kms/ekmconnection/"
@@ -281,6 +282,7 @@ func (e *EkmServer) ListEkmConnections(_ context.Context, req *kmspb.ListEkmConn
 // UpdateEkmConnection changes service_resolvers, key_management_mode and
 // crypto_space_path. An etag that is not the stored one is ABORTED, as
 // Google's etags are elsewhere (UNVERIFIED here).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/ekm_service.proto
 func (e *EkmServer) UpdateEkmConnection(_ context.Context, req *kmspb.UpdateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
 	s := e.s
 	in := req.GetEkmConnection()

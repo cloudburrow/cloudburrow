@@ -56,6 +56,7 @@ var entityRE = regexp.MustCompile(`^(?:(user|group|domain)-(.+)|project-(owners|
 // uniformRefusal is the 400 every ACL request on a bucket with uniform
 // bucket-level access gets (uniform-bucket-level-access docs: such requests
 // "fail with 400 Bad Request errors"). UNVERIFIED: the message.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/uniform-bucket-level-access
 func uniformRefusal() error {
 	return badRequest("Cannot use ACL API to manage access when uniform bucket-level access is enabled. Read more at https://cloud.google.com/storage/docs/uniform-bucket-level-access")
 }
@@ -79,6 +80,7 @@ func normalizeEntity(entity string) (string, error) {
 	m := entityRE.FindStringSubmatch(entity)
 	if m == nil {
 		// UNVERIFIED: the message.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 		return "", badRequest("Invalid argument: entity %q is not user-, group-, domain-, project-<team>-<project>, allUsers or allAuthenticatedUsers", entity)
 	}
 	if m[3] != "" {
@@ -114,6 +116,7 @@ func parseEntry(kind aclKind, v any) (aclEntry, error) {
 			allowed = "OWNER, READER or WRITER"
 		}
 		// UNVERIFIED: the message.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 		return aclEntry{}, badRequest("Invalid argument: role %q must be %s", role, allowed)
 	}
 	return aclEntry{Entity: e, Role: role}, nil
@@ -539,6 +542,7 @@ func (s *Server) storeACL(tx Tx, st *aclState, kind aclKind, acl []aclEntry) err
 
 func notFoundEntry(t aclTarget) error {
 	// UNVERIFIED: the message.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 	return notFound("No such access control entry: %s", t.entity)
 }
 
@@ -622,6 +626,7 @@ func (s *Server) aclSet(kind aclKind, fromPath bool) http.HandlerFunc {
 				}
 				if pe != e.Entity {
 					// UNVERIFIED: the message.
+					// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 					return badRequest("Invalid argument: the body's entity %q is not the path's %q", e.Entity, pe)
 				}
 			}

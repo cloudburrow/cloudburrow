@@ -17,6 +17,7 @@ import (
 //     ifMetagenerationMatch (required in the discovery document; 412 when
 //     stale) and an unlocked policy (400 badRequest without one; a repeat
 //     lock is refused 400 badRequest too, UNVERIFIED); a locked period can
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/lockRetentionPolicy
 //     grow but not shrink or go (400 badRequestException).
 //   - temporaryHold and eventBasedHold block delete and replace (403
 //     objectUnderActiveHold); metadata stays editable. Releasing an
@@ -72,6 +73,7 @@ func retentionStart(o objectRecord) time.Time {
 // keptNoncurrent is a live version becoming noncurrent on a versioned
 // bucket, which a retention period allows (bucket-lock docs); holds still
 // refuse it (UNVERIFIED: the object-holds docs do not mention versioning).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/object-holds
 func protect(b bucketRecord, o objectRecord, now time.Time, keptNoncurrent bool) error {
 	if o.TemporaryHold || o.EventBasedHold {
 		return errorf(http.StatusForbidden, "objectUnderActiveHold",
@@ -158,6 +160,7 @@ func (s *Server) bucketsLockRetentionPolicy(w http.ResponseWriter, r *http.Reque
 		}
 		if locked, _ := p["isLocked"].(bool); locked {
 			// UNVERIFIED: Google documents no answer for a repeat lock; this
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/lockRetentionPolicy
 			// is the status-codes page's 400 badRequest for a lock the
 			// bucket's settings do not allow, and nothing changes.
 			return errorf(http.StatusBadRequest, "badRequest", "The retention policy on bucket %s is already locked.", name)

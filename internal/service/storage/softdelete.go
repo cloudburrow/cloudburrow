@@ -396,6 +396,7 @@ func (s *Server) softBuckets(tx Tx, project, prefix string) ([]bucketRecord, err
 // a bucket "restores only the empty bucket"); its soft-deleted objects are
 // restorable again. A live bucket of the same name refuses it with 409
 // (UNVERIFIED: no page states the code).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/restore
 func (s *Server) bucketsRestore(w http.ResponseWriter, r *http.Request) {
 	name := pathVar(r, jsonPrefix, 1)
 	gen := r.URL.Query().Get("generation")

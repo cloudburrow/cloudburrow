@@ -33,6 +33,7 @@ import (
 // However, you can add the column without a default value, then change its
 // default value". The wording of the refusal is CloudBurrow's
 // (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/default-values
 
 // addDefaultRefused is the 400 for a column added with a default.
 func addDefaultRefused(column string) string {
@@ -45,6 +46,7 @@ func addDefaultRefused(column string) string {
 // value for the entire STRUCT field. You cannot set the default value for
 // a subset of the fields" (https://cloud.google.com/bigquery/docs/default-values,
 // #1456). The wording is CloudBurrow's (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/default-values
 func nestedDefaultRefused(path, name string) string {
 	return fmt.Sprintf("Cannot set a default value on field %s.%s: the default value of a STRUCT is set for the "+
 		"entire STRUCT field %s, not for a subset of its fields.", path, name, path)

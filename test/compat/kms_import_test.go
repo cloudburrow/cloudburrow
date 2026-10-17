@@ -29,6 +29,7 @@ import (
 // key's public key is the one imported.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion INVALID_ARGUMENT: a wrapped key that does not unwrap, or a key of the wrong length
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/importing-a-key
 func TestKMSImportManuallyWrappedKeys(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()

@@ -54,6 +54,7 @@ import (
 // A project's name is returned with its number, the documented form
 // (projects/{project_number}/...); a project ID is accepted as the
 // provider and gcloud send it. UNVERIFIED: the statuses and messages of the
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 // refusals, that a second trial is refused, the effective edition of
 // ESSENTIALS (STANDARD here), and the parent of a project or a folder
 // Resource Manager does not have. Inheritance walks the instance's Resource

@@ -25,7 +25,9 @@ import (
 // covers: google.cloud.kms.v1.EkmService/CreateEkmConnection, google.cloud.kms.v1.EkmService/GetEkmConnection, google.cloud.kms.v1.EkmService/UpdateEkmConfig
 //
 // unverified: google.iam.v1.IAMPolicy/GetIamPolicy NOT_FOUND: an EkmConnection that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/iam/v1/iam_policy.proto
 // unverified: google.iam.v1.IAMPolicy/SetIamPolicy ABORTED: a stale etag on an EkmConnection or ekmConfig
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/iam/v1/policy.proto
 func TestKMSEkmIamPolicyIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
 	// Asked here, not first inside a subtest: an unserved KMS skips this

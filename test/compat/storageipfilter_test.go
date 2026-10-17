@@ -37,7 +37,9 @@ var localSources = []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/
 // ranges, or mode Disabled, admits them. VPC sources are stored.
 //
 // unverified: storage.objects.list 403: a caller outside the bucket's IP filter (the message is not documented)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/ip-filtering-overview
 // unverified: storage.buckets.insert 400: an ipFilter mode other than Enabled or Disabled
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets
 // covers: storage.buckets.insert, storage.buckets.get, storage.buckets.patch, storage.objects.list, storage.objects.insert
 func TestStorageIPFilterJSON(t *testing.T) {
 	h := New(t)
@@ -143,8 +145,11 @@ func TestStorageIPFilterGRPC(t *testing.T) {
 // preconditions.
 //
 // unverified: storage.rapidCaches.insert 409: a second cache in the zone
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 // unverified: storage.rapidCaches.insert 400: a zone outside the bucket's location
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 // unverified: storage.managedFolders.update 400: a policy naming a cache the bucket does not have
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 // covers: storage.rapidCaches.insert, storage.rapidCaches.get, storage.rapidCaches.list, storage.rapidCaches.update, storage.rapidCaches.disable
 // covers: storage.managedFolders.update, storage.managedFolders.insert, storage.managedFolders.get
 func TestStorageRapidCachesJSON(t *testing.T) {

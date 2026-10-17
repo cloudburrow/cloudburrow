@@ -43,6 +43,7 @@ package bigqueryfront
 // wording is CloudBurrow's), and a body routineReference naming another
 // routine, or one with no routineType or definitionBody, 400 invalid
 // (UNVERIFIED wording).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/error-messages
 //
 // Not served: a function routines.insert made before the front started,
 // which the front does not know; routines.update of a procedure; a PATCH of

@@ -19,6 +19,7 @@ import (
 // store (#413).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/Decrypt FAILED_PRECONDITION: a DESTROYED version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func TestDecryptIsRefusedOnceDestroyed(t *testing.T) {
 	ctx := context.Background()
 	clock := sched.NewFakeClock(time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC))

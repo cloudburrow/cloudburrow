@@ -28,6 +28,7 @@ import (
 // Both are long-running on Google; the deletion is immediate here, so each
 // returns its Operation already done, which the client's Wait returns without
 // polling. The codes for a refused deletion are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 
 const retiredPrefix = "kms/retired/"
 
@@ -150,6 +151,19 @@ func (s *Server) DeleteCryptoKey(_ context.Context, req *kmspb.DeleteCryptoKeyRe
 		return nil, apierror.Wrap(apierror.FailedPrecondition(
 			"CryptoKey %s still has %d versions: every version must be deleted with DeleteCryptoKeyVersion first", k.Name, len(versions)))
 	}
+	// delete-kms-resources: "The key doesn't have automatic key rotation
+	// scheduled." and "The key wasn't created by Cloud KMS Autokey."
+	// (https://cloud.google.com/kms/docs/delete-kms-resources, read
+	// 2026-10-17); the code is UNVERIFIED, as for the versions above.
+	if k.RotationPeriod > 0 {
+		return nil, apierror.Wrap(apierror.FailedPrecondition(
+			"CryptoKey %s has automatic rotation scheduled: clear its rotation schedule before deleting it", k.Name))
+	}
+	if autokey, err := s.autokeyKey(k.Name); err != nil {
+		return nil, apierror.Wrap(err)
+	} else if autokey {
+		return nil, apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s was created by Cloud KMS Autokey and cannot be deleted", k.Name))
+	}
 	id, err := randomID()
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -208,4 +222,23 @@ func (s *Server) ListRetiredResources(_ context.Context, req *kmspb.ListRetiredR
 		}
 	}
 	return resp, nil
+}
+
+// autokeyKey reports whether a KeyHandle names key: Autokey created it.
+func (s *Server) autokeyKey(key string) (bool, error) {
+	handles, err := s.db.List(keyHandlePrefix)
+	if err != nil {
+		return false, apierror.Internal(err, "list key handles")
+	}
+	for _, dbk := range handles {
+		var h keyHandle
+		found, err := s.get(dbk, &h)
+		if err != nil {
+			return false, err
+		}
+		if found && h.KmsKey == key {
+			return true, nil
+		}
+	}
+	return false, nil
 }

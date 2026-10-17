@@ -609,6 +609,7 @@ func (f front) undeleteDataset(r *http.Request, dataset string, deleted int64) (
 	f.expireDropped(r)
 	if st, _ := f.get(r, "/datasets/"+url.PathEscape(dataset)); st == http.StatusOK {
 		return http.StatusConflict, "duplicate", "Already Exists: Dataset " + project + ":" + dataset // UNVERIFIED wording
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets/undelete
 	}
 	if f.dropped == nil {
 		return http.StatusNotFound, "notFound", "Not found: Dataset " + project + ":" + dataset
@@ -616,6 +617,7 @@ func (f front) undeleteDataset(r *http.Request, dataset string, deleted int64) (
 	d, tables, ok := f.dropped.takeDataset(project, dataset, deleted)
 	if !ok {
 		// UNVERIFIED wording.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets/undelete
 		return http.StatusNotFound, "notFound", "Not found: Dataset " + project + ":" + dataset +
 			" was not deleted within its time travel window"
 	}

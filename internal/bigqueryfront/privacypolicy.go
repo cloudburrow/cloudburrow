@@ -63,6 +63,7 @@ import (
 // that reads a table with an aggregation threshold or differential privacy
 // policy in a subquery, a CTE or through another view is BigQuery's 400
 // "You must use SELECT WITH ..." (UNVERIFIED: the analysis rules say only
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 // that such a table "can be queried with" the clause). JOIN_ANY met by an
 // outer join and JOIN_ALL alongside one follow each join_condition's
 // wording, a NATURAL join is a syntax error (checkJoinRestriction).
@@ -358,6 +359,7 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		if !inSpan && (privacyDepths(s)[p.tr.at] != 0 || len(s) > 0 && s[0].is("WITH")) {
 			if want := mustUseClause(p.pol); want != "" && !anyClause {
 				// #1517, UNVERIFIED: a query with no privacy clause at all
+				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 				// reads it in a subquery or CTE. The analysis rules say the
 				// table "can be queried with" the clause; BigQuery's
 				// documented error for a read without one is followed.
@@ -809,10 +811,12 @@ func readAlias(tr tableRead) string {
 // #1517: JOIN_ANY's "At least one column in join_allowed_columns must be
 // joined upon" names no kind of join, so a LEFT, RIGHT or FULL join upon an
 // allowed column meets it (UNVERIFIED: the list overlap rule's summary,
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 // "Only overlapping rows can be queried after a join operation", is not
 // measured against an outer join); JOIN_ALL met by its INNER JOIN allows
 // other joins too, by the same wording, each still checked against the
 // restricted columns (UNVERIFIED). A NATURAL join is BigQuery's syntax
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 // error: NATURAL is a reserved keyword (lexical#reserved_keywords) and the
 // join operation has no NATURAL form (query-syntax#join_types).
 func checkJoinRestriction(p privacyRead) (msg string, unsupported bool) {

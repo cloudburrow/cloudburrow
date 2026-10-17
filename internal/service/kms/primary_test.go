@@ -15,6 +15,7 @@ import (
 // set through the store, since DestroyCryptoKeyVersion is a later issue.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion FAILED_PRECONDITION: a DESTROY_SCHEDULED target version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/updatePrimaryVersion
 func TestPrimaryRefusesADestroyScheduledVersion(t *testing.T) {
 	ctx := context.Background()
 	db := store.NewMemory()

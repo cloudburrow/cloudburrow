@@ -19,8 +19,10 @@ package kms
 //     fields must be omitted. Every key here is ENCRYPT_DECRYPT.
 //
 // Google's code and messages for a refusal are UNVERIFIED: the proto states
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // the rules, not the wording, and nothing here calls Google. The refusals are
 // INVALID_ARGUMENT naming the field and the rule. What is also UNVERIFIED,
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // and chosen here: a next_rotation_time in the past is accepted and rotates
 // at the next sweep; a key that was due several periods ago (the service was
 // not running) rotates once, and next_rotation_time moves to the first time

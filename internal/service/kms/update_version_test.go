@@ -19,6 +19,7 @@ func stateMask() *fieldmaskpb.FieldMask { return &fieldmaskpb.FieldMask{Paths: [
 // is a later issue.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion FAILED_PRECONDITION: a DESTROY_SCHEDULED or DESTROYED version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func TestUpdateVersionRefusesADestroyScheduledVersion(t *testing.T) {
 	ctx := context.Background()
 	db := store.NewMemory()
@@ -71,7 +72,9 @@ func TestDisablingThePrimaryKeepsIt(t *testing.T) {
 // Names are validated like every other RPC's.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion INVALID_ARGUMENT: a malformed version name
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion NOT_FOUND: a well-formed version that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestUpdateVersionNames(t *testing.T) {
 	c := client(t)
 	ctx := context.Background()
