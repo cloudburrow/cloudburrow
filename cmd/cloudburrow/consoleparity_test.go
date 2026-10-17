@@ -1242,8 +1242,8 @@ var parityRows = []parityRow{
 		Tests: []string{"TestBigQueryEditDataset", "TestBigQueryEditDatasetThroughTheForm"}},
 	{Resource: "BigQuery dataset undelete", Service: "bigquery",
 		Methods:  []string{"bigquery.datasets.undelete"},
-		Provider: "bigquery", Offers: "UNDROP SCHEMA in the query editor's Read-write mode, which restores a dataset deleted within its time travel window with its tables and views, as datasets.undelete does, and a deleted table restored by a copy of table@time through the API (#1460); the console lists no deleted dataset, as BigQuery's API lists none, so it offers no Undelete button",
-		Tests: []string{"TestTheBigQueryReadWriteEditorScreensStatements", "TestBigQueryUndeleteAndRestore"}},
+		Provider: "bigquery", Offers: "Undelete dataset on the BigQuery list: datasets.undelete of the dataset ID typed, as bq undelete takes it, since BigQuery's API lists no deleted dataset; it comes back with its tables, views, routines and models (#1552); UNDROP SCHEMA in the query editor's Read-write mode is the same restore in SQL, and a deleted table is restored by a copy of table@time through the API (#1460)",
+		Tests: []string{"TestConsoleBigQueryUndeleteDataset", "TestBigQueryUndeleteDatasetThroughTheList", "TestTheBigQueryReadWriteEditorScreensStatements", "TestBigQueryUndeleteAndRestore"}},
 	{Resource: "BigQuery dataset replace", Service: "bigquery",
 		Methods:  []string{"bigquery.datasets.update"},
 		Excluded: "the replacing form of the edit the console makes with datasets.patch, which changes the fields Edit dataset holds without clearing the ones it does not show"},
@@ -1312,9 +1312,9 @@ var parityRows = []parityRow{
 	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
 	// have no coverage page; this row writes the exclusion down (#782).
 	{Resource: "BigQuery models", Service: "bigquery",
-		Methods: []string{"bigquery.models.list", "bigquery.models.get", "bigquery.models.patch", "bigquery.models.delete"},
-		Excluded: "no model can exist: the emulator does not serve BigQuery ML's CREATE MODEL, so a dataset's models are always none " +
-			"and there is nothing to show, edit or delete (#1200)"},
+		Methods:  []string{"bigquery.models.list", "bigquery.models.get", "bigquery.models.patch", "bigquery.models.delete"},
+		Provider: "bigquery", Offers: "a dataset's Models section (models.list) of the models CREATE MODEL trains in the query editor's Read-write mode; a model's page with its type, features, label, training runs, evaluation metrics and weights (models.get and ML.WEIGHTS); Edit model, its description and friendly name (models.patch); Delete model (models.delete) (#1465)",
+		Tests: []string{"TestBigQueryModelsSectionAndPage", "TestBigQueryModelPageResults"}},
 	{Resource: "BigQuery projects", Service: "bigquery",
 		Methods:  []string{"bigquery.projects.list"},
 		Excluded: "lists the one project the instance serves; the console's project picker already names it, from Resource Manager"},
