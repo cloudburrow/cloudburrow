@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -260,6 +261,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	// Service Usage is built after the registry, so its reset reads it
+	// through this too (#1537).
+	var serviceUsageRef *serviceusage.Server
 	// The admin token (#553): minted now, required on every /admin route,
 	// written beside the runtime file once the control server is up.
 	adminToken, err := newAdminToken()
@@ -268,13 +272,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		kms:       kmsSvc,
-		mysql:     mysqlCreds,
-		scheduler: schedulerSvc,
-		logging:   loggingSvc,
-		run:       runSvc,
-		projects:  func() []string { return registered() },
-		registry:  func() *resourcemanager.Registry { return projectRegistry },
+		kms:          kmsSvc,
+		mysql:        mysqlCreds,
+		scheduler:    schedulerSvc,
+		logging:      loggingSvc,
+		run:          runSvc,
+		projects:     func() []string { return registered() },
+		registry:     func() *resourcemanager.Registry { return projectRegistry },
+		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -418,6 +423,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	projects, releaseProjects, err := openProjects(cfg)
 	if err == nil && projects != nil {
 		projectRegistry = projects
+		wirePurge(adminAPI, projects)
 		registered = func() []string {
 			list, err := projects.List()
 			if err != nil {
@@ -456,6 +462,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// kept in the registry's store so it persists as the projects do.
 	serviceUsageSrv := newServiceUsageServer(cfg, projects, projects.Backing())
 	if serviceUsageSrv != nil {
+		serviceUsageRef = serviceUsageSrv
 		coord.Register(serviceUsageSrv)
 	}
 

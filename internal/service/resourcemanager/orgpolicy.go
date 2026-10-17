@@ -146,7 +146,7 @@ func (r *Registry) OrgPolicy(resource, constraint string) (*crmv1.OrgPolicy, err
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if err := r.checkPolicyResource(resource); err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (r *Registry) SetOrgPolicy(resource string, p *crmv1.OrgPolicy) (*crmv1.Org
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if err := r.checkPolicyResource(resource); err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (r *Registry) ClearOrgPolicy(resource, constraint, etag string) error {
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if err := r.checkPolicyResource(resource); err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func (r *Registry) OrgPolicies(resource string) ([]*crmv1.OrgPolicy, error) {
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	if err := r.checkPolicyResource(resource); err != nil {
 		return nil, err
 	}
@@ -347,7 +347,7 @@ func (r *Registry) EffectiveOrgPolicy(resource, constraint string) (*crmv1.OrgPo
 		return nil, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	chain, err := r.policyChain(resource)
 	if err != nil {
 		return nil, err
@@ -506,7 +506,7 @@ func (s *ProjectsServer) v1OrgPolicy(w http.ResponseWriter, r *http.Request, res
 // on, exists.
 func (r *Registry) CheckPolicyResource(resource string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.checkPolicyResource(policyResource(resource))
 }
 
@@ -514,6 +514,6 @@ func (r *Registry) CheckPolicyResource(resource string) error {
 // policies its effective policy is evaluated from, the organization first.
 func (r *Registry) OrgPolicyChain(resource string) ([]string, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.policyChain(policyResource(resource))
 }

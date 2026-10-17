@@ -773,3 +773,38 @@ func MethodStatuses() map[string]bool {
 	}
 	return out
 }
+
+// ResetProject forgets a project's API states and the operations that
+// changed them, or every project's for "" (#1537): /admin/reset's, and a
+// purged project's, so a project created again under the ID starts with
+// every API at its default, as a new project on Google starts with its own.
+func (s *Server) ResetProject(project string) error {
+	if s.st != nil {
+		keys, err := s.st.List(keyPrefix)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if project == "" || k == keyPrefix+project {
+				if err := s.st.Delete(k); err != nil && !errors.Is(err, store.ErrNotFound) {
+					return err
+				}
+			}
+		}
+	}
+	prefix := parent(project) + "/services/"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.opOrder[:0]
+	for _, n := range s.opOrder {
+		md, _ := s.ops[n]["metadata"].(map[string]any)
+		names, _ := md["resourceNames"].([]string)
+		if project == "" || (len(names) > 0 && strings.HasPrefix(names[0], prefix)) {
+			delete(s.ops, n)
+			continue
+		}
+		kept = append(kept, n)
+	}
+	s.opOrder = kept
+	return nil
+}

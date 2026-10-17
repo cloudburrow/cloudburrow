@@ -309,7 +309,7 @@ func (r *Registry) CheckParentExists(parent string) error {
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	_, err := r.checkParentLocked(parent)
 	return err
 }
