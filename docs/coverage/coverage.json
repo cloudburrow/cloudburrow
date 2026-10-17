@@ -2933,6 +2933,7 @@
           "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
           "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
         ],
         "unverified": [
@@ -4455,52 +4456,77 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Implemented": 1,
-      "Unimplemented": 43,
-      "Verified": 22
+      "Unimplemented": 4,
+      "Verified": 62
     },
     "rows": [
       {
         "method": "google.cloud.memorystore.v1.Memorystore/AddAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/AddTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/BackupInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
-          "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
+          "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
+          "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
+          "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteInstance",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
@@ -4508,38 +4534,54 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ExportBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/FinishMigration",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackupCollection",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
         ]
       },
@@ -4548,6 +4590,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -4559,23 +4604,33 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListAuthTokens",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackupCollections",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackups",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListInstances",
@@ -4587,8 +4642,10 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListTokenAuthUsers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/RescheduleMaintenance",
@@ -4597,63 +4654,94 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/StartMigration",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/UpdateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/AddAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/AddTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/BackupCluster",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/CreateAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
-          "test/compat/memorystorecluster_test.go:232 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystorecluster_test.go:233 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
+          "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
+          "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteCluster",
@@ -4666,38 +4754,53 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ExportBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetAclPolicyRevision",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetBackupCollection",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetCluster",
@@ -4705,13 +4808,16 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetSharedRegionalCertificateAuthority",
@@ -4720,33 +4826,47 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAclPolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAclPolicyRevisions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAuthTokens",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListBackupCollections",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListBackups",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListClusters",
@@ -4758,8 +4878,10 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListTokenAuthUsers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/RescheduleClusterMaintenance",
@@ -4768,8 +4890,10 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/UpdateAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/UpdateCluster",

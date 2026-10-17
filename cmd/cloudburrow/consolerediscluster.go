@@ -36,7 +36,7 @@ func (p redisClusterProvider) api() (*redisadmin.ClusterServer, *redisadmin.Serv
 }
 
 const redisClusterNote = "Each cluster is a real Redis Cluster: shard_count primaries with replica_count replicas each, every node a Valkey server in cluster mode. " +
-	"A cluster client on the host starts from the discovery endpoint and follows MOVED to the nodes; TLS and IAM tokens are not served."
+	"A cluster client on the host starts from the discovery endpoint and follows MOVED to the nodes; with in-transit encryption it trusts the cluster's own CA, which its page shows. IAM auth takes any access token as the AUTH string (IAM is not enforced)."
 
 // List implements console.Provider: the project's clusters.
 func (p redisClusterProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -99,6 +99,19 @@ func (redisClusterProvider) CreateForm() (string, []console.Field) {
 			Help: "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB."},
 		{Name: "network", Label: "Network (PSC)", Type: "text", Help: "Optional. projects/{project}/global/networks/{network}, kept and returned."},
 		{Name: "redisConfigs", Label: "Redis configs", Type: "map", Help: "Optional. One key=value per line, such as maxmemory-policy."},
+		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
+			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the cluster's own CA, which its page shows. It cannot be changed later."},
+		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
+			Help: "AUTH_MODE_IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
+		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
+			Help: "AUTH_MODE_TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the cluster's page adds and shows."},
+		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
+		{Name: "kmsKey", Label: "Customer-managed encryption key", Type: "text",
+			Help: "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}, a Cloud KMS key in the cluster's region (#1557)."},
+		{Name: "persistence", Label: "Persistence", Type: "select", Default: "DISABLED", Options: []string{"DISABLED", "RDB", "AOF"},
+			Help: "RDB snapshots or the append-only file keep the data across a restart of CloudBurrow; without, it is lost."},
+		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
+			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."},
 	}
 }
 
@@ -137,6 +150,25 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 	}
 	in := &clusterpb.Cluster{ShardCount: proto.Int32(shards), ReplicaCount: proto.Int32(replicas), RedisConfigs: configs,
 		NodeType: clusterpb.NodeType(clusterpb.NodeType_value[values["nodeType"]])}
+	if values["transitEncryption"] == "true" {
+		in.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
+	}
+	if values["iamAuth"] == "true" {
+		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH
+	}
+	if values["tokenAuth"] == "true" {
+		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH
+	}
+	in.AclPolicy = strings.TrimSpace(values["aclPolicy"])
+	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+		in.KmsKey = proto.String(k)
+	}
+	if m := values["persistence"]; m != "" && m != "DISABLED" {
+		in.PersistenceConfig = &clusterpb.ClusterPersistenceConfig{Mode: clusterpb.ClusterPersistenceConfig_PersistenceMode(clusterpb.ClusterPersistenceConfig_PersistenceMode_value[m])}
+	}
+	if b := strings.TrimSpace(values["restoreBackup"]); b != "" {
+		in.ImportSources = &clusterpb.Cluster_ManagedBackupSource_{ManagedBackupSource: &clusterpb.Cluster_ManagedBackupSource{Backup: b}}
+	}
 	if n := strings.TrimSpace(values["network"]); n != "" {
 		in.PscConfigs = []*clusterpb.PscConfig{{Network: n}}
 	}
@@ -228,9 +260,28 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(c.GetRedisConfigs()))},
 		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
+		{Label: "ACL policy", Value: orDash(c.GetAclPolicy())},
+		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
+		{Label: "Persistence", Value: c.GetPersistenceConfig().GetMode().String()},
+		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
+		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
 	}
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	if c.GetTransitEncryptionMode() == clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION {
+		// The CA its clients trust (#1549), as GetClusterCertificateAuthority
+		// returns it.
+		if ca, err := api.GetClusterCertificateAuthority(ctx, &clusterpb.GetClusterCertificateAuthorityRequest{Name: name + "/certificateAuthority"}); err == nil {
+			var text strings.Builder
+			for _, chain := range ca.GetManagedServerCa().GetCaCerts() {
+				for _, cert := range chain.GetCertificates() {
+					text.WriteString(strings.TrimSpace(cert) + "\n")
+				}
+			}
+			d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
+		}
+	}
+	d.Sections = append(d.Sections, p.authSections(ctx, api, c)...)
 	d.Edit = &console.EditForm{
 		Label: "Edit cluster",
 		Fields: []console.Field{

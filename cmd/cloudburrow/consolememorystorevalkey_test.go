@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,14 @@ func (f *fakeValkeyNodes) Remove(_ context.Context, server string) error {
 	return nil
 }
 
+// Exec is a node container's shell: cat returns a fake RDB file (#1549).
+func (f *fakeValkeyNodes) Exec(_ context.Context, server string, _ []byte, argv ...string) ([]byte, error) {
+	if len(argv) > 0 && argv[0] == "cat" {
+		return []byte("REDIS0011 " + server), nil
+	}
+	return nil, nil
+}
+
 type fakeValkeyNode struct {
 	f    *fakeValkeyNodes
 	addr string
@@ -50,6 +59,8 @@ func (n fakeValkeyNode) Do(_ context.Context, args ...any) (any, error) {
 		n.f.mu.Lock()
 		defer n.f.mu.Unlock()
 		return fmt.Sprintf("cluster_state:ok\r\ncluster_known_nodes:%d\r\n", len(n.f.running)), nil
+	case strings.HasPrefix(cmd, "INFOPERSISTENCE"):
+		return "rdb_bgsave_in_progress:0\r\nrdb_last_bgsave_status:ok\r\n", nil
 	case strings.HasPrefix(cmd, "INFO"):
 		return "role:slave\r\nmaster_link_status:up\r\n", nil
 	case strings.HasPrefix(cmd, "CLUSTERSHARDS"):
@@ -90,20 +101,23 @@ func TestConsoleValkeyInstances(t *testing.T) {
 	srv := redisadmin.NewServer(redisadmin.Instance{Project: "p", Host: "127.0.0.1", Port: 9016, Created: time.Unix(100, 0)}, valkeyNoBackend{})
 	srv.EnableCreate(context.Background(), valkeyNoProv{}, func(string, string, string) redisadmin.DataPlane { return nil }, nil, nil)
 	nodes := &fakeValkeyNodes{running: map[string]string{}}
-	srv.EnableValkey(context.Background(), nodes, func(addr, _ string) redisadmin.ClusterNode { return fakeValkeyNode{nodes, addr} }, nil)
+	srv.EnableValkey(context.Background(), nodes, func(addr, _, _ string) redisadmin.ClusterNode { return fakeValkeyNode{nodes, addr} }, nil)
 	p := valkeyProvider{server: func() *redisadmin.Server { return srv }}
 	ctx := context.Background()
 
 	if _, fields := p.CreateForm(); len(fields) == 0 {
 		t.Fatal("no Create instance form")
 	}
-	for _, tc := range []struct{ id, mode, shards, endpoint string }{
-		{"vk-cluster", "CLUSTER", "2", "Discovery endpoint"},
-		{"vk-single", "CLUSTER_DISABLED", "1", "Primary endpoint"},
+	for _, tc := range []struct {
+		id, mode, shards, endpoint string
+		tls                        bool
+	}{
+		{"vk-cluster", "CLUSTER", "2", "Discovery endpoint", true},
+		{"vk-single", "CLUSTER_DISABLED", "1", "Primary endpoint", false},
 	} {
 		id, err := p.Create(ctx, "p", map[string]string{"id": tc.id, "region": redisadmin.Region, "mode": tc.mode, "shardCount": tc.shards,
 			"replicaCount": "1", "nodeType": "SHARED_CORE_NANO", "network": "projects/p/global/networks/default",
-			"engineConfigs": `{"maxmemory-policy":"allkeys-lru"}`})
+			"engineConfigs": `{"maxmemory-policy":"allkeys-lru"}`, "transitEncryption": strconv.FormatBool(tc.tls), "iamAuth": strconv.FormatBool(tc.tls)})
 		if err != nil || id != tc.id {
 			t.Fatalf("Create %s = %q, %v", tc.id, id, err)
 		}
@@ -118,6 +132,15 @@ func TestConsoleValkeyInstances(t *testing.T) {
 		if props["Mode"] != tc.mode || !strings.HasPrefix(props[tc.endpoint], "127.0.0.1:") || props["PSC networks"] != "projects/p/global/networks/default" ||
 			props["Engine configs"] == "—" || props["State"] != "ACTIVE" {
 			t.Errorf("%s's page shows %v", tc.id, props)
+		}
+		// In-transit encryption and IAM auth (#1549): the modes, and the
+		// Server CA tab with the instance's CA.
+		hasCA := len(d.Sections) > 1 && d.Sections[1].ID == "server-ca" && strings.Contains(d.Sections[1].Text, "BEGIN CERTIFICATE")
+		if tc.tls && (props["In-transit encryption"] != "SERVER_AUTHENTICATION" || props["Authorization"] != "IAM_AUTH" || !hasCA) {
+			t.Errorf("%s with in-transit encryption: page shows %v, Server CA tab %v", tc.id, props, hasCA)
+		}
+		if !tc.tls && hasCA {
+			t.Errorf("%s without in-transit encryption has a Server CA tab", tc.id)
 		}
 		if err := p.Edit(ctx, "p", []string{tc.id}, map[string]string{"shardCount": tc.shards, "replicaCount": "2", "nodeType": "SHARED_CORE_NANO"}); err != nil {
 			t.Fatalf("Edit %s: %v", tc.id, err)

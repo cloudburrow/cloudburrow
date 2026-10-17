@@ -264,10 +264,29 @@ func parseReplication(raw string) Replication {
 
 // DialCluster is the ClusterDialer of a cluster's nodes: a go-redis client
 // of one node, not following redirections, since the cluster is being
-// formed or changed through each node in turn.
-func DialCluster(addr, password string) ClusterNode {
-	return clusterNodeClient{redis.NewClient(&redis.Options{Addr: addr, Password: password, MaxRetries: -1, PoolSize: 1})}
+// formed or changed through each node in turn; over TLS, trusting caPEM,
+// for a cluster with in-transit encryption (#1549).
+func DialCluster(addr, password, caPEM string) ClusterNode {
+	tc, err := ClientTLS(caPEM)
+	if err != nil {
+		return failedNode{err}
+	}
+	// A pipeline of SETSLOT over thousands of slots saves the node's
+	// cluster config at each, which outlasts go-redis's 3s read timeout on a
+	// loaded machine.
+	return clusterNodeClient{redis.NewClient(&redis.Options{Addr: addr, Password: password, MaxRetries: -1, PoolSize: 1, TLSConfig: tc,
+		ReadTimeout: clusterNodeTimeout, WriteTimeout: clusterNodeTimeout})}
 }
+
+// clusterNodeTimeout bounds each read and write of a node's admin client.
+const clusterNodeTimeout = 60 * time.Second
+
+// failedNode is a node that could not be dialled: every call is err.
+type failedNode struct{ err error }
+
+func (n failedNode) Do(context.Context, ...any) (any, error)      { return nil, n.err }
+func (n failedNode) Pipe(context.Context, [][]any) ([]any, error) { return nil, n.err }
+func (n failedNode) Close() error                                 { return nil }
 
 type clusterNodeClient struct{ c *redis.Client }
 

@@ -58,6 +58,11 @@ func (s *Server) UseKMS(k KeyService) {
 		s.created.kms = k
 		go s.created.watchKeys(s.created.bg, keyEvery)
 	}
+	for _, c := range []*clusters{s.clusters, s.valkey} {
+		if c != nil {
+			go c.watchKeys(c.bg, keyEvery)
+		}
+	}
 }
 
 // keyEvery is how often a CMEK instance's key is checked.
@@ -73,13 +78,16 @@ type sealed struct {
 
 // checkKey is Google's rule for customer_managed_key: a CryptoKey in the
 // instance's region.
-func checkKey(key, region string) error {
+func checkKey(key, region string) error { return checkKeyField("customer_managed_key", key, region) }
+
+// checkKeyField is that rule for the field that names the key.
+func checkKeyField(field, key, region string) error {
 	m := cryptoKeyRE.FindStringSubmatch(key)
 	if m == nil {
-		return apierror.InvalidArgument("customer_managed_key must be projects/{project}/locations/{location}/keyRings/{key_ring}/cryptoKeys/{crypto_key}, not %q", key)
+		return apierror.InvalidArgument("%s must be projects/{project}/locations/{location}/keyRings/{key_ring}/cryptoKeys/{crypto_key}, not %q", field, key)
 	}
 	if m[2] != region {
-		return apierror.InvalidArgument("customer_managed_key %s must be in the instance's region %s: the key, key ring and instance must be in the same region", key, region)
+		return apierror.InvalidArgument("%s %s must be in the instance's region %s: the key, key ring and instance must be in the same region", field, key, region)
 	}
 	return nil
 }

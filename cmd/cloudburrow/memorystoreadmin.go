@@ -325,8 +325,22 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	for k, v := range spec.Configs {
 		cfg[k] = v
 	}
-	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg})
+	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version], Dir: spec.Dir}
+	if spec.TransitCA != "" {
+		// In-transit encryption (#1549): TLS only, on the node's one port,
+		// with a certificate of the cluster's CA for the host's address,
+		// where clients reach the node, and the node's Service.
+		ns := p.cfg.Cluster.Namespace
+		names := []string{p.cfg.BindAddress, spec.Server + "." + ns, spec.Server + "." + ns + ".svc", spec.Server + "." + ns + ".svc.cluster.local"}
+		files, err := redisadmin.ServerTLS(spec, time.Now(), names...)
+		if err != nil {
+			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
+		}
+		delete(cfg, "port")
+		settings.TLSCert, settings.TLSKey, settings.TLSCA, settings.TLSPort = files.Cert, files.Key, files.CA, port
+	}
+	b := components.MemorystoreServerOf(settings)
 	b.Port = port
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", "", 0, err
@@ -432,6 +446,10 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 var memorystoreImages = map[string]string{
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
+	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 is the
+	// default image.
+	"VALKEY_7_2": components.MemorystoreValkey72Image,
+	"VALKEY_9_0": components.MemorystoreValkey90Image,
 }
 
 // Suspend stops a suspended instance's server and keeps its volume

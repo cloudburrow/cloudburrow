@@ -529,6 +529,16 @@ type MemorystoreSettings struct {
 	// the server serves TLS only, on MemorystoreTLSPort, with this
 	// certificate, and replicates over TLS trusting the CA. "" for none.
 	TLSCert, TLSKey, TLSCA string
+	// TLSPort is the port the server serves TLS on: 0 is
+	// MemorystoreTLSPort. A Redis Cluster node serves its own (#1549).
+	TLSPort int
+	// Dir, in persistent mode, is the server's data directory on its
+	// volume in place of /data itself, made before the server starts: a
+	// Redis Cluster or Valkey node's, one per formation (#1557), so a node
+	// never loads files a previous formation left. When Settings has
+	// appendonly, it is the node's persistence and the mode's own
+	// append-only file is not added.
+	Dir string
 }
 
 // MemorystoreTLSPort is the port a Memorystore server with in-transit
@@ -546,6 +556,15 @@ const memorystoreTLSDir = "/tmp/tls"
 const (
 	MemorystoreRedis62Image = "redis:6.2.24-alpine@sha256:b362b5dff9d14d961dc3352db4776aba6a8c53ca2661d7c74ad2c121f82cdaea"
 	MemorystoreRedis70Image = "redis:7.0.15-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+)
+
+// Valkey images of Memorystore for Valkey's other engine versions (#1557),
+// each the latest release of its line, pinned by the index digest
+// (linux/amd64 and linux/arm64 among others): VALKEY_7_2 is Valkey 7.2.14
+// and VALKEY_9_0 is Valkey 9.0.6. MemorystoreImage is VALKEY_8_0's.
+const (
+	MemorystoreValkey72Image = "valkey/valkey:7.2-alpine@sha256:c6c2f0020be34bbf684a53a0ef716ab16ff70295186d4d9f2518435beb7afbff"
+	MemorystoreValkey90Image = "valkey/valkey:9.0-alpine@sha256:187679e3bd4036959631e3f03983ab2ba503ab21e6fd0454d508e909db2ee989"
 )
 
 // MemorystoreBinary is the prefix of image's server programs: "valkey"
@@ -591,7 +610,16 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	if h, p, err := net.SplitHostPort(o.ReplicaOf); err == nil {
 		args = append(args, "--replicaof", h, p)
 	}
+	dir := ""
+	if persistent && o.Dir != "" && strings.HasPrefix(o.Dir, "/data/") {
+		dir = o.Dir
+	}
+	_, ownPersistence := settings["appendonly"]
 	switch {
+	case dir != "" && ownPersistence:
+		args = append(args, "--dir", dir)
+	case dir != "":
+		args = append(args, "--dir", dir, "--appendonly", "yes", "--appendfsync", "everysec")
 	case o.RDBSeconds > 0 && persistent:
 		args = append(args, "--dir", "/data", "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
 	case o.RDBSeconds > 0:
@@ -610,20 +638,33 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
+	if dir != "" && o.TLSCert == "" {
+		// The directory is made, then the image's own entrypoint starts
+		// the server as it always does, owning it.
+		b.Args = append([]string{"sh", "-c", `set -e; mkdir -p "$0"; exec docker-entrypoint.sh "$@"`, dir}, args...)
+	}
 	if o.TLSCert != "" {
 		// TLS only (--port 0), clients not asked for a certificate
 		// (SERVER_AUTHENTICATION), replication over TLS. The files are
 		// written from the environment, then the image's own entrypoint
 		// starts the server as it always does.
 		d := memorystoreTLSDir
-		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(MemorystoreTLSPort),
+		tlsPort := o.TLSPort
+		if tlsPort == 0 {
+			tlsPort = MemorystoreTLSPort
+		}
+		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(tlsPort),
 			"--tls-cert-file", d+"/server.crt", "--tls-key-file", d+"/server.key", "--tls-ca-cert-file", d+"/ca.crt",
 			"--tls-auth-clients", "no", "--tls-replication", "yes")
-		script := `set -e; mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
+		mk := ""
+		if dir != "" {
+			mk = `mkdir -p ` + dir + `; `
+		}
+		script := `set -e; ` + mk + `mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
 			`printf '%s' "$MEMORYSTORE_TLS_KEY" > ` + d + `/server.key; printf '%s' "$MEMORYSTORE_TLS_CA" > ` + d + `/ca.crt; ` +
 			`chmod 0755 ` + d + `; chmod 0644 ` + d + `/*; exec docker-entrypoint.sh "$@"`
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
-		b.Port = MemorystoreTLSPort
+		b.Port = tlsPort
 		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
 	}
 	return b
