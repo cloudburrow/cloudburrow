@@ -40,7 +40,7 @@ type purgeExtra struct {
 // a queue, a key ring, a Scheduler job, a Logging exclusion and a bucket.
 // Deleted and undeleted it keeps all of it; deleted and purged
 // (POST /admin/purge, in place of the 30 days) and created again with the
-// same ID, none of it reads back.
+// same ID, none of it reads back, and it has a number of its own (#1544).
 func TestAPurgedProjectsIDStartsEmpty(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
@@ -85,6 +85,15 @@ func TestAPurgedProjectsIDStartsEmpty(t *testing.T) {
 		return p
 	}
 	p := create()
+	number := func() int64 {
+		t.Helper()
+		got, err := v1.Projects.Get(id).Context(ctx).Do()
+		if err != nil {
+			t.Fatalf("v1 projects.get %s: %v", id, err)
+		}
+		return got.ProjectNumber
+	}
+	oldNumber := number()
 	t.Cleanup(func() {
 		_, _ = pc.DeleteProject(context.Background(), &rmpb.DeleteProjectRequest{Name: parent})
 	})
@@ -289,6 +298,7 @@ func TestAPurgedProjectsIDStartsEmpty(t *testing.T) {
 		return out
 	}
 	all := len(left())
+	t.Logf("set up: %v", left())
 	if want := 7 + len(extras); all != want {
 		t.Fatalf("set up %d pieces of state, want %d: %v", all, want, left())
 	}
@@ -323,5 +333,26 @@ func TestAPurgedProjectsIDStartsEmpty(t *testing.T) {
 	create()
 	if got := left(); len(got) != 0 {
 		t.Errorf("a project created again under a purged ID reads the old project's %v", got)
+	}
+	// A new project, a new number (#1544): nothing that named the old one
+	// by number names the new one.
+	n := number()
+	if n == oldNumber {
+		t.Errorf("the project made again under %s has the purged one's number %d", id, n)
+	}
+	if useStorage {
+		// The storage server reports the new number too.
+		b := storageClient(t, h).Bucket(id + "-renumbered")
+		if err := b.Create(ctx, id, nil); err != nil {
+			t.Fatalf("create bucket: %v", err)
+		}
+		t.Cleanup(func() { emptyAndDelete(context.Background(), b) })
+		attrs, err := b.Attrs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if int64(attrs.ProjectNumber) != n {
+			t.Errorf("the new project's bucket has projectNumber %d, want %d (the purged one's was %d)", attrs.ProjectNumber, n, oldNumber)
+		}
 	}
 }

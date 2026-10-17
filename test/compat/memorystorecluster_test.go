@@ -227,16 +227,22 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 // covers: google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster
 //
 // TestMemorystoreRedisClusterRefusals (#1519): what a cluster here cannot
-// do is refused, creating nothing: TLS is UNIMPLEMENTED, a shard_count of
-// 0 INVALID_ARGUMENT.
+// do is refused, creating nothing: a customer-managed key that Cloud KMS
+// cannot use is FAILED_PRECONDITION (#1557), one outside the cluster's
+// region INVALID_ARGUMENT, a shard_count of 0 INVALID_ARGUMENT.
 func TestMemorystoreRedisClusterRefusals(t *testing.T) {
 	h := New(t)
 	c, project := redisClusterAdminClient(t, h)
 	parent := "projects/" + project + "/locations/us-central1"
-	_, err := c.CreateCluster(h.Context(), &clusterpb.CreateClusterRequest{Parent: parent, ClusterId: "compat-tls", Cluster: &clusterpb.Cluster{
-		ShardCount: proto.Int32(1), TransitEncryptionMode: clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateCluster with TLS = %v, want UNIMPLEMENTED", err)
+	_, err := c.CreateCluster(h.Context(), &clusterpb.CreateClusterRequest{Parent: parent, ClusterId: "compat-kms", Cluster: &clusterpb.Cluster{
+		ShardCount: proto.Int32(1), KmsKey: proto.String("projects/p/locations/us-central1/keyRings/r/cryptoKeys/k")}})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("CreateCluster with a kms_key Cloud KMS cannot use = %v, want FAILED_PRECONDITION", err)
+	}
+	_, err = c.CreateCluster(h.Context(), &clusterpb.CreateClusterRequest{Parent: parent, ClusterId: "compat-kms-region", Cluster: &clusterpb.Cluster{
+		ShardCount: proto.Int32(1), KmsKey: proto.String("projects/p/locations/europe-west1/keyRings/r/cryptoKeys/k")}})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateCluster with a kms_key of another region = %v, want INVALID_ARGUMENT", err)
 	}
 	_, err = c.CreateCluster(h.Context(), &clusterpb.CreateClusterRequest{Parent: parent, ClusterId: "compat-zero", Cluster: &clusterpb.Cluster{
 		ShardCount: proto.Int32(0)}})

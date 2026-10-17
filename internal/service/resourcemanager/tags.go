@@ -126,7 +126,7 @@ func (r *Registry) resolveProjectLocked(name string) (Project, error) {
 		}
 		for _, k := range keys {
 			pid := strings.TrimPrefix(k, keyPrefix)
-			if projectNumber(pid) == n {
+			if r.projectNumber(pid) == n {
 				return r.load(pid)
 			}
 		}
@@ -136,9 +136,9 @@ func (r *Registry) resolveProjectLocked(name string) (Project, error) {
 }
 
 // namesProject reports whether "projects/X" names the project id.
-func namesProject(parent, id string) bool {
+func (r *Registry) namesProject(parent, id string) bool {
 	x, ok := strings.CutPrefix(parent, "projects/")
-	return ok && (x == id || x == strconv.FormatInt(projectNumber(id), 10))
+	return ok && (x == id || x == strconv.FormatInt(r.projectNumber(id), 10))
 }
 
 // --- Liens ---------------------------------------------------------------
@@ -203,12 +203,12 @@ func (r *Registry) CreateLien(in Lien) (Lien, error) {
 		return Lien{}, apierror.FailedPrecondition("project %s is pending deletion", p.ProjectID)
 	}
 	// Google's lien IDs look like p{number}-l{number}.
-	id := "p" + strconv.FormatInt(projectNumber(p.ProjectID), 10) + "-l" + randomFolderNumber()
+	id := "p" + strconv.FormatInt(numberOf(p), 10) + "-l" + randomFolderNumber()
 	for {
 		if _, err := r.st.Get(lienPrefix + id); err != nil {
 			break
 		}
-		id = "p" + strconv.FormatInt(projectNumber(p.ProjectID), 10) + "-l" + randomFolderNumber()
+		id = "p" + strconv.FormatInt(numberOf(p), 10) + "-l" + randomFolderNumber()
 	}
 	l := in
 	l.Restrictions = append([]string(nil), in.Restrictions...)
@@ -254,7 +254,7 @@ func (r *Registry) liensOfLocked(projectID string) ([]Lien, error) {
 	var out []Lien
 	for _, k := range keys {
 		l, err := r.getLien(strings.TrimPrefix(k, lienPrefix))
-		if err == nil && namesProject(l.Parent, projectID) {
+		if err == nil && r.namesProject(l.Parent, projectID) {
 			out = append(out, l)
 		}
 	}

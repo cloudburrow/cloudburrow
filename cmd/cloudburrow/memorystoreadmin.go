@@ -325,8 +325,22 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	for k, v := range spec.Configs {
 		cfg[k] = v
 	}
-	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg})
+	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version], Dir: spec.Dir}
+	if spec.TransitCA != "" {
+		// In-transit encryption (#1549): TLS only, on the node's one port,
+		// with a certificate of the cluster's CA for the host's address,
+		// where clients reach the node, and the node's Service.
+		ns := p.cfg.Cluster.Namespace
+		names := []string{p.cfg.BindAddress, spec.Server + "." + ns, spec.Server + "." + ns + ".svc", spec.Server + "." + ns + ".svc.cluster.local"}
+		files, err := redisadmin.ServerTLS(spec, time.Now(), names...)
+		if err != nil {
+			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
+		}
+		delete(cfg, "port")
+		settings.TLSCert, settings.TLSKey, settings.TLSCA, settings.TLSPort = files.Cert, files.Key, files.CA, port
+	}
+	b := components.MemorystoreServerOf(settings)
 	b.Port = port
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", "", 0, err
@@ -432,6 +446,10 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 var memorystoreImages = map[string]string{
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
+	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 is the
+	// default image.
+	"VALKEY_7_2": components.MemorystoreValkey72Image,
+	"VALKEY_9_0": components.MemorystoreValkey90Image,
 }
 
 // Suspend stops a suspended instance's server and keeps its volume
@@ -453,6 +471,27 @@ func (k memorystoreKMS) Encrypt(ctx context.Context, key string, plaintext []byt
 		return nil, err
 	}
 	return r.GetCiphertext(), nil
+}
+
+// sqlAdminKMS is memorystoreKMS for the Cloud SQL Admin API (#1538),
+// whose Encrypt also answers the CryptoKeyVersion that wrapped the key, for
+// diskEncryptionStatus.
+type sqlAdminKMS struct{ svc *kmsService }
+
+func (k sqlAdminKMS) Encrypt(ctx context.Context, key string, plaintext []byte) ([]byte, string, error) {
+	api := k.svc.API()
+	if api == nil {
+		return nil, "", errors.New("Cloud KMS has not started yet")
+	}
+	r, err := api.Encrypt(ctx, &kmspb.EncryptRequest{Name: key, Plaintext: plaintext})
+	if err != nil {
+		return nil, "", err
+	}
+	return r.GetCiphertext(), r.GetName(), nil
+}
+
+func (k sqlAdminKMS) Decrypt(ctx context.Context, key string, ciphertext []byte) ([]byte, error) {
+	return buildKMSDecrypter(k).Decrypt(ctx, key, ciphertext)
 }
 
 func (k memorystoreKMS) Decrypt(ctx context.Context, key string, ciphertext []byte) ([]byte, error) {

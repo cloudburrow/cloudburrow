@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -39,6 +40,11 @@ import (
 // endpoint (the first primary) in CLUSTER mode, the primary and a reader
 // (the first replica) in CLUSTER_DISABLED mode, as endpoints when they
 // were asked as endpoints, as psc_auto_connections when asked so.
+//
+// In-transit encryption (SERVER_AUTHENTICATION, #1549) is a Redis
+// cluster's (cluster.go): a CA of the instance's own, which
+// GetCertificateAuthority returns as managed_server_ca, every node serving
+// TLS only. IAM_AUTH takes any AUTH string (ADR-0006: IAM is not enforced).
 
 // MemorystoreRESTPrefix is the path the JSON API of memorystore.googleapis.com
 // is served under on the admin port: a client's endpoint is
@@ -47,9 +53,10 @@ const MemorystoreRESTPrefix = "/memorystore"
 
 const valkeyPrefix = "valkey/"
 
-// DefaultValkeyVersion is the engine_version an instance runs: the image
-// is Valkey 8.1 (components.MemorystoreImage), Memorystore's VALKEY_8_0
-// line.
+// DefaultValkeyVersion is the engine_version an instance runs when none
+// is asked: the image is Valkey 8.1 (components.MemorystoreImage),
+// Memorystore's VALKEY_8_0 line. VALKEY_7_2 runs Valkey 7.2 and
+// VALKEY_9_0 Valkey 9.0 (#1557).
 const DefaultValkeyVersion = "VALKEY_8_0"
 
 // valkeyNodeSizes are the GB a node of each node_type holds, as Memorystore
@@ -79,6 +86,10 @@ type valkeyFields struct {
 	Endpoints        bool   `json:"endpoints,omitempty"`
 	ZoneDistribution string `json:"zoneDistribution,omitempty"`
 	Maintenance      string `json:"maintenance,omitempty"`
+	// CIR is cross-instance replication, Migration the migration
+	// (crossinstance.go); nil for none.
+	CIR       *cirConfig `json:"cir,omitempty"`
+	Migration *migration `json:"migration,omitempty"`
 }
 
 type valkeyNetwork struct {
@@ -185,6 +196,7 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	}
 	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
+	go s.valkey.autoBackups(ctx)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
@@ -241,6 +253,29 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 		Mode:                      mode,
 		SatisfiesPzs:              proto.Bool(false),
 		SatisfiesPzi:              proto.Bool(false),
+	}
+	if r.TransitCA != "" {
+		out.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
+	}
+	if r.KmsKey != "" {
+		out.KmsKey = proto.String(r.KmsKey)
+		out.EncryptionInfo = convert(r.encryptionInfo(), &memorystorepb.EncryptionInfo{})
+	}
+	renderCIR(r, out)
+	if r.AutoBackup != "" {
+		ab := &clusterpb.AutomatedBackupConfig{}
+		if protojson.Unmarshal([]byte(r.AutoBackup), ab) == nil {
+			out.AutomatedBackupConfig = convert(ab, &memorystorepb.AutomatedBackupConfig{})
+		}
+	}
+	if col := collectionName(r); col != "" && r.state != clusterpb.Cluster_CREATING {
+		out.BackupCollection = proto.String(col)
+	}
+	switch {
+	case r.Source != "":
+		out.ImportSources = &memorystorepb.Instance_ManagedBackupSource_{ManagedBackupSource: &memorystorepb.Instance_ManagedBackupSource{Backup: r.Source}}
+	case len(r.SourceURIs) > 0:
+		out.ImportSources = &memorystorepb.Instance_GcsSource{GcsSource: &memorystorepb.Instance_GcsBackupSource{Uris: r.SourceURIs}}
 	}
 	if pc := out.PersistenceConfig; pc.GetMode() == memorystorepb.PersistenceConfig_RDB {
 		// Google returns the time snapshots are counted from: the
@@ -397,19 +432,24 @@ func (s *MemorystoreServer) GetInstance(ctx context.Context, req *memorystorepb.
 	return renderValkey(r), nil
 }
 
-// GetCertificateAuthority is FAILED_PRECONDITION: in-transit encryption is
-// not served, so an instance has no CA.
+// GetCertificateAuthority returns an instance's CA, as managed_server_ca;
+// an instance without in-transit encryption has none.
 func (s *MemorystoreServer) GetCertificateAuthority(ctx context.Context, req *memorystorepb.GetCertificateAuthorityRequest) (*memorystorepb.CertificateAuthority, error) {
-	name := req.GetName()
-	if len(name) > len("/certificateAuthority") {
-		name = name[:len(name)-len("/certificateAuthority")]
-	}
-	c, _, err := s.find(name)
+	// gRPC names the CA (.../certificateAuthority); the JSON API of
+	// memorystore.googleapis.com names the instance.
+	name := strings.TrimSuffix(req.GetName(), "/certificateAuthority")
+	c, r, err := s.find(name)
 	if err != nil {
 		return nil, err
 	}
+	ca := r.TransitCA
 	c.mu.Unlock()
-	return nil, apierror.FailedPrecondition("instance %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_DISABLED", name)
+	if ca == "" {
+		return nil, apierror.FailedPrecondition("instance %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_DISABLED", name)
+	}
+	return &memorystorepb.CertificateAuthority{Name: name,
+		ServerCa: &memorystorepb.CertificateAuthority_ManagedServerCa{ManagedServerCa: &memorystorepb.CertificateAuthority_ManagedCertificateAuthority{
+			CaCerts: []*memorystorepb.CertificateAuthority_ManagedCertificateAuthority_CertChain{{Certificates: []string{ca}}}}}}, nil
 }
 
 // valkeyConfigs are the engine_configs an instance takes, as Memorystore
@@ -433,11 +473,8 @@ func checkValkeyConfigs(cfg map[string]string) error {
 }
 
 func checkEngineVersion(v string) error {
-	switch v {
-	case "", DefaultValkeyVersion:
+	if _, ok := valkeyVersions[v]; ok || v == "" {
 		return nil
-	case "VALKEY_7_2", "VALKEY_9_0":
-		return apierror.Unimplemented("engine_version %s is not served: CloudBurrow runs one Valkey image, Valkey 8.1 (%s)", v, DefaultValkeyVersion)
 	}
 	return apierror.InvalidArgument("engine_version %q is not a Memorystore for Valkey engine version", v)
 }
@@ -555,21 +592,35 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		auth = memorystorepb.Instance_AUTH_DISABLED
 	case memorystorepb.Instance_AUTH_DISABLED:
 	case memorystorepb.Instance_IAM_AUTH:
-		// Kept and returned; there are no IAM tokens to check here, so
-		// the nodes take connections without AUTH (docs/memorystore.md).
+		// A client's AUTH is its access token. IAM is not enforced here
+		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
 	case memorystorepb.Instance_TOKEN_AUTH:
-		return nil, apierror.Unimplemented("authorization_mode TOKEN_AUTH is not served here: token auth users and their tokens are not built")
+		// Token auth users and their tokens (clusterauth.go).
 	default:
 		return nil, apierror.InvalidArgument("authorization_mode %s is not an authorization mode", auth)
 	}
-	if in.GetTransitEncryptionMode() == memorystorepb.Instance_SERVER_AUTHENTICATION {
-		return nil, apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not served for a Memorystore for Valkey instance here: its nodes serve plain TCP")
+	tlsOn := false
+	switch tm := in.GetTransitEncryptionMode(); tm {
+	case memorystorepb.Instance_TRANSIT_ENCRYPTION_MODE_UNSPECIFIED, memorystorepb.Instance_TRANSIT_ENCRYPTION_DISABLED:
+	case memorystorepb.Instance_SERVER_AUTHENTICATION:
+		tlsOn = true
+	default:
+		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
-	if in.GetKmsKey() != "" || in.GetCrossInstanceReplicationConfig() != nil || in.GetImportSources() != nil ||
-		in.GetBackupCollection() != "" || in.GetMigrationConfig() != nil || in.GetServerCaPool() != "" ||
-		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) ||
-		in.GetAutomatedBackupConfig().GetAutomatedBackupMode() == memorystorepb.AutomatedBackupConfig_ENABLED {
-		return nil, apierror.Unimplemented("kms_key, cross-instance replication, import sources, backups, migration and server CA modes are not served for a Memorystore for Valkey instance here")
+	if in.GetServerCaPool() != "" ||
+		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) {
+		return nil, apierror.Unimplemented("server CA modes are not served for a Memorystore for Valkey instance here")
+	}
+	primary, err := cirPrimary(in, mode, tlsOn)
+	if err != nil {
+		return nil, err
+	}
+	ab := convert(in.GetAutomatedBackupConfig(), &clusterpb.AutomatedBackupConfig{})
+	if in.GetAutomatedBackupConfig() == nil {
+		ab = nil
+	}
+	if err := checkAutoBackup(ab); err != nil {
+		return nil, err
 	}
 	if err := checkValkeyConfigs(in.GetEngineConfigs()); err != nil {
 		return nil, err
@@ -589,6 +640,31 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		Valkey: &valkeyFields{Mode: mode.String(), NodeType: nt.String(), EngineVersion: version, AuthMode: auth.String(),
 			Updated: now, Persistence: protoJSON(in.GetPersistenceConfig()), Networks: nets, Endpoints: asEndpoints,
 			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(in.GetMaintenancePolicy())}}
+	if auth == memorystorepb.Instance_TOKEN_AUTH {
+		r.AdminPassword = newUID() + newUID()
+	}
+	r.AutoBackup = protoJSON(ab)
+	if key := in.GetKmsKey(); key != "" {
+		if err := c.newClusterKey(ctx, r, key, m[2]); err != nil {
+			return nil, err
+		}
+	}
+	switch src := in.GetImportSources().(type) {
+	case *memorystorepb.Instance_GcsSource:
+		r.SourceURIs = src.GcsSource.GetUris()
+		r.restore, err = c.readGCS(ctx, r.SourceURIs, "instance.gcs_source.uris")
+	case *memorystorepb.Instance_ManagedBackupSource_:
+		r.Source = src.ManagedBackupSource.GetBackup()
+		r.restore, err = c.readBackup(r.Source, "instance.managed_backup_source.backup")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if tlsOn {
+		if r.TransitCA, r.TransitCAKey, err = newCA(id, now); err != nil {
+			return nil, apierror.Internal(err, "create the CA of instance %s", name)
+		}
+	}
 	for sh := 0; sh < int(r.ShardCount); sh++ {
 		for k := 0; k <= int(r.ReplicaCount); k++ {
 			r.Nodes = append(r.Nodes, &clusterNode{Server: clusterServerName(name, r.NextNode), Shard: sh, Primary: k == 0})
@@ -599,6 +675,12 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if _, ok := c.byName[name]; ok {
 		c.mu.Unlock()
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
+	}
+	if primary != "" {
+		if err := c.checkPrimary(r, primary); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
 	}
 	if err := c.save(r); err != nil {
 		c.mu.Unlock()
@@ -626,6 +708,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	set := map[string]bool{}
 	for _, p := range paths {
+		if head, _, ok := strings.Cut(p, "."); ok {
+			// gcloud names a message's fields (#1557):
+			// cross_instance_replication_config.instance_role and the like.
+			switch head {
+			case "cross_instance_replication_config", "crossInstanceReplicationConfig",
+				"persistence_config", "persistenceConfig", "automated_backup_config", "automatedBackupConfig":
+				p = head
+			}
+		}
 		switch p {
 		case "shard_count", "shardCount":
 			set["shard_count"] = true
@@ -649,6 +740,10 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 			set["zone_distribution_config"] = true
 		case "maintenance_policy", "maintenancePolicy":
 			set["maintenance_policy"] = true
+		case "automated_backup_config", "automatedBackupConfig":
+			set["automated_backup_config"] = true
+		case "cross_instance_replication_config", "crossInstanceReplicationConfig":
+			set["cross_instance_replication_config"] = true
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode", "mode",
 			"psc_auto_connections", "pscAutoConnections":
 			return nil, apierror.InvalidArgument("update_mask path %q is an immutable field of Instance", p)
@@ -663,6 +758,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	defer c.mu.Unlock()
 	if _, pending := c.busy[r.Name]; pending || r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("instance %s is %s: an instance is updated only when ACTIVE", r.Name, r.state)
+	}
+	if r.Valkey.Migration.migrating() {
+		return nil, apierror.FailedPrecondition("instance %s is migrating: an instance is updated once FinishMigration completes", r.Name)
+	}
+	if set["cross_instance_replication_config"] {
+		if len(set) > 1 {
+			return nil, apierror.InvalidArgument("cross_instance_replication_config is updated alone, not with other fields")
+		}
+		return s.updateCIR(c, r, in.GetCrossInstanceReplicationConfig())
 	}
 	next := *r
 	vf := *r.Valkey
@@ -686,12 +790,19 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		}
 		vf.NodeType = in.GetNodeType().String()
 	}
+	upgradeTo := ""
 	if set["engine_version"] {
 		if v := in.GetEngineVersion(); v != vf.EngineVersion {
 			if err := checkEngineVersion(v); err != nil {
 				return nil, err
 			}
-			return nil, apierror.InvalidArgument("engine_version %q is not a later version than %s", v, vf.EngineVersion)
+			if valkeyVersions[v] <= valkeyVersions[vf.EngineVersion] {
+				return nil, apierror.InvalidArgument("engine_version %q is not a later version than %s: an instance is only upgraded", v, vf.EngineVersion)
+			}
+			if _, ok := c.rt.(Shell); !ok {
+				return nil, apierror.Unimplemented("engine upgrades are not supported by this instance's servers")
+			}
+			upgradeTo = v
 		}
 	}
 	if set["engine_configs"] {
@@ -724,6 +835,16 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	if set["maintenance_policy"] {
 		vf.Maintenance = protoJSON(in.GetMaintenancePolicy())
+	}
+	if set["automated_backup_config"] {
+		next.AutoBackup = ""
+		if in.GetAutomatedBackupConfig() != nil {
+			ab := convert(in.GetAutomatedBackupConfig(), &clusterpb.AutomatedBackupConfig{})
+			if err := checkAutoBackup(ab); err != nil {
+				return nil, err
+			}
+			next.AutoBackup = protoJSON(ab)
+		}
 	}
 	if set["node_type"] || set["engine_configs"] || set["persistence_config"] {
 		settings := serverConfigs(next.RedisConfigs)
@@ -759,6 +880,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	*r = next
 	op := c.newOperation(r.Name, "update")
+	if upgradeTo != "" && reshape {
+		return nil, apierror.InvalidArgument("engine_version and the instance's shape cannot be changed in one update")
+	}
+	if upgradeTo != "" {
+		r.state, r.message = clusterpb.Cluster_UPDATING, "upgrading the engine to "+upgradeTo
+		c.busy[r.Name] = op
+		go c.upgrade(r.Name, op, upgradeTo)
+		return s.api.operation(op)
+	}
 	if !reshape {
 		c.finish(op, renderValkey(r), nil)
 		return s.api.operation(op)
@@ -794,6 +924,20 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 	}
 	if r.DeletionProtect {
 		return nil, apierror.FailedPrecondition("instance %s has deletion protection enabled: disable it first", r.Name)
+	}
+	if len(c.secondariesOf(r.Name)) > 0 {
+		return nil, apierror.FailedPrecondition("instance %s is the primary of cross-instance replication: detach its secondary instances first", r.Name)
+	}
+	if r.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && r.Valkey.CIR.Primary != nil {
+		if p := c.byName[r.Valkey.CIR.Primary.Name]; p != nil {
+			var rest []*clusterRecord
+			for _, x := range c.secondariesOf(p.Name) {
+				if x != r {
+					rest = append(rest, x)
+				}
+			}
+			c.setMembership(p, rest)
+		}
 	}
 	r.state = clusterpb.Cluster_DELETING
 	op := c.newOperation(r.Name, "delete")

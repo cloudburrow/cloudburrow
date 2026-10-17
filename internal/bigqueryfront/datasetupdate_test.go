@@ -122,7 +122,7 @@ func TestDatasetUpdateRefusals(t *testing.T) {
 func TestGetServiceAccount(t *testing.T) {
 	code, got := do(t, Wrap(&oneDatasetEmulator{}), http.MethodGet, base+"/serviceAccount", "")
 	email, _ := got["email"].(string)
-	if code != http.StatusOK || got["kind"] != "bigquery#getServiceAccountResponse" || email != serviceAccountEmail("p") ||
+	if code != http.StatusOK || got["kind"] != "bigquery#getServiceAccountResponse" || email != serviceAccountEmail("p", nil) ||
 		!strings.HasPrefix(email, "bq-") || !strings.HasSuffix(email, "@bigquery-encryption.iam.gserviceaccount.com") {
 		t.Errorf("getServiceAccount = %d %v", code, got)
 	}

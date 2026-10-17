@@ -104,6 +104,9 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 		{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
 			Options: []string{"ZONAL", "REGIONAL"}, Default: "ZONAL", Help: availabilityHelp},
 		{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox"},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key (Cloud KMS)", Type: "text",
+			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the instance's region (needs kms in --services). " +
+				"The instance is SUSPENDED while the key's version is disabled or destroyed. The key cannot be changed later, and the server's data volume is not encrypted with it."},
 		{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox",
 			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
 		{Name: "sourceHostPort", Label: "External server host:port (source representation)", Type: "text",
@@ -184,9 +187,13 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true}
 		pitrConfig(st.BackupConfiguration, v["databaseVersion"], true)
 	}
-	_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{
+	in := &sqladminapi.DatabaseInstance{
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
-	}).Context(ctx).Do()
+	}
+	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
+		in.DiskEncryptionConfiguration = &sqladminapi.DiskEncryptionConfiguration{KmsKeyName: k}
+	}
+	_, err = svc.Instances.Insert(project, in).Context(ctx).Do()
 	if err != nil {
 		return "", sqlAPIError(err)
 	}
@@ -302,6 +309,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Earliest recovery time", Value: earliest}, {Label: "Latest recovery time", Value: latest},
 		{Label: "Instance type", Value: in.InstanceType}, {Label: "Primary instance", Value: in.MasterInstanceName},
 		{Label: "Read replicas", Value: strings.Join(in.ReplicaNames, ", ")},
+		{Label: "Encryption key (CMEK)", Value: cmekKey(in)}, {Label: "Encryption key version", Value: cmekVersion(in)},
+		{Label: "Suspension reason", Value: strings.Join(in.SuspensionReason, ", ")},
 	} {
 		if pr.Value != "" {
 			d.Summary = append(d.Summary, pr)
@@ -496,6 +505,8 @@ func sourceRepDetail(in *sqladminapi.DatabaseInstance) console.Detail {
 		{Label: "Version", Value: in.DatabaseVersion}, {Label: "Region", Value: in.Region},
 		{Label: "External server", Value: op.HostPort}, {Label: "Replication user", Value: op.Username},
 		{Label: "Read replicas", Value: strings.Join(in.ReplicaNames, ", ")},
+		{Label: "Encryption key (CMEK)", Value: cmekKey(in)}, {Label: "Encryption key version", Value: cmekVersion(in)},
+		{Label: "Suspension reason", Value: strings.Join(in.SuspensionReason, ", ")},
 	} {
 		if pr.Value != "" {
 			d.Summary = append(d.Summary, pr)
@@ -920,4 +931,20 @@ func regionOr(r string) string {
 		return r
 	}
 	return "us-central1"
+}
+
+// cmekKey and cmekVersion are an instance's customer-managed encryption key
+// and the version that wrapped its data key (#1538), "" for none.
+func cmekKey(in *sqladminapi.DatabaseInstance) string {
+	if in.DiskEncryptionConfiguration == nil {
+		return ""
+	}
+	return in.DiskEncryptionConfiguration.KmsKeyName
+}
+
+func cmekVersion(in *sqladminapi.DatabaseInstance) string {
+	if in.DiskEncryptionStatus == nil {
+		return ""
+	}
+	return in.DiskEncryptionStatus.KmsKeyVersionName
 }

@@ -499,7 +499,9 @@ func SourceManagerLocations(project string) []string {
 // the console shows it (#1527).
 type SourceManagerTrigger struct {
 	Name, EventType, ConfigFilePath, IncludedGitRefs, IgnoredGitRefs, ServiceAccount string
-	Disabled                                                                         bool
+	// GitRepositoryLink is the trigger's devConnectGitRepositoryLink (#1546).
+	GitRepositoryLink string
+	Disabled          bool
 }
 
 // SourceManagerTriggers reads the triggers file on a repository's default
@@ -532,7 +534,7 @@ func SourceManagerTriggers(ctx context.Context, name string) ([]SourceManagerTri
 			cfg = ".cloudbuild/cloudbuild.yaml"
 		}
 		out[i] = SourceManagerTrigger{Name: t.Name, EventType: ev, ConfigFilePath: cfg, IncludedGitRefs: t.IncludedGitRefs,
-			IgnoredGitRefs: t.IgnoredGitRefs, ServiceAccount: t.ServiceAccount, Disabled: t.Disabled}
+			IgnoredGitRefs: t.IgnoredGitRefs, ServiceAccount: t.ServiceAccount, GitRepositoryLink: t.DevConnectGitRepositoryLink, Disabled: t.Disabled}
 	}
 	return out, nil
 }

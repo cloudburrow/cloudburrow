@@ -56,6 +56,11 @@ type Spec struct {
 	// TransitTrust, PEM, are every CA server_ca_certs lists: TransitCA
 	// and the ones a rotation replaced, which still are valid (#1463).
 	TransitTrust string
+	// Dir is a Redis Cluster or Valkey node's data directory on its
+	// volume in persistent mode (#1557): one per formation, so a node
+	// formed again never loads what a previous formation left. "" is the
+	// mode's own.
+	Dir string
 }
 
 // Provisioner runs the server of an instance CreateInstance made.

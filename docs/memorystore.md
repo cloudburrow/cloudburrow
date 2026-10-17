@@ -278,7 +278,9 @@ Each node serves clients on one port that is the same in the cluster and on the 
 announces the host's address to clients (`cluster-announce-client-ipv4`); the nodes gossip on
 their pod addresses (bus port 16379). A client inside the Kubernetes cluster therefore gets host
 addresses from `CLUSTER SLOTS`, which it cannot reach: in the cluster, reach the nodes by pod
-address.
+address. Valkey announces one client address per address family (`cluster-announce-client-ipv4`,
+`-ipv6`), and both the host's tunnels and the pods reach a node over IPv4, so no setting
+serves both (#1549); the discovery endpoint is the host's too.
 
 `UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
 them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or
@@ -287,10 +289,115 @@ forgets replicas; `node_type` sets each node's `maxmemory` (1.4, 6.5, 13 or 58 G
 as Google requires. Terraform's `google_redis_cluster` works through `redis_custom_endpoint`, and
 the console has a Memorystore Redis Cluster page.
 
-Not served: in-transit encryption (`SERVER_AUTHENTICATION` is 501), token auth, backups, ACL
-policies, cross-cluster replication and CMEK. `AUTH_MODE_IAM_AUTH` is kept and returned, but no
-IAM token is checked: the nodes take connections without AUTH. After a restart of CloudBurrow a
-cluster is formed again, empty.
+**In-transit encryption** (#1549): `--transit-encryption-mode=server-authentication`
+(`TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION`) gives the cluster a CA of its own, as §6 gives an
+instance one, and every node a server certificate of it, issued each time the node starts, for
+the host's address and the node's Service. Each node serves TLS only, on its one port; the nodes
+gossip (`tls-cluster`) and replicate over TLS. `GetClusterCertificateAuthority` returns the CA as
+`managedServerCa.caCerts[0].certificates`; trust it in the cluster client:
+
+```go
+ca, _ := c.GetClusterCertificateAuthority(ctx, &clusterpb.GetClusterCertificateAuthorityRequest{Name: name + "/certificateAuthority"})
+pool := x509.NewCertPool()
+pool.AppendCertsFromPEM([]byte(ca.GetManagedServerCa().GetCaCerts()[0].GetCertificates()[0]))
+rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery},
+	TLSConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}})
+```
+
+It cannot be changed after the cluster is created, as Google's cannot.
+
+**IAM auth:** with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH string. The
+instance's IAM is not enforced (ADR-0006), so the nodes' default user has no password and takes
+any AUTH string, a token CloudBurrow's credentials issued among them, without checking it.
+
+**Token auth** (#1549): with `AUTH_MODE_TOKEN_AUTH` a client logs in as a token auth user
+with a token the service generates: `AddTokenAuthUser`, then `AddAuthToken`, and
+`GetAuthToken` / `ListAuthTokens` return the token. Each user is a Valkey ACL user on every
+node (`ACL SETUSER <user> reset on ><token>... ~* &* +@all`), set again on a node that starts
+and on every node whenever a user or token changes. The nodes' default user has a password
+only CloudBurrow's admin plane knows (and the replicas, `masterauth`), so a client without a
+token is refused (`NOAUTH`), and one with a deleted or wrong token too (`WRONGPASS`):
+
+```go
+rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery}, Username: "app", Password: token.GetToken()})
+```
+
+The mode cannot be changed to or from token auth after create (UNIMPLEMENTED).
+
+**ACL policies** (#1549): `CreateAclPolicy` with rules, a username and a Valkey ACL rule
+each (`on >secret ~app:* +@read`), and a cluster's `acl_policy` (at create or by
+`UpdateCluster`) make each rule a Valkey ACL user on every node (`ACL SETUSER <user> reset
+<rule>`). `UpdateAclPolicy` is a new revision (`GetAclPolicyRevision`,
+`ListAclPolicyRevisions`) set on every node of every attached cluster; detaching deletes the
+users; an attached policy cannot be deleted.
+
+**Backups** (#1549): each cluster has a backup collection,
+`projects/P/locations/L/backupCollections/<cluster UID>`, which outlives it.
+`BackupCluster` (`gcloud redis clusters backup`) keeps an RDB snapshot of each shard's
+primary (`BGSAVE`, then the file, read from the node's container) in the instance's
+Memorystore state: on disk in persistent mode, in memory in ephemeral mode. `ListBackups`,
+`GetBackup` and `DeleteBackup` act on them; a backup past its `ttl` (default 100 years) is
+removed. `ExportBackup` writes the files to a bucket of this instance's Cloud Storage, as
+`gs://BUCKET/<backup ID>/<file>` (`--services memorystore,storage`). A cluster created with
+`managed_backup_source` (a backup) or `gcs_source` (RDB files) loads them once its nodes
+serve: each file is served by a second server on a loopback port in the first primary's
+container, which `MIGRATE`s every key to the node that owns its slot, so a backup restores
+into any shard count. `automated_backup_config` is kept and returned, and its daily backup is
+taken at the start hour (UTC), kept for its `retention` (default 35 days).
+
+```sh
+gcloud redis clusters create-backup orders --region=us-central1 --backup-id=nightly --ttl=7d
+gcloud redis clusters backups list --backup-collection=COLLECTION --region=us-central1
+gcloud memorystore instances create cache --location=us-central1 --authorization-mode=token-auth ...
+gcloud memorystore instances create-token-auth-user cache --location=us-central1 --token-auth-user=app
+gcloud memorystore instances token-auth-users create-auth-token app --instance=cache --location=us-central1
+```
+
+Terraform's `automated_backup_config` works on both resources. The console's Create has **Token
+authentication**, **Restore from backup** and (a cluster's) **ACL policy**; a page has **Token
+auth** and **Backups** tabs and their actions (add and delete users and tokens, back up now,
+export and delete a backup; on a cluster, an **ACL policies** tab to create, update, delete and
+attach the location's policies). gcloud's Redis Cluster token auth commands are
+alpha and beta only, on `v1beta1`, which is not served; use the API or the console.
+
+**CMEK** (`kms_key`, #1557), for a cluster and a Valkey instance (§9) alike: the key must be a
+CryptoKey in the cluster's region that this instance's Cloud KMS (`--services ...,kms`) can use;
+an `Encrypt` with it wraps the cluster's data key (256-bit AES), kept only wrapped. What the key
+protects: the cluster's kept secrets (token auth users' tokens, the default user's password, the
+in-transit CA's private key), sealed with the data key and never kept in the clear, and each
+backup's RDB files, sealed with it (the backup keeps the wrapped data key, so it is restored or
+exported only while the key can be used). What it does not: the nodes' data in memory, which
+Valkey serves to clients as it is; an export, written to the bucket as plain RDB files under the
+bucket's own encryption; and the rest of the cluster's record (its shape, labels, configs). The
+key is checked every 2 seconds: once it cannot be used (disabled, destroyed, its version
+disabled), the cluster is suspended as a Memorystore for Redis instance (§6) and a Cloud SQL
+instance are: not `ACTIVE`, `encryption_info.kms_key_primary_state` says why, and its nodes are
+stopped, their data first kept as RDB files sealed with the data key; once the key can be used
+again new nodes are formed (`UPDATING`) and the data loaded, then `ACTIVE`.
+
+Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
+only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
+cluster cannot be another's secondary).
+
+**Across a restart** (#1557). After `cloudburrow stop` and `up` (persistent mode, the same state
+directory) a cluster is formed again with its users, policy and backups (`CREATING` until it
+serves). Its data follows its `persistence_config`, set on every node (RDB: `save <period> 1`;
+AOF: `appendonly yes` with its `appendfsync`): each node keeps its files on its own volume, in a
+directory of its formation (`/data/g<N>`), and each formation after a restart starts empty in the
+next one. **With RDB or AOF**, the previous formation's files of each shard's primary are served by
+a loopback server in that node's container and their keys moved (`MIGRATE`) to the primaries that
+own their slots now, then the previous directory is removed: every key the files held comes back
+(RDB: as of the last snapshot, which Valkey also writes when it stops; AOF: as of the last fsync).
+**Without persistence** (`DISABLED`, the default) nothing is loaded and the cluster comes back
+empty, as Google documents: without persistence a node's data is lost when it restarts, and nodes
+do not load snapshots made before persistence was disabled. In ephemeral mode nothing is kept.
+`TestMemorystoreClustersAcrossRestart` checks both, for Redis clusters and Valkey instances in
+either mode.
+
+**gcloud and Terraform** (#1557): `gcloud redis clusters create --kms-key` and
+`google_redis_cluster`'s `kms_key` are tested (`TestGcloudMemorystore1557`,
+`TestTerraformMemorystore1557`); the console's Create cluster has **Customer-managed encryption
+key** and **Persistence**, and the cluster's page shows its Encryption, key and Persistence.
 
 ## 9. Memorystore for Valkey (#1519)
 
@@ -324,12 +431,71 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
 6.5, 13 or 58 GB of `maxmemory`), `engine_configs` and `persistence_config`, set on every running
 node, and keeps `labels`, `deletion_protection_enabled`, `endpoints`, zone distribution and
 maintenance policy. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
-`appendfsync`; but as for a Redis cluster, after a restart of CloudBurrow an instance is formed
-again, empty. The console's **Memorystore for Valkey** page lists, creates (either mode), edits
-and deletes instances.
+`appendfsync`; after a restart of CloudBurrow an instance comes back with its data when it has
+RDB or AOF persistence, and empty without, as a Redis cluster does (§8, Across a restart). The
+console's **Memorystore for Valkey** page lists, creates (either mode), edits and deletes
+instances.
 
-Not served: `engine_version` other than `VALKEY_8_0` (one image, Valkey 8.1, runs; `VALKEY_7_2`
-and `VALKEY_9_0` are 501), in-transit encryption (`SERVER_AUTHENTICATION` is 501: the nodes serve
-plain TCP), `TOKEN_AUTH`, node types whose size is not modelled here, CMEK, backups,
-cross-instance replication, migration and server CA modes, each 501 with the reason. `IAM_AUTH`
-is kept and returned, but no token is checked.
+**Engine versions** (#1557): `VALKEY_7_2` runs Valkey 7.2.14 (`valkey/valkey:7.2-alpine`),
+`VALKEY_8_0` (the default) Valkey 8.1 and `VALKEY_9_0` Valkey 9.0.6 (`valkey/valkey:9.0-alpine`),
+each pinned by digest, for amd64 and arm64. Valkey 7.2 has no `cluster-announce-client-ipv4`, so
+a 7.2 node in `CLUSTER` mode announces the host's address to clients as its hostname
+(`cluster-preferred-endpoint-type hostname`). An `UpdateInstance` of `engine_version` to a later
+version takes an RDB snapshot of each shard's primary, forms new nodes of the new image, loads the
+snapshots, then removes the old nodes, which serve until then: writes made during the upgrade,
+after the snapshot, are not carried over. A downgrade is INVALID_ARGUMENT.
+
+**Cross-instance replication** (#1557), for `CLUSTER_DISABLED` instances without in-transit
+encryption: an instance created with `cross_instance_replication_config` `instance_role`
+`SECONDARY` and `primary_instance` (an `ACTIVE` `CLUSTER_DISABLED` instance of the same
+`authorization_mode`) has its primary node replicate the primary instance's (`REPLICAOF`), its
+replicas chained to it: it serves the primary's keys and refuses writes (READONLY). Each member
+reports the `membership`. `UpdateInstance` of `cross_instance_replication_config` (alone)
+switches over (a secondary to `PRIMARY`, every other member as its `secondary_instances`) and
+detaches (a secondary to `NONE`; a primary to `NONE`, or to fewer `secondary_instances`). A
+primary with secondaries is not deleted (FAILED_PRECONDITION). In `CLUSTER` mode it is 501, as a
+Redis cluster's (§8).
+
+**Migration** (`StartMigration`, `FinishMigration`, #1557) into a `CLUSTER_DISABLED` instance:
+its primary replicates `self_managed_source`'s `ip_address` and `port` (state `MIGRATING`,
+`migration_config.state` `REPLICATION_ESTABLISHED` once linked); `FinishMigration` waits until
+its offset reaches the source's (unless `force`), stops replicating, and the instance is `ACTIVE`
+and `MIGRATED`. A source that is a server of this CloudBurrow instance (a Memorystore for Redis
+instance, a node of a Valkey instance or Redis cluster) is named by the host address its clients
+use and reached at its in-cluster address; any other address is replicated from as it is.
+`network_attachment` is checked and kept. A source with AUTH (`self_managed_source` has no
+credentials), a `CLUSTER` mode target and in-transit encryption are not served (501 with the
+reason).
+
+**gcloud, Terraform and the console** (#1557). gcloud 587.0.0's `memorystore instances create
+--kms-key`, `--engine-version`, `--cross-instance-replication-config-role=secondary
+--primary-instance`, `instances update --engine-version` and
+`--cross-instance-replication-config-role=none`, `start-migration` and `finish-migration` are
+tested (`TestGcloudMemorystore1557`); `UpdateInstance` takes a message field's own paths in its
+`update_mask` (`cross_instance_replication_config.instance_role`), as gcloud sends them.
+`google_memorystore_instance`'s `kms_key`, `engine_version` (changed in place, the same `uid`) and
+`cross_instance_replication_config` apply and plan empty (`TestTerraformMemorystore1557`); the
+provider has no migration fields. The console's Create instance has **Engine version**,
+**Persistence**, **Customer-managed encryption key** and **Secondary of (cross-instance
+replication)**; Edit has **Engine version** (an upgrade); the instance's page shows its
+Encryption, key and key state, its cross-instance replication role, primary, secondaries and
+membership, and a migration's state and source; a secondary's page has **Switchover** and
+**Detach**, a `CLUSTER_DISABLED` instance's **Start migration** (source IP and port) and, while
+migrating, **Finish migration** (`TestConsoleValkeyReplicationMigrationVersions`,
+`TestMemorystoreValkeySecondaryThroughThePage`).
+
+Not served: node types whose size is not modelled here and server CA modes, each 501 with the
+reason.
+
+`TOKEN_AUTH`, backups (`BackupInstance`, `ListBackupCollections`, `GetBackupCollection`,
+`ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and
+restore through `managed_backup_source` or `gcs_source` are a Redis cluster's (§8), for an
+instance in either mode: a `CLUSTER_DISABLED` instance's backup is its primary's file, and a
+restore MIGRATEs the keys to its primary. Memorystore for Valkey has no ACL policies.
+
+In-transit encryption (`SERVER_AUTHENTICATION`) and `IAM_AUTH` are a Redis cluster's (§8): a CA of
+the instance's own, which `GetCertificateAuthority` returns as `managedServerCa` (gRPC
+`{instance}/certificateAuthority`, JSON `/memorystore/v1/{instance}/certificateAuthority`), every
+node serving TLS only, a `CLUSTER_DISABLED` instance's replicas replicating over TLS; any AUTH
+string is taken under `IAM_AUTH`. The console's Create has **Enable in-transit encryption** and
+**IAM authentication**, and the instance's page a **Server CA** tab.

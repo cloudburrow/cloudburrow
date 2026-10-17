@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,5 +62,49 @@ func TestConsoleArtifactRegistryCreateAndEditRepository(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "", []string{"made"}, "edit-repository", map[string]string{"labels": "nokey"}); err == nil {
 		t.Error("Edit repository took labels that are not key=value")
+	}
+}
+
+// Create repository's Mode and Upstream repositories (#1546) make a remote
+// repository over a standard one, and its page names the upstream.
+func TestConsoleArtifactRegistryCreateRemoteRepository(t *testing.T) {
+	ctx := context.Background()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	g := grpc.NewServer()
+	s.ArtifactRegistry().Register(g)
+	runadapter.NewOperationsServer(s).Register(g)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = g.Serve(ln) }()
+	t.Cleanup(g.Stop)
+	p := artifactRegistryProvider{defaultProject: "console-ar-remote", runAddr: func() string { return ln.Addr().String() }}
+	t.Cleanup(func() { _ = p.Delete(ctx, "", "cache"); _ = p.Delete(ctx, "", "base") })
+	if _, err := p.Create(ctx, "", map[string]string{"id": "base", "format": "PYTHON", "location": "us-east1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"id": "cache", "format": "PYTHON", "location": "us-east1", "mode": "REMOTE_REPOSITORY"}); err == nil {
+		t.Error("a remote repository with no upstream was created")
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"id": "cache", "format": "PYTHON", "location": "us-east1",
+		"mode": "REMOTE_REPOSITORY", "upstream": "base"}); err != nil {
+		t.Fatalf("Create repository, remote: %v", err)
+	}
+	r, _, err := p.repository("console-ar-remote", "cache")
+	if err != nil || r.GetMode().String() != "REMOTE_REPOSITORY" ||
+		r.GetRemoteRepositoryConfig().GetCommonRepository().GetUri() != "projects/console-ar-remote/locations/us-east1/repositories/base" {
+		t.Fatalf("the remote repository = %v, %v", r, err)
+	}
+	d, err := p.Detail(ctx, "", []string{"cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, x := range d.Summary {
+		found = found || (x.Label == "Mode" && strings.Contains(x.Value, "pulls through from projects/console-ar-remote/locations/us-east1/repositories/base"))
+	}
+	if !found {
+		t.Errorf("the remote repository's page = %+v; want its Mode to name the upstream", d.Summary)
 	}
 }

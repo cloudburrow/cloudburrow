@@ -238,7 +238,7 @@ func (s *Server) backupRuns(r *http.Request, base, project string, e Engine, res
 			Description string `json:"description"`
 			Type        string `json:"type"`
 		}
-		if err := decode(r, &body); err != nil {
+		if err := readChecked(r, "backupRun", backupRunFields, &body); err != nil {
 			return "sql.backupRuns.insert", nil, err
 		}
 		if body.Type == "AUTOMATED" {
@@ -416,7 +416,10 @@ func (s *Server) pruneAutomated(project, instance string) {
 
 // removeInstanceBackups deletes a deleted instance's backups, as deleting
 // a Cloud SQL instance deletes its backups.
-func (s *Server) removeInstanceBackups(project, instance string) {
+//
+// With retain (settings.retainBackupsOnDelete, #1538) every backup is
+// kept, as a FINAL one always is.
+func (s *Server) removeInstanceBackups(project, instance string, retain bool) {
 	b := s.backups
 	if b == nil {
 		return
@@ -428,7 +431,7 @@ func (s *Server) removeInstanceBackups(project, instance string) {
 		if r.BackupDR {
 			continue
 		}
-		if r.Type == "FINAL" {
+		if r.Type == "FINAL" || retain {
 			r.InstanceDeletionTime = now
 			continue
 		}

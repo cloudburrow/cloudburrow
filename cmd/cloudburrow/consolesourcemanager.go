@@ -238,7 +238,7 @@ func (p sourceManagerProvider) Detail(ctx context.Context, project string, path 
 			"Description": orDash(r.GetDescription()), "Clone URL": r.GetUris().GetGitHttps(), "Age": stampAge(r.GetCreateTime())}})
 	}
 	sec.Listing.Total = len(sec.Listing.Items)
-	d.Sections = []console.Section{sec}
+	d.Sections = []console.Section{sec, p.connectionsSection(project, in)}
 	return d, nil
 }
 
@@ -285,7 +285,7 @@ func (p sourceManagerProvider) repositoryDetail(ctx context.Context, project str
 	d.Sections = append(d.Sections, console.Section{ID: "push", Label: "How to push", Kind: console.KindText, Text: pushHelp(r)})
 
 	trig := console.Section{ID: "triggers", Label: "Triggers", Listing: console.Listing{
-		Columns: []string{"Event", "Config file", "Branches", "Ignored", "Service account"}, NameColumn: "Trigger", Noun: "triggers",
+		Columns: []string{"Event", "Config file", "Branches", "Ignored", "Service account", "Link"}, NameColumn: "Trigger", Noun: "triggers",
 		AlwaysStatus: true}, Note: "Read from " + runadapter.SourceManagerTriggersFile + " on " + branch + "; change them by pushing it."}
 	ts, err := runadapter.SourceManagerTriggers(ctx, r.GetName())
 	if err != nil {
@@ -301,10 +301,10 @@ func (p sourceManagerProvider) repositoryDetail(ctx context.Context, project str
 		}
 		trig.Listing.Items = append(trig.Listing.Items, console.Resource{Name: t.Name, Status: st, Fields: map[string]string{
 			"Event": t.EventType, "Config file": t.ConfigFilePath, "Branches": orDash(t.IncludedGitRefs),
-			"Ignored": orDash(t.IgnoredGitRefs), "Service account": orDash(t.ServiceAccount)}})
+			"Ignored": orDash(t.IgnoredGitRefs), "Service account": orDash(t.ServiceAccount), "Link": orDash(lastSegment(t.GitRepositoryLink))}})
 	}
 	trig.Listing.Total = len(trig.Listing.Items)
-	d.Sections = append(d.Sections, trig)
+	d.Sections = append(d.Sections, trig, p.linksSection(project, in, r))
 
 	builds := console.Section{ID: "builds", Label: "Builds", Listing: console.Listing{
 		Columns: []string{"Commit", "Created"}, NameColumn: "Build", Noun: "builds", AlwaysStatus: true},
@@ -365,23 +365,23 @@ func (p sourceManagerProvider) DetailActions(ctx context.Context, project string
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{ID: "create-repo", Label: "Create repository", Fields: []console.Field{
+		return append([]console.Action{{ID: "create-repo", Label: "Create repository", Fields: []console.Field{
 			{Name: "id", Label: "Repository ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$"},
 			{Name: "description", Label: "Description", Type: "text"},
 			{Name: "branch", Label: "Default branch", Type: "text", Default: "main",
 				Help: "the branch a clone checks out, and whose " + runadapter.SourceManagerTriggersFile + " a push's triggers are read from"},
-		}}}
+		}}}, p.connectionActions(project, in)...)
 	case 2:
 		r, err := p.repository(ctx, in, path[1])
 		if err != nil {
 			return nil
 		}
-		return []console.Action{
+		return append([]console.Action{
 			{ID: "edit-description", Label: "Edit description", Fields: []console.Field{
 				{Name: "description", Label: "Description", Type: "text", Default: r.GetDescription()}}},
 			{ID: "delete-repo", Label: "Delete repository", Destructive: true, Leaves: true,
 				Confirm: "the repository and every commit pushed to it"},
-		}
+		}, p.linkActions(project, in, r)...)
 	}
 	return nil
 }
@@ -390,6 +390,9 @@ func (p sourceManagerProvider) DetailActions(ctx context.Context, project string
 func (p sourceManagerProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
 	in, err := p.instance(ctx, project, path[0])
 	if err != nil {
+		return err
+	}
+	if ok, err := p.devConnectAct(ctx, path, action, in, v); ok {
 		return err
 	}
 	parent := in.GetName()[:strings.Index(in.GetName(), "/instances/")]

@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // TestConsoleBackupDRListActions (#1536): the Backup and DR page's own
@@ -63,5 +67,52 @@ func TestConsoleBackupDRListActions(t *testing.T) {
 	if l, err := p.ActAtResult(ctx, project, nil, "compliance", map[string]string{"location": "us-central1"}); err != nil ||
 		l.Items[0].Fields["Assured Workloads"] != "No" {
 		t.Errorf("compliance: %v %+v", err, l)
+	}
+}
+
+// TestConsoleBackupDRFindProtectedUnderFolders (#1536): Find protected
+// resources takes a folder or the organization, and answers every project
+// under it (folders and organizations resourceBackupConfigs.fetch), each
+// row naming its project.
+func TestConsoleBackupDRFindProtectedUnderFolders(t *testing.T) {
+	reg := resourcemanager.New(store.NewMemory())
+	top, err := reg.CreateFolder(resourcemanager.OrganizationName, "Top")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := reg.CreateFolder(top.Name, "Sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []resourcemanager.Project{{ProjectID: "bdr-in-top", Parent: top.Name}, {ProjectID: "bdr-in-sub", Parent: sub.Name}} {
+		if _, err := reg.Create(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := backupdr.NewServer("127.0.0.1:0", &fakeBackupDRSQL{runs: map[string]bool{}}, "")
+	srv.UseHierarchy(backupDRHierarchy{reg: reg})
+	p := backupDRProvider{bdr: srv}
+	ctx := context.Background()
+	projects := func(l *console.Listing) string {
+		var out []string
+		for _, it := range l.Items {
+			out = append(out, it.Fields["Project"]+"/"+it.Name)
+		}
+		sort.Strings(out)
+		return strings.Join(out, " ")
+	}
+	for scope, want := range map[string]string{
+		top.Name: "bdr-in-sub/pg bdr-in-top/pg", sub.Name: "bdr-in-sub/pg",
+		resourcemanager.OrganizationName: "bdr-in-sub/pg bdr-in-top/pg", "": "bdr-console/pg"} {
+		l, err := p.ActAtResult(ctx, "bdr-console", nil, "protected", map[string]string{"location": "us-central1", "scope": scope})
+		if err != nil || projects(l) != want {
+			t.Errorf("scope %q: %v %v, want %s", scope, err, l, want)
+		}
+	}
+	if _, err := p.ActAtResult(ctx, "bdr-console", nil, "protected", map[string]string{"location": "us-central1", "scope": "projects/x"}); err == nil {
+		t.Error("a project as the scope was accepted")
+	}
+	if _, err := p.ActAtResult(ctx, "bdr-console", nil, "protected", map[string]string{"location": "us-central1", "scope": "folders/404"}); err == nil {
+		t.Error("a folder that does not exist was accepted")
 	}
 }

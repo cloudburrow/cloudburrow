@@ -585,7 +585,8 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 // operationType (Copy table's, copyJob), into a destination that does not
 // exist, or (Restore) with a write preference. Snapshot's expiration is set
 // on the snapshot, after the job, with tables.patch (the official client's
-// Copier has no destinationExpirationTime).
+// Copier has no destinationExpirationTime), from the snapshot's
+// creationTime: the instance's clock, not this machine's (#1558).
 const (
 	actSnapshotTable = "snapshottable"
 	actCloneTable    = "clonetable"
@@ -643,7 +644,17 @@ func (p bigqueryProvider) snapshotCloneRestore(ctx context.Context, project, dat
 	}
 	defer c.Close()
 	tbl := c.Dataset(strings.TrimSpace(values["datasetId"])).Table(strings.TrimSpace(values["tableId"]))
-	if _, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{ExpirationTime: time.Now().Add(time.Duration(hours) * time.Hour)}, ""); err != nil {
+	// "From now" by the instance's clock, which clock:advance moves and
+	// BigQuery's times read (#1487, #1558), not this machine's: the
+	// snapshot's creationTime, which the instance stamped as the job made it.
+	md, err := tbl.Metadata(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("the snapshot was made, but its expiration was not set: %w", bigqueryRefusal(err))
+	}
+	if md.CreationTime.IsZero() {
+		return nil, fmt.Errorf("the snapshot was made, but its expiration was not set: tables.get answered no creationTime")
+	}
+	if _, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{ExpirationTime: md.CreationTime.Add(time.Duration(hours) * time.Hour)}, ""); err != nil {
 		return nil, fmt.Errorf("the snapshot was made, but its expiration was not set: %w", bigqueryRefusal(err))
 	}
 	return out, nil

@@ -61,7 +61,7 @@ func TestBigQueryMLPreprocessFunctions(t *testing.T) {
 		}
 	}
 	for _, sql := range []string{
-		"SELECT ML.QUANTILE_BUCKETIZE(v, 2) OVER () FROM UNNEST([1.0, 2.0]) AS v",
+		"SELECT ML.HASH_BUCKETIZE(v, 2) FROM UNNEST(['a', 'b']) AS v",
 		"SELECT ML.IMPUTER(v, 'median') OVER () FROM UNNEST([1.0, 2.0]) AS v",
 	} {
 		_, err := c.Query(sql).Read(ctx)
@@ -123,5 +123,87 @@ func TestBigQueryMLTransformPreprocess(t *testing.T) {
 	var ge *googleapi.Error
 	if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
 		t.Errorf("TRANSFORM with AVG OVER: %v; want 501", err)
+	}
+}
+
+// TestBigQueryMLQuantilePreprocess (#1548): ML.QUANTILE_BUCKETIZE,
+// ML.ROBUST_SCALER and ML.NGRAMS as BigQuery documents them, on its own
+// examples (https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-quantile-bucketize,
+// .../bigqueryml-syntax-robust-scaler, .../bigqueryml-syntax-ngrams), in a
+// query and in a TRANSFORM, whose quantiles are learned over the training
+// rows and kept. ML.HASH_BUCKETIZE stays 501 (the vocabulary functions are
+// TestBigQueryMLVocabularyPreprocess's).
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryMLQuantilePreprocess(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	got := mlQuery(t, h, c, "SELECT f, ML.QUANTILE_BUCKETIZE(f, 3) OVER () AS bucket FROM UNNEST([1, 2, 3, 4, 5]) AS f ORDER BY f")
+	want := []string{"bin_1", "bin_2", "bin_2", "bin_3", "bin_3"}
+	if len(got) != 5 {
+		t.Fatalf("ML.QUANTILE_BUCKETIZE rows: %v", got)
+	}
+	for i, g := range got {
+		if g["bucket"] != want[i] {
+			t.Errorf("ML.QUANTILE_BUCKETIZE(%v, 3) = %v; want %s", g["f"], g["bucket"], want[i])
+		}
+	}
+	got = mlQuery(t, h, c, "SELECT f, ML.ROBUST_SCALER(f) OVER () AS output FROM UNNEST([NULL, -3, 1, 2, 3, 4, 5]) AS f ORDER BY f")
+	wantR := []any{nil, -5.0 / 3, -1.0 / 3, 0.0, 1.0 / 3, 2.0 / 3, 1.0}
+	if len(got) != 7 {
+		t.Fatalf("ML.ROBUST_SCALER rows: %v", got)
+	}
+	for i, g := range got {
+		if wantR[i] == nil {
+			if g["output"] != nil {
+				t.Errorf("ML.ROBUST_SCALER(NULL) = %v", g["output"])
+			}
+			continue
+		}
+		if !near(g["output"], wantR[i].(float64), 1e-12) {
+			t.Errorf("ML.ROBUST_SCALER(%v) = %v; want %v", g["f"], g["output"], wantR[i])
+		}
+	}
+	got = mlQuery(t, h, c, "SELECT ML.NGRAMS(['a', 'b', 'c'], [2,3], '#') AS output, ML.NGRAMS(['a', 'b', 'c'], 1) AS ones, "+
+		"ML.NGRAMS(['x', 'y'], 2) AS spaced")
+	if len(got) != 1 || fmt.Sprint(got[0]["output"]) != "[a#b a#b#c b#c]" || fmt.Sprint(got[0]["ones"]) != "[a b c]" || fmt.Sprint(got[0]["spaced"]) != "[x y]" {
+		t.Errorf("ML.NGRAMS: %v", got)
+	} else if s := got[0]["spaced"].([]bigquery.Value); len(s) != 1 {
+		t.Errorf("ML.NGRAMS(['x', 'y'], 2) = %q; want one bigram", s)
+	}
+
+	// In a TRANSFORM: the training rows' quartiles kept for prediction.
+	// x in 0..9: median 4, quartiles 2 and 7 (PERCENTILE_DISC); y = x.
+	name := mlDataset(t, h, c, map[string]string{
+		"q": "SELECT CAST(x AS FLOAT64) AS x, CAST(x AS FLOAT64) AS y FROM UNNEST(GENERATE_ARRAY(0, 9)) AS x",
+	})
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.rs` TRANSFORM(ML.ROBUST_SCALER(x) OVER () AS xr, y) "+
+		"OPTIONS(model_type='linear_reg', input_label_cols=['y']) AS SELECT x, y FROM `%s.q`", name, name)); err != nil {
+		t.Fatalf("CREATE MODEL with ML.ROBUST_SCALER: %v", err)
+	}
+	pred := mlQuery(t, h, c, fmt.Sprintf("SELECT predicted_y FROM ML.PREDICT(MODEL `%s.rs`, (SELECT 100.0 AS x))", name))
+	if len(pred) != 1 || !near(pred[0]["predicted_y"], 100, 1e-6) {
+		t.Errorf("ML.PREDICT robust-scaled: %v; want 100", pred)
+	}
+	feat := mlQuery(t, h, c, fmt.Sprintf("SELECT min, max FROM ML.FEATURE_INFO(MODEL `%s.rs`) WHERE input = 'xr'", name))
+	if len(feat) != 1 || !near(feat[0]["min"], -4.0/5, 1e-9) || !near(feat[0]["max"], 1, 1e-9) {
+		t.Errorf("ML.FEATURE_INFO of xr: %v; want min -0.8 and max 1 ((x - 4) / (7 - 2))", feat)
+	}
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.qb` TRANSFORM(ML.QUANTILE_BUCKETIZE(x, 2) OVER () AS b, y) "+
+		"OPTIONS(model_type='linear_reg', input_label_cols=['y']) AS SELECT x, y FROM `%s.q`", name, name)); err != nil {
+		t.Fatalf("CREATE MODEL with ML.QUANTILE_BUCKETIZE: %v", err)
+	}
+	// Two buckets split at the median 4: bin_1 is x 0..3 (mean 1.5),
+	// bin_2 x 4..9 (mean 6.5), whatever the rows predicted.
+	pred = mlQuery(t, h, c, fmt.Sprintf("SELECT x, predicted_y FROM ML.PREDICT(MODEL `%s.qb`, (SELECT -50.0 AS x UNION ALL SELECT 4.0)) ORDER BY x", name))
+	if len(pred) != 2 || !near(pred[0]["predicted_y"], 1.5, 1e-6) || !near(pred[1]["predicted_y"], 6.5, 1e-6) {
+		t.Errorf("ML.PREDICT quantile-bucketized: %v; want 1.5 and 6.5", pred)
+	}
+	for _, sql := range []string{
+		"SELECT ML.QUANTILE_BUCKETIZE(v, 2, 'bucket_ranges') OVER () FROM UNNEST([1.0, 2.0]) AS v",
+	} {
+		_, err := c.Query(sql).Read(ctx)
+		wantHTTPStatus(t, sql, err, http.StatusNotImplemented)
 	}
 }

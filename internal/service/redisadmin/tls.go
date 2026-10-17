@@ -134,8 +134,9 @@ func parseCAPair(certPEM, keyPEM string) (*x509.Certificate, any, error) {
 
 // ServerTLS issues spec's server a certificate of its instance's CA, for
 // the names its clients reach it at: the host's loopback, where its
-// tunnels and endpoints are, and names, its Services in the cluster. It
-// is nil for a server without in-transit encryption.
+// tunnels and endpoints are, and names, its Services in the cluster, or
+// further IP addresses (a cluster node's, #1549). It is nil for a server
+// without in-transit encryption.
 func ServerTLS(spec Spec, now time.Time, names ...string) (*TLSFiles, error) {
 	if spec.TransitCA == "" {
 		return nil, nil
@@ -155,8 +156,15 @@ func ServerTLS(spec Spec, now time.Time, names ...string) (*TLSFiles, error) {
 		NotAfter:     now.Add(certLifetime),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		DNSNames:     append([]string{"localhost", spec.Server}, names...),
+		DNSNames:     []string{"localhost", spec.Server},
 		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+	}
+	for _, n := range names {
+		if ip := net.ParseIP(n); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		} else if n != "" {
+			tmpl.DNSNames = append(tmpl.DNSNames, n)
+		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &k.PublicKey, caKey)
 	if err != nil {

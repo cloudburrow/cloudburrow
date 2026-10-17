@@ -102,6 +102,12 @@ var gcloudVerified = []struct {
 	// gcloud source-manager appends v1/. TestGcloudSourceManager drives
 	// instances and repos create, describe, list, update and delete.
 	{config.ServiceRun, "securesourcemanager", "/securesourcemanager/", false, false},
+	// Developer Connect (#1546), on the Run port under /developerconnect/
+	// beside it; gcloud developer-connect appends v1/.
+	// TestGcloudDeveloperConnect drives connections create
+	// --secure-source-manager-instance-config, describe, list and delete,
+	// and git-repository-links create, describe, list and delete.
+	{config.ServiceRun, "developerconnect", "/developerconnect/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.

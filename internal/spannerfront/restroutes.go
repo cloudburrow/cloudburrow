@@ -57,6 +57,17 @@ func (r restReq) mask(param string) *fieldmaskpb.FieldMask {
 	return m
 }
 
+// queryMask is the first of the query parameters that is set, by its JSON
+// or its proto name, as a field mask; nil when none is.
+func (r restReq) queryMask(params ...string) *fieldmaskpb.FieldMask {
+	for _, p := range params {
+		if m := r.mask(p); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
 type route struct {
 	method string
 	path   *regexp.Regexp
@@ -208,6 +219,9 @@ var routes = []route{
 			req.InstanceConfig = &instancepb.InstanceConfig{}
 		}
 		req.InstanceConfig.Name = r.m[1]
+		if req.UpdateMask == nil {
+			req.UpdateMask = r.queryMask("updateMask", "update_mask")
+		}
 		return s.UpdateInstanceConfig(ctx, req)
 	}},
 	{http.MethodDelete, rx(`(projects/[^/:]+/instanceConfigs/[^/:]+)`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
@@ -239,6 +253,12 @@ var routes = []route{
 			req.InstancePartition = &instancepb.InstancePartition{}
 		}
 		req.InstancePartition.Name = r.m[1]
+		if req.FieldMask == nil {
+			// Terraform's google_spanner_instance_partition sends the mask
+			// as ?field_mask=display_name,node_count, a query parameter
+			// Google's transcoding accepts beside the body (#1304).
+			req.FieldMask = r.queryMask("fieldMask", "field_mask")
+		}
 		return s.UpdateInstancePartition(ctx, req)
 	}},
 	{http.MethodDelete, rx(`(` + pInst + `/instancePartitions/[^/:]+)`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {

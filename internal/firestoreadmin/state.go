@@ -40,6 +40,8 @@ type savedState struct {
 	OpOrder    []string             `json:"opOrder,omitempty"`
 	Backups    map[string][]byte    `json:"backups,omitempty"`
 	LastBackup map[string]time.Time `json:"lastBackup,omitempty"`
+	// Seen is every database a documents call has named (seen.go, #1550).
+	Seen []string `json:"seen,omitempty"`
 }
 
 // KeepState restores the API's state from dir, when it holds any, and
@@ -145,6 +147,12 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 	for n, t := range s.LastBackup {
 		a.lastBackup[n] = t
 	}
+	a.seen = map[string]bool{}
+	for _, n := range s.Seen {
+		if db := databaseOf(n); db != "" {
+			a.seen[db] = true
+		}
+	}
 	return nil
 }
 
@@ -212,6 +220,7 @@ func (a *Admin) save() error {
 			s.LastBackup[n] = t
 		}
 	}
+	s.Seen = a.seenList("")
 	a.mu.Unlock()
 	if err != nil {
 		return err
@@ -233,6 +242,7 @@ func (a *Admin) ResetState() error {
 	a.opOrder = nil
 	a.backups = map[string]*backup{}
 	a.lastBackup = map[string]time.Time{}
+	a.seen = map[string]bool{}
 	st := a.state
 	a.mu.Unlock()
 	if st == nil {

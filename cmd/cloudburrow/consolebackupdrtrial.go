@@ -1,7 +1,8 @@
 package main
 
 // The Backup and DR page's own actions (#1536), on no vault: Find protected
-// resources (resourceBackupConfigs.fetch with gcloud's filter and order),
+// resources (resourceBackupConfigs.fetch with gcloud's filter and order, of
+// the project, or of a folder or the organization: every project under it),
 // Show trial, Subscribe to trial and End trial (getTrial, trial.subscribe,
 // trial.end), and Check Assured Workloads (managementServers.msComplianceMetadata).
 
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 var bdrTrialLocations = []string{"us", "eu", "asia"}
@@ -31,7 +33,10 @@ func (backupDRProvider) ListActions(_ context.Context, project string) []console
 				Help: `As gcloud backup-dr resource-backup-config list takes it: target_resource_display_name="db" AND vaulted=true; ` +
 					"the keys are target_resource_display_name, target_resource_type, backup_configured, vaulted, " +
 					"backup_configs_details.backup_config_source_display_name and backup_configs_details.type."},
-			{Name: "order", Label: "Order by name", Type: "select", Options: []string{"ascending", "descending"}, Default: "ascending"}}},
+			{Name: "order", Label: "Order by name", Type: "select", Options: []string{"ascending", "descending"}, Default: "ascending"},
+			{Name: "scope", Label: "Folder or organization", Type: "text",
+				Help: "Blank for this project; folders/{number} for every project under that folder and its subfolders, or " +
+					resourcemanager.OrganizationName + " for every project under the organization."}}},
 		{ID: "trial", Label: "Show trial", Fields: []console.Field{trialLoc}},
 		{ID: "subscribetrial", Label: "Subscribe to trial", Confirm: "A project subscribes to a Backup and DR trial once; it lasts 30 days.",
 			Fields: []console.Field{trialLoc}},
@@ -61,13 +66,22 @@ func (p backupDRProvider) ActAtResult(ctx context.Context, project string, path 
 		if v["order"] == "descending" {
 			q.Set("orderBy", "target_resource_display_name desc")
 		}
-		l := &console.Listing{Columns: []string{"Type", "Backup configured", "Vaulted", "Backup configs"}, NameColumn: "Resource",
+		l := &console.Listing{Columns: []string{"Project", "Type", "Backup configured", "Vaulted", "Backup configs"}, NameColumn: "Resource",
 			Noun: "protected resources", Note: "resourceBackupConfigs.fetch: each Cloud SQL instance of the region and how it is backed up."}
+		parent := loc
+		if scope := strings.Trim(strings.TrimSpace(v["scope"]), "/"); scope != "" {
+			kind, id, _ := strings.Cut(scope, "/")
+			if (kind != "folders" && kind != "organizations") || id == "" || strings.Contains(id, "/") {
+				return nil, errors.New("the folder or organization is folders/{number} or organizations/{number}")
+			}
+			parent = "/v1/" + kind + "/" + url.PathEscape(id) + "/locations/" + url.PathEscape(v["location"])
+			l.Note = "resourceBackupConfigs.fetch of " + scope + ": each Cloud SQL instance of the region, in every project under it, and how it is backed up."
+		}
 		for token := ""; ; {
 			if token != "" {
 				q.Set("pageToken", token)
 			}
-			out, err := p.call(ctx, p.bdr, http.MethodGet, loc+"/resourceBackupConfigs:fetch?"+q.Encode(), nil)
+			out, err := p.call(ctx, p.bdr, http.MethodGet, parent+"/resourceBackupConfigs:fetch?"+q.Encode(), nil)
 			if err != nil {
 				return nil, err
 			}
@@ -76,8 +90,9 @@ func (p backupDRProvider) ActAtResult(ctx context.Context, project string, path 
 				for _, d := range bdrItems(x, "backupConfigsDetails") {
 					cfgs = append(cfgs, str(d, "type")+" "+str(d, "backupConfigSourceDisplayName"))
 				}
+				proj, _, _ := strings.Cut(strings.TrimPrefix(str(x, "name"), "projects/"), "/")
 				l.Items = append(l.Items, console.Resource{Name: str(x, "targetResourceDisplayName"), Fields: map[string]string{
-					"Type": str(x, "targetResourceType"), "Backup configured": boolText(x["backupConfigured"]),
+					"Project": proj, "Type": str(x, "targetResourceType"), "Backup configured": boolText(x["backupConfigured"]),
 					"Vaulted": boolText(x["vaulted"]), "Backup configs": strings.Join(cfgs, "; ")}})
 			}
 			if token = str(out, "nextPageToken"); token == "" {

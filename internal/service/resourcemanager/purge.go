@@ -42,7 +42,17 @@ func (r *Registry) OnPurge(fn func(projectID string) error) {
 func (r *Registry) unlock() {
 	purged, hooks := r.purged, r.onPurge
 	r.purged = nil
+	var numberHooks []func()
+	if r.numbersChanged || len(purged) > 0 {
+		numberHooks = r.onNumbers
+	}
+	r.numbersChanged = false
 	r.mu.Unlock()
+	defer func() {
+		for _, fn := range numberHooks {
+			fn()
+		}
+	}()
 	for _, id := range purged {
 		if err := runHooks(hooks, id); err != nil {
 			slog.Warn("project purged, but not all of its state could be deleted", "project", id, "error", err)
@@ -76,6 +86,8 @@ func (r *Registry) Purge(id string) error {
 		r.unlock()
 		return apierror.FailedPrecondition("project %q is not pending deletion; delete it before purging it", id)
 	}
+	r.retireNumberLocked(p)
+	r.numbersChanged = true
 	_ = r.st.Delete(key(id))
 	err = r.dropProjectStateLocked(id)
 	hooks := r.onPurge
@@ -85,7 +97,9 @@ func (r *Registry) Purge(id string) error {
 
 // purgeLocked removes a project's record and what the registry keeps for it,
 // and queues the OnPurge hooks. The caller holds r.mu.
-func (r *Registry) purgeLocked(id string) {
+func (r *Registry) purgeLocked(p Project) {
+	id := p.ProjectID
+	r.retireNumberLocked(p)
 	_ = r.st.Delete(key(id))
 	if err := r.dropProjectStateLocked(id); err != nil {
 		slog.Warn("project purged, but not all of its Resource Manager state could be deleted", "project", id, "error", err)
@@ -135,7 +149,7 @@ func (r *Registry) dropProjectStateLocked(id string) error {
 		return apierror.Internal(err, "list liens")
 	}
 	for _, k := range lienKeys {
-		if l, err := r.getLien(strings.TrimPrefix(k, lienPrefix)); err == nil && namesProject(l.Parent, id) {
+		if l, err := r.getLien(strings.TrimPrefix(k, lienPrefix)); err == nil && r.namesProject(l.Parent, id) {
 			_ = r.st.Delete(k)
 		}
 	}
@@ -179,7 +193,7 @@ func (r *Registry) dropProjectStateLocked(id string) error {
 		if err := r.getProto(bk, b); err != nil {
 			continue
 		}
-		if values[b.GetTagValue()] || inProject(b.GetParent(), id) {
+		if values[b.GetTagValue()] || r.inProject(b.GetParent(), id) {
 			_ = r.st.Delete(bk)
 		}
 	}
@@ -189,13 +203,13 @@ func (r *Registry) dropProjectStateLocked(id string) error {
 // inProject reports whether a full resource name is project id's, by ID or
 // number: "//cloudresourcemanager.googleapis.com/projects/{id}", or another
 // service's "//{service}/projects/{id}/...".
-func inProject(fullName, id string) bool {
+func (r *Registry) inProject(fullName, id string) bool {
 	_, rest, ok := strings.Cut(strings.TrimPrefix(fullName, "//"), "/projects/")
 	if !ok {
 		return false
 	}
 	x, _, _ := strings.Cut(rest, "/")
-	return namesProject("projects/"+x, id)
+	return r.namesProject("projects/"+x, id)
 }
 
 // deletePrefixLocked deletes every record under prefix. The caller holds r.mu.

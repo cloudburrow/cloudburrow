@@ -154,7 +154,7 @@ func twineUpload(t *testing.T, base, name, version, filename string, content []b
 // (when on PATH) installs it with --index-url; the official client reads
 // it as a Python package, a package, a version, a file and a tag. A
 // virtual repository over it serves the same index and refuses uploads; a
-// remote repository is refused with the reason.
+// remote repository over PyPI is refused with the reason, egress.
 func TestArtifactRegistryPythonRepository(t *testing.T) {
 	h := New(t)
 	ar, ctx := arClient(t, h)
@@ -235,10 +235,13 @@ func TestArtifactRegistryPythonRepository(t *testing.T) {
 	if code, _ := twineUpload(t, vbase, "other", "1.0", "other-1.0-py3-none-any.whl", wheel); code != http.StatusMethodNotAllowed {
 		t.Errorf("an upload to the virtual repository = %d; want 405", code)
 	}
-	_, err = ar.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "py-remote",
-		Repository: &arpb.Repository{Format: arpb.Repository_PYTHON, Mode: arpb.Repository_REMOTE_REPOSITORY}})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "public upstreams") {
-		t.Errorf("a remote repository = %v; want UNIMPLEMENTED naming the public upstreams", err)
+	_, err = ar.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "py-pypi",
+		Repository: &arpb.Repository{Format: arpb.Repository_PYTHON, Mode: arpb.Repository_REMOTE_REPOSITORY,
+			ModeConfig: &arpb.Repository_RemoteRepositoryConfig{RemoteRepositoryConfig: &arpb.RemoteRepositoryConfig{
+				RemoteSource: &arpb.RemoteRepositoryConfig_PythonRepository_{PythonRepository: &arpb.RemoteRepositoryConfig_PythonRepository{
+					Upstream: &arpb.RemoteRepositoryConfig_PythonRepository_PublicRepository_{PublicRepository: arpb.RemoteRepositoryConfig_PythonRepository_PYPI}}}}}}})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "egress is off") {
+		t.Errorf("a remote repository over PyPI = %v; want UNIMPLEMENTED naming egress", err)
 	}
 }
 

@@ -29,7 +29,7 @@ import (
 //     it), its IAM policy and row access policies, a materialized view
 //     and a table snapshot;
 //   - UNDROP SCHEMA in a multi-statement query, through jobs.query and
-//     jobs.insert; 501 when another statement names the dataset.
+//     jobs.insert, and (#1548) one whose other statements read the dataset.
 //
 // Measured first: each was 501 or lost (the rebuild 501 "starts it over",
 // a restored table's history began at the restore, CHANGES of it was
@@ -182,11 +182,11 @@ func TestBigQueryUndeleteKeepsMore(t *testing.T) {
 		}
 		check(fmt.Sprintf("after UNDROP SCHEMA in a script (insert %v)", insert))
 	}
+	// A script that reads the dataset after it undeletes it (#1548: each
+	// statement in its turn).
 	run("DROP SCHEMA " + ds.DatasetID + " CASCADE")
-	wantAPIError(t, "UNDROP SCHEMA in a script that reads the dataset",
-		bqRun(ctx, c, "UNDROP SCHEMA "+ds.DatasetID+"; SELECT * FROM "+p("t"), false), http.StatusNotImplemented, "Not implemented")
-	if err := bqRun(ctx, c, "UNDROP SCHEMA "+ds.DatasetID, false); err != nil {
-		t.Fatalf("UNDROP SCHEMA: %v", err)
+	if got := read("UNDROP SCHEMA " + ds.DatasetID + "; SELECT n, s FROM " + p("t") + " ORDER BY n"); !reflect.DeepEqual(got, []string{"1|c", "2|b"}) {
+		t.Errorf("UNDROP SCHEMA then a read of the dataset: %v, want [1|c 2|b]", got)
 	}
 }
 

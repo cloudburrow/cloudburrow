@@ -30,46 +30,9 @@ func v1Client(t *testing.T, srv *httptest.Server) *runv1.APIService {
 // entries to what V1Handler does (#1533): each, called through the official
 // v1 client, answers 501. A served method's evidence is its compat test.
 func TestV1EveryUnservedMethodIsNotImplemented(t *testing.T) {
-	c := v1Client(t, v1Server(t))
-	ns, loc := "namespaces/demo-project", "projects/demo-project/locations/us-central1"
-	calls := map[string]func() error{
-		"run.namespaces.instances.create": func() error { _, err := c.Namespaces.Instances.Create(ns, &runv1.Instance{}).Do(); return err },
-		"run.namespaces.instances.delete": func() error { _, err := c.Namespaces.Instances.Delete(ns + "/instances/i").Do(); return err },
-		"run.namespaces.instances.get":    func() error { _, err := c.Namespaces.Instances.Get(ns + "/instances/i").Do(); return err },
-		"run.namespaces.instances.list":   func() error { _, err := c.Namespaces.Instances.List(ns).Do(); return err },
-		"run.namespaces.instances.replaceInstance": func() error {
-			_, err := c.Namespaces.Instances.ReplaceInstance(ns+"/instances/i", &runv1.Instance{}).Do()
-			return err
-		},
-		"run.namespaces.instances.start": func() error {
-			_, err := c.Namespaces.Instances.Start(ns+"/instances/i", &runv1.StartInstanceRequest{}).Do()
-			return err
-		},
-		"run.namespaces.instances.stop": func() error {
-			_, err := c.Namespaces.Instances.Stop(ns+"/instances/i", &runv1.StopInstanceRequest{}).Do()
-			return err
-		},
-		"run.namespaces.workerpools.create": func() error { _, err := c.Namespaces.Workerpools.Create(ns, &runv1.WorkerPool{}).Do(); return err },
-		"run.namespaces.workerpools.delete": func() error { _, err := c.Namespaces.Workerpools.Delete(ns + "/workerpools/p").Do(); return err },
-		"run.namespaces.workerpools.get":    func() error { _, err := c.Namespaces.Workerpools.Get(ns + "/workerpools/p").Do(); return err },
-		"run.namespaces.workerpools.list":   func() error { _, err := c.Namespaces.Workerpools.List(ns).Do(); return err },
-		"run.namespaces.workerpools.replaceWorkerPool": func() error {
-			_, err := c.Namespaces.Workerpools.ReplaceWorkerPool(ns+"/workerpools/p", &runv1.WorkerPool{}).Do()
-			return err
-		},
-		"run.projects.locations.instances.getIamPolicy": func() error {
-			_, err := c.Projects.Locations.Instances.GetIamPolicy(loc + "/instances/i").Do()
-			return err
-		},
-		"run.projects.locations.instances.setIamPolicy": func() error {
-			_, err := c.Projects.Locations.Instances.SetIamPolicy(loc+"/instances/i", &runv1.SetIamPolicyRequest{Policy: &runv1.Policy{}}).Do()
-			return err
-		},
-		"run.projects.locations.instances.testIamPermissions": func() error {
-			_, err := c.Projects.Locations.Instances.TestIamPermissions(loc+"/instances/i", &runv1.TestIamPermissionsRequest{Permissions: []string{"run.instances.get"}}).Do()
-			return err
-		},
-	}
+	// Every v1 method is served since #1546; a method that becomes
+	// unserved gets its call here, through the official client.
+	calls := map[string]func() error{}
 	for m, served := range V1MethodStatuses() {
 		call, ok := calls[m]
 		switch {

@@ -38,7 +38,8 @@ import (
 // artifactregistryconfig.go). PYTHON, NPM, MAVEN, GENERIC, APT and YUM
 // repositories serve their own protocols, and virtual repositories over
 // them read from their upstreams (#1531, artifactregistryformats.go);
-// remote repositories are refused, as they pull from public upstreams.
+// remote repositories pull through from, and cache, another repository of
+// this instance (#1546, artifactregistryremote.go).
 type ArtifactRegistryServer struct {
 	arpb.UnimplementedArtifactRegistryServer
 	s *Server
@@ -112,25 +113,68 @@ func (a *ArtifactRegistryServer) ListRepositories(_ context.Context, req *arpb.L
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetPageToken() != "" || req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListRepositories page_token, filter and order_by are not supported")
+	if req.GetPageToken() != "" {
+		// No response here carries a next_page_token, so no token is ours.
+		return nil, apierror.InvalidArgument("invalid page_token %q", req.GetPageToken())
+	}
+	match, err := repositoryNameFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
+	}
+	desc := false
+	switch strings.Join(strings.Fields(strings.ToLower(req.GetOrderBy())), " ") {
+	case "", "name", "name asc":
+	case "name desc":
+		desc = true
+	default:
+		return nil, apierror.InvalidArgument("invalid order_by %q: only name, ascending or desc, is supported", req.GetOrderBy())
 	}
 	repositories.mu.Lock()
 	defer repositories.mu.Unlock()
 	out := &arpb.ListRepositoriesResponse{}
 	for name, r := range repositories.repos {
-		if strings.HasPrefix(name, req.GetParent()+"/repositories/") {
+		if strings.HasPrefix(name, req.GetParent()+"/repositories/") && match(name) {
 			out.Repositories = append(out.Repositories, proto.Clone(r).(*arpb.Repository))
 		}
 	}
-	sort.Slice(out.Repositories, func(i, j int) bool { return out.Repositories[i].Name < out.Repositories[j].Name })
+	sort.Slice(out.Repositories, func(i, j int) bool {
+		if desc {
+			return out.Repositories[i].Name > out.Repositories[j].Name
+		}
+		return out.Repositories[i].Name < out.Repositories[j].Name
+	})
 	return out, nil
+}
+
+// repositoryFilterRe is ListRepositories' one documented filter: name,
+// compared with a repository's full resource name, where * matches any run
+// of characters (`name="projects/p1/locations/us-central1/repositories/a*1"`).
+// Terraform's google_artifact_registry_repositories sends its name_filter
+// so (#1304).
+var repositoryFilterRe = regexp.MustCompile(`^\s*name\s*=\s*"([^"]*)"\s*$`)
+
+// repositoryNameFilter is the predicate filter selects, every repository
+// for an empty one. Filter rules are case insensitive, as documented.
+func repositoryNameFilter(filter string) (func(string) bool, error) {
+	if strings.TrimSpace(filter) == "" {
+		return func(string) bool { return true }, nil
+	}
+	m := repositoryFilterRe.FindStringSubmatch(filter)
+	if m == nil {
+		return nil, apierror.InvalidArgument("invalid filter %q: only name=\"...\", with * as a wildcard, is supported", filter)
+	}
+	parts := strings.Split(m[1], "*")
+	for i, part := range parts {
+		parts[i] = regexp.QuoteMeta(part)
+	}
+	re := regexp.MustCompile("(?i)^" + strings.Join(parts, ".*") + "$")
+	return re.MatchString, nil
 }
 
 // CreateRepository stores a repository and returns its operation, already
 // done with the repository, as Artifact Registry's completes in moments.
 // Every format but KFP and GO is served (#1531, artifactregistryformats.go);
-// a remote repository is refused (checkMode).
+// a remote repository's upstream must be one of this instance's (checkMode).
 func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
@@ -318,11 +362,10 @@ func loadRepositories(st *registry.Store) {
 	loadFormats(st)
 }
 
-// checkMode accepts a standard repository, and a virtual one whose
-// upstreams are standard repositories of its format in its location. A
-// remote repository is refused: Google's pulls from a public upstream
-// (Docker Hub, PyPI, npmjs, Maven Central, Debian), and this instance
-// makes no calls off the machine.
+// checkMode accepts a standard repository; a remote one whose upstream is
+// a standard repository of its format on this instance (checkRemote); and
+// a virtual one whose upstreams are standard or remote repositories of its
+// format in its location.
 func checkMode(parent string, r *arpb.Repository) error {
 	switch r.GetMode() {
 	case arpb.Repository_MODE_UNSPECIFIED, arpb.Repository_STANDARD_REPOSITORY:
@@ -331,7 +374,7 @@ func checkMode(parent string, r *arpb.Repository) error {
 		}
 		return nil
 	case arpb.Repository_REMOTE_REPOSITORY:
-		return apierror.Unimplemented("remote repositories are not supported: they pull from public upstreams (Docker Hub, PyPI, npmjs, Maven Central), and this instance makes no calls off the machine")
+		return checkRemote(r)
 	case arpb.Repository_VIRTUAL_REPOSITORY:
 	default:
 		return apierror.Unimplemented("repository mode %v is not supported", r.GetMode())
@@ -352,8 +395,8 @@ func checkMode(parent string, r *arpb.Repository) error {
 		if !ok || !strings.HasPrefix(u.GetRepository(), parent+"/repositories/") {
 			return apierror.InvalidArgument("upstream %q is not a repository in %s", u.GetRepository(), parent)
 		}
-		if up.GetFormat() != r.GetFormat() || up.GetMode() != arpb.Repository_STANDARD_REPOSITORY {
-			return apierror.InvalidArgument("upstream %q must be a standard %v repository", u.GetRepository(), r.GetFormat())
+		if up.GetFormat() != r.GetFormat() || (up.GetMode() != arpb.Repository_STANDARD_REPOSITORY && up.GetMode() != arpb.Repository_REMOTE_REPOSITORY) {
+			return apierror.InvalidArgument("upstream %q must be a standard or remote %v repository", u.GetRepository(), r.GetFormat())
 		}
 	}
 	return nil

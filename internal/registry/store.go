@@ -405,6 +405,36 @@ func (s *Store) PutManifest(r Repo, image, ref, contentType string, b []byte) (s
 	return d, nil
 }
 
+// CopyManifest copies a manifest, by tag or digest, from one repository's
+// image to another's, with the manifests an index names; the blobs are
+// shared by digest, so none is copied. A tag is set to the same digest.
+func (s *Store) CopyManifest(from, to Repo, image, ref string) error {
+	b, d, mt, err := s.GetManifest(from, image, ref)
+	if err != nil {
+		return err
+	}
+	if IsIndex(mt) {
+		m, _, err := ParseManifest(mt, b)
+		if err != nil {
+			return err
+		}
+		for _, x := range m.Manifests {
+			if err := s.CopyManifest(from, to, image, x.Digest); err != nil {
+				return err
+			}
+		}
+	}
+	if !ValidDigest(ref) {
+		if cur, _, err := s.Resolve(to, image, ref); err == nil && cur == d {
+			return nil
+		}
+	} else if _, _, err := s.Resolve(to, image, ref); err == nil {
+		return nil
+	}
+	_, err = s.PutManifest(to, image, ref, mt, b)
+	return err
+}
+
 // ManifestInvalidError is a manifest the registry refuses.
 type ManifestInvalidError struct{ Err error }
 

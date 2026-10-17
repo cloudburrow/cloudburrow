@@ -147,3 +147,42 @@ func (t *inProcessTail) Send(resp *loggingpb.TailLogEntriesResponse) error {
 	}
 	return nil
 }
+
+// consoleLogNames is the Explorer's Log name picker (#1554): ListLogs on the
+// same LoggingServiceV2 server, with the instance's fault rules applied
+// first, as the service's interceptor applies them to an SDK's call.
+type consoleLogNames struct {
+	svc    *loggingService
+	faults *admin.Faults
+}
+
+// logNameLister is the Explorer's ListLogs, or nil when Logging is not
+// served.
+func (s *loggingService) logNameLister(faults *admin.Faults) console.LogNameLister {
+	if s == nil {
+		return nil
+	}
+	return consoleLogNames{svc: s, faults: faults}
+}
+
+func (n consoleLogNames) ListLogs(ctx context.Context, parent string) ([]string, error) {
+	if n.svc.api == nil {
+		return nil, errors.New(loggingNotStarted)
+	}
+	if err := n.faults.Apply(ctx, "logging", loggingpb.LoggingServiceV2_ListLogs_FullMethodName, parent); err != nil {
+		return nil, err
+	}
+	var out []string
+	req := &loggingpb.ListLogsRequest{Parent: parent, PageSize: 1000}
+	for {
+		resp, err := n.svc.api.ListLogs(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resp.GetLogNames()...)
+		if resp.GetNextPageToken() == "" {
+			return out, nil
+		}
+		req.PageToken = resp.GetNextPageToken()
+	}
+}
