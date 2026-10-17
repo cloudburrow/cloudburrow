@@ -175,7 +175,7 @@ models only; Sampled Shapley, the custom-container method, is served) (#1454).
 
 Already tracked: #1427 (Iceberg files for `storage_uri`), and the rows below.
 
-Closed: `CHANGES` and `APPENDS` (#1418), change history across table rebuilds and `CREATE OR REPLACE TABLE`, and the transaction, change data capture and one-day refusals (#1466), a table's `privacy_policy` aggregation threshold and join
+Closed: `CHANGES` and `APPENDS` (#1418), the second copy of every row in the change history (#1597: a row inserted or updated is copied only when it changes again or the history is read), change history across table rebuilds and `CREATE OR REPLACE TABLE`, and the transaction, change data capture and one-day refusals (#1466), a table's `privacy_policy` aggregation threshold and join
 restriction (#1426), materialized view statements in a script with a TEMP table or function
 (#1434), `INTERVAL` arithmetic and the Write API's Arrow path (#1437), `CREATE TABLE` column
 `OPTIONS` (#1438), copy jobs, snapshots and clones (#1002), extracting every column type (#957),
@@ -222,7 +222,6 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | Table options: `storage_uri` with no connection is kept only, no files written (with `WITH CONNECTION` a table for Apache Iceberg since #1427, the formats defaulted since #1456; a project's default connection is not served), and what #1426 and #1418 leave in the rows below (#1456) | not built yet | M |
 | Project configurations: `default_kms_key_name` reaches every table made (a script's and an upload load's since #1456); `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is carried out in its turn (#1459), and 501 only in a dry run; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows, which Google does not document (#1456) | not built yet | S |
 | What #1426, #1455, #1482, #1502 and #1517 leave of `privacy_policy` (#1517 built: two `SELECT WITH AGGREGATION_THRESHOLD` in one query, a read with no clause in a subquery, CTE or view (400), `JOIN_ANY` met by an outer join and `JOIN_ALL` alongside one by each `join_condition`'s wording, a `NATURAL` join (400, a syntax error), a DP aggregate inside an expression, evaluated on the noisy values; the UNVERIFIED choices in docs/compatibility.md): a read of an aggregation threshold or join restriction table or view in a subquery or CTE outside its own `SELECT WITH AGGREGATION_THRESHOLD`, or through another view, in a query with a privacy clause; of differential privacy, `COUNT(DISTINCT)` and `max_rows_contributed` are 501: documented by neither BigQuery (analysis-rules, query-syntax#agg_threshold_clause and #dp_clause, aggregate-dp-functions, the join operation) nor GoogleSQL (read 2026-10-17) (#1589) | not documented by Google | M |
-| What #1503 leaves of change history: every table's rows are recorded twice, whatever its options (#1466) (#1548) (#1597) | not built yet | S |
 
 ## Spanner, Bigtable, Firestore, Datastore
 
