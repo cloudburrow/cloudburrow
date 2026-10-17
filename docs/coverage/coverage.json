@@ -210,6 +210,7 @@
           "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
@@ -357,7 +358,8 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:49 TestSecretLifecycle"
+          "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
         ]
       },
       {
@@ -2066,7 +2068,8 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
       {
@@ -2080,7 +2083,8 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
       {
@@ -2599,6 +2603,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -2681,6 +2686,7 @@
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
           "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -2711,7 +2717,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys"
+          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
         ],
         "unverified": [
           {
@@ -2747,7 +2754,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListKeyRings",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
         ],
         "unverified": [
           {
@@ -3060,6 +3068,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/terraform_batch10_test.go:455 TestTerraformResourceManagerDataSources",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -3077,7 +3086,8 @@
         "method": "google.cloud.resourcemanager.v3.Folders/ListFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/terraform_batch10_test.go:455 TestTerraformResourceManagerDataSources"
         ]
       },
       {
@@ -3132,6 +3142,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch10_test.go:91 TestTerraformOrganizationIAMAuditConfig",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
@@ -3139,7 +3150,8 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/GetOrganization",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:68 TestResourceManagerV3Organizations"
+          "test/compat/resourcemanagerfolders_test.go:68 TestResourceManagerV3Organizations",
+          "test/compat/terraform_batch10_test.go:455 TestTerraformResourceManagerDataSources"
         ]
       },
       {
@@ -3153,7 +3165,8 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch10_test.go:91 TestTerraformOrganizationIAMAuditConfig"
         ]
       },
       {
@@ -3195,7 +3208,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/projectnumber_test.go:34 TestOneProjectNumberEverywhere",
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects",
+          "test/compat/terraform_batch10_test.go:455 TestTerraformResourceManagerDataSources"
         ]
       },
       {
@@ -3655,7 +3669,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
+          "test/compat/terraform_batch10_test.go:455 TestTerraformResourceManagerDataSources"
         ]
       },
       {
@@ -3663,7 +3678,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:309 TestGcloudFoldersAndOrganizations",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/terraform_batch10_test.go:455 TestTerraformResourceManagerDataSources"
         ]
       },
       {
@@ -4610,6 +4626,7 @@
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
@@ -4875,6 +4892,7 @@
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ]
       },
@@ -5281,6 +5299,7 @@
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
@@ -5814,6 +5833,7 @@
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
@@ -5867,6 +5887,7 @@
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
@@ -5985,7 +6006,8 @@
         "method": "storage.projects.serviceAccount.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle"
+          "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
+          "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
         ]
       },
       {

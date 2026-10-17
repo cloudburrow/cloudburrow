@@ -264,7 +264,8 @@ type unpointedPrefix struct{ prefix, why string }
 //
 // Firestore, Spanner and Bigtable, and Artifact Registry and Cloud Build,
 // when the instance does not serve them (Spanner's REST port among it),
-// since nothing then points them here; Cloud Functions and Cloud Build v2
+// since nothing then points them here; Cloud Build v2 and the
+// google_storage_buckets, google_projects and google_folders data sources
 // always.
 func unpointedResources(cfg config.Config) []unpointedPrefix {
 	var out []unpointedPrefix
@@ -298,8 +299,18 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// Whatever is enabled: no instance serves Cloud Build v2's repository
 	// connections, so the provider has no local endpoint for them (#1304).
 	// Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
+	// Three list data sources call a fixed Google URL whatever the
+	// provider's custom endpoints say (measured with hashicorp/google 8.4.0,
+	// #1304): google_storage_buckets lists at
+	// https://storage.googleapis.com/storage/v1/b, google_projects at
+	// https://cloudresourcemanager.googleapis.com/v1/projects and
+	// google_folders at https://cloudresourcemanager.googleapis.com/v3/folders,
+	// so no setting points them here.
 	out = append(out,
-		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"})
+		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"},
+		unpointedPrefix{"google_storage_buckets", "the provider lists buckets at storage.googleapis.com, ignoring storage_custom_endpoint"},
+		unpointedPrefix{"google_projects", "the provider lists projects at cloudresourcemanager.googleapis.com, ignoring resource_manager_custom_endpoint"},
+		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"})
 	return out
 }
 
