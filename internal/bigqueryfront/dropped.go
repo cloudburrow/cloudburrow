@@ -63,7 +63,8 @@ import (
 // copies. Kept since #1483 (droppedkeep.go): a materialized view, a table
 // snapshot, the settings the front keeps of a table (enable_change_history,
 // privacy_policy, tableoptions.go), its IAM policy and row access
-// policies. Not kept: an external table, a dataset's routines and models.
+// policies; and a dataset's routines and models (droppedroutines.go). Not
+// kept: an external table, whose definition the front does not keep.
 
 // droppedDatasetID is the front's dataset of the copies.
 const droppedDatasetID = "_cloudburrow_dropped"
@@ -103,6 +104,11 @@ type droppedDataset struct {
 	Resource json.RawMessage `json:"resource"`
 	Deleted  int64           `json:"deleted"`
 	Hours    int64           `json:"hours"`
+	// Routines (functions' Routine resources), Procedures and Models are
+	// the dataset's, kept with it (#1483, droppedroutines.go).
+	Routines   []json.RawMessage     `json:"routines,omitempty"`
+	Procedures map[string]storedProc `json:"procedures,omitempty"`
+	Models     []bqModel             `json:"models,omitempty"`
 }
 
 func (d droppedTable) expires() int64   { return d.Deleted + d.Hours*int64(time.Hour/time.Millisecond) }
@@ -426,6 +432,7 @@ func (f front) keepDataset(r *http.Request, dataset string) ([]droppedTable, *dr
 		return nil, nil
 	}
 	d := &droppedDataset{Project: projectOf(f.base), Dataset: dataset, Resource: res, Hours: hours}
+	f.keepRoutines(r, d) // #1483, droppedroutines.go
 	var kept []droppedTable
 	token := ""
 	for {
@@ -471,6 +478,7 @@ func (f front) deleteDatasetKeeping(w http.ResponseWriter, r *http.Request, data
 		return
 	}
 	f.commitDropped(r, kept, d)
+	f.dropRoutines(r, d) // #1483, droppedroutines.go
 }
 
 // droppedRead is the subquery of the rows of t as they were at at
@@ -622,6 +630,9 @@ func (f front) undeleteDataset(r *http.Request, dataset string, deleted int64) (
 			return http.StatusInternalServerError, "backendError", "restoring " + tableName(project,
 				tableRef{DatasetID: t.Dataset, TableID: t.Table}) + ": " + msg
 		}
+	}
+	if msg := f.restoreRoutines(r, d); msg != "" { // #1483, droppedroutines.go
+		return http.StatusInternalServerError, "backendError", "restoring " + msg
 	}
 	return 0, "", ""
 }

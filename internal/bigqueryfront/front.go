@@ -283,7 +283,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
-			functions: functions, records: records, settings: settings}).serveUndelete(w, r) { // dropped.go, #1460
+			functions: functions, records: records, settings: settings, models: models}).serveUndelete(w, r) { // dropped.go, #1460
 			return
 		}
 		if serveUnserved(w, r) { // unserved.go, #1200
@@ -419,7 +419,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
 			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
-			dropped: dropped, iam: iam}
+			dropped: dropped, iam: iam, functions: functions, models: models} // functions, models: #1483, droppedroutines.go
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -441,12 +441,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				writeError(w, http.StatusBadRequest, "resourceInUse", fmt.Sprintf("Dataset %s:%s is still in use", projectOf(f.base), dataset))
 				return
 			}
-			sw := &statusWriter{ResponseWriter: w}
-			next.ServeHTTP(sw, r)
-			if sw.status/100 == 2 || sw.status == 0 {
-				models.dropDataset(projectOf(f.base), dataset)
-			}
-			return
+			// deleteDatasetKeeping (below) keeps them with the dataset and
+			// drops them (#1483, droppedroutines.go).
 		}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
