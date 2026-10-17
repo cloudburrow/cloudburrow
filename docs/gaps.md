@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **62** | **14** | **29** | **13** | **6** |
+| **Total** | **61** | **13** | **29** | **13** | **6** |
 
 ## Cloud Storage
 
