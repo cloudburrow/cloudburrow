@@ -530,9 +530,8 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 		if !f.tables.watched(key) {
 			if !checked && f.tables.anyWatched() {
 				if meta, ok := f.metaOf(r, tr.dataset, tr.table); ok {
-					if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
-						writeError(w, http.StatusNotImplemented, "notImplemented", why)
-						return true
+					if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why.msg != "" {
+						return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
 					}
 				}
 			}
@@ -551,17 +550,15 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 					" The policy could not be read: "+why+".")
 				return true
 			}
-			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
-				writeError(w, http.StatusNotImplemented, "notImplemented", why)
-				return true
+			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why.msg != "" {
+				return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
 			}
 			prot = append(prot, privacyRead{tr: tr, name: tr.dataset + "." + tr.table, pol: pol, columns: schemaColumns(meta)})
 			continue
 		}
 		if !checked {
-			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
-				writeError(w, http.StatusNotImplemented, "notImplemented", why)
-				return true
+			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why.msg != "" {
+				return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
 			}
 		}
 		if tr.decorator != "" {
@@ -580,6 +577,24 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 		return true
 	}
 	return false
+}
+
+// refuseViewRead answers q, which reads a view whose query reads a table
+// with a privacy policy (why): with no privacy clause in q, BigQuery's 400
+// for a read of that table without the clause its policy needs (#1517,
+// UNVERIFIED: the analysis rules document no view of such a view, and a
+// query of it without the clause cannot be one that "can be queried with"
+// it); else the 501, nothing run.
+func (f front) refuseViewRead(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, dataset string, clause bool,
+	why viewPrivacy) bool {
+	if !clause && why.clause != "" {
+		f.failBeforeRun(w, r, q, insert, dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery",
+			Message: "You must use SELECT WITH " + why.clause + " for this query because a privacy policy is set on " +
+				why.name + "."})
+		return true
+	}
+	writeError(w, http.StatusNotImplemented, "notImplemented", why.msg)
+	return true
 }
 
 // partitionFilterRefusal is BigQuery's 400 of tr, a read of a table with

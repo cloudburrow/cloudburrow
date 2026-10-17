@@ -290,3 +290,52 @@ GROUP BY item`)
     p.item, COUNT(*) FROM (SELECT DISTINCT item FROM pub) AS p LEFT JOIN professors ON p.item = professors.item
 GROUP BY p.item`)
 }
+
+// An expression over DP aggregates (#1517, UNVERIFIED): each call a hidden
+// aggregate with its share of the epsilon, the expression evaluated on the
+// noisy values.
+func TestDPExpressionItem(t *testing.T) {
+	q := mustDPQuery(t, `SELECT WITH DIFFERENTIAL_PRIVACY
+    OPTIONS(epsilon=1e20, delta=.01, max_groups_contributed=2, privacy_unit_column=id)
+    item, ROUND(SUM(quantity, contribution_bounds_per_group => (0, 100)) / 2, 1) AS half,
+    COUNT(*, contribution_bounds_per_group => (0, 100)) + 1 plus
+FROM professors GROUP BY item HAVING half > 10 ORDER BY item`)
+	if len(q.items) != 5 || !q.items[1].isExpr() || q.items[1].alias != "half" || !q.items[3].isExpr() ||
+		q.items[3].alias != "plus" || !q.items[2].hidden || q.items[2].agg.fn != "SUM" || !q.items[4].hidden ||
+		q.items[4].agg.fn != "COUNT" || q.items[0].text != "item" {
+		t.Fatalf("items %+v", q.items)
+	}
+	inner := q.innerSQL("id")
+	if !strings.Contains(inner, "CAST(NULL AS INT64) AS `__dp_x1`, SUM(quantity) AS `__dp_a2`") ||
+		!strings.HasSuffix(inner, "GROUP BY item, id") {
+		t.Fatalf("inner %s", inner)
+	}
+	rows := [][]any{{"pen", nil, "39", nil, "2", "101"}, {"pen", nil, "16", nil, "1", "123"},
+		{"pencil", nil, "24", nil, "1", "101"}, {"pencil", nil, "48", nil, "2", "123"}}
+	out, msg := q.compute(rows)
+	if msg != "" || len(out) != 2 {
+		t.Fatal(msg, out)
+	}
+	schema := []field{{Name: "item", Type: "STRING"}, {Name: "__dp_x1", Type: "INTEGER"}, {Name: "__dp_a2", Type: "INTEGER"},
+		{Name: "__dp_x3", Type: "INTEGER"}, {Name: "__dp_a4", Type: "INTEGER"}, {Name: "__dp_unit", Type: "INTEGER"}}
+	q.items[2].agg.sumInt = true
+	sql, msg := q.resultSQL(schema, out)
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	for _, want := range []string{"SELECT `__dp_c0` AS `item`, (ROUND(`__dp_c2` / 2, 1)) AS `half`, (`__dp_c4` + 1) AS `plus` FROM UNNEST(",
+		" WHERE (ROUND(`__dp_c2` / 2, 1)) > 10 ORDER BY item"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("result\n%s\nwant %s", sql, want)
+		}
+	}
+	for sql, wantMsg := range map[string]string{
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) SUM(x) + MAX(x) FROM t":   "Aggregate function MAX",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) 1 + SUM(COUNT(*)) FROM t": "multi-level aggregation",
+	} {
+		toks, _ := lex(sql)
+		if _, msg, _ := parseDPQuery(sql, toks); !strings.Contains(msg, wantMsg) {
+			t.Errorf("%s: %q, want %q", sql, msg, wantMsg)
+		}
+	}
+}
