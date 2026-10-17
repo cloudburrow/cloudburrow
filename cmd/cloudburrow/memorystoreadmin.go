@@ -325,8 +325,22 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	for k, v := range spec.Configs {
 		cfg[k] = v
 	}
-	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg})
+	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg}
+	if spec.TransitCA != "" {
+		// In-transit encryption (#1549): TLS only, on the node's one port,
+		// with a certificate of the cluster's CA for the host's address,
+		// where clients reach the node, and the node's Service.
+		ns := p.cfg.Cluster.Namespace
+		names := []string{p.cfg.BindAddress, spec.Server + "." + ns, spec.Server + "." + ns + ".svc", spec.Server + "." + ns + ".svc.cluster.local"}
+		files, err := redisadmin.ServerTLS(spec, time.Now(), names...)
+		if err != nil {
+			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
+		}
+		delete(cfg, "port")
+		settings.TLSCert, settings.TLSKey, settings.TLSCA, settings.TLSPort = files.Cert, files.Key, files.CA, port
+	}
+	b := components.MemorystoreServerOf(settings)
 	b.Port = port
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", "", 0, err

@@ -4898,9 +4898,8 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Implemented": 1,
       "Unimplemented": 43,
-      "Verified": 22
+      "Verified": 23
     },
     "rows": [
       {
@@ -4923,10 +4922,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
-          "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
+          "test/compat/memorystorevalkey_test.go:303 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
-          "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
+          "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
+          "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
         ]
       },
       {
@@ -4983,7 +4985,8 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
+          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystorevalkey_test.go:303 TestMemorystoreValkeyRefusals"
         ]
       },
       {
@@ -5077,9 +5080,12 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:232 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -5153,8 +5159,10 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetSharedRegionalCertificateAuthority",

@@ -278,7 +278,9 @@ Each node serves clients on one port that is the same in the cluster and on the 
 announces the host's address to clients (`cluster-announce-client-ipv4`); the nodes gossip on
 their pod addresses (bus port 16379). A client inside the Kubernetes cluster therefore gets host
 addresses from `CLUSTER SLOTS`, which it cannot reach: in the cluster, reach the nodes by pod
-address.
+address. Valkey announces one client address per address family (`cluster-announce-client-ipv4`,
+`-ipv6`), and both the host's tunnels and the pods reach a node over IPv4, so no setting
+serves both (#1549); the discovery endpoint is the host's too.
 
 `UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
 them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or
@@ -287,10 +289,29 @@ forgets replicas; `node_type` sets each node's `maxmemory` (1.4, 6.5, 13 or 58 G
 as Google requires. Terraform's `google_redis_cluster` works through `redis_custom_endpoint`, and
 the console has a Memorystore Redis Cluster page.
 
-Not served: in-transit encryption (`SERVER_AUTHENTICATION` is 501), token auth, backups, ACL
-policies, cross-cluster replication and CMEK. `AUTH_MODE_IAM_AUTH` is kept and returned, but no
-IAM token is checked: the nodes take connections without AUTH. After a restart of CloudBurrow a
-cluster is formed again, empty.
+**In-transit encryption** (#1549): `--transit-encryption-mode=server-authentication`
+(`TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION`) gives the cluster a CA of its own, as §6 gives an
+instance one, and every node a server certificate of it, issued each time the node starts, for
+the host's address and the node's Service. Each node serves TLS only, on its one port; the nodes
+gossip (`tls-cluster`) and replicate over TLS. `GetClusterCertificateAuthority` returns the CA as
+`managedServerCa.caCerts[0].certificates`; trust it in the cluster client:
+
+```go
+ca, _ := c.GetClusterCertificateAuthority(ctx, &clusterpb.GetClusterCertificateAuthorityRequest{Name: name + "/certificateAuthority"})
+pool := x509.NewCertPool()
+pool.AppendCertsFromPEM([]byte(ca.GetManagedServerCa().GetCaCerts()[0].GetCertificates()[0]))
+rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery},
+	TLSConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}})
+```
+
+It cannot be changed after the cluster is created, as Google's cannot.
+
+**IAM auth:** with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH string. The
+instance's IAM is not enforced (ADR-0006), so the nodes' default user has no password and takes
+any AUTH string, a token CloudBurrow's credentials issued among them, without checking it.
+
+Not served: token auth, backups, ACL policies, cross-cluster replication and CMEK. After a
+restart of CloudBurrow a cluster is formed again, empty.
 
 ## 9. Memorystore for Valkey (#1519)
 
@@ -329,7 +350,12 @@ again, empty. The console's **Memorystore for Valkey** page lists, creates (eith
 and deletes instances.
 
 Not served: `engine_version` other than `VALKEY_8_0` (one image, Valkey 8.1, runs; `VALKEY_7_2`
-and `VALKEY_9_0` are 501), in-transit encryption (`SERVER_AUTHENTICATION` is 501: the nodes serve
-plain TCP), `TOKEN_AUTH`, node types whose size is not modelled here, CMEK, backups,
-cross-instance replication, migration and server CA modes, each 501 with the reason. `IAM_AUTH`
-is kept and returned, but no token is checked.
+and `VALKEY_9_0` are 501), `TOKEN_AUTH`, node types whose size is not modelled here, CMEK,
+backups, cross-instance replication, migration and server CA modes, each 501 with the reason.
+
+In-transit encryption (`SERVER_AUTHENTICATION`) and `IAM_AUTH` are a Redis cluster's (§8): a CA of
+the instance's own, which `GetCertificateAuthority` returns as `managedServerCa` (gRPC
+`{instance}/certificateAuthority`, JSON `/memorystore/v1/{instance}/certificateAuthority`), every
+node serving TLS only, a `CLUSTER_DISABLED` instance's replicas replicating over TLS; any AUTH
+string is taken under `IAM_AUTH`. The console's Create has **Enable in-transit encryption** and
+**IAM authentication**, and the instance's page a **Server CA** tab.

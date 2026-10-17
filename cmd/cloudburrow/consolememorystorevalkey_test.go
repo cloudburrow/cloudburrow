@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -90,20 +91,23 @@ func TestConsoleValkeyInstances(t *testing.T) {
 	srv := redisadmin.NewServer(redisadmin.Instance{Project: "p", Host: "127.0.0.1", Port: 9016, Created: time.Unix(100, 0)}, valkeyNoBackend{})
 	srv.EnableCreate(context.Background(), valkeyNoProv{}, func(string, string, string) redisadmin.DataPlane { return nil }, nil, nil)
 	nodes := &fakeValkeyNodes{running: map[string]string{}}
-	srv.EnableValkey(context.Background(), nodes, func(addr, _ string) redisadmin.ClusterNode { return fakeValkeyNode{nodes, addr} }, nil)
+	srv.EnableValkey(context.Background(), nodes, func(addr, _, _ string) redisadmin.ClusterNode { return fakeValkeyNode{nodes, addr} }, nil)
 	p := valkeyProvider{server: func() *redisadmin.Server { return srv }}
 	ctx := context.Background()
 
 	if _, fields := p.CreateForm(); len(fields) == 0 {
 		t.Fatal("no Create instance form")
 	}
-	for _, tc := range []struct{ id, mode, shards, endpoint string }{
-		{"vk-cluster", "CLUSTER", "2", "Discovery endpoint"},
-		{"vk-single", "CLUSTER_DISABLED", "1", "Primary endpoint"},
+	for _, tc := range []struct {
+		id, mode, shards, endpoint string
+		tls                        bool
+	}{
+		{"vk-cluster", "CLUSTER", "2", "Discovery endpoint", true},
+		{"vk-single", "CLUSTER_DISABLED", "1", "Primary endpoint", false},
 	} {
 		id, err := p.Create(ctx, "p", map[string]string{"id": tc.id, "region": redisadmin.Region, "mode": tc.mode, "shardCount": tc.shards,
 			"replicaCount": "1", "nodeType": "SHARED_CORE_NANO", "network": "projects/p/global/networks/default",
-			"engineConfigs": `{"maxmemory-policy":"allkeys-lru"}`})
+			"engineConfigs": `{"maxmemory-policy":"allkeys-lru"}`, "transitEncryption": strconv.FormatBool(tc.tls), "iamAuth": strconv.FormatBool(tc.tls)})
 		if err != nil || id != tc.id {
 			t.Fatalf("Create %s = %q, %v", tc.id, id, err)
 		}
@@ -118,6 +122,15 @@ func TestConsoleValkeyInstances(t *testing.T) {
 		if props["Mode"] != tc.mode || !strings.HasPrefix(props[tc.endpoint], "127.0.0.1:") || props["PSC networks"] != "projects/p/global/networks/default" ||
 			props["Engine configs"] == "—" || props["State"] != "ACTIVE" {
 			t.Errorf("%s's page shows %v", tc.id, props)
+		}
+		// In-transit encryption and IAM auth (#1549): the modes, and the
+		// Server CA tab with the instance's CA.
+		hasCA := len(d.Sections) > 1 && d.Sections[1].ID == "server-ca" && strings.Contains(d.Sections[1].Text, "BEGIN CERTIFICATE")
+		if tc.tls && (props["In-transit encryption"] != "SERVER_AUTHENTICATION" || props["Authorization"] != "IAM_AUTH" || !hasCA) {
+			t.Errorf("%s with in-transit encryption: page shows %v, Server CA tab %v", tc.id, props, hasCA)
+		}
+		if !tc.tls && hasCA {
+			t.Errorf("%s without in-transit encryption has a Server CA tab", tc.id)
 		}
 		if err := p.Edit(ctx, "p", []string{tc.id}, map[string]string{"shardCount": tc.shards, "replicaCount": "2", "nodeType": "SHARED_CORE_NANO"}); err != nil {
 			t.Fatalf("Edit %s: %v", tc.id, err)

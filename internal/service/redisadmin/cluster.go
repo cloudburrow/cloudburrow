@@ -48,8 +48,17 @@ import (
 // does; a change of replica_count adds or forgets replicas. node_type sizes
 // each node's maxmemory, and redis_configs are set on every node. What has
 // no local counterpart is kept and returned (psc_configs, zone distribution,
-// persistence, maintenance), or refused: TLS (SERVER_AUTHENTICATION) and
-// AUTH_MODE_IAM_AUTH tokens are not checked here.
+// persistence, maintenance), or refused.
+//
+// In-transit encryption (SERVER_AUTHENTICATION, #1549) gives the cluster a
+// CA of its own (tls.go) and every node a server certificate of it, issued
+// each time the node starts: the nodes serve TLS only on their client port,
+// gossip (tls-cluster) and replicate (tls-replication) over TLS, and
+// GetClusterCertificateAuthority returns the CA as managed_server_ca. With
+// AUTH_MODE_IAM_AUTH a client sends an access token as its AUTH string;
+// the instance's IAM is not enforced (ADR-0006), so the nodes' default user
+// has no password and takes any AUTH, the token CloudBurrow's credentials
+// issued among them.
 
 // ClusterRuntime runs the nodes of a cluster.
 type ClusterRuntime interface {
@@ -72,8 +81,9 @@ type ClusterNode interface {
 	Close() error
 }
 
-// ClusterDialer reaches a node's server at addr.
-type ClusterDialer func(addr, password string) ClusterNode
+// ClusterDialer reaches a node's server at addr, over TLS trusting caPEM
+// when it is not "".
+type ClusterDialer func(addr, password, caPEM string) ClusterNode
 
 // clusterBusPort is the port every node gossips on: fixed, since a client
 // port near 65535 has no room for the default of the port plus 10000.
@@ -125,7 +135,11 @@ type clusterRecord struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	// Valkey is a Memorystore for Valkey instance's (memorystore.go):
 	// nil for a Redis cluster.
-	Valkey          *valkeyFields `json:"valkey,omitempty"`
+	Valkey *valkeyFields `json:"valkey,omitempty"`
+	// TransitCA and TransitCAKey, PEM, are the cluster's CA with in-transit
+	// encryption (#1549); "" for none.
+	TransitCA       string `json:"transitCa,omitempty"`
+	TransitCAKey    string `json:"transitCaKey,omitempty"`
 	state           clusterpb.Cluster_State
 	message         string
 	pendingShards   int32
@@ -404,19 +418,25 @@ func (s *ClusterServer) find(name string) (*clusters, *clusterRecord, error) {
 	return c, r, nil
 }
 
-// GetClusterCertificateAuthority is NOT_FOUND-free only for a cluster with
-// TLS, which is not served: a cluster here has no CA.
+// GetClusterCertificateAuthority returns a cluster's CA, as
+// managed_server_ca, which its clients trust; a cluster without in-transit
+// encryption has none.
 func (s *ClusterServer) GetClusterCertificateAuthority(ctx context.Context, req *clusterpb.GetClusterCertificateAuthorityRequest) (*clusterpb.CertificateAuthority, error) {
-	name := req.GetName()
-	if len(name) > len("/certificateAuthority") {
-		name = name[:len(name)-len("/certificateAuthority")]
-	}
-	c, _, err := s.find(name)
+	// gRPC names the CA (.../certificateAuthority); the JSON API of
+	// memorystore.googleapis.com names the instance.
+	name := strings.TrimSuffix(req.GetName(), "/certificateAuthority")
+	c, r, err := s.find(name)
 	if err != nil {
 		return nil, err
 	}
+	ca := r.TransitCA
 	c.mu.Unlock()
-	return nil, apierror.FailedPrecondition("cluster %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_MODE_DISABLED", name)
+	if ca == "" {
+		return nil, apierror.FailedPrecondition("cluster %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_MODE_DISABLED", name)
+	}
+	return &clusterpb.CertificateAuthority{Name: name + "/certificateAuthority",
+		ServerCa: &clusterpb.CertificateAuthority_ManagedServerCa{ManagedServerCa: &clusterpb.CertificateAuthority_ManagedCertificateAuthority{
+			CaCerts: []*clusterpb.CertificateAuthority_ManagedCertificateAuthority_CertChain{{Certificates: []string{ca}}}}}}, nil
 }
 
 // render is r as Google shapes a cluster. Call with mu held.
@@ -440,6 +460,9 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 		DeletionProtectionEnabled: proto.Bool(r.DeletionProtect),
 		ZoneDistributionConfig:    &clusterpb.ZoneDistributionConfig{Mode: clusterpb.ZoneDistributionConfig_MULTI_ZONE},
 		PersistenceConfig:         &clusterpb.ClusterPersistenceConfig{Mode: clusterpb.ClusterPersistenceConfig_DISABLED},
+	}
+	if r.TransitCA != "" {
+		out.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
 	}
 	if r.ZoneDistribution != "" {
 		z := &clusterpb.ZoneDistributionConfig{}
@@ -530,15 +553,23 @@ func (r *clusterRecord) maxMemory() int64 {
 
 func (r *clusterRecord) spec(server string) Spec {
 	cfg := serverConfigs(r.RedisConfigs)
+	tls := func(s Spec) Spec {
+		s.TransitCA, s.TransitCAKey, s.TransitTrust = r.TransitCA, r.TransitCAKey, r.TransitCA
+		return s
+	}
 	if r.standalone() {
-		return Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg}
+		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg})
+	}
+	if r.TransitCA != "" {
+		// The cluster bus, and MIGRATE between nodes, over TLS too.
+		cfg["tls-cluster"] = "yes"
 	}
 	cfg["cluster-enabled"] = "yes"
 	cfg["cluster-port"] = strconv.Itoa(clusterBusPort)
 	cfg["cluster-config-file"] = "/tmp/nodes.conf"
 	cfg["cluster-node-timeout"] = "5000"
 	cfg["cluster-require-full-coverage"] = "yes"
-	return Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg}
+	return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg})
 }
 
 // clusterConfigs are the redis_configs a cluster takes, as Memorystore
@@ -606,13 +637,18 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 		auth = clusterpb.AuthorizationMode_AUTH_MODE_DISABLED
 	case clusterpb.AuthorizationMode_AUTH_MODE_DISABLED:
 	case clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH:
-		// Kept and returned; there are no IAM tokens to check here, so
-		// the nodes take connections without AUTH (docs/memorystore.md).
+		// A client's AUTH is its access token. IAM is not enforced here
+		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
 	default:
 		return nil, apierror.Unimplemented("authorization_mode %s is not served here", auth)
 	}
-	if in.GetTransitEncryptionMode() == clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION {
-		return nil, apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not served for a Redis cluster here: its nodes serve plain TCP")
+	tlsOn := false
+	switch tm := in.GetTransitEncryptionMode(); tm {
+	case clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_UNSPECIFIED, clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_DISABLED:
+	case clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION:
+		tlsOn = true
+	default:
+		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
 	if in.GetKmsKey() != "" || in.GetCrossClusterReplicationConfig() != nil || in.GetImportSources() != nil || in.GetAclPolicy() != "" {
 		return nil, apierror.Unimplemented("kms_key, cross-cluster replication, import sources and ACL policies are not served for a Redis cluster here")
@@ -624,6 +660,11 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	r := &clusterRecord{Name: name, UID: newUID(), Created: c.now(), ShardCount: in.GetShardCount(), ReplicaCount: in.GetReplicaCount(),
 		NodeType: nt.String(), AuthMode: auth.String(), RedisConfigs: copyMap(in.GetRedisConfigs()),
 		DeletionProtect: in.GetDeletionProtectionEnabled(), state: clusterpb.Cluster_CREATING, pendingReplicas: -1}
+	if tlsOn {
+		if r.TransitCA, r.TransitCAKey, err = newCA(id, c.now()); err != nil {
+			return nil, apierror.Internal(err, "create the CA of cluster %s", name)
+		}
+	}
 	for _, p := range in.GetPscConfigs() {
 		r.PscConfigs = append(r.PscConfigs, p.GetNetwork())
 	}
@@ -752,7 +793,7 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 		return nil
 	}
 	for _, n := range nodes {
-		cl := c.dial(n.addr, r.password())
+		cl := c.dial(n.addr, r.password(), r.TransitCA)
 		host, _ := splitAddr(n.addr, "", 0)
 		_, err := cl.Do(ctx, "CONFIG", "SET", "cluster-announce-client-ipv4", host)
 		if err == nil {
@@ -810,7 +851,7 @@ func (c *clusters) form(ctx context.Context, r *clusterRecord, nodes []*clusterN
 }
 
 func (c *clusters) do(ctx context.Context, r *clusterRecord, n *clusterNode, args ...any) error {
-	cl := c.dial(n.addr, r.password())
+	cl := c.dial(n.addr, r.password(), r.TransitCA)
 	defer cl.Close()
 	if _, err := cl.Do(ctx, args...); err != nil {
 		return fmt.Errorf("%v on node %s: %w", args, n.Server, err)
@@ -829,7 +870,7 @@ func (c *clusters) meet(ctx context.Context, r *clusterRecord, via *clusterNode,
 	return c.until(ctx, "every node to know the others", func() bool {
 		want := len(r.Nodes)
 		for _, n := range r.Nodes {
-			cl := c.dial(n.addr, r.password())
+			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			got := known(ctx, cl, "cluster_known_nodes")
 			cl.Close()
 			if got != strconv.Itoa(want) {
@@ -875,7 +916,7 @@ func (c *clusters) replicate(ctx context.Context, r *clusterRecord, these, all [
 func (c *clusters) settle(ctx context.Context, r *clusterRecord, nodes []*clusterNode) error {
 	return c.until(ctx, "cluster_state:ok on every node", func() bool {
 		for _, n := range r.Nodes {
-			cl := c.dial(n.addr, r.password())
+			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			ok := r.standalone() || known(ctx, cl, "cluster_state") == "ok"
 			if ok && !n.Primary {
 				info, err := cl.Do(ctx, "INFO", "replication")
@@ -927,9 +968,9 @@ func (c *clusters) until(ctx context.Context, what string, cond func() bool) err
 // MIGRATING on src, MIGRATE of every key, then NODE on both, as
 // redis-cli --cluster reshard does, each step pipelined over the slots.
 func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *clusterNode, slots []int) error {
-	s := c.dial(src.addr, r.password())
+	s := c.dial(src.addr, r.password(), r.TransitCA)
 	defer s.Close()
-	d := c.dial(dst.addr, r.password())
+	d := c.dial(dst.addr, r.password(), r.TransitCA)
 	defer d.Close()
 	each := func(f func(slot int) []any) [][]any {
 		out := make([][]any, len(slots))
@@ -980,7 +1021,7 @@ func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *cl
 
 // ownedSlots reads which primary serves each slot, by node ID, from via.
 func (c *clusters) ownedSlots(ctx context.Context, r *clusterRecord, via *clusterNode) (map[string][]int, error) {
-	cl := c.dial(via.addr, r.password())
+	cl := c.dial(via.addr, r.password(), r.TransitCA)
 	defer cl.Close()
 	v, err := cl.Do(ctx, "CLUSTER", "SHARDS")
 	if err != nil {
@@ -1077,7 +1118,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 			// Set by ClusterLabels, beside the transcoder.
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode":
 			if p == "transit_encryption_mode" || p == "transitEncryptionMode" {
-				return nil, apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not served for a Redis cluster here")
+				return nil, apierror.InvalidArgument("transit_encryption_mode cannot be changed once a cluster is created")
 			}
 			set["authorization_mode"] = true
 		default:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -39,6 +40,11 @@ import (
 // endpoint (the first primary) in CLUSTER mode, the primary and a reader
 // (the first replica) in CLUSTER_DISABLED mode, as endpoints when they
 // were asked as endpoints, as psc_auto_connections when asked so.
+//
+// In-transit encryption (SERVER_AUTHENTICATION, #1549) is a Redis
+// cluster's (cluster.go): a CA of the instance's own, which
+// GetCertificateAuthority returns as managed_server_ca, every node serving
+// TLS only. IAM_AUTH takes any AUTH string (ADR-0006: IAM is not enforced).
 
 // MemorystoreRESTPrefix is the path the JSON API of memorystore.googleapis.com
 // is served under on the admin port: a client's endpoint is
@@ -242,6 +248,9 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 		SatisfiesPzs:              proto.Bool(false),
 		SatisfiesPzi:              proto.Bool(false),
 	}
+	if r.TransitCA != "" {
+		out.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
+	}
 	if pc := out.PersistenceConfig; pc.GetMode() == memorystorepb.PersistenceConfig_RDB {
 		// Google returns the time snapshots are counted from: the
 		// create time, unless one was asked.
@@ -397,19 +406,24 @@ func (s *MemorystoreServer) GetInstance(ctx context.Context, req *memorystorepb.
 	return renderValkey(r), nil
 }
 
-// GetCertificateAuthority is FAILED_PRECONDITION: in-transit encryption is
-// not served, so an instance has no CA.
+// GetCertificateAuthority returns an instance's CA, as managed_server_ca;
+// an instance without in-transit encryption has none.
 func (s *MemorystoreServer) GetCertificateAuthority(ctx context.Context, req *memorystorepb.GetCertificateAuthorityRequest) (*memorystorepb.CertificateAuthority, error) {
-	name := req.GetName()
-	if len(name) > len("/certificateAuthority") {
-		name = name[:len(name)-len("/certificateAuthority")]
-	}
-	c, _, err := s.find(name)
+	// gRPC names the CA (.../certificateAuthority); the JSON API of
+	// memorystore.googleapis.com names the instance.
+	name := strings.TrimSuffix(req.GetName(), "/certificateAuthority")
+	c, r, err := s.find(name)
 	if err != nil {
 		return nil, err
 	}
+	ca := r.TransitCA
 	c.mu.Unlock()
-	return nil, apierror.FailedPrecondition("instance %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_DISABLED", name)
+	if ca == "" {
+		return nil, apierror.FailedPrecondition("instance %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_DISABLED", name)
+	}
+	return &memorystorepb.CertificateAuthority{Name: name,
+		ServerCa: &memorystorepb.CertificateAuthority_ManagedServerCa{ManagedServerCa: &memorystorepb.CertificateAuthority_ManagedCertificateAuthority{
+			CaCerts: []*memorystorepb.CertificateAuthority_ManagedCertificateAuthority_CertChain{{Certificates: []string{ca}}}}}}, nil
 }
 
 // valkeyConfigs are the engine_configs an instance takes, as Memorystore
@@ -555,15 +569,20 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		auth = memorystorepb.Instance_AUTH_DISABLED
 	case memorystorepb.Instance_AUTH_DISABLED:
 	case memorystorepb.Instance_IAM_AUTH:
-		// Kept and returned; there are no IAM tokens to check here, so
-		// the nodes take connections without AUTH (docs/memorystore.md).
+		// A client's AUTH is its access token. IAM is not enforced here
+		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
 	case memorystorepb.Instance_TOKEN_AUTH:
 		return nil, apierror.Unimplemented("authorization_mode TOKEN_AUTH is not served here: token auth users and their tokens are not built")
 	default:
 		return nil, apierror.InvalidArgument("authorization_mode %s is not an authorization mode", auth)
 	}
-	if in.GetTransitEncryptionMode() == memorystorepb.Instance_SERVER_AUTHENTICATION {
-		return nil, apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not served for a Memorystore for Valkey instance here: its nodes serve plain TCP")
+	tlsOn := false
+	switch tm := in.GetTransitEncryptionMode(); tm {
+	case memorystorepb.Instance_TRANSIT_ENCRYPTION_MODE_UNSPECIFIED, memorystorepb.Instance_TRANSIT_ENCRYPTION_DISABLED:
+	case memorystorepb.Instance_SERVER_AUTHENTICATION:
+		tlsOn = true
+	default:
+		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
 	if in.GetKmsKey() != "" || in.GetCrossInstanceReplicationConfig() != nil || in.GetImportSources() != nil ||
 		in.GetBackupCollection() != "" || in.GetMigrationConfig() != nil || in.GetServerCaPool() != "" ||
@@ -589,6 +608,11 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		Valkey: &valkeyFields{Mode: mode.String(), NodeType: nt.String(), EngineVersion: version, AuthMode: auth.String(),
 			Updated: now, Persistence: protoJSON(in.GetPersistenceConfig()), Networks: nets, Endpoints: asEndpoints,
 			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(in.GetMaintenancePolicy())}}
+	if tlsOn {
+		if r.TransitCA, r.TransitCAKey, err = newCA(id, now); err != nil {
+			return nil, apierror.Internal(err, "create the CA of instance %s", name)
+		}
+	}
 	for sh := 0; sh < int(r.ShardCount); sh++ {
 		for k := 0; k <= int(r.ReplicaCount); k++ {
 			r.Nodes = append(r.Nodes, &clusterNode{Server: clusterServerName(name, r.NextNode), Shard: sh, Primary: k == 0})

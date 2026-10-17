@@ -46,7 +46,7 @@ func (p valkeyProvider) api() (*redisadmin.MemorystoreServer, *redisadmin.Server
 }
 
 const valkeyNote = "Each instance runs real Valkey 8.1 nodes: in cluster mode shard_count primaries with replica_count replicas each, " +
-	"with cluster mode disabled one primary and its replicas. A client on the host connects to the endpoints shown; TLS and token auth are not served."
+	"with cluster mode disabled one primary and its replicas. A client on the host connects to the endpoints shown, over TLS trusting the instance's own CA when in-transit encryption is on; token auth is not served."
 
 // valkeyEndpoint is an instance's first endpoint of kind, host:port.
 func valkeyEndpoint(inst *memorystorepb.Instance, kind memorystorepb.ConnectionType) string {
@@ -130,6 +130,10 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 			Help: "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB."},
 		{Name: "network", Label: "Network (PSC)", Type: "text", Help: "Optional. projects/{project}/global/networks/{network}: an endpoint is created on it."},
 		{Name: "engineConfigs", Label: "Engine configs", Type: "map", Help: "Optional. One key=value per line, such as maxmemory-policy."},
+		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
+			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
+		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
+			Help: "IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
 	}
 }
 
@@ -157,6 +161,12 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 	in := &memorystorepb.Instance{ShardCount: shards, ReplicaCount: proto.Int32(replicas), EngineConfigs: configs,
 		NodeType: memorystorepb.Instance_NodeType(memorystorepb.Instance_NodeType_value[values["nodeType"]]),
 		Mode:     memorystorepb.Instance_Mode(memorystorepb.Instance_Mode_value[values["mode"]])}
+	if values["transitEncryption"] == "true" {
+		in.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
+	}
+	if values["iamAuth"] == "true" {
+		in.AuthorizationMode = memorystorepb.Instance_IAM_AUTH
+	}
 	if n := strings.TrimSpace(values["network"]); n != "" {
 		in.Endpoints = []*memorystorepb.Instance_InstanceEndpoint{{Connections: []*memorystorepb.Instance_ConnectionDetail{{
 			Connection: &memorystorepb.Instance_ConnectionDetail_PscAutoConnection{PscAutoConnection: &memorystorepb.PscAutoConnection{
@@ -246,6 +256,19 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 	)
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	if i.GetTransitEncryptionMode() == memorystorepb.Instance_SERVER_AUTHENTICATION {
+		// The CA its clients trust (#1549), as GetCertificateAuthority
+		// returns it.
+		if ca, err := api.GetCertificateAuthority(ctx, &memorystorepb.GetCertificateAuthorityRequest{Name: name + "/certificateAuthority"}); err == nil {
+			var text strings.Builder
+			for _, chain := range ca.GetManagedServerCa().GetCaCerts() {
+				for _, cert := range chain.GetCertificates() {
+					text.WriteString(strings.TrimSpace(cert) + "\n")
+				}
+			}
+			d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
+		}
+	}
 	fields := []console.Field{}
 	if i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED {
 		fields = append(fields, console.Field{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,

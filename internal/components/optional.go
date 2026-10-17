@@ -528,6 +528,9 @@ type MemorystoreSettings struct {
 	// the server serves TLS only, on MemorystoreTLSPort, with this
 	// certificate, and replicates over TLS trusting the CA. "" for none.
 	TLSCert, TLSKey, TLSCA string
+	// TLSPort is the port the server serves TLS on: 0 is
+	// MemorystoreTLSPort. A Redis Cluster node serves its own (#1549).
+	TLSPort int
 }
 
 // MemorystoreTLSPort is the port a Memorystore server with in-transit
@@ -615,14 +618,18 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		// written from the environment, then the image's own entrypoint
 		// starts the server as it always does.
 		d := memorystoreTLSDir
-		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(MemorystoreTLSPort),
+		tlsPort := o.TLSPort
+		if tlsPort == 0 {
+			tlsPort = MemorystoreTLSPort
+		}
+		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(tlsPort),
 			"--tls-cert-file", d+"/server.crt", "--tls-key-file", d+"/server.key", "--tls-ca-cert-file", d+"/ca.crt",
 			"--tls-auth-clients", "no", "--tls-replication", "yes")
 		script := `set -e; mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
 			`printf '%s' "$MEMORYSTORE_TLS_KEY" > ` + d + `/server.key; printf '%s' "$MEMORYSTORE_TLS_CA" > ` + d + `/ca.crt; ` +
 			`chmod 0755 ` + d + `; chmod 0644 ` + d + `/*; exec docker-entrypoint.sh "$@"`
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
-		b.Port = MemorystoreTLSPort
+		b.Port = tlsPort
 		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
 	}
 	return b

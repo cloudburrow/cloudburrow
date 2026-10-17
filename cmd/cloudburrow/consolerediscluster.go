@@ -36,7 +36,7 @@ func (p redisClusterProvider) api() (*redisadmin.ClusterServer, *redisadmin.Serv
 }
 
 const redisClusterNote = "Each cluster is a real Redis Cluster: shard_count primaries with replica_count replicas each, every node a Valkey server in cluster mode. " +
-	"A cluster client on the host starts from the discovery endpoint and follows MOVED to the nodes; TLS and IAM tokens are not served."
+	"A cluster client on the host starts from the discovery endpoint and follows MOVED to the nodes; with in-transit encryption it trusts the cluster's own CA, which its page shows. IAM auth takes any access token as the AUTH string (IAM is not enforced)."
 
 // List implements console.Provider: the project's clusters.
 func (p redisClusterProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -99,6 +99,10 @@ func (redisClusterProvider) CreateForm() (string, []console.Field) {
 			Help: "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB."},
 		{Name: "network", Label: "Network (PSC)", Type: "text", Help: "Optional. projects/{project}/global/networks/{network}, kept and returned."},
 		{Name: "redisConfigs", Label: "Redis configs", Type: "map", Help: "Optional. One key=value per line, such as maxmemory-policy."},
+		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
+			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the cluster's own CA, which its page shows. It cannot be changed later."},
+		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
+			Help: "AUTH_MODE_IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
 	}
 }
 
@@ -137,6 +141,12 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 	}
 	in := &clusterpb.Cluster{ShardCount: proto.Int32(shards), ReplicaCount: proto.Int32(replicas), RedisConfigs: configs,
 		NodeType: clusterpb.NodeType(clusterpb.NodeType_value[values["nodeType"]])}
+	if values["transitEncryption"] == "true" {
+		in.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
+	}
+	if values["iamAuth"] == "true" {
+		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH
+	}
 	if n := strings.TrimSpace(values["network"]); n != "" {
 		in.PscConfigs = []*clusterpb.PscConfig{{Network: n}}
 	}
@@ -231,6 +241,19 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 	}
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	if c.GetTransitEncryptionMode() == clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION {
+		// The CA its clients trust (#1549), as GetClusterCertificateAuthority
+		// returns it.
+		if ca, err := api.GetClusterCertificateAuthority(ctx, &clusterpb.GetClusterCertificateAuthorityRequest{Name: name + "/certificateAuthority"}); err == nil {
+			var text strings.Builder
+			for _, chain := range ca.GetManagedServerCa().GetCaCerts() {
+				for _, cert := range chain.GetCertificates() {
+					text.WriteString(strings.TrimSpace(cert) + "\n")
+				}
+			}
+			d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
+		}
+	}
 	d.Edit = &console.EditForm{
 		Label: "Edit cluster",
 		Fields: []console.Field{
