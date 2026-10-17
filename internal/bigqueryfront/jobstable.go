@@ -71,8 +71,21 @@ import (
 // gives every job's, and lists the front's own jobs whole, so each row is
 // the one a full list writes; a job asked for and not listed is gone, and
 // its row deleted. A sync then costs what the jobs new or changed since
-// the last do. A query still lists every job and writes what differs, so
-// it reads every job however a job was made or changed.
+// the last do.
+//
+// A query of every job wrote the table the same way, from a list of every
+// job, which cost it what the list did (#1559): measured on one instance
+// late in the CI emulators shard's run (5,287 jobs, the kind node at two
+// CPUs, 2026-10-17), a jobs.list of them took 0.55 s of an unfiltered
+// COUNT(*)'s 0.55 to 0.70 s, and on GitHub's runners the COUNT(*) took
+// 1.36 to 1.44 s. So a query brings the table up to date as a background
+// sync does, incrementally, while every change of a job since the table
+// was last written whole is one the front was told of (noteMade) or one
+// of a job not DONE: it lists every job again only when the table is not
+// made, or when pending reached jobsPendingMax since (overflow), so that
+// a change was dropped. The syncs of a project's table, a query's and the
+// background's, run one at a time (inc), so a query waits for the
+// background's sync of the jobs it took, and reads them.
 
 // jobsTableName is the table of JOBS rows in resultsDataset. It does not
 // begin with scratchPrefix, so queryResults takes it for no scratch table
@@ -139,6 +152,14 @@ type jobsTable struct {
 	// pending are the IDs of the jobs made since the last background
 	// sync, by project, for those whose table is made.
 	pending map[string]map[string]bool
+	// overflow are the projects whose pending reached jobsPendingMax
+	// since their table was last written from a list of every job: the
+	// next query lists every job (above).
+	overflow map[string]bool
+
+	// inc is held through each sync of a table, from its list of jobs to
+	// its last write (above).
+	inc sync.Mutex
 }
 
 // jobsPendingMax is the most job IDs pending keeps of a project, which a
@@ -168,7 +189,31 @@ func (j *jobsTable) noteMade(project, id string) {
 	}
 	if len(p) < jobsPendingMax {
 		p[id] = true
+		return
 	}
+	j.overflowLocked(project)
+}
+
+// overflowLocked records that a change of the project's jobs was dropped
+// (overflow). The caller holds bg.
+func (j *jobsTable) overflowLocked(project string) {
+	if j.overflow == nil {
+		j.overflow = map[string]bool{}
+	}
+	j.overflow[project] = true
+}
+
+// incremental reports whether the project's table is made and every
+// change since it was last written whole is pending or open (above), and
+// forgets the overflow when it is not: the caller lists every job.
+func (j *jobsTable) incremental(project string) bool {
+	j.bg.Lock()
+	defer j.bg.Unlock()
+	if !j.made[project] || j.overflow[project] {
+		delete(j.overflow, project)
+		return false
+	}
+	return true
 }
 
 // takePending returns and forgets the project's pending IDs.
@@ -189,7 +234,7 @@ func (j *jobsTable) reset() {
 	j.rows, j.open, j.cursor = nil, nil, nil
 	j.mu.Unlock()
 	j.bg.Lock()
-	j.made, j.pending = nil, nil
+	j.made, j.pending, j.overflow = nil, nil, nil
 	j.bg.Unlock()
 }
 
@@ -200,6 +245,7 @@ func (j *jobsTable) setMade(project string, made bool) {
 	if !made {
 		delete(j.made, project)
 		delete(j.pending, project)
+		delete(j.overflow, project)
 		return
 	}
 	if j.made == nil {
@@ -423,6 +469,8 @@ func (f front) syncJobsTableSoon(r *http.Request) {
 	f.jobsTable.soon(project, func() {
 		ctx, cancel := context.WithTimeout(req.Context(), jobsTableSyncTimeout)
 		defer cancel()
+		f.jobsTable.inc.Lock()
+		defer f.jobsTable.inc.Unlock()
 		f.syncJobsTable(req.WithContext(ctx), project)
 	})
 }
@@ -430,8 +478,8 @@ func (f front) syncJobsTableSoon(r *http.Request) {
 // syncJobsTable writes the rows of the project's jobs made since the last
 // sync (those the engine added after the last it listed, and those
 // noteMade was told of) and of those not DONE then (above) to its table,
-// if it is made.
-func (f front) syncJobsTable(r *http.Request, project string) {
+// if it is made, and reports whether it did. The caller holds inc.
+func (f front) syncJobsTable(r *http.Request, project string) bool {
 	pending := f.jobsTable.takePending(project)
 	asked := map[string]bool{}
 	ids := make([]string, 0, len(pending))
@@ -452,7 +500,45 @@ func (f front) syncJobsTable(r *http.Request, project string) {
 		for id := range pending { // for the next sync
 			f.jobsTable.noteMade(project, id)
 		}
+		return false
 	}
+	return true
+}
+
+// everyJobRows is the subquery of the project's table of every job's
+// rows, brought up to date incrementally when it can be (above), else
+// from a list of every job (made first if need be), or "" when it could
+// not be written.
+func (f front) everyJobRows(r *http.Request, project string) string {
+	if f.jobsTable == nil {
+		return ""
+	}
+	f.jobsTable.inc.Lock()
+	defer f.jobsTable.inc.Unlock()
+	if f.jobsTable.incremental(project) && f.syncJobsTable(r, project) {
+		return "(SELECT * FROM " + jobsTablePath() + ")"
+	}
+	listed := &engineList{}
+	jobs, status, _ := f.listedJobs(r, nil, listed)
+	if status != 0 {
+		f.jobsTable.bg.Lock()
+		if f.jobsTable.made[project] {
+			f.jobsTable.overflowLocked(project) // still to be listed whole
+		}
+		f.jobsTable.bg.Unlock()
+		return ""
+	}
+	return f.tableRowsOrRetry(r, project, jobs, listed.last)
+}
+
+// lockedTableRows is tableRowsOrRetry, holding inc.
+func (f front) lockedTableRows(r *http.Request, project string, jobs []map[string]any, last string) string {
+	if f.jobsTable == nil {
+		return ""
+	}
+	f.jobsTable.inc.Lock()
+	defer f.jobsTable.inc.Unlock()
+	return f.tableRowsOrRetry(r, project, jobs, last)
 }
 
 // engineListKey is the context key of the engineList of a jobs.list the
