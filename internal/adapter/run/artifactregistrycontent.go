@@ -57,7 +57,7 @@ func RegistryHandler() http.Handler {
 	if st == nil {
 		return nil
 	}
-	return &registry.Handler{Store: st, Lookup: lookupRegistryRepo}
+	return &registry.Handler{Store: st, Lookup: lookupRegistryRepo, Remote: lookupRegistryUpstream}
 }
 
 // RegistryHandlerOr serves the registry's /v2/ paths and passes every other

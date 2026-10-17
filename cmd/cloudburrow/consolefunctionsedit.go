@@ -198,15 +198,18 @@ func (p functionsProvider) downloadSource(ctx context.Context, fn *functionspb.F
 		Items: []console.Resource{{Name: "Download the source (.zip)", Link: link, Fields: map[string]string{"URL": link}}}, Total: 1}, nil
 }
 
-// PolicyOn is the Permissions tab on a 1st-gen function's page: the v1
-// API's GetIamPolicy, SetIamPolicy and TestIamPermissions. A 2nd-gen
-// function's invokers are its Cloud Run service's, on the service's page.
+// PolicyOn is the Permissions tab on a function's page: a 1st-gen
+// function's through the v1 API's GetIamPolicy, SetIamPolicy and
+// TestIamPermissions (#1491), a 2nd-gen one's through the v2 API's, the
+// policy google_cloudfunctions2_function_iam_* writes (#1556). A 2nd-gen
+// function's Cloud Run service has a policy of its own, on the service's
+// page.
 func (functionsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if len(path) != 1 {
 		return nil
 	}
 	for _, fn := range runadapter.Functions("") {
-		if strings.HasSuffix(fn.GetName(), "/functions/"+path[0]) && fn.GetEnvironment() == functionspb.Environment_GEN_1 {
+		if strings.HasSuffix(fn.GetName(), "/functions/"+path[0]) {
 			return &console.PolicyTarget{Link: compatibilityDoc + "functions-and-source-builds",
 				RoleHelp: roleHelp("Cloud Functions", "roles/cloudfunctions.invoker")}
 		}
@@ -231,15 +234,17 @@ func (i v1FunctionsIAM) TestIamPermissions(ctx context.Context, r *iampb.TestIam
 	return i.c.TestIamPermissions(ctx, r)
 }
 
-// withFunctionIAM calls fn with the v1 API's IAM methods and the 1st-gen
-// function's full name.
+// withFunctionIAM calls fn with the IAM methods of the function's
+// generation's API, v1 for 1st gen and v2 for 2nd, and its full name.
 func (p functionsProvider) withFunctionIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
 	f, err := p.find(project, path[0])
 	if err != nil {
 		return err
 	}
 	if f.GetEnvironment() != functionspb.Environment_GEN_1 {
-		return errors.New("a 2nd gen function's invokers are set on its Cloud Run service's Permissions tab")
+		return p.withClient(ctx, func(c *functions.FunctionClient) error {
+			return fn(clientIAM{c}, f.GetName())
+		})
 	}
 	return p.withV1Client(ctx, func(c *functionsv1.CloudFunctionsClient) error {
 		return fn(v1FunctionsIAM{c}, f.GetName())

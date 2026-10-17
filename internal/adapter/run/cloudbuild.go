@@ -274,6 +274,9 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 		}
 		if isSourceDeployPath(r.URL.Path) {
 			r, err := takeApprovalConfig(r)
+			if err == nil {
+				r, err = takeRemoteConfigExtras(r)
+			}
 			if err != nil {
 				apierror.WriteJSON(w, err)
 				return

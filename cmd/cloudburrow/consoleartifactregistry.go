@@ -136,7 +136,7 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 		settings = fmt.Sprintf("%s, pull percent %d", ps.GetLegacyRedirectionState(), ps.GetPullPercent())
 	}
 	return console.Detail{
-		Summary: []console.Property{{Label: "Format", Value: r.GetFormat().String()}, {Label: "Location", Value: repo.Location},
+		Summary: []console.Property{{Label: "Format", Value: r.GetFormat().String()}, {Label: "Mode", Value: dockerMode(r)}, {Label: "Location", Value: repo.Location},
 			{Label: "URL", Value: r.GetRegistryUri()}, {Label: "Push to", Value: registryPushHint(repo)},
 			{Label: "Description", Value: orDash(r.GetDescription())}, {Label: "Cleanup policies", Value: cleanup},
 			{Label: "VPC-SC policy (location)", Value: vpcsc}, {Label: "Project settings", Value: settings},
@@ -144,6 +144,14 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images}, {ID: "rules", Label: "Rules", Listing: rules},
 			{ID: "attachments", Label: "Attachments", Listing: attachments}},
 	}
+}
+
+// dockerMode is a DOCKER repository's mode, with a remote one's upstream.
+func dockerMode(r *arpb.Repository) string {
+	if u := r.GetRemoteRepositoryConfig().GetCommonRepository().GetUri(); u != "" {
+		return r.GetMode().String() + ": pulls through from " + u
+	}
+	return r.GetMode().String()
 }
 
 // registryPushHint is where a local docker client pushes the repository's

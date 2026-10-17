@@ -29,6 +29,30 @@ type Lookup func(location, project, repository string) (Repo, bool)
 type Handler struct {
 	Store  *Store
 	Lookup Lookup
+	// Remote, when set, reports whether a repository is a remote one, and
+	// the repository it pulls through from (#1546). A manifest read from
+	// a remote repository is first copied from its upstream, which shares
+	// the blobs, and kept, so the remote repository answers from its cache
+	// once the upstream no longer has it; pushes to it are refused.
+	Remote func(Repo) (upstream Repo, ok bool)
+}
+
+// remote is the upstream of a remote repository; ok is false for any other.
+func (h *Handler) remote(repo Repo) (Repo, bool) {
+	if h.Remote == nil {
+		return Repo{}, false
+	}
+	return h.Remote(repo)
+}
+
+func (h *Handler) readOnly(w http.ResponseWriter, repo Repo) bool {
+	up, ok := h.remote(repo)
+	if !ok {
+		return false
+	}
+	h.fail(w, http.StatusMethodNotAllowed, "UNSUPPORTED", fmt.Sprintf("%s/%s is a remote repository, which is read-only: "+
+		"it caches what it pulls from its upstream, %s/%s; push there", repo.Project, repo.Repository, up.Project, up.Repository))
+	return true
 }
 
 // HostSuffixes are the registry hosts whose first label is
@@ -150,7 +174,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if m := uploadPath.FindStringSubmatch(p); m != nil {
-		h.withRepo(w, r, m[1], func(repo Repo, image string) { h.upload(w, r, m[1], m[2]) })
+		h.withRepo(w, r, m[1], func(repo Repo, image string) {
+			if !h.readOnly(w, repo) {
+				h.upload(w, r, m[1], m[2])
+			}
+		})
 		return
 	}
 	if m := blobPath.FindStringSubmatch(p); m != nil {
@@ -229,6 +257,11 @@ func (h *Handler) tags(w http.ResponseWriter, r *http.Request, repo Repo, image,
 func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, repo Repo, image, name, ref string) {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
+		if up, ok := h.remote(repo); ok && up.Repository != "" {
+			// What the upstream holds now wins, so a moved tag is
+			// followed; what it no longer holds is served from the cache.
+			_ = h.Store.CopyManifest(up, repo, image, ref)
+		}
 		b, d, mt, err := h.Store.GetManifest(repo, image, ref)
 		if err != nil {
 			h.failErr(w, err)
@@ -241,6 +274,9 @@ func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, repo Repo, im
 			_, _ = w.Write(b)
 		}
 	case http.MethodPut:
+		if h.readOnly(w, repo) {
+			return
+		}
 		b, err := io.ReadAll(io.LimitReader(r.Body, 4<<20+1))
 		if err != nil {
 			h.failErr(w, err)

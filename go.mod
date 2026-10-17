@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/datastore v1.27.0
+	cloud.google.com/go/developerconnect v1.2.0
 	cloud.google.com/go/firestore v1.26.0
 	cloud.google.com/go/functions v1.26.0
 	cloud.google.com/go/iam v1.14.0
