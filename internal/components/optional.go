@@ -735,6 +735,10 @@ type SQLReplicaSource struct {
 	// ServerID is the replica's MySQL server_id, which must differ from
 	// its primary's.
 	ServerID uint32
+	// User and Port are an external primary's replication user and port
+	// (#1501); "" and 0 are SQLReplicaUser and the primary's 3306.
+	User string
+	Port int
 }
 
 // SQLReplicaUser is the replication user a replica connects to its
@@ -752,6 +756,12 @@ func CloudSQLReplicaBackend(b Backend, mysql bool, src SQLReplicaSource) Backend
 	b.Env = copyEnv(b.Env)
 	b.Env["CLOUDSQL_REPLICATION_PASSWORD"] = src.Password
 	b.Env["CLOUDSQL_PRIMARY_HOST"] = src.Host
+	if src.User != "" {
+		b.Env["CLOUDSQL_PRIMARY_USER"] = src.User
+	}
+	if src.Port != 0 {
+		b.Env["CLOUDSQL_PRIMARY_PORT"] = fmt.Sprint(src.Port)
+	}
 	if mysql {
 		b.Args = append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", src.ServerID),
 			"--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--read-only=ON")

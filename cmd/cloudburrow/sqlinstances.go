@@ -106,8 +106,20 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 		User: user, Database: user, HostAddr: p.hostAddr(spec.Name)}
 }
 
-// primaryHost is the Service a replica's server replicates from.
+// primaryHost is the Service a replica's server replicates from: for a
+// replica of a source representation instance (#1501), its hostPort's
+// host, or the Service of the CloudBurrow instance hostPort is the tunnel
+// of.
 func primaryHost(spec sqladmin.Spec) string {
+	if ext := spec.External; ext != nil {
+		switch {
+		case ext.Instance == "":
+			return ext.Host
+		case ext.InstanceUp:
+			return string(config.ServiceCloudSQLMySQL)
+		}
+		return components.SQLInstancePrefix + ext.Instance
+	}
 	switch {
 	case !spec.MasterUp:
 		return components.SQLInstancePrefix + spec.MasterInstanceName
@@ -130,8 +142,15 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		b.Args = append(append([]string{}, b.Args...), pgPITRArgs()...)
 	}
 	if spec.MasterInstanceName != "" {
-		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), components.SQLReplicaSource{
-			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000})
+		src := components.SQLReplicaSource{
+			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000}
+		if ext := spec.External; ext != nil {
+			src.Password, src.User = ext.Password, ext.User
+			if ext.Instance == "" {
+				src.Port = ext.Port
+			}
+		}
+		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), src)
 	}
 	return b
 }
@@ -141,7 +160,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 // a replica that has a source already is left as it is.
 const mysqlReplicaSetup = `set -e
 ` + mysqlRootEnv + `if [ -n "$(mysql $MYSQL_LOCAL -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
-src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -u ` + components.SQLReplicaUser + `; }
+src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "${CLOUDSQL_PRIMARY_USER:-` + components.SQLReplicaUser + `}"; }
 dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
 mysql $MYSQL_LOCAL -e 'RESET BINARY LOGS AND GTIDS' 2>/dev/null || mysql $MYSQL_LOCAL -e 'RESET MASTER' # MySQL 8.0's name
 if [ -n "$dbs" ]; then
@@ -149,8 +168,8 @@ if [ -n "$dbs" ]; then
 else
   mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
 fi
-mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = 3306, SOURCE_USER = '` +
-	components.SQLReplicaUser + `', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
+mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = ${CLOUDSQL_PRIMARY_PORT:-3306}, SOURCE_USER = '${CLOUDSQL_PRIMARY_USER:-` +
+	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
 `
 
 func (p *sqlProvisioner) rollout(ctx context.Context, name string) error {
@@ -199,7 +218,9 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 	if err := p.rolloutDeployment(ctx, b.Name); err != nil {
 		return err
 	}
-	if spec.MasterInstanceName != "" && spec.MySQL() {
+	if spec.MasterInstanceName != "" && spec.MySQL() && (spec.External == nil || spec.ExternalSyncStarted) {
+		// A replica of a source representation instance runs idle until
+		// startExternalSync (#1501).
 		var out strings.Builder
 		if err := podExec(p.cfg, components.SQLInstancePrefix+spec.Name)(ctx, nil, &out, "sh", "-c", mysqlReplicaSetup); err != nil {
 			return fmt.Errorf("start replication of %s from %s: %w", spec.Name, spec.MasterInstanceName, err)

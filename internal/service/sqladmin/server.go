@@ -284,10 +284,9 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // The reasons the instance methods CloudBurrow cannot serve faithfully are
 // refused (#1462): each names what is missing.
 const (
-	externalPrimaryWhy = "an external primary is a source representation instance (instanceType ON_PREMISES_INSTANCE) for a database server " +
-		"outside Cloud SQL, with its onPremisesConfiguration (hostPort, replication user, CA and dump file); CloudBurrow keeps no such " +
-		"instance and builds no replica server from an outside source's dump and binary log or WAL, so there is no external server " +
-		"to replicate from, demote to, or sync with; read replicas of an instance are served (docs/cloudsql.md)"
+	externalPrimaryWhy = "demoting makes a Cloud SQL instance a replica of an external primary, a server outside Cloud SQL, which a migration back out of Cloud SQL " +
+		"replicates to; CloudBurrow serves the other direction, a replica of a source representation instance (ON_PREMISES_INSTANCE) " +
+		"synced with startExternalSync and promoted with promoteReplica, but does not turn a primary into a replica (docs/cloudsql.md)"
 	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
 	diskWhy      = "an instance's storage is its server's volume in the cluster, not a provisioned Compute Engine persistent disk, " +
 		"so it has no provisioned size (settings.dataDiskSizeGb) to shrink or reset"
@@ -301,7 +300,7 @@ const (
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "demoteMaster", "demote", "startExternalSync", "verifyExternalSyncSettings":
+	case "demoteMaster", "demote":
 		return externalPrimaryWhy
 	case "switchover":
 		return "switchover swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster, " +
@@ -385,6 +384,9 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.instances", nil, Errorf(http.StatusNotFound, "method %s is not served on instances", r.Method)
 	}
 	name, verb, _ := strings.Cut(rest[1], ":")
+	if rep := s.sourceNamed(project, name); rep != nil {
+		return s.sourceRoute(r, base, project, rep, rest, verb)
+	}
 	e := s.engine(name)
 	c := s.createdNamed(project, name)
 	if c == nil && e != nil && s.writes != nil {
@@ -527,6 +529,16 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			out, err := s.restartInstance(base, project, name)
 			return "sql.instances.restart", out, err
 		}
+	case "verifyExternalSyncSettings":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.verifyExternalSyncSettings(r, project, name)
+			return "sql.projects.instances.verifyExternalSyncSettings", out, err
+		}
+	case "startExternalSync":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.startExternalSync(r, base, project, name)
+			return "sql.projects.instances.startExternalSync", out, err
+		}
 	}
 	return "sql.instances." + rest[2], nil, unimplemented("instances/{instance}/"+rest[2], verbWhy(rest[2]))
 }
@@ -564,13 +576,27 @@ func (s *Server) listInstances(ctx context.Context, base, project string) (any, 
 		}
 	}
 	s.emu.RUnlock()
+	var reps []*SourceRep
+	s.emu.RLock()
+	if s.writes != nil {
+		for _, r := range s.writes.sources {
+			if r.Project == project {
+				reps = append(reps, r)
+			}
+		}
+	}
+	s.emu.RUnlock()
 	sort.Slice(cs, func(i, j int) bool { return cs[i].spec.Name < cs[j].spec.Name })
+	sort.Slice(reps, func(i, j int) bool { return reps[i].Name < reps[j].Name })
 	for _, c := range cs {
 		in, err := s.createdJSON(ctx, base, c)
 		if err != nil {
 			return nil, err
 		}
 		items = append(items, in)
+	}
+	for _, r := range reps {
+		items = append(items, s.sourceJSON(base, r))
 	}
 	return map[string]any{"kind": "sql#instancesList", "items": items}, nil
 }

@@ -74,6 +74,11 @@ type Spec struct {
 	HAEpochs [2]int `json:"haEpochs,omitempty"`
 	// HAPassword is the standby's replication user's; never answered.
 	HAPassword string `json:"haPassword,omitempty"`
+	// External is the outside server a replica of a source representation
+	// instance replicates from (#1501); ExternalSyncStarted is set by
+	// startExternalSync, before which the replica's server runs idle.
+	External            *ExternalSource `json:"external,omitempty"`
+	ExternalSyncStarted bool            `json:"externalSyncStarted,omitempty"`
 }
 
 // Regional reports whether the instance has a standby (#1408).
@@ -146,6 +151,8 @@ type instances struct {
 	// path is where the records are kept, "" for an ephemeral instance.
 	path   string
 	byName map[string]*created
+	// sources are the source representation instances (#1501).
+	sources map[string]*SourceRep
 }
 
 // EnableInstanceWrites serves instances.insert, patch, update, delete and
@@ -155,7 +162,7 @@ type instances struct {
 func (s *Server) EnableInstanceWrites(p Provisioner, statePath string) {
 	s.emu.Lock()
 	defer s.emu.Unlock()
-	s.writes = &instances{prov: p, path: statePath, byName: map[string]*created{}}
+	s.writes = &instances{prov: p, path: statePath, byName: map[string]*created{}, sources: map[string]*SourceRep{}}
 }
 
 // restore brings back the recorded instances and prunes the rest, in the
@@ -170,6 +177,7 @@ func (s *Server) restore() {
 	}
 	var keep []string
 	s.emu.Lock()
+	s.restoreSourcesLocked()
 	for _, sp := range specs {
 		if s.engineLocked(sp.Name) != nil || !SupportedVersions[sp.DatabaseVersion] {
 			continue
@@ -320,7 +328,8 @@ func (b instanceBody) unsupported() error {
 		return legacyFailoverErr()
 	}
 	if b.InstanceType == "ON_PREMISES_INSTANCE" || b.OnPremisesConfiguration != nil {
-		return unimplemented("source representation instances (instanceType ON_PREMISES_INSTANCE)", externalPrimaryWhy)
+		return Errorf(http.StatusBadRequest, "Invalid request: an instance's type cannot be changed to ON_PREMISES_INSTANCE; "+
+			"insert a source representation instance of its own.")
 	}
 	if b.Settings != nil {
 		if a := b.Settings.AvailabilityType; a != "" && a != "ZONAL" && a != "REGIONAL" {
@@ -452,6 +461,9 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance name %q must be lowercase letters, digits and hyphens, "+
 			"start with a letter, not end with a hyphen, and be at most %d characters in CloudBurrow.", b.Name, maxInstanceName)
 	}
+	if b.InstanceType == "ON_PREMISES_INSTANCE" || b.OnPremisesConfiguration != nil {
+		return s.insertSource(base, project, b)
+	}
 	replica := b.MasterInstanceName != ""
 	if !replica && b.ReplicaConfiguration != nil {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: replicaConfiguration needs masterInstanceName.")
@@ -521,7 +533,7 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		spec.RootPassword = ""
 	}
 	s.emu.Lock()
-	if s.engineLocked(b.Name) != nil {
+	if s.engineLocked(b.Name) != nil || s.writes.sources[b.Name] != nil {
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
 	}
@@ -841,7 +853,11 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if spec.MasterInstanceName != "" {
 		in["instanceType"] = "READ_REPLICA_INSTANCE"
 		in["masterInstanceName"] = spec.Project + ":" + spec.MasterInstanceName
-		in["replicaConfiguration"] = map[string]any{"kind": "sql#replicaConfiguration", "failoverTarget": false}
+		rc := map[string]any{"kind": "sql#replicaConfiguration", "failoverTarget": false}
+		if ext := spec.External; ext != nil {
+			rc["mysqlReplicaConfiguration"] = map[string]any{"kind": "sql#mysqlReplicaConfiguration", "username": ext.User}
+		}
+		in["replicaConfiguration"] = rc
 		st["replicationType"] = "ASYNCHRONOUS"
 		st["databaseReplicationEnabled"] = !spec.ReplicationStopped
 	}
