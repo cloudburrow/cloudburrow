@@ -29,7 +29,7 @@ func httpStatus(err error) int {
 // enable_fine_grained_mutations (BOOL, "to enable fine-grained DML
 // optimization on the table"), set by CREATE TABLE and ALTER TABLE SET
 // OPTIONS, reads back in INFORMATION_SCHEMA.TABLE_OPTIONS and NULL clears
-// it; a column's data_policies (ARRAY<STRING> of
+// it; a column's data_policies, by CREATE TABLE and by ALTER COLUMN SET OPTIONS (ARRAY<STRING> of
 // "{'name':'project.region-us.policy'}", with = and +=) read back as the
 // field's dataPolicies through tables.get, NULL clearing them, and a name
 // not of that form is 400; data_governance_tags stays 501. And an ALTER
@@ -65,7 +65,8 @@ func TestBigQueryDDLMoreOptionsAndWholeAlter(t *testing.T) {
 				"WHERE table_name = '"+name+"' AND option_name = 'enable_fine_grained_mutations'")
 			return fmt.Sprint(got)
 		}
-		run("CREATE TABLE " + ref + " (a STRING, b INT64, n INT64) OPTIONS (enable_fine_grained_mutations = TRUE)")
+		run("CREATE TABLE " + ref + " (a STRING OPTIONS (data_policies = [\"{'name':'" + project + ".region-us.p0'}\"]), b INT64, n INT64) " +
+			"OPTIONS (enable_fine_grained_mutations = TRUE)")
 		if got := option(); got != "[[true]]" {
 			t.Errorf("insert %v: after CREATE TABLE: enable_fine_grained_mutations %s, want [[true]]", insert, got)
 		}
@@ -91,6 +92,9 @@ func TestBigQueryDDLMoreOptionsAndWholeAlter(t *testing.T) {
 			return strings.Join(out, ",")
 		}
 		pol := func(id string) string { return "projects/" + project + "/locations/us/dataPolicies/" + id }
+		if got := policies(); got != pol("p0") {
+			t.Errorf("insert %v: CREATE TABLE with data_policies = [p0]: %q, want %q", insert, got, pol("p0"))
+		}
 		run("ALTER TABLE " + ref + " ALTER COLUMN a SET OPTIONS (data_policies = [\"{'name':'" + project + ".region-us.p1'}\"])")
 		if got := policies(); got != pol("p1") {
 			t.Errorf("insert %v: data_policies = [p1]: %q, want %q", insert, got, pol("p1"))
@@ -326,5 +330,90 @@ func TestBigQueryDefaultKeyOfJobTables(t *testing.T) {
 	wait("query into existing", job, err)
 	if got := keyOf("existing"); got != "" {
 		t.Errorf("a destination table that existed: key %q, want none", got)
+	}
+}
+
+// TestBigQueryDefaultTimeZoneOfCoercedStrings (#1456): a project's
+// default_time_zone reads a string literal compared with a TIMESTAMP
+// column, which the analyzer coerces to a TIMESTAMP, in that zone, as it
+// does a TIMESTAMP literal with no zone ("if no time zone is specified,
+// the default time zone is used"); a string with a zone keeps it, and a
+// job in another region reads UTC. Before, the coerced string was read
+// in UTC. The setting is in africa-south1, which no other test uses.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryDefaultTimeZoneOfCoercedStrings(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	const region = "africa-south1"
+	const r = "`region-" + region + "."
+	count := func(sql string, insert bool, loc string) int64 {
+		t.Helper()
+		q := c.Query(sql)
+		q.Location = loc
+		var it *bigquery.RowIterator
+		var err error
+		if insert {
+			job, e := q.Run(ctx)
+			if e != nil {
+				t.Fatalf("%s: %v", sql, e)
+			}
+			it, err = job.Read(ctx)
+		} else {
+			it, err = q.Read(ctx)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		var row []bigquery.Value
+		if err := it.Next(&row); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		n, _ := row[0].(int64)
+		return n
+	}
+	t.Cleanup(func() {
+		q := c.Query("ALTER PROJECT SET OPTIONS (" + r + "default_time_zone` = NULL)")
+		q.Location = region
+		_, _ = q.Read(ctx)
+	})
+	ds := c.Dataset(strings.ReplaceAll(project, "-", "_") + "_coercedzone")
+	if err := ds.Create(ctx, &bigquery.DatasetMetadata{Location: region}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ds.DeleteWithContents(ctx) })
+	ref := "`" + ds.DatasetID + ".t`"
+	for _, sql := range []string{
+		"CREATE TABLE " + ref + " (ts TIMESTAMP)",
+		"INSERT INTO " + ref + " (ts) VALUES (TIMESTAMP '2020-01-01 03:00:00+00')",
+		"ALTER PROJECT SET OPTIONS (" + r + "default_time_zone` = 'America/New_York')",
+	} {
+		q := c.Query(sql)
+		q.Location = region
+		if _, err := q.Read(ctx); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	// 2020-01-01 03:00:00 UTC is 2019-12-31 22:00:00 in New York.
+	for _, insert := range []bool{false, true} {
+		for where, want := range map[string]int64{
+			"ts = '2019-12-31 22:00:00'":                                 1,
+			"ts > '2020-01-01 00:00:00'":                                 0,
+			"ts < '2020-01-01'":                                          1,
+			"ts = '2020-01-01 03:00:00+00'":                              1,
+			"ts = '2020-01-01 03:00:00 UTC'":                             1,
+			"'2019-12-31 22:00:00' = ts":                                 1,
+			"ts BETWEEN '2019-12-31 21:00:00' AND '2019-12-31 23:00:00'": 1,
+		} {
+			if got := count("SELECT COUNT(*) FROM "+ref+" WHERE "+where, insert, region); got != want {
+				t.Errorf("insert %v: WHERE %s in America/New_York: %d rows, want %d", insert, where, got, want)
+			}
+		}
+	}
+	// Another region's job reads UTC: the same rows through a literal
+	// table, as the dataset is in africa-south1.
+	if got := count("SELECT COUNT(*) FROM UNNEST([TIMESTAMP '2020-01-01 03:00:00+00']) AS ts WHERE ts > '2020-01-01 00:00:00'", false, "US"); got != 1 {
+		t.Errorf("a US job: %d rows, want 1 (UTC)", got)
 	}
 }

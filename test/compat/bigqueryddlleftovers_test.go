@@ -126,7 +126,7 @@ func schemaString(s bigquery.Schema) string {
 // ("Setting the VALUE to NULL clears the column's value for that
 // option"), and a value written then rounds away from zero. Refused 400
 // invalidQuery: a rounding_mode of a STRING column, a mode BigQuery does
-// not have. data_policies stays 501. Measured first: rounding_mode there
+// not have. data_policies is carried out since #1456 (bigqueryddlmore_test.go). Measured first: rounding_mode there
 // was 501.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get
@@ -174,7 +174,7 @@ func TestBigQueryAlterColumnSetOptionsRoundingMode(t *testing.T) {
 		for sql, code := range map[string]int{
 			"ALTER TABLE " + ref + " ALTER COLUMN note SET OPTIONS (rounding_mode = 'ROUND_HALF_EVEN')": http.StatusBadRequest,
 			"ALTER TABLE " + ref + " ALTER COLUMN y SET OPTIONS (rounding_mode = 'ROUND_DOWN')":         http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ALTER COLUMN y SET OPTIONS (data_policies = ['p'])":                http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ALTER COLUMN y SET OPTIONS (data_policies = ['p'])":                http.StatusBadRequest, // not a policy's {'name':...} (#1456)
 		} {
 			wantHTTPStatus(t, sql, bqRun(ctx, c, sql, insert), code)
 		}
@@ -255,10 +255,10 @@ func TestBigQueryAlterTableDryRun(t *testing.T) {
 		code   int
 		reason string
 	}{
-		"ALTER TABLE `" + ds.DatasetID + ".nosuch` ADD COLUMN b STRING":              {http.StatusNotFound, "notFound"},
-		"ALTER TABLE " + ref + " ADD COLUMN a STRING":                                {http.StatusBadRequest, "invalidQuery"},
-		"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE STRING":                {http.StatusBadRequest, "invalidQuery"},
-		"ALTER TABLE " + ref + " SET OPTIONS (not_an_option = TRUE)": {http.StatusNotImplemented, "notImplemented"},
+		"ALTER TABLE `" + ds.DatasetID + ".nosuch` ADD COLUMN b STRING": {http.StatusNotFound, "notFound"},
+		"ALTER TABLE " + ref + " ADD COLUMN a STRING":                   {http.StatusBadRequest, "invalidQuery"},
+		"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE STRING":   {http.StatusBadRequest, "invalidQuery"},
+		"ALTER TABLE " + ref + " SET OPTIONS (not_an_option = TRUE)":    {http.StatusNotImplemented, "notImplemented"},
 	} {
 		_, err := dry(sql)
 		wantReason(t, sql, err, want.code, want.reason)

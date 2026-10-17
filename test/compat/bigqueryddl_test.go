@@ -78,14 +78,14 @@ func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 	ref := "`" + ds.DatasetID + ".altered`"
 	for _, insert := range []bool{false, true} {
 		for sql, code := range map[string]int{
-			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                             http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":                    http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME TO `t!`":                                     http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                            http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":          http.StatusBadRequest, // #1416
-			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                     http.StatusBadRequest, // #1389
-			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":          http.StatusBadRequest, // #1389
-			"ALTER TABLE " + ref + " SET OPTIONS (not_an_option = TRUE)": http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                    http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":           http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME TO `t!`":                            http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                   http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>": http.StatusBadRequest, // #1416
+			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":            http.StatusBadRequest, // #1389
+			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c": http.StatusBadRequest, // #1389
+			"ALTER TABLE " + ref + " SET OPTIONS (not_an_option = TRUE)":        http.StatusNotImplemented,
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantHTTPStatus(t, sql, err, code)

@@ -115,7 +115,7 @@ func alterNotImplemented(what string) string {
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
 		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name, " +
 		"max_staleness, default_rounding_mode, tags, require_partition_filter, enable_change_history, storage_uri, privacy_policy, enable_fine_grained_mutations), " +
-		"ALTER COLUMN SET OPTIONS (description, rounding_mode), " +
+		"ALTER COLUMN SET OPTIONS (description, rounding_mode, data_policies), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
