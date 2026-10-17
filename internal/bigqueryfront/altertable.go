@@ -92,6 +92,8 @@ type alterAction struct {
 type alterOption struct {
 	name string
 	val  []token
+	// add is name += val, which data_policies takes (#1456).
+	add bool
 }
 
 // isAlterTable reports whether body is an ALTER TABLE statement.
@@ -112,8 +114,8 @@ func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
 		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name, " +
-		"max_staleness, default_rounding_mode, tags, require_partition_filter, enable_change_history, storage_uri, privacy_policy), " +
-		"ALTER COLUMN SET OPTIONS (description, rounding_mode), " +
+		"max_staleness, default_rounding_mode, tags, require_partition_filter, enable_change_history, storage_uri, privacy_policy, enable_fine_grained_mutations), " +
+		"ALTER COLUMN SET OPTIONS (description, rounding_mode, data_policies), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
@@ -223,8 +225,18 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					return st, "", "Syntax error: SET OPTIONS without its list"
 				}
 				for _, o := range opts {
-					if o.name != "description" && o.name != "rounding_mode" { // rounding_mode: #1416
+					switch {
+					case o.name == "data_governance_tags":
+						return st, "ALTER COLUMN SET OPTIONS (data_governance_tags), which the engine's table schema does not keep " +
+							"(it has no dataGovernanceTagsInfo field)", ""
+					case o.name != "description" && o.name != "rounding_mode" && o.name != "data_policies": // rounding_mode: #1416, data_policies: #1456
 						return st, "ALTER COLUMN SET OPTIONS (" + o.name + ")", ""
+					case o.add && o.name != "data_policies":
+						return st, "", "Syntax error: the operator += is supported only for the column option data_policies"
+					case o.name == "data_policies":
+						if _, msg := dataPolicyNames(o.val); msg != "" {
+							return st, "", msg
+						}
 					}
 				}
 				act.kind, act.options = "column options", opts
@@ -386,16 +398,20 @@ func readOptions(t []token) ([]alterOption, bool) {
 	var out []alterOption
 	i := 2
 	for i < len(t)-1 {
-		if t[i].kind != tokWord || i+1 >= len(t) || !t[i+1].punct("=") {
+		add := i+2 < len(t) && t[i+1].punct("+") && t[i+2].punct("=")
+		if t[i].kind != tokWord || i+1 >= len(t) || !t[i+1].punct("=") && !add {
 			return nil, false
 		}
 		name := strings.ToLower(t[i].text)
 		i += 2
+		if add {
+			i++
+		}
 		end := skipTo(t, i, ",", ")")
 		if end > len(t)-1 {
 			end = len(t) - 1
 		}
-		out = append(out, alterOption{name: name, val: t[i:end]})
+		out = append(out, alterOption{name: name, val: t[i:end], add: add})
 		i = end
 		if i < len(t) && t[i].punct(",") {
 			i++
@@ -484,6 +500,12 @@ func fieldTypeOf(t []token, i int, exprs bool) (map[string]any, int, string) {
 					case o.name == "description" && len(o.val) == 1 && o.val[0].is("NULL"):
 					case exprs && o.name == "description" && !ok && len(o.val) > 0: // #1438
 						f[descExprKey] = [2]int{o.val[0].pos, o.val[len(o.val)-1].end}
+					case o.name == "data_policies":
+						// Google documents data policies on a column only
+						// (column-data-masking, "Mask data with data
+						// policies directly on a column"), not on a
+						// STRUCT's field (#1456).
+						return nil, i, "a STRUCT field's option data_policies, which BigQuery documents for a top-level column only"
 					case o.name != "description" || !ok:
 						return nil, i, "a STRUCT field's option " + o.name + " other than a description or rounding_mode literal"
 					default:
@@ -585,6 +607,30 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 	// of them at a time, in its order, each run on the table as the one
 	// before left it (#1389).
 	groups := alterGroups(st.actions)
+	// Each run is first checked, as a dry run checks it (altertabledry.go),
+	// so that a refusal of a later run leaves the table as it was rather
+	// than the earlier runs done (#1456): BigQuery carries out an ALTER
+	// TABLE whole or not at all. The checks are made on the table as it
+	// is, as the runs before a run do not change what it checks (a column
+	// RENAME TO keeps; ADD COLUMN, which another run cannot name, #1389);
+	// what the tables.patch path refuses only when it is sent (updateTable)
+	// is still met in its turn.
+	if len(groups) > 1 && !s.dry {
+		s.dry = true
+		for i, g := range groups {
+			sub := st
+			sub.actions, sub.ifExists = g, st.ifExists && i == 0
+			flow := s.alterRun(sub, ds, table, text)
+			if flow != nil || s.notImpl != "" {
+				s.dry = false
+				if flow == nil {
+					flow = &scriptFlow{}
+				}
+				return flow
+			}
+		}
+		s.dry = false
+	}
 	for i, g := range groups {
 		sub := st
 		sub.actions, sub.ifExists = g, st.ifExists && i == 0
@@ -720,6 +766,11 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 				continue
 			}
 			for _, o := range a.options {
+				if o.name == "data_policies" { // #1456, datapolicies.go
+					setDataPolicies(f, o)
+					schemaChanged = true
+					continue
+				}
 				v, flow := s.stringOption(o, text)
 				if flow != nil {
 					return flow
@@ -807,7 +858,7 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 						patch["encryptionConfiguration"] = map[string]any{"kmsKeyName": *v}
 					}
 				case "max_staleness", "default_rounding_mode", "tags", "require_partition_filter", "enable_change_history",
-					"storage_uri", "privacy_policy": // #1390, tableoptions.go
+					"storage_uri", "privacy_policy", "enable_fine_grained_mutations": // #1390, tableoptions.go
 					m, msg := readMoreOption(o.name, o.val, text)
 					if msg != "" {
 						return failWith(http.StatusBadRequest, "invalidQuery", msg, text)

@@ -72,6 +72,11 @@ func (f *jobsFilter) listBounds(q url.Values) {
 	}
 }
 
+// bounded reports whether listBounds cuts the list.
+func (f *jobsFilter) bounded() bool {
+	return f != nil && (f.minUs != nil && *f.minUs >= 0 || f.maxUs != nil && *f.maxUs >= 0)
+}
+
 // apply returns the jobs the filter keeps, in their order.
 func (f *jobsFilter) apply(project string, jobs []map[string]any) []map[string]any {
 	if f == nil {
@@ -165,39 +170,74 @@ func pushedJobsFilter(sql string, refs []jobsRef, now time.Time) *jobsFilter {
 	if ref == nil {
 		return nil
 	}
-	t, ok := lex(sql)
+	w, ok := whereOf(sql, ref.pos, ref.end, ref.alias, ref.view)
 	if !ok {
 		return nil
 	}
+	t, i := w.tokens, w.after
+	f := &jobsFilter{limit: -1}
+	exact := w.all
+	for _, c := range w.conjuncts {
+		if !f.conjunct(c, w.qualifier, now) {
+			exact = false
+		}
+	}
+	if exact && i+1 < len(t) && t[i].is("ORDER") && t[i+1].is("BY") {
+		f.orderLimit(t, i+2, w.from, w.qualifier, sql)
+	}
+	if len(f.keep) == 0 && f.minUs == nil && f.maxUs == nil && f.limit < 0 {
+		return nil
+	}
+	return f
+}
+
+// viewWhere is the WHERE clause of the SELECT whose only FROM item is a
+// view reference (whereOf).
+type viewWhere struct {
+	tokens    []token
+	from      int       // the index of the reference's first token
+	after     int       // the index of the token that ends the WHERE clause (or of the one after the reference)
+	qualifier string    // the reference's alias, or the view's name
+	conjuncts [][]token // the WHERE clause's top-level conjuncts
+	all       bool      // false when the WHERE clause has a top-level OR (conjuncts is then empty)
+}
+
+// whereOf reads the WHERE clause of the SELECT whose FROM is the view
+// reference sql[pos:end]; ok is false when that FROM has another item (a
+// join, a comma, a pipe) or the reference is not after FROM. A SELECT with
+// no WHERE has no conjuncts.
+func whereOf(sql string, pos, end int, alias bool, view string) (viewWhere, bool) {
+	t, ok := lex(sql)
+	if !ok {
+		return viewWhere{}, false
+	}
 	a, b := -1, -1
 	for i, tok := range t {
-		if tok.pos == ref.pos {
+		if tok.pos == pos {
 			a = i
 		}
-		if tok.end == ref.end {
+		if tok.end == end {
 			b = i + 1
 		}
 	}
 	if a < 1 || b <= a || !t[a-1].is("FROM") {
-		return nil
+		return viewWhere{}, false
 	}
-	qualifier := ref.view
+	w := viewWhere{tokens: t, from: a, qualifier: view, all: true}
 	i := b
-	if ref.alias {
-		if t[i].is("AS") {
+	if alias {
+		if i < len(t) && t[i].is("AS") {
 			i++
 		}
 		if i >= len(t) {
-			return nil
+			return viewWhere{}, false
 		}
-		qualifier = t[i].text
+		w.qualifier = t[i].text
 		i++
 	}
 	ends := func(i int) bool {
 		return i >= len(t) || t[i].punct(")") || t[i].punct(";") || t[i].kind == tokWord && clauseEnds[strings.ToUpper(t[i].text)]
 	}
-	f := &jobsFilter{limit: -1}
-	exact := true
 	if i < len(t) && t[i].is("WHERE") {
 		start, depth := i+1, 0
 		i++
@@ -213,23 +253,12 @@ func pushedJobsFilter(sql string, refs []jobsRef, now time.Time) *jobsFilter {
 				break
 			}
 		}
-		conjuncts, all := splitAnd(t[start:i])
-		exact = all
-		for _, c := range conjuncts {
-			if !f.conjunct(c, qualifier, now) {
-				exact = false
-			}
-		}
+		w.conjuncts, w.all = splitAnd(t[start:i])
 	} else if !ends(i) {
-		return nil // another FROM item, a join, a pipe
+		return viewWhere{}, false // another FROM item, a join, a pipe
 	}
-	if exact && i+1 < len(t) && t[i].is("ORDER") && t[i+1].is("BY") {
-		f.orderLimit(t, i+2, a, qualifier, sql)
-	}
-	if len(f.keep) == 0 && f.minUs == nil && f.maxUs == nil && f.limit < 0 {
-		return nil
-	}
-	return f
+	w.after = i
+	return w, true
 }
 
 // splitAnd splits a WHERE clause at its top-level ANDs; all is false when
@@ -293,35 +322,12 @@ var stringColumns = map[string]func(jobKeys) string{
 // conjunct adds the conjunct t to f, and reports whether f now applies it
 // exactly; false leaves f as it was, or wider than t.
 func (f *jobsFilter) conjunct(t []token, qualifier string, now time.Time) bool {
-	for len(t) >= 2 && t[0].punct("(") && t[len(t)-1].punct(")") && closes(t) {
-		t = t[1 : len(t)-1]
+	t = unwrap(t)
+	if col, vals, ok := stringIn(t, qualifier); ok {
+		return f.equal(col, vals)
 	}
 	col, rest := column(t, qualifier)
-	if col == "" {
-		// 'x' = job_id
-		if len(t) >= 3 {
-			if v, ok := literal(t[0]); ok && t[1].punct("=") {
-				if c, after := column(t[2:], qualifier); c != "" && len(after) == 0 {
-					return f.equal(c, []string{v})
-				}
-			}
-		}
-		return false
-	}
 	switch {
-	case len(rest) == 2 && rest[0].punct("=") && rest[1].kind == tokString:
-		v, ok := literal(rest[1])
-		return ok && f.equal(col, []string{v})
-	case len(rest) >= 4 && rest[0].is("IN") && rest[1].punct("(") && rest[len(rest)-1].punct(")"):
-		var vals []string
-		for j := 2; j < len(rest)-1; j += 2 {
-			v, ok := literal(rest[j])
-			if !ok || !rest[j+1].punct(",") && !rest[j+1].punct(")") {
-				return false
-			}
-			vals = append(vals, v)
-		}
-		return f.equal(col, vals)
 	case col == "parent_job_id" && len(rest) == 2 && rest[0].is("IS") && rest[1].is("NULL"):
 		f.keep = append(f.keep, func(k jobKeys) bool { return k.parent == "" })
 		return true
@@ -332,6 +338,48 @@ func (f *jobsFilter) conjunct(t []token, qualifier string, now time.Time) bool {
 		return f.timeBound(rest, now)
 	}
 	return false
+}
+
+// unwrap drops the parentheses around the whole of a conjunct.
+func unwrap(t []token) []token {
+	for len(t) >= 2 && t[0].punct("(") && t[len(t)-1].punct(")") && closes(t) {
+		t = t[1 : len(t)-1]
+	}
+	return t
+}
+
+// stringIn reads the conjunct t as column = 'v', 'v' = column or column
+// IN ('v', ...), the column unqualified or qualified by qualifier: the
+// column, lower case, and the literals' values.
+func stringIn(t []token, qualifier string) (string, []string, bool) {
+	col, rest := column(t, qualifier)
+	if col == "" {
+		// 'x' = job_id
+		if len(t) >= 3 {
+			if v, ok := literal(t[0]); ok && t[1].punct("=") {
+				if c, after := column(t[2:], qualifier); c != "" && len(after) == 0 {
+					return c, []string{v}, true
+				}
+			}
+		}
+		return "", nil, false
+	}
+	switch {
+	case len(rest) == 2 && rest[0].punct("=") && rest[1].kind == tokString:
+		v, ok := literal(rest[1])
+		return col, []string{v}, ok
+	case len(rest) >= 4 && rest[0].is("IN") && rest[1].punct("(") && rest[len(rest)-1].punct(")"):
+		var vals []string
+		for j := 2; j < len(rest)-1; j += 2 {
+			v, ok := literal(rest[j])
+			if !ok || !rest[j+1].punct(",") && !rest[j+1].punct(")") {
+				return "", nil, false
+			}
+			vals = append(vals, v)
+		}
+		return col, vals, true
+	}
+	return "", nil, false
 }
 
 // closes reports whether t's first parenthesis closes at its last token.

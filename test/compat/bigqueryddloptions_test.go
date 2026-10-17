@@ -108,7 +108,7 @@ func TestBigQueryDDLOptionsReadBack(t *testing.T) {
 		}
 
 		// An option the front does not set: 501, nothing made.
-		sql = "CREATE TABLE " + path("part"+sfx) + " (a INT64) OPTIONS(description = 'd', enable_fine_grained_mutations = TRUE)"
+		sql = "CREATE TABLE " + path("part"+sfx) + " (a INT64) OPTIONS(description = 'd', not_an_option = TRUE)"
 		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
 		if tableExists(t, ctx, ds.Table("part"+sfx)) {
 			t.Errorf("the refused %s made the table", sql)

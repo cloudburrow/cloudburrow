@@ -107,6 +107,9 @@ type pqPlan struct {
 	raw    []any
 	files  []pqFile
 	upload *spooled // the upload's data, for a load of one
+	// props are the new table's properties the load names (#1457,
+	// loadtable.go).
+	props map[string]any
 }
 
 // pqFile is one file of a load: an upload's data, or an object in Cloud
@@ -128,7 +131,7 @@ func (f front) parquetOwnLoad(w http.ResponseWriter, r *http.Request, plan *pqPl
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a Parquet load "+why+
 			". Nothing was loaded.")
 	}
-	j, ok := f.startParquetJob(w, r)
+	j, ok := f.startParquetJob(w, r, "Parquet")
 	if !ok {
 		return
 	}
@@ -238,7 +241,7 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 	ds := plan.dest.DatasetID
 	schema := map[string]any{"fields": plan.raw}
 	if plan.kind == pqLoadNew {
-		if msg := f.makeParquetTable(r, plan.dest, schema, nil); msg != "" {
+		if msg := f.makeParquetTable(r, plan.dest, schema, plan.props); msg != "" {
 			return msg
 		}
 		if msg := f.insertRows(r, plan.dest, plan.target, rows); msg != "" {
@@ -463,10 +466,10 @@ func (f front) parquetData(r *http.Request, s *spooled, pf pqFile) (*readerAtSee
 	return &readerAtSeeker{ReaderAt: tmp, size: size}, size, cleanup, nil
 }
 
-// startParquetJob reads the job of r, a load the front carries out, as
-// startOwnJob does for a job whose body is JSON; r may be a multipart
-// upload.
-func (f front) startParquetJob(w http.ResponseWriter, r *http.Request) (*ownJob, bool) {
+// startParquetJob reads the job of r, a load of format (Parquet, Avro)
+// the front carries out, as startOwnJob does for a job whose body is JSON;
+// r may be a multipart upload.
+func (f front) startParquetJob(w http.ResponseWriter, r *http.Request, format string) (*ownJob, bool) {
 	var job struct {
 		JobReference  map[string]any             `json:"jobReference"`
 		Configuration map[string]json.RawMessage `json:"configuration"`
@@ -476,12 +479,12 @@ func (f front) startParquetJob(w http.ResponseWriter, r *http.Request) (*ownJob,
 		return nil, false
 	}
 	if dry := job.Configuration["dryRun"]; string(dry) == "true" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of a Parquet load "+
-			"CloudBurrow carries out itself. Nothing was run.")
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of a "+format+
+			" load CloudBurrow carries out itself. Nothing was run.")
 		return nil, false
 	}
 	if f.jobs == nil {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a Parquet load CloudBurrow "+
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a "+format+" load CloudBurrow "+
 			"carries out itself: this front keeps no jobs of its own. Nothing was loaded.")
 		return nil, false
 	}

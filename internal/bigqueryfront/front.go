@@ -224,6 +224,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
+	if o.stateDir != "" {
+		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
+	}
 	// Every time the front reports, and the engine's (bigquery-emulator
 	// patches 0034, 0041), is the instance's clock, the front's, which
 	// clock:advance moves (#1487).
@@ -372,7 +375,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models}
 			if j[3] == "jobs" {
-				f.insertJob(w, r)
+				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
 				withInfinities(w, r, func(w http.ResponseWriter) { f.query(w, r) }) // #1077, #1101
 			}
@@ -492,6 +495,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
 		// its answer (#1427, iceberg.go).

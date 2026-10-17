@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -168,7 +169,9 @@ func TestConsoleFunctionsV1(t *testing.T) {
 			props["Source upload URL"] != fn.GetSourceUploadUrl() {
 			t.Errorf("the console's page of %s = %v; want the v1 resource", cs.id, props)
 		}
-		offered := strings.Join(acts, ",") == "test-function"
+		// The page offers Edit, Download and Permissions too (#1491); what
+		// matters here is that Test function is among them.
+		offered := slices.Contains(acts, "test-function")
 		if cs.id == "console-v1-http" {
 			if !offered || props["URL"] != fn.GetHttpsTrigger().GetUrl() {
 				t.Errorf("the HTTP function's page = %v with actions %v; want its URL and Test function", props, acts)

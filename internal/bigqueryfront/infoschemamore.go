@@ -33,10 +33,12 @@ import (
 // dataset billed by physical bytes, where it is NULL. last_modified_time,
 // "the most recent time that data was written to the partition", is the
 // latest change to its rows in the engine's change table (changeWrites),
-// the engine's transaction time; NULL where that table holds none (it
-// keeps seven days, and none of a table made before the engine kept
-// them), and for an ingestion-time partitioned table, whose change table
-// keeps no _PARTITIONTIME. storage_tier is
+// the engine's transaction time, by the instance clock (#1487); NULL where
+// that table holds none (it keeps seven days, and none of a table made
+// before the engine kept them). An ingestion-time partitioned table's
+// change table keeps each change's _PARTITIONTIME (googlesqlite patch
+// 0050, #1458); one made before that patch has none, and its partitions'
+// last_modified_time is NULL. storage_tier is
 // ACTIVE for a table made in the last 90 days (no partition of it can have
 // gone 90 days unmodified, https://cloud.google.com/bigquery/pricing#storage),
 // and NULL otherwise. An ingestion-time partitioned table's partitions are
@@ -178,7 +180,7 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 		// last_modified_time: the partition's latest change in the
 		// engine's change table (changeWrites), NULL where it has none.
 		changed := "SELECT CAST(NULL AS STRING) AS pid, CAST(NULL AS TIMESTAMP) AS t"
-		if c := f.changeWrites(r, project, dataset, name); c != "" && (id == "" || !pm.ingestion()) {
+		if c := f.changeWrites(r, project, dataset, name, pm.ingestion()); c != "" {
 			changed = "SELECT " + pid + " AS pid, MAX(_CHANGE_TIMESTAMP) AS t FROM " + c + " GROUP BY 1"
 		}
 		selects = append(selects, "SELECT "+head+"p.pid AS partition_id, p.n AS total_rows, p.b AS total_logical_bytes, "+
@@ -206,13 +208,20 @@ func (f front) physicalBilling(r *http.Request, dataset string) bool {
 // inserted, deleted or updated, with its column values and
 // _CHANGE_TIMESTAMP, the time of its transaction, kept seven days. It is
 // "" for a table that has no change table (one made before the engine
-// kept them).
-func (f front) changeWrites(r *http.Request, project, dataset, table string) string {
+// kept them). With partitionTime (an ingestion-time partitioned table)
+// it also has each change's _PARTITIONTIME, a pseudo-column of the change
+// table (googlesqlite patch 0050, #1458), and is "" for a change table
+// made before that patch, which keeps none.
+func (f front) changeWrites(r *http.Request, project, dataset, table string, partitionTime bool) string {
 	path := quotePath([]string{project, dataset, table + changeTableSuffix})
-	if _, msg := f.scalar(r, "SELECT COUNT(*) FROM "+path+" WHERE FALSE"); msg != "" {
+	cols := "*"
+	if partitionTime {
+		cols = "*, _PARTITIONTIME"
+	}
+	if _, msg := f.scalar(r, "SELECT COUNT(*) FROM (SELECT "+cols+" FROM "+path+" WHERE FALSE)"); msg != "" {
 		return ""
 	}
-	return "(SELECT * FROM " + path + " WHERE _CHANGE_TYPE != 'START')"
+	return "(SELECT " + cols + " FROM " + path + " WHERE _CHANGE_TYPE != 'START')"
 }
 
 const routineOptionsColumns = "STRUCT<specific_catalog STRING, specific_schema STRING, specific_name STRING, " +
