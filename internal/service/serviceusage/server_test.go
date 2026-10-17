@@ -144,3 +144,53 @@ func TestMethodsTableMatchesTheRouter(t *testing.T) {
 		}
 	}
 }
+
+// operations.list lists every operation oldest first and pages; cancel of
+// a done one answers Empty and leaves it done; delete forgets it; a filter
+// is refused saying why (#1530).
+func TestOperationsListCancelDelete(t *testing.T) {
+	_, c := newTestServer(t, store.NewMemory())
+	ctx := context.Background()
+	const p = "projects/su-ops"
+	var names []string
+	for _, svc := range []string{"run.googleapis.com", "storage.googleapis.com", "run.googleapis.com"} {
+		op, err := c.Services.Disable(p+"/services/"+svc, &su.DisableServiceRequest{}).Context(ctx).Do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, op.Name)
+	}
+	page, err := c.Operations.List().PageSize(2).Context(ctx).Do()
+	if err != nil || len(page.Operations) != 2 || page.Operations[0].Name != names[0] || page.NextPageToken == "" {
+		t.Fatalf("list page 1 = %+v, %v", page, err)
+	}
+	rest, err := c.Operations.List().PageSize(2).PageToken(page.NextPageToken).Context(ctx).Do()
+	if err != nil || len(rest.Operations) != 1 || rest.Operations[0].Name != names[2] || rest.NextPageToken != "" {
+		t.Fatalf("list page 2 = %+v, %v", rest, err)
+	}
+	if _, err := c.Operations.Cancel(names[0], &su.CancelOperationRequest{}).Context(ctx).Do(); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if op, err := c.Operations.Get(names[0]).Context(ctx).Do(); err != nil || !op.Done || op.Error != nil {
+		t.Errorf("after cancel get = %+v, %v; want it still done", op, err)
+	}
+	if _, err := c.Operations.Delete(names[1]).Context(ctx).Do(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := c.Operations.Get(names[1]).Context(ctx).Do(); code(err) != http.StatusNotFound {
+		t.Errorf("get of a deleted operation = %v; want 404", err)
+	}
+	if _, err := c.Operations.Delete(names[1]).Context(ctx).Do(); code(err) != http.StatusNotFound {
+		t.Errorf("second delete = %v; want 404", err)
+	}
+	if _, err := c.Operations.Cancel("operations/nope", &su.CancelOperationRequest{}).Context(ctx).Do(); code(err) != http.StatusNotFound {
+		t.Errorf("cancel of an unknown operation = %v; want 404", err)
+	}
+	all, err := c.Operations.List().Context(ctx).Do()
+	if err != nil || len(all.Operations) != 2 {
+		t.Errorf("list after delete = %+v, %v", all, err)
+	}
+	if _, err := c.Operations.List().Filter("done=true").Context(ctx).Do(); code(err) != http.StatusNotImplemented || !strings.Contains(err.Error(), "filter") {
+		t.Errorf("list with a filter = %v; want 501 naming the filter", err)
+	}
+}

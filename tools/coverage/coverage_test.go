@@ -16,8 +16,12 @@ func fixtureRoot(t *testing.T, compat string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reasons, err := os.ReadFile("reasons.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for dir, files := range map[string]map[string][]byte{
-		"tools/coverage": {"registry.json": reg},
+		"tools/coverage": {"registry.json": reg, "reasons.json": reasons},
 		"test/compat":    {"x_test.go": []byte("//go:build compat\n\npackage compat\n\nimport \"testing\"\n" + compat)},
 	} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
@@ -90,5 +94,29 @@ func TestAnUnclassifiedOwnMethodIsRefused(t *testing.T) {
 	_ = os.WriteFile(path, b, 0o644)
 	if _, err := build(root); err == nil || !strings.Contains(err.Error(), "PurgeQueue has no registry entry") {
 		t.Errorf("an unclassified method was accepted: %v", err)
+	}
+}
+
+// A reason shows on the row it explains, and one on a Verified row, or on a
+// method no service has, is refused (#1530).
+func TestReasonsShowAndAreChecked(t *testing.T) {
+	const m = "google.cloud.secretmanager.v1.SecretManagerService/RotateSecret"
+	pages, err := build(fixtureRoot(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := rowOf(t, pages, m); r.Status != "Unimplemented" || !strings.Contains(r.Note, "Cloud SQL") {
+		t.Errorf("%s: %+v; want its reason", m, r)
+	}
+	for name, entry := range map[string]string{
+		"verified": "google.cloud.tasks.v2.CloudTasks/ListTasks",
+		"unknown":  "google.cloud.tasks.v2.CloudTasks/ListTasksEverywhere",
+	} {
+		root := fixtureRoot(t, "\n// covers: google.cloud.tasks.v2.CloudTasks/ListTasks\nfunc TestListsTasks(t *testing.T) {}\n")
+		b, _ := json.Marshal(map[string]string{entry: "because"})
+		_ = os.WriteFile(filepath.Join(root, "tools", "coverage", "reasons.json"), b, 0o644)
+		if _, err := build(root); err == nil || !strings.Contains(err.Error(), "reasons.json") {
+			t.Errorf("%s: a reason on %s was accepted: %v", name, entry, err)
+		}
 	}
 }

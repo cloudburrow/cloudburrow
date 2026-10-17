@@ -49,3 +49,36 @@ func TestConsoleServiceUsageEnableDisable(t *testing.T) {
 		t.Error("enabling Spanner on an instance without it succeeded")
 	}
 }
+
+// The Service Usage operations page lists a project's operations, done,
+// and its Delete forgets one, as operations.delete does (#1530).
+func TestConsoleServiceUsageOperations(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceStorage}
+	srv := newServiceUsageServer(cfg, nil, store.NewMemory())
+	p := serviceUsageOperationsProvider{api: srv}
+	ctx := context.Background()
+	if err := srv.SetState("su-ops-console", "storage.googleapis.com", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.SetState("another-project", "storage.googleapis.com", false); err != nil {
+		t.Fatal(err)
+	}
+	l, err := p.List(ctx, "su-ops-console")
+	if err != nil || len(l.Items) != 1 {
+		t.Fatalf("list = %+v, %v; want this project's one operation", l.Items, err)
+	}
+	r := l.Items[0]
+	if r.Status != "DONE" || r.Fields["Services"] != "storage.googleapis.com" || r.Fields["Result"] != "DisableServiceResponse" || r.Actions[0].ID != "delete" {
+		t.Fatalf("row = %+v", r)
+	}
+	if err := p.Act(ctx, "su-ops-console", r.Name, "delete"); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := p.List(ctx, "su-ops-console"); len(l.Items) != 0 {
+		t.Errorf("after Delete: %+v", l.Items)
+	}
+	if len(srv.Operations()) != 1 {
+		t.Errorf("Delete removed another project's operation: %d left", len(srv.Operations()))
+	}
+}
