@@ -12,24 +12,26 @@ import (
 // (JobStatistics2.statementType).
 func TestStatementTypeOf(t *testing.T) {
 	for sql, want := range map[string]string{
-		"SELECT 1":                                               "SELECT",
-		"WITH a AS (SELECT 1) SELECT * FROM a":                   "SELECT",
-		"INSERT INTO ds.t VALUES (1)":                            "INSERT",
+		"SELECT 1":                             "SELECT",
+		"WITH a AS (SELECT 1) SELECT * FROM a": "SELECT",
+		"INSERT INTO ds.t VALUES (1)":          "INSERT",
+
 		"merge ds.t USING ds.s ON TRUE WHEN MATCHED THEN DELETE": "MERGE",
-		"CREATE TEMP TABLE t (a INT64)":                          "CREATE_TABLE",
-		"CREATE OR REPLACE TABLE ds.t AS SELECT 1 AS a":          "CREATE_TABLE_AS_SELECT",
-		"CREATE TABLE ds.t (a INT64) AS SELECT 1":                "CREATE_TABLE_AS_SELECT",
-		"CREATE TABLE ds.t LIKE ds.s":                            "CREATE_TABLE",
-		"CREATE TEMP FUNCTION f(x INT64) AS (x)":                 "CREATE_FUNCTION",
-		"CREATE TABLE FUNCTION ds.f() AS SELECT 1 AS a":          "CREATE_TABLE_FUNCTION",
-		"CREATE MATERIALIZED VIEW ds.mv AS SELECT 1 AS a":        "CREATE_MATERIALIZED_VIEW",
-		"CREATE SNAPSHOT TABLE ds.s CLONE ds.t":                  "CREATE_SNAPSHOT_TABLE",
-		"DROP TABLE t":                                           "DROP_TABLE",
-		"DROP SCHEMA ds CASCADE":                                 "DROP_SCHEMA",
-		"ALTER TABLE ds.t ADD COLUMN b INT64":                    "ALTER_TABLE",
-		"TRUNCATE TABLE ds.t":                                    "TRUNCATE_TABLE",
-		"ASSERT TRUE":                                            "ASSERT",
-		"DECLARE x INT64":                                        "",
+
+		"CREATE TEMP TABLE t (a INT64)":                   "CREATE_TABLE",
+		"CREATE OR REPLACE TABLE ds.t AS SELECT 1 AS a":   "CREATE_TABLE_AS_SELECT",
+		"CREATE TABLE ds.t (a INT64) AS SELECT 1":         "CREATE_TABLE_AS_SELECT",
+		"CREATE TABLE ds.t LIKE ds.s":                     "CREATE_TABLE",
+		"CREATE TEMP FUNCTION f(x INT64) AS (x)":          "CREATE_FUNCTION",
+		"CREATE TABLE FUNCTION ds.f() AS SELECT 1 AS a":   "CREATE_TABLE_FUNCTION",
+		"CREATE MATERIALIZED VIEW ds.mv AS SELECT 1 AS a": "CREATE_MATERIALIZED_VIEW",
+		"CREATE SNAPSHOT TABLE ds.s CLONE ds.t":           "CREATE_SNAPSHOT_TABLE",
+		"DROP TABLE t":                                    "DROP_TABLE",
+		"DROP SCHEMA ds CASCADE":                          "DROP_SCHEMA",
+		"ALTER TABLE ds.t ADD COLUMN b INT64":             "ALTER_TABLE",
+		"TRUNCATE TABLE ds.t":                             "TRUNCATE_TABLE",
+		"ASSERT TRUE":                                     "ASSERT",
+		"DECLARE x INT64":                                 "",
 	} {
 		if got := statementTypeOf(sql); got != want {
 			t.Errorf("%s: %q, want %q", sql, got, want)
