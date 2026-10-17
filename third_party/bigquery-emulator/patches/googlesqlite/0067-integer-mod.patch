@@ -13,7 +13,7 @@ CloudBurrow Authors.
 
 --- a/internal/functions/math/mod.go
 +++ b/internal/functions/math/mod.go
-@@ -9,6 +9,18 @@
+@@ -9,6 +9,19 @@
  )
  
  func MOD(x, y value.Value) (value.Value, error) {
@@ -24,7 +24,8 @@ CloudBurrow Authors.
 +	if xi, ok := x.(value.IntValue); ok {
 +		if yi, ok := y.(value.IntValue); ok {
 +			if yi == 0 {
-+				return nil, fmt.Errorf("MOD: zero divided")
++				// #1585's form, as the float64 path below gives it.
++				return nil, fmt.Errorf("division by zero: MOD(%d, 0)", int64(xi))
 +			}
 +			return value.IntValue(int64(xi) % int64(yi)), nil
 +		}
@@ -57,7 +58,7 @@ CloudBurrow Authors.
 +			t.Errorf("MOD(%d, %d) = %v, %v; want %d", c.x, c.y, got, err, c.want)
 +		}
 +	}
-+	if _, err := MOD(value.IntValue(1), value.IntValue(0)); err == nil {
-+		t.Errorf("MOD(1, 0): no error")
++	if _, err := MOD(value.IntValue(1), value.IntValue(0)); err == nil || err.Error() != "division by zero: MOD(1, 0)" {
++		t.Errorf("MOD(1, 0): %v; want division by zero: MOD(1, 0)", err)
 +	}
 +}
