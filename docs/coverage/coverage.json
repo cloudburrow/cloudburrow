@@ -5247,6 +5247,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
@@ -5281,6 +5282,8 @@
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
           "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
@@ -5313,6 +5316,8 @@
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
@@ -5404,6 +5409,8 @@
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
           "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storagelifecycle_test.go:45 TestStorageLifecycleUnknownCondition400",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
@@ -5895,6 +5902,7 @@
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
           "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
@@ -6029,7 +6037,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       },
       {
@@ -6037,7 +6046,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       },
       {
@@ -6045,7 +6055,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ],
         "unverified": [
           {
@@ -6065,7 +6076,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       },
       {
@@ -6073,7 +6085,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
-          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
         ]
       }
     ]

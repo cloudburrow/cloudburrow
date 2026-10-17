@@ -45,7 +45,8 @@ instance (#1290), the XML API's bucket `PUT`, service `GET` and form `POST` (#12
 `google.storage.v2` API (#1321), and its customer-supplied encryption keys, ACLs, managed-folder
 IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345). ACLs
 and object IAM on the JSON API are excluded (below). Bucket IP filters (enforced for public sources),
-Rapid Caches and `managedFolders.update` are built (#1505).
+Rapid Caches and `managedFolders.update` are built, with their console screens and gcloud and Terraform
+(`ip_filter`) tests (#1505).
 
 | Gap | Why open | Size |
 |---|---|---|

@@ -82,11 +82,18 @@ func isRapidOp(t string) bool {
 	return t == createRapidType || t == updateRapidType || t == disableRapidType
 }
 
+// parseRapidAdmission reads a Rapid Cache's admissionPolicy. The control
+// API's field documents no_read_admission, while gcloud alpha storage buckets
+// rapid-caches sends its --admission-policy as no-read-admission or
+// NO_READ_ADMISSION (and ADMIT_ON_FIRST_MISS): each spelling is read as the
+// one value, stored as the control API documents it.
 func parseRapidAdmission(v any) (string, error) {
-	if s, _ := v.(string); strings.ToLower(s) == noReadAdmission {
+	s, _ := v.(string)
+	norm := strings.ReplaceAll(strings.ToLower(s), "_", "-")
+	if norm == "no-read-admission" {
 		return noReadAdmission, nil
 	}
-	a, err := parseAdmission(v)
+	a, err := parseAdmission(norm)
 	if err != nil {
 		return "", badRequest("Invalid argument: admissionPolicy %v must be no_read_admission, admit-on-first-miss or admit-on-second-miss.", v)
 	}

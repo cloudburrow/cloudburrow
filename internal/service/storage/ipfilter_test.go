@@ -107,3 +107,20 @@ func TestRapidCachesAndManagedFolderConfig(t *testing.T) {
 		t.Errorf("get disabled = %d %s", code, resp)
 	}
 }
+
+// TestRapidAdmissionSpellings: gcloud alpha storage buckets rapid-caches
+// sends --admission-policy as no-read-admission, NO_READ_ADMISSION or
+// ADMIT_ON_FIRST_MISS; each is read as the value the control API documents.
+func TestRapidAdmissionSpellings(t *testing.T) {
+	for in, want := range map[string]string{
+		"no_read_admission": noReadAdmission, "no-read-admission": noReadAdmission, "NO_READ_ADMISSION": noReadAdmission,
+		"admit-on-first-miss": admitFirstMiss, "ADMIT_ON_FIRST_MISS": admitFirstMiss, "admit-on-second-miss": admitSecondMiss,
+	} {
+		if got, err := parseRapidAdmission(in); err != nil || got != want {
+			t.Errorf("parseRapidAdmission(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := parseRapidAdmission("admit-always"); err == nil {
+		t.Error("admit-always was read as an admission policy")
+	}
+}
