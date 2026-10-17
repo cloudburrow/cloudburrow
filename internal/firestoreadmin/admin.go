@@ -7,7 +7,8 @@
 // admin calls, over gRPC and over REST, and passes every other call to the
 // emulator unchanged.
 //
-// What it keeps, in memory, as the emulator keeps its documents:
+// What it keeps, in its state directory when it has one (state.go,
+// #1514), as the emulator keeps its documents:
 //
 //   - Databases. `(default)` is described for every project until it is
 //     deleted; CreateDatabase adds a named one. The emulator serves any
@@ -56,6 +57,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 )
 
 // DefaultLocation is the location `(default)` is described in: the emulator
@@ -99,6 +102,11 @@ type Admin struct {
 	// storage is the instance's Cloud Storage, for exports and imports.
 	storage string
 	emulatorConn
+
+	// state is the front's state directory (state.go, #1514); nil keeps
+	// the state in memory alone.
+	state *frontstate.Store
+	logf  func(string, ...any)
 }
 
 // New returns the API for the emulator at emulator (host:port).
@@ -117,7 +125,7 @@ func New(emulator string) *Admin {
 		backups:    map[string]*backup{},
 		lastBackup: map[string]time.Time{},
 	}
-	a.grpc = grpc.NewServer()
+	a.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(a.persistAfter))
 	adminpb.RegisterFirestoreAdminServer(a.grpc, a)
 	longrunningpb.RegisterOperationsServer(a.grpc, a)
 	return a
@@ -135,6 +143,9 @@ const (
 // a gRPC call to FirestoreAdmin or Operations, or a REST call under
 // /v1/projects/ that is not under a database's documents.
 func (a *Admin) Claims(r *http.Request) bool {
+	if r.URL.Path == frontstate.ResetPath {
+		return true
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		return strings.HasPrefix(r.URL.Path, adminService) || strings.HasPrefix(r.URL.Path, opsService)
 	}
@@ -149,10 +160,17 @@ var documentsPath = regexp.MustCompile(`^/v1/projects/[^/]+/databases/[^/]+/docu
 
 // ServeHTTP answers an admin call Claims claimed.
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == frontstate.ResetPath {
+		frontstate.ServeReset(w, r, a.ResetState)
+		return
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		a.grpc.ServeHTTP(w, r)
 		return
 	}
+	// The state is written as the call returns (state.go); a gRPC call's
+	// before it is answered, by the server's interceptor.
+	defer a.persist()
 	a.serveREST(w, r)
 }
 

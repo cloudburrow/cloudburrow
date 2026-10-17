@@ -49,6 +49,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -100,6 +101,11 @@ type Instances struct {
 	// partitions the changes UpdateInstancePartition made.
 	configs    map[string]*instancepb.InstanceConfig
 	partitions map[string]*partitionChange
+
+	// state is the front's state directory (state.go, #1514); nil keeps
+	// the state in memory alone.
+	state *frontstate.Store
+	logf  func(string, ...any)
 }
 
 type change struct {
@@ -119,7 +125,7 @@ func New(emulator string) (*Instances, error) {
 		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}, policies: map[string]*iampolicy.Stored{},
 		backups: map[string]*backup{}, restored: map[string]*databasepb.RestoreInfo{}, schedules: map[string]*schedule{},
 		roleStmts: map[string][]string{}, configs: map[string]*instancepb.InstanceConfig{}, partitions: map[string]*partitionChange{}}
-	s.grpc = grpc.NewServer()
+	s.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(s.persistAfter))
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
 	longrunningpb.RegisterOperationsServer(s.grpc, s)
@@ -151,6 +157,9 @@ func (s *Instances) ownOperation(name string) bool {
 
 // Claims reports whether r is one of the instance calls the front answers.
 func (s *Instances) Claims(r *http.Request) bool {
+	if r.URL.Path == frontstate.ResetPath {
+		return true
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		if r.URL.Path == getOperation {
 			return true
@@ -176,10 +185,17 @@ func (s *Instances) Claims(r *http.Request) bool {
 
 // ServeHTTP answers a call Claims claimed.
 func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == frontstate.ResetPath {
+		frontstate.ServeReset(w, r, s.ResetState)
+		return
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		s.grpc.ServeHTTP(w, r)
 		return
 	}
+	// The state is written as the call returns (state.go); a gRPC call's
+	// before it is answered, by the server's interceptor.
+	defer s.persist()
 	if r.Method == http.MethodPost && restIAM.MatchString(r.URL.Path) {
 		s.serveRESTIAM(w, r)
 		return

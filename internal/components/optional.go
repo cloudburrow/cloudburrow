@@ -208,6 +208,22 @@ func OptionalPort(s config.Service) int {
 // request metrics, request log and traces, so a pod's calls are seen as
 // the host's are. Its image is the storage image, which
 // LifecycleComponent.Backends sets.
+// FrontStateDir is where the Spanner, Bigtable and Firestore fronts keep
+// their records and data copies (#1514), on an emptyDir of their pod
+// limited to FrontStateSizeLimit: a restart of the front's container keeps
+// them, and a restart of the pod loses them with the emulator's data.
+const (
+	FrontStateDir       = "/var/lib/cloudburrow-front"
+	FrontStateSizeLimit = "1Gi"
+)
+
+// withState has the front keep its state in FrontStateDir.
+func withState(f *Front) *Front {
+	f.Args = append(f.Args, "--state-dir", FrontStateDir)
+	f.StateDir, f.StateSizeLimit = FrontStateDir, FrontStateSizeLimit
+	return f
+}
+
 func callFront(port, upstream int) *Front {
 	return &Front{
 		Name:       "front",
@@ -236,7 +252,7 @@ func firestoreBackend(project string) Backend {
 func firestoreFront() *Front {
 	f := callFront(FirestorePort, FirestoreEmulatorPort)
 	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore")
-	return f
+	return withState(f)
 }
 
 // datastoreFront is the call front, answering RunAggregationQuery, which
@@ -334,13 +350,13 @@ func bigtableBackend(project string) Backend {
 		Image:   PubSubImage,
 		Command: []string{bigtableEmulator, "-host", "127.0.0.1", "-port", fmt.Sprint(BigtableEmulatorPort)},
 		Port:    BigtablePort,
-		Front: &Front{
+		Front: withState(&Front{
 			Name:       "front",
 			PullPolicy: "Never",
 			Args: []string{"bigtable-front", "--listen", fmt.Sprintf("0.0.0.0:%d", BigtablePort),
 				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigtableEmulatorPort)},
 			UpstreamPort: BigtableEmulatorPort,
-		},
+		}),
 	}
 }
 
@@ -353,6 +369,7 @@ func spannerBackend() Backend {
 	front.Args = append(front.Args, "--rest-listen", fmt.Sprintf("0.0.0.0:%d", SpannerRESTPort),
 		"--rest-upstream", fmt.Sprintf("127.0.0.1:%d", SpannerEmulatorRESTPort),
 		"--spanner-instances")
+	withState(front)
 	front.Extra = []FrontPort{{Port: SpannerRESTPort, Upstream: SpannerEmulatorRESTPort}}
 	return Backend{
 		Name:  "spanner",

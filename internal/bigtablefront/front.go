@@ -40,6 +40,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
@@ -85,6 +86,8 @@ type Front struct {
 	sqlViews *sqlViews
 	bundles  *schemaBundles
 	served   map[string]method
+	// persist is the state directory (state.go, #1514), when there is one.
+	persist persister
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -195,6 +198,8 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		return status.Error(codes.Internal, "no method on the stream")
 	}
 	if m, ok := f.served[method]; ok {
+		// The state is written as the call returns (state.go).
+		defer f.flush()
 		return serveUnary(ss, m)
 	}
 	if strings.HasPrefix(method, instanceAdmin) || strings.HasPrefix(method, operations) {
@@ -361,7 +366,12 @@ func (f *Front) httpHandler() http.Handler {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, restPrefix) {
+			defer f.flush()
 			api.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == frontstate.ResetPath {
+			f.serveReset(w, r)
 			return
 		}
 		http.NotFound(w, r)
