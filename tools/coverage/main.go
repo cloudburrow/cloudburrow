@@ -202,9 +202,11 @@ var areas = []area{
 // answers 501 (a Cloud SQL backup is restored by Cloud SQL). Patches,
 // plan revisions, the fetch and reference views and operations.cancel and
 // delete are served since #1462, resourceBackupConfigs.list (Cloud SQL
-// instances) since #1501; management servers, the appliance's
-// data source methods, trials, resource backup configs' fetch and
-// serviceConfig.initialize answer 501 naming what they need.
+// instances) since #1501, resourceBackupConfigs.fetch, trials and
+// msComplianceMetadata since #1536; management servers, the appliance's
+// data source methods, a folder's or organization's fetch and
+// serviceConfig.initialize answer 501 naming what they need
+// (reasons.json says why).
 var backupdrStatuses = map[string]bool{
 	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            false,
 	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      false,
@@ -248,25 +250,25 @@ var backupdrStatuses = map[string]bool{
 	"backupdr.projects.locations.dataSourceReferences.get":                              true,
 	"backupdr.projects.locations.dataSourceReferences.list":                             true,
 	"backupdr.projects.locations.get":                                                   true,
-	"backupdr.projects.locations.getTrial":                                              false,
+	"backupdr.projects.locations.getTrial":                                              true,
 	"backupdr.projects.locations.list":                                                  true,
 	"backupdr.projects.locations.managementServers.create":                              false,
 	"backupdr.projects.locations.managementServers.delete":                              false,
 	"backupdr.projects.locations.managementServers.get":                                 false,
 	"backupdr.projects.locations.managementServers.getIamPolicy":                        false,
 	"backupdr.projects.locations.managementServers.list":                                false,
-	"backupdr.projects.locations.managementServers.msComplianceMetadata":                false,
+	"backupdr.projects.locations.managementServers.msComplianceMetadata":                true,
 	"backupdr.projects.locations.managementServers.setIamPolicy":                        false,
 	"backupdr.projects.locations.managementServers.testIamPermissions":                  false,
 	"backupdr.projects.locations.operations.cancel":                                     true,
 	"backupdr.projects.locations.operations.delete":                                     true,
 	"backupdr.projects.locations.operations.get":                                        true,
 	"backupdr.projects.locations.operations.list":                                       true,
-	"backupdr.projects.locations.resourceBackupConfigs.fetch":                           false,
+	"backupdr.projects.locations.resourceBackupConfigs.fetch":                           true,
 	"backupdr.projects.locations.resourceBackupConfigs.list":                            true,
 	"backupdr.projects.locations.serviceConfig.initialize":                              false,
-	"backupdr.projects.locations.trial.end":                                             false,
-	"backupdr.projects.locations.trial.subscribe":                                       false,
+	"backupdr.projects.locations.trial.end":                                             true,
+	"backupdr.projects.locations.trial.subscribe":                                       true,
 }
 
 // backupdrMethods is backupdrStatuses' methods, sorted.

@@ -270,7 +270,7 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	} else {
 		for _, x := range bdrItems(out, "resourceBackupConfigs") {
 			for _, dt := range bdrItems(x, "backupConfigsDetails") {
-				if str(dt, "type") != "BACKUPDR" || str(dt, "backupVault") != vault {
+				if str(dt, "type") != "BACKUPDR_BACKUP_PLAN" || str(dt, "backupVault") != vault {
 					continue
 				}
 				prot.Items = append(prot.Items, console.Resource{Name: str(x, "targetResourceDisplayName"), Status: str(dt, "state"),

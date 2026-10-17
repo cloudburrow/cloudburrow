@@ -140,6 +140,8 @@ type state struct {
 	Associations map[string]*association `json:"associations"`
 	DataSources  map[string]*dataSource  `json:"dataSources"`
 	Backups      map[string]*backup      `json:"backups"`
+	// Trials are by location name (#1536).
+	Trials map[string]*trial `json:"trials,omitempty"`
 }
 
 type vault struct {
@@ -379,13 +381,29 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		return "backupdr.projects.locations.get", locationJSON(p[1], p[3]), nil
 	}
 	rest := p[4:]
-	if len(rest) == 1 && rest[0] == "resourceBackupConfigs" && verb == "" && r.Method == http.MethodGet {
-		out, err := s.listResourceBackupConfigs(r, p[1], p[3])
+	if len(rest) == 1 && rest[0] == "resourceBackupConfigs" && r.Method == http.MethodGet && (verb == "" || verb == "fetch") {
+		out, err := s.listResourceBackupConfigs(r, p[1], p[3], verb == "fetch")
+		if verb == "fetch" {
+			return "backupdr.projects.locations.resourceBackupConfigs.fetch", out, err
+		}
 		return "backupdr.projects.locations.resourceBackupConfigs.list", out, err
 	}
-	if len(rest) == 0 && verb == "msComplianceMetadata" {
-		return "backupdr.projects.locations.managementServers.msComplianceMetadata", nil,
-			unimplemented("managementServers.msComplianceMetadata", managementServerWhy)
+	if len(rest) == 1 && rest[0] == "managementServers" && verb == "msComplianceMetadata" && r.Method == http.MethodPost {
+		out, err := s.msComplianceMetadata(r)
+		return "backupdr.projects.locations.managementServers.msComplianceMetadata", out, err
+	}
+	if len(rest) == 1 && rest[0] == "trial" {
+		switch {
+		case verb == "" && r.Method == http.MethodGet:
+			out, err := s.getTrial(loc, p[3])
+			return "backupdr.projects.locations.getTrial", out, err
+		case verb == "subscribe" && r.Method == http.MethodPost:
+			out, err := s.subscribeTrial(r, loc, p[3])
+			return "backupdr.projects.locations.trial.subscribe", out, err
+		case verb == "end" && r.Method == http.MethodPost:
+			out, err := s.endTrial(r, loc, p[3])
+			return "backupdr.projects.locations.trial.end", out, err
+		}
 	}
 	if len(rest) == 0 {
 		return "", nil, unimplemented("projects.locations."+verb, otherWhy)
@@ -535,13 +553,6 @@ func refused(rest []string, verb string) (string, string) {
 			return pre + "managementServers", managementServerWhy
 		}
 		return pre + "managementServers." + m, managementServerWhy
-	case len(rest) == 1 && rest[0] == "trial":
-		if verb == "" {
-			return pre + "getTrial", trialWhy
-		}
-		return pre + "trial." + verb, trialWhy
-	case len(rest) == 1 && rest[0] == "resourceBackupConfigs":
-		return pre + "resourceBackupConfigs." + map[bool]string{true: "fetch", false: "list"}[verb == "fetch"], inventoryWhy
 	case len(rest) == 1 && rest[0] == "serviceConfig" && verb == "initialize":
 		return pre + "serviceConfig.initialize", initializeWhy
 	case len(rest) == 4 && rest[0] == "backupVaults" && rest[2] == "dataSources":
