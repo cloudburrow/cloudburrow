@@ -119,10 +119,10 @@ type Server struct {
 	certs *sslCertStore
 	// secrets reads executeSql's passwordSecretVersion (#1462), nil
 	// unless SetSecretAccessor was called; emu guards it.
-	secrets  SecretAccessor
+	secrets SecretAccessor
 	// kms is Cloud KMS, for diskEncryptionConfiguration (#1538), nil unless
 	// UseKMS was called; emu guards it.
-	kms KeyService
+	kms      KeyService
 	stopAuto chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex

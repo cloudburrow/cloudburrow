@@ -168,7 +168,7 @@ var settingsFields = map[string]fieldRule{
 	// retainBackupsOnDelete and finalBackupConfig decide what instances.
 	// delete keeps (#1538).
 	"retainBackupsOnDelete": kept, "finalBackupConfig": kept,
-	"kind":                  output,
+	"kind": output,
 
 	"authorizedGaeApplications": stored, "autoUpgradeEnabled": stored, "crashSafeReplicationEnabled": stored,
 	"dataCacheConfig": stored, "dataDiskProvisionedIops": stored, "dataDiskProvisionedThroughput": stored,
@@ -230,7 +230,7 @@ var backupRunFields = map[string]fieldRule{
 		return Errorf(http.StatusBadRequest, "Invalid request: %s cannot be set on a backup run: a backup inherits its instance's "+
 			"encryption, as Cloud SQL documents.", f)
 	}},
-	"timeZone": sqlServerOnly(),
+	"timeZone":        sqlServerOnly(),
 	"databaseVersion": output, "diskEncryptionStatus": output, "endTime": output, "enqueuedTime": output,
 	"error": output, "id": output, "instance": output, "kind": output, "maxChargeableBytes": output,
 	"selfLink": output, "startTime": output, "status": output, "windowStartTime": output,

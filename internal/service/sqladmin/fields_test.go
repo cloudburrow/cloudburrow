@@ -184,7 +184,7 @@ var instanceSamples = map[string][2]string{
 	"nodeCount":                                  {`2`, "refuse"},
 	"replicationCluster":                         {`{"failoverDrReplicaName":"dr"}`, "refuse"},
 	"switchTransactionLogsToCloudStorageEnabled": {`true`, "refuse"},
-	"tags":                                       {`{"tagKeys/1":"tagValues/2"}`, "refuse"},
+	"tags": {`{"tagKeys/1":"tagValues/2"}`, "refuse"},
 }
 
 // settingsSamples are the same for Settings.
