@@ -96,6 +96,7 @@ func TestFunctionsAPI(t *testing.T) {
 		t.Errorf("ListLocations = %v, %v", l, err)
 	}
 
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage) // the upload URL is a bucket's
 	up, err := fc.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent})
 	if err != nil {
 		t.Fatalf("GenerateUploadUrl: %v", err)
@@ -294,6 +295,7 @@ func TestFunctionsAPIBuildsAndServes(t *testing.T) {
 	fc := functionsClient(t, h)
 	rc := runClient(t, h)
 
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage) // the upload URL is a bucket's
 	up, err := fc.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent})
 	if err != nil {
 		t.Fatalf("GenerateUploadUrl: %v", err)

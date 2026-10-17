@@ -331,7 +331,7 @@ resource "google_folder" "f" {
 		})
 	}
 	runTFIAMPhases(t, m, base, [2]string{"roles/resourcemanager.folderViewer", "roles/resourcemanager.folderEditor"}, []tfIAMTarget{{
-		kind: "google_folder", label: "f", ref: map[string]string{"folder": "google_folder.f.name"}, read: readFolder,
+		kind: "google_folder", label: "f", policyData: true, ref: map[string]string{"folder": "google_folder.f.name"}, read: readFolder,
 	}})
 	if f, err := fc.GetFolder(ctx, &rmpb.GetFolderRequest{Name: folderName}); err != nil || f.GetState().String() != "DELETE_REQUESTED" {
 		t.Errorf("after destroy %s reads %v, %v; want DELETE_REQUESTED", folderName, f, err)

@@ -133,6 +133,7 @@ func New(emulator string) (*Instances, error) {
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
 	longrunningpb.RegisterOperationsServer(s.grpc, s)
+	spannerpb.RegisterSpannerServer(s.grpc, cacheData{s: s})
 	go s.scheduleLoop()
 	return s, nil
 }
@@ -165,7 +166,7 @@ func (s *Instances) Claims(r *http.Request) bool {
 		return true
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-		if r.URL.Path == getOperation {
+		if r.URL.Path == getOperation || r.URL.Path == fetchCacheUpdate {
 			return true
 		}
 		if m, ok := strings.CutPrefix(r.URL.Path, databaseService); ok {
@@ -173,6 +174,9 @@ func (s *Instances) Claims(r *http.Request) bool {
 		}
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
 		return ok && (claimed[m] || iamMethods[m])
+	}
+	if r.Method == http.MethodPost && restCacheUpdate.MatchString(r.URL.Path) {
+		return true
 	}
 	if r.Method == http.MethodGet && s.ownOperation(strings.TrimPrefix(r.URL.Path, "/v1/")) {
 		return true
@@ -205,6 +209,10 @@ func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The state is written as the call returns (state.go); a gRPC call's
 	// before it is answered, by the server's interceptor.
 	defer s.persist()
+	if m := restCacheUpdate.FindStringSubmatch(r.URL.Path); m != nil && r.Method == http.MethodPost {
+		s.serveRESTCacheUpdate(w, r, m[1])
+		return
+	}
 	if r.Method == http.MethodPost && restIAM.MatchString(r.URL.Path) {
 		s.serveRESTIAM(w, r)
 		return

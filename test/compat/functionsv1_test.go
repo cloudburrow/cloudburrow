@@ -65,6 +65,7 @@ func TestFunctionsV1API(t *testing.T) {
 	if l, err := locs.Next(); err != nil || !strings.HasPrefix(l.GetName(), "projects/"+h.Project()+"/locations/") {
 		t.Errorf("ListLocations = %v, %v", l, err)
 	}
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage) // the upload URL is a bucket's
 	up, err := c.GenerateUploadUrl(ctx, &fv1.GenerateUploadUrlRequest{Parent: parent})
 	if err != nil || up.GetUploadUrl() == "" {
 		t.Fatalf("GenerateUploadUrl = %v, %v", up, err)
@@ -255,6 +256,7 @@ func TestFunctionsV1BuildsAndServes(t *testing.T) {
 	c := functionsV1Client(t, h)
 	fc := functionsClient(t, h)
 
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage) // the upload URL is a bucket's
 	up, err := c.GenerateUploadUrl(ctx, &fv1.GenerateUploadUrlRequest{Parent: parent})
 	if err != nil {
 		t.Fatalf("GenerateUploadUrl: %v", err)

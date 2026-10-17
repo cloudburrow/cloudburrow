@@ -464,8 +464,8 @@ resource "google_tags_tag_value" "v" {
 		}
 	}
 	runTFIAMPhases(t, m, base, [2]string{"roles/resourcemanager.tagUser", "roles/resourcemanager.tagViewer"}, []tfIAMTarget{
-		{kind: "google_tags_tag_key", label: "k", ref: map[string]string{"tag_key": "google_tags_tag_key.k.name"}, read: read(false)},
-		{kind: "google_tags_tag_value", label: "v", ref: map[string]string{"tag_value": "google_tags_tag_value.v.name"}, read: read(true)},
+		{kind: "google_tags_tag_key", label: "k", policyData: true, ref: map[string]string{"tag_key": "google_tags_tag_key.k.name"}, read: read(false)},
+		{kind: "google_tags_tag_value", label: "v", policyData: true, ref: map[string]string{"tag_value": "google_tags_tag_value.v.name"}, read: read(true)},
 	})
 }
 

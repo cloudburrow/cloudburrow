@@ -1,0 +1,127 @@
+CloudBurrow patch 62 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1547).
+
+The bug: a GEOGRAPHY that a streamed row (tabledata.insertAll) or a JSON or
+CSV load gave as text, WKT or GeoJSON, was bound as that text, and the
+engine stored it as a STRING: ST_ASTEXT, ST_X and every other geography
+function of the column failed "expected GEOGRAPHY, got value.StringValue".
+BigQuery loads a GEOGRAPHY from WKT, WKB or GeoJSON text
+(https://cloud.google.com/bigquery/docs/geospatial-data). The patch binds a
+non-REPEATED GEOGRAPHY column's value through ST_GEOGFROM(CAST(? AS STRING)), which reads WKT
+and GeoJSON into a geography, in Repository.addTableRows, which every write
+of rows goes through. A GEOGRAPHY inside a RECORD or a REPEATED one is left
+as it was. server/geography_values_test.go fails without the patch and
+passes with it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/contentdata/repository.go b/internal/contentdata/repository.go
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -732,6 +732,14 @@
+ 			// it as a JSON string literal (double-encoded). PARSE_JSON turns
+ 			// the bound JSON text into a proper JSON value.
+ 			placeholders = append(placeholders, "PARSE_JSON(?)")
++		} else if col.Type == types.GEOGRAPHY && col.Mode != types.RepeatedMode {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1547): a
++			// GEOGRAPHY value is bound as its text (WKT, or GeoJSON:
++			// tabledata.insertAll, JSON and CSV loads), which the engine
++			// stored as a STRING, so a geography function of the column
++			// failed "expected GEOGRAPHY, got value.StringValue".
++			// ST_GEOGFROM reads either into a geography.
++			placeholders = append(placeholders, "ST_GEOGFROM(CAST(? AS STRING))")
+ 		} else if col.Type == types.RANGE && col.Mode != types.RepeatedMode {
+ 			// CloudBurrow patch (cloudburrow/cloudburrow#1492): a RANGE
+ 			// value is bound as its text, "[start, end)", which the
+diff --git a/server/geography_values_test.go b/server/geography_values_test.go
+new file mode 100644
+--- /dev/null
++++ b/server/geography_values_test.go
+@@ -0,0 +1,83 @@
++package server_test
++
++import (
++	"context"
++	"strings"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/iterator"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestGeographyColumnHoldsGeographies is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1547): a GEOGRAPHY a streamed row or a load
++// gave as WKT or GeoJSON text was stored as a STRING, and ST_ASTEXT of the
++// column failed "expected GEOGRAPHY, got value.StringValue".
++func TestGeographyColumnHoldsGeographies(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	schema := bigquery.Schema{
++		{Name: "id", Type: bigquery.IntegerFieldType},
++		{Name: "g", Type: bigquery.GeographyFieldType},
++	}
++	table := client.Dataset("ds").Table("t")
++	if err := table.Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
++		t.Fatal(err)
++	}
++	if err := table.Inserter().Put(ctx, []*bigquery.ValuesSaver{
++		{Schema: schema, InsertID: "1", Row: []bigquery.Value{int64(1), "POINT(1 2)"}},
++	}); err != nil {
++		t.Fatal(err)
++	}
++	src := bigquery.NewReaderSource(strings.NewReader(`{"id":2,"g":"{\"type\":\"Point\",\"coordinates\":[3,4]}"}` + "\n" +
++		`{"id":3,"g":null}` + "\n"))
++	src.SourceFormat = bigquery.JSON
++	job, err := table.LoaderFrom(src).Run(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("load: %v, %v", err, status)
++	}
++	it, err := client.Query("SELECT id, ST_ASTEXT(g) FROM ds.t ORDER BY id").Read(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	want := [][]bigquery.Value{{int64(1), "POINT(1 2)"}, {int64(2), "POINT(3 4)"}, {int64(3), nil}}
++	for i := 0; ; i++ {
++		var row []bigquery.Value
++		if err := it.Next(&row); err == iterator.Done {
++			if i != len(want) {
++				t.Errorf("%d rows, want %d", i, len(want))
++			}
++			break
++		} else if err != nil {
++			t.Fatal(err)
++		}
++		if i >= len(want) || len(row) != 2 || row[0] != want[i][0] || row[1] != want[i][1] {
++			t.Errorf("row %d = %v, want %v", i, row, want[min(i, len(want)-1)])
++		}
++	}
++}

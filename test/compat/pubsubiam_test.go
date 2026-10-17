@@ -295,15 +295,15 @@ resource "google_pubsub_schema" "sc" {
 		}
 	}
 	targets := []tfIAMTarget{
-		{kind: "google_pubsub_topic", label: "t", ref: map[string]string{"project": "google_pubsub_topic.t.project", "topic": "google_pubsub_topic.t.name"},
+		{kind: "google_pubsub_topic", label: "t", policyData: true, ref: map[string]string{"project": "google_pubsub_topic.t.project", "topic": "google_pubsub_topic.t.name"},
 			read: read(func(ctx context.Context, r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 				return c.TopicAdminClient.GetIamPolicy(ctx, r)
 			}, topicName)},
-		{kind: "google_pubsub_subscription", label: "s", ref: map[string]string{"project": "google_pubsub_subscription.s.project", "subscription": "google_pubsub_subscription.s.name"},
+		{kind: "google_pubsub_subscription", label: "s", policyData: true, ref: map[string]string{"project": "google_pubsub_subscription.s.project", "subscription": "google_pubsub_subscription.s.name"},
 			read: read(func(ctx context.Context, r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 				return c.SubscriptionAdminClient.GetIamPolicy(ctx, r)
 			}, sub)},
-		{kind: "google_pubsub_schema", label: "sc", ref: map[string]string{"project": "google_pubsub_schema.sc.project", "schema": "google_pubsub_schema.sc.name"},
+		{kind: "google_pubsub_schema", label: "sc", policyData: true, ref: map[string]string{"project": "google_pubsub_schema.sc.project", "schema": "google_pubsub_schema.sc.name"},
 			read: read(func(ctx context.Context, r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 				return sc.GetIamPolicy(ctx, r)
 			}, "projects/"+project+"/schemas/tf-iam-schema")},

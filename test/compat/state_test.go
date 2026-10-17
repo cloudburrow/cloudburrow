@@ -41,6 +41,7 @@ func TestStateSaveResetLoadRestoresEverything(t *testing.T) {
 	// It checks the Storage snapshot too, so it runs where Storage is served
 	// (the storage shard), not in another shard that happens to have Tasks.
 	h.Endpoint(EnvStorage)
+	h.Endpoint(EnvPubSub) // and the Pub/Sub snapshot
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
