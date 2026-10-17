@@ -106,7 +106,7 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a physical
-(`PHYSICAL`) external sync (see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
+(`PHYSICAL`) external sync (#1570; see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
 and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
 upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and high
 availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (#1462). A legacy failover replica
@@ -155,7 +155,6 @@ Refused with 501, each naming what is missing:
 | `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
 | `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `demote`, `demoteMaster` | they make a Cloud SQL instance a replica of an external primary, to migrate back out of Cloud SQL; the other direction, `startExternalSync`, is served (#1501) |
 | `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
 | `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
@@ -431,10 +430,33 @@ Not as Google: sequences are set by the schema copy but not replicated after (pg
 synchronises them); users are not migrated, as on Cloud SQL; the publication stays on the
 source after the promotion.
 
-501, naming why: `migrationType` `PHYSICAL` (an XtraBackup physical backup), and `demote` and
-`demoteMaster` (the reverse direction; Google's custom import demotes a promoted instance and
-then sets replication up with Cloud SQL's `mysql.*` stored procedures, which CloudBurrow's
-servers do not have).
+**Demoting an instance** (#1524), the reverse direction, for MySQL: a standalone instance
+(not a replica, with no replicas of its own, not `REGIONAL`) becomes a read replica of the server
+a source representation instance records. Its server restarts as a replica (a server ID of its
+own, GTIDs on, read-only); the source is verified first, as for `startExternalSync`.
+
+- **`demoteMaster`** (`DEMOTE_MASTER`), with `demoteMasterContext.masterInstanceName` the source
+  representation instance and optionally `replicaConfiguration.mysqlReplicaConfiguration`'s
+  `username` and `password` (else the source representation instance's), keeps the instance's
+  data and replicates from the source by GTID auto-positioning. `verifyGtidConsistency`, true
+  unless sent false, refuses it 400 when the instance has executed a transaction the source has
+  not (`GTID_SUBSET`).
+- **`demote`** (`DEMOTE`), with `demoteContext.sourceRepresentativeInstanceName`, is Database
+  Migration Service's step for a migration to an existing instance: the instance is left a
+  replica waiting for `startExternalSync` (as the source representation instance's `username` and
+  `password`), which dumps the source's databases into it and starts
+  replicating. Its own databases that the source has not stay.
+
+`promoteReplica` makes it a primary again. In the console, a standalone MySQL instance's page has
+**Demote** (either method); gcloud and Terraform have no demote command or resource.
+
+501, naming why: `migrationType` `PHYSICAL` (Google restores an XtraBackup physical backup from
+Cloud Storage into the replica's data directory; the instance images have no XtraBackup, and the
+restore would need the backup's files copied into the server's volume before it starts, #1570),
+`demoteMaster` with `skipReplicationSetup` (the replication is then set up by hand with Cloud
+SQL's `mysql.*` stored procedures, `mysql.setupExternalSourceAutoPosition` and the rest, which a
+stock MySQL server has not), and `demote` of a PostgreSQL instance (the subscription's first copy
+of the source's tables collides with the rows the instance has).
 
 ### Database versions and major version upgrades (#1381)
 

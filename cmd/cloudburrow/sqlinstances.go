@@ -163,7 +163,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 const mysqlReplicaSetup = `set -e
 ` + mysqlRootEnv + `if [ -n "$(mysql $MYSQL_LOCAL -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
 src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "${CLOUDSQL_PRIMARY_USER:-` + components.SQLReplicaUser + `}"; }
-if [ -z "${CLOUDSQL_SEEDED:-}" ]; then # a replica seeded from dumpFilePath has the data (#1524)
+if [ -z "${CLOUDSQL_SEEDED:-}" ]; then # a replica seeded from dumpFilePath, or demoted by demoteMaster, has the data (#1524)
 dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
 mysql $MYSQL_LOCAL -e 'RESET BINARY LOGS AND GTIDS' 2>/dev/null || mysql $MYSQL_LOCAL -e 'RESET MASTER' # MySQL 8.0's name
 if [ -n "$dbs" ]; then
@@ -337,7 +337,7 @@ func replicaSetup(spec sqladmin.Spec) string {
 		return ""
 	case ext != nil && ext.SyncMode == "OFFLINE":
 		return mysqlOfflineSetup
-	case ext != nil && ext.DumpFile != "":
+	case ext != nil && (ext.DumpFile != "" || ext.Demoted):
 		return "export CLOUDSQL_SEEDED=1\n" + mysqlReplicaSetup
 	}
 	return mysqlReplicaSetup
