@@ -663,6 +663,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:50 TestRunServiceCloudSQLMySQLVolume",
@@ -889,8 +890,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
-          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:733 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories",
+          "test/compat/artifactregistry_remote_test.go:212 TestGcloudArtifactsRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
@@ -924,7 +929,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
+          "test/compat/artifactregistry_formats_test.go:467 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
         ]
       },
@@ -932,7 +937,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository",
+          "test/compat/artifactregistry_formats_test.go:384 TestArtifactRegistryMavenRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -940,8 +945,9 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_formats_test.go:733 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
           "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -958,7 +964,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
+          "test/compat/artifactregistry_formats_test.go:467 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -966,7 +972,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
@@ -1015,21 +1021,21 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetMavenArtifact",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+          "test/compat/artifactregistry_formats_test.go:384 TestArtifactRegistryMavenRepository"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetNpmPackage",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
@@ -1052,7 +1058,10 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_formats_test.go:733 TestTerraformArtifactRegistryRepositoryFormats",
+          "test/compat/artifactregistry_remote_test.go:212 TestGcloudArtifactsRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1069,7 +1078,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
@@ -1087,7 +1096,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
@@ -1096,14 +1105,14 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportAptArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports"
+          "test/compat/artifactregistry_formats_test.go:581 TestArtifactRegistryAptAndYumImports"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportYumArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports",
+          "test/compat/artifactregistry_formats_test.go:581 TestArtifactRegistryAptAndYumImports",
           "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata"
         ]
       },
@@ -1119,7 +1128,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository"
         ]
       },
       {
@@ -1127,22 +1137,24 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListMavenArtifacts",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+          "test/compat/artifactregistry_formats_test.go:384 TestArtifactRegistryMavenRepository"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListNpmPackages",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+          "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
         ]
       },
       {
@@ -1150,7 +1162,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
@@ -1159,7 +1171,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPythonPackages",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository"
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
         ]
       },
       {
@@ -1191,7 +1204,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
@@ -1254,7 +1267,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
+          "test/compat/artifactregistry_formats_test.go:467 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1769,6 +1782,168 @@
     ]
   },
   {
+    "Key": "developerconnect",
+    "Title": "Developer Connect",
+    "counts": {
+      "Unimplemented": 15,
+      "Verified": 11
+    },
+    "rows": [
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateGitRepositoryLink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteGitRepositoryLink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteSelf",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteUser",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchAccessToken",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitHubInstallations",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitRefs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchLinkableGitRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchReadToken",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchReadWriteToken",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchSelf",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FinishOAuth",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetGitRepositoryLink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListAccountConnectors",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListGitRepositoryLinks",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListUsers",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/StartOAuth",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "functions",
     "Title": "Cloud Functions v2",
     "counts": {
@@ -1966,8 +2141,7 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 61
+      "Verified": 76
     },
     "rows": [
       {
@@ -2052,38 +2226,52 @@
       },
       {
         "method": "run.namespaces.instances.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.replaceInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.start",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.instances.stop",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.namespaces.jobs.create",
@@ -2241,28 +2429,38 @@
       },
       {
         "method": "run.namespaces.workerpools.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.replaceWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:138 TestRunV1WorkerPools"
+        ]
       },
       {
         "method": "run.projects.authorizeddomains.list",
@@ -2322,18 +2520,24 @@
       },
       {
         "method": "run.projects.locations.instances.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.projects.locations.instances.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.projects.locations.instances.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1instances_test.go:46 TestRunV1Instances"
+        ]
       },
       {
         "method": "run.projects.locations.jobs.getIamPolicy",
@@ -3391,9 +3595,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
           "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
         ],
         "unverified": [
@@ -4932,52 +5138,77 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Implemented": 1,
-      "Unimplemented": 43,
-      "Verified": 22
+      "Unimplemented": 4,
+      "Verified": 62
     },
     "rows": [
       {
         "method": "google.cloud.memorystore.v1.Memorystore/AddAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/AddTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/BackupInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
-          "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
+          "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
+          "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
+          "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteInstance",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
@@ -4985,38 +5216,54 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ExportBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/FinishMigration",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackupCollection",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
         ]
       },
@@ -5025,6 +5272,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -5036,23 +5286,33 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListAuthTokens",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackupCollections",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackups",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListInstances",
@@ -5064,8 +5324,10 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListTokenAuthUsers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/RescheduleMaintenance",
@@ -5074,63 +5336,94 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/StartMigration",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/UpdateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/AddAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/AddTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/BackupCluster",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/CreateAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
-          "test/compat/memorystorecluster_test.go:232 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystorecluster_test.go:233 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
+          "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
+          "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteCluster",
@@ -5143,38 +5436,53 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ExportBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetAclPolicyRevision",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetAuthToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetBackupCollection",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetCluster",
@@ -5182,13 +5490,16 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetSharedRegionalCertificateAuthority",
@@ -5197,33 +5508,47 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetTokenAuthUser",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAclPolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAclPolicyRevisions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAuthTokens",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListBackupCollections",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListBackups",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListClusters",
@@ -5235,8 +5560,10 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListTokenAuthUsers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/RescheduleClusterMaintenance",
@@ -5245,8 +5572,10 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/UpdateAclPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/UpdateCluster",
@@ -8888,6 +9217,7 @@
         "method": "bigquery.datasets.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquery1548_test.go:37 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigqueryhistory1522_test.go:135 TestBigQueryUndeleteKeepsRoutinesTheFrontDidNotSee",
           "test/compat/bigqueryhistory1522_test.go:39 TestBigQueryUndeleteKeepsExternalTables",
@@ -8905,6 +9235,7 @@
         "method": "bigquery.datasets.get",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquery1548_test.go:37 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
           "test/compat/bigqueryfromitems1459_test.go:119 TestBigQueryCreateSchemaOptionsAndCollation",
@@ -9036,7 +9367,7 @@
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
+          "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
@@ -9066,6 +9397,7 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquery1548_test.go:37 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
@@ -9127,6 +9459,7 @@
           "test/compat/bigqueryinfoschemaschemata_test.go:20 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
+          "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigqueryintervalarith_test.go:35 TestBigQueryIntervalArithmetic",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryjsonunknown_test.go:34 TestBigQueryLoadFieldsOutsideTheSchema",
@@ -9147,6 +9480,7 @@
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
+          "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
@@ -9154,9 +9488,11 @@
           "test/compat/bigquerymlmore_test.go:185 TestBigQueryMLPCA",
           "test/compat/bigquerymlmore_test.go:225 TestBigQueryMLTransform",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
+          "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:76 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
+          "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -9207,7 +9543,7 @@
           "test/compat/bigqueryviewcolumns_test.go:234 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
+          "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
@@ -9223,6 +9559,7 @@
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryexecimmediate_test.go:155 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
+          "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
           "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
@@ -9237,6 +9574,7 @@
         "method": "bigquery.jobs.query",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquery1548_test.go:37 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
@@ -9247,6 +9585,7 @@
           "test/compat/bigquerychangehistory1466_test.go:37 TestBigQueryChangeHistoryRebuilds",
           "test/compat/bigquerychangehistory1503_test.go:101 TestBigQueryChangeHistoryRetention",
           "test/compat/bigquerychangehistory1503_test.go:29 TestBigQueryChangeHistoryCommittedTransaction",
+          "test/compat/bigquerychangehistory1548_test.go:22 TestBigQueryChangeHistoryForUpdateColumn",
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
           "test/compat/bigquerychangehistory_test.go:228 TestBigQueryChangeHistoryRefusals",
           "test/compat/bigquerychangehistory_test.go:47 TestBigQueryChangeHistory",
@@ -9304,6 +9643,7 @@
           "test/compat/bigqueryinfoschemaschemata_test.go:20 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
+          "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigqueryintervalarith_test.go:35 TestBigQueryIntervalArithmetic",
           "test/compat/bigqueryjobsbyfolder_test.go:29 TestBigQueryJobsByFolderAndOrganization",
           "test/compat/bigqueryjson_test.go:128 TestBigQueryJSONBuildersOfStoredRows",
@@ -9325,6 +9665,7 @@
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
+          "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
@@ -9332,9 +9673,11 @@
           "test/compat/bigquerymlmore_test.go:185 TestBigQueryMLPCA",
           "test/compat/bigquerymlmore_test.go:225 TestBigQueryMLTransform",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
+          "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:76 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
+          "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -9403,6 +9746,7 @@
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
+          "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
           "test/compat/bigquerymlmore_test.go:125 TestBigQueryMLKMeans",
@@ -9717,7 +10061,7 @@
           "test/compat/bigqueryviewcolumns_test.go:139 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:234 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
-          "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
+          "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
@@ -9740,6 +10084,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerychangehistory1548_test.go:22 TestBigQueryChangeHistoryForUpdateColumn",
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
           "test/compat/bigquerycollation1508_test.go:27 TestBigQueryCollationUndCI",
           "test/compat/bigquerycollation1508_test.go:93 TestBigQueryCollationDefaults",
@@ -9898,6 +10243,7 @@
         "tests": [
           "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
         ]
       },
@@ -9976,6 +10322,7 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
@@ -10143,6 +10490,8 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlfields_test.go:146 TestTerraformSQLDatabaseInstanceEncryptionKey",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
@@ -10219,6 +10568,8 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlfields_test.go:146 TestTerraformSQLDatabaseInstanceEncryptionKey",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
@@ -10270,6 +10621,8 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlfields_test.go:146 TestTerraformSQLDatabaseInstanceEncryptionKey",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
@@ -10321,6 +10674,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
@@ -10394,6 +10748,7 @@
         "method": "sql.instances.restart",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
         ]
       },
@@ -10472,6 +10827,7 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlfields_test.go:146 TestTerraformSQLDatabaseInstanceEncryptionKey",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
@@ -10623,6 +10979,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
@@ -10742,25 +11099,23 @@
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {
-      "Unimplemented": 17,
-      "Verified": 44
+      "Unimplemented": 15,
+      "Verified": 46
     },
     "rows": [
       {
         "method": "backupdr.folders.locations.resourceBackupConfigs.fetch",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a folder's or organization's fetch answers every project under it, and the Backup and DR Service is not wired to Resource Manager's folders and organizations, so it cannot tell which projects are under one; projects.locations.resourceBackupConfigs.fetch answers each project"
+          "test/compat/backupdrhierarchy_test.go:31 TestBackupDRFetchUnderFolders"
+        ]
       },
       {
         "method": "backupdr.organizations.locations.resourceBackupConfigs.fetch",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a folder's or organization's fetch answers every project under it, and the Backup and DR Service is not wired to Resource Manager's folders and organizations, so it cannot tell which projects are under one; projects.locations.resourceBackupConfigs.fetch answers each project"
+          "test/compat/backupdrhierarchy_test.go:31 TestBackupDRFetchUnderFolders"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupPlanAssociations.create",
