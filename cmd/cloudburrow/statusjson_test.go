@@ -277,3 +277,36 @@ func TestStatusJSONRunWaitsForKnative(t *testing.T) {
 		t.Errorf("run with Knative = %+v, want ready", s)
 	}
 }
+
+// Every service waits for a created cluster's nodes to be Ready, which
+// `kind create --wait` covered when it was part of the cluster (#1588).
+func TestStatusJSONWaitsForTheClusterNodes(t *testing.T) {
+	cfg, err := config.Load(config.Options{
+		Args:   []string{"--name", "golden", "--state-dir", t.TempDir(), "--services", "storage,tasks"},
+		Getenv: func(string) string { return "" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := func(comps map[string]bool) map[string]statusService {
+		r, _ := buildStatusReport(cfg, &liveState{info: runtimeInfo{PID: 1, Control: "x"},
+			readiness: &readiness{State: "starting", Components: comps}}, "running", "")
+		m := map[string]statusService{}
+		for _, s := range r.Services {
+			m[s.ID] = s
+		}
+		return m
+	}
+	all := map[string]bool{"cluster": true, "cluster-nodes": false, "storage-image": true, "components": true, "forward:storage": true, "tasks": true}
+	for id, s := range report(all) {
+		if s.Ready || !strings.Contains(s.Reason, "cluster-nodes") {
+			t.Errorf("%s before the nodes are Ready = %+v, want waiting for cluster-nodes", id, s)
+		}
+	}
+	all["cluster-nodes"] = true
+	for id, s := range report(all) {
+		if !s.Ready {
+			t.Errorf("%s with the nodes Ready = %+v, want ready", id, s)
+		}
+	}
+}
