@@ -50,12 +50,13 @@ type FileActor interface {
 }
 
 // ListActor is a provider with actions on its list screen itself, on no
-// existing resource (#1289): Cloud Run's Create service from source. The
-// list screen draws them beside Create, and each is sent with an empty path.
-// They are offered only through the upload route, so every one must take a
-// file; one that does not is not drawn.
+// existing resource (#1289): Cloud Run's Create service from source, and
+// Spanner's Create instance beside its Create database (#1491). The list
+// screen draws them beside Create, and each is sent with an empty path: one
+// that takes a file through the upload route, which needs a FileActor, and
+// any other through the action route, to ActAt with no path.
 type ListActor interface {
-	FileActor
+	PathActor
 	// ListActions returns what the list screen offers for a project.
 	ListActions(ctx context.Context, project string) []Action
 }
@@ -70,16 +71,18 @@ func takesFile(a Action) bool {
 	return false
 }
 
-// listActions are a provider's list-screen actions that take a file, or
-// none when it has no ListActor.
+// listActions are a provider's list-screen actions, or none when it has
+// no ListActor. One that takes a file is drawn only for a FileActor, which
+// the upload route needs.
 func listActions(ctx context.Context, p Provider, project string) []Action {
 	la, ok := p.(ListActor)
 	if !ok {
 		return nil
 	}
+	_, files := p.(FileActor)
 	var out []Action
 	for _, a := range la.ListActions(ctx, project) {
-		if takesFile(a) {
+		if files || !takesFile(a) {
 			out = append(out, a)
 		}
 	}
