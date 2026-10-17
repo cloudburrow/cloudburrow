@@ -14,9 +14,15 @@
 // passes to the emulator and drops them.
 //
 // What an emulator instance cannot carry is refused UNIMPLEMENTED, naming
-// why: autoscaling (the emulator does not scale), a move to another
-// configuration (MoveInstance), the edition and the default backup schedule
-// type (the emulator has no editions and takes no backups).
+// why: autoscaling (the emulator does not scale), the edition and the
+// default backup schedule type (the emulator has no editions). A move to
+// another configuration is MoveInstance (configs.go).
+//
+// Since #1498 the front also serves what the emulator does not keep:
+// backups and restores (backups.go), backup schedules (schedules.go),
+// Google's and custom instance configurations and partition updates
+// (configs.go), database roles and the operation listings (roles.go), over
+// gRPC and REST (restroutes.go).
 package spannerfront
 
 import (
@@ -275,7 +281,7 @@ var refused = map[string]string{
 	"config":                       "a move to another instance configuration is MoveInstance",
 	"autoscaling_config":           "the emulator does not autoscale: set node_count or processing_units",
 	"edition":                      "the emulator has no editions",
-	"default_backup_schedule_type": "the emulator takes no backups",
+	"default_backup_schedule_type": "new databases get no default backup schedule here: create one with CreateBackupSchedule",
 	"instance_type":                "an instance's type cannot change",
 }
 
