@@ -208,4 +208,7 @@ const (
 	envCMEKKMS         = "CLOUDBURROW_TEST_CMEK_KMS"
 	envCloudSQLSecrets = "CLOUDBURROW_TEST_CLOUDSQL_SECRETS"
 	envNoPubSubStorage = "CLOUDBURROW_TEST_NOPUBSUB_STORAGE"
+	// Resource Manager for the sql shard's tests that make a folder or
+	// purge a project (#1568).
+	envSQLResourceManager = "CLOUDBURROW_TEST_SQL_RESOURCEMANAGER"
 )

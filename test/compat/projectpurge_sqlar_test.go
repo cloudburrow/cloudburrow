@@ -40,7 +40,9 @@ import (
 func TestAPurgedProjectsSQLBackupAndRegistryStartEmpty(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
-	h.Endpoint(EnvResourceManager)
+	// Resource Manager as the sql shard's SQL_RESOURCEMANAGER (#1568), so
+	// the Resource Manager suite stays in storage.
+	shardEndpoint(h, envSQLResourceManager, EnvResourceManager)
 	served := func(env string) bool {
 		if strings.TrimSpace(os.Getenv(env)) == "" {
 			return false

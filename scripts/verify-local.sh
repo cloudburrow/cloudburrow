@@ -17,7 +17,7 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,emulators,sql,acceptance
+#                     storage,served,run,emulators,memorystore,sql,acceptance
 #   --port-base N     the instances' port layout (default 41000)
 #   --out DIR         where the result and logs go (default ./verify-local)
 #   --no-build        use bin/cloudburrow as it is instead of `make build`
@@ -430,14 +430,16 @@ browser_suite() {  # <shard> <dir> <flags...>
   local chrome="" select pattern
   # As in CI: the KMS and Cloud Run screens' tests in the run shard, the
   # BigQuery, Firestore and Datastore screens' in the emulators shard, the
-  # Cloud SQL screens' in the sql shard, the rest in storage.
+  # Memorystore screens' in the memorystore shard, the Cloud SQL screens' in
+  # the sql shard, the rest in storage.
   # The never-run tests are skipped in every shard, as in CI.
   local skip=(-skip "$COMPAT_BROWSER_NEVER_TESTS") pick
   case "$shard" in
     run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" ;;
     emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
+    memorystore) select=-run pattern="$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS" ;;
     sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
       skip=() ;;
   esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -456,7 +458,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   local BROWSER_ENV BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
   # As in CI: the emulators shard's tests also read back through the
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+  # The memorystore shard's read back through the Memorystore admin API.
+  if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
   if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
   # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
@@ -524,15 +528,17 @@ done
 # from ci.yml so the two cannot drift.
 compat_coverage() {
   local s never none
-  for s in storage served run emulators sql; do
+  for s in storage served run emulators memorystore sql; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
   : > "$SUITES"; : > "$CHECKS"
   never=$(sed -n "s/^ *never='\(.*\)'\$/\1/p" .github/workflows/ci.yml)
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
-  for s in storage served run emulators sql; do
-    cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null
+  # A shard without restart probes has no probe-*.log, and cat's exit 1
+  # for the unmatched glob would end the script under set -e.
+  for s in storage served run emulators memorystore sql; do
+    cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)
   printf '%s\n' "$none" > "$LOGS/ran-in-no-shard.txt"

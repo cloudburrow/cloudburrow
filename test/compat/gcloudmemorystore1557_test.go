@@ -28,6 +28,8 @@ func TestGcloudMemorystore1557(t *testing.T) {
 	h := New(t)
 	vc, _ := valkeyAdminClient(t, h) // skips without the admin API
 	rc, _ := redisClusterAdminClient(t, h)
+	// Cloud KMS as the shard's CMEK_KMS (#1568), so the KMS suite stays in served.
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	kmsClients(t, h) // skips without Cloud KMS
 	g := newGcloudSession(t, h)
 	sfx := time.Now().UnixNano() % 1e7

@@ -42,7 +42,11 @@ type linkFixture struct {
 }
 
 func newLinkFixture(t *testing.T, h *Harness, prefix string) *linkFixture {
-	ctx := h.Context()
+	// Each expect waits up to a minute for the linked dataset to follow, and
+	// a test makes several: h.Context()'s one minute for them all ran out
+	// on a loaded machine (#1568).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	t.Cleanup(cancel)
 	bq, project := bigqueryClient(t, h)
 	cfg, err := vlogging.NewConfigClient(ctx, loggingClientOptions(h)...)
 	if err != nil {

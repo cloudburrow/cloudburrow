@@ -1049,11 +1049,19 @@ func (c *clusters) do(ctx context.Context, r *clusterRecord, n *clusterNode, arg
 }
 
 // meet introduces every node of others to via, then waits until every one
-// knows them all.
+// knows them all by their IDs. cluster_known_nodes alone is not enough: it
+// counts a node still in its handshake, under a random ID, so a CLUSTER
+// REPLICATE sent then fails "ERR Unknown node" (#1568).
 func (c *clusters) meet(ctx context.Context, r *clusterRecord, via *clusterNode, others []*clusterNode) error {
 	for _, n := range others {
 		if err := c.do(ctx, r, via, "CLUSTER", "MEET", n.podIP, n.port, clusterBusPort); err != nil {
 			return err
+		}
+	}
+	ids := make([]string, 0, len(r.Nodes))
+	for _, n := range r.Nodes {
+		if n.id != "" {
+			ids = append(ids, n.id)
 		}
 	}
 	return c.until(ctx, "every node to know the others", func() bool {
@@ -1061,13 +1069,41 @@ func (c *clusters) meet(ctx context.Context, r *clusterRecord, via *clusterNode,
 		for _, n := range r.Nodes {
 			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			got := known(ctx, cl, "cluster_known_nodes")
+			ok := got == strconv.Itoa(want)
+			if ok {
+				v, err := cl.Do(ctx, "CLUSTER", "NODES")
+				ok = err == nil && knowsAll(fmt.Sprint(v), ids)
+			}
 			cl.Close()
-			if got != strconv.Itoa(want) {
+			if !ok {
 				return false
 			}
 		}
 		return true
 	})
+}
+
+// knowsAll reports whether a CLUSTER NODES reply lists every one of ids
+// with its handshake done: a line of its own whose flags name neither
+// handshake nor noaddr.
+func knowsAll(nodes string, ids []string) bool {
+	done := map[string]bool{}
+	for _, line := range strings.Split(nodes, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		flags := "," + f[2] + ","
+		if !strings.Contains(flags, ",handshake,") && !strings.Contains(flags, ",noaddr,") {
+			done[f[0]] = true
+		}
+	}
+	for _, id := range ids {
+		if !done[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // replicate makes each replica of these a replica of its shard's primary,
