@@ -16,7 +16,8 @@ The fix, as BigQuery's collation reference documents
   refuses what the reference refuses (two different collations
   compared);
 - a CREATE TABLE records each STRING column's collation (its COLLATE, or
-  the table's DEFAULT COLLATE) in ColumnSpec.Collation, and the catalog
+  the table's DEFAULT COLLATE unless its COLLATE is '') in
+  ColumnSpec.Collation, and the catalog
   gives the column that collation as an annotation (needs go-googlesql
   patch 0003);
 - the formatter compares und:ci values case-folded: a comparison's
@@ -35,7 +36,7 @@ Authors.
 
 --- /dev/null
 +++ b/collation_test.go
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,80 @@
 +package googlesqlite_test
 +
 +import (
@@ -66,6 +67,8 @@ Authors.
 +		"INSERT INTO `p.d.t` (s, n) VALUES ('Abc', 1), ('aBC', 2), ('b', 3), ('B', 4), (NULL, 5)",
 +		"CREATE TABLE `p.d.u` (s STRING, n INT64) DEFAULT COLLATE 'und:ci'",
 +		"INSERT INTO `p.d.u` (s, n) VALUES ('Abc', 1)",
++		"CREATE TABLE `p.d.e` (s STRING COLLATE '', u STRING) DEFAULT COLLATE 'und:ci'",
++		"INSERT INTO `p.d.e` (s, u) VALUES ('Abc', 'Abc')",
 +		"CREATE TABLE `p.d.plain` (s STRING)",
 +		"INSERT INTO `p.d.plain` (s) VALUES ('Abc'), ('aBC')",
 +	} {
@@ -75,6 +78,9 @@ Authors.
 +	}
 +	for _, tc := range []struct{ q, want string }{
 +		{"SELECT COUNT(*) FROM `p.d.t` WHERE s = 'ABC'", "2"},
++		// COLLATE '' keeps the table's DEFAULT COLLATE off the column.
++		{"SELECT COUNT(*) FROM `p.d.e` WHERE s = 'ABC'", "0"},
++		{"SELECT COUNT(*) FROM `p.d.e` WHERE u = 'ABC'", "1"},
 +		{"SELECT COUNT(*) FROM `p.d.t` WHERE s != 'ABC'", "2"},
 +		{"SELECT COUNT(*) FROM `p.d.t` WHERE s IN ('ABC', 'x')", "2"},
 +		{"SELECT COUNT(*) FROM `p.d.t` WHERE s LIKE 'ab%'", "2"},
@@ -519,26 +525,28 @@ Authors.
  	columns := []*ColumnSpec{}
  	for _, columnNode := range def {
  		annotation, _ := columnNode.Annotations()
-@@ -723,13 +727,29 @@
- 				}
+@@ -724,12 +728,31 @@
  			}
  			defaultSQL, _ = dv.Sql()
-+		}
+ 		}
 +		// CloudBurrow patch (#1508): the column's COLLATE, else the
-+		// table's DEFAULT COLLATE for a STRING column.
++		// table's DEFAULT COLLATE for a STRING column. A column whose
++		// COLLATE is '' keeps none: "A column with empty collation
++		// doesn't inherit the table's default collation".
 +		typ := m1(columnNode.Type())
-+		collation := ""
++		collation, named := "", false
 +		if col, _ := columnNode.Column(); col != nil {
 +			collation = collationOf(m1(col.TypeAnnotationMap()))
++			named = collation != ""
 +		}
-+		if collation == "" && annotation != nil {
++		if !named && annotation != nil {
 +			if expr, _ := annotation.CollationName(); expr != nil {
-+				collation = literalString(expr)
++				collation, named = literalString(expr), true
 +			}
 +		}
-+		if collation == "" && typ != nil && m1(typ.IsString()) {
++		if !named && typ != nil && m1(typ.IsString()) {
 +			collation = defaultCollation
- 		}
++		}
  		columns = append(columns, &ColumnSpec{
  			Name:        m1(columnNode.Name()),
 -			Type:        newType(m1(columnNode.Type())),
@@ -550,7 +558,7 @@ Authors.
  		})
  	}
  	return columns
-@@ -766,7 +786,7 @@
+@@ -766,7 +789,7 @@
  	return &TableSpec{
  		IsTemp:     isTemp,
  		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
@@ -559,7 +567,7 @@ Authors.
  		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
  		CreateMode: m1(stmt.CreateMode()),
  		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
-@@ -941,7 +961,7 @@
+@@ -941,7 +964,7 @@
  	return &TableSpec{
  		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
  		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
@@ -568,7 +576,7 @@ Authors.
  		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
  		CreateMode: m1(stmt.CreateMode()),
  		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
-@@ -1000,3 +1020,15 @@
+@@ -1000,3 +1023,15 @@
  		FieldTypes:    fieldTypes,
  	}
  }

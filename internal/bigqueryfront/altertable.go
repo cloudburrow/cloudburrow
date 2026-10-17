@@ -21,7 +21,8 @@ import (
 // and the statements after it, one or several in one statement, with
 // ALTER TABLE IF EXISTS:
 //
-//   - ADD COLUMN [IF NOT EXISTS] name type [OPTIONS(description = ...,
+//   - ADD COLUMN [IF NOT EXISTS] name type [COLLATE 'und:ci' or '', else the
+//     table's defaultCollation for a STRING (#1508)] [OPTIONS(description = ...,
 //     rounding_mode = ...)], a STRUCT's fields with their own
 //     OPTIONS(description, rounding_mode) (#1409, decimalddl.go),
 //     of any type the DDL writes: a scalar (STRING(10) and NUMERIC(10, 2)
@@ -153,6 +154,14 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			}
 			f["name"] = act.column
 			rest := a[next:]
+			if len(rest) > 1 && rest[0].is("COLLATE") { // #1508, collationddl.go
+				spec, ok := stringLiteral(rest[1])
+				if !ok || f["type"] != "STRING" || f["mode"] == "REPEATED" {
+					return st, "", "COLLATE is only allowed on a STRING column, with a string literal: " + act.column
+				}
+				f["collation"] = spec
+				rest = rest[2:]
+			}
 			if len(rest) > 1 && rest[0].is("NOT") && rest[1].is("NULL") {
 				f["mode"] = "REQUIRED"
 				rest = rest[2:]
@@ -619,6 +628,7 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 		TableConstraints *tableConstraints `json:"tableConstraints"`
 		TimePartitioning map[string]any    `json:"timePartitioning"`
 		CreationTime     string            `json:"creationTime"`
+		DefaultCollation string            `json:"defaultCollation"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &current) != nil {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read "+name, text)
@@ -674,6 +684,14 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 				if v != nil {
 					a.field["description"] = *v
 				}
+			}
+			// "When a new column is added to the table without an
+			// explicit collation specification, the column inherits this
+			// collation specification for STRING types" (#1508); a
+			// STRING inside a RECORD has none here (collationddl.go).
+			if _, named := a.field["collation"]; !named && current.DefaultCollation != "" &&
+				a.field["type"] == "STRING" && a.field["mode"] != "REPEATED" {
+				a.field["collation"] = current.DefaultCollation
 			}
 			fields = append(fields, a.field)
 			schemaChanged = true

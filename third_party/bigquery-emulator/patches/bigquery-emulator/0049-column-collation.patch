@@ -2,9 +2,12 @@ CloudBurrow patch 49 to github.com/goccy/bigquery-emulator v0.8.1
 (cloudburrow/cloudburrow#1508).
 
 The bug: a STRING column tables.insert gave a collation ('und:ci') was
-made in the engine without it, so its values compared case-sensitively.
+made in the engine without it, so its values compared case-sensitively;
+and a column CREATE TABLE collated (its COLLATE, or the table's DEFAULT
+COLLATE) read back from tables.get with no collation.
 The fix: CreateTable writes the column's COLLATE, which the engine
-compares its values by (googlesqlite patch 0059). Its test
+compares its values by (googlesqlite patch 0059), and addTableMetadata
+records the engine's collation of a CREATE TABLE's column. Its test
 server/collation_test.go fails without it.
 
 Licence: a modification of goccy/bigquery-emulator, which is under the MIT
@@ -30,11 +33,12 @@ CloudBurrow Authors.
  			// column's defaultValueExpression is its DEFAULT in the
 --- /dev/null
 +++ b/server/collation_test.go
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,82 @@
 +package server_test
 +
 +import (
 +	"context"
++	"strings"
 +	"testing"
 +	"time"
 +
@@ -92,4 +96,36 @@ CloudBurrow Authors.
 +	if len(row) != 1 || row[0] != int64(1) {
 +		t.Errorf("COUNT(*) WHERE s = 'aBC' = %v, want 1", row)
 +	}
++	// A CREATE TABLE column's collation reads back from tables.get.
++	job, err = client.Query("CREATE TABLE ds.d (s STRING, e STRING COLLATE '', n INT64) DEFAULT COLLATE 'und:ci'").Run(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("create: %v, %v", err, status.Err())
++	}
++	md, err := client.Dataset("ds").Table("d").Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var got []string
++	for _, f := range md.Schema {
++		got = append(got, f.Name+"="+f.Collation)
++	}
++	if want := "s=und:ci e= n="; strings.Join(got, " ") != want {
++		t.Errorf("DDL table's collations %q, want %q", strings.Join(got, " "), want)
++	}
 +}
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1881,6 +1881,10 @@
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1340): a CREATE
+ 		// TABLE column's DEFAULT reads back as its defaultValueExpression.
+ 		field.DefaultValueExpression = column.DefaultSQL
++		// CloudBurrow patch (cloudburrow/cloudburrow#1508): a CREATE
++		// TABLE column's collation (its COLLATE, or the table's DEFAULT
++		// COLLATE) reads back as its collation.
++		field.Collation = column.Collation
+ 		fields = append(fields, field)
+ 	}
+ 	conn, err := server.connMgr.Connection(ctx, projectID, datasetID)

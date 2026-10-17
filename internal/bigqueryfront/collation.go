@@ -20,30 +20,28 @@ import (
 // gave it) and made the table with neither. The front gives a table made
 // in such a dataset, by tables.insert or by a lone CREATE [OR REPLACE]
 // TABLE, the dataset's defaultCollation when it names none, and each of
-// its STRING columns, a RECORD's fields too, the table's default
-// collation when the column names none. The collation is recorded, as
-// tables.insert of a collated column records its own; the engine compares
-// the column's values as it does any STRING's (#1508).
+// its top-level STRING columns the table's default collation when the
+// column names none; a CREATE TABLE gets the dataset's as its own DEFAULT
+// COLLATE before it runs (withDefaultCollation, below). The engine
+// compares a collated column's values by its collation (#1508).
 
-// withCollation writes collation into each STRING field of fields that
-// names none, a RECORD's fields too, and reports whether it wrote any.
+// withCollation writes collation into each top-level, not REPEATED,
+// STRING field of fields that names none, and reports whether it wrote
+// any. A STRING inside a RECORD, or a REPEATED one, is left without: the
+// engine collates only a top-level STRING column (collationddl.go).
 func withCollation(fields []any, collation string) bool {
 	changed := false
 	for _, f := range fields {
 		m, ok := f.(map[string]any)
-		if !ok {
+		if !ok || m["type"] != "STRING" {
 			continue
 		}
-		switch m["type"] {
-		case "STRING":
-			if c, _ := m["collation"].(string); c == "" {
-				m["collation"] = collation
-				changed = true
-			}
-		case "RECORD", "STRUCT":
-			if sub, ok := m["fields"].([]any); ok && withCollation(sub, collation) {
-				changed = true
-			}
+		if mode, _ := m["mode"].(string); strings.EqualFold(mode, "REPEATED") {
+			continue
+		}
+		if c, _ := m["collation"].(string); c == "" {
+			m["collation"] = collation
+			changed = true
 		}
 	}
 	return changed
@@ -110,14 +108,24 @@ func (f front) defaultTableCollation(r *http.Request, dataset string, raw []byte
 // collated, so that runQuery runs it as it would otherwise.
 type defaultCollationKey struct{}
 
-// withDefaultCollation runs q, a lone CREATE TABLE in a dataset with a
-// default collation, and collates the table it made (above) with
-// tables.update. It reports false, having done nothing, otherwise.
+// withDefaultCollation runs q, a lone CREATE TABLE (a CREATE TABLE AS
+// SELECT too) with a default collation, its own DEFAULT COLLATE or else
+// its dataset's. With the dataset's, it adds `DEFAULT COLLATE '...'` to
+// the statement before running it, so the engine makes each STRING
+// column that names no COLLATE with that collation, and the emulator
+// records it (bigquery-emulator patch 0049); a table made first and
+// collated after would compare case-sensitively (#1508). It then gives
+// the table it made the default collation, with tables.update. It
+// reports false, having done nothing, otherwise.
 func (f front) withDefaultCollation(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
 	if r.Context().Value(defaultCollationKey{}) != nil || !strings.Contains(strings.ToUpper(q.Query), "CREATE") {
 		return false
 	}
 	parts, replace, _, ok := createdTableOf(q.Query, false)
+	if !ok {
+		return false
+	}
+	own, named, at, ok := tableDefaultCollate(q.Query)
 	if !ok {
 		return false
 	}
@@ -137,8 +145,17 @@ func (f front) withDefaultCollation(w http.ResponseWriter, r *http.Request, q qu
 	if dataset == "" {
 		return false
 	}
-	c := f.datasetCollation(r, dataset)
-	if c == "" {
+	c, client := own, jobText{query: q.Query}
+	if !named {
+		if c = f.datasetCollation(r, dataset); c == "" {
+			return false
+		}
+		sql := q.Query[:at] + " DEFAULT COLLATE " + sqlString(c) + q.Query[at:]
+		if !setQueryText(r, insert, sql) {
+			return false
+		}
+		q.Query = sql
+	} else if c == "" {
 		return false
 	}
 	existed, _ := f.get(r, tablePath(dataset, table))
@@ -149,13 +166,16 @@ func (f front) withDefaultCollation(w http.ResponseWriter, r *http.Request, q qu
 			var tb map[string]any
 			dec := json.NewDecoder(bytes.NewReader(got))
 			dec.UseNumber()
-			if dec.Decode(&tb) == nil && tb != nil && collated(tb, c) {
-				if body, err := json.Marshal(tb); err == nil {
-					f.send(r, http.MethodPut, tablePath(dataset, table), body) // tables.update keeps it, as projectdefaults.go's
+			if dec.Decode(&tb) == nil && tb != nil {
+				if _, has := tb["defaultCollation"]; !has {
+					tb["defaultCollation"] = c
+					if body, err := json.Marshal(tb); err == nil {
+						f.send(r, http.MethodPut, tablePath(dataset, table), body) // tables.update keeps it, as projectdefaults.go's
+					}
 				}
 			}
 		}
 	}
-	rec.copyTo(w)
+	f.clientText(w, rec, client) // the job reads back the query as the client sent it
 	return true
 }
