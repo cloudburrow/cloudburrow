@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -385,6 +386,79 @@ func TestResourceHierarchyFolderPermissionsThroughTheTab(t *testing.T) {
 	p.waitFor(`document.querySelector("#permissions-table") === null`)
 	if got := members(); len(got) != 0 {
 		t.Errorf("after Remove principal the Folders API reads %v", got)
+	}
+	if sent := p.posts("/api/permissions/hierarchy"); len(sent) != 2 {
+		t.Errorf("the grant and the removal sent %d requests, want 2: %v", len(sent), sent)
+	}
+}
+
+// TestResourceHierarchyOrganizationPageAndPermissions (#1554), in the storage
+// shard. The Resource hierarchy list links the organization to its own page,
+// as Google's console opens the organization picked in the resource
+// selector: it names what GetOrganization answers, lists its Organization
+// policies, and has a Permissions tab, where Grant access is the v3
+// Organizations API's SetIamPolicy, which its GetIamPolicy reads back, and
+// Remove principal, confirmed by typing the principal back, takes it away.
+func TestResourceHierarchyOrganizationPageAndPermissions(t *testing.T) {
+	needService(t, "hierarchy")
+	opts := rmClientOptions(t)
+	ctx := context.Background()
+	orgs, err := resourcemanager.NewOrganizationsClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orgs.Close() })
+	org, err := orgs.SearchOrganizations(ctx, &rmpb.SearchOrganizationsRequest{}).Next()
+	if err != nil {
+		t.Fatalf("SearchOrganizations: %v", err)
+	}
+	const role = "roles/resourcemanager.organizationViewer"
+	member := fmt.Sprintf("user:org-%d@example.com", time.Now().UnixNano()%1e8)
+	holds := func() bool {
+		pol, err := orgs.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: org.GetName()})
+		if err != nil {
+			t.Fatalf("GetIamPolicy of %s: %v", org.GetName(), err)
+		}
+		for _, b := range pol.GetBindings() {
+			if b.GetRole() == role && slices.Contains(b.GetMembers(), member) {
+				return true
+			}
+		}
+		return false
+	}
+
+	p := open(t)
+	p.navigate("/resource-hierarchy")
+	p.waitFor(`[...document.querySelectorAll("#view .listing-summary a")].some((a) => a.getAttribute("href").startsWith("/resource-hierarchy/organization"))`)
+	p.eval(`[...document.querySelectorAll("#view .listing-summary a")].find((a) => a.getAttribute("href").startsWith("/resource-hierarchy/organization")).click(), true`, nil)
+	p.waitFor(`location.pathname === "/resource-hierarchy/organization"`)
+	p.waitFor(fmt.Sprintf(`(document.querySelector("#view").textContent || "").includes(%q)`, org.GetName()))
+	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Organization policies")`)
+	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Permissions")`)
+	p.clickText("#view .tab-strip .tab", "Permissions")
+	p.waitFor(`document.querySelector("#grant-access") !== null`)
+	p.clickText("#view #grant-access", "Grant access")
+	p.waitFor(`document.querySelector(".modal.is-open #f-members") !== null`)
+	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
+		q("#f-members").value = %q; q("#f-members").dispatchEvent(new Event("input", { bubbles: true }));
+		q("#f-role").value = %q; q("#f-role").dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, member, role), nil)
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	remove := fmt.Sprintf(`button[aria-label=%q]`, "Remove "+member+" from "+role)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, remove))
+	if !holds() {
+		t.Errorf("after Grant access the Organizations API does not read %s holding %s", member, role)
+	}
+
+	p.run(chromedp.Click(remove, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
+	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #confirm-input");
+		f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, member), nil)
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) === null`, remove))
+	if holds() {
+		t.Errorf("after Remove principal the Organizations API still reads %s holding %s", member, role)
 	}
 	if sent := p.posts("/api/permissions/hierarchy"); len(sent) != 2 {
 		t.Errorf("the grant and the removal sent %d requests, want 2: %v", len(sent), sent)

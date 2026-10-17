@@ -575,6 +575,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if v := loggingSvc.logViewReader(faults); v != nil {
 			consoleSrv.SetLogViewReader(v)
 		}
+		// And its Log name picker lists ListLogs (#1554).
+		if l := loggingSvc.logNameLister(faults); l != nil {
+			consoleSrv.SetLogNameLister(l)
+		}
 	}
 
 	if localAISrv != nil {

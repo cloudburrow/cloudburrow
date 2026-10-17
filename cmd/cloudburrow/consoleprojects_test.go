@@ -103,8 +103,7 @@ func TestConsoleProjectOrgPolicies(t *testing.T) {
 }
 
 // TestConsoleFolderAndOrganizationOrgPolicies (#1534): Set organization
-// policy on the organization (the Resource hierarchy screen's own action)
-// and on a folder, through the registry the v1 methods use; the folder's
+// policy on the organization (on its page, #1554) and on a folder, through the registry the v1 methods use; the folder's
 // and a project's pages show the inherited policy and the effective one, and
 // Clear organization policy on the folder unsets its own.
 func TestConsoleFolderAndOrganizationOrgPolicies(t *testing.T) {
@@ -120,24 +119,27 @@ func TestConsoleFolderAndOrganizationOrgPolicies(t *testing.T) {
 		t.Fatal(err)
 	}
 	const boolC, listC = "constraints/compute.requireOsLogin", "constraints/gcp.resourceLocations"
-	if a := h.ListActions(ctx, ""); len(a) != 1 || a[0].ID != orgPolicySet {
-		t.Fatalf("the hierarchy screen offers %+v; want Set organization policy on the organization", a)
+	org := []string{organizationSegment}
+	if a := h.DetailActions(ctx, "", org); len(a) != 1 || a[0].ID != orgPolicySet {
+		t.Fatalf("the organization's page offers %+v; want Set organization policy", a)
 	}
-	if err := h.ActAt(ctx, "", nil, orgPolicySet, map[string]string{"constraint": boolC, "enforced": "true"}); err != nil {
+	if err := h.ActAt(ctx, "", org, orgPolicySet, map[string]string{"constraint": boolC, "enforced": "true"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.ActAt(ctx, "", nil, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:eu-locations"}); err != nil {
+	if err := h.ActAt(ctx, "", org, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:eu-locations"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := reg.OrgPolicy(resourcemanager.OrganizationName, boolC); err != nil || got.BooleanPolicy == nil || !got.BooleanPolicy.Enforced {
 		t.Fatalf("the organization's %s = %+v, %v", boolC, got, err)
 	}
-	l, _ := h.List(ctx, "")
-	if len(l.Summary) != 1 || len(l.Summary[0].Properties) != 2 || l.Summary[0].Properties[0].Value != "Enforced" {
-		t.Errorf("the hierarchy screen's organization policies = %+v", l.Summary)
+	od, _ := h.Detail(ctx, "", org)
+	for _, sec := range od.Sections {
+		if sec.ID == "org-policies" && (sec.Listing.Total != 2 || sec.Listing.Items[0].Fields["Policy"] != "Enforced") {
+			t.Errorf("the organization's Organization policies = %+v", sec.Listing.Items)
+		}
 	}
-	if a := h.ListActions(ctx, ""); len(a) != 2 || a[1].ID != orgPolicyClear {
-		t.Errorf("with policies set, the hierarchy screen offers %+v; want Set and Clear", a)
+	if a := h.DetailActions(ctx, "", org); len(a) != 2 || a[1].ID != orgPolicyClear {
+		t.Errorf("with policies set, the organization's page offers %+v; want Set and Clear", a)
 	}
 	if err := h.ActAt(ctx, "", []string{eng}, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:us-locations", "inherit": "true"}); err != nil {
 		t.Fatal(err)
