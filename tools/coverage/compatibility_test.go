@@ -289,8 +289,11 @@ var (
 	// third_party/bigquery-emulator/patches).
 	patchTestFunc = regexp.MustCompile(`(?m)^\+func (Test\w+)\(`)
 	pyTestFunc    = regexp.MustCompile(`(?m)^\s*(?:async\s+)?def (test_\w+)\(`)
-	// A cited Go test, `TestX` or a prefix `TestX*`, and a cited pytest.
-	goTestToken = regexp.MustCompile("`(Test[A-Za-z0-9_]*)(\\*?)`")
+	// A cited Go test, `TestX`, a prefix `TestX*` or a subtest `TestX/case`,
+	// backticked or not, in a table row or in prose (#1566). A name after a
+	// `.` or a `/` is a method (`Handle.TestPermissions`,
+	// `SecureSourceManager/TestIamPermissionsRepo`), not a test.
+	goTestToken = regexp.MustCompile(`(?:^|[^A-Za-z0-9_./])(Test[A-Z0-9_][A-Za-z0-9_]*)(\*?)`)
 	pyTestToken = regexp.MustCompile("`(test_[a-z0-9_]+)`")
 )
 
@@ -343,35 +346,18 @@ func definedTests(t *testing.T, root string) (goTests, pyTests map[string]bool) 
 	return goTests, pyTests
 }
 
-// TestCompatibilityCitesOnlyDefinedTests (#688): every backticked `Test*`
-// name (or `TestX*` prefix) and `test_*` pytest name in a docs/compatibility.md
-// table row is a test defined in the repository, so a row cannot cite
-// evidence that does not exist. A name that is a method of a generated page
-// (`TestIamPermissions`) is a method, not a test.
-func TestCompatibilityCitesOnlyDefinedTests(t *testing.T) {
-	pages, err := build("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	methods := map[string]bool{}
-	for _, p := range pages {
-		for _, r := range p.Rows {
-			methods[r.Method[strings.LastIndex(r.Method, "/")+1:]] = true
-		}
-	}
-	goTests, pyTests := definedTests(t, "../..")
-	if len(goTests) == 0 || len(pyTests) == 0 {
-		t.Fatalf("found %d Go and %d Python tests; the walk is wrong", len(goTests), len(pyTests))
-	}
-	b, err := os.ReadFile("../../docs/compatibility.md")
-	if err != nil {
-		t.Fatal(err)
-	}
+// citedDocs are the documents whose test citations must name defined
+// tests: the compatibility matrix and the two pages that repeat its claims
+// (#1566).
+var citedDocs = []string{"docs/compatibility.md", "docs/console-parity.md", "docs/gaps.md"}
+
+// undefinedCitations returns each Go test name (or `TestX*` prefix) and
+// backticked pytest name doc cites, anywhere in it, that no test defines. A
+// name that is a method of a generated page (`TestIamPermissions`) is a
+// method, not a test.
+func undefinedCitations(doc string, goTests, pyTests, methods map[string]bool) []string {
 	missing := map[string]bool{}
-	for _, line := range strings.Split(string(b), "\n") {
-		if !strings.HasPrefix(line, "|") {
-			continue
-		}
+	for _, line := range strings.Split(doc, "\n") {
 		for _, m := range goTestToken.FindAllStringSubmatch(line, -1) {
 			name, prefix := m[1], m[2] == "*"
 			if methods[name] {
@@ -398,7 +384,52 @@ func TestCompatibilityCitesOnlyDefinedTests(t *testing.T) {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	for _, n := range names {
-		t.Errorf("docs/compatibility.md cites %s, which no test in the repository defines", n)
+	return names
+}
+
+// TestCompatibilityCitesOnlyDefinedTests (#688, #1566): every `Test*` name
+// (or `TestX*` prefix, or `TestX/case` subtest), backticked or not, and every
+// backticked `test_*` pytest name in docs/compatibility.md,
+// docs/console-parity.md and docs/gaps.md, in a table row or in prose, is a
+// test defined in the repository, so no claim can cite evidence that does not
+// exist, or that a rename left behind.
+func TestCompatibilityCitesOnlyDefinedTests(t *testing.T) {
+	pages, err := build("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	methods := map[string]bool{}
+	for _, p := range pages {
+		for _, r := range p.Rows {
+			methods[r.Method[strings.LastIndex(r.Method, "/")+1:]] = true
+		}
+	}
+	goTests, pyTests := definedTests(t, "../..")
+	if len(goTests) == 0 || len(pyTests) == 0 {
+		t.Fatalf("found %d Go and %d Python tests; the walk is wrong", len(goTests), len(pyTests))
+	}
+	for _, name := range citedDocs {
+		b, err := os.ReadFile("../../" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range undefinedCitations(string(b), goTests, pyTests, methods) {
+			t.Errorf("%s cites %s, which no test in the repository defines", name, n)
+		}
+	}
+}
+
+// TestACitationOfARenamedTestFails (#1566): the check above catches a test
+// cited in prose, unbackticked, as a subtest or as a prefix, and leaves
+// methods alone.
+func TestACitationOfARenamedTestFails(t *testing.T) {
+	goTests := map[string]bool{"TestKept": true, "TestKeptToo": true}
+	pyTests := map[string]bool{"test_kept": true}
+	methods := map[string]bool{"TestIamPermissions": true}
+	doc := "Prose citing TestKept and TestGone, `TestKept/case`, `TestRenamed/case`, `TestKept*`, `TestNoSuch*`.\n" +
+		"| row | **Verified** | `TestKeptToo`, `test_kept`, `test_gone`, `TestIamPermissions`, `Handle.TestPermissions`, `SecureSourceManager/TestIamPermissionsRepo` |\n"
+	got := strings.Join(undefinedCitations(doc, goTests, pyTests, methods), ",")
+	if want := "TestGone,TestNoSuch*,TestRenamed,test_gone"; got != want {
+		t.Errorf("undefinedCitations = %s, want %s", got, want)
 	}
 }

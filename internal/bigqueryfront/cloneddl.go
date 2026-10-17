@@ -53,7 +53,9 @@ import (
 //
 // 501, nothing done: OR REPLACE (not in the
 // documented syntax), a table of another project, a dry run, legacy SQL,
-// any of these statements inside a multi-statement script (checkDDL), and
+// any of these statements inside a multi-statement script with a TEMP table
+// or function (checkDDL; another script is carried out a statement at a
+// time since #1459, scriptflow.go), and
 // DROP SNAPSHOT TABLE of a table that is not a snapshot (BigQuery's
 // documentation does not say what it does).
 
