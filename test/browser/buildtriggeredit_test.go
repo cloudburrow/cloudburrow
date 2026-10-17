@@ -75,3 +75,46 @@ func TestCloudRunBuildTriggerEditAndDisableThroughThePage(t *testing.T) {
 		t.Error("GetBuildTrigger after Disable: the trigger is not disabled")
 	}
 }
+
+// TestCloudRunBuildWorkerPoolEditThroughThePage (#1491), in the run shard.
+// A pool had no page and was changed only with gcloud: from the Worker
+// pools list, a pool's page opens, and Edit worker pool changes the display
+// name, machine type and disk the official client's GetWorkerPool then
+// reads. The Triggers page names the default build service account.
+func TestCloudRunBuildWorkerPoolEditThroughThePage(t *testing.T) {
+	needService(t, "cloud-build-worker-pools")
+	addr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envRun)), "http://")
+	if addr == "" {
+		t.Skipf("%s is not set: the pool is read back through the Cloud Build API itself", envRun)
+	}
+	ctx := context.Background()
+	c, err := cloudbuild.NewClient(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	project := uniqueProject(t)
+	name := fmt.Sprintf("browser-pool-%d", time.Now().UnixNano()%1e6)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/cloud-build-worker-pools?project="+project,
+		`{"name":"`+name+`","region":"us-central1","machineType":"e2-standard-2"}`); code != http.StatusOK {
+		t.Fatalf("create pool %s through the console API = %d: %s", name, code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/cloud-build-worker-pools?project="+project+"&name="+name, "")
+	})
+
+	p := open(t)
+	p.navigate("/cloud-build/worker-pools?project=" + project)
+	p.clickText("#view tbody a", name)
+	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/cloud-build/worker-pools/"+name))
+	p.pageAction("Edit worker pool", map[string]string{"displayName": "Browser builders", "machineType": "e2-highcpu-8", "diskSizeGb": "200"}, "")
+	w, err := c.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: "projects/" + project + "/locations/us-central1/workerPools/" + name})
+	if wc := w.GetPrivatePoolV1Config().GetWorkerConfig(); err != nil || w.GetDisplayName() != "Browser builders" ||
+		wc.GetMachineType() != "e2-highcpu-8" || wc.GetDiskSizeGb() != 200 {
+		t.Errorf("GetWorkerPool after Edit worker pool = %v, %v; want the form's values", w, err)
+	}
+
+	p.navigate("/cloud-build/triggers?project=" + project)
+	p.waitFor(`document.querySelector("#view").textContent.includes("Default build service account")`)
+}

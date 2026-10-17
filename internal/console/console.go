@@ -1652,13 +1652,15 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if req.Action == "" || (req.Name == "" && len(req.Path) == 0) {
+	if req.Action == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "action, and one of name or path, are required",
 		})
 		return
 	}
-	if len(req.Path) > 0 {
+	// Neither a name nor a path is the list screen's own action
+	// (ListActor), on no existing resource: Spanner's Create instance.
+	if len(req.Path) > 0 || req.Name == "" {
 		s.actAtPath(w, r, p, req.Path, req.Action, req.Values)
 		return
 	}
@@ -1721,9 +1723,14 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	// The action must be one the page would have offered. Without this check
 	// the route is a way to invoke any action name the provider happens to
 	// understand on any path, which is wider than the UI it serves.
+	offers := listActions(ctx, p, project)
+	if len(path) > 0 {
+		offers = actor.DetailActions(ctx, project, path)
+	}
 	offered := false
-	for _, a := range actor.DetailActions(ctx, project, path) {
-		if a.ID == action {
+	for _, a := range offers {
+		// A list action that takes a file goes to the upload route.
+		if a.ID == action && (len(path) > 0 || !takesFile(a)) {
 			offered = true
 			break
 		}
@@ -1738,6 +1745,9 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	// The whole path names the target in the ledger: the first segment alone
 	// would say "enable demo-secret" when a version was enabled.
 	name := strings.Join(path, "/")
+	if name == "" {
+		name = p.Title()
+	}
 	opID := s.logs.StartOperation(action, name, project)
 
 	var result *Listing

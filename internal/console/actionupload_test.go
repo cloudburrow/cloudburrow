@@ -191,8 +191,10 @@ func (p listActorProvider) ListActions(context.Context, string) []Action {
 // actions that take a file are on its listing, and one is posted to the
 // upload route with an empty path, which reaches the provider with no path
 // and is in the ledger under the screen's title. A list action that takes no
-// file is neither listed nor accepted; a detail action is not accepted with
-// an empty path; a provider with no list actions refuses an empty path.
+// file is listed too, refused by the upload route and performed by the
+// action route with no name or path (#1491); a detail action is not
+// accepted with an empty path; a provider with no list actions refuses an
+// empty path.
 func TestActionUploadTakesAListLevelAction(t *testing.T) {
 	var got []string
 	p := listActorProvider{fileActorProvider{fakeProvider: fakeProvider{id: "run", title: "Cloud Run"}, got: &got}}
@@ -205,8 +207,8 @@ func TestActionUploadTakesAListLevelAction(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &listing); err != nil {
 		t.Fatal(err)
 	}
-	if len(listing.Actions) != 1 || listing.Actions[0].ID != "createfile" {
-		t.Errorf("the listing's actions are %+v, want only createfile", listing.Actions)
+	if len(listing.Actions) != 2 || listing.Actions[0].ID != "createfile" || listing.Actions[1].ID != "noform" {
+		t.Errorf("the listing's actions are %+v, want createfile and noform", listing.Actions)
 	}
 	if _, body := get(t, srv, "/api/resources/bigquery?project=p", nil); strings.Contains(body, `"actions"`) {
 		t.Errorf("a provider with no list actions lists some: %s", body)
@@ -230,7 +232,7 @@ func TestActionUploadTakesAListLevelAction(t *testing.T) {
 		code      int
 		why       string
 	}{
-		{"no file", u, map[string]any{"Action": "noform"}, http.StatusBadRequest, "not available"},
+		{"no file", u, map[string]any{"Action": "noform"}, http.StatusBadRequest, "takes no file"},
 		{"detail action", u, map[string]any{"Action": "loadfile"}, http.StatusBadRequest, "not available"},
 		{"no list actions", srv.URL + "/api/actions/bigquery/upload?project=p", map[string]any{"Action": "loadfile"}, http.StatusBadRequest, "not available"},
 		{"no action", u, map[string]any{"Path": []string{}}, http.StatusBadRequest, "action is required"},
@@ -241,5 +243,13 @@ func TestActionUploadTakesAListLevelAction(t *testing.T) {
 	}
 	if len(got) != 1 || len(plainGot) != 0 {
 		t.Errorf("a refused list action reached a provider: %q %q", got, plainGot)
+	}
+	if code, body := post(t, srv, "/api/actions/run?project=p", `{"Action":"noform"}`); code != http.StatusOK {
+		t.Errorf("the list action with no file through the action route = %d: %s", code, body)
+	}
+	for _, a := range []string{"createfile", "loadfile"} {
+		if code, body := post(t, srv, "/api/actions/run?project=p", `{"Action":"`+a+`"}`); code != http.StatusBadRequest || !strings.Contains(body, "not available") {
+			t.Errorf("%s through the action route with no path = %d: %s; want it refused", a, code, body)
+		}
 	}
 }
