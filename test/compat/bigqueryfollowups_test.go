@@ -133,7 +133,7 @@ func TestBigQueryFailedScriptLeavesTheCatalogInStep(t *testing.T) {
 			"CREATE TEMP TABLE " + ghost + " AS SELECT 1 AS a; SELECT * FROM nope.nope",
 		} {
 			err := bqRun(ctx, c, sql, insert)
-			if err == nil || !strings.Contains(err.Error(), "Table not found: nope.nope") {
+			if err == nil || !strings.Contains(err.Error(), "Not found: Dataset "+c.Project()+":nope was not found in location") {
 				t.Fatalf("%s: %v, want the emulator's error", sql, err)
 			}
 			if insert && strings.Contains(err.Error(), "notImplemented") {
