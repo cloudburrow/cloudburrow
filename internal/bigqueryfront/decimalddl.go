@@ -54,6 +54,7 @@ type decimalColumn struct {
 	maxLength                        string // STRING(L), BYTES(L): #1493
 	description                      *string
 	descExpr                         string
+	dataPolicies                     []any // #1456, datapolicies.go
 	fields                           []decimalColumn
 }
 
@@ -101,6 +102,7 @@ func decimalsOf(sql, name string, f map[string]any) (decimalColumn, bool) {
 		d.descExpr = sql[span[0]:span[1]]
 		delete(f, descExprKey)
 	}
+	d.dataPolicies, _ = f["dataPolicies"].([]any)
 	subs, _ := f["fields"].([]any)
 	for _, sub := range subs {
 		if m, ok := sub.(map[string]any); ok {
@@ -109,7 +111,8 @@ func decimalsOf(sql, name string, f map[string]any) (decimalColumn, bool) {
 			}
 		}
 	}
-	return d, d.precision != "" || d.maxLength != "" || d.rounding != "" || d.description != nil || d.descExpr != "" || len(d.fields) > 0
+	return d, d.precision != "" || d.maxLength != "" || d.rounding != "" || d.description != nil || d.descExpr != "" || len(d.fields) > 0 ||
+		len(d.dataPolicies) > 0
 }
 
 // readDecimalColumns reads cols, the tokens of sql's CREATE TABLE column
@@ -183,6 +186,14 @@ func readDecimalColumns(sql string, cols []token) (out []decimalColumn, invalid,
 						continue
 					}
 					f["roundingMode"] = s
+				case "data_policies": // #1456, datapolicies.go
+					if _, msg := dataPolicyNames(o.val); msg != "" {
+						if invalid == "" {
+							invalid = msg
+						}
+						continue
+					}
+					setDataPolicies(f, o)
 				default:
 					if unsupported == "" {
 						unsupported = "the column option " + o.name + " (of column " + c[0].text + ")"
@@ -252,6 +263,9 @@ func putDecimalFields(fields []any, cols []decimalColumn) {
 			}
 			if c.description != nil { // #1438
 				m["description"] = *c.description
+			}
+			if len(c.dataPolicies) > 0 { // #1456
+				m["dataPolicies"] = c.dataPolicies
 			}
 			if subs, ok := m["fields"].([]any); ok && len(c.fields) > 0 {
 				putDecimalFields(subs, c.fields)

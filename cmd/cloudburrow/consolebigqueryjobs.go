@@ -10,7 +10,7 @@ package main
 // (docs/compatibility.md, the BigQuery rows of #919, #931, #939, #944, #945,
 // #952, #957, #960, #966, #970):
 //
-//   - a load: CSV, NEWLINE_DELIMITED_JSON or Parquet from gs:// URIs, a
+//   - a load: CSV, NEWLINE_DELIMITED_JSON, Parquet or Avro from gs:// URIs, a
 //     wildcard included; WRITE_APPEND or WRITE_TRUNCATE; a schema, autodetect
 //     or neither (a table that exists keeps its own); for CSV,
 //     skipLeadingRows, fieldDelimiter, quote, allowJaggedRows, nullMarker,
@@ -18,8 +18,10 @@ package main
 //     UTF-16BE, UTF-16LE, UTF-32BE or UTF-32LE, #1325), maxBadRecords,
 //     ignoreUnknownValues, preserveAsciiControlCharacters,
 //     sourceColumnMatch, timeZone and the date, datetime, time and
-//     timestamp formats (#1325). WRITE_EMPTY and Avro or ORC are not
-//     offered, as nothing tests them.
+//     timestamp formats (#1325); for Avro, useAvroLogicalTypes (#1457);
+//     and, for a table the load makes, time partitioning by a column or
+//     by ingestion time, and clustering columns (#1457). WRITE_EMPTY and
+//     ORC are not offered (the front refuses ORC, 501).
 //   - an export: a URI and More URIs (the front shares the rows out
 //     between them), CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET (the front
 //     writes the Avro object container and Parquet files,
@@ -68,7 +70,8 @@ import (
 
 // The choices the load and export forms offer.
 var (
-	bigqueryLoadFormats   = []string{"CSV", "NEWLINE_DELIMITED_JSON", "PARQUET"}
+	bigqueryLoadFormats   = []string{"CSV", "NEWLINE_DELIMITED_JSON", "PARQUET", "AVRO"}
+	bigqueryPartitionings = []string{"DAY", "HOUR", "MONTH", "YEAR"}
 	bigqueryWriteModes    = []string{"WRITE_APPEND", "WRITE_TRUNCATE"}
 	bigqueryEncodings     = []string{"UTF-8", "ISO-8859-1", "UTF-16BE", "UTF-16LE", "UTF-32BE", "UTF-32LE"}
 	bigqueryColumnMatches = []string{"POSITION", "NAME"}
@@ -123,6 +126,17 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 		console.Field{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern, Section: "Schema",
 			Help: "Optional: the columns of the loaded data, in order. " + bigqueryFieldNameHelp},
+		console.Field{Name: "partitionType", Label: "Partitioning", Type: "select",
+			Options: append([]string{"NONE"}, bigqueryPartitionings...), Section: "Partitioning and clustering",
+			Help: "For a table the load makes: partition it by this unit of the column below, or of the load's " +
+				"ingestion time when no column is named. A table that exists keeps its own."},
+		console.Field{Name: "partitionField", Label: "Partitioning column", Type: "text", Section: "Partitioning and clustering",
+			Help: "Optional: a DATE, TIMESTAMP or DATETIME column; empty partitions by ingestion time."},
+		console.Field{Name: "clusteringFields", Label: "Clustering columns", Type: "text", Section: "Partitioning and clustering",
+			Help: "Optional, for a table the load makes: up to four column names, separated by commas."},
+		console.Field{Name: "useAvroLogicalTypes", Label: "Use Avro logical types", Type: "checkbox", Section: "Avro options",
+			Help: "Avro only: date, time, timestamp and local-timestamp values load as DATE, TIME, TIMESTAMP and " +
+				"DATETIME, rather than as the INTEGER underneath."},
 		console.Field{Name: "maxBadRecords", Label: "Number of errors allowed", Type: "number", Section: "Advanced options",
 			Help: "How many bad records the load leaves out before it fails. Each one left out is listed on the " +
 				"job's page. Empty is 0."},
@@ -259,6 +273,12 @@ func loadFileConfig(values map[string]string) (*bigquery.FileConfig, error) {
 		return nil, err
 	}
 	src.IgnoreUnknownValues = checked(values, "ignoreUnknownValues")
+	if checked(values, "useAvroLogicalTypes") {
+		if format != "AVRO" {
+			return nil, fmt.Errorf("useAvroLogicalTypes applies to Avro only, and this load is %s", format)
+		}
+		src.AvroOptions = &bigquery.AvroOptions{UseAvroLogicalTypes: true}
+	}
 
 	if format != "CSV" {
 		names := make([]string, 0, len(bigqueryCSVOnly))
@@ -319,6 +339,37 @@ func loadFileConfig(values map[string]string) (*bigquery.FileConfig, error) {
 	return src, nil
 }
 
+// loadTableOptions are the partitioning and clustering of the table a load
+// makes, from the form (#1457).
+func loadTableOptions(values map[string]string) (*bigquery.TimePartitioning, *bigquery.Clustering, error) {
+	var tp *bigquery.TimePartitioning
+	typ := strings.TrimSpace(values["partitionType"])
+	field := strings.TrimSpace(values["partitionField"])
+	switch {
+	case typ == "" || typ == "NONE":
+		if field != "" {
+			return nil, nil, errors.New("a partitioning column needs a partitioning unit (DAY, HOUR, MONTH or YEAR)")
+		}
+	case slices.Contains(bigqueryPartitionings, typ):
+		tp = &bigquery.TimePartitioning{Type: bigquery.TimePartitioningType(typ), Field: field}
+	default:
+		return nil, nil, fmt.Errorf("the partitioning is NONE, %s, not %q", strings.Join(bigqueryPartitionings, ", "), typ)
+	}
+	var cl *bigquery.Clustering
+	for _, f := range strings.Split(values["clusteringFields"], ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			if cl == nil {
+				cl = &bigquery.Clustering{}
+			}
+			cl.Fields = append(cl.Fields, f)
+		}
+	}
+	if cl != nil && len(cl.Fields) > 4 {
+		return nil, nil, fmt.Errorf("a table is clustered by up to four columns, not %d", len(cl.Fields))
+	}
+	return tp, cl, nil
+}
+
 // loadJob runs Load from Cloud Storage into datasetID.tableID and waits for
 // it. A job that fails is the error, in the API's words; one that succeeds
 // is the result row, which links to its page in Job history.
@@ -343,6 +394,9 @@ func (p bigqueryProvider) loadJob(ctx context.Context, project, datasetID, table
 	defer c.Close()
 	loader := c.Dataset(datasetID).Table(tableID).LoaderFrom(src)
 	loader.WriteDisposition = bigquery.TableWriteDisposition(write)
+	if loader.TimePartitioning, loader.Clustering, err = loadTableOptions(values); err != nil {
+		return nil, err
+	}
 	job, err := loader.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)

@@ -75,13 +75,15 @@ import (
 //     wording of these errors is UNVERIFIED. 501, before anything runs
 //     when the result's columns can be read first: a column whose type or
 //     REPEATED mode is not the table's (whether BigQuery coerces, INT64
-//     into FLOAT64 for example, is not documented), a missing column with
-//     a default value (whether BigQuery writes the default is not
-//     documented), and schemaUpdateOptions ALLOW_FIELD_RELAXATION into a
+//     into FLOAT64 for example, is not documented), a missing field with
+//     a default value below the top level (a table cannot have one,
+//     nestedDefault), and schemaUpdateOptions ALLOW_FIELD_RELAXATION into a
 //     REQUIRED column or ALLOW_FIELD_ADDITION of a field inside a RECORD.
 //     ALLOW_FIELD_ADDITION of a top-level column is carried out (#1110):
 //     the table is made again with the column at its end, NULLABLE
-//     (remakeWithColumns), and its rows replaced.
+//     (remakeWithColumns), and its rows replaced. A top-level column
+//     with a default value that the result does not have gets its
+//     default (withoutDefaulted, #1456).
 //
 // The result's columns are read before the job runs, by the query run
 // alone with no rows (lone). The job the emulator records names the
@@ -170,6 +172,9 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 		if add {
 			target = withAddedColumns(old, result)
 		}
+		if write == "WRITE_TRUNCATE_DATA" {
+			target = withoutDefaulted(target, result, defaults)
+		}
 		if p := truncateRefused(write, result, target, c.SchemaUpdateOptions, defaults); p != nil && !p.invalid {
 			return notImplemented(p.msg)
 		}
@@ -228,8 +233,15 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 	if msg == "" && add {
 		target = withAddedColumns(old, fields.Fields)
 	}
+	// The columns written: a top-level column with a default value that
+	// the result does not have is left out of the INSERT, which writes its
+	// default (#1456, withoutDefaulted).
+	written := target
+	if msg == "" && write == "WRITE_TRUNCATE_DATA" {
+		written = withoutDefaulted(target, fields.Fields, defaults)
+	}
 	if msg == "" {
-		if p := truncateRefused(write, fields.Fields, target, c.SchemaUpdateOptions, defaults); p != nil {
+		if p := truncateRefused(write, fields.Fields, written, c.SchemaUpdateOptions, defaults); p != nil {
 			if p.invalid {
 				e.Reason, msg = "invalid", "Invalid schema update of "+name+" with writeDisposition "+write+
 					", which keeps the table's schema: "+p.msg+". The table was not changed."
@@ -240,7 +252,7 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 		}
 	}
 	if msg == "" && write == "WRITE_TRUNCATE_DATA" {
-		if why, bad := f.requiredNulls(r, scratch, fields.Fields, target); why != "" {
+		if why, bad := f.requiredNulls(r, scratch, fields.Fields, written); why != "" {
 			msg = "CloudBurrow could not read the query's result: " + why
 		} else if bad {
 			e.Reason, msg = "invalid", "The query's result has NULL where "+name+", whose schema WRITE_TRUNCATE_DATA "+
@@ -254,7 +266,7 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 	}
 	if msg == "" {
 		var kept bool
-		if msg, kept = f.writeResult(r, *dest, scratch, write, table, target, fields.Fields, sm.Schema); msg != "" {
+		if msg, kept = f.writeResult(r, *dest, scratch, write, table, written, fields.Fields, sm.Schema); msg != "" {
 			keep = kept
 			msg = "CloudBurrow could not write the query's result into " + name + ": " + msg
 		}
@@ -308,6 +320,33 @@ func truncateRefused(write string, result, old []field, opts []string, defaults 
 			"whether BigQuery writes its default is not documented"}
 	}
 	return nil
+}
+
+// withoutDefaulted is target without its top-level columns that have a
+// default value (defaults, lower-case paths) and that result does not
+// have. BigQuery: "If the query omits a column with a default value, the
+// default value is assigned" (https://cloud.google.com/bigquery/docs/default-values,
+// a query appended to a table); WRITE_TRUNCATE_DATA writes a result as
+// such an append does (above), so the INSERT that writes the result
+// leaves such a column out and the engine writes its default (#1456).
+// Only a top-level column has a default (nestedDefault).
+func withoutDefaulted(target, result []field, defaults map[string]bool) []field {
+	var out []field
+	for i, t := range target {
+		if _, ok := fieldNamed(result, t.Name); !ok && defaults[strings.ToLower(t.Name)] {
+			if out == nil {
+				out = append([]field{}, target[:i]...)
+			}
+			continue
+		}
+		if out != nil {
+			out = append(out, t)
+		}
+	}
+	if out == nil {
+		return target
+	}
+	return out
 }
 
 // missingDefaulted returns the first field of old, at any depth, with a
