@@ -303,7 +303,21 @@ func (md bqModel) resource(full bool) map[string]any {
 	case "ARIMA_PLUS":
 		var info []map[string]any
 		opts, info = md.arimaResource()
-		results = []map[string]any{{"index": 0, "arimaResult": map[string]any{"arimaModelInfo": info, "seasonalPeriods": []string{"NO_SEASONALITY"}}}}
+		// The model's seasonal periods: every series' (#1518).
+		var periods []string
+		seen := map[string]bool{}
+		for _, m := range info {
+			for _, p := range m["seasonalPeriods"].([]string) {
+				if !seen[p] && p != "NO_SEASONALITY" {
+					seen[p] = true
+					periods = append(periods, p)
+				}
+			}
+		}
+		if len(periods) == 0 {
+			periods = []string{"NO_SEASONALITY"}
+		}
+		results = []map[string]any{{"index": 0, "arimaResult": map[string]any{"arimaModelInfo": info, "seasonalPeriods": periods}}}
 		var single []map[string]any
 		for _, m := range info {
 			sm := map[string]any{"nonSeasonalOrder": m["nonSeasonalOrder"], "arimaFittingMetrics": m["arimaFittingMetrics"], "hasDrift": m["hasDrift"],
@@ -1089,13 +1103,20 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			if len(ss) == 0 {
 				return bad()
 			}
-			return 501, "Not implemented here: seasonalities " + strings.Join(ss, ", ") + ": the seasonal decomposition of ARIMA_PLUS is Google's and " +
-				"undocumented in the detail a faithful result needs; CloudBurrow fits a non-seasonal ARIMA (AUTO or NO_SEASONALITY). Nothing was run."
+			o.TS.Seasonalities = strings.Join(ss, ",")
 		case "holiday_region":
 			return 501, "Not implemented here: holiday_region: its holiday effects come from Google's holiday calendar " +
 				"(bigquery-public-data.ml_datasets.holidays_and_events_for_forecasting), which CloudBurrow does not have. Nothing was run."
 		case "forecast_limit_lower_bound", "forecast_limit_upper_bound":
-			return 501, "Not implemented here: " + name + ": how BigQuery bounds a forecast is undocumented. Nothing was run."
+			v, ok := num()
+			if !ok {
+				return bad()
+			}
+			if name == "forecast_limit_lower_bound" {
+				o.TS.LimitLower = &v
+			} else {
+				o.TS.LimitUpper = &v
+			}
 		case "hierarchical_time_series_cols":
 			return 501, "Not implemented here: hierarchical_time_series_cols: the reconciliation of hierarchical forecasts is Google's. Nothing was run."
 		case "num_factors":
@@ -1284,7 +1305,7 @@ var modelTypeOptions = map[string][]string{
 	"ARIMA_PLUS": {"time_series_timestamp_col", "time_series_data_col", "time_series_id_col", "horizon", "auto_arima", "auto_arima_max_order",
 		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
 		"decompose_time_series", "seasonalities", "trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length",
-		"max_time_series_length"},
+		"max_time_series_length", "forecast_limit_lower_bound", "forecast_limit_upper_bound"},
 	"RANDOM_FOREST_REGRESSOR": {"input_label_cols", "l1_reg", "l2_reg", "early_stop", "min_rel_progress", "data_split_method",
 		"data_split_eval_fraction", "data_split_col", "enable_global_explain", "max_tree_depth", "min_split_loss", "min_tree_child_weight",
 		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},

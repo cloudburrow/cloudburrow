@@ -167,11 +167,16 @@ func TestTrainArimaAuto(t *testing.T) {
 
 func TestArimaOptions(t *testing.T) {
 	for sql, want := range map[string]int{
-		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v') AS SELECT 1":                           0,
-		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', holiday_region='US') AS SELECT 1":      501,
-		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', auto_arima=FALSE) AS SELECT 1":         400,
-		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', include_drift=TRUE) AS SELECT 1":       400,
-		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', seasonalities=['WEEKLY']) AS SELECT 1": 501,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v') AS SELECT 1":                                   0,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', holiday_region='US') AS SELECT 1":              501,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', auto_arima=FALSE) AS SELECT 1":                 400,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', include_drift=TRUE) AS SELECT 1":               400,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', seasonalities=['WEEKLY']) AS SELECT 1":         0,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', seasonalities=['WEEKLY', 'AUTO']) AS SELECT 1": 400,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', forecast_limit_lower_bound=0, " +
+			"forecast_limit_upper_bound=10) AS SELECT 1": 0,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', forecast_limit_lower_bound=10, " +
+			"forecast_limit_upper_bound=10) AS SELECT 1": 400,
 		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', auto_arima=FALSE, " +
 			"non_seasonal_order=(1, 1, 0), include_drift=TRUE) AS SELECT 1": 0,
 	} {
@@ -183,5 +188,154 @@ func TestArimaOptions(t *testing.T) {
 		if code == 0 && d.opts.TS.Horizon != 1000 {
 			t.Errorf("%s: horizon %d", sql, d.opts.TS.Horizon)
 		}
+	}
+}
+
+// weekly is a weekly pattern summing to zero.
+var weekly = []float64{3, -1, -2, 0, 1, -4, 3}
+
+// pipelineSeries is 84 days of a slow trend, the weekly pattern, a little
+// deterministic noise, a spike of +15 on day 30 and a step of +10 from day
+// 55.
+func pipelineSeries() []float64 {
+	var v []float64
+	for t := 0; t < 84; t++ {
+		x := 50 + 0.1*float64(t) + weekly[t%7] + 0.2*math.Sin(2.3*float64(t))
+		if t == 30 {
+			x += 15
+		}
+		if t >= 55 {
+			x += 10
+		}
+		v = append(v, x)
+	}
+	return v
+}
+
+// TestArimaPipeline: the default pipeline finds the weekly seasonality,
+// the spike and the step, takes them out before the ARIMA, and the
+// components add up to the data; the forecast continues the latest level
+// and the weekly pattern.
+func TestArimaPipeline(t *testing.T) {
+	y := pipelineSeries()
+	cols, rows := arimaRows(y)
+	tr, fe := trainModel(arimaOpts(), cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	s := tr.Arima.Series[0]
+	if len(s.Seasons) != 1 || s.Seasons[0] != (arimaSeason{"WEEKLY", 7}) {
+		t.Fatalf("seasons %v; want WEEKLY", s.Seasons)
+	}
+	for k := range y {
+		if d := s.Seasonal[0][k] - weekly[k%7]; math.Abs(d) > 0.5 {
+			t.Errorf("day %d: seasonal %v; want about %v", k, s.Seasonal[0][k], weekly[k%7])
+		}
+		want := 0.0
+		if k == 30 {
+			want = 15
+		}
+		if math.Abs(s.Spikes[k]-want) > 1 || (want == 0 && s.Spikes[k] != 0) {
+			t.Errorf("day %d: spike %v; want %v", k, s.Spikes[k], want)
+		}
+		want = 0
+		if k < 55 {
+			want = -10
+		}
+		if math.Abs(s.Steps[k]-want) > 1 {
+			t.Errorf("day %d: step %v; want %v", k, s.Steps[k], want)
+		}
+	}
+	// The components add up to the data.
+	x := s.adjusted()
+	for k := range y {
+		if sum := x[k] + s.Seasonal[0][k] + s.Spikes[k] + s.Steps[k]; math.Abs(sum-y[k]) > 1e-9 {
+			t.Errorf("day %d: components sum to %v; data %v", k, sum, y[k])
+		}
+	}
+	// The adjusted series is the trend: the step and spike are gone.
+	for k := 1; k < len(x); k++ {
+		if d := x[k] - x[k-1]; math.Abs(d) > 2 {
+			t.Errorf("day %d: adjusted series jumps %v", k, d)
+		}
+	}
+	fc, _, _, _ := s.arimaForecast(arimaOpts().TS, tr.Arima.Cond, 7, 1.96)
+	for k, f := range fc {
+		day := 84 + k
+		want := 60 + 0.1*float64(day) + weekly[day%7]
+		if math.Abs(f-want) > 1.5 {
+			t.Errorf("forecast %d: %v; want about %v", k, f, want)
+		}
+	}
+}
+
+// TestArimaPipelineOff: with NO_SEASONALITY, clean_spikes_and_dips and
+// adjust_step_changes FALSE the series is fitted as it is; an explicit
+// seasonality is used without the strength test; forecast limits bound
+// the forecast.
+func TestArimaPipelineOff(t *testing.T) {
+	y := pipelineSeries()
+	cols, rows := arimaRows(y)
+	o := arimaOpts("seasonalities", "clean_spikes_and_dips", "adjust_step_changes")
+	o.TS.Seasonalities, o.TS.CleanSpikes, o.TS.AdjustSteps = "NO_SEASONALITY", false, false
+	tr, fe := trainModel(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	s := tr.Arima.Series[0]
+	if len(s.Seasons) != 0 || s.Spikes != nil || s.Steps != nil {
+		t.Fatalf("components %v %v %v; want none", s.Seasons, s.Spikes, s.Steps)
+	}
+	for k, v := range s.adjusted() {
+		if v != y[k] {
+			t.Fatalf("adjusted %v; want the data", v)
+		}
+	}
+	// A small but exact weekly pattern is found; a given seasonality is
+	// fitted without the strength test.
+	flat := make([]float64, 28)
+	for k := range flat {
+		flat[k] = 5 + 0.01*float64(k%7)
+	}
+	cols, rows = arimaRows(flat)
+	tr, fe = trainModel(arimaOpts(), cols, rows)
+	if fe != nil || len(tr.Arima.Series[0].Seasons) != 1 {
+		t.Fatalf("a small weekly pattern: %v %v", fe, tr.Arima.Series[0].Seasons)
+	}
+	o = arimaOpts("seasonalities")
+	o.TS.Seasonalities = "WEEKLY"
+	cols, rows = arimaRows(ar1Series())
+	tr, fe = trainModel(o, cols, rows)
+	if fe != nil || len(tr.Arima.Series[0].Seasons) != 1 {
+		t.Fatalf("seasonalities WEEKLY: %v %v", fe, tr.Arima.Series[0].Seasons)
+	}
+	lo, hi := 59.0, 61.0
+	o = arimaOpts("forecast_limit_lower_bound", "forecast_limit_upper_bound")
+	o.TS.LimitLower, o.TS.LimitUpper = &lo, &hi
+	cols, rows = arimaRows(y)
+	tr, fe = trainModel(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	fc, _, l, u := tr.Arima.Series[0].arimaForecast(o.TS, tr.Arima.Cond, 14, 1.96)
+	for k := range fc {
+		if fc[k] < lo || fc[k] > hi || l[k] < lo || u[k] > hi {
+			t.Errorf("forecast %d: %v [%v, %v] outside [%v, %v]", k, fc[k], l[k], u[k], lo, hi)
+		}
+	}
+}
+
+// TestStepAndSpikeDetectors: a series of noise alone has neither.
+func TestStepAndSpikeDetectors(t *testing.T) {
+	var x []float64
+	for k := 0; k < 100; k++ {
+		x = append(x, math.Sin(float64(k)*1.3)+0.5*math.Cos(float64(k)*0.7))
+	}
+	if nonZero(stepChanges(x)) || nonZero(spikesAndDips(x)) {
+		t.Errorf("steps %v spikes %v in noise", stepChanges(x), spikesAndDips(x))
+	}
+	x[40] += 20
+	if sp := spikesAndDips(x); sp[40] < 15 || nonZero(append(sp[:40:40], sp[41:]...)) {
+		t.Errorf("spikes %v; want day 40 only", sp)
 	}
 }
