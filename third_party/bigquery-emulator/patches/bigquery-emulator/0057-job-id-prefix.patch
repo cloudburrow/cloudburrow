@@ -1,0 +1,203 @@
+CloudBurrow patch 57 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1555).
+
+The bug: CloudBurrow's front runs queries of its own (reads a check
+needs, the change history, the table of INFORMATION_SCHEMA.JOBS rows),
+which are no client's jobs, and knew them by job ID in its memory alone,
+the last 5,000 of them. After a front restart, or 5,000 of them later,
+jobs.list and INFORMATION_SCHEMA.JOBS listed every earlier one as the
+client's (measured in the BigQuery compat suite: 1,306 jobs before a front
+restart, 3,684 after). The engine makes a jobs.query's job ID itself, so
+the front could not choose one it would know again.
+
+The patch reads the header X-Cloudburrow-Job-Id-Prefix (letters, digits,
+underscores and dashes, at most 64), which the front sends with its own
+queries, and begins the ID of each job it makes for that request with it:
+a jobs.query's, and a jobs.insert's that names no jobReference.jobId. A
+request without it is unchanged.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/middleware.go
++++ b/server/middleware.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"compress/gzip"
++	"context"
+ 	"fmt"
+ 	"net/http"
+ 	"runtime"
+@@ -122,6 +123,11 @@
+ 			if zone := r.Header.Get(DefaultTimeZoneHeader); zone != "" {
+ 				ctx = googlesqlite.WithDefaultTimeZone(ctx, zone)
+ 			}
++			// CloudBurrow patch (cloudburrow/cloudburrow#1555): the job
++			// ID prefix CloudBurrow's front sends with a query of its own.
++			if prefix := r.Header.Get(JobIDPrefixHeader); validJobIDPrefix(prefix) {
++				ctx = context.WithValue(ctx, jobIDPrefixKey{}, prefix)
++			}
+ 			next.ServeHTTP(w, r.WithContext(ctx))
+ 		})
+ 	}
+@@ -132,6 +138,37 @@
+ // (cloudburrow/cloudburrow#1456).
+ const DefaultTimeZoneHeader = "X-Cloudburrow-Default-Time-Zone"
+ 
++// JobIDPrefixHeader carries a prefix for the IDs of the jobs a request
++// makes when it names none: a jobs.query's, and a jobs.insert's without a
++// jobReference.jobId. CloudBurrow's front sends it with the queries it
++// runs itself, so that their jobs are known as the front's for as long
++// as they are kept. CloudBurrow patch (cloudburrow/cloudburrow#1555).
++const JobIDPrefixHeader = "X-Cloudburrow-Job-Id-Prefix"
++
++type jobIDPrefixKey struct{}
++
++// validJobIDPrefix reports whether p may begin a job ID: BigQuery's "only
++// letters (a-z, A-Z), numbers (0-9), underscores (_), or dashes (-)", and
++// at most 64 of them.
++func validJobIDPrefix(p string) bool {
++	if p == "" || len(p) > 64 {
++		return false
++	}
++	for _, c := range p {
++		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
++			return false
++		}
++	}
++	return true
++}
++
++// newJobID is a job ID the engine makes for a job of ctx's request: a
++// random one, after the request's JobIDPrefixHeader if it sent one.
++func newJobID(ctx context.Context) string {
++	prefix, _ := ctx.Value(jobIDPrefixKey{}).(string)
++	return prefix + randomID()
++}
++
+ func projectIDFromParams(params map[string]string) (string, bool) {
+ 	projectID, exists := params["projectId"]
+ 	if exists {
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1723,7 +1723,7 @@
+ 	)
+ 	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	if job.JobReference.JobId == "" {
+-		job.JobReference.JobId = randomID() // generate job id
++		job.JobReference.JobId = newJobID(ctx) // generate job id; CloudBurrow patch (#1555): with the request's prefix
+ 	}
+ 	if jobErr == nil {
+ 		if hasDestinationTable {
+@@ -2164,7 +2164,9 @@
+ 	// collide on AddJob if we routed them through as the jobID. Idempotency
+ 	// (RequestId → cached response) is a TODO; for now every call gets a
+ 	// fresh jobID.
+-	jobID := randomID()
++	// CloudBurrow patch (cloudburrow/cloudburrow#1555): after the
++	// request's JobIDPrefixHeader, when it sent one.
++	jobID := newJobID(ctx)
+ 
+ 	// Persist the job in the metadata store, mirroring what
+ 	// jobsInsertHandler.Handle does at line ~1758. The previous behaviour
+--- /dev/null
++++ b/server/job_id_prefix_test.go
+@@ -0,0 +1,94 @@
++package server_test
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestJobIDPrefixHeader is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1555): CloudBurrow's front kept the IDs of the
++// queries it runs itself in memory alone, so a restarted front listed
++// them as a client's jobs. The engine now begins the ID of a job it makes
++// for a request with the request's X-Cloudburrow-Job-Id-Prefix, which the
++// front sends with its own queries, and the ID is kept with the job.
++func TestJobIDPrefixHeader(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test"))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	base := testServer.URL + "/bigquery/v2/projects/test"
++	post := func(path, prefix string, body any) string {
++		t.Helper()
++		b, _ := json.Marshal(body)
++		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(b))
++		req.Header.Set("Content-Type", "application/json")
++		if prefix != "" {
++			req.Header.Set(server.JobIDPrefixHeader, prefix)
++		}
++		resp, err := http.DefaultClient.Do(req)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer resp.Body.Close()
++		var got struct {
++			JobReference struct {
++				JobID string `json:"jobId"`
++			} `json:"jobReference"`
++		}
++		if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&got) != nil {
++			t.Fatalf("POST %s: %s", path, resp.Status)
++		}
++		return got.JobReference.JobID
++	}
++	query := map[string]any{"query": "SELECT 1", "useLegacySql": false}
++	// A jobReference with no jobId: the emulator reads the reference
++	// without looking for it (#973).
++	insert := map[string]any{"jobReference": map[string]any{"projectId": "test"}, "configuration": map[string]any{"query": query}}
++
++	marked := post("/queries", "_cloudburrow_", query)
++	if !strings.HasPrefix(marked, "_cloudburrow_") || len(marked) <= len("_cloudburrow_") {
++		t.Errorf("jobs.query with the prefix: job %q, want _cloudburrow_ and a random ID", marked)
++	}
++	insertMarked := post("/jobs", "_cloudburrow_", insert)
++	if !strings.HasPrefix(insertMarked, "_cloudburrow_") {
++		t.Errorf("jobs.insert without a jobId, with the prefix: job %q, want it to begin _cloudburrow_", insertMarked)
++	}
++	named := post("/jobs", "_cloudburrow_", map[string]any{"jobReference": map[string]any{"jobId": "mine"},
++		"configuration": map[string]any{"query": query}})
++	if named != "mine" {
++		t.Errorf("jobs.insert naming its job, with the prefix: job %q, want mine", named)
++	}
++	for _, prefix := range []string{"", "bad prefix", "a/b"} {
++		if id := post("/queries", prefix, query); strings.ContainsAny(id, " /") || strings.HasPrefix(id, "_") {
++			t.Errorf("jobs.query with prefix %q: job %q, want a random ID alone", prefix, id)
++		}
++	}
++
++	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/jobs/"+marked, nil)
++	resp, err := http.DefaultClient.Do(req)
++	if err != nil {
++		t.Fatal(err)
++	}
++	resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		t.Errorf("jobs.get %s: %s, want the job kept under its ID", marked, resp.Status)
++	}
++}

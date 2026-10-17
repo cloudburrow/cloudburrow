@@ -1380,7 +1380,7 @@ func (s *scriptRun) sendAs(text string, asJob bool) (*recorder, *scriptFlow) {
 	body, err := json.Marshal(opts)
 	if err == nil && asJob {
 		body, err = json.Marshal(map[string]any{"configuration": map[string]any{"query": opts},
-			"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": newJobID()}})
+			"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": jobIDFor(s.r.Context())}})
 	}
 	if err != nil {
 		return nil, &scriptFlow{failed: true, status: http.StatusInternalServerError, msg: err.Error(), text: text}

@@ -112,6 +112,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not give the job a jobReference")
 		return
 	}
+	if refuseInternalJobID(w, r, job.JobReference.JobID) { // internaljobs.go, #1555
+		return
+	}
 	project := job.JobReference.ProjectID
 	if project == "" {
 		project = projectOf(f.base)

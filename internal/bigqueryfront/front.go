@@ -355,6 +355,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil {
 			project := projectOf("/" + j[2])
+			if serveInternalJob(w, r, project, j[3]) { // internaljobs.go, #1555
+				return
+			}
 			if id, err := url.PathUnescape(j[3]); err == nil {
 				defer jobRows.noteMade(project, id) // jobstable.go, #1528
 			}
@@ -389,6 +392,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
 			project := projectOf("/" + j[2])
+			if serveInternalJob(w, r, project, j[4]) { // internaljobs.go, #1555
+				return
+			}
 			if j[3] == "jobs" && own.serveJobAction(w, r, project, j[4], "") {
 				return
 			}
@@ -1057,8 +1063,9 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 		rd = bytes.NewReader(body)
 	}
 	// The front's own request runs in UTC, whatever the client query's
-	// default_time_zone (timezone.go, #1456).
-	req, err := http.NewRequestWithContext(inUTC(r.Context()), method, u.String(), rd)
+	// default_time_zone (timezone.go, #1456), and the jobs it makes are
+	// named as the front's (internaljobs.go, #1555).
+	req, err := http.NewRequestWithContext(asInternal(inUTC(r.Context())), method, u.String(), rd)
 	if err != nil {
 		return 0, nil
 	}
@@ -1070,17 +1077,6 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/1.1", 1, 1
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, req)
-	if method == http.MethodPost && path == "/queries" && (rec.status == 0 || rec.status == http.StatusOK) {
-		// The front's own query: not a job of the client's (#972).
-		var resp map[string]any
-		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
-			project, id := jobRef(resp)
-			if project == "" {
-				project = projectOf(f.base)
-			}
-			f.records.markInternal(project, id)
-		}
-	}
 	return rec.status, rec.body.Bytes()
 }
 
