@@ -46,7 +46,9 @@ func TestParquetCharMapNames(t *testing.T) {
 		{bad, "STRICT", http.StatusBadRequest},
 		{bad, "V1", http.StatusNotImplemented},
 		{bad, "V2", http.StatusNotImplemented},
-		{[]field{{Name: "a.b"}}, "V2", http.StatusNotImplemented},
+		{[]field{{Name: "a.b"}}, "V2", http.StatusBadRequest}, // #1547
+		{[]field{{Name: "r", Fields: []field{{Name: "a.b"}}}}, "V1", http.StatusBadRequest},
+		{[]field{{Name: "a.b!"}}, "V1", http.StatusNotImplemented},
 		{[]field{{Name: "1a"}}, "V1", http.StatusNotImplemented},
 		{[]field{{Name: "a_"}, {Name: "r", Fields: []field{{Name: "b_c"}}}}, "V1", 0},
 	} {

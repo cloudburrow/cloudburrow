@@ -50,13 +50,14 @@ import (
 //     and a job's schema are checked as for Parquet (mergeParquet,
 //     givenFits).
 //
+// A file compressed with zstandard is read too (#1547, avrozstd.go).
+//
 // Not implemented (501), each for its reason: a union of several types
 // other than null (BigQuery makes "a RECORD of nullable fields", but does
 // not document their names); a map (its entries' order is not documented,
 // and the decoder does not keep the file's); a recursive record ("dropped
 // beyond the first nesting level", not measured); an array whose items
-// may be null; a file compressed with zstandard (the Avro decoder in
-// go.mod, goavro, reads null, deflate and snappy); a file whose schema is
+// may be null; a file whose schema is
 // not its referenceFileSchemaUri's (referencefile.go); a decimal decimalTargetTypes makes STRING; a dry run; a partition
 // decorator; another project's table.
 
@@ -549,13 +550,18 @@ func (f front) avroOpen(r *http.Request, upload *spooled, af avFile) (io.ReadClo
 
 // avroReader reads an object container file's header, or says why not.
 func avroReader(rd io.Reader, where string) (*goavro.OCFReader, error) {
+	rd, err := zstdOCF(rd) // #1547, avrozstd.go
+	if err != nil {
+		return nil, avInvalid("Error while reading data%s: the data is not an Avro object container file BigQuery can "+
+			"read: %v.", where, err)
+	}
 	ocf, err := goavro.NewOCFReader(rd)
 	if err == nil {
 		return ocf, nil
 	}
 	if strings.Contains(err.Error(), "compression") || strings.Contains(err.Error(), "codec") {
 		return nil, avNotHere("whose file%s is compressed by a codec the Avro decoder CloudBurrow uses does not read (%v); "+
-			"it reads null, deflate and snappy", where, err)
+			"it reads null, deflate, snappy and zstandard", where, err)
 	}
 	return nil, avInvalid("Error while reading data%s: the data is not an Avro object container file BigQuery can "+
 		"read: %v.", where, err)
