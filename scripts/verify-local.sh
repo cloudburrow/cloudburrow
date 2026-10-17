@@ -3,7 +3,9 @@
 # a dated, machine-readable result (#705). GitHub's macOS runners cannot run
 # the cluster, so this is how macOS (Docker Desktop) is verified: `up
 # --detach`, the environment from scripts/compat-env.sh, the compat suite,
-# the acceptance tests and the restart probes, then stop and delete.
+# the acceptance tests and the restart probes, then stop and delete; with
+# every compat shard run, the compat-coverage check that each compat test
+# ran in one of them (#1568).
 #
 # What each shard starts and runs is read from scripts/compat-shards.sh, the
 # file ci.yml's compat job sources, so the two cannot drift. It needs no CI
@@ -291,8 +293,16 @@ run_shard() {
     go_suite k8s "$dir/k8s.log" "" strict
   else
     log "$shard: compat suite"
+    # As in CI: Google's pinned Cloud SQL Auth Proxy for
+    # TestCloudSQLAuthProxyBinary (#1421) in the sql shard; the test skips
+    # without it.
+    if [ "$shard" = sql ]; then
+      CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy 2> "$dir/cloud-sql-proxy.err" || true)
+      export CLOUDBURROW_TEST_CLOUD_SQL_PROXY
+    fi
     rc=0
-    go test -tags=compat -count=1 -timeout 25m -v ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
+    # CI's timeout: the emulators and sql shards pass 25m.
+    go test -tags=compat -count=1 -timeout 60m -v ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
       retry_flaky "$dir/compat.log" go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... > "$dir/retry.out" 2>&1 || true
       settle_retries "$dir/compat.log"
@@ -421,11 +431,14 @@ browser_suite() {  # <shard> <dir> <flags...>
   # As in CI: the KMS and Cloud Run screens' tests in the run shard, the
   # BigQuery, Firestore and Datastore screens' in the emulators shard, the
   # Cloud SQL screens' in the sql shard, the rest in storage.
+  # The never-run tests are skipped in every shard, as in CI.
+  local skip=(-skip "$COMPAT_BROWSER_NEVER_TESTS") pick
   case "$shard" in
     run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" ;;
     emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
     sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS" ;;
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
+      skip=() ;;
   esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
@@ -456,9 +469,15 @@ browser_suite() {  # <shard> <dir> <flags...>
   (
     eval "$BROWSER_ENV"
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
-    go test -tags=browser -count=1 -timeout 10m -v "$select" "$pattern" ./test/browser/ > "$dir/browser.log" 2>&1 || true
+    go test -tags=browser -count=1 -timeout 10m -v "$select" "$pattern" ${skip[@]+"${skip[@]}"} ./test/browser/ > "$dir/browser.log" 2>&1 || true
   )
   go_suite browser "$dir/browser.log" "$("$chrome" --version 2>/dev/null || echo chrome)" strict
+  # As in CI: every test of this shard's selection must have passed, so one
+  # that never ran (a panic, a timeout) is a failure too.
+  for pick in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -vE "$COMPAT_BROWSER_NEVER_TESTS" |
+    if [ "$select" = -run ]; then grep -E "$pattern"; else grep -vE "$pattern"; fi); do
+    grep -q -- "^--- [A-Z]*: $pick (" "$dir/browser.log" || check "browser test $pick ran" fail "no result"
+  done
   "$CLI" stop "$@" >> "$dir/stop.log" 2>&1 || true
 }
 
@@ -500,6 +519,42 @@ for s in "${SHARD_LIST[@]}"; do
   run_shard "$s"
 done
 
+# ci.yml's compat-coverage job: with every compat shard run, each compat
+# test passed or failed in one of them, but for the never-run list, read
+# from ci.yml so the two cannot drift.
+compat_coverage() {
+  local s never none
+  for s in storage served run emulators sql; do
+    case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
+  done
+  SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
+  : > "$SUITES"; : > "$CHECKS"
+  never=$(sed -n "s/^ *never='\(.*\)'\$/\1/p" .github/workflows/ci.yml)
+  go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
+  for s in storage served run emulators sql; do
+    cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null
+  done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
+  none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)
+  printf '%s\n' "$none" > "$LOGS/ran-in-no-shard.txt"
+  if [ -z "$never" ]; then
+    check "every compat test ran in a shard" fail "no never= list in ci.yml"
+  elif [ -n "$none" ]; then
+    check "every compat test ran in a shard" fail "$(echo "$none" | paste -sd' ' -)"
+  else
+    check "every compat test ran in a shard" pass
+  fi
+
+  jq -n --slurpfile checks "$CHECKS" \
+    '{shard: "compat-coverage", instance: "", services: [], cluster_host: "", duration_seconds: 0, suites: [], checks: $checks,
+      passed: 0, skipped: 0, failed: ([$checks[] | select(.result == "fail")] | length),
+      failed_tests: [$checks[] | select(.result == "fail") | "check: \(.name)"]}
+     | .result = (if .failed == 0 then "pass" else "fail" end)' > "$WORK/compat-coverage.json"
+  log "compat-coverage: $(jq -r .result "$WORK/compat-coverage.json")"
+  SHARD_RESULTS+=(compat-coverage)
+}
+SHARD_RESULTS=("${SHARD_LIST[@]}")
+compat_coverage
+
 DOCKER_JSON=$(docker info --format '{{json .}}' | jq -c '{operating_system: .OperatingSystem, server_version: .ServerVersion,
   architecture: .Architecture, kernel: .KernelVersion, cpus: .NCPU, memory_bytes: .MemTotal}')
 jq -n --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg os "$OS" --arg arch "$ARCH" --arg osv "$(os_version)" \
@@ -512,7 +567,7 @@ jq -n --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg os "$OS" --arg arch "$AR
   --arg node "$(tool_version node --version)" --arg python "$(tool_version python3 --version)" \
   --arg terraform "$(tool_version terraform version)" --arg tofu "$(tool_version tofu version)" \
   --arg gcloud "$(tool_version gcloud version)" \
-  --slurpfile shards <(for s in "${SHARD_LIST[@]}"; do cat "$WORK/$s.json"; done) \
+  --slurpfile shards <(for s in "${SHARD_RESULTS[@]}"; do cat "$WORK/$s.json"; done) \
   '{schema: 1, date: $date, host: {os: $os, arch: $arch, os_version: $osv}, docker: $docker,
     cli: {version: $cliv, detail: $cli, git_commit: $commit, tracked_changes: ($dirty != "")},
     tools: {go: $go, kind: $kind, kubectl: $kubectl, node: $node, python: $python, terraform: $terraform, tofu: $tofu, gcloud: $gcloud},
