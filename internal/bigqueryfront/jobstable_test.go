@@ -345,3 +345,74 @@ func TestJobsTableSyncsIncrementally(t *testing.T) {
 		t.Fatalf("the JOBS query after the background syncs sent %q, want only its read of the table: its rows differ from a full rebuild", sent)
 	}
 }
+
+// TestJobsTableStatementsAreNoJobsAfterARestart (#1553): the statements
+// that write the table of JOBS rows are the front's own, and are no
+// client's jobs, in jobs.list or in JOBS, once the front has restarted
+// too, when it no longer remembers running them; each was a row of the
+// next INSERT, whose text was written into the INSERT after it, until a
+// JOBS query no longer fit the engine.
+func TestJobsTableStatementsAreNoJobsAfterARestart(t *testing.T) {
+	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}}}
+	for _, q := range []string{"SELECT 1", "SELECT 2"} {
+		if code, got := do(t, Wrap(emu), "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", q, code, got)
+		}
+	}
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	table := "`" + resultsDataset + "`.`" + jobsTableName + "`"
+	if code, got := do(t, Wrap(emu), "POST", base+"/queries", `{"query":"`+count+`"}`); code != 200 {
+		t.Fatalf("JOBS: %d %v", code, got)
+	}
+	h := Wrap(emu) // a front that has restarted
+	code, got := do(t, h, "GET", base+"/jobs?allUsers=true&projection=full", "")
+	if code != 200 {
+		t.Fatalf("jobs.list: %d %v", code, got)
+	}
+	jobs, _ := got["jobs"].([]any)
+	for _, j := range jobs {
+		job, _ := j.(map[string]any)
+		if internalText(job) {
+			t.Errorf("jobs.list listed the front's own %v", job["configuration"])
+		}
+	}
+	if len(jobs) != 3 { // the two SELECTs and the JOBS query
+		t.Errorf("jobs.list listed %d jobs, want 3", len(jobs))
+	}
+	from := len(emu.log)
+	if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+count+`"}`); code != 200 {
+		t.Fatalf("JOBS after the restart: %d %v", code, got)
+	}
+	for _, s := range emu.sentSince(from) {
+		if strings.HasPrefix(s, "INSERT INTO "+table) && strings.Contains(s, "INSERT INTO "+strings.ReplaceAll(table, "`", `\`+"`")) {
+			t.Errorf("the INSERT after the restart carries an INSERT's text: %.200s", s)
+		}
+		if strings.HasPrefix(s, "INSERT INTO "+table) && strings.Count(s, "'auto") != 3 {
+			t.Errorf("the INSERT after the restart wrote %d rows, want 3: %.300s", strings.Count(s, "'auto"), s)
+		}
+	}
+}
+
+// TestJobsBatchBoundsAnInsert (#1553): an INSERT of the table writes at
+// most jobsTableBatch rows and, past the first, jobsTableBatchBytes of
+// them.
+func TestJobsBatchBoundsAnInsert(t *testing.T) {
+	small := make([]string, 2500)
+	for i := range small {
+		small[i] = "(x)"
+	}
+	big := strings.Repeat("x", jobsTableBatchBytes/3)
+	for _, c := range []struct {
+		rows []string
+		want int
+	}{
+		{nil, 0},
+		{small, jobsTableBatch},
+		{[]string{big, big, big, big, big}, 3},
+		{[]string{strings.Repeat("x", 2*jobsTableBatchBytes), "(x)"}, 1},
+	} {
+		if got := jobsBatch(c.rows); got != c.want {
+			t.Errorf("jobsBatch of %d rows: %d, want %d", len(c.rows), got, c.want)
+		}
+	}
+}

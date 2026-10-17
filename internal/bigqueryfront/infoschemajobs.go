@@ -318,7 +318,7 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		return "", status, msg
 	}
 	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378)
-		if sub := f.tableJobsRows(r, project, jobs, listed.last, nil, true); sub != "" {
+		if sub := f.tableRowsOrRetry(r, project, jobs, listed.last); sub != "" {
 			return sub, 0, ""
 		}
 	}
@@ -334,9 +334,14 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 				return "", status, msg
 			}
 		}
-		if sub := f.tableJobsRows(r, project, jobs, listed.last, nil, true); sub != "" {
+		if sub := f.tableRowsOrRetry(r, project, jobs, listed.last); sub != "" {
 			return sub, 0, ""
 		}
+	}
+	if f.jobsTable != nil && len(kept) > jobsLiteralMax {
+		// The table could not be written, twice: a literal of so many
+		// rows is a statement too large for the engine (#1553).
+		return "", http.StatusInternalServerError, fmt.Sprintf("cloudburrow: could not write the %d rows of INFORMATION_SCHEMA.JOBS", len(kept))
 	}
 	jobs = kept
 	rows := make([][]string, len(jobs))
@@ -344,6 +349,19 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		rows[i] = jobRow(project, job)
 	}
 	return rowsSubquery(jobsColumns, rows), 0, ""
+}
+
+// tableRowsOrRetry is tableJobsRows of every job, made first if need be,
+// and once more if that fails: a failed write forgets the table (sync),
+// so the second makes it anew. A query reads the literal of its jobs
+// only when both fail, and then only of jobsLiteralMax jobs at most: a
+// literal of every job is compiled whole, and with thousands it did not
+// fit the engine's WebAssembly heap (#1553).
+func (f front) tableRowsOrRetry(r *http.Request, project string, jobs []map[string]any, last string) string {
+	if sub := f.tableJobsRows(r, project, jobs, last, nil, true); sub != "" {
+		return sub
+	}
+	return f.tableJobsRows(r, project, jobs, last, nil, true)
 }
 
 // jobsLiteralMax is the most jobs a filtered query of JOBS reads as a
