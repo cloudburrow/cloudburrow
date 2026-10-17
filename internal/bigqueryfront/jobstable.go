@@ -86,6 +86,18 @@ import (
 // a change was dropped. The syncs of a project's table, a query's and the
 // background's, run one at a time (inc), so a query waits for the
 // background's sync of the jobs it took, and reads them.
+//
+// An incremental sync still cost what every job did (#1564): the engine
+// read its job order as GoogleSQL, whose WHERE visits every row, so a
+// list of one job took 70 ms at 5,000 jobs, 138 ms at 10,000 and 274 ms
+// at 20,000 (the kind node at two CPUs, 2026-10-17); and sync compared
+// every row written. The engine now reads the order by its keys
+// (bigquery-emulator patch 0060), and sync compares only the rows asked
+// for and listed. A filtered query read a list of every job too, which
+// the engine did not cut by creation time (1.0 s at 10,000 jobs, 2.3 s
+// at 20,000): once the table is made it reads the table as an unfiltered
+// one does (jobsRows), and the engine cuts a list by minCreationTime and
+// maxCreationTime (patch 0060), which the front reads again.
 
 // jobsTableName is the table of JOBS rows in resultsDataset. It does not
 // begin with scratchPrefix, so queryResults takes it for no scratch table
@@ -216,6 +228,16 @@ func (j *jobsTable) incremental(project string) bool {
 	return true
 }
 
+// isMade reports whether the project's table is made.
+func (j *jobsTable) isMade(project string) bool {
+	if j == nil {
+		return false
+	}
+	j.bg.Lock()
+	defer j.bg.Unlock()
+	return j.made[project]
+}
+
 // takePending returns and forgets the project's pending IDs.
 func (j *jobsTable) takePending(project string) map[string]bool {
 	j.bg.Lock()
@@ -339,9 +361,28 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 	}
 	var gone []string
 	var add []string
-	for id, row := range have {
-		if now, ok := rows[id]; ok && now != row || !ok && (asked == nil || asked[id]) {
-			gone = append(gone, id)
+	// Of an incremental sync, only the rows asked for and listed can have
+	// changed (#1564): reading every row written cost each sync what the
+	// project's jobs did.
+	check := func(id string) {
+		if row, had := have[id]; had {
+			if now, ok := rows[id]; ok && now != row || !ok && (asked == nil || asked[id]) {
+				gone = append(gone, id)
+			}
+		}
+	}
+	if asked == nil {
+		for id := range have {
+			check(id)
+		}
+	} else {
+		for id := range asked {
+			check(id)
+		}
+		for id := range rows {
+			if !asked[id] {
+				check(id)
+			}
 		}
 	}
 	for _, id := range ids {
