@@ -566,8 +566,16 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()},
+		out := []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()},
 			kmsCreateImportJobAction(), kmsRandomBytesAction}
+		// DeleteKeyRing needs every key deleted first, and every import
+		// job expired (delete-kms-resources, #1595): offered on an empty
+		// ring, where the API names an import job still in the way.
+		if ks, err := api.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{Parent: ring, PageSize: 1}); err == nil && len(ks.GetCryptoKeys()) == 0 {
+			out = append(out, console.Action{ID: "deletering", Label: "Delete", Destructive: true,
+				Confirm: "The key ring is deleted permanently; its name can be used again after about 5 to 10 minutes."})
+		}
+		return out
 	case 2:
 		key := ring + "/cryptoKeys/" + path[1]
 		k, err := api.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key})
@@ -693,6 +701,13 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 
 	case action == "deletekey" && len(path) == 2:
 		op, err := api.DeleteCryptoKey(ctx, &kmspb.DeleteCryptoKeyRequest{Name: key})
+		if err == nil && op.GetError() != nil {
+			err = fmt.Errorf("%s", op.GetError().GetMessage())
+		}
+		return nil, err
+
+	case action == "deletering" && len(path) == 1:
+		op, err := api.DeleteKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: ring})
 		if err == nil && op.GetError() != nil {
 			err = fmt.Errorf("%s", op.GetError().GetMessage())
 		}

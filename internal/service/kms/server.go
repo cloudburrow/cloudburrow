@@ -197,7 +197,8 @@ func (s *Server) now() time.Time { return s.clock.Now() }
 // beside them (cloudkms_v1.yaml:13), and the Locations mixin (#1291). The
 // Operations mixin is registered apart (Operations).
 func (s *Server) Register(g grpc.ServiceRegistrar) {
-	kmspb.RegisterKeyManagementServiceServer(g, s)
+	// KeyManagementService with DeleteKeyRing, which kmspb lacks (deletering.go).
+	g.RegisterService(keyManagementServiceDesc(), s)
 	kmspb.RegisterEkmServiceServer(g, s.Ekm())
 	kmspb.RegisterAutokeyServer(g, s.Autokey())
 	kmspb.RegisterAutokeyAdminServer(g, s.AutokeyAdmin())
@@ -291,6 +292,11 @@ func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingReques
 		return nil, apierror.Wrap(err)
 	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("KeyRing %s already exists", name))
+	}
+	if held, err := s.ringHeld(name); err != nil {
+		return nil, apierror.Wrap(apierror.Internal(err, "read the hold on %s", name))
+	} else if held {
+		return nil, apierror.Wrap(apierror.AlreadyExists("KeyRing %s was deleted less than %s ago: its name becomes available for reuse after that", name, ringReuseAfter))
 	}
 	r := keyRing{Name: name, Created: s.now().UTC()}
 	if err := s.put(dbKey(ringPrefix, name), r); err != nil {

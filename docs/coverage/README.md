@@ -20,7 +20,7 @@ Do not edit these files by hand.
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 76 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud KMS](kms.md) | 62 | 62 | 0 | 0 | 0 | 0 | 0 | 86 |
+| [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 86 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |

@@ -190,3 +190,32 @@ func TestConsoleKMSDeleteIsOfferedWhereAllowed(t *testing.T) {
 		t.Errorf("ListRetiredResources = %v, %v", r, err)
 	}
 }
+
+// Delete on a key ring's page is offered only while the ring has no keys,
+// and deletes it through DeleteKeyRing (#1595).
+func TestConsoleKMSDeleteKeyRing(t *testing.T) {
+	p, c, ring := kmsConsole(t)
+	ctx := context.Background()
+	if got := kmsActionIDs(p, []string{ring}); !slices.Contains(got, "deletering") {
+		t.Fatalf("an empty key ring does not offer Delete: %v", got)
+	}
+	if _, err := p.ActAtResult(ctx, "demo-proj", []string{ring}, "createkey", map[string]string{"cryptoKeyId": "k"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := kmsActionIDs(p, []string{ring}); slices.Contains(got, "deletering") {
+		t.Errorf("a key ring with a key offers Delete: %v", got)
+	}
+	if err := p.ActAt(ctx, "demo-proj", []string{ring}, "deletering", nil); err == nil {
+		t.Error("Delete of a key ring with a key succeeded")
+	}
+	other, err := p.Create(ctx, "demo-proj", map[string]string{"keyRingId": "empty", "location": "global"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, "demo-proj", []string{other}, "deletering", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: "projects/demo-proj/locations/global/keyRings/empty"}); err == nil {
+		t.Error("the SDK still reads the deleted key ring")
+	}
+}

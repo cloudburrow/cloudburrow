@@ -242,7 +242,7 @@
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:244 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -334,7 +334,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -368,7 +368,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secretexpiryfilter_test.go:118 TestSecretManagerListFilters",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
@@ -377,7 +377,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secretexpiryfilter_test.go:118 TestSecretManagerListFilters",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -422,7 +422,7 @@
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
           "test/compat/secretcmek_test.go:201 TestGcloudSecretsCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:217 TestTerraformRegionalSecret",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
@@ -2701,28 +2701,28 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Verified": 62
+      "Verified": 63
     },
     "rows": [
       {
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
       },
@@ -2730,7 +2730,7 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2738,14 +2738,14 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2755,14 +2755,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/GetEkmConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2770,14 +2770,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/ListEkmConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2786,14 +2786,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2801,7 +2801,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2910,7 +2910,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:47 TestKMSResources",
@@ -2974,7 +2974,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:47 TestKMSResources"
         ],
@@ -3005,6 +3006,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
           "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
@@ -3014,6 +3016,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
@@ -3037,7 +3041,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:630 TestKMSDecrypt",
           "test/compat/kms_test.go:731 TestKMSDecryptFollowsTheVersionLifecycle",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext",
@@ -3080,6 +3084,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
         ],
         "unverified": [
@@ -3102,6 +3107,14 @@
             "case": "a version that is not DESTROYED",
             "test": "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
           }
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/DeleteKeyRing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing"
         ]
       },
       {
@@ -3134,7 +3147,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:509 TestKMSEncrypt",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
@@ -3230,6 +3243,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_test.go:1162 TestKMSGetCryptoKeyVersion",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled"
         ],
@@ -3268,6 +3282,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
@@ -3312,6 +3328,7 @@
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM",
           "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
+          "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
@@ -3349,7 +3366,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/kms_test.go:950 TestKMSFullViewAddsNothingForSoftwareKeys",
@@ -3507,7 +3524,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:905 TestKMSUpdateCryptoKey",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
