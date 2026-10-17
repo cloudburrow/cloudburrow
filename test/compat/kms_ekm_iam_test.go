@@ -28,6 +28,9 @@ import (
 // unverified: google.iam.v1.IAMPolicy/SetIamPolicy ABORTED: a stale etag on an EkmConnection or ekmConfig
 func TestKMSEkmIamPolicyIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
+	// Asked here, not first inside a subtest: an unserved KMS skips this
+	// test, where the harness's Skip from a subtest failed it (#1362).
+	h.Endpoint(EnvKMS)
 	ctx := h.Context()
 	der := ekmCertificate(t)
 	const member = "user:ekm-admin@example.com"
