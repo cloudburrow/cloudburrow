@@ -400,7 +400,7 @@ Authors.
 +}
 --- a/internal/formatter.go
 +++ b/internal/formatter.go
-@@ -364,6 +364,9 @@
+@@ -369,6 +369,9 @@
  	if err != nil {
  		return "", err
  	}
@@ -410,7 +410,7 @@ Authors.
  	// CloudBurrow patch (cloudburrow/cloudburrow#1116): the JSON
  	// encoders are given their argument's type (json_encoding.go).
  	if typedJSONFuncs[funcName] {
-@@ -731,6 +734,9 @@
+@@ -736,6 +739,9 @@
  	if spec, exists := funcMap[funcName]; exists {
  		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
  	}
@@ -420,7 +420,7 @@ Authors.
  	var opts []string
  	for _, item := range m1(n.node.OrderByItemList()) {
  		columnRef := m1(item.ColumnRef())
-@@ -1868,12 +1874,18 @@
+@@ -1873,12 +1879,18 @@
  	}
  	groupByColumns := []string{}
  	groupByColumnMap := map[string]struct{}{}
@@ -441,7 +441,7 @@ Authors.
  		groupByColumnMap[colName] = struct{}{}
  	}
  	columns := []string{}
-@@ -2301,10 +2313,15 @@
+@@ -2306,10 +2318,15 @@
  			}
  			orderByColumns = append(orderByColumns, fmt.Sprintf("(CASE WHEN `%[1]s` IS NULL THEN 0 WHEN typeof(`%[1]s`) = 'text' THEN 1 ELSE 2 END)%[2]s", colName, dir))
  		}
@@ -567,16 +567,16 @@ Authors.
  		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
  		CreateMode: m1(stmt.CreateMode()),
  		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
-@@ -941,7 +964,7 @@
- 	return &TableSpec{
- 		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
- 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
--		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
-+		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()), tableDefaultCollation(stmt)),
- 		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
- 		CreateMode: m1(stmt.CreateMode()),
- 		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
-@@ -1000,3 +1023,15 @@
+@@ -945,7 +968,7 @@
+ 	// EXISTS, which may name a table made without it.
+ 	isTemp := resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp
+ 	ifNotExists := m1(stmt.CreateMode()) == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists
+-	columns := newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()))
++	columns := newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()), tableDefaultCollation(stmt))
+ 	if with := withStreamedAtColumn(columns, isTemp || ifNotExists); len(with) > len(columns) {
+ 		columns = with
+ 		outputColumns = append(outputColumns, "NULL AS `"+streamedAtColumn+"`")
+@@ -1012,3 +1035,15 @@
  		FieldTypes:    fieldTypes,
  	}
  }
