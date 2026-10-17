@@ -218,3 +218,29 @@ func TestJobsTableReadByFilteredQueries(t *testing.T) {
 		t.Fatalf("JOBS query of two jobs sent %q, want a literal", sent)
 	}
 }
+
+// TestJobsTableBackgroundWaitsAfterASlowSync (#1525): a background sync
+// runs no sooner than jobsTableIdle times as long as the last one took
+// after it ended, so syncs that list many jobs never run back to back.
+func TestJobsTableBackgroundWaitsAfterASlowSync(t *testing.T) {
+	saved := jobsTableDelay
+	jobsTableDelay = time.Millisecond
+	t.Cleanup(func() { jobsTableDelay = saved })
+	var j jobsTable
+	j.setMade("p", true)
+	const took = 40 * time.Millisecond
+	ran := make(chan [2]time.Time, 2)
+	sync := func() {
+		start := time.Now()
+		time.Sleep(took)
+		ran <- [2]time.Time{start, time.Now()}
+	}
+	j.soon("p", sync)
+	first := <-ran
+	time.Sleep(5 * time.Millisecond) // the first sync's wait is recorded
+	j.soon("p", sync)
+	second := <-ran
+	if gap := second[0].Sub(first[1]); gap < jobsTableIdle*took {
+		t.Errorf("the second sync started %v after the first ended, want at least %v", gap, jobsTableIdle*took)
+	}
+}

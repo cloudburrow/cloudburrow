@@ -51,6 +51,16 @@ import (
 // still syncs first, so it reads every job, as before. The background
 // never makes a table: one dropped (the emulator restarted, a write
 // failed) waits for the next query.
+//
+// A background sync lists every job, which costs the emulator more with
+// each job made (#1525): measured on one instance with 2,100 jobs, a
+// list took 0.33 s, and one is sent each second jobs are made, so with
+// some 6,000 jobs the syncs ran back to back and the engine served the
+// client's loads and queries between them. So a background sync runs
+// no sooner than jobsTableIdle times as long as the last one took after
+// it ended: the engine spends at most a fifth or so of its time on them,
+// however many jobs there are. What a query reads is unchanged, as it
+// still syncs first.
 
 // jobsTableName is the table of JOBS rows in resultsDataset. It does not
 // begin with scratchPrefix, so queryResults takes it for no scratch table
@@ -69,6 +79,10 @@ const jobsTableBatch = 1000
 // waited longer, and the first query after 5,000 jobs took 20 s.)
 var jobsTableDelay = time.Second
 
+// jobsTableIdle is how many times as long as the last background sync
+// took the next waits, at least, after it (above).
+const jobsTableIdle = 4
+
 // jobsTable is what the front wrote to each project's table of JOBS rows.
 type jobsTable struct {
 	mu sync.Mutex
@@ -84,6 +98,9 @@ type jobsTable struct {
 	queued map[string]bool
 	// made are the projects whose table is made (rows has them).
 	made map[string]bool
+	// after is when each project's next background sync may run, by
+	// how long the last took (jobsTableIdle).
+	after map[string]time.Time
 }
 
 // reset forgets the tables: the emulator restarted, and has none.
@@ -128,12 +145,24 @@ func (j *jobsTable) soon(project string, sync func()) {
 		j.queued = map[string]bool{}
 	}
 	j.queued[project] = true
+	delay := jobsTableDelay
+	if wait := time.Until(j.after[project]); wait > delay {
+		delay = wait
+	}
 	j.bg.Unlock()
-	time.AfterFunc(jobsTableDelay, func() {
+	time.AfterFunc(delay, func() {
 		j.bg.Lock()
 		delete(j.queued, project)
 		j.bg.Unlock()
+		start := time.Now()
 		sync()
+		took := time.Since(start)
+		j.bg.Lock()
+		if j.after == nil {
+			j.after = map[string]time.Time{}
+		}
+		j.after[project] = time.Now().Add(jobsTableIdle * took)
+		j.bg.Unlock()
 	})
 }
 
