@@ -27,7 +27,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
-| Secret Manager | 2 | 1 | 0 | 0 | 1 |
+| Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
 | BigQuery | 29 | 9 | 12 | 8 | 0 |
@@ -149,7 +149,6 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A Cloud Run `secretKeyRef` to a version under a customer-managed key is `UNIMPLEMENTED`: the mounted Kubernetes Secret holds ciphertext (#1453) | not built yet | S |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) (#1445) | needs live GCP | S |
 
 ## Resource Manager
