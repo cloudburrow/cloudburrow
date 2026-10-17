@@ -23,7 +23,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 6 | 0 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 1 | 1 | 1 |
 | Cloud Tasks | 0 | 0 | 0 | 0 | 0 |
-| Cloud Run | 4 | 0 | 3 | 0 | 1 |
+| Cloud Run | 5 | 0 | 4 | 0 | 1 |
 | Cloud Scheduler | 1 | 0 | 0 | 0 | 1 |
 | Cloud Logging | 2 | 0 | 0 | 2 | 0 |
 | Cloud KMS | 8 | 0 | 3 | 4 | 1 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 10 | 7 | 3 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **89** | **22** | **38** | **23** | **6** |
+| **Total** | **90** | **22** | **39** | **23** | **6** |
 
 ## Cloud Storage
 
@@ -102,6 +102,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 |---|---|---|
 | Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, which the coverage page shows, as only `DOCKER` repositories are served (#1531); remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | Cloud Build: BuildTriggers with a repository source or a `filename` are refused 501 with the reason (their sources name GitHub, GitLab, Bitbucket, Cloud Source Repositories or Developer Connect connections, hosted services no instance runs); a repository whose pushes run builds is served as a Secure Source Manager repository with its `.cloudbuild/triggers.yaml`, as Google documents it, in the console and driven by gcloud and Terraform, its IAM policies stored, not enforced (#1521, #1527); Pub/Sub triggers are built (#1506). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, or package formats not served) | M |
+| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: remote repositories are refused with the reason (they pull from public upstreams); Python, npm, Maven, generic, Apt and Yum repositories and virtual ones over them were built in #1531. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 | Cloud Build: triggers with a repository source or a `filename` are refused 501 with the reason (they need a hosted git service: no Cloud Source Repositories, Secure Source Manager or Developer Connect is served, and Google's repository sources name hosted services, not local paths); Pub/Sub triggers are built (#1506). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) (#1521) | no emulator support: built; the rest is refused with its reason (a hosted git service, or package formats not served) | M |
 

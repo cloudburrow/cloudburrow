@@ -299,6 +299,9 @@ func (a *ArtifactRegistryServer) UpdateFile(ctx context.Context, req *arpb.Updat
 // file is allowed only in a GENERIC repository, and a Docker image's
 // blobs go when the versions holding them are deleted.
 func (a *ArtifactRegistryServer) DeleteFile(ctx context.Context, req *arpb.DeleteFileRequest) (*longrunningpb.Operation, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtDeleteFile(req.GetName())
+	}
 	if _, err := a.GetFile(ctx, &arpb.GetFileRequest{Name: req.GetName()}); err != nil {
 		return nil, err
 	}
@@ -315,6 +318,23 @@ func (a *ArtifactRegistryServer) BatchDeleteVersions(ctx context.Context, req *a
 	}
 	repoName := ""
 	for _, n := range req.GetNames() {
+		if isPackageRepo(n) {
+			r, pkg, _, err := splitFmtName(n, "versions")
+			if err != nil {
+				return nil, err
+			}
+			if req.GetParent() != "" && fmtPackageName(r, pkg) != req.GetParent() {
+				return nil, apierror.InvalidArgument("version %q is not in package %q", n, req.GetParent())
+			}
+			if repoName != "" && r != repoName {
+				return nil, apierror.InvalidArgument("all versions must be in one repository")
+			}
+			repoName = r
+			if _, err := a.GetVersion(ctx, &arpb.GetVersionRequest{Name: n}); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		pkg, r, _, _, err := parseVersionName(n)
 		if err != nil {
 			return nil, err
@@ -723,51 +743,6 @@ func (a *ArtifactRegistryServer) UpdateVPCSCConfig(_ context.Context, req *arpb.
 	return proto.Clone(c).(*arpb.VPCSCConfig), nil
 }
 
-// The methods below are refused with the reason: they serve formats or
-// sources this instance has no repositories for.
-
-const noFormat = "only DOCKER repositories are served: CreateRepository refuses %s, so no repository here holds them"
-
-// ListMavenArtifacts is refused: no MAVEN repository can exist here.
-func (a *ArtifactRegistryServer) ListMavenArtifacts(context.Context, *arpb.ListMavenArtifactsRequest) (*arpb.ListMavenArtifactsResponse, error) {
-	return nil, apierror.Unimplemented(noFormat, "MAVEN")
-}
-
-// GetMavenArtifact is refused: no MAVEN repository can exist here.
-func (a *ArtifactRegistryServer) GetMavenArtifact(context.Context, *arpb.GetMavenArtifactRequest) (*arpb.MavenArtifact, error) {
-	return nil, apierror.Unimplemented(noFormat, "MAVEN")
-}
-
-// ListNpmPackages is refused: no NPM repository can exist here.
-func (a *ArtifactRegistryServer) ListNpmPackages(context.Context, *arpb.ListNpmPackagesRequest) (*arpb.ListNpmPackagesResponse, error) {
-	return nil, apierror.Unimplemented(noFormat, "NPM")
-}
-
-// GetNpmPackage is refused: no NPM repository can exist here.
-func (a *ArtifactRegistryServer) GetNpmPackage(context.Context, *arpb.GetNpmPackageRequest) (*arpb.NpmPackage, error) {
-	return nil, apierror.Unimplemented(noFormat, "NPM")
-}
-
-// ListPythonPackages is refused: no PYTHON repository can exist here.
-func (a *ArtifactRegistryServer) ListPythonPackages(context.Context, *arpb.ListPythonPackagesRequest) (*arpb.ListPythonPackagesResponse, error) {
-	return nil, apierror.Unimplemented(noFormat, "PYTHON")
-}
-
-// GetPythonPackage is refused: no PYTHON repository can exist here.
-func (a *ArtifactRegistryServer) GetPythonPackage(context.Context, *arpb.GetPythonPackageRequest) (*arpb.PythonPackage, error) {
-	return nil, apierror.Unimplemented(noFormat, "PYTHON")
-}
-
-// ImportAptArtifacts is refused: no APT repository can exist here.
-func (a *ArtifactRegistryServer) ImportAptArtifacts(context.Context, *arpb.ImportAptArtifactsRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented(noFormat, "APT")
-}
-
-// ImportYumArtifacts is refused: no YUM repository can exist here.
-func (a *ArtifactRegistryServer) ImportYumArtifacts(context.Context, *arpb.ImportYumArtifactsRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented(noFormat, "YUM")
-}
-
 // ConfigServer serves the methods above for the console: those returning
 // an operation (CreateAttachment, DeleteAttachment, BatchDeleteVersions,
 // ExportArtifact) do their work and return no operation on it.
@@ -782,6 +757,9 @@ func LastExport() *arpb.ExportArtifactMetadata { return lastExport.Load() }
 // deleteVersionNow deletes a version and its tags, as DeleteVersion with
 // force does, with no operation.
 func deleteVersionNow(name string) error {
+	if isPackageRepo(name) {
+		return fmtDeleteVersionNow(name, true)
+	}
 	_, repoName, image, digest, err := parseVersionName(name)
 	if err != nil {
 		return err
@@ -836,6 +814,9 @@ func (a *ArtifactRegistryServer) ExportArtifact(ctx context.Context, req *arpb.E
 	if version == "" {
 		return nil, apierror.InvalidArgument("source_version or source_tag is required")
 	}
+	if isPackageRepo(req.GetRepository()) {
+		return a.exportPackageVersion(ctx, w, req, version)
+	}
 	if _, r, _, _, err := parseVersionName(version); err != nil || r != req.GetRepository() {
 		return nil, apierror.InvalidArgument("source %q must be a version in %s", version, req.GetRepository())
 	}
@@ -889,4 +870,44 @@ func pkgIDOf(version string) string {
 	pkg, _, _ := splitChild(version, "versions")
 	_, id, _ := splitChild(pkg, "packages")
 	return id
+}
+
+// exportPackageVersion is ExportArtifact for a package format's version:
+// each of its files is written as an object named by its file ID.
+func (a *ArtifactRegistryServer) exportPackageVersion(ctx context.Context, w ObjectWriter, req *arpb.ExportArtifactRequest, version string) (*longrunningpb.Operation, error) {
+	if repoNameOf(version) != req.GetRepository() {
+		return nil, apierror.InvalidArgument("source %q must be a version in %s", version, req.GetRepository())
+	}
+	v, err := a.GetVersion(ctx, &arpb.GetVersionRequest{Name: version})
+	if err != nil {
+		return nil, err
+	}
+	bucket, dir, _ := strings.Cut(strings.Trim(strings.TrimPrefix(req.GetGcsPath(), "gs://"), "/"), "/")
+	if bucket == "" {
+		return nil, apierror.InvalidArgument("gcs_path is required: bucket, or bucket/dir")
+	}
+	st := RegistryStore()
+	project := strings.Split(req.GetRepository(), "/")[1]
+	meta := &arpb.ExportArtifactMetadata{}
+	defer func() { lastExport.Store(meta) }()
+	for _, f := range repoFilesOf(req.GetRepository()) {
+		x := fmtFileOf(req.GetRepository(), f)
+		if x.GetOwner() != version {
+			continue
+		}
+		b, err := st.ReadBlob(f.Digest)
+		if err != nil {
+			return nil, apierror.Internal(err, "read file %s", x.GetName())
+		}
+		object := f.ID
+		if dir != "" {
+			object = dir + "/" + f.ID
+		}
+		if err := w.Put(ctx, project, bucket, object, b, false); err != nil {
+			return nil, apierror.FailedPrecondition("write gs://%s/%s: %v", bucket, object, err)
+		}
+		meta.ExportedFiles = append(meta.ExportedFiles, &arpb.ExportArtifactMetadata_ExportedFile{Name: x.GetName(), Hashes: x.GetHashes(),
+			Destination: &arpb.ExportArtifactMetadata_ExportedFile_GcsObjectPath{GcsObjectPath: bucket + "/" + object}})
+	}
+	return a.doneWith(req.GetRepository(), meta, &arpb.ExportArtifactResponse{ExportedVersion: v})
 }

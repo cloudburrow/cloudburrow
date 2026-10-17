@@ -190,6 +190,8 @@ func (r *runService) Start(ctx context.Context) error {
 		fetch = sf
 		// ExportArtifact writes a version's files there (#1449).
 		runadapter.UseExportWriter(sf)
+		// ImportAptArtifacts and ImportYumArtifacts read from there (#1531).
+		runadapter.UseImportReader(sf)
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)

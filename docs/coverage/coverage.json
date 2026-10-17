@@ -24,7 +24,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -37,9 +37,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
-          "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -49,7 +48,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
@@ -84,7 +83,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
@@ -100,9 +99,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
-          "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -184,9 +182,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
-          "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -292,7 +289,7 @@
         "tests": [
           "test/compat/secretsrotation1215_test.go:19 TestSecretsManagedRotationIsUnimplemented"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): managed rotation changes a Cloud SQL user's password, and Google documents only the request, not what a rotation does to that user or to the secret's versions"
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
@@ -369,7 +366,7 @@
         "tests": [
           "test/compat/secretsrotation1215_test.go:19 TestSecretsManagedRotationIsUnimplemented"
         ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): managed rotation changes a Cloud SQL user's password, and Google documents only the request, not what a rotation does to that user or to the secret's versions"
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy",
@@ -841,8 +838,7 @@
     "Key": "artifactregistry",
     "Title": "Artifact Registry",
     "counts": {
-      "Unimplemented": 8,
-      "Verified": 42
+      "Verified": 50
     },
     "rows": [
       {
@@ -863,6 +859,9 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -879,6 +878,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
@@ -894,6 +894,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
         ]
       },
@@ -901,6 +902,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -908,6 +910,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -924,6 +927,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -931,6 +935,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
         ]
@@ -961,6 +966,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetFile",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -974,18 +980,23 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetMavenArtifact",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetNpmPackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -998,13 +1009,16 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPythonPackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1021,6 +1035,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
@@ -1037,18 +1052,23 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportAptArtifacts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportYumArtifacts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:578 TestArtifactRegistryAptAndYumImports"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments",
@@ -1069,30 +1089,40 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListFiles",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListMavenArtifacts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListNpmPackages",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPackages",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPythonPackages",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories",
@@ -1112,6 +1142,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListTags",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1119,6 +1150,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListVersions",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1179,6 +1212,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1245,9 +1279,7 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildpubsub_test.go:107 TestTerraformCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1255,7 +1287,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1264,9 +1296,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildpubsub_test.go:107 TestTerraformCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1274,7 +1304,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1299,8 +1329,7 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildpubsub_test.go:107 TestTerraformCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1315,7 +1344,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1323,7 +1352,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuildTriggers",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1340,14 +1369,14 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1364,7 +1393,7 @@
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1372,8 +1401,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1381,301 +1409,8 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
-        ]
-      }
-    ]
-  },
-  {
-    "Key": "securesourcemanager",
-    "Title": "Secure Source Manager",
-    "counts": {
-      "Unimplemented": 44,
-      "Verified": 9
-    },
-    "rows": [
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/BatchCreatePullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CloseIssue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ClosePullRequest",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateBranchRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateInstance",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateIssue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateIssueComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequest",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateRepository",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteBranchRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteInstance",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteIssue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteIssueComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeletePullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteRepository",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/FetchBlob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/FetchRefs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/FetchTree",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetBranchRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIamPolicyRepo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetInstance",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIssue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIssueComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetPullRequest",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetPullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetRepository",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListBranchRules",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListHooks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListInstances",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListIssueComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListIssues",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequestFileDiffs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequests",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListRepositories",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
-        ]
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/MergePullRequest",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/OpenIssue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/OpenPullRequest",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ResolvePullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/SetIamPolicyRepo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/TestIamPermissionsRepo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UnresolvePullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateBranchRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateIssue",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateIssueComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdatePullRequest",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdatePullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateRepository",
-        "status": "Verified",
-        "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
         ]
       }
     ]
@@ -2339,49 +2074,50 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Verified": 62
+      "Unimplemented": 2,
+      "Verified": 60
     },
     "rows": [
       {
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
@@ -2390,14 +2126,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/GetEkmConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2405,14 +2141,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/ListEkmConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2421,14 +2157,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2436,15 +2172,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.HsmManagement/ApproveSingleTenantHsmInstanceProposal",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
         ]
       },
       {
@@ -2458,8 +2193,7 @@
         "method": "google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstanceProposal",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
         ]
       },
       {
@@ -2473,8 +2207,7 @@
         "method": "google.cloud.kms.v1.HsmManagement/ExecuteSingleTenantHsmInstanceProposal",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
         ]
       },
       {
@@ -2544,7 +2277,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:46 TestKMSResources",
@@ -2608,7 +2341,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
@@ -2640,7 +2373,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
@@ -2671,7 +2403,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:614 TestKMSDecrypt",
           "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext",
@@ -2768,7 +2500,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:495 TestKMSEncrypt",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
@@ -2807,10 +2539,11 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
-        ]
+          "test/compat/kms_unimplemented_test.go:31 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes",
@@ -2864,7 +2597,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:1141 TestKMSGetCryptoKeyVersion",
+          "test/compat/kms_test.go:1139 TestKMSGetCryptoKeyVersion",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled"
         ],
         "unverified": [
@@ -2881,7 +2614,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a version number the key does not have",
-            "test": "test/compat/kms_test.go:1141 TestKMSGetCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:1139 TestKMSGetCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
@@ -2919,7 +2652,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a key ring removed by a project-scoped /admin/reset",
-            "test": "test/compat/kms_test.go:1109 TestKMSProjectResetClearsOnlyThatProject"
+            "test": "test/compat/kms_test.go:1107 TestKMSProjectResetClearsOnlyThatProject"
           },
           {
             "code": "NOT_FOUND",
@@ -2959,8 +2692,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
         ],
         "unverified": [
           {
@@ -2972,19 +2704,20 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
-        ]
+          "test/compat/kms_unimplemented_test.go:31 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:931 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3015,7 +2748,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:931 TestKMSFullViewAddsNothingForSoftwareKeys"
+          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys"
         ],
         "unverified": [
           {
@@ -3136,9 +2869,9 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:886 TestKMSUpdateCryptoKey",
+          "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3165,7 +2898,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "the immutable destroy_scheduled_duration in the mask",
-            "test": "test/compat/kms_test.go:886 TestKMSUpdateCryptoKey"
+            "test": "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey"
           },
           {
             "code": "NOT_FOUND",
@@ -4090,10 +3823,9 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
-          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
@@ -4106,9 +3838,8 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/DeleteJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
-          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
@@ -4119,10 +3850,9 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/GetJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
-          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
@@ -4162,8 +3892,7 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/RunJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens"
@@ -4173,7 +3902,7 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/UpdateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
@@ -4242,8 +3971,8 @@
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
-          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:114 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
+          "test/compat/logging1451_test.go:235 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -4295,7 +4024,7 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:235 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -4365,7 +4094,7 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:235 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -4546,7 +4275,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
-          "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
+          "test/compat/logging1451_test.go:114 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
@@ -6138,7 +5867,7 @@
       {
         "method": "storage.objects.getIamPolicy",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): excluded by ADR-0006, amended by #504: Google's JSON API reference documents no object-level IAM (the discovery document lists the method, the reference does not), and an object's access is its bucket's or managed folder's IAM and its ACLs"
       },
       {
         "method": "storage.objects.insert",
@@ -6230,12 +5959,12 @@
       {
         "method": "storage.objects.setIamPolicy",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): excluded by ADR-0006, amended by #504: Google's JSON API reference documents no object-level IAM (the discovery document lists the method, the reference does not), and an object's access is its bucket's or managed folder's IAM and its ACLs"
       },
       {
         "method": "storage.objects.testIamPermissions",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "note": "returns UNIMPLEMENTED (in-process check): excluded by ADR-0006, amended by #504: Google's JSON API reference documents no object-level IAM (the discovery document lists the method, the reference does not), and an object's access is its bucket's or managed folder's IAM and its ACLs"
       },
       {
         "method": "storage.objects.update",
@@ -6327,8 +6056,8 @@
     "Key": "storagegrpc",
     "Title": "Cloud Storage (gRPC API v2)",
     "counts": {
-      "Implemented": 2,
-      "Verified": 22
+      "Implemented": 1,
+      "Verified": 23
     },
     "rows": [
       {
@@ -6344,13 +6073,14 @@
         "tests": [
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
-          "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects"
+          "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects",
+          "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
         ]
       },
       {
         "method": "google.storage.v2.Storage/CancelResumableWrite",
         "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "note": "no official-SDK test can reach it: the official Go client never calls it (it abandons a session by not finishing it); unit-tested in TestGRPCWriteObjectResumes"
       },
       {
         "method": "google.storage.v2.Storage/ComposeObject",
@@ -6442,8 +6172,10 @@
       },
       {
         "method": "google.storage.v2.Storage/QueryWriteStatus",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
+        ]
       },
       {
         "method": "google.storage.v2.Storage/ReadObject",
@@ -6481,7 +6213,8 @@
         "method": "google.storage.v2.Storage/StartResumableWrite",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
         ]
       },
       {
@@ -9845,31 +9578,37 @@
     "Key": "serviceusage",
     "Title": "Service Usage API (v1)",
     "counts": {
-      "Unimplemented": 3,
-      "Verified": 7
+      "Verified": 10
     },
     "rows": [
       {
         "method": "serviceusage.operations.cancel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations"
+        ]
       },
       {
         "method": "serviceusage.operations.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations"
+        ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
+          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations",
           "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.operations.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations"
+        ]
       },
       {
         "method": "serviceusage.services.batchEnable",
