@@ -5,9 +5,13 @@ package compat
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	arapi "google.golang.org/api/artifactregistry/v1"
@@ -244,5 +248,178 @@ output "outputs" {
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := c.GetInstance(ctx, &securesourcemanagerpb.GetInstanceRequest{Name: inst}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetInstance after destroy: %v; want NotFound", err)
+	}
+}
+
+// TestTerraformArtifactRegistryPackageDataSources (#1304): over a GENERIC
+// repository the module makes, holding two versions of a package uploaded
+// with the API's media upload and a tag made with the official client, the
+// data sources google_artifact_registry_packages, _package, _versions,
+// _version, _tags, _tag and _file (which downloads the file) match what the
+// official client reads. The change relabels the repository in place, and
+// the tag moved to the other version with the official client is read on
+// the next apply; the plan is clean after each. Destroy deletes the
+// repository.
+// covers: google.devtools.artifactregistry.v1.ArtifactRegistry/ListPackages, google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage, google.devtools.artifactregistry.v1.ArtifactRegistry/ListVersions, google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion, google.devtools.artifactregistry.v1.ArtifactRegistry/ListTags, google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag, google.devtools.artifactregistry.v1.ArtifactRegistry/GetFile, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRepository
+func TestTerraformArtifactRegistryPackageDataSources(t *testing.T) {
+	h := New(t)
+	ar, ctx := arClient(t, h) // asks for the Run endpoint first
+	m := newTFModule(t)
+	p := h.Project()
+	repoName := runParent(h) + "/repositories/tfds11-generic"
+	pkg := repoName + "/packages/tool"
+	out := filepath.Join(t.TempDir(), "tool.tar.gz")
+	module := func(team string, data bool) string {
+		ds := ""
+		if data {
+			ds = fmt.Sprintf(`
+data "google_artifact_registry_packages" "ps" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+}
+data "google_artifact_registry_package" "p" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+  name          = "tool"
+}
+data "google_artifact_registry_versions" "vs" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+  package_name  = "tool"
+}
+data "google_artifact_registry_version" "v" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+  package_name  = "tool"
+  version_name  = "1.0.0"
+}
+data "google_artifact_registry_tags" "ts" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+  package_name  = "tool"
+}
+data "google_artifact_registry_tag" "t" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+  package_name  = "tool"
+  tag_name      = "current"
+}
+data "google_artifact_registry_file" "f" {
+  project       = %[1]q
+  location      = "us-central1"
+  repository_id = google_artifact_registry_repository.g.repository_id
+  file_id       = "tool:1.0.0:tool.tar.gz"
+  output_path   = %[2]q
+  overwrite     = true
+}
+output "outputs" {
+  value = {
+    packages = join(",", [for x in data.google_artifact_registry_packages.ps.packages : x.name])
+    package  = data.google_artifact_registry_package.p.name
+    versions = join(",", sort([for x in data.google_artifact_registry_versions.vs.versions : x.name]))
+    version  = data.google_artifact_registry_version.v.name
+    tags     = join(",", [for x in data.google_artifact_registry_tags.ts.tags : "${x.name}=${x.version}"])
+    tag      = data.google_artifact_registry_tag.t.version
+    file     = data.google_artifact_registry_file.f.name
+    size     = tostring(data.google_artifact_registry_file.f.size_bytes)
+  }
+}
+`, p, out)
+		}
+		return fmt.Sprintf(`
+resource "google_artifact_registry_repository" "g" {
+  project       = %q
+  location      = "us-central1"
+  repository_id = "tfds11-generic"
+  format        = "GENERIC"
+  labels        = { team = %q }
+}
+%s`, p, team, ds)
+	}
+	m.write(module("burrow", false))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	for _, v := range []string{"1.0.0", "1.1.0"} {
+		if code, b := genericUpload(t, h, repoName, "tool", v, "tool.tar.gz", []byte("tool "+v)); code != http.StatusOK {
+			t.Fatalf("upload %s = %d %s", v, code, b)
+		}
+	}
+	if _, err := ar.CreateTag(ctx, &arpb.CreateTagRequest{Parent: pkg, TagId: "current", Tag: &arpb.Tag{Version: pkg + "/versions/1.0.0"}}); err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+	check := func(when, team, tagged string) {
+		t.Helper()
+		var got map[string]string
+		if err := json.Unmarshal([]byte(m.must("output", "-json", "outputs")), &got); err != nil {
+			t.Fatalf("%s, the outputs: %v", when, err)
+		}
+		var pkgs, versions, tags []string
+		for _, x := range collectAll(t, ar.ListPackages(ctx, &arpb.ListPackagesRequest{Parent: repoName}).Next) {
+			pkgs = append(pkgs, x.GetName())
+		}
+		for _, x := range collectAll(t, ar.ListVersions(ctx, &arpb.ListVersionsRequest{Parent: pkg}).Next) {
+			versions = append(versions, x.GetName())
+		}
+		for _, x := range collectAll(t, ar.ListTags(ctx, &arpb.ListTagsRequest{Parent: pkg}).Next) {
+			tags = append(tags, x.GetName()+"="+x.GetVersion())
+		}
+		pk, err := ar.GetPackage(ctx, &arpb.GetPackageRequest{Name: pkg})
+		if err != nil {
+			t.Fatalf("%s: GetPackage: %v", when, err)
+		}
+		ver, err := ar.GetVersion(ctx, &arpb.GetVersionRequest{Name: pkg + "/versions/1.0.0"})
+		if err != nil {
+			t.Fatalf("%s: GetVersion: %v", when, err)
+		}
+		tag, err := ar.GetTag(ctx, &arpb.GetTagRequest{Name: pkg + "/tags/current"})
+		if err != nil {
+			t.Fatalf("%s: GetTag: %v", when, err)
+		}
+		f, err := ar.GetFile(ctx, &arpb.GetFileRequest{Name: repoName + "/files/tool:1.0.0:tool.tar.gz"})
+		if err != nil {
+			t.Fatalf("%s: GetFile: %v", when, err)
+		}
+		want := map[string]string{
+			"packages": strings.Join(pkgs, ","), "package": pk.GetName(),
+			"versions": strings.Join(sortedCopy(versions), ","), "version": ver.GetName(),
+			"tags": strings.Join(tags, ","), "tag": tag.GetVersion(),
+			"file": f.GetName(), "size": fmt.Sprint(f.GetSizeBytes()),
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) || got["tag"] != pkg+"/versions/"+tagged || got["packages"] != pkg {
+			t.Errorf("%s: the data sources = %v; the official client reads %v", when, got, want)
+		}
+		if b, err := os.ReadFile(out); err != nil || string(b) != "tool 1.0.0" {
+			t.Errorf("%s: google_artifact_registry_file wrote %q, %v; want the file's content", when, b, err)
+		}
+		r, err := ar.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: repoName})
+		if err != nil || r.GetLabels()["team"] != team {
+			t.Errorf("%s: the repository = %v, %v; want label team=%s", when, r, err, team)
+		}
+	}
+	m.write(module("burrow", true))
+	m.apply()
+	check("after apply", "burrow", "1.0.0")
+	m.planClean()
+
+	if _, err := ar.UpdateTag(ctx, &arpb.UpdateTagRequest{Tag: &arpb.Tag{Name: pkg + "/tags/current", Version: pkg + "/versions/1.1.0"}}); err != nil {
+		t.Fatalf("UpdateTag: %v", err)
+	}
+	m.write(module("warren", true))
+	applied := m.must("apply", "-auto-approve", "-input=false", "-no-color")
+	if !strings.Contains(applied, "0 added, 1 changed, 0 destroyed") {
+		t.Errorf("the change was not applied in place:\n%s", lastLines(applied, 20))
+	}
+	check("after the change", "warren", "1.1.0")
+	m.planClean()
+
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := ar.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: repoName}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetRepository after destroy: %v; want NotFound", err)
 	}
 }

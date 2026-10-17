@@ -892,7 +892,7 @@
           "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
-          "test/compat/terraform_batch11_run_test.go:33 TestTerraformArtifactRegistryProjectConfigAndRepositories",
+          "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -942,7 +942,7 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
-          "test/compat/terraform_batch11_run_test.go:33 TestTerraformArtifactRegistryProjectConfigAndRepositories",
+          "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -999,7 +999,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1029,7 +1030,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1069,7 +1071,8 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1085,7 +1088,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1147,7 +1151,8 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1162,7 +1167,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
-          "test/compat/terraform_batch11_run_test.go:33 TestTerraformArtifactRegistryProjectConfigAndRepositories"
+          "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories"
         ]
       },
       {
@@ -1177,7 +1182,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1186,7 +1192,8 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
       {
@@ -1230,6 +1237,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources",
           "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1493,7 +1501,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
-          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
+          "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1521,7 +1529,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
-          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
+          "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1539,7 +1547,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
-          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
+          "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1562,7 +1570,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
-          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
+          "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1595,7 +1603,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM",
-          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
+          "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1706,7 +1714,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM",
-          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
+          "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
