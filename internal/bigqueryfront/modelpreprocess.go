@@ -46,7 +46,7 @@ import (
 // Refused 501 with the reason: the other preprocessing functions (their
 // quantiles are approximate, their vocabularies or hashing Google's), the
 // output_format argument of ML.BUCKETIZE, and IMPUTER strategies other than
-// mean.
+// mean. Any other ML.<name>(...) of no MODEL is left to the engine.
 
 // mlPreprocessUnserved are the ML functions of no model CloudBurrow
 // refuses, and why.
@@ -89,6 +89,11 @@ func rewritePreprocess(sql string, learn mlLearn) (string, int, string) {
 			continue
 		}
 		fn := strings.ToUpper(toks[i+2].text)
+		if _, refused := mlPreprocessUnserved[fn]; !mlPreprocessServed[fn] && !refused {
+			// Not a preprocessing function BigQuery documents (a function
+			// of a dataset named ML, say): the engine's to answer.
+			continue
+		}
 		end := matchParen(toks, i+3)
 		if end < 0 {
 			return "", 400, "Syntax error: unclosed ML." + fn
@@ -152,6 +157,11 @@ func splitTopLevel(toks []token) [][]token {
 	}
 	return out
 }
+
+// mlPreprocessServed are the ML functions of no model CloudBurrow writes
+// as SQL.
+var mlPreprocessServed = map[string]bool{"BUCKETIZE": true, "POLYNOMIAL_EXPAND": true, "FEATURE_CROSS": true, "DISTANCE": true, "LP_NORM": true,
+	"NORMALIZER": true, "STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true}
 
 var mlAnalytic = map[string]bool{"STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true}
 

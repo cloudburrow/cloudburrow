@@ -40,14 +40,15 @@ func TestRewritePreprocess(t *testing.T) {
 		"SELECT ML.BUCKETIZE(x, [1.0]) OVER () FROM t":      400,
 		"SELECT ML.FEATURE_CROSS(STRUCT(a AS x), 5) FROM t": 400,
 		"SELECT ML.POLYNOMIAL_EXPAND(s) FROM t":             501,
-		"SELECT ML.SOMETHING_ELSE(x) FROM t":                501,
 	} {
 		if _, code, _ := rewritePreprocess(sql, nil); code != want {
 			t.Errorf("%s: %d; want %d", sql, code, want)
 		}
 	}
-	if got, _, _ := rewritePreprocess("SELECT * FROM ML.PREDICT(MODEL m, TABLE t)", nil); got != "SELECT * FROM ML.PREDICT(MODEL m, TABLE t)" {
-		t.Errorf("a model's function was rewritten: %s", got)
+	for _, sql := range []string{"SELECT * FROM ML.PREDICT(MODEL m, TABLE t)", "SELECT ML.my_udf(x) FROM t"} {
+		if got, code, _ := rewritePreprocess(sql, nil); got != sql || code != 0 {
+			t.Errorf("rewritten: %s, %d", got, code)
+		}
 	}
 	if c := combinations(3, 2, false); len(c) != 3 {
 		t.Errorf("combinations: %v", c)
