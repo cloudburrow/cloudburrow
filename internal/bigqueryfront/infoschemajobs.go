@@ -405,10 +405,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 		// The datasets and tables the query can read (#1510,
 		// infoschemanames.go), read with their own datasetMeta.
 		only := pushedNameFilter(q.Query, ref.pos, ref.end, ref.alias, ref.view)
-		m := meta
-		if only != nil {
-			m = &datasetMeta{only: only}
-		}
+		m := metaFor(meta, ref.view, only)
 		sub, ok := subs[key+only.key()]
 		if !ok {
 			var status int

@@ -163,3 +163,33 @@ func TestRegionRowsReadOnlyTheFilteredTables(t *testing.T) {
 		t.Errorf("no dataset read %v: %s", gets, sub)
 	}
 }
+
+// TestMaterializedViewsReadNoBaseTable (#1510): MATERIALIZED_VIEWS reads
+// the tables.get of no table tables.list gives as a TABLE.
+func TestMaterializedViewsReadNoBaseTable(t *testing.T) {
+	var gets []string
+	engine := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(r.URL.Path, "/bigquery/v2/projects/p/datasets/d")
+		switch {
+		case p == "":
+			_, _ = w.Write([]byte(`{}`))
+		case p == "/tables":
+			_, _ = w.Write([]byte(`{"tables":[{"tableReference":{"tableId":"t"},"type":"TABLE"},` +
+				`{"tableReference":{"tableId":"mv"},"type":"MATERIALIZED_VIEW"},{"tableReference":{"tableId":"v"},"type":"VIEW"}]}`))
+		default:
+			gets = append(gets, strings.TrimPrefix(p, "/tables/"))
+			_, _ = w.Write([]byte(`{"type":"MATERIALIZED_VIEW","materializedView":{"query":"SELECT 1"}}`))
+		}
+	})
+	f := front{next: engine, base: "/bigquery/v2/projects/p"}
+	r := httptest.NewRequest(http.MethodPost, "http://bq/bigquery/v2/projects/p/queries", nil)
+	if _, st, msg := infoSchemaBuilders["MATERIALIZED_VIEWS"](f, r, "d", metaFor(&datasetMeta{}, "MATERIALIZED_VIEWS", nil)); st != 0 {
+		t.Fatalf("%d %s", st, msg)
+	}
+	if sort.Strings(gets); !reflect.DeepEqual(gets, []string{"mv", "v"}) {
+		t.Errorf("read %v, want mv and v", gets)
+	}
+	if shared := (&datasetMeta{}); metaFor(shared, "TABLES", nil) != shared {
+		t.Error("TABLES with no filter does not share the query's datasetMeta")
+	}
+}

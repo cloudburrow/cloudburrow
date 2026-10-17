@@ -73,10 +73,26 @@ func init() {
 
 // datasetMeta keeps the tables.get resources of each dataset one query
 // reads, so two views of one dataset read them once. With only, it reads
-// and keeps only the tables only keeps (pushedNameFilter, #1510).
+// and keeps only the tables only keeps (pushedNameFilter, #1510); with
+// types, only the tables tables.list gives one of those types (or none).
 type datasetMeta struct {
 	tables map[string][]map[string]any
 	only   *nameFilter
+	types  map[string]bool
+}
+
+// viewTableTypes are, by view, the only types of table that have rows
+// in it (tables.list's type): a view of them reads no other table's
+// tables.get (#1510). A materialized view may be listed as a VIEW.
+var viewTableTypes = map[string]map[string]bool{"MATERIALIZED_VIEWS": {"MATERIALIZED_VIEW": true, "VIEW": true}}
+
+// metaFor is the datasetMeta a reference to view reads, filtered by only:
+// shared when nothing narrows it, else its own.
+func metaFor(shared *datasetMeta, view string, only *nameFilter) *datasetMeta {
+	if only == nil && viewTableTypes[view] == nil {
+		return shared
+	}
+	return &datasetMeta{only: only, types: viewTableTypes[view]}
 }
 
 // keeps reports whether m reads table.
@@ -110,6 +126,7 @@ func (f front) tablesOf(r *http.Request, dataset string, m *datasetMeta) ([]info
 				TableReference struct {
 					TableID string `json:"tableId"`
 				} `json:"tableReference"`
+				Type string `json:"type"`
 			} `json:"tables"`
 			NextPageToken string `json:"nextPageToken"`
 		}
@@ -120,8 +137,8 @@ func (f front) tablesOf(r *http.Request, dataset string, m *datasetMeta) ([]info
 			if dataset == resultsDataset && tb.TableReference.TableID == jobsTableName {
 				continue // the front's table of JOBS rows (jobstable.go, #1378)
 			}
-			if !m.keeps(tb.TableReference.TableID) {
-				continue // no row of it can pass the query's WHERE
+			if !m.keeps(tb.TableReference.TableID) || m.types != nil && tb.Type != "" && !m.types[strings.ToUpper(tb.Type)] {
+				continue // no row of it can pass the query's WHERE, or the view has none of its type
 			}
 			st, got := f.get(r, tablePath(dataset, tb.TableReference.TableID))
 			if st == http.StatusNotFound {

@@ -196,11 +196,10 @@ func (f front) withInformationSchemaViews(w http.ResponseWriter, r *http.Request
 		if only != nil && only.tables == nil {
 			only = nil
 		}
-		m := meta
 		if only != nil {
 			only.schemas = nil
-			m = &datasetMeta{only: only}
 		}
+		m := metaFor(meta, ref.view, only)
 		key := ref.dataset + "\x00" + ref.view + only.key()
 		sub, ok := subs[key]
 		if !ok {
