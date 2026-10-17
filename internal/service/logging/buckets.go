@@ -704,6 +704,8 @@ func (s configServer) DeleteView(ctx context.Context, req *loggingpb.DeleteViewR
 	} else if err := s.a.db.Delete(viewKey(ref, id)); err != nil {
 		return nil, apierror.Wrap(apierror.Internal(err, "deleting the view"))
 	}
+	// The view's IAM policy goes with it (#1519).
+	_ = s.a.db.Delete(viewIAMKey(ref, id))
 	// The bucket's linked dataset loses the view (#1435).
 	if err := s.a.resyncBucket(ctx, ref); err != nil {
 		return nil, apierror.Wrap(err)

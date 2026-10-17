@@ -18,7 +18,7 @@ import (
 // Create view; a view made there with a filter is listed in its Views
 // section, which the console API reads back. Its row's Edit, prefilled with
 // the filter, saves a new one, and its Delete, confirmed by typing the view's
-// ID, removes it. _AllLogs's row offers neither.
+// ID, removes it. _AllLogs's row offers neither, only Permissions (#1519).
 func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 	needService(t, "logging-buckets")
 	p := open(t)
@@ -52,14 +52,17 @@ func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 		t.Fatalf("the console API does not list the view the browser created: %s", body)
 	}
 
-	// _AllLogs is listed without an actions menu; the new view has one.
+	// _AllLogs's menu offers Permissions alone (#1519); the new view's
+	// offers Edit and Delete too.
 	p.run(chromedp.Click(`#tab-views`, chromedp.ByQuery))
 	p.waitFor(`document.querySelector('button[aria-label="Actions for errors"]') !== null`)
-	var allLogsMenu bool
-	p.eval(`document.querySelector('button[aria-label="Actions for _AllLogs"]') !== null`, &allLogsMenu)
-	if allLogsMenu {
-		t.Error("_AllLogs's row offers actions")
+	p.run(chromedp.Click(`button[aria-label="Actions for _AllLogs"]`, chromedp.ByQuery))
+	var allLogsItems []string
+	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((i) => i.textContent.trim())`, &allLogsItems)
+	if strings.Join(allLogsItems, ",") != "Permissions" {
+		t.Errorf("_AllLogs's row offers %v; want Permissions alone", allLogsItems)
 	}
+	p.run(chromedp.KeyEvent(kb.Escape))
 	p.run(chromedp.Click(`button[aria-label="Actions for errors"]`, chromedp.ByQuery))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit")
 	p.waitFor(`document.querySelector(".modal.is-open #f-filter") !== null`)

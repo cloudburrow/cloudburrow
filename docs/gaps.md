@@ -28,14 +28,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
-| Resource Manager | 0 | 0 | 0 | 0 | 0 |
+| Resource Manager | 1 | 0 | 0 | 1 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 45 | 15 | 16 | 14 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 7 | 0 | 6 | 0 | 1 |
-| Cloud SQL, Memorystore | 6 | 4 | 2 | 0 | 0 |
+| Cloud SQL, Memorystore | 10 | 7 | 3 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **75** | **19** | **30** | **20** | **6** |
+| **Total** | **80** | **22** | **31** | **21** | **6** |
 
 ## Cloud Storage
 
@@ -43,7 +43,8 @@ Closed: `objects.bulkRestore` (#1279), `buckets.operations.list` filters (#1280)
 and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel delivery on an `up`
 instance (#1290), the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), the gRPC
 `google.storage.v2` API (#1321), and its customer-supplied encryption keys, ACLs, managed-folder
-IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345). ACLs
+IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345), and
+Storage Control's intelligence configurations, stored with nothing acting on them (#1519). ACLs
 and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
@@ -91,7 +92,7 @@ of one ID (#1400); `gcloud run deploy --source` and `gcloud builds submit` with 
 and Cloud Build (#1347), steps of any image (#1382), a Docker registry for built images (#1383),
 `secretEnv`, `script` and `allowFailure` (#1407), Cloud Build triggers and worker pools (#1422),
 and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_RUN_TASK_ATTEMPT`
-(#1448); Cloud Storage FUSE volumes from the instance's storage (#1474); the `h2c` port name (#1475).
+(#1448); Cloud Storage FUSE volumes from the instance's storage (#1474); the `h2c` port name (#1475); Artifact Registry `projectConfig` (#1519).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -117,7 +118,8 @@ resources (#1403); sink delivery to Cloud Storage, Pub/Sub, BigQuery and another
 TailLogEntries on views and over JSON (#1410); `CopyLogEntries` from folder, organization and
 billing-account buckets (#1411); Log Analytics, a link making a read-only BigQuery linked dataset
 (#1423), with a view per log view, retention and DeleteLog applied to its rows, and links refused
-on folder and organization buckets, as Google refuses them (#1435).
+on folder and organization buckets, as Google refuses them (#1435); log view IAM, saved queries
+and log scopes, with their console and the view IAM Terraform resources (#1519).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -141,7 +143,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 Closed: `RotateSecret`, `EnableManagedRotation` and `Secret.rotation` (#1215), `Secret.expire_time`
 / `ttl` (#1225), `ListSecrets` / `ListSecretVersions` filters (#1228), `Secret.topics` event
 notifications to Pub/Sub (#1259), and `Secret.rotation` schedules and `version_destroy_ttl`
-delayed destruction (#1278). IAM conditions are excluded (below).
+delayed destruction (#1278), and regional secrets with their CMEK, gcloud, Terraform and console
+(#1519). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -152,9 +155,12 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org policy on projects
 (#1296), and regional tag bindings and effective tags through the
 `{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
-and never enforced (#1368).
+and never enforced (#1368); folder capabilities (`app-management`), stored with nothing acting on
+them (#1519), and the management project an app-enabled folder gets (#1532).
 
-No gap is left open here.
+| Gap | Why open | Size |
+|---|---|---|
+| An app-enabled folder's management project is `google-mp-{folder number}`, shaped as the discovery document's one example: the project ID and display name Google assigns are not documented, and the APIs it enables on the project are not modelled (built in #1532) (#1445) | not documented by Google | S |
 
 ## Vertex AI
 
@@ -273,7 +279,7 @@ replicas (#1381), high availability (#1408), Google's Auth Proxy binary (#1421),
 `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433);
 the Memorystore admin API over Valkey (#1302), exports, imports and RDB persistence (#1384),
 STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), in-transit
-encryption (#1413), and customer-managed keys and server CA rotation (#1463). IAM database authentication is excluded (below).
+encryption (#1413), and customer-managed keys and server CA rotation (#1463); Memorystore for Redis Cluster, a real Redis Cluster with resharding, and Memorystore for Valkey instances in either cluster mode, each with gcloud, Terraform and console (#1519). IAM database authentication is excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -283,6 +289,10 @@ encryption (#1413), and customer-managed keys and server CA rotation (#1463). IA
 | Cloud SQL: a `PHYSICAL` external sync and `demote`/`demoteMaster` (the reverse direction, whose custom import needs Cloud SQL's `mysql.*` stored procedures) stay 501 (a MySQL external primary, its source representation instance, `verifyExternalSyncSettings` and `startExternalSync` are built since #1501; a PostgreSQL external primary by built-in logical replication, without pglogical, a MySQL replica seeded from `dumpFilePath`, and `OFFLINE` syncs since #1524); `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files (their images, `mysql:5.6`, `mysql:5.7` and `mcr.microsoft.com/mssql/server` 2022 and 2025, are linux/amd64 only, checked again with `docker manifest inspect` 2026-10-17); upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal`), each 501 naming why (PostgreSQL 9.6 to 12, a MySQL replica's own upgrade, Cloud SQL's 400 for a legacy failover replica and for a PostgreSQL database's charset change are built since #1462); 22 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote`, `switchover`, `reencrypt`, disk shrink and others; [sqladmin.md](coverage/sqladmin.md)) (#1462) (#1501) (#1524) | not built yet | L |
 | Backup and DR: workload types other than Cloud SQL instances (Compute Engine instances and disks, AlloyDB, Filestore, which CloudBurrow does not run), management servers and the appliance protocol, a folder's or organization's resource backup configs' `fetch` (not wired to Resource Manager's hierarchy) and `serviceConfig.initialize` (17 methods 501, each naming what is missing in `tools/coverage/reasons.json`; `encryptionConfig` with this instance's Cloud KMS and `resourceBackupConfigs.list` of Cloud SQL instances are built since #1501, a project's `resourceBackupConfigs.fetch` with gcloud's filter, trials and `msComplianceMetadata` since #1536; [backupdr.md](coverage/backupdr.md)) (#1462) (#1501) (#1536) | not built yet | L |
 | Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) (#1501: still no maintained image, so they stay 501) | no emulator support: no maintained image; Valkey writes its own files | S |
+| Cloud SQL: external-primary replicas (no source representation instance is kept); `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files (their images are linux/amd64 only); upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal`), each 501 naming why (PostgreSQL 9.6 to 12, a MySQL replica's own upgrade, Cloud SQL's 400 for a legacy failover replica and for a PostgreSQL database's charset change are built since #1462); 24 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote` and external sync, `switchover`, `reencrypt`, disk shrink and others; project `Backups`, `executeSql`, `preCheckMajorVersionUpgrade`, `truncateLog` and final backups are built since #1462; [sqladmin.md](coverage/sqladmin.md)) (#1462) (#1501) | not built yet | L |
+| Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, resource backup configs, management servers and trials (23 methods 501, each naming what is missing; `patch`, plan revisions, data source references and `fetchUsable` are built since #1462; [backupdr.md](coverage/backupdr.md)) (#1462) (#1501) | not built yet | L |
+| Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) (#1501) | no emulator support: no maintained image; Valkey writes its own files | S |
+| Memorystore for Redis Cluster and for Valkey: in-transit encryption, token auth, backups, ACL policies, cross-cluster (cross-instance) replication and CMEK are 501; IAM auth is kept but no token is checked; the nodes announce the host address to clients, so an in-cluster client must use pod addresses; a cluster or instance is formed again empty after a restart; Valkey `engine_version` other than `VALKEY_8_0` is 501 (one Valkey 8.1 image), and a CLUSTER_DISABLED instance's reader endpoint is its first replica, with no automatic failover (#1519) | not built yet | M |
 
 ## Functions, credentials, tooling
 
@@ -292,7 +302,7 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 
 | Gap | Why open | Size |
 |---|---|---|
-| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_folder_organization_policy` and `google_organization_policy` (folder and organization org policies are refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the `google_storage_buckets`, `google_projects` and `google_folders` data sources (the provider calls Google's URLs whatever its custom endpoints say, so `cloudburrow terraform` refuses them), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the ten batches of #1304 and the verified rows of compatibility.md) | L |
+| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_folder_organization_policy` and `google_organization_policy` (folder and organization org policies are refused 501), `google_bigquery_data_transfer_config` (its endpoint is not set: not served), the `google_storage_buckets`, `google_projects` and `google_folders` data sources (the provider calls Google's URLs whatever its custom endpoints say, so `cloudburrow terraform` refuses them), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the ten batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 

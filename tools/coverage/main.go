@@ -73,8 +73,10 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
+	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
+	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	_ "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	_ "cloud.google.com/go/run/apiv2/runpb"
 	_ "cloud.google.com/go/scheduler/apiv1/schedulerpb"
@@ -130,7 +132,10 @@ var areas = []area{
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
-		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"}},
+		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"},
+		// Folder capabilities (#1519) are v3 REST only: the Go v3 proto
+		// has no Capability, so they are named by their discovery IDs.
+		Extra: []string{"cloudresourcemanager.folders.capabilities.get", "cloudresourcemanager.folders.capabilities.patch"}},
 	// Resource Manager's JSON-only surface: v1 REST, which gcloud projects
 	// and Terraform's google_project and google_project_organization_policy
 	// call (#301, #1296), and liens (#1295), which have no gRPC service. A
@@ -151,8 +156,9 @@ var areas = []area{
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
-	// server --services memorystore runs.
-	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis"}},
+	// server --services memorystore runs, and Memorystore for Redis
+	// Cluster and Memorystore for Valkey (#1519) on the same port.
+	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis", "google.cloud.redis.cluster.v1.CloudRedisCluster", "google.cloud.memorystore.v1.Memorystore"}},
 	// Pub/Sub's IAM (#1367) is the google.iam.v1.IAMPolicy mixin, which the
 	// kms area lists (mixin keys are global), served by the Pub/Sub front
 	// over gRPC and REST: its rows are named by the REST methods' discovery
@@ -164,7 +170,9 @@ var areas = []area{
 	// is registered under CloudBurrow's own name, since the CLI links the Go
 	// client's copy too, so its methods come from the server's service
 	// descriptor, under the name clients call.
-	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods()},
+	// Storage Control's IntelligenceConfig methods (#1519) are on the same
+	// port; its Anywhere Cache methods are named by the JSON API's rows.
+	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: append(gcs.GRPCMethods(), gcs.ControlGRPCMethods()...)},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
 	// otherwise. Bigtable's instance admin service (#1331) is the Bigtable

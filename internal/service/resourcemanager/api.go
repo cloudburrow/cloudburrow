@@ -450,7 +450,7 @@ func (s *ProjectsServer) restGet(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return writeProto(w, p)
+	return s.writeProjectJSON(w, p)
 }
 
 func (s *ProjectsServer) restSearch(w http.ResponseWriter, r *http.Request, verb string) error {

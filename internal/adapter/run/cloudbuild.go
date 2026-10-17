@@ -262,6 +262,9 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 		if servePush(reg.c, w, r) {
 			return // a Pub/Sub trigger's subscription (#1506)
 		}
+		if serveProjectConfig(w, r) {
+			return // Artifact Registry's projectConfig, by hand (#1519)
+		}
 		if isSourceDeployPath(r.URL.Path) && serveWebhook(reg.c, w, r) {
 			return // ReceiveTriggerWebhook's raw body (#1422)
 		}

@@ -105,6 +105,11 @@ var gcloudVerified = []struct {
 	// gcloud redis appends v1/. TestGcloudRedis creates, describes, lists,
 	// updates and deletes an instance, given --region.
 	{memorystoreAdminEndpoint, "redis", "/", false, false},
+	// Memorystore for Valkey (#1519): memorystore.googleapis.com's JSON on
+	// the same port, under /memorystore/ as its paths are redis's; gcloud
+	// memorystore appends v1/. TestGcloudMemorystoreValkey creates,
+	// describes, lists, updates and deletes an instance.
+	{memorystoreAdminEndpoint, "memorystore", "/memorystore/", false, false},
 	// The Backup and DR Service (#1433): gcloud backup-dr appends v1/.
 	// TestGcloudBackupDR drives vaults, plans, associations, data sources
 	// and backups.

@@ -483,6 +483,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"Folders/CreateFolder", "Folders/DeleteFolder", "Folders/GetFolder", "Folders/ListFolders", "Folders/MoveFolder", "Folders/UndeleteFolder", "Folders/UpdateFolder"},
 		Provider: "hierarchy", Offers: "Resource hierarchy: folders list with each folder's path, folder detail with its folders and projects, Create folder (under the organization or a folder), Rename folder, Move folder, Delete, Undelete folder (#1294)",
 		Tests: []string{"TestConsoleResourceHierarchy", "TestResourceManagerV3Folders", "TestResourceHierarchyAndTagsThroughTheDrawer", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Resource Manager folder capabilities", Service: "resourcemanager",
+		Methods:  []string{"cloudresourcemanager.folders.capabilities.get", "cloudresourcemanager.folders.capabilities.patch"},
+		Provider: "hierarchy", Offers: "Resource hierarchy: App management (Enabled or Disabled) and the Management project it makes (#1532) on a folder's page, and Enable app management or Disable app management, the app-management capability (#1519)",
+		Tests: []string{"TestConsoleFolderAppManagement", "TestResourceManagerFolderCapabilities"}},
 	{Resource: "Resource Manager folder search", Service: "resourcemanager",
 		Methods:  []string{"Folders/SearchFolders"},
 		Excluded: "the query form of ListFolders over the same registry; the Resource hierarchy list and its filter show the same folders"},
@@ -547,6 +551,24 @@ var parityRows = []parityRow{
 		Methods:  []string{"cloudresourcemanager.liens.create", "cloudresourcemanager.liens.get", "cloudresourcemanager.liens.list", "cloudresourcemanager.liens.delete"},
 		Provider: "projects", Offers: "Liens on a project's page, Add lien (restrictions, reason, origin), Remove lien; Delete project is refused while a lien restricts it (#1295)",
 		Tests: []string{"TestConsoleTagsAndLiens", "TestResourceManagerLiens"}},
+
+	// Memorystore for Redis Cluster (#1519)
+	{Resource: "Memorystore Redis clusters", Service: "memorystore",
+		Methods:  []string{"CloudRedisCluster/ListClusters", "CloudRedisCluster/GetCluster", "CloudRedisCluster/CreateCluster", "CloudRedisCluster/UpdateCluster", "CloudRedisCluster/DeleteCluster"},
+		Provider: "memorystore-clusters", Offers: "Memorystore Redis Cluster page: clusters list (location, discovery endpoint, shards, replicas, node type, capacity, state); Create cluster (ID, region, shards, replicas per shard, node type, PSC network, Redis configs), waiting for it to form; a cluster's page with its discovery endpoint and configuration; Edit (shards, replicas per shard, node type, deletion protection), each change waited for; Delete (#1519)",
+		Tests: []string{"TestConsoleRedisCluster"}},
+	{Resource: "Memorystore Redis cluster CA", Service: "memorystore",
+		Methods:  []string{"CloudRedisCluster/GetClusterCertificateAuthority"},
+		Excluded: "no cluster here has in-transit encryption, so there is no CA to show; the cluster's page shows its In-transit encryption mode"},
+
+	// Memorystore for Valkey (#1519)
+	{Resource: "Memorystore for Valkey instances", Service: "memorystore",
+		Methods:  []string{"Memorystore/ListInstances", "Memorystore/GetInstance", "Memorystore/CreateInstance", "Memorystore/UpdateInstance", "Memorystore/DeleteInstance"},
+		Provider: "memorystore-valkey", Offers: "Memorystore for Valkey page: instances list (location, mode, endpoint, shards, replicas, node type, engine version, state); Create instance (ID, region, cluster mode, shards, replicas per shard, node type, PSC network, engine configs), waiting for it to serve; an instance's page with its discovery or primary and reader endpoints and configuration; Edit (shards, replicas per shard, node type, deletion protection), each change waited for; Delete (#1519)",
+		Tests: []string{"TestConsoleValkeyInstances"}},
+	{Resource: "Memorystore for Valkey CA", Service: "memorystore",
+		Methods:  []string{"Memorystore/GetCertificateAuthority"},
+		Excluded: "no instance here has in-transit encryption, so there is no CA to show; the instance's page shows its In-transit encryption mode"},
 
 	// Memorystore for Redis (#1302)
 	{Resource: "Memorystore instances", Service: "memorystore",
@@ -788,6 +810,12 @@ var parityRows = []parityRow{
 	// The gRPC API (#1321) is a second transport onto the JSON API's store,
 	// answered by its handlers, so the Cloud Storage pages, which use the
 	// JSON API, show and change what gRPC does.
+	{Resource: "Storage Intelligence configurations", Service: "storagegrpc",
+		Methods: []string{"StorageControl/GetProjectIntelligenceConfig", "StorageControl/UpdateProjectIntelligenceConfig",
+			"StorageControl/GetFolderIntelligenceConfig", "StorageControl/UpdateFolderIntelligenceConfig",
+			"StorageControl/GetOrganizationIntelligenceConfig", "StorageControl/UpdateOrganizationIntelligenceConfig"},
+		Provider: "storage-intelligence", Offers: "Storage Intelligence: the project's, the organization's and each folder's configuration (edition, effective edition and where it comes from, filter, trial end); Enable (Standard), Start trial, Disable and Inherit from parent on each; Edit filter (locations and bucket ID regexes, included or excluded) on a configuration's page (#1519)",
+		Tests: []string{"TestConsoleStorageIntelligence", "TestStorageIntelligenceConfigs"}},
 	{Resource: "Cloud Storage buckets over gRPC", Service: "storagegrpc",
 		Methods:  []string{"Storage/CreateBucket", "Storage/GetBucket", "Storage/ListBuckets", "Storage/UpdateBucket", "Storage/DeleteBucket", "Storage/LockBucketRetentionPolicy"},
 		Excluded: "the gRPC transport of the buckets the Cloud Storage pages show and change through the JSON API (buckets.insert, get, list, patch, delete and lockRetentionPolicy), as Google's console does; a bucket made or changed over gRPC shows there, as both read one store (#1321, #1491)"},

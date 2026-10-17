@@ -55,10 +55,14 @@ func (s *Store) wake() {
 // secretParts splits projects/{p}/secrets/{s}.
 func secretParts(name string) (project, id string) {
 	parts := strings.Split(name, "/")
-	if len(parts) != 4 {
-		return "", ""
+	switch len(parts) {
+	case 4:
+		return parts[1], parts[3]
+	case 6:
+		// A regional secret (#1519): its scope.
+		return RegionalScope(parts[1], parts[3]), parts[5]
 	}
-	return parts[1], parts[3]
+	return "", ""
 }
 
 // Sweep deletes every secret whose expire_time has come, sends the

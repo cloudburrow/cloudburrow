@@ -313,13 +313,22 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	// One port for gRPC and JSON, as logging.googleapis.com (#591): the same
 	// server, transcoded, for REST clients and gcloud.
-	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); s.admin.Register(g) }
+	register := func(g grpc.ServiceRegistrar) {
+		s.api.Register(g)
+		s.admin.Register(g)
+		s.admin.RegisterViewIAM(g) // log views' IAM (#1519)
+	}
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
 	// The Logging clock (#1404), a CloudBurrow extension on the API's port.
 	transcoded := jsonAPI
 	jsonAPI = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == logging.ClockPath {
 			s.api.ServeClock(w, r)
+			return
+		}
+		// Saved queries and log scopes (#1519), which no published
+		// google.logging.v2 proto carries, so the transcoder cannot.
+		if s.admin.ServeExtra(w, r) {
 			return
 		}
 		transcoded.ServeHTTP(w, r)

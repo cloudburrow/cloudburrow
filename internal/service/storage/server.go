@@ -55,6 +55,8 @@ type Server struct {
 	// relayChannels hands channel messages to a relay (#1290) instead of
 	// POSTing them.
 	relayChannels bool
+	// hierarchy reads a project's and a folder's parent (#1532), or nil.
+	hierarchy Hierarchy
 	// grpc serves google.storage.v2.Storage (#1321) on the same port, as
 	// h2c.
 	grpc http.Handler
@@ -92,6 +94,10 @@ type Options struct {
 	// CLI delivers them on the developer's machine, so the pod needs no
 	// egress.
 	RelayChannels bool
+	// Hierarchy reads the parents Storage Intelligence inheritance walks
+	// (#1532); nil means none: what inherits inherits the local
+	// organization's configuration.
+	Hierarchy Hierarchy
 }
 
 // NewServer returns the server.
@@ -102,7 +108,7 @@ func NewServer(o Options) (*Server, error) {
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
 	s.signingKeys, s.observe, s.faults = o.SigningKeys, o.Observe, o.Faults
-	s.relayChannels = o.RelayChannels
+	s.relayChannels, s.hierarchy = o.RelayChannels, o.Hierarchy
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {
 		origin, err := hostguard.ParseOrigin(v)
@@ -239,6 +245,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		// No bucket is named "v2" (bucket names are 3 to 63 characters), so
 		// the Storage Control API's paths take nothing from the XML API.
 		s.serveControl(w, r)
+	case strings.HasPrefix(path, jsonPrefix+"v2/") && isIntelligencePath(strings.TrimPrefix(r.URL.Path, jsonPrefix+"v2/")):
+		// gcloud storage intelligence-configs, under the override
+		// gcloud-setup writes (intelligence.go).
+		s.serveIntelligence(w, r, strings.TrimPrefix(r.URL.Path, jsonPrefix+"v2/"))
 	case strings.HasPrefix(path, jsonPrefix):
 		if err := checkSystemParams(r); err != nil {
 			apierror.WriteStorageJSON(w, err)

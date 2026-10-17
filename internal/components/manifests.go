@@ -100,6 +100,10 @@ type Backend struct {
 	// denies all but DNS. It is enforced only by a CNI that implements
 	// NetworkPolicy, which kind's default does not.
 	EgressTo []string
+	// EgressPorts, with EgressTo, are TCP ports the pod may also reach at
+	// any address: the cloudburrow-host Service's ports, whose endpoint is
+	// the developer's machine, which no pod selector names (#1532).
+	EgressPorts []int
 	// Front, when set, is a second container in the pod that serves Port,
 	// and the backend's own container listens on Front.UpstreamPort, which
 	// the Service does not publish (#873).
@@ -585,6 +589,9 @@ spec:
 `, b.Name, namespace, b.Name)
 		for _, app := range b.EgressTo {
 			fmt.Fprintf(&sb, "    - to:\n        - podSelector:\n            matchLabels:\n              app: %s\n", app)
+		}
+		for _, p := range b.EgressPorts {
+			fmt.Fprintf(&sb, "    - ports:\n        - protocol: TCP\n          port: %d\n", p)
 		}
 	}
 

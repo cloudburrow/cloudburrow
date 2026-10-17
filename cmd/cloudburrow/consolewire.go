@@ -147,7 +147,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, sp,
 			storageDeletedProvider{endpoint: storageAddr},
-			storageSettingsProvider{endpoint: storageAddr})
+			storageSettingsProvider{endpoint: storageAddr},
+			// Storage Intelligence (#1519): the project's, the
+			// organization's and each folder's configuration.
+			storageIntelligenceProvider{endpoint: storageAddr, registry: d.projects})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Four screens of one product: topics, every subscription of the
@@ -226,7 +229,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
 		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
-			loggingSettingsProvider{screen})
+			loggingSettingsProvider{screen},
+			// Saved queries and log scopes (#1519).
+			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The
@@ -250,6 +255,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// Memorystore's Instances page, through the admin API (#1302).
 		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},
+		// Memorystore for Redis Cluster's page (#1519).
+		{config.ServiceMemorystore, func(string) console.Provider { return redisClusterProvider{svc: d.memorystore} }},
+		// Memorystore for Valkey's page (#1519).
+		{config.ServiceMemorystore, func(string) console.Provider { return newValkeyProvider(d.memorystore) }},
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {

@@ -78,6 +78,14 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 	if s.VersionDestroyTTL > 0 {
 		out.VersionDestroyTtl = durationpb.New(s.VersionDestroyTTL)
 	}
+	if s.Regional() {
+		// A regional secret (#1519) has no replication; its key is the
+		// secret's own.
+		if len(s.KMSKeys) > 0 && s.KMSKeys[0] != "" {
+			out.CustomerManagedEncryption = &secretmanagerpb.CustomerManagedEncryption{KmsKeyName: s.KMSKeys[0]}
+		}
+		return out
+	}
 	// Replication is a required field of the resource, so it is always
 	// present in a response even when the caller did not set one.
 	out.Replication = toProtoReplication(s)
@@ -107,8 +115,25 @@ func toProtoVersion(v Version) *secretmanagerpb.SecretVersion {
 	if !v.ScheduledDestroy.IsZero() {
 		out.ScheduledDestroyTime = timestamppb.New(v.ScheduledDestroy)
 	}
+	if scope := scopeOfName(v.Name); scope != "" {
+		if _, l := SplitScope(scope); l != "" {
+			// A regional secret's version (#1519) reports its key version
+			// in customer_managed_encryption, not replication_status.
+			out.CustomerManagedEncryption = regionalKeyStatus(v)
+			return out
+		}
+	}
 	out.ReplicationStatus = toProtoReplicationStatus(v)
 	return out
+}
+
+// regionalKeyStatus is a regional secret version's customer_managed_encryption
+// (#1519): the key version that encrypted it, nil for none.
+func regionalKeyStatus(v Version) *secretmanagerpb.CustomerManagedEncryptionStatus {
+	if len(v.Replicas) == 0 || v.Replicas[0].KeyVersion == "" {
+		return nil
+	}
+	return &secretmanagerpb.CustomerManagedEncryptionStatus{KmsKeyVersionName: v.Replicas[0].KeyVersion}
 }
 
 // toProtoReplicationStatus is a version's replication_status (#1453): its
@@ -173,13 +198,24 @@ func replicationOf(r *secretmanagerpb.Replication) (string, []string, []string) 
 	return "user-managed", locations, normalKeys(keys)
 }
 
-// parseParent validates a projects/{project} parent.
+// parseParent validates a projects/{project} parent, or the
+// projects/{project}/locations/{location} of regional secrets (#1519),
+// whose scope it returns.
 func parseParent(parent string) (string, error) {
 	const prefix = "projects/"
 	if !strings.HasPrefix(parent, prefix) {
 		return "", apierror.InvalidArgument("parent %q must be projects/{project}", parent)
 	}
 	project := strings.TrimPrefix(parent, prefix)
+	if p, l, ok := strings.Cut(project, "/locations/"); ok {
+		if p == "" || strings.Contains(p, "/") || !resource.ValidID(p) {
+			return "", apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}", parent)
+		}
+		if l == "" || strings.Contains(l, "/") || !resource.ValidID(l) {
+			return "", apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}", parent)
+		}
+		return RegionalScope(p, l), nil
+	}
 	if project == "" || strings.Contains(project, "/") {
 		return "", apierror.InvalidArgument("parent %q must be projects/{project}", parent)
 	}
@@ -197,7 +233,8 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 		return nil, apierror.Wrap(err)
 	}
 	sec := req.GetSecret()
-	if err := checkCreatable(sec); err != nil {
+	_, location := SplitScope(project)
+	if err := checkCreatable(sec, location != ""); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	expire, err := expireOf(sec, g.store.now())
@@ -209,6 +246,13 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 		return nil, apierror.Wrap(err)
 	}
 	kind, locations, keys := replicationOf(sec.GetReplication())
+	if location != "" {
+		// A regional secret (#1519) has no replication policy: its one
+		// replica is its location, and its key, if any, is the secret's own
+		// customer_managed_encryption, which must be in that location.
+		kind, locations = "user-managed", []string{location}
+		keys = normalKeys([]string{sec.GetCustomerManagedEncryption().GetKmsKeyName()})
+	}
 	created, err := g.store.CreateSecretEncrypted(project, req.GetSecretId(),
 		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), sch, keys, kind, locations...)
 	if err != nil {
@@ -245,7 +289,7 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			"update_mask must name at least one field; an empty mask would clear every label"))
 	}
 
-	var updateLabels, updateAnnotations, checkReplication, updateExpire, updateTopics bool
+	var updateLabels, updateAnnotations, checkReplication, updateExpire, updateTopics, updateCMEK bool
 	var updateNext, updatePeriod, updateTTL bool
 	for _, p := range paths {
 		switch {
@@ -270,6 +314,9 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			updateTopics = true
 		case p == "replication" || strings.HasPrefix(p, "replication."):
 			checkReplication = true
+		case p == "customer_managed_encryption" || p == "customerManagedEncryption" ||
+			strings.HasPrefix(p, "customer_managed_encryption.") || strings.HasPrefix(p, "customerManagedEncryption."):
+			updateCMEK = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument(
 				"update_mask path %q is not supported; only labels, annotations, expire_time, ttl, topics, rotation and version_destroy_ttl are mutable", p))
@@ -279,9 +326,30 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 		return nil, apierror.Wrap(err)
 	}
 	var newKeys []string
-	if checkReplication {
+	_, location := SplitScope(project)
+	switch {
+	case checkReplication && location != "":
+		return nil, apierror.Wrap(apierror.InvalidArgument("a regional secret has no replication policy; " +
+			"its key is customer_managed_encryption"))
+	case checkReplication:
 		if newKeys, err = g.replicationUnchanged(project, id, sec.GetReplication()); err != nil {
 			return nil, apierror.Wrap(err)
+		}
+	case updateCMEK && location == "":
+		return nil, apierror.Wrap(apierror.InvalidArgument("customer_managed_encryption is a regional secret's; " +
+			"a global secret's keys are in replication"))
+	case updateCMEK:
+		// The one key of a regional secret (#1519) can be changed or
+		// removed, as a global secret's can (#1453).
+		cur, err := g.store.GetSecret(project, id)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if c := sec.GetCustomerManagedEncryption(); c != nil && c.GetKmsKeyName() == "" {
+			return nil, apierror.Wrap(apierror.InvalidArgument("customer_managed_encryption.kms_key_name is required"))
+		}
+		if k := []string{sec.GetCustomerManagedEncryption().GetKmsKeyName()}; !slices.Equal(normalKeys(k), cur.KMSKeys) {
+			newKeys = k
 		}
 	}
 	var expire time.Time

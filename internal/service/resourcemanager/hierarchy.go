@@ -61,6 +61,12 @@ type Folder struct {
 	CreateTime  string `json:"createTime"`
 	UpdateTime  string `json:"updateTime"`
 	DeleteTime  string `json:"deleteTime,omitempty"`
+	// Capabilities are the names of the capabilities set true on it
+	// (capabilities.go), as configuredCapabilities lists them.
+	Capabilities []string `json:"capabilities,omitempty"`
+	// ManagementProject is "projects/{id}", the management project made
+	// when app-management was enabled (#1532, capabilities.go), or "".
+	ManagementProject string `json:"managementProject,omitempty"`
 }
 
 // ID is the folder's number.
