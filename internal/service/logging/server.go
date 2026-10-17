@@ -379,8 +379,8 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		if !keep {
 			continue
 		}
-		hidden := s.excluded(e, exclusions)
 		rt := s.routeOf(e, sinks, exclusions)
+		hidden := s.excluded(e, exclusions) || rt.intercepted
 		buckets := rt.buckets
 		deliveries = append(deliveries, rt.out...)
 		if hidden && len(buckets) == 0 {
@@ -701,6 +701,8 @@ type sinkRoute struct {
 	// log bucket or a project, else as stored.
 	dest        string
 	partitioned bool
+	// intercept is an ancestor's intercept_children sink (intercept.go).
+	intercept bool
 }
 
 func (r sinkRoute) isBucket() bool {
@@ -715,20 +717,25 @@ func (r sinkRoute) isProject() bool {
 type routing struct {
 	buckets []string
 	out     []delivery
+	// intercepted is set when an intercepting sink above the entry's
+	// parent matched it: its own _Default bucket does not hold it.
+	intercepted bool
 }
 
 // routeOf is where the sinks of the entry's own parent, and the
 // include_children sinks of the folders and organization above it, send
 // it: log buckets, which store it, and the other destinations deliver.go
 // delivers to. A project destination's own _Default bucket and sinks take
-// it, once (rerouted).
+// it, once (rerouted). An intercepting sink above the entry that matches it
+// leaves out every sink below its owner, and the entry's own _Default
+// bucket (intercept.go); the farthest one that matches does.
 func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute, exclusions map[parent]pred) routing {
 	var out routing
 	if s.admin == nil {
 		return out
 	}
 	own := entryParent(e)
-	var routes []sinkRoute
+	var levels [][]sinkRoute
 	for i, p := range append([]parent{own}, s.admin.ancestors(own)...) {
 		key := p
 		if i > 0 {
@@ -739,6 +746,21 @@ func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute, ex
 			rs = s.admin.sinkRoutes(p, i > 0)
 			cache[key] = rs
 		}
+		levels = append(levels, rs)
+	}
+	from := 0
+top:
+	for i := len(levels) - 1; i > 0; i-- {
+		for _, r := range levels[i] {
+			if r.intercept && r.match(e) && (r.excluded == nil || !r.excluded(e)) {
+				from = i
+				break top
+			}
+		}
+	}
+	out.intercepted = from > 0
+	var routes []sinkRoute
+	for _, rs := range levels[from:] {
 		routes = append(routes, rs...)
 	}
 	seen := map[string]bool{}
@@ -772,7 +794,7 @@ func (s *Server) follow(e *loggingpb.LogEntry, routes []sinkRoute, cache map[par
 				ex = s.admin.excluder(dp)
 				exclusions[dp] = ex
 			}
-			if def := (bucketRef{parent: dp, location: "global", bucket: bucketDefault}).name(); (ex == nil || !ex(e)) && !seen[def] && dp != entryParent(e) {
+			if def := (bucketRef{parent: dp, location: "global", bucket: bucketDefault}).name(); (ex == nil || !ex(e)) && !seen[def] && (dp != entryParent(e) || out.intercepted) {
 				seen[def] = true
 				out.buckets = append(out.buckets, def)
 			}
