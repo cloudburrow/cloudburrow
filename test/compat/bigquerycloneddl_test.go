@@ -248,7 +248,7 @@ func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 	} else if got := fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path("past"))); got != "[[2]]" {
 		t.Errorf("the snapshot of a second ago holds %s rows, want 2", got)
 	}
-	err = bqRun(ctx, c, "CREATE TABLE "+path("kms")+" CLONE "+path("base")+" OPTIONS(enable_fine_grained_mutations = TRUE)", false)
+	err = bqRun(ctx, c, "CREATE TABLE "+path("kms")+" CLONE "+path("base")+" OPTIONS(not_an_option = TRUE)", false)
 	wantReason(t, "an option CloudBurrow does not set", err, http.StatusNotImplemented, "notImplemented")
 	for _, name := range []string{"old", "kms"} {
 		if tableExists(t, ctx, ds.Table(name)) {

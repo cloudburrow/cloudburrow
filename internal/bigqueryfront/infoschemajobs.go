@@ -568,7 +568,7 @@ func (f front) storageBytes(r *http.Request, project, dataset string, t infoTabl
 		}
 		logical = strconv.FormatInt(n, 10)
 	}
-	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && logical != "NULL" && f.buffers.clock().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
+	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && logical != "NULL" && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
 		active, long = logical, "0"
 	}
 	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)

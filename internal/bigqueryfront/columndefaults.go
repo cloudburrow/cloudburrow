@@ -40,11 +40,46 @@ func addDefaultRefused(column string) string {
 		"default value, then set its default with ALTER COLUMN SET DEFAULT.", column)
 }
 
+// nestedDefaultRefused is the 400 for a default given a field of a
+// STRUCT, path, rather than the STRUCT itself: "you must set the default
+// value for the entire STRUCT field. You cannot set the default value for
+// a subset of the fields" (https://cloud.google.com/bigquery/docs/default-values,
+// #1456). The wording is CloudBurrow's (UNVERIFIED).
+func nestedDefaultRefused(path, name string) string {
+	return fmt.Sprintf("Cannot set a default value on field %s.%s: the default value of a STRUCT is set for the "+
+		"entire STRUCT field %s, not for a subset of its fields.", path, name, path)
+}
+
+// nestedDefault is the 400 for a field below the top level of fields
+// that has a default, or "".
+func nestedDefault(fields []field) string {
+	var walk func(fs []field, path string) string
+	walk = func(fs []field, path string) string {
+		for _, f := range fs {
+			if path != "" && f.DefaultValueExpression != "" {
+				return nestedDefaultRefused(path, f.Name)
+			}
+			p := f.Name
+			if path != "" {
+				p = path + "." + f.Name
+			}
+			if msg := walk(f.Fields, p); msg != "" {
+				return msg
+			}
+		}
+		return ""
+	}
+	return walk(fields, "")
+}
+
 // defaultChange compares the top-level defaults of a table's columns, old,
 // with those of a schema update's, next. It reports whether a column old
 // has gets another default (or loses it), or the message to refuse a new
 // column with a default with (400).
 func defaultChange(old, next []field) (changed bool, refused string) {
+	if msg := nestedDefault(next); msg != "" {
+		return false, msg
+	}
 	had := byLowerName(old)
 	for _, n := range next {
 		o, ok := had[strings.ToLower(n.Name)]

@@ -1,0 +1,156 @@
+CloudBurrow patch 45 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1456).
+
+The bug: a RANGE value inside a RECORD (a STRUCT column holding a
+RANGE<TIMESTAMP> field, or a RECORD in a REPEATED RECORD) read back in a
+query result as GoogleSQL's text, a TIMESTAMP bound as
+"2020-01-01 00:00:00+00" and a DATETIME bound with a space, where
+BigQuery's REST API gives int64 microseconds and a "T": patch 0008's Format
+rewrote only top-level and REPEATED RANGE values, as Format does not walk
+STRUCTs. The official Go client fails to parse such a value.
+
+The patch walks a RECORD cell (and a REPEATED RECORD's cells) whose schema
+holds a RANGE at any depth, and writes each RANGE in it with 0008's
+formatRangeCells; needs 0008.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/types/types.go
++++ b/internal/types/types.go
+@@ -23,12 +23,12 @@
+ 	}
+ 
+ 	QueryResponse struct {
+-		JobReference   *bigqueryv2.JobReference   `json:"jobReference"`
+-		Schema         *bigqueryv2.TableSchema    `json:"schema"`
+-		Rows           []*TableRow                `json:"rows"`
+-		TotalRows      uint64                     `json:"totalRows,string"`
+-		JobComplete    bool                       `json:"jobComplete"`
+-		TotalBytes     int64                      `json:"-"`
++		JobReference   *bigqueryv2.JobReference     `json:"jobReference"`
++		Schema         *bigqueryv2.TableSchema      `json:"schema"`
++		Rows           []*TableRow                  `json:"rows"`
++		TotalRows      uint64                       `json:"totalRows,string"`
++		JobComplete    bool                         `json:"jobComplete"`
++		TotalBytes     int64                        `json:"-"`
+ 		ChangedCatalog *googlesqlite.ChangedCatalog `json:"-"`
+ 	}
+ 
+@@ -229,6 +229,8 @@
+ 		for colIdx, cell := range row.F {
+ 			if fl := schema.Fields[colIdx]; fl.Type == "RANGE" && cell.V != nil {
+ 				cells = append(cells, &TableCell{V: formatRangeCells(fl, cell.V)})
++			} else if (fl.Type == "RECORD" || fl.Type == "STRUCT") && cell.V != nil && hasNestedRange(fl) {
++				cells = append(cells, &TableCell{V: formatNestedRanges(fl, cell.V)})
+ 			} else if schema.Fields[colIdx].Type == "TIMESTAMP" && cell.V != nil {
+ 				cells = append(cells, &TableCell{
+ 					V: formatTimestampCell(cell.V, useInt64Timestamp),
+@@ -309,4 +311,66 @@
+ 		}
+ 	}
+ 	return "[" + parts[0] + ", " + parts[1] + ")"
++}
++
++// hasNestedRange reports whether fl, a RECORD, holds a RANGE field at any
++// depth (cloudburrow/cloudburrow#1456).
++func hasNestedRange(fl *bigqueryv2.TableFieldSchema) bool {
++	for _, sub := range fl.Fields {
++		if sub == nil {
++			continue
++		}
++		if sub.Type == "RANGE" || (sub.Type == "RECORD" || sub.Type == "STRUCT") && hasNestedRange(sub) {
++			return true
++		}
++	}
++	return false
++}
++
++// formatNestedRanges writes the RANGE values inside v, a RECORD cell of fl
++// (or a REPEATED RECORD's cells), in the REST form formatRangeCells gives a
++// top-level one (cloudburrow/cloudburrow#1456): Format rewrote only
++// top-level and REPEATED RANGE values, so a TIMESTAMP RANGE in a RECORD read
++// back as GoogleSQL text, which the official clients cannot parse.
++func formatNestedRanges(fl *bigqueryv2.TableFieldSchema, v interface{}) interface{} {
++	switch x := v.(type) {
++	case []*TableCell:
++		out := make([]*TableCell, 0, len(x))
++		for _, it := range x {
++			if it == nil || it.V == nil {
++				out = append(out, it)
++				continue
++			}
++			out = append(out, &TableCell{V: formatNestedRanges(fl, it.V)})
++		}
++		return out
++	case TableRow:
++		return formatNestedRow(fl, &x)
++	case *TableRow:
++		if x == nil {
++			return v
++		}
++		r := formatNestedRow(fl, x)
++		return &r
++	}
++	return v
+ }
++
++func formatNestedRow(fl *bigqueryv2.TableFieldSchema, row *TableRow) TableRow {
++	cells := make([]*TableCell, 0, len(row.F))
++	for i, cell := range row.F {
++		if i >= len(fl.Fields) || cell == nil || cell.V == nil || fl.Fields[i] == nil {
++			cells = append(cells, cell)
++			continue
++		}
++		switch sub := fl.Fields[i]; {
++		case sub.Type == "RANGE":
++			cells = append(cells, &TableCell{V: formatRangeCells(sub, cell.V)})
++		case (sub.Type == "RECORD" || sub.Type == "STRUCT") && hasNestedRange(sub):
++			cells = append(cells, &TableCell{V: formatNestedRanges(sub, cell.V)})
++		default:
++			cells = append(cells, cell)
++		}
++	}
++	return TableRow{F: cells}
++}
+--- /dev/null
++++ b/internal/types/nested_range_test.go
+@@ -0,0 +1,35 @@
++package types
++
++import (
++	"testing"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// A RANGE in a RECORD, and in a REPEATED RECORD in a RECORD, reads back in
++// BigQuery's REST form, as a top-level one does (cloudburrow/cloudburrow#1456).
++func TestFormatRangeInARecord(t *testing.T) {
++	ts := &bigqueryv2.TableFieldSchema{Name: "r", Type: "RANGE",
++		RangeElementType: &bigqueryv2.TableFieldSchemaRangeElementType{Type: "TIMESTAMP"}}
++	dt := &bigqueryv2.TableFieldSchema{Name: "d", Type: "RANGE",
++		RangeElementType: &bigqueryv2.TableFieldSchemaRangeElementType{Type: "DATETIME"}}
++	inner := &bigqueryv2.TableFieldSchema{Name: "in", Type: "RECORD", Mode: "REPEATED", Fields: []*bigqueryv2.TableFieldSchema{dt}}
++	schema := &bigqueryv2.TableSchema{Fields: []*bigqueryv2.TableFieldSchema{{Name: "s", Type: "RECORD",
++		Fields: []*bigqueryv2.TableFieldSchema{{Name: "a", Type: "STRING"}, ts, inner}}}}
++	rows := []*TableRow{{F: []*TableCell{{V: TableRow{F: []*TableCell{
++		{V: "x"},
++		{V: "[2020-01-01 00:00:00+00, UNBOUNDED)"},
++		{V: []*TableCell{{V: TableRow{F: []*TableCell{{V: "[2020-01-01 10:00:00, 2020-01-02 00:00:00)"}}}}}},
++	}}}}}}
++	got := Format(schema, rows, true)[0].F[0].V.(TableRow)
++	if v := got.F[0].V; v != "x" {
++		t.Errorf("STRING field = %v", v)
++	}
++	if v := got.F[1].V; v != "[1577836800000000, UNBOUNDED)" {
++		t.Errorf("TIMESTAMP RANGE field = %v", v)
++	}
++	in := got.F[2].V.([]*TableCell)[0].V.(TableRow)
++	if v := in.F[0].V; v != "[2020-01-01T10:00:00, 2020-01-02T00:00:00)" {
++		t.Errorf("DATETIME RANGE in a REPEATED RECORD = %v", v)
++	}
++}

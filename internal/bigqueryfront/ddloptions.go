@@ -381,7 +381,7 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 		also := ""
 		if !d.view {
 			also = ", partition_expiration_days, kms_key_name (stored), max_staleness, default_rounding_mode, tags, " +
-				"require_partition_filter, enable_change_history, storage_uri, file_format, table_format and privacy_policy"
+				"require_partition_filter, enable_change_history, storage_uri, file_format, table_format, privacy_policy and enable_fine_grained_mutations"
 		}
 		return fmt.Sprintf("the %s option %s. CloudBurrow sets a %s's description, friendly_name, labels, "+
 			"expiration_timestamp%s from OPTIONS; the emulator behind it does not carry out what %s does", kind,
