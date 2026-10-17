@@ -500,6 +500,12 @@ func fieldTypeOf(t []token, i int, exprs bool) (map[string]any, int, string) {
 					case o.name == "description" && len(o.val) == 1 && o.val[0].is("NULL"):
 					case exprs && o.name == "description" && !ok && len(o.val) > 0: // #1438
 						f[descExprKey] = [2]int{o.val[0].pos, o.val[len(o.val)-1].end}
+					case o.name == "data_policies":
+						// Google documents data policies on a column only
+						// (column-data-masking, "Mask data with data
+						// policies directly on a column"), not on a
+						// STRUCT's field (#1456).
+						return nil, i, "a STRUCT field's option data_policies, which BigQuery documents for a top-level column only"
 					case o.name != "description" || !ok:
 						return nil, i, "a STRUCT field's option " + o.name + " other than a description or rounding_mode literal"
 					default:

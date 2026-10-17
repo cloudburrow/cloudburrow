@@ -67,9 +67,26 @@ func TestPartitionFilterRefusal(t *testing.T) {
 		"SELECT * FROM ds.t WHERE x = 1":                     true,
 		"SELECT day FROM ds.t":                               true,
 		"SELECT * FROM ds.t WHERE `day` > DATE '2024-01-01'": false,
+		// #1456: as querying-partitioned-tables documents.
+		"SELECT * FROM ds.t WHERE day = '2024-01-01' AND x = 'a'":                          false,
+		"SELECT * FROM ds.t WHERE day = '2024-01-01' OR x = 'a'":                           true,
+		"SELECT * FROM ds.t WHERE x = 'a' AND (day = '2024-01-01' OR day = '2024-01-02')":  false,
+		"SELECT * FROM ds.t WHERE day >= y":                                                true,
+		"SELECT * FROM ds.t WHERE day = (SELECT MAX(d) FROM ds.u)":                         true,
+		"SELECT * FROM ds.t WHERE DATE_ADD(day, INTERVAL 1 DAY) > CURRENT_DATE()":          false,
+		"SELECT * FROM ds.t WHERE day > DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)":          false,
+		"SELECT * FROM ds.t WHERE day + 1 > CURRENT_DATE()":                                true,
+		"SELECT * FROM ds.t WHERE ABS(DATE_DIFF(day, CURRENT_DATE(), DAY)) < 2":            true,
+		"SELECT * FROM ds.t WHERE EXTRACT(YEAR FROM day) = 2024":                           false,
+		"SELECT * FROM ds.t WHERE EXTRACT(MONTH FROM day) = 1":                             true,
+		"SELECT * FROM ds.t WHERE FORMAT_TIMESTAMP('%Y%m%d', day) = '20240101'":            false,
+		"SELECT * FROM ds.t WHERE FORMAT_TIMESTAMP('%m', day) = '01'":                      true,
+		"SELECT * FROM ds.t t WHERE t.day BETWEEN '2024-01-01' AND '2024-01-31' AND x = 1": false,
+		"SELECT * FROM ds.t WHERE day = @d":                                                false,
+		"SELECT * FROM ds.t WHERE x = 1 GROUP BY day":                                      true,
 	} {
 		reads, _, ok := tableReads(sql, "p", "")
-		if !ok || len(reads) != 1 {
+		if !ok || len(reads) == 0 {
 			t.Fatalf("%s: reads %v", sql, reads)
 		}
 		msg := partitionFilterRefusal(reads[0], meta, "p.ds.t")

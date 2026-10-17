@@ -90,6 +90,9 @@ func checkSchema(fields []field, prefix string) string {
 		if !fieldModes[strings.ToUpper(f.Mode)] {
 			return fmt.Sprintf("Invalid field mode %q for field %s%s", f.Mode, prefix, f.Name)
 		}
+		if prefix != "" && f.DefaultValueExpression != "" { // #1456, columndefaults.go
+			return nestedDefaultRefused(strings.TrimSuffix(prefix, "."), f.Name)
+		}
 		isRecord := typ == "RECORD" || typ == "STRUCT"
 		if isRecord && len(f.Fields) == 0 {
 			return fmt.Sprintf("Field %s%s is type %s but has no schema", prefix, f.Name, typ)

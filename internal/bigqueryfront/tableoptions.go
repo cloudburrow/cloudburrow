@@ -34,8 +34,9 @@ import (
 // What they do:
 //   - require_partition_filter: a query that reads the table with no
 //     filter on its partitioning column fails 400 as BigQuery's does
-//     (partitionFilterRefusal); the check is that the column is named in a
-//     WHERE of the statement that reads it, not that the filter can prune.
+//     (partitionFilterRefusal): a WHERE of the statement that reads it
+//     must have a predicate of the column alone that can prune its
+//     partitions, as BigQuery documents (partitionfilter.go, #1456).
 //   - max_staleness: a query reads the table as it is, never older data.
 //   - default_rounding_mode: kept; the engine rounds a value written to a
 //     parameterized NUMERIC or BIGNUMERIC column to its scale by the
@@ -545,7 +546,8 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 
 // partitionFilterRefusal is BigQuery's 400 of tr, a read of a table with
 // require_partition_filter, whose resource is meta, when its statement
-// names none of the partitioning columns in a WHERE clause, or "".
+// has no WHERE filter on a partitioning column that can prune
+// (partitionfilter.go), or "".
 func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) string {
 	tp, _ := meta["timePartitioning"].(map[string]any)
 	rp, _ := meta["rangePartitioning"].(map[string]any)
@@ -563,21 +565,8 @@ func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) stri
 	default:
 		return ""
 	}
-	where := false
-	for _, t := range tr.stmt {
-		if t.is("WHERE") {
-			where = true
-			continue
-		}
-		if !where || t.kind != tokWord && t.kind != tokQuoted {
-			continue
-		}
-		name := strings.Trim(t.text, "`")
-		for _, c := range columns {
-			if strings.EqualFold(name, c) {
-				return ""
-			}
-		}
+	if prunes(tr.stmt, columns, tp == nil) { // #1456, partitionfilter.go
+		return ""
 	}
 	quoted := make([]string, len(columns))
 	for i, c := range columns {

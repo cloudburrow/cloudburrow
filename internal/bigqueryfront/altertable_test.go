@@ -223,6 +223,21 @@ func TestCoercion(t *testing.T) {
 
 // TestDefaultChange (#1340): a schema update that changes a column's
 // default makes the table again; a column added with one is refused.
+func TestNestedDefaultRefused(t *testing.T) {
+	deep := []field{{Name: "r", Type: "RECORD", DefaultValueExpression: "STRUCT(STRUCT(1 AS y) AS q)", Fields: []field{{Name: "q",
+		Type: "RECORD", Fields: []field{{Name: "y", Type: "INTEGER", DefaultValueExpression: "1"}}}}}}
+	if got := checkSchema(deep, ""); !strings.Contains(got, "field r.q.y") {
+		t.Errorf("checkSchema: %q", got)
+	}
+	if got := nestedDefault(deep); !strings.Contains(got, "field r.q.y") {
+		t.Errorf("nestedDefault: %q", got)
+	}
+	deep[0].Fields[0].Fields[0].DefaultValueExpression = ""
+	if got := checkSchema(deep, ""); got != "" {
+		t.Errorf("a STRUCT column's own default: %q", got)
+	}
+}
+
 func TestDefaultChange(t *testing.T) {
 	old := []field{{Name: "id", Type: "INTEGER"}, {Name: "s", Type: "STRING", DefaultValueExpression: "'x'"}}
 	for _, c := range []struct {
@@ -235,6 +250,9 @@ func TestDefaultChange(t *testing.T) {
 		{[]field{{Name: "id", Type: "INTEGER", DefaultValueExpression: "1"}, {Name: "s", Type: "STRING"}}, true, false},
 		{append(append([]field{}, old...), field{Name: "n", Type: "INTEGER"}), false, false},
 		{append(append([]field{}, old...), field{Name: "n", Type: "INTEGER", DefaultValueExpression: "7"}), false, true},
+		// #1456: a STRUCT's field has no default of its own.
+		{append(append([]field{}, old...), field{Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "INTEGER",
+			DefaultValueExpression: "1"}}}), false, true},
 	} {
 		changed, refused := defaultChange(old, c.next)
 		if changed != c.changed || (refused != "") != c.refused {
