@@ -113,6 +113,15 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 	// passed here too (#1571).
 	cfg = withRecordedCloudSQLConnector(cfg)
 
+	// A running instance knows the ports it actually bound, including any
+	// that were OS-assigned, which configuration alone cannot. They are
+	// applied before the fixture is written: its token_uri is the metadata
+	// port, and `env` without the instance's --port-base rewrote it with the
+	// default one (#1304: TestOfficialAuthLibraryUsesTheLocalFixture on an
+	// instance at another port base).
+	if live {
+		cfg = withLivePorts(cfg, info.Endpoints)
+	}
 	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), proj, tokenURI(cfg))
 	if err != nil {
 		return cfg, nil, err
@@ -122,11 +131,6 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 		return cfg, nil, err
 	}
 
-	// A running instance knows the ports it actually bound, including any
-	// that were OS-assigned, which configuration alone cannot.
-	if live {
-		cfg = withLivePorts(cfg, info.Endpoints)
-	}
 	return cfg, envVars(cfg, proj, adcPath), nil
 }
 
