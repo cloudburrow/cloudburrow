@@ -360,7 +360,7 @@ var parityRows = []parityRow{
 		Provider: "kms-hsm", Offers: "Single-tenant HSM page (/kms/hsm): a project's instances with state, quorum and disable time; Create instance (location, total approvers, key portability); an instance's page with its configuration, proposals (operation, state, approvals, expiry), the PENDING proposals' challenges as base64url with the key each is for, and the registered two-factor keys; Create proposal (every operation; upgrade_key_trust with the AES_WRAPPING version it promotes, #1521), Approve (one challenge signed with a two-factor key, quorum or required), Execute and Delete proposal (#1469); Create key offers HSM_SINGLE_TENANT with the instance as its backend",
 		Tests: []string{"TestConsoleKMSSingleTenantHsm", "TestConsoleKMSTrustedKeyWrapping"}},
 	{Resource: "Cloud KMS trusted key wrapping", Service: "kms",
-		Methods: []string{"KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion", "KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion"},
+		Methods:  []string{"KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion", "KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion"},
 		Provider: "kms", Offers: "Create key's AES_WRAPPING purpose (AES_256_KWP) and Trusted wrapping checkbox, also on Add version and Import version of an HSM_SINGLE_TENANT key; " +
 			"a version's page shows Trusted wrapping enabled and HSM trusted; Export trusted-wrapped on the page of a version with trusted wrapping (the wrapped key shown base64), " +
 			"Import trusted-wrapped version on an HSM_SINGLE_TENANT key's page (importing key, algorithm, wrapped key) (#1521)",

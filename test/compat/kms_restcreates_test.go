@@ -93,7 +93,8 @@ func TestKMSLifecycleOverRESTWire(t *testing.T) {
 		{"PATCH", k + "/cryptoKeyVersions/1?updateMask=state", `{"state":"DISABLED"}`, 200},
 		{"POST", k + "/cryptoKeyVersions/1:destroy", ``, 200},
 		{"POST", k + "/cryptoKeyVersions/1:restore", `{}`, 200},
-		{"POST", k + "/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion", `{}`, 501},
+		// re-import into an existing version stays 501 (#1521)
+		{"POST", k + "/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion", `{"importingKey":"k","cryptoKeyVersion":"v"}`, 501},
 		{"POST", k + "/cryptoKeyVersions/1:asymmetricSign", `{}`, 400}, // a symmetric key (#1212)
 		{"POST", k + "/cryptoKeyVersions/1:nope", `{}`, 404},
 		{"DELETE", k, ``, 400},                          // it still has a version

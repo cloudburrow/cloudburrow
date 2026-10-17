@@ -2339,8 +2339,7 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Unimplemented": 2,
-      "Verified": 60
+      "Verified": 62
     },
     "rows": [
       {
@@ -2444,7 +2443,8 @@
         "method": "google.cloud.kms.v1.HsmManagement/ApproveSingleTenantHsmInstanceProposal",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
         ]
       },
       {
@@ -2458,7 +2458,8 @@
         "method": "google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstanceProposal",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
         ]
       },
       {
@@ -2472,7 +2473,8 @@
         "method": "google.cloud.kms.v1.HsmManagement/ExecuteSingleTenantHsmInstanceProposal",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm"
+          "test/compat/kms_hsm_management_test.go:76 TestKMSSingleTenantHsm",
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
         ]
       },
       {
@@ -2638,6 +2640,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
@@ -2804,11 +2807,10 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:31 TestKMSUnimplementedContract"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes",
@@ -2862,7 +2864,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:1139 TestKMSGetCryptoKeyVersion",
+          "test/compat/kms_test.go:1141 TestKMSGetCryptoKeyVersion",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled"
         ],
         "unverified": [
@@ -2879,7 +2881,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a version number the key does not have",
-            "test": "test/compat/kms_test.go:1139 TestKMSGetCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:1141 TestKMSGetCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
@@ -2917,7 +2919,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a key ring removed by a project-scoped /admin/reset",
-            "test": "test/compat/kms_test.go:1107 TestKMSProjectResetClearsOnlyThatProject"
+            "test": "test/compat/kms_test.go:1109 TestKMSProjectResetClearsOnlyThatProject"
           },
           {
             "code": "NOT_FOUND",
@@ -2957,7 +2959,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
+          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
         ],
         "unverified": [
           {
@@ -2969,11 +2972,10 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:31 TestKMSUnimplementedContract"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/kms_trusted_test.go:55 TestKMSTrustedKeyWrapping"
+        ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
@@ -2982,7 +2984,7 @@
           "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/kms_test.go:931 TestKMSFullViewAddsNothingForSoftwareKeys",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3013,7 +3015,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys"
+          "test/compat/kms_test.go:931 TestKMSFullViewAddsNothingForSoftwareKeys"
         ],
         "unverified": [
           {
@@ -3136,7 +3138,7 @@
         "tests": [
           "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey",
+          "test/compat/kms_test.go:886 TestKMSUpdateCryptoKey",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3163,7 +3165,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "the immutable destroy_scheduled_duration in the mask",
-            "test": "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey"
+            "test": "test/compat/kms_test.go:886 TestKMSUpdateCryptoKey"
           },
           {
             "code": "NOT_FOUND",

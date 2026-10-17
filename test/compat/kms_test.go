@@ -774,7 +774,8 @@ func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
 // TestKMSJSONIsServedOnTheSamePort (#414): the KMS endpoint answers the
 // official REST client too, and a method that stays unimplemented is
 // UNIMPLEMENTED over JSON as over gRPC. CreateKeyRing was the case until it was
-// transcoded (#423), and CreateImportJob until #1212; trusted key wrapping stays out of scope.
+// transcoded (#423), CreateImportJob until #1212, and trusted key wrapping
+// until #1521, which still refuses re-import into an existing version.
 func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -783,10 +784,11 @@ func TestKMSJSONIsServedOnTheSamePort(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rc.Close()
-	_, err = rc.ExportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ExportTrustedKeyWrappedCryptoKeyVersionRequest{
-		Name: "projects/" + h.Project() + "/locations/global/keyRings/json-ring/cryptoKeys/k/cryptoKeyVersions/1"})
+	key := "projects/" + h.Project() + "/locations/global/keyRings/json-ring/cryptoKeys/k"
+	_, err = rc.ImportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest{
+		Parent: key, ImportingKey: key, CryptoKeyVersion: key + "/cryptoKeyVersions/1"})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("ExportTrustedKeyWrappedCryptoKeyVersion through the REST client = %v, want UNIMPLEMENTED", err)
+		t.Errorf("ImportTrustedKeyWrappedCryptoKeyVersion re-import through the REST client = %v, want UNIMPLEMENTED", err)
 	}
 }
 
