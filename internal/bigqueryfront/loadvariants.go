@@ -73,6 +73,7 @@ import (
 //     after the file's).
 //
 // UNVERIFIED: the keys are columns after the file's columns (the page does
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/hive-partitioned-loads-gcs
 // not say where; HivePartitioningOptions.fields lists them "in the order
 // they were inferred"). A schema the job gives that has no column for a
 // key gets one at its end, NULLABLE, of the key's type; one it has is
@@ -100,6 +101,8 @@ import (
 // is GEOGRAPHY whatever its values. A property named as a column the
 // Feature already makes (geometry, id or another member) is 501, as the
 // page does not say which wins.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/geospatial-data
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/hive-partitioned-loads-gcs
 
 // hiveKey is one partition key: its name and type.
 type hiveKey struct{ name, typ string }
@@ -544,6 +547,7 @@ var hiveIntPattern = regexp.MustCompile(`^[+-]?[0-9]+$`)
 // hiveTimestampLayouts are the TIMESTAMP forms a key's value is read in:
 // a date and a time, with T or a space, and a UTC offset or none, as
 // "/time=2018-10-18 16:00:00+00/" (UNVERIFIED beyond that example).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/hive-partitioned-loads-gcs
 var hiveTimestampLayouts = []string{
 	"2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999Z07", "2006-01-02 15:04:05.999999999",
 	"2006-01-02T15:04:05.999999999Z07:00", "2006-01-02T15:04:05.999999999Z07", "2006-01-02T15:04:05.999999999",

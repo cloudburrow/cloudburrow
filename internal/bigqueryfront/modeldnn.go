@@ -48,6 +48,7 @@ import (
 // serve it as they do the other models. ML.WEIGHTS, ML.FEATURE_IMPORTANCE
 // and the explain functions are not supported for it, as BigQuery's
 // documentation of each lists the model types it takes.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-dnn-models
 
 // dnnTrained is a network's layers, the hidden ones then the output.
 type dnnTrained struct {
@@ -620,6 +621,7 @@ func (d *dnnTrained) latentLayer() int { return (len(d.Layers) - 1) / 2 }
 // latent_col_1, ..., then the input columns; ML.EVALUATE and
 // ML.RECONSTRUCTION_LOSS the errors of the encoded columns' reconstruction.
 // UNVERIFIED: BigQuery documents latent_col_<index> as INT64, which cannot
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-predict
 // hold a unit's value, so CloudBurrow gives FLOAT64; the errors are of the
 // preprocessed columns (BigQuery does not say which).
 func trainAutoencoder(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {

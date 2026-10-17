@@ -254,6 +254,7 @@ func (s *ProjectsServer) v1Update(w http.ResponseWriter, r *http.Request) error 
 	}
 	if in.ProjectId != "" && in.ProjectId != id {
 		// UNVERIFIED: Google documents no code for a body naming another project.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v1/projects/update
 		return apierror.InvalidArgument("project %q in the body does not match %q in the URL; a project ID cannot be changed", in.ProjectId, id)
 	}
 	parent, err := v1Parent(in.Parent)

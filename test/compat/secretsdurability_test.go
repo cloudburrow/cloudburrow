@@ -50,6 +50,7 @@ func TestSecretManagerRestartSetup(t *testing.T) {
 // secret's latest version reads back; in ephemeral mode the secret is gone.
 //
 // unverified: google.cloud.secretmanager.v1.SecretManagerService/GetSecret NOT_FOUND: a secret that did not survive an ephemeral restart
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/secret-manager/docs/reference/rest/v1/projects.secrets/get
 func TestSecretManagerAcrossRestart(t *testing.T) {
 	expect := os.Getenv(envSecretsExpect)
 	if expect == "" {

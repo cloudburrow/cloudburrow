@@ -40,6 +40,7 @@ import (
 // attribution, the largest first) and of ties (by feature name). Refused
 // 501: a model with a TRANSFORM clause, and an input column of a type
 // CloudBurrow cannot write back (ARRAY, STRUCT, GEOGRAPHY, JSON, RANGE).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-global-explain
 
 // mlGlobal is one row of ML.GLOBAL_EXPLAIN.
 type mlGlobal struct {

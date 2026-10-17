@@ -384,6 +384,7 @@ func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler
 // sync_status is NULL, as BigQuery gives it for a dataset with no replica,
 // and an instance keeps none. default_collation_name is the dataset's
 // defaultCollation, or NULL.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-datasets-schemata
 const schemataColumns = "STRUCT<catalog_name STRING, schema_name STRING, schema_owner STRING, " +
 	"creation_time TIMESTAMP, last_modified_time TIMESTAMP, location STRING, ddl STRING, " +
 	"default_collation_name STRING, sync_status JSON>"

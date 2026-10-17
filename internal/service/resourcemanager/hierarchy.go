@@ -229,6 +229,7 @@ func (r *Registry) checkSiblingName(all []Folder, parent, display, self string) 
 	for _, f := range all {
 		if f.Parent == parent && f.State == StateActive && f.Name != self && f.DisplayName == display {
 			// UNVERIFIED: Google answers a duplicate sibling name
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v3/folders/create
 			// FAILED_PRECONDITION (FOLDER_NAME_UNIQUENESS_VIOLATION).
 			return apierror.FailedPrecondition("a folder named %q already exists under %s", display, parent)
 		}

@@ -38,6 +38,7 @@ import (
 //   - ML.IMPUTER(x, 'mean'): x, or the mean where it is NULL.
 //
 // UNVERIFIED: what BigQuery gives where a scaler divides by zero (a
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-standard-scaler
 // constant column, or ML.NORMALIZER of a zero array); CloudBurrow gives
 // NULL. ML.BUCKETIZE of NULL is NULL.
 // The order of ML.POLYNOMIAL_EXPAND's fields is the input fields, then the
@@ -70,6 +71,7 @@ import (
 // output_format argument of ML.BUCKETIZE and ML.QUANTILE_BUCKETIZE other
 // than bucket_names, and IMPUTER strategies other than mean. Any other
 // ML.<name>(...) of no MODEL is left to the engine.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-quantile-bucketize
 
 // mlPreprocessUnserved are the ML functions of no model CloudBurrow
 // refuses, and why.

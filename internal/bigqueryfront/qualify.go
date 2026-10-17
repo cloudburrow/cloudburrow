@@ -286,6 +286,7 @@ const noDefaultDataset = "_cloudburrow_no_default_dataset"
 // view's own name is in the default dataset, as a table's is. The message
 // is the one tables.insert of such a view gets (viewnames.go); BigQuery's
 // own wording is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/views
 func qualifyTables(sql, dataset string) (text string, changed bool, msg string) {
 	refs, ok := unqualifiedTables(sql)
 	if !ok || len(refs) == 0 {

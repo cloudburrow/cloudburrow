@@ -26,6 +26,7 @@ import (
 //
 // Locally there is never a wait for capacity, so a delayed execution starts
 // at once: "within the next 12 hours" holds.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.jobs
 const annV1DelayExecution = "cloudburrow.dev/run-v1-delay-execution"
 
 // setV1Delay sets or clears the delayExecution annotation on one object.

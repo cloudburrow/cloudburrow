@@ -143,6 +143,7 @@ func parseLinkName(name string) (parent string, err error) {
 // acceptance tests plan clean against Google, which therefore answers none
 // (UNVERIFIED beyond that). An etag a caller sends is accepted and not
 // compared, as there is none to compare it with.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/developerconnect/v1/developer_connect.proto
 
 func (d *DeveloperConnectServer) done(parent, target, verb string, resp proto.Message) (*longrunningpb.Operation, error) {
 	// Operations are a location's, a link's too.

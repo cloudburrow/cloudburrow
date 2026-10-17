@@ -37,6 +37,7 @@ func wantCode(t *testing.T, what string, err error, code int, part string) {
 // The policy goes with the table: one made again has none.
 //
 // covers: bigquery.tables.getIamPolicy, bigquery.tables.setIamPolicy, bigquery.tables.testIamPermissions
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/iam/v1/policy.proto
 func TestBigQueryTableIAMIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -188,6 +189,7 @@ func TestBigQueryRoutineIAMIsStoredNotEnforced(t *testing.T) {
 // rowAccessPolicies.setIamPolicy; update changes the grantees.
 //
 // covers: bigquery.rowAccessPolicies.getIamPolicy, bigquery.rowAccessPolicies.testIamPermissions
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/rowAccessPolicies
 func TestBigQueryRowAccessPolicyIAMIsItsGrantees(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)

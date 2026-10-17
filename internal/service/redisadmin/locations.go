@@ -21,6 +21,7 @@ import (
 // of the project's instances, since any is accepted. Each carries
 // google.cloud.redis.v1.LocationMetadata with zones a, b and c; which
 // zones Google lists per region is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/redis/v1/cloud_redis.proto
 type LocationsServer struct {
 	locationpb.UnimplementedLocationsServer
 	api *Server

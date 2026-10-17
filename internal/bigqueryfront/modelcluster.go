@@ -39,6 +39,7 @@ import (
 // mean; PCA's components are signed so their largest-magnitude entry is
 // positive, and PCA refuses categorical features (501: whether their
 // one-hot columns are centered is undocumented).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-kmeans
 
 // maxPCAColumns is how many encoded columns CloudBurrow decomposes.
 const maxPCAColumns = 1000

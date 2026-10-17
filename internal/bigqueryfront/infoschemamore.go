@@ -52,6 +52,7 @@ import (
 //
 // MATERIALIZED_VIEWS and SCHEMATA_OPTIONS: infoschemaschemata.go (#1351).
 // OBJECT_PRIVILEGES and SCHEMATA_LINKS, region-qualified: infoschemaprivileges.go (#1355).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-partitions
 
 func init() {
 	for k, v := range map[string]func(front, *http.Request, string, *datasetMeta) (string, int, string){

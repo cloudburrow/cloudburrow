@@ -72,11 +72,13 @@ func TestBigQueryCreateInMissingDataset(t *testing.T) {
 //
 //   - a division by zero: "division by zero: 1 / 0" (the operators
 //     reference: "Divide by zero operations return an error"; the message
-//     is GoogleSQL's, UNVERIFIED against BigQuery);
+//     is GoogleSQL's, UNVERIFIED against BigQuery; docs re-read
+//     2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/operators);
 //   - ERROR(message): the message (the debugging functions reference's
 //     example gives "Found unexpected value: baz");
 //   - a named parameter the request does not give: "Query parameter 'p'
-//     not found at [1:8]" (UNVERIFIED).
+//     not found at [1:8]" (UNVERIFIED; docs re-read 2026-10-17:
+//     https://docs.cloud.google.com/bigquery/docs/parameterized-queries).
 //
 // A script's statement's error position counts from the start of the
 // script, as BigQuery's (SELECT 1;\nSELECT FROM at [2:8]); and a table is

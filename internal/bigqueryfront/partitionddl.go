@@ -28,6 +28,7 @@ import (
 // that names a column of the wrong type, or is of a form BigQuery does not
 // take, is refused 400 before anything is run. The messages are
 // UNVERIFIED: Google documents the forms, not the wording.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 //
 // Not carried out: what partitioning does to queries (partition pruning,
 // require_partition_filter, partition_expiration_days: 501 as options),

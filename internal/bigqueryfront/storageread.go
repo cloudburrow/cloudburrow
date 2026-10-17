@@ -388,7 +388,7 @@ func (s *storageRead) streamOf(name string) (*readStream, error) {
 	}
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "Not found: the read stream %q, which CloudBurrow did not see made "+
-			"or whose session has expired. Create the read session again.", name) // wording UNVERIFIED
+			"or whose session has expired. Create the read session again.", name) // wording UNVERIFIED; docs re-read 2026-10-17: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/bigquery/storage/v1/storage.proto
 	}
 	return st, nil
 }

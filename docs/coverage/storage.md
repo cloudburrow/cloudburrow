@@ -122,8 +122,8 @@ stays UNVERIFIED until a recorded observation pins it (see test/compat/README.md
 | `storage.managedFolders.insert` | `400` | a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status) | [`TestStorageManagedFolderLifecycle`](../../test/compat/storagemanagedfolders_test.go#L59) |
 | `storage.managedFolders.setIamPolicy` | `412` | a stale etag (as for buckets.setIamPolicy) | [`TestStorageManagedFolderIAM`](../../test/compat/storagemanagedfolders_test.go#L146) |
 | `storage.managedFolders.update` | `400` | a policy naming a cache the bucket does not have | [`TestStorageRapidCachesJSON`](../../test/compat/storageipfilter_test.go#L155) |
-| `storage.objects.get` | `200` | the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed) | [`TestStorageJSONAllowsAllowedOriginsInProcess`](../../internal/service/storage/cors_test.go#L111) |
-| `storage.objects.list` | `200` | the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed) | [`TestStorageJSONAlwaysAllowsCORS`](../../test/compat/storagecors_test.go#L126) |
+| `storage.objects.get` | `200` | the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed) | [`TestStorageJSONAllowsAllowedOriginsInProcess`](../../internal/service/storage/cors_test.go#L112) |
+| `storage.objects.list` | `200` | the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed) | [`TestStorageJSONAlwaysAllowsCORS`](../../test/compat/storagecors_test.go#L127) |
 | `storage.objects.list` | `403` | a caller outside the bucket's IP filter (the message is not documented) | [`TestStorageIPFilterJSON`](../../test/compat/storageipfilter_test.go#L44) |
 | `storage.rapidCaches.insert` | `400` | a zone outside the bucket's location | [`TestStorageRapidCachesJSON`](../../test/compat/storageipfilter_test.go#L155) |
 | `storage.rapidCaches.insert` | `409` | a second cache in the zone | [`TestStorageRapidCachesJSON`](../../test/compat/storageipfilter_test.go#L155) |

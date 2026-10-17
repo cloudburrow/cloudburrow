@@ -37,6 +37,7 @@ import (
 // INVALID_ARGUMENT, with the Kubernetes API server's wording ("field label
 // not supported"). Whether Google filters on it or ignores it is
 // UNVERIFIED; gcloud matches the name again itself.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.services/list
 
 // v1Requirement is one term of a selector.
 type v1Requirement struct {

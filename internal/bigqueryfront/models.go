@@ -466,6 +466,7 @@ func (md bqModel) resource(full bool) map[string]any {
 	if len(md.Transform) > 0 {
 		// The TRANSFORM's output features (UNVERIFIED: BigQuery's
 		// featureColumns are then the input's, and it gives transformSql).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/models
 		var tc []map[string]any
 		for _, ft := range t.Features {
 			tc = append(tc, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})

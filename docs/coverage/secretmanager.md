@@ -32,4 +32,4 @@ stays UNVERIFIED until a recorded observation pins it (see test/compat/README.md
 | Method | Code | Case | Test |
 |---|---|---|---|
 | `google.cloud.secretmanager.v1.SecretManagerService/CreateSecret` | `NOT_FOUND` | a topic in Secret.topics that does not exist (Pub/Sub's code for the failed TOPIC_CONFIGURED publish) | [`TestSecretManagerTopicNotifications`](../../test/compat/secrettopics_test.go#L33) |
-| `google.cloud.secretmanager.v1.SecretManagerService/GetSecret` | `NOT_FOUND` | a secret that did not survive an ephemeral restart | [`TestSecretManagerAcrossRestart`](../../test/compat/secretsdurability_test.go#L53) |
+| `google.cloud.secretmanager.v1.SecretManagerService/GetSecret` | `NOT_FOUND` | a secret that did not survive an ephemeral restart | [`TestSecretManagerAcrossRestart`](../../test/compat/secretsdurability_test.go#L54) |
