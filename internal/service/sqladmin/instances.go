@@ -79,6 +79,12 @@ type Spec struct {
 	// startExternalSync, before which the replica's server runs idle.
 	External            *ExternalSource `json:"external,omitempty"`
 	ExternalSyncStarted bool            `json:"externalSyncStarted,omitempty"`
+	// KMSKey is diskEncryptionConfiguration.kmsKeyName (#1538), KMSKeyVersion
+	// the version that wrapped WrappedKey, the instance's data key, which
+	// is kept only wrapped (diskencryption.go).
+	KMSKey        string `json:"kmsKey,omitempty"`
+	KMSKeyVersion string `json:"kmsKeyVersion,omitempty"`
+	WrappedKey    []byte `json:"wrappedKey,omitempty"`
 }
 
 // Regional reports whether the instance has a standby (#1408).
@@ -235,7 +241,11 @@ func (s *Server) bringUp(name, opID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
-	err := s.writes.prov.Start(ctx, spec)
+	// A server whose key cannot be used is not started (#1538).
+	err := s.keyUsable(spec)
+	if err == nil {
+		err = s.writes.prov.Start(ctx, spec)
+	}
 	if err == nil {
 		err = s.seedExternal(ctx, name, spec)
 	}
@@ -304,6 +314,8 @@ type instanceBody struct {
 	Region               string           `json:"region"`
 	ReplicaConfiguration *json.RawMessage `json:"replicaConfiguration"`
 	FailoverReplica      *json.RawMessage `json:"failoverReplica"`
+	// DiskEncryption is diskEncryptionConfiguration (#1538).
+	DiskEncryption *json.RawMessage `json:"diskEncryptionConfiguration"`
 	// IncludeReplicas is includeReplicasForMajorVersionUpgrade (#1421).
 	IncludeReplicas bool `json:"includeReplicasForMajorVersionUpgrade"`
 	// OnPremisesConfiguration and instanceType ON_PREMISES_INSTANCE make a
@@ -429,6 +441,9 @@ func decodeInstance(r *http.Request) (instanceBody, error) {
 	if err := json.Unmarshal(body, &b); err != nil {
 		return b, Errorf(http.StatusBadRequest, "Invalid JSON payload received: %v", err)
 	}
+	if err := checkInstanceFields(body); err != nil {
+		return b, err
+	}
 	_ = json.Unmarshal(body, &raw)
 	b.raw = raw.Settings
 	return b, nil
@@ -524,6 +539,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if err := spec.pgBefore12Unsupported(nil); err != nil {
 		return nil, err
 	}
+	key, err := parseDiskEncryption(b.DiskEncryption)
+	if err != nil {
+		return nil, err
+	}
 	if !s.engineServed(b.DatabaseVersion) {
 		svc := "cloudsql"
 		if strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
@@ -536,6 +555,17 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		// PostgreSQL's postgres user trusts every connection, as the server
 		// `up` runs does (docs/cloudsql.md): no password is kept.
 		spec.RootPassword = ""
+	}
+	if replica {
+		err = s.replicaKey(r.Context(), &spec, key)
+	} else if key != "" {
+		err = s.encryptWith(r.Context(), &spec, key)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := checkReplicationSetting(b.raw, spec); err != nil {
+		return nil, err
 	}
 	s.emu.Lock()
 	if s.engineLocked(b.Name) != nil || s.writes.sources[b.Name] != nil {
@@ -609,6 +639,25 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	upgrade := b.DatabaseVersion != "" && b.DatabaseVersion != c.spec.DatabaseVersion
 	if b.Name != "" && b.Name != name {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: an instance cannot be renamed.")
+	}
+	key, err := parseDiskEncryption(b.DiskEncryption)
+	if err != nil {
+		return nil, err
+	}
+	s.emu.RLock()
+	cur := c.spec
+	s.emu.RUnlock()
+	if key != "" && key != cur.KMSKey {
+		// "After you create a Cloud SQL instance, you can't change the
+		// encryption key type", nor give it another key.
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: diskEncryptionConfiguration cannot be changed after an instance "+
+			"is created: customer-managed encryption is set by instances.insert, and its key cannot be replaced.")
+	}
+	if err := checkSettingsVersion(b.raw, cur); err != nil {
+		return nil, err
+	}
+	if err := checkReplicationSetting(b.raw, cur); err != nil {
+		return nil, err
 	}
 	s.emu.Lock()
 	if c.state != "RUNNABLE" && c.state != "FAILED" {
@@ -695,6 +744,13 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		next.HAEpochs[sb] = max(next.HAEpochs[0], next.HAEpochs[1]) + 1
 	}
 	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED" || haChange
+	if restart {
+		// A server whose key cannot be used is not started again (#1538).
+		if err := s.keyUsableWith(s.kms, next); err != nil {
+			s.emu.Unlock()
+			return nil, err
+		}
+	}
 	next.SettingsVersion++
 	c.spec = next
 	if restart {
@@ -725,6 +781,16 @@ func (s *Server) deleteInstance(r *http.Request, base, project, name string) (an
 	fb, err := s.finalBackupOf(r)
 	if err != nil {
 		return nil, err
+	}
+	if r.URL.Query().Get("enableFinalBackup") == "" {
+		// settings.finalBackupConfig is the default a delete without
+		// enableFinalBackup takes (#1538).
+		s.emu.RLock()
+		spec := c.spec
+		s.emu.RUnlock()
+		if fb, err = s.finalBackupConfigOf(spec); err != nil {
+			return nil, err
+		}
 	}
 	s.emu.Lock()
 	if c.spec.DeletionProtection {
@@ -774,7 +840,7 @@ func (s *Server) deleteInstance(r *http.Request, base, project, name string) (an
 			s.conn.removeInstance(name)
 		}
 		if err == nil {
-			s.removeInstanceBackups(project, name)
+			s.removeInstanceBackups(project, name, retainBackups(c.spec))
 		}
 		s.finish(id, err)
 	}()
@@ -787,6 +853,12 @@ func (s *Server) restartInstance(base, project, name string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.emu.RLock()
+	spec := c.spec
+	s.emu.RUnlock()
+	if err := s.keyUsable(spec); err != nil {
+		return nil, err
+	}
 	s.emu.Lock()
 	if c.state != "RUNNABLE" {
 		st := c.state
@@ -794,7 +866,7 @@ func (s *Server) restartInstance(base, project, name string) (any, error) {
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
 	}
 	c.state = "MAINTENANCE"
-	spec := c.spec
+	spec = c.spec
 	s.emu.Unlock()
 	op := s.pending(base, project, name, "RESTART")
 	id := op["name"].(string)
@@ -869,7 +941,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	for k, v := range spec.Settings {
 		switch k {
 		case "kind", "settingsVersion", "tier", "userLabels", "databaseFlags", "deletionProtectionEnabled",
-			"availabilityType", "activationPolicy", "backupConfiguration":
+			"availabilityType", "activationPolicy", "backupConfiguration", "databaseReplicationEnabled":
 		default:
 			st[k] = v
 		}
@@ -904,6 +976,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		bc["backupRetentionSettings"] = map[string]any{"retentionUnit": "COUNT", "retainedBackups": defaultRetained}
 	}
 	st["backupConfiguration"] = bc
+	s.diskEncryptionJSON(in, spec)
 	return in, nil
 }
 

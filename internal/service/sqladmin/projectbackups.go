@@ -198,7 +198,7 @@ func (s *Server) createBackup(r *http.Request, base, project string) (any, error
 		TTLDays     int64  `json:"ttlDays,string"`
 		ExpiryTime  string `json:"expiryTime"`
 	}
-	if err := decode(r, &body); err != nil {
+	if err := readChecked(r, "backup", backupFields, &body); err != nil {
 		return nil, err
 	}
 	if body.Instance == "" {
@@ -240,7 +240,7 @@ func (s *Server) updateBackup(r *http.Request, base string, run BackupRun) (any,
 		TTLDays     int64   `json:"ttlDays,string"`
 		ExpiryTime  string  `json:"expiryTime"`
 	}
-	if err := decode(r, &body); err != nil {
+	if err := readChecked(r, "backup", backupFields, &body); err != nil {
 		return nil, err
 	}
 	mask := r.URL.Query().Get("updateMask")

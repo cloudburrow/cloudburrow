@@ -480,6 +480,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if secretsSvc != nil {
 			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
 		}
+		// diskEncryptionConfiguration (#1538) wraps an instance's data key
+		// with this instance's Cloud KMS, in process.
+		if kmsSvc != nil {
+			sqlAdminSrv.UseKMS(sqlAdminKMS{svc: kmsSvc})
+		}
 		coord.Register(sqlAdminSrv)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.

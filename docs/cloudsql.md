@@ -239,7 +239,9 @@ and an address the connectors reach through 3307.
 | `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
-| `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
+| `settings.userLabels`, `deletionProtectionEnabled` | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
+| `diskEncryptionConfiguration` | A customer-managed encryption key: see [Customer-managed encryption keys](#customer-managed-encryption-keys-1538). |
+| Every other field | Applied, recorded, ignored as output only, or refused by name: see [Request fields](#request-fields-1538). |
 | `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
 | `settings.availabilityType` | `ZONAL` (the default) or `REGIONAL`, a high-availability instance with a synchronous standby: see [High availability](#high-availability-1408). Another value is 400. |
 | `replicaConfiguration.failoverTarget`, `failoverReplica` | 400, as Cloud SQL answers (#1462): the legacy high-availability configuration, deprecated for every instance on 2025-01-13, with which "you can't create instances" ([configure-legacy-ha](https://docs.cloud.google.com/sql/docs/mysql/configure-legacy-ha)). `REGIONAL` is high availability. |
@@ -247,6 +249,60 @@ and an address the connectors reach through 3307.
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
 server, its Service and its volume. `restart` restarts its pod.
+
+### Request fields (#1538)
+
+Every settable field of the request bodies served, `DatabaseInstance` and its `Settings`, `User`,
+`Database`, `BackupRun`, `Backup` and `SslCertsInsertRequest`, is one of four things, never accepted
+and dropped: **applied** (it changes what the server does or answers), **recorded** (stored and
+answered as sent, with nothing behind it), **ignored** (output only, as Cloud SQL ignores it in a
+request), or **refused** with 400 or 501 naming it. A field the discovery document does not have is
+400. `TestSQLFieldTablesMatchTheDiscoveryDocument` checks the lists in
+`internal/service/sqladmin/fields.go` against the pinned discovery document, and
+`TestSQLFieldsNeverSilentlyDropped` sends each one.
+
+| Field | What happens |
+|---|---|
+| `settings.settingsVersion` | On `patch` and `update`, a value that is not the instance's is 412, Cloud SQL's guard against a concurrent change. |
+| `settings.retainBackupsOnDelete` | `true` keeps the instance's backups after `delete` (they stay listed by `Backups.ListBackups`); otherwise only a `FINAL` one is kept. |
+| `settings.finalBackupConfig` | `enabled` makes a `delete` without `enableFinalBackup` take a `FINAL` backup, kept `retentionDays` (30 when not given). |
+| `settings.databaseReplicationEnabled` | A read replica's replication state, set by `stopReplica` and `startReplica`; a different value in a patch is 400 naming those methods, and `true` on a primary is 400. |
+| `settings.dataApiAccess`, `edition`, `dataDiskSizeGb`, `backupConfiguration`, `activationPolicy`, `availabilityType` | Applied: see the sections on the Data API, point-in-time recovery, storage shrink, backups and high availability. |
+| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` other than `GOOGLE_MANAGED_INTERNAL_CA`, and `serverCaPool`, are 501: per-instance CAs are Certificate Authority Service's. |
+| `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
+| `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
+| `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
+| `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
+| `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `replicationCluster`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
+| `connectionName`, `ipAddresses`, `state`, `gceZone`, `serverCaCert`, `selfLink` and the other output fields | Ignored, as Cloud SQL ignores them. |
+| `users`: `databaseRoles`, `passwordPolicy`, `dualPasswordType` (other than `NO_DUAL_PASSWORD`), `iamEmail` | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). |
+| `databases`: `sqlserverDatabaseDetails` | 400 (SQL Server). |
+| `backupRuns.insert`: `backupKind` `PHYSICAL`, `location` other than `us-central1` | 501: a backup is a logical dump, kept in the one region. `diskEncryptionConfiguration` is 400 (a backup inherits its instance's), `timeZone` 400 (SQL Server). |
+
+### Customer-managed encryption keys (#1538)
+
+`diskEncryptionConfiguration.kmsKeyName` on `instances.insert` (Terraform's `encryption_key_name`,
+the console's **Customer-managed encryption key**) is a CryptoKey of this instance's Cloud KMS, so it
+needs `kms` in `--services` (412 otherwise). As Cloud SQL requires, the key is in the instance's
+region (another location is 400), and it cannot be added to an instance, changed or removed after
+it is created (400). The instance gets a data key of its own, wrapped by the CryptoKey's primary
+version and kept only wrapped; it answers `diskEncryptionConfiguration` and
+`diskEncryptionStatus.kmsKeyVersionName`, the version that wrapped it.
+
+The key is checked, by unwrapping the data key, whenever the instance is read and before its server
+is started (created, restarted, patched in a way that restarts it, or brought back by `up`). Cloud
+SQL documents that "if Cloud SQL is unable to access the key (such as if you disable the key
+version), Cloud SQL suspends the instance", so while the version is disabled or destroyed the
+instance answers `SUSPENDED` with `suspensionReason` `KMS_KEY_ISSUE`, a create or a start is refused
+naming the key, and `connectSettings` and `generateEphemeralCert` are 412, so the connectors cannot
+reach it. It is `RUNNABLE` again once the version is enabled. A read replica in its primary's region
+inherits the primary's key (another key is 400); one in another region needs a key of that region;
+a clone keeps its source's key.
+
+**The data volume itself is not encrypted with the key**: the server's files are on an ordinary
+volume of the cluster, and a server already running keeps answering direct connections through its
+host tunnel while its key is disabled. What the key controls is whether the instance can be started
+and reached through the API and the connectors.
 
 ### Read replicas (#1330)
 
