@@ -11,6 +11,8 @@ package sqladmin
 // starts GTID replication from it; promoteReplica ends the migration.
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -72,6 +74,10 @@ type ExternalSource struct {
 	InstanceUp bool   `json:"instanceUp,omitempty"`
 	// Databases are a PostgreSQL source's selectedObjects (#1524).
 	Databases []string `json:"databases,omitempty"`
+	// DumpFile is the dump in Cloud Storage a MySQL replica is seeded
+	// from when it is created (#1524): its source's or its own
+	// dumpFilePath, written with the source's GTIDs as purged.
+	DumpFile string `json:"dumpFile,omitempty"`
 	// SyncMode is startExternalSync's: "" (ONLINE), a dump and then
 	// replication, or OFFLINE, the dump alone (#1524).
 	SyncMode string `json:"syncMode,omitempty"`
@@ -87,9 +93,6 @@ const (
 
 // upPostgresService is the Service of the PostgreSQL server `up` runs.
 const upPostgresService = "cloudsql"
-
-const dumpFileWhy = "a custom import replicates from a dump file in Cloud Storage written at a binary log position; " +
-	"use a managed import (no dumpFilePath), in which startExternalSync dumps the source's databases itself"
 
 func (w *instances) sourcesPath() string {
 	if w.path == "" {
@@ -184,7 +187,9 @@ func (s *Server) insertSource(base, project string, b instanceBody) (any, error)
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for databaseVersion: %s.", b.DatabaseVersion)
 	}
 	if op.DumpFilePath != "" {
-		return nil, unimplemented("onPremisesConfiguration.dumpFilePath", dumpFileWhy)
+		if _, _, err := parseGCSURI(op.DumpFilePath); err != nil {
+			return nil, err
+		}
 	}
 	if _, _, err := hostPort(op.HostPort); err != nil {
 		return nil, err
@@ -236,10 +241,13 @@ func (s *Server) sourceJSON(base string, r *SourceRep) map[string]any {
 	}
 	op := map[string]any{"kind": "sql#onPremisesConfiguration", "hostPort": r.OnPremises.HostPort}
 	for k, v := range map[string]string{"username": r.OnPremises.Username, "caCertificate": r.OnPremises.CaCertificate,
-		"clientCertificate": r.OnPremises.ClientCertificate} {
+		"clientCertificate": r.OnPremises.ClientCertificate, "dumpFilePath": r.OnPremises.DumpFilePath} {
 		if v != "" {
 			op[k] = v
 		}
+	}
+	if len(r.OnPremises.SelectedObjects) > 0 {
+		op["selectedObjects"] = r.OnPremises.SelectedObjects
 	}
 	in := map[string]any{
 		"kind": "sql#instance", "name": r.Name, "project": r.Project, "databaseVersion": r.DatabaseVersion,
@@ -307,7 +315,7 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 	if b.InstanceType != "" && b.InstanceType != "READ_REPLICA_INSTANCE" {
 		return Errorf(http.StatusBadRequest, "Invalid request: an instance with masterInstanceName must have instanceType READ_REPLICA_INSTANCE.")
 	}
-	user, pass := rep.OnPremises.Username, rep.OnPremises.Password
+	user, pass, dump := rep.OnPremises.Username, rep.OnPremises.Password, rep.OnPremises.DumpFilePath
 	if b.ReplicaConfiguration != nil {
 		var rc struct {
 			FailoverTarget bool `json:"failoverTarget"`
@@ -323,7 +331,13 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 		}
 		if m := rc.Mysql; m != nil {
 			if m.DumpFilePath != "" {
-				return unimplemented("mysqlReplicaConfiguration.dumpFilePath", dumpFileWhy)
+				if pg {
+					return Errorf(http.StatusBadRequest, "Invalid request: mysqlReplicaConfiguration is for a replica of a MySQL source.")
+				}
+				if _, _, err := parseGCSURI(m.DumpFilePath); err != nil {
+					return err
+				}
+				dump = m.DumpFilePath
 			}
 			if m.Username != "" {
 				user, pass = m.Username, m.Password
@@ -338,7 +352,10 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 	if err != nil {
 		return err
 	}
-	ext := &ExternalSource{Host: host, Port: port, User: user, Password: pass}
+	if dump != "" && s.transfers == nil {
+		return s.noTransfers("a replica seeded from dumpFilePath")
+	}
+	ext := &ExternalSource{Host: host, Port: port, User: user, Password: pass, DumpFile: dump}
 	for _, o := range rep.OnPremises.SelectedObjects {
 		if o.Database != "" {
 			ext.Databases = append(ext.Databases, o.Database)
@@ -603,3 +620,54 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 // as the sync uses PostgreSQL's built-in logical replication instead
 // (components.CloudSQLInstanceBackend).
 var LogicalDecodingFlags = map[string]bool{"cloudsql.logical_decoding": true, "cloudsql.enable_pglogical": true}
+
+// seedExternal loads a new MySQL external replica's dumpFilePath (#1524),
+// as Google documents seeding from a dump file: the replica's GTIDs are
+// reset, the dump, written by mysqldump --set-gtid-purged=ON, is loaded
+// and sets them as the source's at the dump, and the replica then
+// connects to the source and replicates from there, with no
+// startExternalSync.
+func (s *Server) seedExternal(ctx context.Context, name string, spec Spec) error {
+	ext := spec.External
+	if ext == nil || ext.DumpFile == "" || spec.ExternalSyncStarted || !spec.MySQL() {
+		return nil
+	}
+	s.emu.RLock()
+	c := s.writes.byName[name]
+	s.emu.RUnlock()
+	if c == nil || s.transfers == nil {
+		return s.noTransfers("a replica seeded from dumpFilePath")
+	}
+	bucket, object, err := parseGCSURI(ext.DumpFile)
+	if err != nil {
+		return err
+	}
+	data, err := s.transfers.obj.Read(ctx, bucket, object)
+	if err != nil {
+		return fmt.Errorf("read the dump file %s: %w", ext.DumpFile, err)
+	}
+	var rd io.Reader = bytes.NewReader(data)
+	if strings.HasSuffix(object, ".gz") {
+		zr, err := gzip.NewReader(rd)
+		if err != nil {
+			return Errorf(http.StatusBadRequest, "%s ends in .gz but is not gzip: %v", ext.DumpFile, err)
+		}
+		rd = zr
+	}
+	reset := "RESET BINARY LOGS AND GTIDS;\n"
+	if strings.HasPrefix(spec.DatabaseVersion, "MYSQL_8_0") {
+		reset = "RESET MASTER;\n"
+	}
+	if err := s.transfers.t.ImportSQL(ctx, s.target(c.engine), "", "", io.MultiReader(strings.NewReader(reset), rd)); err != nil {
+		return fmt.Errorf("load the dump file %s: %w", ext.DumpFile, err)
+	}
+	s.emu.Lock()
+	c.spec.ExternalSyncStarted = true
+	next := c.spec
+	err = s.saveLocked()
+	s.emu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.writes.prov.Start(ctx, next)
+}

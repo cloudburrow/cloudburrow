@@ -236,6 +236,9 @@ func (s *Server) bringUp(name, opID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 	err := s.writes.prov.Start(ctx, spec)
+	if err == nil {
+		err = s.seedExternal(ctx, name, spec)
+	}
 	if err == nil && spec.PITREnabled() && spec.MasterInstanceName == "" {
 		// The first base, so the instance is recoverable from its start.
 		if err = s.takePITRBase(name); err != nil {

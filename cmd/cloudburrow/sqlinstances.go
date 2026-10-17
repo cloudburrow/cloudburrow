@@ -163,12 +163,14 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 const mysqlReplicaSetup = `set -e
 ` + mysqlRootEnv + `if [ -n "$(mysql $MYSQL_LOCAL -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
 src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "${CLOUDSQL_PRIMARY_USER:-` + components.SQLReplicaUser + `}"; }
+if [ -z "${CLOUDSQL_SEEDED:-}" ]; then # a replica seeded from dumpFilePath has the data (#1524)
 dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
 mysql $MYSQL_LOCAL -e 'RESET BINARY LOGS AND GTIDS' 2>/dev/null || mysql $MYSQL_LOCAL -e 'RESET MASTER' # MySQL 8.0's name
 if [ -n "$dbs" ]; then
   src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events --databases $dbs | mysql $MYSQL_LOCAL
 else
   mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
+fi
 fi
 mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = ${CLOUDSQL_PRIMARY_PORT:-3306}, SOURCE_USER = '${CLOUDSQL_PRIMARY_USER:-` +
 	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
@@ -335,6 +337,8 @@ func replicaSetup(spec sqladmin.Spec) string {
 		return ""
 	case ext != nil && ext.SyncMode == "OFFLINE":
 		return mysqlOfflineSetup
+	case ext != nil && ext.DumpFile != "":
+		return "export CLOUDSQL_SEEDED=1\n" + mysqlReplicaSetup
 	}
 	return mysqlReplicaSetup
 }

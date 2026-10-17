@@ -46,7 +46,7 @@ func TestSourceRepresentationInstance(t *testing.T) {
 		{&sqladmin.DatabaseInstance{Name: "pgext", DatabaseVersion: "POSTGRES_17", InstanceType: "ON_PREMISES_INSTANCE",
 			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:5432", Username: "repl", DumpFilePath: "gs://b/d.sql"}}, "400"},
 		{&sqladmin.DatabaseInstance{Name: "dump", DatabaseVersion: "MYSQL_8_4",
-			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:3306", DumpFilePath: "gs://b/d.sql"}}, "501"},
+			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:3306", DumpFilePath: "b/d.sql"}}, "400"},
 		{&sqladmin.DatabaseInstance{Name: "bad", DatabaseVersion: "MYSQL_8_4",
 			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5"}}, "400"},
 	} {
