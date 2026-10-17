@@ -320,13 +320,38 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 			return sub, 0, ""
 		}
 	}
-	jobs = filter.apply(project, jobs)
+	kept := filter.apply(project, jobs)
+	if filter != nil && len(kept) > jobsLiteralMax {
+		// Too many for a literal (#1515): the table, which the query's
+		// WHERE filters as it filters the literal. Its rows are every
+		// job's, so a list cut by creation_time is read again whole.
+		if filter.bounded() {
+			jobs, status, msg = f.allJobs(r, nil)
+			if status != 0 {
+				return "", status, msg
+			}
+		}
+		if sub := f.tableJobsRows(r, project, jobs, true); sub != "" {
+			return sub, 0, ""
+		}
+	}
+	jobs = kept
 	rows := make([][]string, len(jobs))
 	for i, job := range jobs {
 		rows[i] = jobRow(project, job)
 	}
 	return rowsSubquery(jobsColumns, rows), 0, ""
 }
+
+// jobsLiteralMax is the most jobs a filtered query of JOBS reads as a
+// literal of rows (jobsRows); past it, the query reads the table of rows
+// (jobstable.go), as an unfiltered one does (#1515). Measured on one
+// instance with 2,100 jobs (--services bigquery,storage, arm64,
+// 2026-10-17): a literal costs the engine about 2 ms a row (a COUNT(*)
+// WHERE job_type = 'QUERY' of 2,100 took 4.0 to 4.8 s), the table about
+// 0.3 s whatever its rows, once written; a literal of 100 rows takes
+// about 0.2 s.
+var jobsLiteralMax = 100
 
 // allJobs lists the project's jobs, top-level and children, within the
 // bounds of creation_time filter gives, or the status and message of why
