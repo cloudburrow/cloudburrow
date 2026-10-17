@@ -1,0 +1,150 @@
+CloudBurrow patch 72 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1585).
+
+The bug: a division by zero failed "zero divided error ( 1.000000 / 0
+)" (DIV and MOD "DIV: zero divided"), where GoogleSQL, and BigQuery,
+fail "division by zero: 1 / 0"; and ERROR()'s error was its message
+alone, which CloudBurrow's front could not tell from the engine's own
+errors, all of which the emulator answers with reason jobInternalError.
+
+The patch writes the division's error in GoogleSQL's form ("division by
+zero: 1 / 0", the dividend in its shortest form; DIV and MOD
+"division by zero: DIV(1, 0)"), and starts ERROR()'s message with
+"ERROR function: ", which the front takes off as it gives the error
+BigQuery's reason, invalidQuery.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/functions/debugging/error.go b/internal/functions/debugging/error.go
+--- a/internal/functions/debugging/error.go
++++ b/internal/functions/debugging/error.go
+@@ -17,5 +17,13 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return nil, errors.New(v)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1585): the message
++	// carries ErrorFunctionPrefix, by which CloudBurrow's front tells the
++	// query's own error from the engine's and gives it BigQuery's reason;
++	// the front takes the prefix off.
++	return nil, errors.New(ErrorFunctionPrefix + v)
+ }
++
++// ErrorFunctionPrefix starts the message of ERROR()'s error (CloudBurrow
++// patch, cloudburrow/cloudburrow#1585).
++const ErrorFunctionPrefix = "ERROR function: "
+diff --git a/internal/functions/math/div.go b/internal/functions/math/div.go
+--- a/internal/functions/math/div.go
++++ b/internal/functions/math/div.go
+@@ -16,7 +16,9 @@
+ 		return nil, err
+ 	}
+ 	if yv == 0 {
+-		return nil, fmt.Errorf("DIV: zero divided")
++		// CloudBurrow patch (cloudburrow/cloudburrow#1585): in GoogleSQL's
++		// form, "division by zero: DIV(1, 0)".
++		return nil, fmt.Errorf("division by zero: DIV(%d, 0)", xv)
+ 	}
+ 	return value.IntValue(xv / yv), nil
+ }
+diff --git a/internal/functions/math/mod.go b/internal/functions/math/mod.go
+--- a/internal/functions/math/mod.go
++++ b/internal/functions/math/mod.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"fmt"
+ 	"math"
++	"strconv"
+ 
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+@@ -17,7 +18,9 @@
+ 		return nil, err
+ 	}
+ 	if yv == 0 {
+-		return nil, fmt.Errorf("MOD: zero divided")
++		// CloudBurrow patch (cloudburrow/cloudburrow#1585): in GoogleSQL's
++		// form, "division by zero: MOD(1, 0)".
++		return nil, fmt.Errorf("division by zero: MOD(%s, 0)", strconv.FormatFloat(xv, 'g', -1, 64))
+ 	}
+ 	return value.FloatValue(math.Mod(xv, yv)), nil
+ }
+diff --git a/internal/value/value_float.go b/internal/value/value_float.go
+--- a/internal/value/value_float.go
++++ b/internal/value/value_float.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"fmt"
+ 	"math/big"
++	"strconv"
+ 	"time"
+ )
+ 
+@@ -38,7 +39,9 @@
+ 		return nil, err
+ 	}
+ 	if v2 == 0 {
+-		return nil, fmt.Errorf("zero divided error ( %f / 0 )", fv)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1585): GoogleSQL's
++		// message, "division by zero: 1 / 0".
++		return nil, fmt.Errorf("division by zero: %s / 0", strconv.FormatFloat(float64(fv), 'g', -1, 64))
+ 	}
+ 	return FloatValue(float64(fv) / v2), nil
+ }
+diff --git a/internal/value/value_int.go b/internal/value/value_int.go
+--- a/internal/value/value_int.go
++++ b/internal/value/value_int.go
+@@ -53,7 +53,9 @@
+ 		return nil, err
+ 	}
+ 	if v2 == 0 {
+-		return nil, fmt.Errorf("zero divided error ( %d / 0 )", iv)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1585): GoogleSQL's
++		// message, "division by zero: 1 / 0".
++		return nil, fmt.Errorf("division by zero: %d / 0", iv)
+ 	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1484): BigQuery's / (and
+ 	// SAFE_DIVIDE) of INT64s is FLOAT64, never an integer quotient
+diff --git a/runtime_error_messages_test.go b/runtime_error_messages_test.go
+new file mode 100644
+--- /dev/null
++++ b/runtime_error_messages_test.go
+@@ -0,0 +1,35 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++)
++
++// TestRuntimeErrorMessages is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1585): a division by zero fails with
++// GoogleSQL's message, "division by zero: 1 / 0", not "zero divided error
++// ( 1.000000 / 0 )", and ERROR()'s message starts with "ERROR function: ",
++// by which CloudBurrow's front tells it from the engine's own errors.
++func TestRuntimeErrorMessages(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=runtime_error_messages")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, tc := range []struct{ query, want string }{
++		{"SELECT 1/0", "division by zero: 1 / 0"},
++		{"SELECT 1.5/0", "division by zero: 1.5 / 0"},
++		{"SELECT DIV(7, 0)", "division by zero: DIV(7, 0)"},
++		{"SELECT MOD(7, 0)", "division by zero: MOD(7, 0)"},
++		{"SELECT ERROR('boom')", "ERROR function: boom"},
++	} {
++		var v any
++		err := db.QueryRowContext(ctx, tc.query).Scan(&v)
++		if err == nil || !strings.HasSuffix(err.Error(), tc.want) {
++			t.Errorf("%s: %v, want an error ending %q", tc.query, err, tc.want)
++		}
++	}
++}
