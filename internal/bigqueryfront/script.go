@@ -300,6 +300,13 @@ func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	if done {
 		return
 	}
+	if cut, ok := withoutDefaultCollate(q.Query); ok { // #1459, schemaddl.go
+		if !setQueryText(r, insert, cut) {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+			return
+		}
+		q.Query = cut
+	}
 	f.functions.note(projectOf(f.base), q, v) // #990
 	if replaceFunc != nil {
 		f.next = next

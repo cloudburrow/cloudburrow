@@ -87,6 +87,12 @@ func (f front) functionDDL(w http.ResponseWriter, r *http.Request, q queryOption
 			made[key] = true
 			continue
 		}
+		if len(full) >= 2 && full[len(full)-2] == resultsDataset && strings.HasPrefix(full[len(full)-1], scratchPrefix+"session_") {
+			// A TEMP function's hidden name (tempsession.go, #1459): new,
+			// by its random name, so not looked up.
+			made[key] = true
+			continue
+		}
 		exists := made[key]
 		kind := ""
 		if !exists && !dropped[key] {

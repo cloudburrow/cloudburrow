@@ -101,10 +101,12 @@ func TestBigQueryScriptVariableNamedAsAnAlias(t *testing.T) {
 // TEMP table of its name. Through a query job, which the emulator commits
 // up to the failing statement, as BigQuery keeps it: a dropped table was
 // still listed, and a table made was not. The front puts both back after
-// the failure: through jobs.query, each table reads as before the script
-// (and the script is 501, #935); through a query job, as the statements
-// before the failing one left it, as in BigQuery, and the job fails with
-// the emulator's error.
+// the failure: through a query job, as the statements before the failing
+// one left it, as in BigQuery, and the job fails with the emulator's
+// error. Since #1459 a script with no TEMP table given to jobs.query is
+// carried out a statement at a time, so it too keeps what the statements
+// before the failing one did, as in BigQuery (before, each table read as
+// before the script, and the script was 501, #935).
 func TestBigQueryFailedScriptLeavesTheCatalogInStep(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -141,16 +143,11 @@ func TestBigQueryFailedScriptLeavesTheCatalogInStep(t *testing.T) {
 		want := map[string][][]bigquery.Value{
 			"CREATE TEMP TABLE " + ghost + " AS SELECT 2 AS b; SELECT b FROM " + ghost: {{int64(2)}},
 		}
-		gone := []string{"c1"}
-		if insert {
-			want["SELECT z FROM "+p("keep2")] = [][]bigquery.Value{{"z"}}
-			want["SELECT a FROM "+p("c1")] = [][]bigquery.Value{{int64(1)}}
-			gone = []string{"keep", "view"}
-		} else {
-			want["SELECT a, s.b, arr FROM "+p("keep")] = [][]bigquery.Value{{int64(1), int64(2), []bigquery.Value{int64(3), int64(4)}}}
-			want["SELECT a FROM "+p("keep2")] = [][]bigquery.Value{{int64(5)}}
-			want["SELECT a FROM "+p("view")] = [][]bigquery.Value{{int64(6)}}
-		}
+		// Either way, what the statements before the failing one did is
+		// kept (#1459).
+		want["SELECT z FROM "+p("keep2")] = [][]bigquery.Value{{"z"}}
+		want["SELECT a FROM "+p("c1")] = [][]bigquery.Value{{int64(1)}}
+		gone := []string{"keep", "view"}
 		for sql, w := range want {
 			if got := rows(t, ctx, c, sql); !reflect.DeepEqual(got, w) {
 				t.Errorf("after the failed scripts (%s), %s returned %v, want %v", mode, sql, got, w)
@@ -166,22 +163,13 @@ func TestBigQueryFailedScriptLeavesTheCatalogInStep(t *testing.T) {
 				t.Errorf("after the failed scripts (%s), a query of %s: %v, want not found", mode, table.TableID, err)
 			}
 		}
-		listed := map[string]string{"keep2": "a"} // table → its first column, as tables.get lists it
-		if insert {
-			listed = map[string]string{"keep2": "z", "c1": "a"}
-		}
+		listed := map[string]string{"keep2": "z", "c1": "a"} // table → its first column, as tables.get lists it
 		for name, col := range listed {
 			md, err := ds.Table(name + "_" + mode).Metadata(ctx)
 			if err != nil {
 				t.Errorf("after the failed scripts (%s), %s: %v", mode, name, err)
 			} else if got := md.Schema[0].Name; got != col {
 				t.Errorf("after the failed scripts (%s), %s is listed with the column %s, want %s", mode, name, got, col)
-			}
-		}
-		// A table of the name of one the script made and lost is made.
-		if !insert {
-			if got := rows(t, ctx, c, "CREATE TABLE "+p("c1")+" AS SELECT 7 AS z; SELECT z FROM "+p("c1")); !reflect.DeepEqual(got, [][]bigquery.Value{{int64(7)}}) {
-				t.Errorf("CREATE TABLE of the name after the failed script: %v", got)
 			}
 		}
 	}

@@ -123,45 +123,25 @@ func TestCreateSchemaMakesTheDataset(t *testing.T) {
 		}
 	}
 
-	// A script: the dataset is made before it is sent, and a DROP SCHEMA
-	// IF EXISTS of it first, which does nothing, is sent as a statement
-	// that does nothing.
-	for _, sql := range []string{
-		"CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64); SELECT 1",
-		"DECLARE x INT64 DEFAULT 1; BEGIN CREATE SCHEMA fresh; END; CREATE TABLE fresh.t (a INT64)",
-		"DROP SCHEMA IF EXISTS fresh CASCADE; CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64)",
-	} {
-		emu := &datasetEmulator{datasets: map[string]string{}}
-		if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
-			t.Errorf("%s: %d %v", sql, code, got)
-			continue
-		}
-		w := emu.writes()
-		if _, ok := emu.datasets["fresh"]; !ok || len(w) != 2 || !strings.Contains(w[1], "CREATE TABLE fresh.t") {
-			t.Errorf("%s: sent %q", sql, w)
-		}
-		if strings.Contains(w[len(w)-1], "DROP SCHEMA") || strings.HasPrefix(sql, "DROP") && !strings.Contains(w[1], "DROP TABLE IF EXISTS `fresh._cloudburrow_") {
-			t.Errorf("%s: sent %q, want no DROP SCHEMA", sql, w)
-		}
-	}
+	// A script is carried out a statement at a time since #1459, a TEMP
+	// table or function's too (tempsession.go): each CREATE SCHEMA alone,
+	// as above.
 }
 
 // TestCreateSchemaNotCarriedOut (#951): what the front cannot carry out
 // is 501 naming it, and nothing is sent.
 func TestCreateSchemaNotCarriedOut(t *testing.T) {
 	for _, c := range []struct{ sql, names string }{
-		{"CREATE SCHEMA fresh OPTIONS(default_table_expiration_days=1)", "default_table_expiration_days"},
-		{"CREATE SCHEMA fresh OPTIONS(is_case_insensitive=true)", "is_case_insensitive"},
-		{"CREATE SCHEMA fresh DEFAULT COLLATE 'und:ci'", "DEFAULT COLLATE"},
+		// #1459: every option of schema_option_list is carried out but those of replication.
+		{"CREATE SCHEMA fresh OPTIONS(primary_replica='us-east4')", "primary_replica"},
+		{"CREATE SCHEMA fresh OPTIONS(is_primary=true)", "is_primary"},
+		{"CREATE SCHEMA fresh OPTIONS(default_table_expiration_days=1+1)", "default_table_expiration_days"},
+		{"CREATE SCHEMA fresh DEFAULT COLLATE CONCAT('und', ':ci')", "DEFAULT"},
 		{"CREATE SCHEMA fresh OPTIONS(description=CONCAT('a', 'b'))", "description"},
 		{"CREATE SCHEMA fresh OPTIONS(labels=[('k', 1)])", "labels"},
 		{"CREATE SCHEMA fresh OPTIONS(description=b'x')", "description"},
-		// A script whose earlier statement is a query is run statement by
-		// statement (#1249, earlierQuery), so these have DML first.
-		{"INSERT INTO fresh.t VALUES (1); CREATE SCHEMA fresh", "name it"},
-		{"INSERT INTO ds.t VALUES (1); RETURN; CREATE SCHEMA fresh", "RETURN"},
-		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", "DROP SCHEMA"},
-		{"CREATE SCHEMA fresh; DROP SCHEMA fresh; CREATE SCHEMA fresh", "DROP SCHEMA"},
+		// A script, a TEMP table or function's too, is carried out a
+		// statement at a time since #1459, each CREATE SCHEMA alone.
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{"taken": "{}"}}
 		code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(c.sql))
@@ -175,6 +155,40 @@ func TestCreateSchemaNotCarriedOut(t *testing.T) {
 	}
 }
 
+// TestCreateSchemaOptions (#1459): each option of schema_option_list
+// (but replication's) and DEFAULT COLLATE are the fields of the dataset
+// made; a value BigQuery refuses is 400, and nothing is sent.
+func TestCreateSchemaOptions(t *testing.T) {
+	sql := "CREATE SCHEMA fresh DEFAULT COLLATE 'und:ci' OPTIONS(default_kms_key_name='projects/p/locations/us/keyRings/r/cryptoKeys/k', " +
+		"default_partition_expiration_days=0.5, default_rounding_mode='ROUND_HALF_EVEN', default_table_expiration_days=3.75, " +
+		"is_case_insensitive=TRUE, max_time_travel_hours=72, storage_billing_model='physical', tags=[('p/env', 'prod')], location='us')"
+	emu := &datasetEmulator{datasets: map[string]string{}}
+	if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
+		t.Fatalf("%d %v", code, got)
+	}
+	want := `{"datasetReference":{"projectId":"p","datasetId":"fresh"},"location":"us","defaultCollation":"und:ci",` +
+		`"defaultEncryptionConfiguration":{"kmsKeyName":"projects/p/locations/us/keyRings/r/cryptoKeys/k"},` +
+		`"defaultPartitionExpirationMs":"43200000","defaultTableExpirationMs":"324000000","defaultRoundingMode":"ROUND_HALF_EVEN",` +
+		`"isCaseInsensitive":true,"maxTimeTravelHours":"72","storageBillingModel":"PHYSICAL","resourceTags":{"p/env":"prod"}}`
+	if got := emu.datasets["fresh"]; !jsonEqual([]byte(got), want) {
+		t.Errorf("made %s, want %s", got, want)
+	}
+	for _, bad := range []string{
+		"CREATE SCHEMA fresh DEFAULT COLLATE 'und:cs'",
+		"CREATE SCHEMA fresh OPTIONS(max_time_travel_hours=50)",
+		"CREATE SCHEMA fresh OPTIONS(default_rounding_mode='UP')",
+		"CREATE SCHEMA fresh OPTIONS(storage_billing_model='COMPRESSED')",
+	} {
+		emu := &datasetEmulator{datasets: map[string]string{}}
+		if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(bad)); code != 400 {
+			t.Errorf("%s: %d %v, want 400", bad, code, got)
+		}
+		if w := emu.writes(); len(w) != 0 {
+			t.Errorf("%s: sent %q", bad, w)
+		}
+	}
+}
+
 // TestCreateSchemaUndoneWhenTheQueryFails (#951): when the query the
 // front made datasets for fails, they are deleted again.
 func TestCreateSchemaUndoneWhenTheQueryFails(t *testing.T) {
@@ -182,8 +196,8 @@ func TestCreateSchemaUndoneWhenTheQueryFails(t *testing.T) {
 		name, path, body, answer string
 		code                     int
 	}{
-		{"jobs.query", base + "/queries", schemaQuery("CREATE SCHEMA fresh; SELECT 1/0"), `{"error":{"code":400,"message":"division by zero"}}`, 400},
-		{"jobs.insert", base + "/jobs", `{"jobReference":{"projectId":"p","jobId":"j"},"configuration":{"query":{"query":"CREATE SCHEMA fresh; SELECT 1/0","useLegacySql":false}}}`,
+		{"jobs.query", base + "/queries", schemaQuery("CREATE SCHEMA fresh"), `{"error":{"code":400,"message":"division by zero"}}`, 400},
+		{"jobs.insert", base + "/jobs", `{"jobReference":{"projectId":"p","jobId":"j"},"configuration":{"query":{"query":"CREATE SCHEMA fresh","useLegacySql":false}}}`,
 			`{"jobReference":{"projectId":"p","jobId":"j"},"status":{"state":"DONE","errorResult":{"reason":"invalidQuery","message":"division by zero"}}}`, 0},
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{}, code: c.code, answer: c.answer}
@@ -205,5 +219,20 @@ func TestCreateSchemaUndoneWhenTheQueryFails(t *testing.T) {
 	})
 	if code, _ := do(t, Wrap(failing), "POST", base+"/queries", schemaQuery("CREATE SCHEMA fresh")); code != 500 || len(emu.writes()) != 0 {
 		t.Errorf("a failed datasets.insert: %d, sent %q", code, emu.writes())
+	}
+}
+
+// TestWithoutDefaultCollate (#1459): the emulator is sent CREATE SCHEMA
+// without its DEFAULT COLLATE clause.
+func TestWithoutDefaultCollate(t *testing.T) {
+	for in, want := range map[string]string{
+		"CREATE SCHEMA d DEFAULT COLLATE 'und:ci' OPTIONS(location='us')":        "CREATE SCHEMA d  OPTIONS(location='us')",
+		"SELECT 1; CREATE SCHEMA IF NOT EXISTS p.d DEFAULT COLLATE ''; SELECT 2": "SELECT 1; CREATE SCHEMA IF NOT EXISTS p.d ; SELECT 2",
+		"CREATE SCHEMA d OPTIONS(description='DEFAULT COLLATE')":                 "",
+	} {
+		got, changed := withoutDefaultCollate(in)
+		if want == "" && changed || want != "" && got != want {
+			t.Errorf("%q: %q %v, want %q", in, got, changed, want)
+		}
 	}
 }

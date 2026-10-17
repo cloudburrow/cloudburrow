@@ -380,7 +380,7 @@ func TestBigQueryCreateViewReadsBackAsWritten(t *testing.T) {
 
 // TestBigQueryUpdateFrom (#1027): UPDATE ... FROM a subquery or a table
 // runs, as BigQuery runs it (https://cloud.google.com/bigquery/docs/reference/standard-sql/dml-syntax#update_statement),
-// and reports its rows; one with several FROM items is 501. Measured
+// and reports its rows; one with several FROM items runs since #1459. Measured
 // first through the front: 400 "failed to analyze: Update with joins not
 // supported [at 1:1]".
 func TestBigQueryUpdateFrom(t *testing.T) {
@@ -426,10 +426,12 @@ func TestBigQueryUpdateFrom(t *testing.T) {
 	if want := []string{"z,eu,x,y"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("read back %v, want %v", got, want)
 	}
-	err := runIn(ctx, c, project, ds.DatasetID, "UPDATE orders o SET region = 'q' FROM ids, ids AS j WHERE o.id = ids.id", false)
+	// Several FROM items run since #1459 (TestBigQueryDMLFromSeveralItems);
+	// a parenthesized join is still 501.
+	err := runIn(ctx, c, project, ds.DatasetID, "UPDATE orders o SET region = 'q' FROM (ids JOIN ids AS j USING (id)) WHERE o.id = ids.id", false)
 	var gerr *googleapi.Error
 	if !errors.As(err, &gerr) || gerr.Code != 501 {
-		t.Errorf("UPDATE ... FROM two items: %v, want 501", err)
+		t.Errorf("UPDATE ... FROM a parenthesized join: %v, want 501", err)
 	}
 }
 

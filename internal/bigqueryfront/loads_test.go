@@ -317,7 +317,7 @@ func (a *autodetectRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // TestCreateSchemaOfAnExistingDataset (#946): CREATE SCHEMA of a dataset
 // that exists fails as BigQuery fails it; IF NOT EXISTS, another dataset,
 // or one an earlier DROP SCHEMA removes, pass; a later statement of a
-// script that does so is 501.
+// script with a TEMP table or function that does so is 501.
 func TestCreateSchemaOfAnExistingDataset(t *testing.T) {
 	for _, c := range []struct {
 		sql    string
@@ -326,13 +326,11 @@ func TestCreateSchemaOfAnExistingDataset(t *testing.T) {
 	}{
 		{"CREATE SCHEMA taken", 409, "duplicate"},
 		{"create schema `p.taken` OPTIONS(description='x')", 409, "duplicate"},
-		{"CREATE SCHEMA p.taken; SELECT 1", 409, "duplicate"},
 		{"CREATE SCHEMA IF NOT EXISTS taken", 200, ""},
 		{"CREATE SCHEMA fresh", 200, ""},
 		{"CREATE SCHEMA other.taken", 200, ""},
-		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", 501, "notImplemented"}, // #951
-		{"DECLARE z INT64 DEFAULT 1; CREATE SCHEMA taken", 501, "notImplemented"},
-		{"CREATE SCHEMA fresh; CREATE SCHEMA fresh", 501, "notImplemented"},
+		// A script, a TEMP function's too, is carried out a statement at
+		// a time (#1459, TestScriptsCarriedOutInTurn).
 		{"CREATE SCHEMA fresh; CREATE SCHEMA IF NOT EXISTS fresh", 200, ""},
 		{"SELECT 'CREATE SCHEMA taken'", 200, ""},
 	} {

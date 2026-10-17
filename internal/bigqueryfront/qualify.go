@@ -62,7 +62,20 @@ type nameRef struct {
 	// MATERIALIZED VIEW statement, which no default dataset affects
 	// (#1049, qualifyTables).
 	view bool
+	// alias is whether the name is sent with itself as its alias
+	// (qualifyTables, #1509): it is a table of a DML statement's FROM
+	// clause, or a DELETE's or a MERGE's own, and no alias follows it.
+	alias bool
 }
+
+// aliasBefore are the tokens before which a table of a FROM clause, a
+// DELETE or a MERGE has no alias of its own (#1509): the end of a FROM
+// item, or the next clause. A name followed by anything else, an alias,
+// a hint, FOR SYSTEM_TIME, TABLESAMPLE or PIVOT, is sent without one.
+var aliasBefore = map[string]bool{"WHERE": true, "JOIN": true, "INNER": true, "LEFT": true, "RIGHT": true,
+	"FULL": true, "CROSS": true, "ON": true, "USING": true, "GROUP": true, "ORDER": true, "LIMIT": true,
+	"HAVING": true, "QUALIFY": true, "WINDOW": true, "UNION": true, "INTERSECT": true, "EXCEPT": true,
+	"WHEN": true, ",": true, ")": true, ";": true}
 
 // unqualifiedTables returns the table names the statements in sql give
 // with no dataset, where a query reads or writes a table: after FROM and
@@ -114,12 +127,16 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 	}
 	var refs []nameRef
 	seen := map[int]bool{}
+	// dml is whether the statement is DML, whose tables the engine does
+	// not know by their names once qualified (#1509).
+	dml := stmt[0].is("INSERT") || stmt[0].is("UPDATE") || stmt[0].is("DELETE") || stmt[0].is("MERGE")
 	// viewBody is whether the statement is a CREATE VIEW's, whose names
 	// after the view's own are its query's.
 	viewBody := false
 	// add notes the name at j; source is whether it is read in a FROM
-	// clause, where a "(" after it makes it a table-valued function's.
-	add := func(j int, source bool) {
+	// clause, where a "(" after it makes it a table-valued function's;
+	// aliased whether an alias may follow it.
+	add := func(j int, source, aliased bool) {
 		if j >= len(stmt) || seen[j] || stmt[j].kind != tokWord && stmt[j].kind != tokQuoted {
 			return
 		}
@@ -135,7 +152,8 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 			return
 		}
 		seen[j] = true
-		refs = append(refs, nameRef{pos: stmt[j].pos, end: stmt[j].end, name: parts[0], view: source && viewBody})
+		alias := aliased && dml && (next >= len(stmt) || aliasBefore[strings.ToUpper(stmt[next].text)])
+		refs = append(refs, nameRef{pos: stmt[j].pos, end: stmt[j].end, name: parts[0], view: source && viewBody, alias: alias})
 	}
 
 	// The tables DDL and DML name at the head of the statement.
@@ -145,23 +163,23 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 		if j < len(stmt) && stmt[j].is("INTO") {
 			j++
 		}
-		add(j, false)
+		add(j, false, false)
 	case stmt[0].is("UPDATE"):
-		add(1, false)
+		add(1, false, false)
 	case stmt[0].is("DELETE"):
 		j := 1
 		if j < len(stmt) && stmt[j].is("FROM") {
 			j++
 		}
-		add(j, false)
+		add(j, false, true)
 	case stmt[0].is("MERGE"):
 		j := 1
 		if j < len(stmt) && stmt[j].is("INTO") {
 			j++
 		}
-		add(j, false)
+		add(j, false, true)
 	case stmt[0].is("TRUNCATE") && len(stmt) > 1 && stmt[1].is("TABLE"):
-		add(2, false)
+		add(2, false, false)
 	case stmt[0].is("CREATE") || stmt[0].is("DROP"):
 		if _, temp := createsTemp(stmt); temp {
 			break
@@ -184,7 +202,7 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 		case j+1 < len(stmt) && stmt[j].is("IF") && stmt[j+1].is("EXISTS"):
 			j += 2
 		}
-		add(j, false)
+		add(j, false, false)
 		viewBody = createsView
 	}
 
@@ -216,11 +234,11 @@ func statementTables(stmt []token, temps map[string]bool) []nameRef {
 			// a IS [NOT] DISTINCT FROM b.
 		case t.is("FROM") || t.is("JOIN"):
 			fromAt[depth] = true
-			add(i+1, true)
+			add(i+1, true, true)
 		case t.punct(",") && fromAt[depth]:
-			add(i+1, true)
+			add(i+1, true, true)
 		case t.is("USING") && stmt[0].is("MERGE") && depth == 0:
-			add(i+1, true)
+			add(i+1, true, true)
 			delete(fromAt, depth)
 		case t.is("WHERE") || t.is("GROUP") || t.is("HAVING") || t.is("QUALIFY") || t.is("WINDOW") || t.is("ORDER") ||
 			t.is("LIMIT") || t.is("UNION") || t.is("INTERSECT") || t.is("EXCEPT") || t.is("ON") || t.is("USING") ||
@@ -295,6 +313,12 @@ func qualifyTables(sql, dataset string) (text string, changed bool, msg string) 
 		}
 		b.WriteString(sql[last:ref.pos])
 		b.WriteString(quotePath([]string{in, ref.name}))
+		if ref.alias {
+			// The engine does not know a table so named by its
+			// implicit alias, its name, as BigQuery does (#1509):
+			// "Unrecognized name: u" for u.id in a DML's subquery.
+			b.WriteString(" AS " + quotePath([]string{ref.name}))
+		}
 		last = ref.end
 	}
 	b.WriteString(sql[last:])

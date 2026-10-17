@@ -392,16 +392,16 @@ func TestBigQueryCSVExtractOfAnEmptyString(t *testing.T) {
 	}
 }
 
-// TestBigQueryFailedScriptFunctionsAndDropSchema (#976), through the
-// official Go client: a script given to jobs.query (Query.Read) that makes
-// a function and then fails is 501, and the function is then not there
-// (measured first: it was, where the 501 says nothing was kept), so the
-// same CREATE FUNCTION later makes it with its new body; a function that
-// existed before is left as it was, and so for a table function (#1061:
-// it was 501 before anything ran, as the pinned engine could not drop one);
-// a DROP FUNCTION in such a script is 501 before anything runs. As a query job,
-// which the emulator commits as BigQuery keeps it, the function is kept.
-// (DROP SCHEMA, 501 here since #976, is carried out since #990:
+// TestBigQueryFailedScriptFunctionsAndDropSchema (#976, #1459), through
+// the official Go client: a script given to jobs.query (Query.Read) that
+// makes, replaces or drops a function and then fails keeps what it did, as
+// BigQuery keeps what the statements before the failing one did: since
+// #1459 the front carries such a script out a statement at a time, each
+// as it runs alone. (Measured first, #976: the emulator rolled the script
+// back but kept the function in its engine, so the script was 501; and a
+// DROP FUNCTION in it was 501 before anything ran.) As a query job, which
+// the emulator commits as BigQuery keeps it, the function is kept. (DROP
+// SCHEMA, 501 here since #976, is carried out since #990:
 // TestBigQueryDropSchema.)
 func TestBigQueryFailedScriptFunctionsAndDropSchema(t *testing.T) {
 	h := New(t)
@@ -422,44 +422,32 @@ func TestBigQueryFailedScriptFunctionsAndDropSchema(t *testing.T) {
 		}
 		return fmt.Sprint(row)
 	}
+	failed := func(what string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "nope.nope") || strings.Contains(err.Error(), "notImplemented") {
+			t.Errorf("%s: %v, want the failing statement's error", what, err)
+		}
+	}
 
-	err := bqRun(ctx, c, "CREATE FUNCTION "+d+".f(x INT64) AS (x + 1)"+fail, false)
-	wantReason(t, "a failed script that makes a function", err, http.StatusNotImplemented, "notImplemented")
-	if got := value("SELECT " + d + ".f(1)"); !strings.Contains(got, "Function not found") {
-		t.Errorf("after the failed script, f(1) = %s, want not found", got)
-	}
-	if err := bqRun(ctx, c, "CREATE FUNCTION "+d+".f(x INT64) AS (x + 2)", false); err != nil {
-		t.Fatalf("CREATE FUNCTION after it: %v", err)
-	}
-	if got := value("SELECT " + d + ".f(1)"); got != "[3]" {
-		t.Errorf("f(1) = %s, want [3]", got)
+	failed("a failed script that makes a function", bqRun(ctx, c, "CREATE FUNCTION "+d+".f(x INT64) AS (x + 1)"+fail, false))
+	if got := value("SELECT " + d + ".f(1)"); got != "[2]" {
+		t.Errorf("after the failed script, f(1) = %s, want [2]: the function kept", got)
 	}
 
 	if err := bqRun(ctx, c, "CREATE FUNCTION "+d+".g(x INT64) AS (x * 10)", false); err != nil {
 		t.Fatal(err)
 	}
-	err = bqRun(ctx, c, "CREATE OR REPLACE FUNCTION "+d+".g(x INT64) AS (x + 1)"+fail, false)
-	wantReason(t, "a failed script that replaces a function", err, http.StatusNotImplemented, "notImplemented")
-	err = bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x AS y)"+fail, false)
-	wantReason(t, "a failed script that makes a table function", err, http.StatusNotImplemented, "notImplemented")
-	if got := value("SELECT * FROM " + d + ".tf(1)"); !strings.Contains(got, "not found") {
-		t.Errorf("after the failed script, tf(1) = %s, want not found", got)
+	failed("a failed script that replaces a function", bqRun(ctx, c, "CREATE OR REPLACE FUNCTION "+d+".g(x INT64) AS (x + 1)"+fail, false))
+	if got := value("SELECT " + d + ".g(1)"); got != "[2]" {
+		t.Errorf("after the failed script, g(1) = %s, want [2]: the replacement kept", got)
 	}
-	if err := bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x + 1 AS y)", false); err != nil {
-		t.Fatalf("CREATE TABLE FUNCTION after it: %v", err)
+	failed("a failed script that makes a table function", bqRun(ctx, c, "CREATE TABLE FUNCTION "+d+".tf(x INT64) AS (SELECT x AS y)"+fail, false))
+	if got := value("SELECT * FROM " + d + ".tf(1)"); got != "[1]" {
+		t.Errorf("after the failed script, tf(1) = %s, want [1]", got)
 	}
-	if got := value("SELECT * FROM " + d + ".tf(1)"); got != "[2]" {
-		t.Errorf("tf(1) = %s, want [2]", got)
-	}
-	for _, sql := range []string{"DROP FUNCTION " + d + ".g" + fail} {
-		err := bqRun(ctx, c, sql, false)
-		wantReason(t, sql, err, http.StatusNotImplemented, "notImplemented")
-		if err != nil && !strings.Contains(err.Error(), "Nothing was run") {
-			t.Errorf("%s: %v", sql, err)
-		}
-	}
-	if got := value("SELECT " + d + ".g(1)"); got != "[10]" {
-		t.Errorf("g(1) = %s, want [10], as before the scripts", got)
+	failed("a failed script that drops a function", bqRun(ctx, c, "DROP FUNCTION "+d+".g"+fail, false))
+	if got := value("SELECT " + d + ".g(1)"); !strings.Contains(got, "not found") {
+		t.Errorf("after the failed script that dropped it, g(1) = %s, want not found", got)
 	}
 
 	// A query job keeps it, as BigQuery keeps what ran before the failure.

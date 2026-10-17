@@ -754,7 +754,8 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 	}
 	raw = legacyTableTypes(r, raw, body.Schema) // #1034, typenames.go
 	if !update && body.View == nil && body.MaterializedView == nil {
-		raw = f.defaultTableKey(r, dataset, raw) // #1417, projectdefaults.go
+		raw = f.defaultTableKey(r, dataset, raw)       // #1417, projectdefaults.go
+		raw = f.defaultTableCollation(r, dataset, raw) // #1459, collation.go
 	}
 	if !update {
 		id := ""

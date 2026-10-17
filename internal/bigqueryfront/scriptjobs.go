@@ -30,13 +30,15 @@ import (
 // statistics and, for a query, destination table.
 //
 // The last statement of a script is the client's request (scriptflow.go):
-// a query is run once more as a child of its own, which only reads; a
-// last statement that changes data is not run twice, so it has no child
-// job, and its counts are the parent's. A script with no control flow and
-// no earlier query is sent whole to the emulator, which runs it as one job:
-// it makes no child jobs (documented, docs/compatibility.md), because
-// running it a statement at a time would end a TEMP table or function with
-// the statement that made it.
+// a query is run once more as a child of its own, which only reads. Since
+// #1459 every script of
+// several statements is carried out so (dml.go), one with a TEMP table or
+// function as its session's text (tempsession.go); a last statement that
+// changes data is a child job of its own, run once, its counts the
+// parent's too; a query child is run as a query job, so that it names its
+// destination table (sendStatement); and each child's statementType is
+// its statement's (statementTypeOf), where the emulator answers SELECT
+// for every statement but DML.
 
 // scriptChild is one child job a script ran.
 type scriptChild struct {
@@ -146,8 +148,105 @@ func (j *jobRecords) patchScript(job map[string]any, project string) bool {
 			frame["endLine"], frame["endColumn"] = child.endLine, child.endCol
 		}
 		stats["scriptStatistics"] = map[string]any{"evaluationKind": child.kind, "stackFrames": []any{frame}}
+		if typ := statementTypeOf(child.text); typ != "" && child.kind == "STATEMENT" {
+			// The emulator answers SELECT for every statement but DML
+			// (#1459); BigQuery's child job has its statement's own.
+			qs, _ := stats["query"].(map[string]any)
+			if qs == nil {
+				qs = map[string]any{}
+				stats["query"] = qs
+			}
+			qs["statementType"] = typ
+		}
 	}
 	return true
+}
+
+// statementTypeOf is the statementType BigQuery gives a job of the
+// statement text (JobStatistics2.statementType,
+// https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobStatistics2),
+// or "" when it is not one read here (#1459).
+func statementTypeOf(text string) string {
+	toks, ok := lex(text)
+	if !ok || len(toks) == 0 {
+		return ""
+	}
+	at := func(i int, words ...string) bool {
+		for k, w := range words {
+			if i+k >= len(toks) || !toks[i+k].is(w) {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case toks[0].is("SELECT") || toks[0].is("WITH") || toks[0].punct("("):
+		return "SELECT"
+	case toks[0].is("INSERT"), toks[0].is("UPDATE"), toks[0].is("DELETE"), toks[0].is("MERGE"), toks[0].is("ASSERT"):
+		return strings.ToUpper(toks[0].text)
+	case at(0, "TRUNCATE", "TABLE"):
+		return "TRUNCATE_TABLE"
+	case toks[0].is("CALL"):
+		return "CALL"
+	case toks[0].is("EXPORT") && at(1, "DATA"):
+		return "EXPORT_DATA"
+	case at(0, "LOAD", "DATA"):
+		return "LOAD_DATA"
+	}
+	verb := strings.ToUpper(toks[0].text)
+	if verb != "CREATE" && verb != "DROP" && verb != "ALTER" {
+		return ""
+	}
+	i := 1
+	if verb == "CREATE" && at(i, "OR", "REPLACE") {
+		i += 2
+	}
+	if verb == "CREATE" && (at(i, "TEMP") || at(i, "TEMPORARY")) {
+		i++
+	}
+	kinds := []struct {
+		words []string
+		typ   string
+	}{
+		{[]string{"MATERIALIZED", "VIEW"}, "MATERIALIZED_VIEW"},
+		{[]string{"SNAPSHOT", "TABLE"}, "SNAPSHOT_TABLE"},
+		{[]string{"EXTERNAL", "TABLE"}, "EXTERNAL_TABLE"},
+		{[]string{"TABLE", "FUNCTION"}, "TABLE_FUNCTION"},
+		{[]string{"AGGREGATE", "FUNCTION"}, "FUNCTION"},
+		{[]string{"ROW", "ACCESS", "POLICY"}, "ROW_ACCESS_POLICY"},
+		{[]string{"SEARCH", "INDEX"}, "SEARCH_INDEX"},
+		{[]string{"TABLE"}, "TABLE"},
+		{[]string{"VIEW"}, "VIEW"},
+		{[]string{"FUNCTION"}, "FUNCTION"},
+		{[]string{"PROCEDURE"}, "PROCEDURE"},
+		{[]string{"SCHEMA"}, "SCHEMA"},
+		{[]string{"MODEL"}, "MODEL"},
+	}
+	for _, k := range kinds {
+		if !at(i, k.words...) {
+			continue
+		}
+		typ := verb + "_" + k.typ
+		if typ == "CREATE_TABLE" {
+			// AS SELECT at the statement's top level makes it
+			// CREATE_TABLE_AS_SELECT.
+			depth := 0
+			for _, t := range toks[i:] {
+				switch {
+				case t.punct("("):
+					depth++
+				case t.punct(")"):
+					depth--
+				case depth == 0 && (t.is("LIKE") || t.is("COPY") || t.is("CLONE")):
+					return typ
+				case depth == 0 && t.is("AS"):
+					return "CREATE_TABLE_AS_SELECT"
+				}
+			}
+		}
+		return typ
+	}
+	return ""
 }
 
 // childAt places text in the script sql, when it is there as written.

@@ -210,6 +210,17 @@ type tableSetting struct {
 	// since its last refresh, its backing table already brought up to
 	// date by a read (materializedviews.go, #1415).
 	MVChanged bool `json:"mvChanged,omitempty"`
+	// Transactions are the change times (microseconds since the epoch)
+	// of the multi-statement transactions committed to the table, kept
+	// for the longest time travel window, which CHANGES refuses a range
+	// over (changehistory.go, #1503).
+	Transactions []int64 `json:"transactions,omitempty"`
+}
+
+// zero reports whether t keeps nothing.
+func (t tableSetting) zero() bool {
+	return t.Created == "" && t.ChangeHistory == nil && t.FineGrainedMutations == nil && t.PrivacyPolicy == nil && !t.MVChanged &&
+		len(t.Transactions) == 0
 }
 
 // tableSettings are the settings of every table, by project, dataset and
@@ -340,6 +351,33 @@ func (s *tableSettings) setMVChanged(key, created string, changed bool) {
 	s.saveLocked()
 }
 
+// addTransaction keeps at, the change time of a multi-statement
+// transaction committed to the table made at created, and drops those
+// older than the longest time travel window before it.
+func (s *tableSettings) addTransaction(key, created string, at int64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]tableSetting{}
+	}
+	t := s.m[key]
+	if t.Created != created {
+		t = tableSetting{Created: created}
+	}
+	kept := []int64{}
+	for _, v := range t.Transactions {
+		if v >= at-7*day && v != at {
+			kept = append(kept, v)
+		}
+	}
+	t.Transactions = append(kept, at)
+	s.m[key] = t
+	s.saveLocked()
+}
+
 // get is the settings of the table made at created.
 func (s *tableSettings) get(key, created string) tableSetting {
 	if s == nil {
@@ -395,7 +433,7 @@ const settingsKey = "_cloudburrow_settings"
 
 // annotate puts the settings of t, project.dataset's table, in t.
 func (s *tableSettings) annotate(project, dataset string, t infoTable) {
-	if st := s.get(streamKey(project, dataset, str(t, "tableId")), str(t, "creationTime")); st != (tableSetting{}) {
+	if st := s.get(streamKey(project, dataset, str(t, "tableId")), str(t, "creationTime")); !st.zero() {
 		t[settingsKey] = st
 	}
 }
