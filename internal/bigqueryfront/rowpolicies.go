@@ -117,6 +117,8 @@ type rowPolicies struct {
 	tables map[string]*protectedTable
 	path   string
 	logf   func(string, ...any)
+	// now is the instance's clock (#1487); nil is the system's.
+	now func() time.Time
 }
 
 func policyKey(project, dataset, table string) string {
@@ -259,7 +261,11 @@ func (p *rowPolicies) put(pol rowPolicy, created string, replace, must bool) (ro
 	if t == nil || t.Created != created {
 		t = &protectedTable{Key: key, Created: created}
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	clock := time.Now
+	if p.now != nil {
+		clock = p.now
+	}
+	now := clock().UTC().Format(time.RFC3339Nano)
 	pol.Created, pol.Modified = now, now
 	i := -1
 	for j, old := range t.Policies {

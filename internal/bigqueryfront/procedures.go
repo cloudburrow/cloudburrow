@@ -49,7 +49,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // procCallDepth is BigQuery's maximum depth of procedure calls.
@@ -344,7 +343,7 @@ func (s *scriptRun) createProc(n scriptNode) *scriptFlow {
 	case exists && !h.replace:
 		return failWith(http.StatusConflict, "duplicate", "Already Exists: Routine "+project+":"+p[0]+"."+p[1], text)
 	}
-	now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	now := strconv.FormatInt(s.f.now().UnixMilli(), 10)
 	routine := map[string]any{
 		"routineReference": map[string]any{"projectId": project, "datasetId": p[0], "routineId": p[1]},
 		"routineType":      "PROCEDURE", "language": "SQL",

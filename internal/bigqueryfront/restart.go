@@ -180,7 +180,7 @@ func (k *knownFunctions) reset() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.funcs, k.scanned, k.procs = nil, nil, nil
-	k.started = time.Now().UnixMilli()
+	k.started = k.clock().UnixMilli()
 	k.saveLocked()
 }
 

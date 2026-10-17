@@ -423,7 +423,7 @@ func TestBigQueryCopyJobs(t *testing.T) {
 
 	// CLONE (#1002): a writable copy whose tables.get gives its
 	// cloneDefinition: the source, and when it was cloned.
-	before := time.Now().Add(-time.Minute)
+	before := advanceBigQueryClock(t, h, 0).Add(-time.Minute) // the instance's clock, #1487
 	if _, err := copyTo("cl", func(cp *bigquery.Copier) { cp.OperationType = bigquery.CloneOperation }, "a"); err != nil {
 		t.Fatalf("a clone: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestBigQueryCopyJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cd := md.CloneDefinition; cd == nil || cd.BaseTableReference == nil || cd.BaseTableReference.TableID != "a" ||
-		cd.BaseTableReference.DatasetID != d || cd.CloneTime.Before(before) || cd.CloneTime.After(time.Now().Add(time.Minute)) {
+		cd.BaseTableReference.DatasetID != d || cd.CloneTime.Before(before) || cd.CloneTime.After(advanceBigQueryClock(t, h, 0).Add(time.Minute)) {
 		t.Errorf("the clone's cloneDefinition: %+v", md.CloneDefinition)
 	}
 	if md.Type != bigquery.RegularTable || schemaText(md.Schema) != schemaText(schema) {
@@ -499,7 +499,7 @@ func TestBigQuerySnapshotAndRestore(t *testing.T) {
 		return int(row[0].(int64))
 	}
 
-	before := time.Now().Add(-time.Minute)
+	before := advanceBigQueryClock(t, h, 0).Add(-time.Minute) // the instance's clock, #1487
 	if err := copyTo("snap", bigquery.SnapshotOperation, "", "base"); err != nil {
 		t.Fatalf("SNAPSHOT: %v", err)
 	}
@@ -511,7 +511,7 @@ func TestBigQuerySnapshotAndRestore(t *testing.T) {
 		t.Errorf("the snapshot's type is %q, want SNAPSHOT", md.Type)
 	}
 	if sd := md.SnapshotDefinition; sd == nil || sd.BaseTableReference == nil || sd.BaseTableReference.TableID != "base" ||
-		sd.SnapshotTime.Before(before) || sd.SnapshotTime.After(time.Now().Add(time.Minute)) {
+		sd.SnapshotTime.Before(before) || sd.SnapshotTime.After(advanceBigQueryClock(t, h, 0).Add(time.Minute)) {
 		t.Errorf("the snapshotDefinition: %+v", md.SnapshotDefinition)
 	}
 	if schemaText(md.Schema) != schemaText(schema) {
