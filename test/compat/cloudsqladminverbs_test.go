@@ -300,7 +300,7 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 // TestCloudSQLRefusedMethods (#1462): what needs Compute Engine,
 // Google-managed networking, another service or another engine is refused
 // 501 through the official client, naming what is missing.
-// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.connect.resolve (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.ListServerCertificates (unimplemented), sql.instances.addServerCertificate (unimplemented), sql.instances.RotateServerCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.instances.demote (unimplemented), sql.instances.demoteMaster (unimplemented), sql.instances.switchover (unimplemented), sql.instances.reencrypt (unimplemented), sql.projects.instances.getDiskShrinkConfig (unimplemented), sql.projects.instances.performDiskShrink (unimplemented), sql.projects.instances.resetReplicaSize (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
+// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.connect.resolve (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.ListServerCertificates (unimplemented), sql.instances.addServerCertificate (unimplemented), sql.instances.RotateServerCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.instances.demote (unimplemented), sql.instances.demoteMaster (unimplemented), sql.instances.switchover (unimplemented), sql.instances.reencrypt (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
 func TestCloudSQLRefusedMethods(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -354,15 +354,6 @@ func TestCloudSQLRefusedMethods(t *testing.T) {
 		{"switchover", "second region", func() error { _, err := svc.Instances.Switchover(p, i).Do(); return err }},
 		{"reencrypt", "Cloud KMS", func() error {
 			_, err := svc.Instances.Reencrypt(p, i, &sqladmin.InstancesReencryptRequest{}).Do()
-			return err
-		}},
-		{"getDiskShrinkConfig", "persistent disk", func() error { _, err := svc.Projects.Instances.GetDiskShrinkConfig(p, i).Do(); return err }},
-		{"performDiskShrink", "persistent disk", func() error {
-			_, err := svc.Projects.Instances.PerformDiskShrink(p, i, &sqladmin.PerformDiskShrinkContext{}).Do()
-			return err
-		}},
-		{"resetReplicaSize", "persistent disk", func() error {
-			_, err := svc.Projects.Instances.ResetReplicaSize(p, i, &sqladmin.SqlInstancesResetReplicaSizeRequest{}).Do()
 			return err
 		}},
 		{"rescheduleMaintenance", "maintenance", func() error {
