@@ -892,6 +892,7 @@
           "test/compat/artifactregistry_formats_test.go:675 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
+          "test/compat/terraform_batch11_run_test.go:33 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -941,6 +942,7 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:730 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch11_run_test.go:33 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -1159,7 +1161,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories",
         "status": "Verified",
         "tests": [
-          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
+          "test/compat/terraform_batch11_run_test.go:33 TestTerraformArtifactRegistryProjectConfigAndRepositories"
         ]
       },
       {
@@ -1489,7 +1492,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1516,7 +1520,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1533,7 +1538,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1555,7 +1561,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1587,7 +1594,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIamPolicyRepo",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM"
+          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM",
+          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {
@@ -1697,7 +1705,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/SetIamPolicyRepo",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM"
+          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM",
+          "test/compat/terraform_batch11_run_test.go:160 TestTerraformSecureSourceManagerIAM"
         ]
       },
       {

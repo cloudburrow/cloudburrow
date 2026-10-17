@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/genproto/googleapis/api/annotations"
@@ -105,6 +106,14 @@ func (m *SecureSourceManagerServer) SetIamPolicyRepo(_ context.Context, req *iam
 // repository that exists, and none on one that does not.
 func (m *SecureSourceManagerServer) TestIamPermissionsRepo(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
 	return ssmTestPermissions("repositories", req)
+}
+
+// isSSMInstanceName reports whether name is a Secure Source Manager
+// instance's, projects/*/locations/*/instances/*.
+func isSSMInstanceName(name string) bool {
+	parts := strings.Split(name, "/")
+	return len(parts) == 6 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "instances" &&
+		parts[1] != "" && parts[3] != "" && parts[5] != ""
 }
 
 // ssmInstanceIAM is the IAMPolicy mixin on instances.
