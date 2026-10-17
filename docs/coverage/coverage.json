@@ -1391,8 +1391,8 @@
     "Key": "securesourcemanager",
     "Title": "Secure Source Manager",
     "counts": {
-      "Unimplemented": 44,
-      "Verified": 9
+      "Unimplemented": 41,
+      "Verified": 12
     },
     "rows": [
       {
@@ -1520,8 +1520,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIamPolicyRepo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetInstance",
@@ -1628,13 +1630,17 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/SetIamPolicyRepo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/TestIamPermissionsRepo",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagersurfaces_test.go:73 TestSecureSourceManagerIAM"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UnresolvePullRequestComments",

@@ -76,6 +76,7 @@ func TestTerraformSetsArtifactRegistryAndCloudBuild(t *testing.T) {
 	for _, want := range []string{
 		`artifact_registry_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
 		`cloud_build_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
+		`secure_source_manager_custom_endpoint = "http://127.0.0.1:9004/securesourcemanager/v1/"`,
 		`cloudfunctions2_custom_endpoint = "http://127.0.0.1:9004/v2/"`,
 		`cloud_functions_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
 	} {

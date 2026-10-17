@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -325,8 +326,9 @@ const ssmJSONPrefix = "/securesourcemanager"
 // JSON API (register adds it and the Operations service it polls), and
 // passes every other request to next. builds runs push triggers' builds.
 func SourceManagerHandlerOr(m *SecureSourceManagerServer, builds *CloudBuildServer, register func(grpc.ServiceRegistrar), next http.Handler) http.Handler {
-	t := &rest.Transcoder{Packages: []string{"google.cloud.securesourcemanager.v1"}, Mixins: sourceDeployMixins}
+	t := &rest.Transcoder{Packages: []string{"google.cloud.securesourcemanager.v1"}, Mixins: ssmIAMMixins}
 	register(t)
+	iampb.RegisterIAMPolicyServer(t, ssmInstanceIAM{})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case IsSourceManagerGitPath(r.URL.Path):

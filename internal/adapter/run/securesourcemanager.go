@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
@@ -65,7 +66,10 @@ var ssmState = struct {
 	root      string // "" keeps repositories in a temporary directory
 	instances map[string]*ssmpb.Instance
 	repos     map[string]*ssmpb.Repository
-}{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}}
+	// policies are the instances' and repositories' IAM policies, by
+	// resource name (securesourcemanageriam.go).
+	policies map[string]iampolicy.Stored
+}{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}, policies: map[string]iampolicy.Stored{}}
 
 // ssmIDRE is the instance and repository ID shape Google documents: lower
 // case letters, digits and hyphens, starting with a letter, at most 63.
@@ -87,8 +91,9 @@ func UseSourceManagerRoot(dir string) error {
 		return nil
 	}
 	var saved struct {
-		Instances    []json.RawMessage `json:"instances"`
-		Repositories []json.RawMessage `json:"repositories"`
+		Instances    []json.RawMessage           `json:"instances"`
+		Repositories []json.RawMessage           `json:"repositories"`
+		Policies     map[string]iampolicy.Stored `json:"policies,omitempty"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return nil
@@ -103,6 +108,11 @@ func UseSourceManagerRoot(dir string) error {
 		r := &ssmpb.Repository{}
 		if protojson.Unmarshal(raw, r) == nil {
 			ssmState.repos[r.GetName()] = r
+		}
+	}
+	for name, p := range saved.Policies {
+		if ssmState.instances[name] != nil || ssmState.repos[name] != nil {
+			ssmState.policies[name] = p
 		}
 	}
 	return nil
@@ -126,9 +136,11 @@ func saveSSMLocked() {
 		return
 	}
 	var saved struct {
-		Instances    []json.RawMessage `json:"instances"`
-		Repositories []json.RawMessage `json:"repositories"`
+		Instances    []json.RawMessage           `json:"instances"`
+		Repositories []json.RawMessage           `json:"repositories"`
+		Policies     map[string]iampolicy.Stored `json:"policies,omitempty"`
 	}
+	saved.Policies = ssmState.policies
 	for _, name := range sortedKeys(ssmState.instances) {
 		b, _ := protojson.Marshal(ssmState.instances[name])
 		saved.Instances = append(saved.Instances, b)
@@ -276,9 +288,11 @@ func (m *SecureSourceManagerServer) DeleteInstance(_ context.Context, req *ssmpb
 	root, _ := ssmRootLocked()
 	for _, name := range held {
 		delete(ssmState.repos, name)
+		delete(ssmState.policies, name)
 		_ = os.RemoveAll(repoDir(root, name))
 	}
 	delete(ssmState.instances, req.GetName())
+	delete(ssmState.policies, req.GetName())
 	saveSSMLocked()
 	ssmState.mu.Unlock()
 	return m.done(parent, req.GetName(), "delete", &emptypb.Empty{})
@@ -441,6 +455,7 @@ func (m *SecureSourceManagerServer) DeleteRepository(_ context.Context, req *ssm
 	}
 	root, _ := ssmRootLocked()
 	delete(ssmState.repos, req.GetName())
+	delete(ssmState.policies, req.GetName())
 	_ = os.RemoveAll(repoDir(root, req.GetName()))
 	saveSSMLocked()
 	ssmState.mu.Unlock()
@@ -462,3 +477,65 @@ func lookupSSMRepo(project, location, id string) (*ssmpb.Repository, string, boo
 	}
 	return proto.Clone(r).(*ssmpb.Repository), repoDir(root, name), true
 }
+
+// SourceManagerLocations are the locations of a project's instances, for
+// the console, which lists each through ListInstances (#1527).
+func SourceManagerLocations(project string) []string {
+	ssmState.mu.Lock()
+	defer ssmState.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for _, name := range sortedKeys(ssmState.instances) {
+		parts := strings.Split(name, "/")
+		if parts[1] == project && !seen[parts[3]] {
+			seen[parts[3]] = true
+			out = append(out, parts[3])
+		}
+	}
+	return out
+}
+
+// SourceManagerTrigger is one trigger of a repository's triggers file, as
+// the console shows it (#1527).
+type SourceManagerTrigger struct {
+	Name, EventType, ConfigFilePath, IncludedGitRefs, IgnoredGitRefs, ServiceAccount string
+	Disabled                                                                         bool
+}
+
+// SourceManagerTriggers reads the triggers file on a repository's default
+// branch: none when it has no such file, and an error when it does not
+// parse, which is also why a push would run no build.
+func SourceManagerTriggers(ctx context.Context, name string) ([]SourceManagerTrigger, error) {
+	parts := strings.Split(name, "/")
+	if len(parts) != 6 {
+		return nil, fmt.Errorf("invalid repository name %q", name)
+	}
+	_, dir, ok := lookupSSMRepo(parts[1], parts[3], parts[5])
+	if !ok {
+		return nil, fmt.Errorf("repository %q not found", name)
+	}
+	raw, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:"+ssmTriggersFile).Output()
+	if err != nil {
+		return nil, nil
+	}
+	ts, err := ParseSourceManagerTriggers(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SourceManagerTrigger, len(ts))
+	for i, t := range ts {
+		ev, cfg := t.EventType, t.ConfigFilePath
+		if ev == "" {
+			ev = "push"
+		}
+		if cfg == "" {
+			cfg = ".cloudbuild/cloudbuild.yaml"
+		}
+		out[i] = SourceManagerTrigger{Name: t.Name, EventType: ev, ConfigFilePath: cfg, IncludedGitRefs: t.IncludedGitRefs,
+			IgnoredGitRefs: t.IgnoredGitRefs, ServiceAccount: t.ServiceAccount, Disabled: t.Disabled}
+	}
+	return out, nil
+}
+
+// SourceManagerTriggersFile is the triggers file's path in a repository.
+const SourceManagerTriggersFile = ssmTriggersFile

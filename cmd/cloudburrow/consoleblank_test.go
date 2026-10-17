@@ -7,6 +7,7 @@ import (
 	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"context"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"net"
@@ -385,7 +386,24 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	// Cloud Build on the same port, for a trigger's page, with the
 	// sparsest trigger CreateBuildTrigger takes: one step, nothing else.
 	cb := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).Builds(stubSource{}, stubBuilder{}).CloudBuild()
-	jobs.also = func(g *grpc.Server) { cb.Register(g) }
+	// Secure Source Manager on the same port (#1527): the sparsest instance
+	// and repository on it.
+	if err := runadapter.UseSourceManagerRoot(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ssm := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).SecureSourceManager(nil)
+	jobs.also = func(g *grpc.Server) { cb.Register(g); ssm.Register(g) }
+	ssmParent := "projects/" + blankProject + "/locations/us-central1"
+	if _, err := ssm.CreateInstance(ctx, &ssmpb.CreateInstanceRequest{Parent: ssmParent, InstanceId: "blank-instance"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ssm.CreateRepository(ctx, &ssmpb.CreateRepositoryRequest{Parent: ssmParent, RepositoryId: "blank-repo",
+		Repository: &ssmpb.Repository{Instance: ssmParent + "/instances/blank-instance"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = ssm.DeleteInstance(context.Background(), &ssmpb.DeleteInstanceRequest{Name: ssmParent + "/instances/blank-instance", Force: true})
+	})
 	trig, err := cb.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: blankProject,
 		Parent: "projects/" + blankProject + "/locations/global", Trigger: &cbpb.BuildTrigger{Name: "blank-trigger",
 			BuildTemplate: &cbpb.BuildTrigger_Build{Build: &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: "alpine:3.20"}}}}}})

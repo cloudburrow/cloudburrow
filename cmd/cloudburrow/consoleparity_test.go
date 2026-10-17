@@ -75,7 +75,12 @@ var parityRows = []parityRow{
 		Methods: []string{"SecureSourceManager/CreateInstance", "SecureSourceManager/GetInstance", "SecureSourceManager/ListInstances",
 			"SecureSourceManager/DeleteInstance", "SecureSourceManager/CreateRepository", "SecureSourceManager/GetRepository",
 			"SecureSourceManager/ListRepositories", "SecureSourceManager/UpdateRepository", "SecureSourceManager/DeleteRepository"},
-		Issue: 1527},
+		Provider: "secure-source-manager", Offers: "Instances page (/secure-source-manager): every instance with its location, state and git host; Create instance (ID, region) and delete, which deletes its repositories too (force); an instance's page with what GetInstance reads and its Repositories (ListRepositories), and Create repository (ID, description, default branch); a repository's page with what GetRepository reads (description, clone URL, default branch, etag), How to push (git clone, git remote add and git push to its clone URL), its Triggers as .cloudbuild/triggers.yaml on the default branch declares them, and the Builds its pushes ran, each opening on the Build history; Edit description (UpdateRepository) and Delete repository (#1527)",
+		Tests: []string{"TestConsoleSourceManagerInstancesAndRepositories", "TestCloudRunSourceManagerThroughThePage"}},
+	{Resource: "Secure Source Manager IAM policies", Service: "securesourcemanager",
+		Methods:  []string{"SecureSourceManager/GetIamPolicyRepo", "SecureSourceManager/SetIamPolicyRepo", "SecureSourceManager/TestIamPermissionsRepo"},
+		Provider: "secure-source-manager", Offers: "the Permissions tab on an instance's page and a repository's: the stored policy (ADR-0006, never enforced), its bindings added and removed, and which permissions TestIamPermissions answers (#1527)",
+		Tests: []string{"TestConsoleSourceManagerInstancesAndRepositories"}},
 	// Backup and DR (#1433).
 	{Resource: "Cloud SQL point-in-time restore from a Backup and DR data source", Service: "sqladmin",
 		Methods:  []string{"sql.instances.pointInTimeRestore"},
