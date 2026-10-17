@@ -149,6 +149,13 @@ type streamBuffers struct {
 	// offset is how far the clock was advanced (serveClock), in
 	// nanoseconds.
 	offset atomic.Int64
+	// clockMu orders the advances and their saves to clockPath, where
+	// the offset is kept (keepClock), "" in memory alone.
+	clockMu   sync.Mutex
+	clockPath string
+	// unsynced is whether the engine may not have the offset yet: the
+	// front restarted with a kept one, or setting the engine's failed.
+	unsynced atomic.Bool
 	// stamp is options.streamTimes.
 	stamp bool
 	// recent is each table's last stream time, by streamKey (above).
@@ -233,12 +240,17 @@ func (s *streamBuffers) serveClock(w http.ResponseWriter, r *http.Request, engin
 		writeError(w, http.StatusBadRequest, "invalid", `the body must be {"seconds": n}, n not negative: the clock only moves forward`)
 		return true
 	}
+	s.clockMu.Lock()
 	s.offset.Add(int64(body.Seconds * float64(time.Second)))
+	s.saveClockLocked()
+	s.clockMu.Unlock()
 	if engine != nil {
 		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" {
+			s.unsynced.Store(true)
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the front's clock moved, but the engine's did not: "+msg)
 			return true
 		}
+		s.unsynced.Store(false)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"time": s.clock().Format(time.RFC3339Nano)})
 	return true
@@ -675,9 +687,84 @@ func (s *streamBuffers) syncEngine(engine http.Handler, logf func(string, ...any
 	}
 	r, err := http.NewRequest(http.MethodPost, "/cloudburrow/clock", nil)
 	if err == nil {
-		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" && logf != nil {
-			logf("bigquery front: setting the engine's clock to the front's: %s", msg)
+		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" {
+			s.unsynced.Store(true)
+			if logf != nil {
+				logf("bigquery front: setting the engine's clock to the front's: %s", msg)
+			}
+		} else {
+			s.unsynced.Store(false)
 		}
+	}
+}
+
+// clockStateFile is where the front keeps its clock's offset (keepClock).
+func clockStateFile(dir string) string { return filepath.Join(dir, "clock.json") }
+
+// keepClock restores the clock's offset from path, and from then on keeps
+// it there (#1513). A front that restarted forgot how far its clock was
+// advanced, while the engine, which kept its own offset, read the clock
+// still advanced: CURRENT_TIMESTAMP() and change history times were then
+// ahead of the times the front reports and checks, and the next advance
+// moved the engine's clock back. The engine is set to the kept offset
+// before the next request (syncPending).
+func (s *streamBuffers) keepClock(path string, logf func(string, ...any)) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	s.clockPath = path
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	var saved struct {
+		OffsetNanos int64 `json:"offsetNanos"`
+	}
+	switch {
+	case err != nil:
+		logf("bigquery front: read %s: %v; the clock starts not advanced", path, err)
+	case json.Unmarshal(b, &saved) != nil || saved.OffsetNanos < 0:
+		logf("bigquery front: %s is unreadable; the clock starts not advanced", path)
+	case saved.OffsetNanos > 0:
+		s.offset.Store(saved.OffsetNanos)
+		s.unsynced.Store(true)
+	}
+}
+
+func (s *streamBuffers) saveClockLocked() {
+	if s.clockPath == "" {
+		return
+	}
+	logf := s.logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	b, _ := json.Marshal(map[string]int64{"offsetNanos": s.offset.Load()})
+	if err := os.MkdirAll(filepath.Dir(s.clockPath), 0o700); err != nil {
+		logf("bigquery front: %v", err)
+		return
+	}
+	tmp := s.clockPath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		logf("bigquery front: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, s.clockPath); err != nil {
+		logf("bigquery front: %v", err)
+	}
+}
+
+// syncPending sets the engine's clock to the front's when the engine may
+// not have it (unsynced), before r is served: a failure is tried again at
+// the next request.
+func (s *streamBuffers) syncPending(engine http.Handler, r *http.Request) {
+	if s == nil || engine == nil || !s.unsynced.Load() {
+		return
+	}
+	if syncEngineClock(r, engine, s.offset.Load()) == "" {
+		s.unsynced.Store(false)
 	}
 }
 
