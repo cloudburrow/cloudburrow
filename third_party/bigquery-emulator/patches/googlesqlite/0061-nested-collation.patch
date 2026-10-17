@@ -19,7 +19,8 @@ https://cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts
   catalog gives the column an annotation map of the type's shape, so
   the analyzer propagates it to a field access, an UNNEST's element and
   a subscript (nested_collation.go);
-- a comparison of an und:ci STRUCT or ARRAY (a STRUCT's =, IN UNNEST)
+- a comparison of an und:ci STRUCT or ARRAY (a STRUCT's =, !=, IN and
+  CASE, IN UNNEST)
   compares its und:ci STRINGs case-folded, through a new function,
   googlesqlite_fold_collation.
 Its test nested_collation_test.go fails without it.
@@ -32,7 +33,7 @@ Authors.
 
 --- /dev/null
 +++ b/nested_collation_test.go
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,64 @@
 +package googlesqlite_test
 +
 +import (
@@ -82,6 +83,9 @@ Authors.
 +		{"SELECT COUNT(DISTINCT st.a) FROM `p.d.u`", "1"},
 +		{"SELECT COUNT(*) FROM `p.d.u` WHERE st = STRUCT('ABC' AS a, 'Abc' AS b)", "1"},
 +		{"SELECT COUNT(*) FROM `p.d.u` WHERE st.a IN ('abc')", "2"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE st != STRUCT('ABC' AS a, 'Abc' AS b)", "1"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE st IN (STRUCT('ABC' AS a, 'Abc' AS b))", "1"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE CASE st WHEN STRUCT('ABC' AS a, 'Abc' AS b) THEN TRUE ELSE FALSE END", "1"},
 +		{"SELECT st.a FROM `p.d.t`", "Abc"},
 +	} {
 +		var v any
