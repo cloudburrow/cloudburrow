@@ -181,3 +181,40 @@ func TestJobsTableBackgroundMakesNoTable(t *testing.T) {
 		}
 	}
 }
+
+// TestJobsTableReadByFilteredQueries (#1515): a filtered JOBS query that
+// keeps more than jobsLiteralMax jobs reads the table of rows, its WHERE
+// left to the engine; one that keeps fewer reads a literal of them.
+func TestJobsTableReadByFilteredQueries(t *testing.T) {
+	saved := jobsLiteralMax
+	jobsLiteralMax = 2
+	t.Cleanup(func() { jobsLiteralMax = saved })
+	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}}}
+	h := Wrap(emu)
+	for _, q := range []string{"SELECT 1", "SELECT 2", "SELECT 3"} {
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", q, code, got)
+		}
+	}
+	table := "`" + resultsDataset + "`.`" + jobsTableName + "`"
+	run := func(sql string) []string {
+		t.Helper()
+		from := len(emu.log)
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+sql+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", sql, code, got)
+		}
+		return emu.sentSince(from)
+	}
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	for _, where := range []string{" WHERE job_type = 'QUERY'", " WHERE creation_time > TIMESTAMP '2000-01-01'"} {
+		sent := run(count + where)
+		last := sent[len(sent)-1]
+		if last != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS"+where {
+			t.Fatalf("%s: sent %q, want the table read", where, sent)
+		}
+	}
+	sent := run(count + " WHERE job_id IN ('auto1', 'auto2')")
+	if len(sent) != 1 || strings.Contains(sent[0], table) || !strings.Contains(sent[0], "UNNEST(ARRAY<") {
+		t.Fatalf("JOBS query of two jobs sent %q, want a literal", sent)
+	}
+}

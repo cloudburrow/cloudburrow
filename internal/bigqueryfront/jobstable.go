@@ -28,7 +28,9 @@ import (
 // rows are asked for after the front starts, as the front no longer knows
 // what it holds, and forgotten when the emulator restarts (restart.go),
 // as the emulator then has neither the table nor the jobs. A filtered
-// query keeps reading a literal of the jobs it keeps, which is smaller.
+// query keeps reading a literal of the jobs it keeps, which is smaller,
+// unless it keeps more than jobsLiteralMax, when it reads the table too
+// (#1515).
 // The table is left out of INFORMATION_SCHEMA's TABLES and the like
 // (tablesOf), and the statements that write it are the front's own,
 // which jobs.list leaves out (front.send). When the table cannot be

@@ -72,6 +72,11 @@ func (f *jobsFilter) listBounds(q url.Values) {
 	}
 }
 
+// bounded reports whether listBounds cuts the list.
+func (f *jobsFilter) bounded() bool {
+	return f != nil && (f.minUs != nil && *f.minUs >= 0 || f.maxUs != nil && *f.maxUs >= 0)
+}
+
 // apply returns the jobs the filter keeps, in their order.
 func (f *jobsFilter) apply(project string, jobs []map[string]any) []map[string]any {
 	if f == nil {
