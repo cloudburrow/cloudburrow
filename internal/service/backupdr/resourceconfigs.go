@@ -30,10 +30,14 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
 
-// listResourceBackupConfigs answers resourceBackupConfigs.list, or
+// fetchResourceBackupConfigs answers resourceBackupConfigs.list, or
 // resourceBackupConfigs.fetch when fetch is set: the same configs, filtered,
-// ordered and paged.
-func (s *Server) listResourceBackupConfigs(r *http.Request, project, location string, fetch bool) (any, error) {
+// ordered and paged. parent is the request's ({projects,folders,
+// organizations}/{id}/locations/{location}), and projects are the projects
+// whose configs it answers: the one project, or every project under the
+// folder or organization (hierarchy.go), each config still named under its
+// own project.
+func (s *Server) fetchResourceBackupConfigs(r *http.Request, parent string, projects []string, location string, fetch bool) (any, error) {
 	method := map[bool]string{false: "resourceBackupConfigs.list", true: "resourceBackupConfigs.fetch"}[fetch]
 	lister, ok := s.sql.(InstanceLister)
 	if !ok {
@@ -47,11 +51,12 @@ func (s *Server) listResourceBackupConfigs(r *http.Request, project, location st
 	if err != nil {
 		return nil, err
 	}
-	all := s.resourceBackupConfigs(lister, project, location)
 	var kept []map[string]any
-	for _, c := range all {
-		if filter.match(c) {
-			kept = append(kept, c)
+	for _, project := range projects {
+		for _, c := range s.resourceBackupConfigs(lister, project, location) {
+			if filter.match(c) {
+				kept = append(kept, c)
+			}
 		}
 	}
 	sort.SliceStable(kept, func(i, j int) bool {
@@ -71,7 +76,7 @@ func (s *Server) listResourceBackupConfigs(r *http.Request, project, location st
 			size = min(n, 500)
 		}
 	}
-	scope := "projects/" + project + "/locations/" + location + "/resourceBackupConfigs|" + param(r, "filter") + "|" + param(r, "orderBy")
+	scope := parent + "/resourceBackupConfigs|" + param(r, "filter") + "|" + param(r, "orderBy")
 	start := 0
 	if tok := param(r, "pageToken"); tok != "" {
 		after, err := paging.DecodeToken(scope, tok)

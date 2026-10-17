@@ -36,7 +36,7 @@ Do not edit these files by hand.
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 58 | 0 | 22 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Backup and DR Service API (v1)](backupdr.md) | 61 | 44 | 0 | 17 | 0 | 0 | 0 | 0 |
+| [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

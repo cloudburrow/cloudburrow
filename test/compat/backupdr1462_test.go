@@ -224,11 +224,11 @@ func TestBackupDRUpdatesAndViews(t *testing.T) {
 }
 
 // TestBackupDRRefusals (#1462): what needs Compute Engine, Google-managed
-// networking, the appliance or Resource Manager's hierarchy is refused 501,
-// naming it.
+// networking or the appliance is refused 501, naming it. (A folder's and
+// the organization's fetch are served since #1536: backupdrhierarchy_test.go.)
 // covers: backupdr.projects.locations.managementServers.create (unimplemented), backupdr.projects.locations.managementServers.delete (unimplemented), backupdr.projects.locations.managementServers.get (unimplemented), backupdr.projects.locations.managementServers.list (unimplemented), backupdr.projects.locations.managementServers.getIamPolicy (unimplemented), backupdr.projects.locations.managementServers.setIamPolicy (unimplemented), backupdr.projects.locations.managementServers.testIamPermissions (unimplemented)
 // covers: backupdr.projects.locations.backupVaults.dataSources.initiateBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.finalizeBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.abandonBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken (unimplemented), backupdr.projects.locations.backupVaults.dataSources.setInternalStatus (unimplemented), backupdr.projects.locations.backupVaults.dataSources.remove (unimplemented)
-// covers: backupdr.folders.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.organizations.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.projects.locations.serviceConfig.initialize (unimplemented)
+// covers: backupdr.projects.locations.serviceConfig.initialize (unimplemented)
 func TestBackupDRRefusals(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvBackupDR) == "" {
@@ -281,14 +281,6 @@ func TestBackupDRRefusals(t *testing.T) {
 		}},
 		{"dataSources.remove", "Compute Engine", func() error {
 			_, err := l.BackupVaults.DataSources.Remove(ds, &backupdr.RemoveDataSourceRequest{}).Do()
-			return err
-		}},
-		{"folders resourceBackupConfigs.fetch", "folder", func() error {
-			_, err := bdr.Folders.Locations.ResourceBackupConfigs.Fetch("folders/1/locations/us-central1").Do()
-			return err
-		}},
-		{"organizations resourceBackupConfigs.fetch", "organization", func() error {
-			_, err := bdr.Organizations.Locations.ResourceBackupConfigs.Fetch("organizations/1/locations/us-central1").Do()
 			return err
 		}},
 		{"serviceConfig.initialize", "default backup vault", func() error {

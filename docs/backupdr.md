@@ -101,9 +101,6 @@ Each answers 501 UNIMPLEMENTED with the reason:
   and recovery appliance VM on Compute Engine, reached over VPC peering.
 - **The appliance protocol** (`dataSources.initiateBackup`, `finalizeBackup`, `abandonBackup`,
   `fetchAccessToken`, `setInternalStatus`, `remove`): what an appliance's agents call.
-- **A folder's or organization's `resourceBackupConfigs.fetch`**: it answers every project under
-  the folder or organization, and the Backup and DR Service is not wired to Resource Manager's
-  hierarchy, so it cannot tell which projects those are. Fetch each project's instead.
 - **`serviceConfig.initialize`**: it creates Google's default vault and plan, whose names, rules
   and retention Google does not document; create them with `backupVaults.create` and
   `backupPlans.create`.
@@ -143,6 +140,16 @@ IAM is not enforced on any of it, as elsewhere (ADR-0004).
   negated with `NOT` or `-`. Parentheses, other keys and other operators are 400. `orderBy` is
   `target_resource_display_name`, with `desc` for the reverse; any other field is 400. `pageSize`
   is 100 by default and at most 500.
+- **A folder's and the organization's `resourceBackupConfigs.fetch`**
+  (`folders/F/locations/L`, `organizations/100000000001/locations/L`) answer the configs of every
+  Cloud SQL instance in every project under the folder, through its subfolders, or under the
+  organization, with the same `filter`, `orderBy` and paging; each config keeps its own project's
+  name (`projects/P/locations/L/resourceBackupConfigs/…`). Backup and DR runs in the CLI's process
+  beside Resource Manager and reads the projects under a folder from its registry, as Cloud
+  Logging and Autokey read the hierarchy. A project with no parent is under no folder and not under
+  the organization, as Resource Manager reports it. A folder or organization Resource Manager does
+  not have is 403 `PERMISSION_DENIED`, as Google answers one you cannot see. The console's Find
+  protected resources takes a folder or the organization, and names each row's project.
 - **Trials** (`getTrial`, `trial.subscribe`, `trial.end`): the reference's states, per project
   and multi-region (`us`, `eu` or `asia`; another location is 400). A trial is `ELIGIBLE` until
   subscribed, then `SUBSCRIBED` with its `startTime` and an `endTime` 30 days later, after which it

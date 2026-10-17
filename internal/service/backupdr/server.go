@@ -131,6 +131,9 @@ type Server struct {
 	// kms is Cloud KMS, for a vault's encryptionConfig (#1501); nil when
 	// it is not enabled. mu guards it.
 	kms KeyService
+	// hierarchy is Resource Manager's folders and organization, for their
+	// resourceBackupConfigs.fetch (#1536); nil refuses it. mu guards it.
+	hierarchy Hierarchy
 }
 
 // state is every record, as it is kept.
@@ -365,7 +368,16 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 	}
 	p := strings.Split(strings.TrimSuffix(path, "/"), "/")
 	if len(p) == 5 && (p[0] == "folders" || p[0] == "organizations") && p[2] == "locations" && p[4] == "resourceBackupConfigs" && verb == "fetch" {
-		return "backupdr." + p[0] + ".locations.resourceBackupConfigs.fetch", nil, unimplemented(p[0]+".locations.resourceBackupConfigs.fetch", hierarchyWhy)
+		method := "backupdr." + p[0] + ".locations.resourceBackupConfigs.fetch"
+		if r.Method != http.MethodGet {
+			return method, nil, errorf(http.StatusMethodNotAllowed, "INVALID_ARGUMENT", "%s is GET", method)
+		}
+		projects, err := s.projectsUnder(p[0], p[1])
+		if err != nil {
+			return method, nil, err
+		}
+		out, err := s.fetchResourceBackupConfigs(r, strings.Join(p[:4], "/"), projects, p[3], true)
+		return method, out, err
 	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" {
 		return "", nil, notFound("%s is not a Backup and DR API v1 path", r.URL.Path)
@@ -382,7 +394,7 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 	}
 	rest := p[4:]
 	if len(rest) == 1 && rest[0] == "resourceBackupConfigs" && r.Method == http.MethodGet && (verb == "" || verb == "fetch") {
-		out, err := s.listResourceBackupConfigs(r, p[1], p[3], verb == "fetch")
+		out, err := s.fetchResourceBackupConfigs(r, loc, []string{p[1]}, p[3], verb == "fetch")
 		if verb == "fetch" {
 			return "backupdr.projects.locations.resourceBackupConfigs.fetch", out, err
 		}

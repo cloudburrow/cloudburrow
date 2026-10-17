@@ -10099,25 +10099,23 @@
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {
-      "Unimplemented": 17,
-      "Verified": 44
+      "Unimplemented": 15,
+      "Verified": 46
     },
     "rows": [
       {
         "method": "backupdr.folders.locations.resourceBackupConfigs.fetch",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a folder's or organization's fetch answers every project under it, and the Backup and DR Service is not wired to Resource Manager's folders and organizations, so it cannot tell which projects are under one; projects.locations.resourceBackupConfigs.fetch answers each project"
+          "test/compat/backupdrhierarchy_test.go:31 TestBackupDRFetchUnderFolders"
+        ]
       },
       {
         "method": "backupdr.organizations.locations.resourceBackupConfigs.fetch",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a folder's or organization's fetch answers every project under it, and the Backup and DR Service is not wired to Resource Manager's folders and organizations, so it cannot tell which projects are under one; projects.locations.resourceBackupConfigs.fetch answers each project"
+          "test/compat/backupdrhierarchy_test.go:31 TestBackupDRFetchUnderFolders"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupPlanAssociations.create",
