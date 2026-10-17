@@ -23,7 +23,7 @@ import (
 // leaves out, the client's texts, the jobs the front carried out and the
 // failures it gave), with BigQuery's documented columns
 // (https://cloud.google.com/bigquery/docs/information-schema-jobs) but
-// those it cannot fill (jobsLeftOut). Every user
+// those it cannot fill (jobsStatisticsColumns: empty or NULL). Every user
 // is the instance's one, so JOBS_BY_USER is JOBS. The jobs are the
 // project's top-level ones and the child jobs of scripts (scriptjobs.go,
 // #1353), and not the query reading the view, which has no record yet.
@@ -38,24 +38,50 @@ import (
 // The region-qualified forms of the dataset views (regionViews, #1329) are
 // the union of every dataset's rows, and region TABLE_STORAGE a row per
 // table but its physical byte counts (storageColumns). Measured first: each was 400 "Table not found". The
-// JOBS columns jobsLeftOut stay left out (why: jobsLeftOut);
+// JOBS columns of statistics the emulator never makes are empty or NULL
+// (jobsStatisticsColumns, #1458);
 // bi_engine_statistics, session_info, continuous_query_info and
 // ml_statistics are given (#1458); destination_table, referenced_tables and labels
 // are read from the job record.
 
-// jobsLeftOut are JOBS columns the front does not give.
-// The INFORMATION_SCHEMA.JOBS page (read again 2026-10-16) gives
-// job_stages, timeline, materialized_view_statistics,
-// metadata_cache_statistics, search_statistics and
-// vector_search_statistics by their REST types, object_storage_stats and
-// query_info by their fields, external_service_costs by none, and says of
-// none of them what a job that has no such statistics holds (NULL, or
-// empty): the emulator makes no query plan, timeline or index, so the
-// front would have to choose, and they stay left out (#1458).
-// bi_engine_statistics, session_info, continuous_query_info and
-// ml_statistics are given (jobRow).
-var jobsLeftOut = []string{"job_stages", "object_storage_stats", "timeline", "query_info", "materialized_view_statistics",
-	"metadata_cache_statistics", "search_statistics", "vector_search_statistics", "external_service_costs"}
+// The nine JOBS columns of statistics the emulator never makes (#1458):
+// the INFORMATION_SCHEMA.JOBS page (read again 2026-10-16) gives
+// job_stages ("Query stages", RECORD REPEATED), object_storage_stats
+// (RECORD REPEATED: cloud_provider, object_storage_bytes_read,
+// cache_bytes_read), timeline, query_info, materialized_view_statistics,
+// metadata_cache_statistics, search_statistics, vector_search_statistics
+// and external_service_costs, typed here by their REST types
+// (ExplainQueryStage, QueryTimelineSample, MaterializedViewStatistics,
+// MetadataCacheStatistics, SearchStatistics, VectorSearchStatistics,
+// ExternalServiceCost; the documented fields of query_info), each field
+// of them the REST field's name in snake case. The page says of none what
+// a job without such statistics holds; the emulator makes no query plan,
+// timeline, index, materialized view rewrite or external call, so each
+// job's REST statistics have none of them, and the columns are what a
+// REST field left out reads as: an empty ARRAY for a repeated one, NULL
+// for a RECORD (UNVERIFIED that BigQuery gives the same).
+const jobsStatisticsColumns = ", job_stages ARRAY<STRUCT<name STRING, id INT64, start_ms INT64, end_ms INT64, " +
+	"status STRING, parallel_inputs INT64, completed_parallel_inputs INT64, records_read INT64, records_written INT64, " +
+	"shuffle_output_bytes INT64, shuffle_output_bytes_spilled INT64, slot_ms INT64>>, " +
+	"object_storage_stats ARRAY<STRUCT<cloud_provider STRING, object_storage_bytes_read INT64, cache_bytes_read INT64>>, " +
+	"timeline ARRAY<STRUCT<elapsed_ms INT64, total_slot_ms INT64, pending_units INT64, completed_units INT64, " +
+	"active_units INT64, estimated_runnable_units INT64>>, " +
+	"query_info STRUCT<resource_warning STRING, performance_insights STRUCT<avg_previous_execution_ms INT64>>, " +
+	"materialized_view_statistics STRUCT<materialized_view ARRAY<STRUCT<table_reference " + jobsTableRef +
+	", chosen BOOL, estimated_bytes_saved INT64, rejected_reason STRING>>>, " +
+	"metadata_cache_statistics STRUCT<table_metadata_cache_usage ARRAY<STRUCT<table_reference " + jobsTableRef +
+	", unused_reason STRING, explanation STRING, table_type STRING>>>, " +
+	"search_statistics STRUCT<index_usage_mode STRING, index_unused_reasons ARRAY<STRUCT<code STRING, message STRING, " +
+	"base_table " + jobsTableRef + ", index_name STRING>>>, " +
+	"vector_search_statistics STRUCT<index_usage_mode STRING, index_unused_reasons ARRAY<STRUCT<code STRING, " +
+	"message STRING, base_table " + jobsTableRef + ", index_name STRING>>>, " +
+	"external_service_costs ARRAY<STRUCT<external_service STRING, bytes_processed INT64, bytes_billed INT64, " +
+	"slot_ms INT64, reserved_slot_count INT64>>"
+
+const jobsTableRef = "STRUCT<project_id STRING, dataset_id STRING, table_id STRING>"
+
+// jobsStatisticsValues are a job's values of jobsStatisticsColumns.
+var jobsStatisticsValues = []string{"[]", "[]", "[]", "NULL", "NULL", "NULL", "NULL", "NULL", "[]"}
 
 // jobsRef is a reference to a region's INFORMATION_SCHEMA.JOBS view.
 type jobsRef struct {
@@ -119,7 +145,8 @@ const jobsColumns = "STRUCT<cache_hit BOOL, creation_time TIMESTAMP, " +
 	"principal_subject STRING, transferred_bytes INT64, query_dialect STRING, continuous BOOL, " +
 	"bi_engine_statistics STRUCT<bi_engine_mode STRING, acceleration_mode STRING, " +
 	"bi_engine_reasons ARRAY<STRUCT<code STRING, message STRING>>>, session_info STRUCT<session_id STRING>, " +
-	"continuous_query_info STRUCT<output_watermark TIMESTAMP>, ml_statistics STRUCT<model_type STRING>>"
+	"continuous_query_info STRUCT<output_watermark TIMESTAMP>, ml_statistics STRUCT<model_type STRING>" +
+	jobsStatisticsColumns + ">"
 
 // int64Or is a resource's int64 (a string or number) as SQL, or NULL.
 func int64Or(v any) string {
@@ -244,7 +271,7 @@ func jobRow(project string, job map[string]any) []string {
 	if qs["totalBytesProcessed"] != nil {
 		bytesProcessed = qs["totalBytesProcessed"]
 	}
-	return []string{cache, millisTimestamp(stats["creationTime"]), tableRefSQL(dest), dml, millisTimestamp(stats["endTime"]),
+	return append([]string{cache, millisTimestamp(stats["creationTime"]), tableRefSQL(dest), dml, millisTimestamp(stats["endTime"]),
 		errResult, "NULL", sqlString(str(ref, "jobId")), sqlOrNull(jobType),
 		"ARRAY<STRUCT<key STRING, value STRING>>[" + strings.Join(labels, ", ") + "]", sqlOrNull(str(stats, "parentJobId")),
 		priority, sqlString(project), "NULL", sqlOrNull(str(qc, "query")), tableRefsSQL(qs["referencedTables"]),
@@ -257,7 +284,7 @@ func jobRow(project string, job map[string]any) []string {
 		// job is continuous (continuous FALSE). ml_statistics.model_type:
 		// "For all other jobs" than a model's creation "the value is NULL"
 		// (#1458).
-		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs)}
+		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs)}, jobsStatisticsValues...)
 }
 
 // sessionInfoSQL is JOBS' session_info of a job's statistics: its
@@ -572,7 +599,7 @@ func (f front) storageBytes(r *http.Request, project, dataset string, t infoTabl
 		active, long = logical, "0"
 	}
 	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)
-	if c := f.changeWrites(r, project, dataset, name); c != "" && (rows > 0 || n > 0) {
+	if c := f.changeWrites(r, project, dataset, name, false); c != "" && (rows > 0 || n > 0) {
 		if us, m := f.scalar(r, "SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+c); m == "" && us >= 0 {
 			modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
 		}

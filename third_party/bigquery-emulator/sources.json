@@ -91,7 +91,9 @@
         "patches/googlesqlite/0049-struct-float-type.patch",
         "patches/googlesqlite/0051-catalog-times-by-the-engine-clock.patch",
         "patches/googlesqlite/0053-range-from-text.patch",
-        "patches/googlesqlite/0055-coerced-timestamp-literal-in-the-default-zone.patch"
+        "patches/googlesqlite/0055-coerced-timestamp-literal-in-the-default-zone.patch",
+        "patches/googlesqlite/0050-change-history-partition-time.patch",
+        "patches/googlesqlite/0056-ctas-streamed-at-column.patch"
       ]
     },
     {
