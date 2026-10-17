@@ -133,41 +133,12 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	inst := "projects/p/instances/i"
 	tbl := inst + "/tables/kept"
 
-	calls := map[string]func() error{
-		"GenerateInitialChangeStreamPartitions": func() error {
-			s, err := d.GenerateInitialChangeStreamPartitions(ctx, &bigtablepb.GenerateInitialChangeStreamPartitionsRequest{TableName: tbl})
-			if err != nil {
-				return err
-			}
-			_, err = s.Recv()
-			return err
-		},
-		"ReadChangeStream": func() error {
-			s, err := d.ReadChangeStream(ctx, &bigtablepb.ReadChangeStreamRequest{TableName: tbl})
-			if err != nil {
-				return err
-			}
-			_, err = s.Recv()
-			return err
-		},
+	// The change stream reads, the last Refused methods, are served
+	// since #1523 (changestreams_test.go).
+	if len(Refused) != 0 {
+		t.Errorf("Refused = %v, want none", Refused)
 	}
-	if len(calls) != len(Refused) {
-		t.Fatalf("%d calls for %d refused methods", len(calls), len(Refused))
-	}
-	for name, call := range calls {
-		method := admin + name
-		if _, ok := Refused[method]; !ok {
-			method = data + name
-		}
-		want, ok := Refused[method]
-		if !ok {
-			t.Fatalf("%s is not refused", name)
-		}
-		err := call()
-		if s, _ := status.FromError(err); s.Code() != codes.Unimplemented || s.Message() != want {
-			t.Errorf("%s: %v, want Unimplemented %q", name, err, want)
-		}
-	}
+	_, _ = d, tbl
 	if _, err := ac.TableInfo(ctx, "kept"); err != nil {
 		t.Errorf("the table after the refusals: %v", err)
 	}
