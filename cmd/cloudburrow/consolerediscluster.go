@@ -103,6 +103,11 @@ func (redisClusterProvider) CreateForm() (string, []console.Field) {
 			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the cluster's own CA, which its page shows. It cannot be changed later."},
 		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
 			Help: "AUTH_MODE_IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
+		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
+			Help: "AUTH_MODE_TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the cluster's page adds and shows."},
+		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
+		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
+			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."},
 	}
 }
 
@@ -146,6 +151,13 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 	}
 	if values["iamAuth"] == "true" {
 		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH
+	}
+	if values["tokenAuth"] == "true" {
+		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH
+	}
+	in.AclPolicy = strings.TrimSpace(values["aclPolicy"])
+	if b := strings.TrimSpace(values["restoreBackup"]); b != "" {
+		in.ImportSources = &clusterpb.Cluster_ManagedBackupSource_{ManagedBackupSource: &clusterpb.Cluster_ManagedBackupSource{Backup: b}}
 	}
 	if n := strings.TrimSpace(values["network"]); n != "" {
 		in.PscConfigs = []*clusterpb.PscConfig{{Network: n}}
@@ -238,6 +250,8 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(c.GetRedisConfigs()))},
 		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
+		{Label: "ACL policy", Value: orDash(c.GetAclPolicy())},
+		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
 	}
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
@@ -254,6 +268,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 			d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
 		}
 	}
+	d.Sections = append(d.Sections, p.authSections(ctx, api, c)...)
 	d.Edit = &console.EditForm{
 		Label: "Edit cluster",
 		Fields: []console.Field{

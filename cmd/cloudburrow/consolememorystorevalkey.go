@@ -46,7 +46,7 @@ func (p valkeyProvider) api() (*redisadmin.MemorystoreServer, *redisadmin.Server
 }
 
 const valkeyNote = "Each instance runs real Valkey 8.1 nodes: in cluster mode shard_count primaries with replica_count replicas each, " +
-	"with cluster mode disabled one primary and its replicas. A client on the host connects to the endpoints shown, over TLS trusting the instance's own CA when in-transit encryption is on; token auth is not served."
+	"with cluster mode disabled one primary and its replicas. A client on the host connects to the endpoints shown, over TLS trusting the instance's own CA when in-transit encryption is on; token auth users and backups are on its page."
 
 // valkeyEndpoint is an instance's first endpoint of kind, host:port.
 func valkeyEndpoint(inst *memorystorepb.Instance, kind memorystorepb.ConnectionType) string {
@@ -134,6 +134,10 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
 		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
 			Help: "IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
+		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
+			Help: "TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the instance's page adds and shows."},
+		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
+			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
 	}
 }
 
@@ -166,6 +170,12 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 	}
 	if values["iamAuth"] == "true" {
 		in.AuthorizationMode = memorystorepb.Instance_IAM_AUTH
+	}
+	if values["tokenAuth"] == "true" {
+		in.AuthorizationMode = memorystorepb.Instance_TOKEN_AUTH
+	}
+	if b := strings.TrimSpace(values["restoreBackup"]); b != "" {
+		in.ImportSources = &memorystorepb.Instance_ManagedBackupSource_{ManagedBackupSource: &memorystorepb.Instance_ManagedBackupSource{Backup: b}}
 	}
 	if n := strings.TrimSpace(values["network"]); n != "" {
 		in.Endpoints = []*memorystorepb.Instance_InstanceEndpoint{{Connections: []*memorystorepb.Instance_ConnectionDetail{{
@@ -269,6 +279,7 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 			d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
 		}
 	}
+	d.Sections = append(d.Sections, p.authSections(ctx, api, i)...)
 	fields := []console.Field{}
 	if i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED {
 		fields = append(fields, console.Field{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,

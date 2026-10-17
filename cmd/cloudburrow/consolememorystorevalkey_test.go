@@ -37,6 +37,14 @@ func (f *fakeValkeyNodes) Remove(_ context.Context, server string) error {
 	return nil
 }
 
+// Exec is a node container's shell: cat returns a fake RDB file (#1549).
+func (f *fakeValkeyNodes) Exec(_ context.Context, server string, _ []byte, argv ...string) ([]byte, error) {
+	if len(argv) > 0 && argv[0] == "cat" {
+		return []byte("REDIS0011 " + server), nil
+	}
+	return nil, nil
+}
+
 type fakeValkeyNode struct {
 	f    *fakeValkeyNodes
 	addr string
@@ -51,6 +59,8 @@ func (n fakeValkeyNode) Do(_ context.Context, args ...any) (any, error) {
 		n.f.mu.Lock()
 		defer n.f.mu.Unlock()
 		return fmt.Sprintf("cluster_state:ok\r\ncluster_known_nodes:%d\r\n", len(n.f.running)), nil
+	case strings.HasPrefix(cmd, "INFOPERSISTENCE"):
+		return "rdb_bgsave_in_progress:0\r\nrdb_last_bgsave_status:ok\r\n", nil
 	case strings.HasPrefix(cmd, "INFO"):
 		return "role:slave\r\nmaster_link_status:up\r\n", nil
 	case strings.HasPrefix(cmd, "CLUSTERSHARDS"):
