@@ -155,6 +155,20 @@ type clusterRecord struct {
 	// Source is the backup or gs:// files the cluster was created from.
 	Source     string   `json:"source,omitempty"`
 	SourceURIs []string `json:"sourceUris,omitempty"`
+	// CMEK (#1557, clustercmek.go): KmsKey is kms_key, WrappedKey the data
+	// key it wrapped, Sealed the secrets sealed with the data key, and
+	// SuspendedData a suspended cluster's data, each primary's RDB file
+	// sealed with it.
+	KmsKey        string   `json:"kmsKey,omitempty"`
+	WrappedKey    []byte   `json:"wrappedKey,omitempty"`
+	Sealed        []byte   `json:"sealed,omitempty"`
+	SuspendedData [][]byte `json:"suspendedData,omitempty"`
+	dek           []byte
+	suspended     bool
+	// KeyState is the key's kms_key_primary_state when it cannot be used,
+	// KeyChecked when it was last checked.
+	KeyState   string    `json:"-"`
+	KeyChecked time.Time `json:"-"`
 	// restore is the RDB files a create loads once the nodes serve.
 	restore         [][]byte
 	state           clusterpb.Cluster_State
@@ -247,7 +261,11 @@ func (c *clusters) save(r *clusterRecord) error {
 	if c.db == nil {
 		return nil
 	}
-	b, err := json.Marshal(r)
+	k, err := r.kept()
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(k)
 	if err != nil {
 		return err
 	}
@@ -490,6 +508,10 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
 	}
+	if r.KmsKey != "" {
+		out.KmsKey = proto.String(r.KmsKey)
+		out.EncryptionInfo = r.encryptionInfo()
+	}
 	if r.AutoBackup != "" {
 		ab := &clusterpb.AutomatedBackupConfig{}
 		if protojson.Unmarshal([]byte(r.AutoBackup), ab) == nil {
@@ -609,7 +631,7 @@ func (r *clusterRecord) spec(server string) Spec {
 		return s
 	}
 	if r.standalone() {
-		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg})
+		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion()})
 	}
 	if r.TransitCA != "" {
 		// The cluster bus, and MIGRATE between nodes, over TLS too.
@@ -620,7 +642,16 @@ func (r *clusterRecord) spec(server string) Spec {
 	cfg["cluster-config-file"] = "/tmp/nodes.conf"
 	cfg["cluster-node-timeout"] = "5000"
 	cfg["cluster-require-full-coverage"] = "yes"
-	return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg})
+	return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion()})
+}
+
+// engineVersion is the Valkey version r's nodes run (#1557): a Valkey
+// instance's engine_version, VALKEY_8_0 for a Redis cluster.
+func (r *clusterRecord) engineVersion() string {
+	if r.Valkey != nil && r.Valkey.EngineVersion != "" {
+		return r.Valkey.EngineVersion
+	}
+	return DefaultValkeyVersion
 }
 
 // clusterConfigs are the redis_configs a cluster takes, as Memorystore
@@ -703,9 +734,6 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	default:
 		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
-	if in.GetKmsKey() != "" {
-		return nil, apierror.Unimplemented("kms_key is not served for a Redis cluster here: the nodes' data is Valkey's own, on volumes CloudBurrow does not encrypt")
-	}
 	if err := checkCrossCluster(in.GetCrossClusterReplicationConfig() != nil); err != nil {
 		return nil, err
 	}
@@ -723,6 +751,11 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 		r.AdminPassword = newUID() + newUID()
 	}
 	r.AutoBackup = protoJSON(in.GetAutomatedBackupConfig())
+	if key := in.GetKmsKey(); key != "" {
+		if err := c.newClusterKey(ctx, r, key, m[2]); err != nil {
+			return nil, err
+		}
+	}
 	if r.AclPolicy, err = c.attachPolicy(ctx, in.GetAclPolicy(), req.GetParent()); err != nil {
 		return nil, err
 	}
@@ -796,6 +829,26 @@ func (c *clusters) create(name, op string) {
 	defer cancel()
 	c.mu.Lock()
 	r := c.byName[name]
+	key, wrapped, dek := r.KmsKey, r.WrappedKey, r.dek
+	c.mu.Unlock()
+	if key != "" && dek == nil {
+		// Formed again after a restart: its secrets are unsealed with the
+		// data key, or it stays suspended until the key can be used.
+		dek, err := c.unwrapKey(ctx, key, wrapped)
+		c.mu.Lock()
+		if err == nil {
+			err = r.unsealWith(dek)
+		}
+		if err != nil {
+			r.suspended, r.KeyState = true, keyState(err)
+			r.state, r.message = clusterpb.Cluster_STATE_UNSPECIFIED, "suspended: its kms_key "+key+" cannot be used: "+err.Error()
+			delete(c.busy, name)
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Unlock()
+	}
+	c.mu.Lock()
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	snap := *r
 	c.mu.Unlock()
@@ -808,6 +861,10 @@ func (c *clusters) create(name, op string) {
 		if err = c.load(ctx, &snap, snap.restore); err != nil {
 			err = fmt.Errorf("restore the data: %w", err)
 		}
+	}
+	if err == nil {
+		// A secondary of cross-instance replication (crossinstance.go).
+		err = c.linkSecondary(ctx, name)
 	}
 	c.mu.Lock()
 	r.restore = nil
@@ -892,6 +949,14 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 		cl := c.dial(n.addr, r.password(), r.TransitCA)
 		host, _ := splitAddr(n.addr, "", 0)
 		_, err := cl.Do(ctx, "CONFIG", "SET", "cluster-announce-client-ipv4", host)
+		if err != nil && strings.Contains(err.Error(), "nknown option") {
+			// Valkey 7.2 (#1557) has no cluster-announce-client-ipv4:
+			// clients are given the host's address as the node's hostname.
+			_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-announce-hostname", host)
+			if err == nil {
+				_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-preferred-endpoint-type", "hostname")
+			}
+		}
 		if err == nil {
 			var id any
 			id, err = cl.Do(ctx, "CLUSTER", "MYID")

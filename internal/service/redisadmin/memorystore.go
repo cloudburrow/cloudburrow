@@ -53,9 +53,10 @@ const MemorystoreRESTPrefix = "/memorystore"
 
 const valkeyPrefix = "valkey/"
 
-// DefaultValkeyVersion is the engine_version an instance runs: the image
-// is Valkey 8.1 (components.MemorystoreImage), Memorystore's VALKEY_8_0
-// line.
+// DefaultValkeyVersion is the engine_version an instance runs when none
+// is asked: the image is Valkey 8.1 (components.MemorystoreImage),
+// Memorystore's VALKEY_8_0 line. VALKEY_7_2 runs Valkey 7.2 and
+// VALKEY_9_0 Valkey 9.0 (#1557).
 const DefaultValkeyVersion = "VALKEY_8_0"
 
 // valkeyNodeSizes are the GB a node of each node_type holds, as Memorystore
@@ -85,6 +86,10 @@ type valkeyFields struct {
 	Endpoints        bool   `json:"endpoints,omitempty"`
 	ZoneDistribution string `json:"zoneDistribution,omitempty"`
 	Maintenance      string `json:"maintenance,omitempty"`
+	// CIR is cross-instance replication, Migration the migration
+	// (crossinstance.go); nil for none.
+	CIR       *cirConfig `json:"cir,omitempty"`
+	Migration *migration `json:"migration,omitempty"`
 }
 
 type valkeyNetwork struct {
@@ -252,6 +257,11 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
 	}
+	if r.KmsKey != "" {
+		out.KmsKey = proto.String(r.KmsKey)
+		out.EncryptionInfo = convert(r.encryptionInfo(), &memorystorepb.EncryptionInfo{})
+	}
+	renderCIR(r, out)
 	if r.AutoBackup != "" {
 		ab := &clusterpb.AutomatedBackupConfig{}
 		if protojson.Unmarshal([]byte(r.AutoBackup), ab) == nil {
@@ -463,11 +473,8 @@ func checkValkeyConfigs(cfg map[string]string) error {
 }
 
 func checkEngineVersion(v string) error {
-	switch v {
-	case "", DefaultValkeyVersion:
+	if _, ok := valkeyVersions[v]; ok || v == "" {
 		return nil
-	case "VALKEY_7_2", "VALKEY_9_0":
-		return apierror.Unimplemented("engine_version %s is not served: CloudBurrow runs one Valkey image, Valkey 8.1 (%s)", v, DefaultValkeyVersion)
 	}
 	return apierror.InvalidArgument("engine_version %q is not a Memorystore for Valkey engine version", v)
 }
@@ -600,13 +607,13 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	default:
 		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
-	if in.GetKmsKey() != "" || in.GetMigrationConfig() != nil || in.GetServerCaPool() != "" ||
+	if in.GetServerCaPool() != "" ||
 		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) {
-		return nil, apierror.Unimplemented("kms_key, migration and server CA modes are not served for a Memorystore for Valkey instance here")
+		return nil, apierror.Unimplemented("server CA modes are not served for a Memorystore for Valkey instance here")
 	}
-	if c := in.GetCrossInstanceReplicationConfig(); c != nil && c.GetInstanceRole() != memorystorepb.CrossInstanceReplicationConfig_NONE &&
-		c.GetInstanceRole() != memorystorepb.CrossInstanceReplicationConfig_INSTANCE_ROLE_UNSPECIFIED {
-		return nil, checkCrossCluster(true)
+	primary, err := cirPrimary(in, mode, tlsOn)
+	if err != nil {
+		return nil, err
 	}
 	ab := convert(in.GetAutomatedBackupConfig(), &clusterpb.AutomatedBackupConfig{})
 	if in.GetAutomatedBackupConfig() == nil {
@@ -637,6 +644,11 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		r.AdminPassword = newUID() + newUID()
 	}
 	r.AutoBackup = protoJSON(ab)
+	if key := in.GetKmsKey(); key != "" {
+		if err := c.newClusterKey(ctx, r, key, m[2]); err != nil {
+			return nil, err
+		}
+	}
 	switch src := in.GetImportSources().(type) {
 	case *memorystorepb.Instance_GcsSource:
 		r.SourceURIs = src.GcsSource.GetUris()
@@ -663,6 +675,12 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if _, ok := c.byName[name]; ok {
 		c.mu.Unlock()
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
+	}
+	if primary != "" {
+		if err := c.checkPrimary(r, primary); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
 	}
 	if err := c.save(r); err != nil {
 		c.mu.Unlock()
@@ -716,7 +734,7 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		case "automated_backup_config", "automatedBackupConfig":
 			set["automated_backup_config"] = true
 		case "cross_instance_replication_config", "crossInstanceReplicationConfig":
-			return nil, checkCrossCluster(true)
+			set["cross_instance_replication_config"] = true
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode", "mode",
 			"psc_auto_connections", "pscAutoConnections":
 			return nil, apierror.InvalidArgument("update_mask path %q is an immutable field of Instance", p)
@@ -731,6 +749,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	defer c.mu.Unlock()
 	if _, pending := c.busy[r.Name]; pending || r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("instance %s is %s: an instance is updated only when ACTIVE", r.Name, r.state)
+	}
+	if r.Valkey.Migration.migrating() {
+		return nil, apierror.FailedPrecondition("instance %s is migrating: an instance is updated once FinishMigration completes", r.Name)
+	}
+	if set["cross_instance_replication_config"] {
+		if len(set) > 1 {
+			return nil, apierror.InvalidArgument("cross_instance_replication_config is updated alone, not with other fields")
+		}
+		return s.updateCIR(c, r, in.GetCrossInstanceReplicationConfig())
 	}
 	next := *r
 	vf := *r.Valkey
@@ -754,12 +781,19 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		}
 		vf.NodeType = in.GetNodeType().String()
 	}
+	upgradeTo := ""
 	if set["engine_version"] {
 		if v := in.GetEngineVersion(); v != vf.EngineVersion {
 			if err := checkEngineVersion(v); err != nil {
 				return nil, err
 			}
-			return nil, apierror.InvalidArgument("engine_version %q is not a later version than %s", v, vf.EngineVersion)
+			if valkeyVersions[v] <= valkeyVersions[vf.EngineVersion] {
+				return nil, apierror.InvalidArgument("engine_version %q is not a later version than %s: an instance is only upgraded", v, vf.EngineVersion)
+			}
+			if _, ok := c.rt.(Shell); !ok {
+				return nil, apierror.Unimplemented("engine upgrades are not supported by this instance's servers")
+			}
+			upgradeTo = v
 		}
 	}
 	if set["engine_configs"] {
@@ -837,6 +871,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	*r = next
 	op := c.newOperation(r.Name, "update")
+	if upgradeTo != "" && reshape {
+		return nil, apierror.InvalidArgument("engine_version and the instance's shape cannot be changed in one update")
+	}
+	if upgradeTo != "" {
+		r.state, r.message = clusterpb.Cluster_UPDATING, "upgrading the engine to "+upgradeTo
+		c.busy[r.Name] = op
+		go c.upgrade(r.Name, op, upgradeTo)
+		return s.api.operation(op)
+	}
 	if !reshape {
 		c.finish(op, renderValkey(r), nil)
 		return s.api.operation(op)
@@ -872,6 +915,20 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 	}
 	if r.DeletionProtect {
 		return nil, apierror.FailedPrecondition("instance %s has deletion protection enabled: disable it first", r.Name)
+	}
+	if len(c.secondariesOf(r.Name)) > 0 {
+		return nil, apierror.FailedPrecondition("instance %s is the primary of cross-instance replication: detach its secondary instances first", r.Name)
+	}
+	if r.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && r.Valkey.CIR.Primary != nil {
+		if p := c.byName[r.Valkey.CIR.Primary.Name]; p != nil {
+			var rest []*clusterRecord
+			for _, x := range c.secondariesOf(p.Name) {
+				if x != r {
+					rest = append(rest, x)
+				}
+			}
+			c.setMembership(p, rest)
+		}
 	}
 	r.state = clusterpb.Cluster_DELETING
 	op := c.newOperation(r.Name, "delete")

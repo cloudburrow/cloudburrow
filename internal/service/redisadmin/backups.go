@@ -56,7 +56,11 @@ type backupRecord struct {
 	Shards        int32        `json:"shards"`
 	Replicas      int32        `json:"replicas"`
 	Files         []backupFile `json:"files"`
-	creating      bool
+	// KmsKey and WrappedKey are a CMEK cluster's key and data key
+	// (clustercmek.go), which seal the backup's files.
+	KmsKey     string `json:"kmsKey,omitempty"`
+	WrappedKey []byte `json:"wrappedKey,omitempty"`
+	creating   bool
 }
 
 // collectionRecord is a backup collection, as it is kept.
@@ -65,6 +69,9 @@ type collectionRecord struct {
 	Owner    string    `json:"owner"`
 	OwnerUID string    `json:"ownerUid"`
 	Created  time.Time `json:"created"`
+	// KmsKey is the cluster's kms_key (#1557), which its backups are
+	// sealed with.
+	KmsKey string `json:"kmsKey,omitempty"`
 }
 
 var backupRE = regexp.MustCompile(`^(projects/([^/]+)/locations/([^/]+)/backupCollections/([^/]+))/backups/([^/]+)$`)
@@ -136,7 +143,7 @@ func (c *clusters) addCollection(r *clusterRecord) {
 	if name == "" || c.collections[name] != nil {
 		return
 	}
-	col := &collectionRecord{Name: name, Owner: r.Name, OwnerUID: r.UID, Created: c.now()}
+	col := &collectionRecord{Name: name, Owner: r.Name, OwnerUID: r.UID, Created: c.now(), KmsKey: r.KmsKey}
 	c.collections[name] = col
 	_ = c.put(c.backupPrefix()+"c/"+clusterKey(name), col)
 }
@@ -205,6 +212,9 @@ func renderBackup(b *backupRecord) *clusterpb.Backup {
 	if b.creating {
 		out.State = clusterpb.Backup_CREATING
 	}
+	if b.KmsKey != "" {
+		out.EncryptionInfo = &clusterpb.EncryptionInfo{EncryptionType: clusterpb.EncryptionInfo_CUSTOMER_MANAGED_ENCRYPTION}
+	}
 	for _, f := range b.Files {
 		out.BackupFiles = append(out.BackupFiles, &clusterpb.BackupFile{FileName: f.Name, SizeBytes: f.Size, CreateTime: timestamppb.New(b.Created)})
 		out.TotalSizeBytes += f.Size
@@ -214,7 +224,7 @@ func renderBackup(b *backupRecord) *clusterpb.Backup {
 
 // renderCollection is col as the Redis Cluster API shapes it.
 func renderCollection(col *collectionRecord) *clusterpb.BackupCollection {
-	return &clusterpb.BackupCollection{Name: col.Name, Cluster: col.Owner, ClusterUid: col.OwnerUID, Uid: col.OwnerUID}
+	return &clusterpb.BackupCollection{Name: col.Name, Cluster: col.Owner, ClusterUid: col.OwnerUID, Uid: col.OwnerUID, KmsKey: col.KmsKey}
 }
 
 // listCollections and listBackups are a location's collections, and a
@@ -300,7 +310,8 @@ func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, a
 	}
 	now := c.now()
 	b := &backupRecord{Name: name, Owner: r.Name, OwnerUID: r.UID, UID: newUID(), Created: now, Expire: now.Add(ttl), Automated: automated,
-		NodeType: r.NodeType, Shards: r.ShardCount, Replicas: r.ReplicaCount, creating: true}
+		NodeType: r.NodeType, Shards: r.ShardCount, Replicas: r.ReplicaCount, creating: true,
+		KmsKey: r.KmsKey, WrappedKey: r.WrappedKey}
 	if r.Valkey != nil {
 		b.EngineVersion, b.NodeType = r.Valkey.EngineVersion, r.Valkey.NodeType
 	} else {
@@ -328,10 +339,17 @@ func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, a
 				err = fmt.Errorf("shard %d: %w", n.Shard, err)
 				break
 			}
+			size := len(data)
+			if snap.dek != nil {
+				// CMEK: the file is kept sealed with the data key.
+				if data, err = seal(snap.dek, data); err != nil {
+					break
+				}
+			}
 			if err = c.putFile(name, len(files), data); err != nil {
 				break
 			}
-			files = append(files, backupFile{Name: fmt.Sprintf("%s-shard-%d.rdb", id, n.Shard), Size: int64(len(data))})
+			files = append(files, backupFile{Name: fmt.Sprintf("%s-shard-%d.rdb", id, n.Shard), Size: int64(size)})
 		}
 		c.mu.Lock()
 		delete(c.busy, snap.Name)
@@ -431,6 +449,9 @@ func (c *clusters) readBackup(name, field string) ([][]byte, error) {
 		if err != nil {
 			return nil, apierror.Internal(err, "read backup %s", name)
 		}
+		if d, err = c.openBackupFile(b, d); err != nil {
+			return nil, err
+		}
 		out = append(out, d)
 	}
 	return out, nil
@@ -494,6 +515,9 @@ func (c *clusters) exportBackup(ctx context.Context, name, bucket string) (strin
 			c.mu.Lock()
 			d, err = c.getFile(name, i)
 			c.mu.Unlock()
+			if err == nil {
+				d, err = c.openBackupFile(&snap, d)
+			}
 			if err == nil {
 				err = objs.Write(ctx, bucket, m[5]+"/"+f.Name, d)
 			}

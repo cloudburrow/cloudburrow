@@ -326,7 +326,7 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		cfg[k] = v
 	}
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg}
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version]}
 	if spec.TransitCA != "" {
 		// In-transit encryption (#1549): TLS only, on the node's one port,
 		// with a certificate of the cluster's CA for the host's address,
@@ -446,6 +446,10 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 var memorystoreImages = map[string]string{
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
+	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 is the
+	// default image.
+	"VALKEY_7_2": components.MemorystoreValkey72Image,
+	"VALKEY_9_0": components.MemorystoreValkey90Image,
 }
 
 // Suspend stops a suspended instance's server and keeps its volume
