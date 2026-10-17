@@ -45,9 +45,9 @@ import (
 // (github, triggerTemplate, repositoryEventConfig), and a build read from a
 // repository (filename, gitFileSource, sourceToBuild, autodetect), which
 // Google clones from a hosted git service, never from a path on the
-// developer's machine. A Pub/Sub trigger (pubsubConfig) is refused too:
-// Google pushes the topic's messages to Cloud Build through a subscription
-// it makes and owns, which this instance does not run.
+// developer's machine; this instance serves no git service. A Pub/Sub
+// trigger (pubsubConfig) runs from a subscription on the instance's Pub/Sub
+// (cloudbuildpubsub.go, #1506).
 //
 // A worker pool is stored, with its long-running operations; a build that
 // names it in options.pool.name runs on the host's Docker like any build,
@@ -119,10 +119,8 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 		return events("triggerTemplate")
 	case t.GetRepositoryEventConfig() != nil:
 		return events("repositoryEventConfig")
-	case t.GetPubsubConfig() != nil:
-		return apierror.Unimplemented("BuildTrigger field pubsubConfig is not supported: Google delivers the topic's " +
-			"messages to Cloud Build through a push subscription it creates and owns, which this instance does not run; " +
-			"use a webhook trigger, or a Pub/Sub push subscription to its :webhook URL")
+	case t.GetPubsubConfig() != nil && validPubsubConfig(t.GetPubsubConfig()) != nil:
+		return validPubsubConfig(t.GetPubsubConfig())
 	case t.GetFilename() != "":
 		return repo("filename")
 	case t.GetGitFileSource() != nil:
@@ -178,13 +176,30 @@ func (c *CloudBuildServer) CreateBuildTrigger(ctx context.Context, req *cbpb.Cre
 	if wc := t.GetWebhookConfig(); wc != nil {
 		wc.State = cbpb.WebhookConfig_OK
 	}
+	prefix := "projects/" + project + "/locations/" + location + "/triggers/"
+	exists := func() bool {
+		for n, x := range triggerStore.triggers {
+			if strings.HasPrefix(n, prefix) && x.GetName() == t.GetName() {
+				return true
+			}
+		}
+		return false
+	}
+	triggerStore.mu.Lock()
+	taken := exists()
+	triggerStore.mu.Unlock()
+	if taken {
+		return nil, apierror.AlreadyExists("trigger %q already exists", t.GetName())
+	}
+	// A Pub/Sub trigger's subscription is made before it is stored (#1506).
+	if err := c.subscribeTrigger(ctx, t); err != nil {
+		return nil, err
+	}
 	triggerStore.mu.Lock()
 	defer triggerStore.mu.Unlock()
-	prefix := "projects/" + project + "/locations/" + location + "/triggers/"
-	for n, x := range triggerStore.triggers {
-		if strings.HasPrefix(n, prefix) && x.GetName() == t.GetName() {
-			return nil, apierror.AlreadyExists("trigger %q already exists", t.GetName())
-		}
+	if exists() {
+		c.unsubscribeTrigger(ctx, t)
+		return nil, apierror.AlreadyExists("trigger %q already exists", t.GetName())
 	}
 	triggerStore.triggers[t.ResourceName] = t
 	if required, ok := approvalFrom(ctx); ok {
@@ -302,15 +317,17 @@ func (c *CloudBuildServer) ListBuildTriggers(_ context.Context, req *cbpb.ListBu
 }
 
 // DeleteBuildTrigger removes a trigger; its builds stay.
-func (c *CloudBuildServer) DeleteBuildTrigger(_ context.Context, req *cbpb.DeleteBuildTriggerRequest) (*emptypb.Empty, error) {
+func (c *CloudBuildServer) DeleteBuildTrigger(ctx context.Context, req *cbpb.DeleteBuildTriggerRequest) (*emptypb.Empty, error) {
 	triggerStore.mu.Lock()
-	defer triggerStore.mu.Unlock()
 	t, err := triggerOf(req.GetName(), req.GetProjectId(), req.GetTriggerId())
 	if err != nil {
+		triggerStore.mu.Unlock()
 		return nil, err
 	}
 	delete(triggerStore.triggers, t.GetResourceName())
 	delete(triggerApprovals, t.GetResourceName())
+	triggerStore.mu.Unlock()
+	c.unsubscribeTrigger(ctx, t)
 	return &emptypb.Empty{}, nil
 }
 
@@ -375,6 +392,23 @@ func (c *CloudBuildServer) UpdateBuildTrigger(ctx context.Context, req *cbpb.Upd
 	}
 	if wc := next.GetWebhookConfig(); wc != nil {
 		wc.State = cbpb.WebhookConfig_OK
+	}
+	// A changed topic gets a new subscription; the same topic keeps its
+	// subscription, which is output only (#1506).
+	oldTopic, newTopic := t.GetPubsubConfig().GetTopic(), next.GetPubsubConfig().GetTopic()
+	if newTopic != "" && newTopic == oldTopic {
+		next.PubsubConfig.Subscription, next.PubsubConfig.State = t.GetPubsubConfig().GetSubscription(), t.GetPubsubConfig().GetState()
+	} else {
+		// A subscription's topic is fixed: the old one goes first, as
+		// the new one takes its name.
+		if oldTopic != "" {
+			c.unsubscribeTrigger(ctx, t)
+		}
+		if newTopic != "" {
+			if err := c.subscribeTrigger(ctx, next); err != nil {
+				return nil, err
+			}
+		}
 	}
 	triggerStore.triggers[t.GetResourceName()] = next
 	// An update whose body has no approvalConfig keeps the trigger's.

@@ -5,19 +5,38 @@ package tasks
 //
 // A CloudBurrow instance has no App Engine, and Google documents no mapping
 // from an App Engine service to anything else (a Cloud Run service of the
-// same name is not one), so a task is never delivered elsewhere. Instead the
-// task and the queue's override are stored as the API documents them, with
-// the output-only AppEngineRouting.host computed as Google computes it, and
-// every attempt fails as a request to an App Engine app that does not exist
-// fails on Google: HTTP 404, recorded in last_attempt.response_status as
-// NOT_FOUND with the reason. The queue's retry_config then applies, as it
-// does to any failed attempt, and a task that exhausts it is deleted, as on
-// Google. Nothing is dropped silently: each attempt counts in
-// dispatch_count and response_count, reaches the attempt observer (the
-// console's attempt history) and, when the queue samples it, Cloud Logging.
+// same name is not one). The task and the queue's override are stored as the
+// API documents them, with the output-only AppEngineRouting.host computed as
+// Google computes it.
+//
+// With --appengine-url (#1506), a local HTTP server stands in for the app:
+// each attempt is sent there, at the task's relative_uri, as Google
+// documents the request an App Engine handler receives
+// (tasks/docs/creating-appengine-handlers, AppEngineHttpRequest): the task's
+// method, body and headers, Host the routing's host, User-Agent
+// "AppEngine-Google; (+http://code.google.com/appengine)", Content-Type
+// application/octet-stream when the task sets none, and X-AppEngine-QueueName,
+// -TaskName, -TaskRetryCount, -TaskExecutionCount, -TaskETA and, after a
+// response, -TaskPreviousResponse; a task's own X-AppEngine-* and X-Google-*
+// headers are replaced, as Google replaces them. A 2xx response succeeds, any
+// other is retried, as for an HTTP task. Every service and version reaches
+// the same server, which can tell them apart by Host.
+//
+// Without it, every attempt fails as a request to an App Engine app that
+// does not exist fails on Google: HTTP 404, recorded in
+// last_attempt.response_status as NOT_FOUND with the reason. The queue's
+// retry_config then applies, as it does to any failed attempt, and a task
+// that exhausts it is deleted, as on Google. Nothing is dropped silently:
+// each attempt counts in dispatch_count and response_count, reaches the
+// attempt observer (the console's attempt history) and, when the queue
+// samples it, Cloud Logging.
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -213,4 +232,47 @@ func (g *GRPCServer) protoTask(t Task) *taskspb.Task {
 		}
 	}
 	return toProtoTaskIn(t, override)
+}
+
+// WithAppEngine sends App Engine attempts to base, the local server standing
+// in for the app (--appengine-url, #1506), and returns the dispatcher.
+func (d *Dispatcher) WithAppEngine(base string) *Dispatcher {
+	d.appEngine = strings.TrimSuffix(base, "/")
+	return d
+}
+
+// AppEngineUserAgent is the User-Agent Google sends an App Engine target.
+const AppEngineUserAgent = "AppEngine-Google; (+http://code.google.com/appengine)"
+
+// appEngineRequest is an App Engine attempt as the stand-in server gets it.
+func (d *Dispatcher) appEngineRequest(ctx context.Context, task Task) (*http.Request, error) {
+	a := task.AppEngineHTTPRequest
+	var override *AppEngineRouting
+	if q, err := d.store.GetQueue(task.Queue); err == nil {
+		override = q.AppEngineRouting
+	}
+	req, err := http.NewRequestWithContext(ctx, a.Method, d.appEngine+a.RelativeURI, bytes.NewReader(a.Body))
+	if err != nil {
+		return nil, fmt.Errorf("build request for %s: %w", task.Name, err)
+	}
+	for k, v := range a.Headers {
+		if lk := strings.ToLower(k); strings.HasPrefix(lk, "x-appengine-") || strings.HasPrefix(lk, "x-google-") {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	req.Host = AppEngineHost(projectOf(task.Name), effectiveRouting(a, override))
+	req.Header.Set("User-Agent", AppEngineUserAgent)
+	if req.Header.Get("Content-Type") == "" && len(a.Body) > 0 {
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	req.Header.Set("X-AppEngine-QueueName", task.Queue[strings.LastIndex(task.Queue, "/")+1:])
+	req.Header.Set("X-AppEngine-TaskName", task.Name[strings.LastIndex(task.Name, "/")+1:])
+	req.Header.Set("X-AppEngine-TaskRetryCount", strconv.Itoa(task.DispatchCount))
+	req.Header.Set("X-AppEngine-TaskExecutionCount", strconv.Itoa(task.ResponseCount))
+	req.Header.Set("X-AppEngine-TaskETA", strconv.FormatFloat(float64(task.ScheduleTime.UnixMicro())/1e6, 'f', 6, 64))
+	if task.LastResponseCode != 0 {
+		req.Header.Set("X-AppEngine-TaskPreviousResponse", strconv.Itoa(task.LastResponseCode))
+	}
+	return req, nil
 }

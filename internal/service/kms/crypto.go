@@ -59,6 +59,9 @@ func (s *Server) encryptTarget(name string) (keyVersion, error) {
 	if err := s.backendUsable(k); err != nil {
 		return keyVersion{}, err
 	}
+	if err := kajRefusal(k); err != nil {
+		return keyVersion{}, err
+	}
 	if number == 0 {
 		if k.Primary == 0 {
 			return keyVersion{}, apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s has no primary version to encrypt with", keyName))
@@ -156,6 +159,9 @@ func (s *Server) Decrypt(_ context.Context, req *kmspb.DecryptRequest) (*kmspb.D
 		return nil, err
 	}
 	if err := s.backendUsable(k); err != nil {
+		return nil, err
+	}
+	if err := kajRefusal(k); err != nil {
 		return nil, err
 	}
 	number, err := parseVersion(ct)

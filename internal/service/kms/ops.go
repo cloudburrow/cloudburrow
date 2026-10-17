@@ -172,6 +172,9 @@ func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequ
 	if err != nil {
 		return nil, err
 	}
+	if err := s.kajAllows(v.Name); err != nil {
+		return nil, err
+	}
 	spec := algorithms[v.algorithm()]
 	raw := spec.hash == 0
 	switch {
@@ -243,6 +246,9 @@ func (s *Server) AsymmetricDecrypt(_ context.Context, req *kmspb.AsymmetricDecry
 	if err != nil {
 		return nil, err
 	}
+	if err := s.kajAllows(v.Name); err != nil {
+		return nil, err
+	}
 	priv, err := v.privateKey()
 	if err != nil {
 		return nil, err
@@ -281,6 +287,9 @@ func (s *Server) MacSign(_ context.Context, req *kmspb.MacSignRequest) (*kmspb.M
 	}
 	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_MAC)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.kajAllows(v.Name); err != nil {
 		return nil, err
 	}
 	m := v.mac(data)
@@ -349,6 +358,9 @@ func (s *Server) RawEncrypt(_ context.Context, req *kmspb.RawEncryptRequest) (*k
 	}
 	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.kajAllows(v.Name); err != nil {
 		return nil, err
 	}
 	block, err := aes.NewCipher(v.Material)
@@ -434,6 +446,9 @@ func (s *Server) RawDecrypt(_ context.Context, req *kmspb.RawDecryptRequest) (*k
 	}
 	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.kajAllows(v.Name); err != nil {
 		return nil, err
 	}
 	block, err := aes.NewCipher(v.Material)
@@ -562,6 +577,9 @@ func (s *Server) Decapsulate(_ context.Context, req *kmspb.DecapsulateRequest) (
 	}
 	v, err := s.usableVersion("name", req.GetName(), kmspb.CryptoKey_KEY_ENCAPSULATION)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.kajAllows(v.Name); err != nil {
 		return nil, err
 	}
 	dk, err := v.kemKey()

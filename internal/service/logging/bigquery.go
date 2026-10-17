@@ -12,8 +12,12 @@ package logging
 //     jsonPayload, timestamp, receiveTimestamp, severity, insertId,
 //     httpRequest, labels, operation, trace, spanId, traceSampled,
 //     sourceLocation, split); httpRequest's cache flags are BOOLEAN and
-//     cacheFillBytes INTEGER, as its other counts (#1451), its latency is
-//     left out (its type is UNVERIFIED). Fields users name (jsonPayload's, labels',
+//     cacheFillBytes INTEGER, as its other counts (#1451), and its latency
+//     FLOAT seconds (#1506): Google's Log Analytics migration guide
+//     (cloud.google.com/blog/products/data-analytics/moving-to-log-analytics-for-bigquery-export-users)
+//     names httpRequest.latency's sink type FLOAT and has it read as
+//     latency.nanos / POW(10,9) after, so every Duration is FLOAT
+//     seconds here. Fields users name (jsonPayload's, labels',
 //     resource labels') are lowercased, with unsupported characters made
 //     underscores and anything before the first letter or digit dropped, at
 //     most 128 characters. A top-level @type of type.googleapis.com/abc.Xyz
@@ -42,8 +46,10 @@ package logging
 //     response and metadata are JSON strings named requestJson,
 //     responseJson and metadataJson, and its serviceData is
 //     servicedata_<shortened type>; other types' fields are lowercased, as
-//     Google's @type table shows. A type the instance does not know, Any
-//     fields but serviceData, and Durations are left out (UNVERIFIED).
+//     Google's @type table shows; a Duration is FLOAT seconds, as
+//     httpRequest.latency is. A type the instance does not know and Any
+//     fields but serviceData are left out: Google documents no column for
+//     them (UNVERIFIED).
 
 import (
 	"context"
@@ -61,6 +67,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -222,6 +229,9 @@ func entryRow(e *loggingpb.LogEntry) row {
 		flag("cacheHit", h.GetCacheHit())
 		flag("cacheValidatedWithOriginServer", h.GetCacheValidatedWithOriginServer())
 		num("cacheFillBytes", h.GetCacheFillBytes())
+		if l := h.GetLatency(); l != nil {
+			sub.set("latency", "FLOAT", l.AsDuration().Seconds())
+		}
 		r.record("httpRequest", sub)
 	}
 	r.record("labels", stringLabels(e.GetLabels()))
@@ -691,6 +701,8 @@ func protoValue(fd protoreflect.FieldDescriptor, v protoreflect.Value, keep bool
 		switch x := msg.(type) {
 		case *timestamppb.Timestamp:
 			return "TIMESTAMP", x.AsTime().UTC().Format(bqTime), nil, true
+		case *durationpb.Duration:
+			return "FLOAT", x.AsDuration().Seconds(), nil, true
 		case *structpb.Struct:
 			return jsonValue(structpb.NewStructValue(x))
 		case *structpb.Value:
@@ -699,7 +711,7 @@ func protoValue(fd protoreflect.FieldDescriptor, v protoreflect.Value, keep bool
 			return "", nil, nil, false // a list of lists has no column
 		}
 		switch fd.Message().FullName() {
-		case "google.protobuf.Any", "google.protobuf.Duration", "google.protobuf.FieldMask", "google.protobuf.Empty":
+		case "google.protobuf.Any", "google.protobuf.FieldMask", "google.protobuf.Empty":
 			return "", nil, nil, false
 		}
 		if w := wrapperValue(msg); w != nil {

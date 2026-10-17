@@ -26,16 +26,16 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Run | 2 | 0 | 1 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
-| Cloud KMS | 5 | 0 | 2 | 2 | 1 |
+| Cloud KMS | 7 | 0 | 3 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
-| BigQuery | 30 | 10 | 12 | 8 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
+| BigQuery | 22 | 8 | 6 | 8 | 0 |
+| Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 3 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **59** | **13** | **27** | **13** | **6** |
+| **Total** | **48** | **10** | **18** | **14** | **6** |
 
 ## Cloud Storage
 
@@ -73,7 +73,7 @@ field (#1255), `stackdriver_logging_config`, with each sampled dispatch written 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Delivery to an App Engine target (#1447) (#1506) | no emulator support (no App Engine): tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
+| Delivery to an App Engine app (#1447) (#1506): with `--appengine-url` a local server stands in for the app and gets each attempt as Google documents it (Host, `X-AppEngine-*` headers; built in #1506), else every attempt fails `NOT_FOUND` (HTTP 404); `X-AppEngine-TaskRetryReason` and `-FailFast` are not sent | no emulator support (no App Engine runtime runs locally, and Google documents no mapping to Cloud Run, so the stand-in is the developer's own server) | — |
 
 ## Cloud Run
 
@@ -97,7 +97,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
+| Cloud Build: triggers with a repository source or a `filename` are refused 501 with the reason (they need a hosted git service: no Cloud Source Repositories, Secure Source Manager or Developer Connect is served, and Google's repository sources name hosted services, not local paths); Pub/Sub triggers are built (#1506). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler
@@ -106,7 +106,7 @@ Closed by the sweep: Locations (#1237).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Delivery to an App Engine target (#1447) (#1506) | no emulator support (no App Engine): jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
+| Delivery to an App Engine app (#1447) (#1506): with `--appengine-url` a local server stands in for the app and gets each attempt as `AppEngineHttpTarget` documents it (built in #1506), else every attempt fails `NOT_FOUND` (HTTP 404) | no emulator support (no App Engine runtime runs locally, and Google documents no mapping to Cloud Run, so the stand-in is the developer's own server) | — |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider (#1445) | needs live GCP | S |
 
 ## Cloud Logging
@@ -123,7 +123,7 @@ on folder and organization buckets, as Google refuses them (#1435).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, the types of `httpRequest.latency` and other `Duration` and `Any` fields (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built) (#1506) | not documented by Google; needs a live sink | S |
+| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, `Any` fields but `serviceData` (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built; `Duration` fields are `FLOAT` seconds, as Google's Log Analytics migration guide shows for `httpRequest.latency`, #1506) | not documented by Google (the export page lists the `export_errors` columns without types, and `schemaErrorDetail` only as BigQuery's message); needs a live sink | S |
 
 ## Cloud KMS
 
@@ -134,6 +134,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 |---|---|---|
 | Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) (#1506) | no emulator support | M |
 | `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally (#1506) | no emulator support | S |
+| Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) | no emulator support | M |
+| `key_access_justifications_policy` is enforced (#1506): encrypt, decrypt and sign fail under a policy with no reasons, as documented, or without `CUSTOMER_INITIATED_ACCESS`, a local call's reason; the refusal's code and text (`FAILED_PRECONDITION`) are CloudBurrow's, and project and organization default policies are not served (#1452) | not documented by Google | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
 | Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted (#1445) | needs live GCP | S |

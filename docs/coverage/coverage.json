@@ -24,7 +24,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -37,8 +37,9 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
+          "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -48,7 +49,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
@@ -83,7 +84,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
@@ -99,8 +100,9 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
+          "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -182,8 +184,9 @@
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
+          "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -1242,7 +1245,9 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildpubsub_test.go:107 TestTerraformCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1250,7 +1255,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1259,7 +1264,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildpubsub_test.go:107 TestTerraformCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1267,7 +1274,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1292,7 +1299,8 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildpubsub_test.go:107 TestTerraformCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1307,7 +1315,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1315,7 +1323,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuildTriggers",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1332,14 +1340,14 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1356,7 +1364,7 @@
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1364,7 +1372,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1372,7 +1381,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       }
@@ -2045,42 +2054,42 @@
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:229 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:244 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
@@ -2089,14 +2098,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/GetEkmConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2104,14 +2113,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/ListEkmConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2120,14 +2129,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2135,7 +2144,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:146 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:161 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2240,7 +2249,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:46 TestKMSResources",
@@ -2304,7 +2313,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
@@ -2366,7 +2375,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:614 TestKMSDecrypt",
           "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext",
@@ -2463,7 +2472,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:495 TestKMSEncrypt",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
@@ -2677,7 +2686,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
           "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys",
@@ -2832,7 +2841,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:52 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
@@ -3787,9 +3796,10 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
@@ -3802,8 +3812,9 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/DeleteJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
@@ -3814,9 +3825,10 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/GetJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
-          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
+          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
           "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
@@ -3856,7 +3868,8 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/RunJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:115 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens"
@@ -3866,7 +3879,7 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/UpdateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
@@ -3935,8 +3948,8 @@
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:114 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
-          "test/compat/logging1451_test.go:235 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
+          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -3988,7 +4001,7 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:235 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -4058,7 +4071,7 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:235 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -4239,7 +4252,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
-          "test/compat/logging1451_test.go:114 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
+          "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",

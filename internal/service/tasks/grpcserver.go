@@ -251,8 +251,8 @@ func fromProtoTask(p *taskspb.Task, parent string) (Task, error) {
 	}
 	hr := p.GetHttpRequest()
 	if hr == nil {
-		// An App Engine task is stored, and its attempts fail, as no app
-		// serves it here (#1447, appengine1447.go).
+		// An App Engine task is stored; its attempts go to --appengine-url,
+		// or fail 404 without it (#1447, #1506, appengine1447.go).
 		if ae := p.GetAppEngineHttpRequest(); ae != nil {
 			a, err := appEngineFromProto(ae)
 			if err != nil {

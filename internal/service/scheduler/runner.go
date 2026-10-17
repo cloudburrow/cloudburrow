@@ -43,6 +43,10 @@ type Runner struct {
 	// tokens mints the Authorization header of a job with oidcToken or
 	// oauthToken (#1243).
 	tokens TokenMinter
+	// appEngine is the base URL of the local server standing in for the
+	// App Engine app (--appengine-url, #1506); "" fails App Engine
+	// attempts 404.
+	appEngine string
 
 	mu       sync.Mutex
 	inflight map[string]bool
@@ -254,8 +258,25 @@ func (r *Runner) attempt(ctx context.Context, j Job, scheduled time.Time, attemp
 			return resp.StatusCode, fmt.Errorf("%s returned HTTP %d", j.HTTP.URI, resp.StatusCode)
 		}
 		return resp.StatusCode, nil
-	case j.AppEngine != nil:
+	case j.AppEngine != nil && r.appEngine == "":
 		return attemptAppEngine(j)
+	case j.AppEngine != nil:
+		actx, cancel := context.WithTimeout(ctx, j.AttemptDeadline)
+		defer cancel()
+		req, err := r.appEngineRequest(actx, j, scheduled)
+		if err != nil {
+			return 0, err
+		}
+		resp, err := r.client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			return resp.StatusCode, fmt.Errorf("%s%s returned HTTP %d", req.Host, j.AppEngine.RelativeURI, resp.StatusCode)
+		}
+		return resp.StatusCode, nil
 	default:
 		return 0, fmt.Errorf("job %s has no target", j.Name)
 	}

@@ -189,6 +189,15 @@ func (r *runService) Start(ctx context.Context) error {
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
 	builds = builds.WithBuildSecrets(r.buildSecretManager, r.buildKMS)
+	// Pub/Sub triggers subscribe on the instance's Pub/Sub (#1506).
+	if r.events != nil {
+		builds = builds.WithTriggerEvents(r.events.transport, func() string {
+			if r.events.pushBase == nil {
+				return ""
+			}
+			return r.events.pushBase()
+		})
+	}
 	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
