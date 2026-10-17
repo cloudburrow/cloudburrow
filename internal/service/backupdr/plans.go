@@ -627,6 +627,9 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	if d == nil {
 		return "", nil, notFound("Data source %s does not exist.", a.DataSource)
 	}
+	if err := s.checkVaultKeyFor(d.Name); err != nil {
+		return "", nil, err
+	}
 	runID, done, err := s.sql.Backup(d.Project, d.Instance, "Backup and DR "+assocName+" rule "+ruleID)
 	if err != nil {
 		return "", nil, err
@@ -689,8 +692,12 @@ func (s *Server) DataSourceInstance(name string) (string, string, error) {
 	return d.Project, d.Instance, nil
 }
 
-// BackupRunID is the Cloud SQL backup run a backup holds.
+// BackupRunID is the Cloud SQL backup run a backup holds, for a restore:
+// an error while its vault's customer-managed key cannot be used.
 func (s *Server) BackupRunID(name string) (string, error) {
+	if err := s.checkVaultKeyFor(name); err != nil {
+		return "", err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b := s.st.Backups[name]

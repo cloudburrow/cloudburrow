@@ -97,22 +97,42 @@ Each answers 501 UNIMPLEMENTED with the reason:
   a Cloud SQL backup.
 - **`pointInTimeRestore` into another project** than the data source's instance's: call it with
   that project as the parent.
-- **`encryptionConfig`** on a vault: it needs a Cloud KMS key; backups are not encrypted with a
-  customer key.
 - **Management servers** (`managementServers.*`): a management server is a Google-managed backup
   and recovery appliance VM on Compute Engine, reached over VPC peering.
 - **The appliance protocol** (`dataSources.initiateBackup`, `finalizeBackup`, `abandonBackup`,
   `fetchAccessToken`, `setInternalStatus`, `remove`): what an appliance's agents call.
 - **Trials** (`getTrial`, `trial.subscribe`, `trial.end`): billing-account state, and CloudBurrow
   has no billing accounts.
-- **Resource backup configs** (`resourceBackupConfigs.list` and `fetch`, and the folder and
-  organization `fetch`): they inventory a project's (or every project's) resources through Cloud
-  Asset Inventory.
+- **Resource backup configs' `fetch`** (`resourceBackupConfigs.fetch`, and the folder and
+  organization `fetch`): they inventory every resource of a project, folder or organization, of
+  every type, through Cloud Asset Inventory. A `filter` on `resourceBackupConfigs.list` is 501
+  too: every config of the location is answered.
 - **`serviceConfig.initialize`**: it creates Google's default vault and plan, whose names, rules
   and retention Google does not document; create them with `backupVaults.create` and
   `backupPlans.create`.
 
 IAM is not enforced on any of it, as elsewhere (ADR-0004).
+
+## Customer-managed encryption keys and resource backup configs (#1501)
+
+- **`encryptionConfig.kmsKeyName`** on `backupVaults.create`: a CryptoKey of this instance's Cloud
+  KMS (start with `kms` in `--services`; without it the create is `FAILED_PRECONDITION`), in the
+  vault's location (400 otherwise). The vault gets a data key of its own, 256-bit AES, wrapped by
+  the CryptoKey and kept only wrapped; the vault answers `encryptionConfig.kmsKeyName`. The key is
+  checked by unwrapping the data key before each backup into the vault (`triggerBackup` and the
+  scheduled ones) and each restore from it (`instances.restoreBackup` with `backupdrBackup`):
+  while the key's version is disabled or destroyed both fail `FAILED_PRECONDITION` naming the key,
+  and they work again once it is enabled. The backups themselves are Cloud SQL backup runs, the
+  dumps the Cloud SQL Admin API keeps; they are not encrypted with the key. The console's Create
+  backup vault has the key, and a vault's page shows it.
+- **`resourceBackupConfigs.list`** answers a `ResourceBackupConfig` for each Cloud SQL instance
+  of the project in the location (`-` for every one): `targetResource`
+  (`//sqladmin.googleapis.com/projects/P/instances/I`), `targetResourceType`
+  `CLOUD_SQL_INSTANCE`, and `backupConfigsDetails`: `CLOUD_SQL_INSTANCE_BACKUP_CONFIG` when the
+  instance's automated backups are on, and `BACKUPDR` for each backup plan association protecting
+  it, with its vault, its rules and their last successful backups; `backupConfigured` and
+  `vaulted` follow. Cloud SQL instances are the one workload served, so no other resource is
+  listed. A vault's page in the console lists them as Protected resources.
 
 ## gcloud and Terraform
 

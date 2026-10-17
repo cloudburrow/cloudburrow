@@ -62,7 +62,7 @@ func TestCloudSQLExternalPrimaryThroughThePage(t *testing.T) {
 		t.Fatalf("the replica is %q", state)
 	}
 	p.navigate("/cloudsql-instances/" + rep + "?project=" + project)
-	rows := p.pageAction("Verify external sync settings", nil, "")
+	rows := p.pageAction("Verify external sync settings", map[string]string{"verifyConnectionOnly": "true"}, "")
 	if !strings.Contains(rows, "CONNECTION_FAILURE") {
 		t.Errorf("Verify external sync settings answered %q; want CONNECTION_FAILURE", rows)
 	}

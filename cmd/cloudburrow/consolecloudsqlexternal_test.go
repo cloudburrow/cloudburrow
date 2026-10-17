@@ -34,7 +34,7 @@ func TestCloudSQLConsoleExternalPrimary(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "rep", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
 				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:src",
 				"replicaConfiguration": map[string]any{"mysqlReplicaConfiguration": map[string]any{"username": "repl"}},
-				"settings": map[string]any{"tier": "db-custom-1-3840", "databaseReplicationEnabled": true}})
+				"settings":             map[string]any{"tier": "db-custom-1-3840", "databaseReplicationEnabled": true}})
 		case strings.HasSuffix(r.URL.Path, "/verifyExternalSyncSettings"):
 			_, _ = io.WriteString(w, `{"kind":"sql#migrationSettingErrorList","errors":[{"type":"UNSUPPORTED_GTID_MODE","detail":"gtid_mode is OFF"}]}`)
 		case r.Method == http.MethodGet:

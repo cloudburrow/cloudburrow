@@ -509,7 +509,9 @@ func externalSyncActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	if in.ReplicaConfiguration == nil || in.ReplicaConfiguration.MysqlReplicaConfiguration == nil {
 		return nil
 	}
-	return []console.Action{{ID: "verify-external-sync", Label: "Verify external sync settings"},
+	return []console.Action{{ID: "verify-external-sync", Label: "Verify external sync settings", Fields: []console.Field{{
+		Name: "verifyConnectionOnly", Label: "Check the connection only", Type: "checkbox",
+		Help: "Only whether the replica's replication user can connect to the external server."}}},
 		{ID: "start-external-sync", Label: "Start external sync", Fields: []console.Field{{Name: "skipVerification",
 			Label: "Skip verification", Type: "checkbox"}},
 			Confirm: "The external server's databases are dumped into this replica, which then replicates from it."}}
@@ -679,7 +681,8 @@ func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project stri
 			return nil, err
 		}
 		res, err := svc.Projects.Instances.VerifyExternalSyncSettings(project, path[0],
-			&sqladminapi.SqlInstancesVerifyExternalSyncSettingsRequest{SyncMode: "ONLINE"}).Context(ctx).Do()
+			&sqladminapi.SqlInstancesVerifyExternalSyncSettingsRequest{SyncMode: "ONLINE",
+				VerifyConnectionOnly: v["verifyConnectionOnly"] == "true"}).Context(ctx).Do()
 		if err != nil {
 			return nil, sqlAPIError(err)
 		}

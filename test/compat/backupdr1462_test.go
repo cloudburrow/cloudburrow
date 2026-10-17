@@ -227,7 +227,7 @@ func TestBackupDRUpdatesAndViews(t *testing.T) {
 // networking, billing or an inventory is refused 501, naming it.
 // covers: backupdr.projects.locations.managementServers.create (unimplemented), backupdr.projects.locations.managementServers.delete (unimplemented), backupdr.projects.locations.managementServers.get (unimplemented), backupdr.projects.locations.managementServers.list (unimplemented), backupdr.projects.locations.managementServers.getIamPolicy (unimplemented), backupdr.projects.locations.managementServers.setIamPolicy (unimplemented), backupdr.projects.locations.managementServers.testIamPermissions (unimplemented), backupdr.projects.locations.managementServers.msComplianceMetadata (unimplemented)
 // covers: backupdr.projects.locations.backupVaults.dataSources.initiateBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.finalizeBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.abandonBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken (unimplemented), backupdr.projects.locations.backupVaults.dataSources.setInternalStatus (unimplemented), backupdr.projects.locations.backupVaults.dataSources.remove (unimplemented)
-// covers: backupdr.projects.locations.getTrial (unimplemented), backupdr.projects.locations.trial.subscribe (unimplemented), backupdr.projects.locations.trial.end (unimplemented), backupdr.projects.locations.resourceBackupConfigs.list (unimplemented), backupdr.projects.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.folders.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.organizations.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.projects.locations.serviceConfig.initialize (unimplemented)
+// covers: backupdr.projects.locations.getTrial (unimplemented), backupdr.projects.locations.trial.subscribe (unimplemented), backupdr.projects.locations.trial.end (unimplemented), backupdr.projects.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.folders.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.organizations.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.projects.locations.serviceConfig.initialize (unimplemented)
 func TestBackupDRRefusals(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvBackupDR) == "" {
@@ -292,7 +292,6 @@ func TestBackupDRRefusals(t *testing.T) {
 			return err
 		}},
 		{"trial.end", "billing", func() error { _, err := l.Trial.End(loc, &backupdr.EndTrialRequest{}).Do(); return err }},
-		{"resourceBackupConfigs.list", "Cloud Asset Inventory", func() error { _, err := l.ResourceBackupConfigs.List(loc).Do(); return err }},
 		{"resourceBackupConfigs.fetch", "Cloud Asset Inventory", func() error { _, err := l.ResourceBackupConfigs.Fetch(loc).Do(); return err }},
 		{"folders resourceBackupConfigs.fetch", "folder", func() error {
 			_, err := bdr.Folders.Locations.ResourceBackupConfigs.Fetch("folders/1/locations/us-central1").Do()
@@ -304,11 +303,6 @@ func TestBackupDRRefusals(t *testing.T) {
 		}},
 		{"serviceConfig.initialize", "default backup vault", func() error {
 			_, err := l.ServiceConfig.Initialize(loc+"/serviceConfig", &backupdr.InitializeServiceRequest{ResourceType: "sqladmin.googleapis.com/Instance"}).Do()
-			return err
-		}},
-		{"a vault with encryptionConfig", "Cloud KMS", func() error {
-			_, err := l.BackupVaults.Create(loc, &backupdr.BackupVault{BackupMinimumEnforcedRetentionDuration: "86400s",
-				EncryptionConfig: &backupdr.EncryptionConfig{KmsKeyName: "projects/p/locations/us-central1/keyRings/r/cryptoKeys/k"}}).BackupVaultId("cmek").Do()
 			return err
 		}},
 	} {
