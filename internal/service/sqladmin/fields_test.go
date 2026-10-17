@@ -457,3 +457,59 @@ func TestSQLReplicaKey(t *testing.T) {
 		t.Errorf("a cross-region replica with its region's key: %v %+v", err, far)
 	}
 }
+
+// settings.retainBackupsOnDelete keeps an instance's backups after delete,
+// and settings.finalBackupConfig takes a FINAL backup on a delete that does
+// not say (#1538).
+func TestSQLRetainBackupsAndFinalBackupConfig(t *testing.T) {
+	ts, _ := fieldsServer(t)
+	base := ts.URL + "/v1/projects/proj/instances"
+	backups := func() string {
+		_, body := call(t, "GET", ts.URL+"/v1/projects/proj/backups", "")
+		return body
+	}
+	waitDone := func(name string) {
+		t.Helper()
+		for i := 0; i < 300; i++ {
+			if code, _ := call(t, "GET", base+"/"+name, ""); code == 404 {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("%s was not deleted", name)
+	}
+	for _, c := range []struct{ name, settings, want string }{
+		{"keep", `"retainBackupsOnDelete":true`, `"ON_DEMAND"`},
+		{"final", `"finalBackupConfig":{"enabled":true,"retentionDays":7}`, `"FINAL"`},
+		{"none", `"storageAutoResize":true`, ""},
+	} {
+		if code, resp := call(t, "POST", base, `{"name":"`+c.name+`","databaseVersion":"POSTGRES_17","settings":{"tier":"t",`+c.settings+`}}`); code != 200 {
+			t.Fatalf("insert %s = %d %s", c.name, code, resp)
+		}
+		getRunnable(t, base+"/"+c.name)
+		if c.name == "keep" {
+			if code, resp := call(t, "POST", base+"/keep/backupRuns", `{"description":"kept"}`); code != 200 {
+				t.Fatalf("backupRuns.insert = %d %s", code, resp)
+			}
+			for i := 0; i < 300 && !strings.Contains(backups(), "kept"); i++ {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		for i := 0; i < 300; i++ {
+			code, _ := call(t, "DELETE", base+"/"+c.name, "")
+			if code == 200 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		waitDone(c.name)
+		got := backups()
+		has := strings.Contains(got, `"instance":"`+c.name+`"`)
+		if c.want == "" && has {
+			t.Errorf("%s: a backup was kept: %s", c.name, got)
+		}
+		if c.want != "" && (!has || !strings.Contains(got, c.want)) {
+			t.Errorf("%s: want a %s backup kept: %s", c.name, c.want, got)
+		}
+	}
+}
