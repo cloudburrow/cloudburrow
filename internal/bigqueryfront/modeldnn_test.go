@@ -50,7 +50,7 @@ func TestDNNOneStepByHand(t *testing.T) {
 	o.ModelType, o.Optimizer, o.Activation, o.LearnRate, o.MaxIterations = "DNN_REGRESSOR", "SGD", "TANH", 0.1, 1
 	o.HiddenUnits = []int{2}
 	var tr mlTrained
-	tr.trainDNN(o, X, Y, nil, nil, false, 1)
+	_ = tr.trainDNN(o, X, Y, nil, nil, false, 1)
 
 	// The initial weights, drawn as trainDNN draws them.
 	rng := rand.New(rand.NewSource(1548))
@@ -215,4 +215,180 @@ func TestParseDNNOptions(t *testing.T) {
 			t.Errorf("%s: %d, want 400", bad, code)
 		}
 	}
+}
+
+// dnnInitByHand draws a network's initial weights as trainDNN does
+// (Glorot uniform from the seed 1548, a layer's fan-in the width of the
+// one before it).
+func dnnInitByHand(fn string, sizes []int) *dnnTrained {
+	rng := rand.New(rand.NewSource(1548))
+	d := &dnnTrained{Activation: fn}
+	for l := 1; l < len(sizes); l++ {
+		fanIn := sizes[l-1]
+		if l > 1 {
+			fanIn = dnnWidth(fn, sizes[l-1])
+		}
+		limit := math.Sqrt(6 / float64(fanIn+sizes[l]))
+		ly := dnnLayer{W: make([][]float64, sizes[l]), B: make([]float64, sizes[l])}
+		for j := range ly.W {
+			ly.W[j] = make([]float64, fanIn)
+			for i := range ly.W[j] {
+				ly.W[j][i] = (2*rng.Float64() - 1) * limit
+			}
+		}
+		d.Layers = append(d.Layers, ly)
+	}
+	return d
+}
+
+// eachWeight calls f with a pointer to each weight and bias of d, and the
+// same one of e.
+func eachWeight(d, e *dnnTrained, f func(name string, p, q *float64)) {
+	for l, ly := range d.Layers {
+		for j := range ly.B {
+			for i := range ly.W[j] {
+				f(strconv.Itoa(l)+"/"+strconv.Itoa(j)+"/"+strconv.Itoa(i), &ly.W[j][i], &e.Layers[l].W[j][i])
+			}
+			f(strconv.Itoa(l)+"/"+strconv.Itoa(j)+"/b", &ly.B[j], &e.Layers[l].B[j])
+		}
+	}
+}
+
+// TestDNNOptionsOneStepByHand (#1562): one SGD step with CRELU, with
+// class weights (a binary classifier, its rows' log loss weighted), and
+// of an autoencoder with l1_reg_activation, each against the gradient by
+// central differences of the loss written out here; and one FTRL step
+// against TensorFlow's update in closed form.
+func TestDNNOptionsOneStepByHand(t *testing.T) {
+	X := [][]float64{{1, -0.5, 0.25}, {1, 1.5, -1}, {1, 0.75, 0.5}}
+	const h = 1e-6
+	check := func(what string, o mlOptions, Y []float64, classifier bool, sizes []int, loss func(d *dnnTrained) float64, classes []string) {
+		t.Helper()
+		tr := mlTrained{Classes: classes}
+		if fe := tr.trainDNN(o, X, Y, nil, nil, classifier, 1); fe != nil {
+			t.Fatalf("%s: %v", what, fe.msg)
+		}
+		init := dnnInitByHand(o.Activation, sizes)
+		eachWeight(init, tr.DNN, func(name string, p, q *float64) {
+			w0 := *p
+			*p = w0 + h
+			up := loss(init)
+			*p = w0 - h
+			down := loss(init)
+			*p = w0
+			if want := w0 - o.LearnRate*(up-down)/(2*h); math.Abs(*q-want) > 1e-7 {
+				t.Errorf("%s: weight %s after one step: %v, want %v", what, name, *q, want)
+			}
+		})
+	}
+	base := func(typ string) mlOptions {
+		o := defaultMLOptions()
+		o.ModelType, o.Optimizer, o.LearnRate, o.MaxIterations = typ, "SGD", 0.1, 1
+		return o
+	}
+
+	// CRELU: a hidden layer of 2 units is 4 wide.
+	o := base("DNN_REGRESSOR")
+	o.Activation, o.HiddenUnits = "CRELU", []int{2}
+	Y := []float64{1, -2, 0.5}
+	check("CRELU", o, Y, false, []int{2, 2, 1}, func(d *dnnTrained) float64 {
+		var s float64
+		for i, x := range X {
+			l0 := d.Layers[0]
+			var hid []float64
+			for j := range l0.B {
+				hid = append(hid, math.Max(l0.B[j]+dot(l0.W[j], x[1:]), 0))
+			}
+			for j := range l0.B {
+				hid = append(hid, math.Max(-(l0.B[j]+dot(l0.W[j], x[1:])), 0))
+			}
+			z := d.Layers[1].B[0] + dot(d.Layers[1].W[0], hid)
+			s += (z - Y[i]) * (z - Y[i])
+		}
+		return s / float64(len(X))
+	}, nil)
+	d := dnnInitByHand("CRELU", []int{2, 2, 1})
+	from, added := d.dnnFrom("src", []string{"a", "b"})
+	if len(added) != 5 || !strings.Contains(from, "_cbml_h0_3") {
+		t.Errorf("CRELU dnnFrom: %v %s", added, from)
+	}
+
+	// Class weights: label "no" 0.25, "yes" 3.
+	o = base("DNN_CLASSIFIER")
+	o.Activation, o.HiddenUnits = "TANH", []int{2}
+	o.ClassWeights = map[string]float64{"no": 0.25, "yes": 3}
+	Yc := []float64{1, 0, 1}
+	cw := []float64{0.25, 3}
+	check("class weights", o, Yc, true, []int{2, 2, 1}, func(d *dnnTrained) float64 {
+		var s float64
+		for i, x := range X {
+			q := sigmoid(d.forward(x[1:])[0])
+			s += -cw[int(Yc[i])] * (Yc[i]*math.Log(q) + (1-Yc[i])*math.Log(1-q))
+		}
+		return s / float64(len(X))
+	}, []string{"no", "yes"})
+	// auto_class_weights: 3 / (rows of the class · 2).
+	o.ClassWeights, o.AutoClassWeights = nil, true
+	aw := []float64{3.0 / 2, 3.0 / 4}
+	check("auto class weights", o, Yc, true, []int{2, 2, 1}, func(d *dnnTrained) float64 {
+		var s float64
+		for i, x := range X {
+			q := sigmoid(d.forward(x[1:])[0])
+			s += -aw[int(Yc[i])] * (Yc[i]*math.Log(q) + (1-Yc[i])*math.Log(1-q))
+		}
+		return s / float64(len(X))
+	}, []string{"no", "yes"})
+	o.AutoClassWeights, o.ClassWeights = false, map[string]float64{"no": 1}
+	var tr mlTrained
+	tr.Classes = []string{"no", "yes"}
+	if fe := tr.trainDNN(o, X, Yc, nil, nil, true, 1); fe == nil || fe.code != 400 {
+		t.Errorf("a class with no weight: %v", fe)
+	}
+
+	// An autoencoder's l1_reg_activation on its latent layer, the middle
+	// of [3, 1, 3].
+	o = base("AUTOENCODER")
+	o.Activation, o.HiddenUnits, o.L1Activation = "TANH", []int{3, 1, 3}, 0.5
+	check("l1_reg_activation", o, nil, false, []int{2, 3, 1, 3, 2}, func(d *dnnTrained) float64 {
+		var s float64
+		for _, x := range X {
+			z, acts := d.forwardActs(x[1:])
+			for k := range z {
+				s += (z[k] - x[1+k]) * (z[k] - x[1+k]) / 2
+			}
+			s += 0.5 * math.Abs(acts[1][0])
+		}
+		return s / float64(len(X))
+	}, nil)
+
+	// FTRL: n = 0.1 + g², z = g - (√n - √0.1)/lr · w0, w1 = -z · lr / √n.
+	o = base("DNN_REGRESSOR")
+	o.Optimizer, o.Activation, o.HiddenUnits = "FTRL", "TANH", []int{2}
+	tr = mlTrained{}
+	if fe := tr.trainDNN(o, X, Y, nil, nil, false, 1); fe != nil {
+		t.Fatal(fe.msg)
+	}
+	init := dnnInitByHand("TANH", []int{2, 2, 1})
+	mse := func(d *dnnTrained) float64 {
+		var s float64
+		for i, x := range X {
+			z := d.forward(x[1:])[0]
+			s += (z - Y[i]) * (z - Y[i])
+		}
+		return s / float64(len(X))
+	}
+	eachWeight(init, tr.DNN, func(name string, p, q *float64) {
+		w0 := *p
+		*p = w0 + h
+		up := mse(init)
+		*p = w0 - h
+		down := mse(init)
+		*p = w0
+		g := (up - down) / (2 * h)
+		n := 0.1 + g*g
+		z := g - (math.Sqrt(n)-math.Sqrt(0.1))/o.LearnRate*w0
+		if want := -z * o.LearnRate / math.Sqrt(n); math.Abs(*q-want) > 1e-7 {
+			t.Errorf("FTRL: weight %s after one step: %v, want %v", name, *q, want)
+		}
+	})
 }

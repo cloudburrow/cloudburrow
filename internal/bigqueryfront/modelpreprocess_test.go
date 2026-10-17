@@ -35,7 +35,8 @@ func TestRewritePreprocess(t *testing.T) {
 		t.Errorf("learned: %s", got)
 	}
 	for sql, want := range map[string]int{
-		"SELECT ML.HASH_BUCKETIZE(x, 4) FROM t":                              501,
+		"SELECT ML.HASH_BUCKETIZE(x) FROM t":                                 400,
+		"SELECT ML.HASH_BUCKETIZE(x, 4) OVER () FROM t":                      400,
 		"SELECT ML.LABEL_ENCODER(x) FROM t":                                  400,
 		"SELECT ML.ONE_HOT_ENCODER(x, 'all') OVER () FROM t":                 400,
 		"SELECT ML.ONE_HOT_ENCODER(x, d) OVER () FROM t":                     501,

@@ -214,6 +214,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.runScript(w, r, q, insert) // #1417, location.go: SCHEMATA read in its turn
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && !txnRequest(r) && schemataInTurnTemp(q.Query) &&
+		f.runTempScript(w, r, q, insert) { // #1562, location.go: in a TEMP script's session
+		return
+	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
 		refs := informationSchemaJobs(q.Query)
 		if links := unqualifiedSchemataLinks(q.Query, projectOf(f.base)); len(links) > 0 { // #1392, infoschemaprivileges.go
@@ -229,7 +233,7 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
-	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && refuseUndrop(w, q) { // #1460, #1483: a dry run, unserved.go
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && f.dryRunSchemaDDL(w, r, q, insert) { // #1562, schemaddldry.go
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.undropSchema(w, r, q, insert) { // #1460, dropped.go

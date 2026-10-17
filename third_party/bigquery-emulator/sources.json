@@ -110,7 +110,8 @@
         "patches/googlesqlite/0065-change-update-flag-name.patch",
         "patches/googlesqlite/0066-function-body-column-ids.patch",
         "patches/googlesqlite/0071-syntax-error-position.patch",
-        "patches/googlesqlite/0072-runtime-error-messages.patch"
+        "patches/googlesqlite/0072-runtime-error-messages.patch",
+        "patches/googlesqlite/0067-integer-mod.patch"
       ]
     },
     {

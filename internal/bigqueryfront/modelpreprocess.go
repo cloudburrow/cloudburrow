@@ -66,8 +66,15 @@ import (
 // The vocabulary functions, ML.LABEL_ENCODER, ML.ONE_HOT_ENCODER,
 // ML.MULTI_HOT_ENCODER, ML.BAG_OF_WORDS and ML.TF_IDF, are modelvocab.go's.
 //
-// Refused 501 with the reason: ML.HASH_BUCKETIZE (a hash function BigQuery
-// does not name), the
+// #1562 adds ML.HASH_BUCKETIZE(string_expression, hash_bucket_size),
+// row-local: FARM_FINGERPRINT(string_expression), read as an unsigned
+// 64-bit number, modulo hash_bucket_size, or the fingerprint itself where
+// hash_bucket_size is 0. BigQuery's page does not name its hash; FarmHash
+// Fingerprint64 read unsigned gives its documented example (a, b, c, d in
+// 3 buckets: 0, 1, 1, 2), which no signed reading does (UNVERIFIED beyond
+// that example).
+//
+// Refused 501 with the reason: the
 // output_format argument of ML.BUCKETIZE and ML.QUANTILE_BUCKETIZE other
 // than bucket_names, and IMPUTER strategies other than mean. Any other
 // ML.<name>(...) of no MODEL is left to the engine.
@@ -75,9 +82,7 @@ import (
 
 // mlPreprocessUnserved are the ML functions of no model CloudBurrow
 // refuses, and why.
-var mlPreprocessUnserved = map[string]string{
-	"HASH_BUCKETIZE": "its hash function is BigQuery's, which its documentation does not name",
-}
+var mlPreprocessUnserved = map[string]string{}
 
 // mlStats are a column's statistics a TRANSFORM learned: quant its
 // quantiles at the fractions asked for (PERCENTILE_DISC's).
@@ -196,13 +201,13 @@ func splitTopLevel(toks []token) [][]token {
 // as SQL.
 var mlPreprocessServed = map[string]bool{"BUCKETIZE": true, "POLYNOMIAL_EXPAND": true, "FEATURE_CROSS": true, "DISTANCE": true, "LP_NORM": true,
 	"NORMALIZER": true, "STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true,
-	"QUANTILE_BUCKETIZE": true, "ROBUST_SCALER": true, "NGRAMS": true}
+	"QUANTILE_BUCKETIZE": true, "ROBUST_SCALER": true, "NGRAMS": true, "HASH_BUCKETIZE": true}
 
 var mlAnalytic = map[string]bool{"STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true,
 	"QUANTILE_BUCKETIZE": true, "ROBUST_SCALER": true}
 
 // mlServedList names the preprocessing functions CloudBurrow answers.
-const mlServedList = "ML.BUCKETIZE, ML.QUANTILE_BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, ML.NGRAMS, ML.STANDARD_SCALER, " +
+const mlServedList = "ML.BUCKETIZE, ML.QUANTILE_BUCKETIZE, ML.HASH_BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, ML.NGRAMS, ML.STANDARD_SCALER, " +
 	"ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM, ML.NORMALIZER, " +
 	"ML.LABEL_ENCODER, ML.ONE_HOT_ENCODER, ML.MULTI_HOT_ENCODER, ML.BAG_OF_WORDS and ML.TF_IDF"
 
@@ -343,6 +348,11 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 		norm := fmt.Sprintf("(SELECT POW(SUM(POW(ABS(CAST(_cbml_b AS FLOAT64)), %s)), 1 / %s) FROM UNNEST(%s) AS _cbml_b)", sqlF(p), sqlF(p), a)
 		return fmt.Sprintf("IF(%s IS NULL, NULL, ARRAY(SELECT SAFE_DIVIDE(CAST(_cbml_a AS FLOAT64), %s) FROM UNNEST(%s) AS _cbml_a WITH OFFSET _cbml_o ORDER BY _cbml_o))",
 			a, norm, a), 0, ""
+	case "HASH_BUCKETIZE":
+		if c, m := nargs(2, 2); c != 0 {
+			return "", c, m
+		}
+		return mlHashBucketizeSQL(args[0], args[1]), 0, ""
 	case "LP_NORM":
 		if c, m := nargs(2, 2); c != 0 {
 			return "", c, m
@@ -701,4 +711,18 @@ func mlQuantileSQL(fn string, args []string, window string, learn mlLearn) (stri
 		out = "SAFE_DIVIDE(" + out + ", " + quant[2] + " - " + quant[1] + ")"
 	}
 	return out, 0, ""
+}
+
+// mlHashBucketizeSQL is ML.HASH_BUCKETIZE(s, n): the unsigned reading of
+// FARM_FINGERPRINT(s), u = (f & (2^63 - 1)) + (2^63 if f < 0), modulo n,
+// written with every intermediate below 2n so nothing overflows; with n 0,
+// the fingerprint. A negative n is an error, as BigQuery's page requires
+// n >= 0.
+func mlHashBucketizeSQL(s, n string) string {
+	f := "FARM_FINGERPRINT((" + s + "))"
+	return fmt.Sprintf("(SELECT CASE WHEN _cbml_n IS NULL OR _cbml_f IS NULL THEN NULL "+
+		"WHEN _cbml_n < 0 THEN ERROR('ML.HASH_BUCKETIZE: hash_bucket_size must be greater than or equal to 0') "+
+		"WHEN _cbml_n = 0 THEN _cbml_f "+
+		"ELSE MOD(MOD(_cbml_f & 9223372036854775807, _cbml_n) + IF(_cbml_f < 0, MOD(MOD(9223372036854775807, _cbml_n) + 1, _cbml_n), 0), _cbml_n) END "+
+		"FROM (SELECT %s AS _cbml_f, CAST((%s) AS INT64) AS _cbml_n))", f, n)
 }
