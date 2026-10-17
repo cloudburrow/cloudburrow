@@ -115,12 +115,12 @@ func TestBigQueryJobTimes(t *testing.T) {
 	var jobs []timed
 	run := func(name string, start func() (*bigquery.Job, error)) {
 		t.Helper()
-		before := time.Now()
+		before := advanceBigQueryClock(t, h, 0) // the instance's clock, #1487
 		job, err := start()
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		after := time.Now()
+		after := advanceBigQueryClock(t, h, 0)
 		jobs = append(jobs, timed{name, job, before, after})
 	}
 	run("upload", func() (*bigquery.Job, error) {
@@ -182,7 +182,7 @@ func TestBigQueryJobListPagesAndFilters(t *testing.T) {
 	c, _ := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
 	ctx := h.Context()
-	start := time.Now().Add(-time.Millisecond)
+	start := advanceBigQueryClock(t, h, 0).Add(-time.Millisecond) // the instance's clock, #1487
 	var ids []string
 	for _, sql := range []string{"SELECT 1", "CREATE TABLE " + ds.DatasetID + ".ctas AS SELECT 1 AS a", "SELECT 3"} {
 		job, err := c.Query(sql).Run(ctx)
@@ -194,7 +194,7 @@ func TestBigQueryJobListPagesAndFilters(t *testing.T) {
 		}
 		ids = append(ids, job.ID())
 	}
-	end := time.Now().Add(time.Millisecond)
+	end := advanceBigQueryClock(t, h, 0).Add(time.Millisecond)
 	list := func(configure func(*bigquery.JobIterator)) []string {
 		t.Helper()
 		it := c.Jobs(ctx)

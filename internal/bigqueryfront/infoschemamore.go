@@ -143,7 +143,7 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 			return "", http.StatusInternalServerError, "cloudburrow: could not read the range partitioning of " + name
 		}
 		tier := "CAST(NULL AS STRING)"
-		if ms, err := strconv.ParseInt(fmt.Sprint(t["creationTime"]), 10, 64); err == nil && time.Since(time.UnixMilli(ms)) < 90*24*time.Hour {
+		if ms, err := strconv.ParseInt(fmt.Sprint(t["creationTime"]), 10, 64); err == nil && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
 			tier = "'ACTIVE'"
 		}
 		head := sqlString(project) + " AS table_catalog, " + sqlString(dataset) + " AS table_schema, " + sqlString(name) +

@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Parquet loads the front carries out itself (#1004, #1005, #1006).
@@ -506,7 +505,7 @@ func (f front) startParquetJob(w http.ResponseWriter, r *http.Request) (*ownJob,
 		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
 		return nil, false
 	}
-	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: time.Now()}, true
+	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: f.now()}, true
 }
 
 // widenedValue is the SQL of expr, a value of the table's field o, as one

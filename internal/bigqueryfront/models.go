@@ -66,6 +66,16 @@ type bqModels struct {
 	models map[string]*bqModel
 	path   string
 	logf   func(string, ...any)
+	// now is the instance's clock (#1487); nil is the system's.
+	now func() time.Time
+}
+
+// clock is the time now by m.now.
+func (m *bqModels) clock() time.Time {
+	if m.now == nil {
+		return time.Now()
+	}
+	return m.now()
 }
 
 func modelsStateFile(dir string) string { return filepath.Join(dir, "models.json") }
@@ -142,7 +152,7 @@ func (m *bqModels) get(project, dataset, id string) (bqModel, bool) {
 	if !ok {
 		return bqModel{}, false
 	}
-	if md.Expiration > 0 && md.Expiration <= time.Now().UnixMilli() {
+	if md.Expiration > 0 && md.Expiration <= m.clock().UnixMilli() {
 		delete(m.models, modelKey(project, dataset, id))
 		m.saveLocked()
 		return bqModel{}, false
@@ -182,7 +192,7 @@ func (m *bqModels) list(project, dataset string) []bqModel {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	now := time.Now().UnixMilli()
+	now := m.clock().UnixMilli()
 	var out []bqModel
 	for k, md := range m.models {
 		if md.Project != project || md.Dataset != dataset {
@@ -547,7 +557,7 @@ func (f front) serveModels(w http.ResponseWriter, r *http.Request) bool {
 				return true
 			}
 		}
-		md.Modified = time.Now().UnixMilli()
+		md.Modified = f.now().UnixMilli()
 		f.models.put(md)
 		writeJSON(w, http.StatusOK, md.resource(true))
 	case http.MethodPut:
@@ -1159,7 +1169,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			return true
 		}
 		if !dry {
-			now := time.Now().UnixMilli()
+			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: d.opts.ModelType, Created: now, Modified: now,
 				Location: loc, Options: d.opts, Trained: trained, Query: d.query, Transform: d.transform})
 		}

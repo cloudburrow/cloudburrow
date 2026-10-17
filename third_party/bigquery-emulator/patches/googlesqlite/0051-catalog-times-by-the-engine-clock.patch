@@ -1,0 +1,237 @@
+CloudBurrow patch 51 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1487). Applies after patch 0047; needs patch
+0044.
+
+Patch 0044 gave the engine a clock, the system's moved forward by the
+offset CloudBurrow's front sets when it advances its own, and
+CURRENT_TIMESTAMP() and the change times read it; but the catalog still
+stamped a table's, view's and function's creation and update times by
+the system clock, so INFORMATION_SCHEMA.TABLES' creation_time read
+another clock than CURRENT_TIMESTAMP(), as did the year a CAST ... FORMAT
+without one defaults to and UNIX_TIMESTAMP(). The patch reads the
+engine's clock there too (the catalog's sync time with them, so that the
+catalog still finds each update), and adds googlesqlite.Now, that clock,
+which bigquery-emulator patch 0041 stamps the times it reports by.
+clock_times_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/clock.go
++++ b/clock.go
+@@ -15,3 +15,9 @@
+ 
+ // ClockOffset is the offset SetClockOffset set.
+ func ClockOffset() time.Duration { return clock.Offset() }
++
++// Now is the time now by the engine's clock (CloudBurrow patch,
++// cloudburrow/cloudburrow#1487): the emulator stamps the times it reports
++// (a dataset's, table's or job's) by it, so that they read the front's
++// clock too.
++func Now() time.Time { return clock.Now() }
+--- a/internal/cast.go
++++ b/internal/cast.go
+@@ -12,6 +12,7 @@
+ 	"github.com/goccy/go-json"
+ 
+ 	"github.com/goccy/googlesqlite/internal/castformat"
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -274,7 +275,7 @@
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		t, err := castformat.ParseDatetime(s, k, format, loc, time.Now())
++		t, err := castformat.ParseDatetime(s, k, format, loc, clock.Now()) // CloudBurrow patch (#1487): the front's clock
+ 		if err != nil {
+ 			return nil, err
+ 		}
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -12,6 +12,7 @@
+ 
+ 	googlesql "github.com/goccy/go-googlesql"
+ 	"github.com/goccy/go-json"
++	"github.com/goccy/googlesqlite/internal/clock"
+ )
+ 
+ var (
+@@ -1911,7 +1912,7 @@
+ 	if err := c.createCatalogTablesIfNotExists(ctx, conn); err != nil {
+ 		return fmt.Errorf("failed to create catalog tables: %w", err)
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	rows, err := conn.QueryContext(
+ 		ctx,
+ 		`SELECT name, kind, spec FROM googlesqlite_catalog WHERE updatedAt >= @lastUpdatedAt`,
+@@ -2196,7 +2197,7 @@
+ 	if err != nil {
+ 		return fmt.Errorf("failed to encode table spec: %w", err)
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	kind := string(TableSpecKind)
+ 	if spec.IsView {
+ 		kind = string(ViewSpecKind)
+@@ -2220,7 +2221,7 @@
+ 	if err != nil {
+ 		return fmt.Errorf("failed to encode TVF spec: %w", err)
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+@@ -2240,7 +2241,7 @@
+ 	if err != nil {
+ 		return fmt.Errorf("failed to encode function spec: %w", err)
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+--- a/internal/functions/timestamp/unix_seconds.go
++++ b/internal/functions/timestamp/unix_seconds.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"time"
+ 
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/functions/helper"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+@@ -24,7 +25,7 @@
+ // instant as Unix seconds; with one arg it behaves like UNIX_SECONDS.
+ func BindMysqlUnixTimestamp(args ...value.Value) (value.Value, error) {
+ 	if len(args) == 0 {
+-		return UNIX_SECONDS(time.Now().UTC())
++		return UNIX_SECONDS(clock.Now().UTC()) // CloudBurrow patch (#1487): the front's clock
+ 	}
+ 	return BindUnixSeconds(args...)
+ }
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -10,6 +10,7 @@
+ 
+ 	googlesql "github.com/goccy/go-googlesql"
+ 	"github.com/goccy/go-json"
++	"github.com/goccy/googlesqlite/internal/clock"
+ )
+ 
+ // protoNameFromDebug strips the "PROTO<...>" / "ENUM<...>" wrapper that
+@@ -622,7 +623,7 @@
+ 			body = bodyQuery
+ 		}
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	return &FunctionSpec{
+ 		IsTemp:    resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+ 		NamePath:  namePath.mergePath(m1(stmt.NamePath())),
+@@ -690,7 +691,7 @@
+ 		}
+ 		body = bodyQuery
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	return &FunctionSpec{
+ 		IsTemp:    resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+ 		NamePath:  namePath.mergePath(m1(stmt.NamePath())),
+@@ -756,7 +757,7 @@
+ }
+ 
+ func newTableSpecWithQuery(ctx context.Context, namePath *NamePath, query string, stmt *googlesql.ResolvedCreateTableStmt) *TableSpec {
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	isTemp := resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp
+ 	// CREATE TABLE IF NOT EXISTS may name a table that exists without the
+ 	// column (made by CREATE TABLE ... AS SELECT), which SQLite then
+@@ -887,7 +888,7 @@
+ 		})
+ 	}
+ 	body := fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(projections, ","), innerBody)
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	return &TVFSpec{
+ 		IsTemp:        resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+ 		NamePath:      namePath.mergePath(m1(stmt.NamePath())),
+@@ -912,7 +913,7 @@
+ 			fmt.Sprintf("`%s#%d` AS `%s`", refColumnName, colID, colName),
+ 		)
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	return &TableSpec{
+ 		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+ 		IsView:     true,
+@@ -936,7 +937,7 @@
+ 			fmt.Sprintf("`%s#%d` AS `%s`", refColumnName, colID, colName),
+ 		)
+ 	}
+-	now := time.Now()
++	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+ 	return &TableSpec{
+ 		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+ 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
+--- /dev/null
++++ b/clock_times_test.go
+@@ -0,0 +1,52 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++	"time"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestCatalogTimesReadTheEngineClock is CloudBurrow's regression test of
++// its patch 0051 (cloudburrow/cloudburrow#1487): a table's creation time,
++// which INFORMATION_SCHEMA.TABLES reports, and the year a CAST ... FORMAT
++// without one defaults to were the system clock's, where every other time
++// the engine reports reads the offset SetClockOffset sets; and Now is
++// that clock.
++func TestCatalogTimesReadTheEngineClock(t *testing.T) {
++	googlesqlite.SetClockOffset(400 * 24 * time.Hour)
++	defer googlesqlite.SetClockOffset(0)
++	if d := time.Until(googlesqlite.Now()); d < 399*24*time.Hour {
++		t.Fatalf("Now is %v ahead, want 400 days", d)
++	}
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	if _, err := db.ExecContext(ctx, "CREATE TABLE `ds.t` (id INT64)"); err != nil {
++		t.Fatal(err)
++	}
++	var created string
++	if err := db.QueryRowContext(ctx, "SELECT creation_time FROM ds.INFORMATION_SCHEMA.TABLES WHERE table_name = 't'").Scan(&created); err != nil {
++		t.Fatal(err)
++	}
++	at, err := time.Parse("2006-01-02 15:04:05.999999 MST", created)
++	if err != nil {
++		t.Fatalf("creation_time %q: %v", created, err)
++	}
++	if d := time.Until(at); d < 399*24*time.Hour {
++		t.Errorf("creation_time %s is %v ahead, want 400 days", created, d)
++	}
++	var year int64
++	if err := db.QueryRowContext(ctx, "SELECT EXTRACT(YEAR FROM CAST('03-04' AS DATE FORMAT 'MM-DD'))").Scan(&year); err != nil {
++		t.Fatal(err)
++	}
++	if want := int64(googlesqlite.Now().Year()); year != want {
++		t.Errorf("CAST('03-04' AS DATE FORMAT 'MM-DD') is in %d, want %d", year, want)
++	}
++}

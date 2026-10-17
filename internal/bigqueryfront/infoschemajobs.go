@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Region-qualified INFORMATION_SCHEMA.JOBS, JOBS_BY_PROJECT and
@@ -344,11 +343,11 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			var msg string
 			switch {
 			case key == "JOBS":
-				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, time.Now()))
+				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, f.now()))
 			case projectViews[key] != nil: // #1375, projectoptions.go
 				sub = projectViews[key](f, location)
 			case hierarchyJobsViews[key]: // #1392, infoschemahierarchy.go
-				sub, status, msg = f.hierarchyJobsRows(r, key, pushedJobsFilter(q.Query, refs, time.Now()))
+				sub, status, msg = f.hierarchyJobsRows(r, key, pushedJobsFilter(q.Query, refs, f.now()))
 			case key == "TABLE_STORAGE":
 				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, inRegion(location, front.storageRows))
 			default: // the region's datasets alone (#1375, projectoptions.go)

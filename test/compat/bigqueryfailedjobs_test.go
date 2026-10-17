@@ -30,7 +30,7 @@ func TestBigQueryFailedQueriesAreJobs(t *testing.T) {
 	ctx := h.Context()
 	ds := validationDataset(t, h, c)
 	mark := fmt.Sprintf("m1397_%d", time.Now().UnixNano())
-	start := time.Now().Add(-time.Second)
+	start := advanceBigQueryClock(t, h, 0).Add(-time.Second) // the instance's clock, #1487
 	const n = 3
 	wantErr := map[string]string{} // the query's kind: what its error says
 	for i := range n {

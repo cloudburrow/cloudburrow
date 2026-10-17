@@ -665,6 +665,22 @@ func plainTable(got []byte) bool {
 	return json.Unmarshal(got, &t) == nil && (t.Type == "" || t.Type == "TABLE")
 }
 
+// syncEngine sets the engine's clock to the front's again, as when the
+// engine restarted (#1487), whose clock is then the system's. It does
+// nothing while the clock was never advanced; a failure, as while the
+// engine is still down, is logged, and the next advance sets it again.
+func (s *streamBuffers) syncEngine(engine http.Handler, logf func(string, ...any)) {
+	if s == nil || engine == nil || s.offset.Load() == 0 {
+		return
+	}
+	r, err := http.NewRequest(http.MethodPost, "/cloudburrow/clock", nil)
+	if err == nil {
+		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" && logf != nil {
+			logf("bigquery front: setting the engine's clock to the front's: %s", msg)
+		}
+	}
+}
+
 // syncEngineClock sets the engine's clock offset to offset nanoseconds
 // (serveClock), or says why it could not.
 func syncEngineClock(r *http.Request, engine http.Handler, offset int64) string {

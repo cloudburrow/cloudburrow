@@ -119,7 +119,7 @@ func TestBigQueryInformationSchemaJobs(t *testing.T) {
 		if r := byID[queryJob.ID()]; r == nil || r[1] != "QUERY" || r[2] != "SELECT" || r[3] != "DONE" || r[4] != "SELECT 1275 AS n" ||
 			r[5] != project || r[6] != "jobs" {
 			t.Errorf("insert=%v: the query job's row %v", insert, r)
-		} else if ct, ok := r[9].(time.Time); !ok || time.Since(ct) > time.Hour || time.Since(ct) < -time.Minute {
+		} else if ct, ok := r[9].(time.Time); !ok || advanceBigQueryClock(t, h, 0).Sub(ct) > time.Hour || advanceBigQueryClock(t, h, 0).Sub(ct) < -time.Minute { // #1487
 			t.Errorf("insert=%v: creation_time %v", insert, r[9])
 		}
 		if r := byID[dmlJob.ID()]; r == nil || r[2] != "INSERT" || r[7] != int64(2) {
