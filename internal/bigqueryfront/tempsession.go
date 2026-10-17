@@ -116,6 +116,9 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 		i++
 		kind := ""
 		switch {
+		case i+1 < len(body) && body[i].is("TABLE") && body[i+1].is("FUNCTION"):
+			kind = "function" // a TEMP table function (#1459)
+			i++
 		case i < len(body) && body[i].is("TABLE"):
 			kind = "table"
 		case i < len(body) && body[i].is("FUNCTION"):
