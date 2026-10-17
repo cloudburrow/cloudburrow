@@ -44,8 +44,8 @@
         "patches/bigquery-emulator/0045-ranges-in-a-record.patch",
         "patches/bigquery-emulator/0049-column-collation.patch",
         "patches/bigquery-emulator/0064-list-jobs-after-one.patch",
-        "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch",
-        "patches/bigquery-emulator/0051-nested-collation.patch"
+        "patches/bigquery-emulator/0051-nested-collation.patch",
+        "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch"
       ]
     },
     {

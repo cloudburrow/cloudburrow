@@ -125,7 +125,7 @@ Authors.
  	// builtins (LAX_*, EDIT_DISTANCE, MAX_BY / MIN_BY, etc.)
 --- a/internal/catalog.go
 +++ b/internal/catalog.go
-@@ -2468,7 +2468,7 @@
+@@ -2522,7 +2522,7 @@
  		// ingestion-time pseudo-columns (applyIngestionPartitionRewrite)
  		// are pseudo-columns, which SELECT * leaves out.
  		// CloudBurrow patch (#1508): a collated column's annotation.
@@ -134,7 +134,7 @@ Authors.
  			columns = append(columns, col)
  		} else {
  			columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, isIngestionPseudoColumn(column.Name), true)))
-@@ -2533,7 +2533,7 @@
+@@ -2587,7 +2587,7 @@
  		if err != nil {
  			return nil, err
  		}

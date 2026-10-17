@@ -19,7 +19,7 @@ CloudBurrow Authors.
 
 --- a/server/handler.go
 +++ b/server/handler.go
-@@ -2483,7 +2483,7 @@
+@@ -2516,7 +2516,7 @@
  }
  
  func (h *routinesGetHandler) Handle(ctx context.Context, r *routinesGetRequest) (*bigqueryv2.Routine, error) {
@@ -28,7 +28,7 @@ CloudBurrow Authors.
  }
  
  func (h *routinesInsertHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-@@ -2527,6 +2527,12 @@
+@@ -2560,6 +2560,12 @@
  	}
  	defer tx.RollbackIfNotCommitted()
  	if err := r.server.contentRepo.AddRoutineByMetaData(ctx, tx, r.routine); err != nil {
@@ -41,7 +41,7 @@ CloudBurrow Authors.
  		return nil, err
  	}
  	if err := tx.Commit(); err != nil {
-@@ -2559,14 +2565,18 @@
+@@ -2592,14 +2598,18 @@
  }
  
  func (h *routinesListHandler) Handle(ctx context.Context, r *routinesListRequest) (*bigqueryv2.ListRoutinesResponse, error) {
