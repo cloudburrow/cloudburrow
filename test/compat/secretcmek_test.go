@@ -20,7 +20,8 @@ import (
 )
 
 // cmekKeys creates, through the official Cloud KMS client, a key ring in
-// each location with one ENCRYPT_DECRYPT key "k" (and "k2" in global), and
+// each location with one ENCRYPT_DECRYPT key "k" (and "k2" in global and
+// us-central1, for the regional secrets of #1519), and
 // returns the key names by location. Key rings cannot be deleted, so the
 // ring ID is unique to the run.
 func cmekKeys(t *testing.T, h *Harness, kc *kms.KeyManagementClient, locations ...string) map[string]string {
@@ -34,7 +35,7 @@ func cmekKeys(t *testing.T, h *Harness, kc *kms.KeyManagementClient, locations .
 			t.Fatalf("CreateKeyRing in %s: %v", l, err)
 		}
 		ids := []string{"k"}
-		if l == "global" {
+		if l == "global" || l == "us-central1" {
 			ids = append(ids, "k2")
 		}
 		for _, id := range ids {

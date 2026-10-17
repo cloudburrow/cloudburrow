@@ -534,6 +534,14 @@ func (p secretsProvider) ListFiltered(ctx context.Context, project, filter strin
 
 	sf := &console.ServerFilter{Value: filter, Placeholder: "labels.env=prod AND name:app", Help: secretsFilterHelp}
 	all, err := st.ListSecretsFiltered(project, filter)
+	if err == nil {
+		// The project's regional secrets (#1519), location by location,
+		// under the same filter.
+		var regional []secrets.Secret
+		if regional, err = st.ListRegionalSecretsFiltered(project, filter); err == nil {
+			all = append(all, regional...)
+		}
+	}
 	if err != nil {
 		if filter == "" {
 			return console.Listing{}, err
@@ -541,7 +549,7 @@ func (p secretsProvider) ListFiltered(ctx context.Context, project, filter strin
 		// A refused filter is reported on the box, with no rows, so the
 		// screen keeps the box to correct it in.
 		sf.Error = err.Error()
-		return console.Listing{Columns: []string{"Versions", "Created", "Expires"}, Noun: "secrets", ServerFilter: sf}, nil
+		return console.Listing{Columns: []string{"Location", "Versions", "Created", "Expires"}, Noun: "secrets", ServerFilter: sf}, nil
 	}
 	items := make([]console.Resource, 0, len(all))
 	for _, s := range all {
@@ -549,14 +557,19 @@ func (p secretsProvider) ListFiltered(ctx context.Context, project, filter strin
 		if !s.Expire.IsZero() {
 			expires = s.Expire.Format(time.RFC3339)
 		}
-		versions, vErr := st.ListVersions(project, lastSegment(s.Name))
+		versions, vErr := st.ListVersions(secretAt(project, s.Name))
 		count := "—"
 		if vErr == nil {
 			count = fmt.Sprint(len(versions))
 		}
+		location := "global"
+		if _, l := secrets.SplitScope(secretScope(project, s.Name)); l != "" {
+			location = l
+		}
 		items = append(items, console.Resource{
 			Name: s.Name,
 			Fields: map[string]string{
+				"Location": location,
 				"Versions": count,
 				"Created":  s.Created.Format(time.RFC3339),
 				"Expires":  expires,
@@ -564,9 +577,27 @@ func (p secretsProvider) ListFiltered(ctx context.Context, project, filter strin
 		})
 	}
 	return console.Listing{
-		Columns: []string{"Versions", "Created", "Expires"}, Noun: "secrets", Items: items, Total: len(items),
+		Columns: []string{"Location", "Versions", "Created", "Expires"}, Noun: "secrets", Items: items, Total: len(items),
 		ServerFilter: sf,
 	}, nil
+}
+
+// secretAt is the Store scope and ID of the secret a console path names
+// (#1519): a regional secret's full name, projects/P/locations/L/secrets/S
+// in the chosen project, is RegionalScope(P, L) and S; anything else is the
+// project's global secret of name's last segment.
+func secretAt(project, name string) (string, string) {
+	return secretScope(project, name), lastSegment(name)
+}
+
+// secretScope is the scope part of secretAt.
+func secretScope(project, name string) string {
+	if scope, _, err := secrets.ParseSecretName(name); err == nil {
+		if p, l := secrets.SplitScope(scope); p == project && l != "" {
+			return scope
+		}
+	}
+	return project
 }
 
 func lastSegment(name string) string {
@@ -1846,7 +1877,7 @@ func (p secretsProvider) Delete(_ context.Context, project, name string) error {
 	if st == nil {
 		return fmt.Errorf("Secret Manager has not started")
 	}
-	return st.DeleteSecret(project, lastSegment(name))
+	return st.DeleteSecret(secretAt(project, name))
 }
 
 func postJSON(ctx context.Context, url string, body []byte) error {
@@ -3654,7 +3685,8 @@ func bucketConfigSection(b bucketMeta) console.Section {
 // current, and when did it change" is the entire question.
 func (p secretsProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) == 2 {
-		return p.versionDetail(project, lastSegment(path[0]), path[1])
+		scope, id := secretAt(project, path[0])
+		return p.versionDetail(scope, id, path[1])
 	}
 	if len(path) > 2 {
 		return console.DeeperThan(2, path), nil
@@ -3667,7 +3699,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
 	}
 
-	id := lastSegment(path[0])
+	project, id := secretAt(project, path[0])
 	secret, err := st.GetSecret(project, id)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the secret: " + err.Error()}, nil
@@ -3859,7 +3891,7 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 	}
 	switch len(path) {
 	case 1:
-		sec, err := st.GetSecret(project, lastSegment(path[0]))
+		sec, err := st.GetSecret(secretAt(project, path[0]))
 		if err != nil {
 			return nil
 		}
@@ -3875,11 +3907,12 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
 		// exist only to fail, so neither is drawn.
-		v, err := st.GetVersion(project, lastSegment(path[0]), path[1])
+		scope, id := secretAt(project, path[0])
+		v, err := st.GetVersion(scope, id, path[1])
 		if err != nil {
 			return nil
 		}
-		sec, err := st.GetSecret(project, lastSegment(path[0]))
+		sec, err := st.GetSecret(scope, id)
 		if err != nil {
 			return nil
 		}
@@ -3910,7 +3943,7 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 	if project == "" {
 		return fmt.Errorf("choose a project first")
 	}
-	id := lastSegment(path[0])
+	project, id := secretAt(project, path[0])
 
 	switch action {
 	case "addversion":
@@ -3967,7 +4000,7 @@ func (p secretsProvider) Reveal(_ context.Context, project string, path []string
 	if project == "" {
 		return "", "", fmt.Errorf("choose a project first")
 	}
-	id := lastSegment(path[0])
+	project, id := secretAt(project, path[0])
 	v, err := st.AccessVersion(project, id, path[1])
 	if err != nil {
 		return "", "", err
@@ -4002,7 +4035,7 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if err != nil {
 		return err
 	}
-	id := lastSegment(path[0])
+	project, id := secretAt(project, path[0])
 	current, err := st.GetSecret(project, id)
 	if err != nil {
 		return err
@@ -4133,6 +4166,11 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 		{Name: "locations", Label: "Locations", Type: "text", Section: "Replication policy",
 			Pattern: `^[a-z0-9\-]+(\s*,\s*[a-z0-9\-]+)*$`,
 			Help:    "User-managed only: the replica locations, comma-separated, for example us-east1, europe-west1."},
+		{Name: "location", Label: "Location", Type: "text", Section: "Replication policy",
+			Pattern: `^[a-z0-9\-]*$`,
+			Help: "Optional. A region, for example us-central1, makes a regional secret (#1519), served as " +
+				"secretmanager.{location}.rep.googleapis.com serves it: its data stays in that location, it has no " +
+				"replication policy, and its customer-managed key must be in that location. Empty is a global secret."},
 		secretKMSKeysField(),
 	}
 }
@@ -4176,6 +4214,11 @@ func secretReplication(values map[string]string) (string, []string, error) {
 // replicationProperties shows a secret's replication policy as it was
 // created: the policy, and a user-managed secret's replica locations.
 func replicationProperties(sec secrets.Secret) []console.Property {
+	if sec.Regional() && len(sec.ReplicaLocations) == 1 {
+		// A regional secret (#1519) has no replication policy.
+		return []console.Property{{Label: "Policy", Value: "None: a regional secret"},
+			{Label: "Location", Value: sec.ReplicaLocations[0]}}
+	}
 	if sec.Replication != "user-managed" {
 		return []console.Property{{Label: "Policy", Value: replicationAutomatic}}
 	}
@@ -4218,6 +4261,14 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		return "", err
 	}
 	id := strings.TrimSpace(values["secretId"])
+	if loc := strings.TrimSpace(values["location"]); loc != "" {
+		// A regional secret (#1519): no replication policy, and its one
+		// replica is its location.
+		if kind != "automatic" {
+			return "", fmt.Errorf("a regional secret has no replication policy; leave it Automatic with no locations")
+		}
+		project, kind, locations = secrets.RegionalScope(project, loc), "user-managed", []string{loc}
+	}
 	keys, err := secretKMSKeysValue(values["kmsKeys"], kind, locations)
 	if err != nil {
 		return "", err

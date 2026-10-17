@@ -53,6 +53,13 @@ var terraformEndpoints = []terraformEndpoint{
 	// Secret Manager (#365): a secret and its *_iam_member apply, plan clean
 	// and destroy in TestTerraformAppliesAndDestroysThroughTheWrapper.
 	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Regional secrets (#1519): the provider's base path is
+	// secretmanager.{{location}}.rep.googleapis.com, and the resources'
+	// URLs carry projects/{project}/locations/{location}, so the one port
+	// serves every location. google_secret_manager_regional_secret, its
+	// _version and _iam_member, _binding and _policy apply, plan clean,
+	// update and destroy in TestTerraformRegionalSecret.
+	{config.ServiceSecrets, "secret_manager_regional_custom_endpoint", "GOOGLE_SECRET_MANAGER_REGIONAL_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Cloud Run v1 (#1293, #1304), the Knative-style API on the same port:
 	// google_cloud_run_domain_mapping applies, becomes Ready, plans clean

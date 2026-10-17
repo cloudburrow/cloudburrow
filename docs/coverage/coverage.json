@@ -207,8 +207,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
-          "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
-          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
+          "test/compat/secretcmek_test.go:244 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
@@ -219,8 +220,9 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
-          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
+          "test/compat/secretcmek_test.go:244 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -232,9 +234,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
-          "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
-          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
+          "test/compat/secretcmek_test.go:244 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
@@ -256,6 +259,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -268,6 +272,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
@@ -278,6 +283,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -296,6 +302,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
@@ -306,6 +313,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
@@ -315,8 +323,9 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
+          "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
@@ -337,7 +346,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
+          "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -349,6 +359,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
       },
@@ -357,6 +368,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10"
@@ -376,6 +388,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
@@ -386,6 +399,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -394,9 +408,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
-          "test/compat/secretcmek_test.go:200 TestGcloudSecretsCMEK",
-          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
+          "test/compat/secretcmek_test.go:201 TestGcloudSecretsCMEK",
+          "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretregional_test.go:217 TestTerraformRegionalSecret",
+          "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",

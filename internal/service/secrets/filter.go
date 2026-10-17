@@ -649,3 +649,17 @@ func (s *Store) ListSecretsFiltered(project, filter string) ([]Secret, error) {
 	}
 	return filterList(all, f), nil
 }
+
+// ListRegionalSecretsFiltered is ListSecretsFiltered over the project's
+// regional secrets in every location (#1519), ordered by name.
+func (s *Store) ListRegionalSecretsFiltered(project, filter string) ([]Secret, error) {
+	f, err := parseSecretFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	all, err := s.ListRegionalSecrets(project)
+	if err != nil {
+		return nil, err
+	}
+	return filterList(all, f), nil
+}

@@ -144,7 +144,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 Closed: `RotateSecret`, `EnableManagedRotation` and `Secret.rotation` (#1215), `Secret.expire_time`
 / `ttl` (#1225), `ListSecrets` / `ListSecretVersions` filters (#1228), `Secret.topics` event
 notifications to Pub/Sub (#1259), and `Secret.rotation` schedules and `version_destroy_ttl`
-delayed destruction (#1278). IAM conditions are excluded (below).
+delayed destruction (#1278), and regional secrets with their CMEK, gcloud, Terraform and console
+(#1519). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
