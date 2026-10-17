@@ -187,14 +187,14 @@ func (p bigtableInstancesProvider) backupsListing(ctx context.Context, project, 
 		list.Items = append(list.Items, console.Resource{Name: id,
 			Fields: map[string]string{"Cluster": cluster, "Source table": lastSegment(b.GetSourceTable()),
 				"Expires": b.GetExpireTime().AsTime().UTC().Format("2006-01-02 15:04 MST"), "Size": strconv.FormatInt(b.GetSizeBytes(), 10) + " bytes"},
-			Actions: backupActions(), ActsOn: []string{instance, bigtableBackupsSegment, cluster + ":" + id}})
+			Actions: bigtableBackupActions(), ActsOn: []string{instance, bigtableBackupsSegment, cluster + ":" + id}})
 	}
 	list.Total = len(list.Items)
 	list.Note = "A backup is a copy of its table's rows, kept by the Bigtable front; it outlives the table, and Restore writes it into a new table."
 	return list
 }
 
-func backupActions() []console.Action {
+func bigtableBackupActions() []console.Action {
 	return []console.Action{
 		{ID: "restorebackup", Label: "Restore", Fields: []console.Field{{Name: "table", Label: "New table ID", Type: "text", Required: true}}},
 		{ID: "editexpiry", Label: "Edit expiry", Fields: []console.Field{{Name: "days", Label: "Expire after (days)", Type: "text", Required: true, Default: "7", Help: "From now; 1 to 90."}}},

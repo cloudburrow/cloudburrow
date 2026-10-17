@@ -6352,31 +6352,31 @@
     "Key": "firestoreadmin",
     "Title": "Firestore Admin API",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 17
+      "Unimplemented": 7,
+      "Verified": 25
     },
     "rows": [
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CloneDatabase",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
@@ -6398,23 +6398,23 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackup",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
@@ -6436,7 +6436,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6444,7 +6444,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6452,31 +6452,31 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ExportDocuments",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackup",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules"
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules"
         ]
       },
       {
@@ -6506,33 +6506,33 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ImportDocuments",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListDatabases",
@@ -6561,7 +6561,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6569,23 +6569,23 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
@@ -6670,6 +6670,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
+          "test/compat/datastoregql_test.go:84 TestDatastoreExplain",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]

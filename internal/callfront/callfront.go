@@ -154,6 +154,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	restUpstream := fs.String("rest-upstream", "", "the emulator's second (REST) address, on the pod's loopback")
 	// The Firestore Admin API, served by the front itself (#1331).
 	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
+	// The instance's Cloud Storage, which Firestore exports are written to
+	// and imports read from (#1500).
+	storage := fs.String("storage", "", "the instance's Cloud Storage base URL, for Firestore exports and imports")
 	// The query RPCs the emulator does not serve, answered by the front
 	// from calls it does (#1405).
 	// The Spanner instance updates the emulator refuses, answered by the
@@ -187,7 +190,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		icpts = append(icpts, queryfront.NewFirestore(*upstream))
 	}
 	if *firestoreAdmin {
-		icpts = append(icpts, firestoreadmin.New(*upstream))
+		fa := firestoreadmin.New(*upstream)
+		fa.SetStorage(*storage)
+		fa.Start(ctx)
+		icpts = append(icpts, fa)
 	}
 	if *spannerInstances {
 		si, err := spannerfront.New(*upstream)

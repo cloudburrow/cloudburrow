@@ -117,6 +117,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 					s == config.ServiceFirestore || s == config.ServiceDatastore {
 					b.Front.Image = c.storageImage
 				}
+				// Firestore's exports and imports go through the
+				// instance's Cloud Storage (#1500).
+				if s == config.ServiceFirestore && c.enabled(config.ServiceStorage) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {
 					b.Image = c.bigQueryImage

@@ -566,7 +566,7 @@ func (p bigtableInstancesProvider) DetailActions(ctx context.Context, project st
 	}
 	switch path[1] {
 	case bigtableBackupsSegment:
-		return backupActions()
+		return bigtableBackupActions()
 	case bigtableLogicalSegment:
 		return sqlViewActions(false)
 	case bigtableMaterializedSegment:

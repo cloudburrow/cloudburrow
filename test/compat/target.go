@@ -193,7 +193,8 @@ var gcloudOverrides = []struct {
 	// And the SINK_ names, which the emulators shard exports for the
 	// Logging sinks' tests beside BigQuery (#1404). LOGGING_RESOURCEMANAGER:
 	// the served shard's Resource Manager, for the Logging folder tests.
-	{"storage", []string{"STORAGE", "RUN_STORAGE", "SINK_STORAGE"}},
+	// FIRESTORE_STORAGE: the emulators shard's, for Firestore's exports (#1500).
+	{"storage", []string{"STORAGE", "RUN_STORAGE", "SINK_STORAGE", "FIRESTORE_STORAGE"}},
 	{"pubsub", []string{"PUBSUB", "SINK_PUBSUB"}},
 	{"cloudkms", []string{"KMS"}},
 	{"secretmanager", []string{"SECRETS"}},

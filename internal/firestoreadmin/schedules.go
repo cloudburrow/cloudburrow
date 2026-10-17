@@ -17,8 +17,7 @@ import (
 // Backup schedules (#1461) are stored and returned as Google returns them,
 // with Google's limits: a database has at most one daily and one weekly
 // schedule, a daily one keeps its backups up to 7 days and a weekly one up
-// to 14 weeks. They take no backups: the emulator cannot snapshot a
-// database, so backups stay refused (noBackups).
+// to 14 weeks. They take backups (backups.go).
 
 var scheduleNameRe = regexp.MustCompile(`^(projects/[^/]+/databases/[^/]+)/backupSchedules/([^/]+)$`)
 
@@ -56,8 +55,8 @@ func checkSchedule(s *adminpb.BackupSchedule) error {
 
 func daily(s *adminpb.BackupSchedule) bool { return s.GetDailyRecurrence() != nil }
 
-// CreateBackupSchedule stores a schedule for an existing database.
-func (a *Admin) CreateBackupSchedule(_ context.Context, req *adminpb.CreateBackupScheduleRequest) (*adminpb.BackupSchedule, error) {
+// createSchedule stores a schedule for an existing database.
+func (a *Admin) createSchedule(req *adminpb.CreateBackupScheduleRequest) (*adminpb.BackupSchedule, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	db, err := a.database(req.GetParent())
@@ -185,5 +184,6 @@ func (a *Admin) DeleteBackupSchedule(_ context.Context, req *adminpb.DeleteBacku
 		return nil, err
 	}
 	delete(a.schedules, s.Name)
+	delete(a.lastBackup, s.Name)
 	return &emptypb.Empty{}, nil
 }
