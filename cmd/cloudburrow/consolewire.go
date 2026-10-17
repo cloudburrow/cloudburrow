@@ -147,7 +147,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, sp,
 			storageDeletedProvider{endpoint: storageAddr},
-			storageSettingsProvider{endpoint: storageAddr})
+			storageSettingsProvider{endpoint: storageAddr},
+			// Storage Intelligence (#1519): the project's, the
+			// organization's and each folder's configuration.
+			storageIntelligenceProvider{endpoint: storageAddr, registry: d.projects})
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Four screens of one product: topics, every subscription of the

@@ -172,7 +172,7 @@ var areas = []area{
 	// descriptor, under the name clients call.
 	// Storage Control's IntelligenceConfig methods (#1519) are on the same
 	// port; its Anywhere Cache methods are named by the JSON API's rows.
-	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods(), Extra: gcs.ControlGRPCMethods()},
+	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: append(gcs.GRPCMethods(), gcs.ControlGRPCMethods()...)},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
 	// otherwise. Bigtable's instance admin service (#1331) is the Bigtable

@@ -20,7 +20,7 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 5 | 0 | 4 | 1 | 0 |
+| Cloud Storage | 6 | 1 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 2 | 0 | 1 | 0 | 1 |
@@ -28,14 +28,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 5 | 0 | 2 | 2 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
-| Resource Manager | 0 | 0 | 0 | 0 | 0 |
+| Resource Manager | 1 | 0 | 0 | 1 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 30 | 10 | 12 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 4 | 3 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **60** | **14** | **27** | **13** | **6** |
+| **Total** | **62** | **15** | **27** | **14** | **6** |
 
 ## Cloud Storage
 
@@ -43,7 +43,8 @@ Closed: `objects.bulkRestore` (#1279), `buckets.operations.list` filters (#1280)
 and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel delivery on an `up`
 instance (#1290), the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), the gRPC
 `google.storage.v2` API (#1321), and its customer-supplied encryption keys, ACLs, managed-folder
-IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345). ACLs
+IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345), and
+Storage Control's intelligence configurations, stored with nothing acting on them (#1519). ACLs
 and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
@@ -52,6 +53,7 @@ and object IAM on the JSON API are excluded (below).
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) (#1505) | no emulator support (no cache tier) | S |
 | `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) (#1505) | no emulator support (no cache tier) | M |
 | Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) (#1505) | no emulator support (needs Pub/Sub) | S |
+| Storage Intelligence: a project or folder that inherits takes the local organization's configuration, never its folder's, as the storage server does not see the hierarchy (#1519) (#1532) | not built yet | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
@@ -157,9 +159,12 @@ delayed destruction (#1278), and regional secrets with their CMEK, gcloud, Terra
 Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org policy on projects
 (#1296), and regional tag bindings and effective tags through the
 `{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
-and never enforced (#1368).
+and never enforced (#1368); folder capabilities (`app-management`), stored with nothing acting on
+them (#1519).
 
-No gap is left open here.
+| Gap | Why open | Size |
+|---|---|---|
+| An app-enabled folder (`app-management` capability) gets no management project: Google creates one, with an undocumented project ID, and `managementProject` stays empty (#1519) (#1532) | not documented by Google | S |
 
 ## Vertex AI
 

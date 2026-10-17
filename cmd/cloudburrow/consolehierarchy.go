@@ -160,6 +160,14 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 	if f.DeleteTime != "" {
 		props = append(props, console.Property{Label: "Deleted", Value: consoleTime(f.DeleteTime)})
 	}
+	// folders.capabilities.get (#1519).
+	if c, err := p.registry.FolderCapability(f.ID(), appManagement); err == nil {
+		v := "Disabled"
+		if c.Value {
+			v = "Enabled"
+		}
+		props = append(props, console.Property{Label: "App management", Value: v})
+	}
 	children := console.Listing{NameColumn: "Folder ID", Columns: []string{"Name"}, Noun: "folders"}
 	for _, c := range all {
 		if c.Parent == f.Name && c.State == resourcemanager.StateActive {
@@ -205,7 +213,13 @@ func (p hierarchyProvider) Edit(_ context.Context, _ string, path []string, valu
 const (
 	folderMove     = "move"
 	folderUndelete = "undelete"
+	// The app-management capability's actions (#1519).
+	folderAppOn  = "enable-app-management"
+	folderAppOff = "disable-app-management"
 )
+
+// appManagement is the one folder capability (folders.capabilities).
+const appManagement = "app-management"
 
 // DetailActions offers Move folder on an active folder and Undelete folder
 // on one pending deletion.
@@ -220,10 +234,14 @@ func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []str
 	if f.State == resourcemanager.StateDeleteRequested {
 		return []console.Action{{ID: folderUndelete, Label: "Undelete folder"}}
 	}
+	app := console.Action{ID: folderAppOn, Label: "Enable app management"}
+	if c, err := p.registry.FolderCapability(f.ID(), appManagement); err == nil && c.Value {
+		app = console.Action{ID: folderAppOff, Label: "Disable app management"}
+	}
 	return append([]console.Action{{ID: folderMove, Label: "Move folder", Fields: []console.Field{
 		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions(f.Name), Default: f.Parent,
 			Help: "The organization, or a folder that is not this one or under it."},
-	}}}, tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)
+	}}, app}, tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)
 }
 
 func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
@@ -239,6 +257,10 @@ func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, act
 		_, err = p.registry.MoveFolder(path[0], values["parent"])
 	case folderUndelete:
 		_, err = p.registry.UndeleteFolder(path[0])
+	case folderAppOn, folderAppOff:
+		// folders.capabilities.patch: stored, nothing acts on it (App Hub
+		// is not served).
+		_, err = p.registry.SetFolderCapability(strings.TrimPrefix(path[0], "folders/"), appManagement, action == folderAppOn)
 	default:
 		err = fmt.Errorf("unknown action %q", action)
 	}

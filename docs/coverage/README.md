@@ -17,7 +17,7 @@ Do not edit these files by hand.
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 38 | 0 | 0 | 0 | 0 | 38 | 0 |
 | [Cloud KMS](kms.md) | 62 | 60 | 0 | 2 | 0 | 0 | 0 | 86 |
-| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 52 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 26 | 12 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -25,7 +25,7 @@ Do not edit these files by hand.
 | [Memorystore for Redis](memorystore.md) | 66 | 22 | 0 | 43 | 1 | 0 | 0 | 2 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 78 | 0 | 9 | 0 | 0 | 0 | 22 |
-| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 22 | 0 | 0 | 2 | 0 | 0 | 0 |
+| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 28 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 17 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |

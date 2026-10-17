@@ -3054,9 +3054,25 @@
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects, Folders, Organizations, Tags)",
     "counts": {
-      "Verified": 52
+      "Verified": 54
     },
     "rows": [
+      {
+        "method": "cloudresourcemanager.folders.capabilities.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:328 TestResourceManagerFolderCapabilities",
+          "test/compat/storageintelligence_test.go:389 TestTerraformResourceManagerCapability"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.folders.capabilities.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:328 TestResourceManagerFolderCapabilities",
+          "test/compat/storageintelligence_test.go:389 TestTerraformResourceManagerCapability"
+        ]
+      },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/CreateFolder",
         "status": "Verified",
@@ -6382,7 +6398,7 @@
     "Title": "Cloud Storage (gRPC API v2)",
     "counts": {
       "Implemented": 2,
-      "Verified": 22
+      "Verified": 28
     },
     "rows": [
       {
@@ -6569,6 +6585,57 @@
         "tests": [
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
+        ]
+      },
+      {
+        "method": "google.storage.control.v2.StorageControl/GetFolderIntelligenceConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:145 TestGcloudStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+        ]
+      },
+      {
+        "method": "google.storage.control.v2.StorageControl/GetOrganizationIntelligenceConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+        ]
+      },
+      {
+        "method": "google.storage.control.v2.StorageControl/GetProjectIntelligenceConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:145 TestGcloudStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+        ]
+      },
+      {
+        "method": "google.storage.control.v2.StorageControl/UpdateFolderIntelligenceConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:145 TestGcloudStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+        ]
+      },
+      {
+        "method": "google.storage.control.v2.StorageControl/UpdateOrganizationIntelligenceConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs"
+        ]
+      },
+      {
+        "method": "google.storage.control.v2.StorageControl/UpdateProjectIntelligenceConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageintelligence_test.go:145 TestGcloudStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
         ]
       }
     ]

@@ -127,7 +127,7 @@ func TestConsoleResourceHierarchy(t *testing.T) {
 	}
 	// Move folder offers neither the folder itself nor one under it.
 	moves := h.DetailActions(ctx, "", []string{eng})
-	if len(moves) != 1 || len(moves[0].Fields[0].Options) != 1 {
+	if len(moves) != 2 || moves[0].ID != folderMove || len(moves[0].Fields[0].Options) != 1 {
 		t.Errorf("Engineering's Move folder = %+v; want only the organization", moves)
 	}
 	if err := h.ActAt(ctx, "", []string{team}, folderMove, map[string]string{"parent": resourcemanager.OrganizationName}); err != nil {

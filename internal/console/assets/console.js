@@ -84,6 +84,8 @@ const ROUTES = [
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
   // The project's Firestore databases, each with its settings, indexes and
