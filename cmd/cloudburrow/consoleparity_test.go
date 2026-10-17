@@ -526,6 +526,15 @@ var parityRows = []parityRow{
 		Provider: "projects", Offers: "Liens on a project's page, Add lien (restrictions, reason, origin), Remove lien; Delete project is refused while a lien restricts it (#1295)",
 		Tests: []string{"TestConsoleTagsAndLiens", "TestResourceManagerLiens"}},
 
+	// Memorystore for Redis Cluster (#1519)
+	{Resource: "Memorystore Redis clusters", Service: "memorystore",
+		Methods:  []string{"CloudRedisCluster/ListClusters", "CloudRedisCluster/GetCluster", "CloudRedisCluster/CreateCluster", "CloudRedisCluster/UpdateCluster", "CloudRedisCluster/DeleteCluster"},
+		Provider: "memorystore-clusters", Offers: "Memorystore Redis Cluster page: clusters list (location, discovery endpoint, shards, replicas, node type, capacity, state); Create cluster (ID, region, shards, replicas per shard, node type, PSC network, Redis configs), waiting for it to form; a cluster's page with its discovery endpoint and configuration; Edit (shards, replicas per shard, node type, deletion protection), each change waited for; Delete (#1519)",
+		Tests: []string{"TestConsoleRedisCluster"}},
+	{Resource: "Memorystore Redis cluster CA", Service: "memorystore",
+		Methods:  []string{"CloudRedisCluster/GetClusterCertificateAuthority"},
+		Excluded: "no cluster here has in-transit encryption, so there is no CA to show; the cluster's page shows its In-transit encryption mode"},
+
 	// Memorystore for Redis (#1302)
 	{Resource: "Memorystore instances", Service: "memorystore",
 		Methods:  []string{"CloudRedis/ListInstances", "CloudRedis/GetInstance", "CloudRedis/CreateInstance", "CloudRedis/UpdateInstance", "CloudRedis/DeleteInstance"},

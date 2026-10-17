@@ -114,6 +114,9 @@ const ROUTES = [
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
   { path: "/memorystore", service: "memorystore", title: "Memorystore", section: "Databases" },
+  // Memorystore for Redis Cluster (#1519), a page of its own beside the
+  // instances, as the Memorystore console's Redis Cluster tab is.
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore Redis Cluster", section: "Databases" },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading

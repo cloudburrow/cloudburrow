@@ -258,3 +258,39 @@ volume are written by Valkey, in the cluster, and are not encrypted by CloudBurr
 served while the key can be used); an export is a plain RDB file, as Memorystore protects an
 export with the destination bucket's own CMEK, not the instance's. The console's instance page
 shows **Encryption** (the key) and, while suspended, **Suspension reasons**.
+
+## 8. Memorystore for Redis Cluster (#1519)
+
+`google.cloud.redis.cluster.v1.CloudRedisCluster` is served on the same admin port as the
+instances, gRPC and JSON, with the same operations. A cluster is a real Redis Cluster: `shard_count`
+primaries with `replica_count` replicas each, every node a Valkey server in cluster mode, a
+Deployment and Service of its own, the 16384 slots spread evenly over the primaries.
+
+```sh
+gcloud redis clusters create orders --region=us-central1 --shard-count=3 --replica-count=1 \
+  --node-type=redis-shared-core-nano --network=projects/PROJECT/global/networks/default
+gcloud redis clusters describe orders --region=us-central1 --format='value(discoveryEndpoints[0])'
+```
+
+Start a cluster client (go-redis `ClusterClient`, redis-py `RedisCluster`, Lettuce, ...) from the
+`discoveryEndpoints[0]` address and port: it reads `CLUSTER SLOTS` and follows MOVED to every node.
+Each node serves clients on one port that is the same in the cluster and on the host, and
+announces the host's address to clients (`cluster-announce-client-ipv4`); the nodes gossip on
+their pod addresses (bus port 16379). A client inside the Kubernetes cluster therefore gets host
+addresses from `CLUSTER SLOTS`, which it cannot reach: in the cluster, reach the nodes by pod
+address.
+
+`UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
+them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or
+forgets replicas; `node_type` sets each node's `maxmemory` (1.4, 6.5, 13 or 58 GB) and
+`redis_configs` are set on every running node. Shards and replicas change in separate updates,
+as Google requires. Terraform's `google_redis_cluster` works through `redis_custom_endpoint`, and
+the console has a Memorystore Redis Cluster page.
+
+Not served: in-transit encryption (`SERVER_AUTHENTICATION` is 501), token auth, backups, ACL
+policies, cross-cluster replication and CMEK. `AUTH_MODE_IAM_AUTH` is kept and returned, but no
+IAM token is checked: the nodes take connections without AUTH. After a restart of CloudBurrow a
+cluster is formed again, empty.
+
+Memorystore for Valkey (`memorystore.googleapis.com`) is not served yet: its official Go client
+is not a dependency of CloudBurrow (#1519).
