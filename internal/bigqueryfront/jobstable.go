@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,15 +53,26 @@ import (
 // never makes a table: one dropped (the emulator restarted, a write
 // failed) waits for the next query.
 //
-// A background sync lists every job, which costs the emulator more with
+// A background sync listed every job, which costs the engine more with
 // each job made (#1525): measured on one instance with 2,100 jobs, a
-// list took 0.33 s, and one is sent each second jobs are made, so with
-// some 6,000 jobs the syncs ran back to back and the engine served the
-// client's loads and queries between them. So a background sync runs
-// no sooner than jobsTableIdle times as long as the last one took after
-// it ended: the engine spends at most a fifth or so of its time on them,
-// however many jobs there are. What a query reads is unchanged, as it
-// still syncs first.
+// list took 0.33 s, and one is sent each second jobs are made. Waiting
+// after each sync four times as long as it took kept the engine free,
+// but let the table fall behind in a burst, and the first query after
+// one wrote what the background had not (the first COUNT(*) after 3,273
+// jobs made in 54 s took 2.0 s). So a background sync is incremental
+// (#1528), and runs jobsTableDelay after a job is made again: it lists
+// only the jobs the engine added after the last one the previous list of
+// the table ended with (the cursor), and the jobs the front was told of
+// since (jobs.insert, jobs.query, a script's parent and children, the
+// front's own jobs, jobs.cancel and jobs.delete: noteMade) or whose row
+// was not DONE when written, which may have finished since, with one
+// jobs.list of bigquery-emulator patch 0064 (engineJobs). The jobs.list
+// path gives them their times, failures, configuration and texts as it
+// gives every job's, and lists the front's own jobs whole, so each row is
+// the one a full list writes; a job asked for and not listed is gone, and
+// its row deleted. A sync then costs what the jobs new or changed since
+// the last do. A query still lists every job and writes what differs, so
+// it reads every job however a job was made or changed.
 
 // jobsTableName is the table of JOBS rows in resultsDataset. It does not
 // begin with scratchPrefix, so queryResults takes it for no scratch table
@@ -79,10 +91,6 @@ const jobsTableBatch = 1000
 // waited longer, and the first query after 5,000 jobs took 20 s.)
 var jobsTableDelay = time.Second
 
-// jobsTableIdle is how many times as long as the last background sync
-// took the next waits, at least, after it (above).
-const jobsTableIdle = 4
-
 // jobsTable is what the front wrote to each project's table of JOBS rows.
 type jobsTable struct {
 	mu sync.Mutex
@@ -91,16 +99,63 @@ type jobsTable struct {
 	// or the emulator restarted.
 	rows map[string]map[string]string
 
-	// bg guards queued and made, apart from mu, which a sync holds
-	// while it writes.
+	// open are the IDs of the rows written of jobs not DONE, by
+	// project, which a background sync reads again.
+	open map[string]map[string]bool
+	// cursor is the ID of the last job the engine listed when each
+	// project's table was last written: the next background sync asks
+	// for the jobs added after it.
+	cursor map[string]string
+
+	// bg guards queued, made and pending, apart from mu, which a sync
+	// holds while it writes.
 	bg sync.Mutex
 	// queued are the projects a background sync waits to run for.
 	queued map[string]bool
 	// made are the projects whose table is made (rows has them).
 	made map[string]bool
-	// after is when each project's next background sync may run, by
-	// how long the last took (jobsTableIdle).
-	after map[string]time.Time
+	// pending are the IDs of the jobs made since the last background
+	// sync, by project, for those whose table is made.
+	pending map[string]map[string]bool
+}
+
+// jobsPendingMax is the most job IDs pending keeps of a project, which a
+// background sync names in its jobs.list's URL; past it the background
+// leaves the changes of jobs it already wrote to the next query, which
+// lists every job (the new ones it lists after the cursor).
+const jobsPendingMax = 2000
+
+// noteMade records that the job was made or changed, for the next
+// background sync of its project's table, when it is made.
+func (j *jobsTable) noteMade(project, id string) {
+	if j == nil || id == "" {
+		return
+	}
+	j.bg.Lock()
+	defer j.bg.Unlock()
+	if !j.made[project] {
+		return
+	}
+	if j.pending == nil {
+		j.pending = map[string]map[string]bool{}
+	}
+	p := j.pending[project]
+	if p == nil {
+		p = map[string]bool{}
+		j.pending[project] = p
+	}
+	if len(p) < jobsPendingMax {
+		p[id] = true
+	}
+}
+
+// takePending returns and forgets the project's pending IDs.
+func (j *jobsTable) takePending(project string) map[string]bool {
+	j.bg.Lock()
+	defer j.bg.Unlock()
+	p := j.pending[project]
+	delete(j.pending, project)
+	return p
 }
 
 // reset forgets the tables: the emulator restarted, and has none.
@@ -109,10 +164,10 @@ func (j *jobsTable) reset() {
 		return
 	}
 	j.mu.Lock()
-	j.rows = nil
+	j.rows, j.open, j.cursor = nil, nil, nil
 	j.mu.Unlock()
 	j.bg.Lock()
-	j.made = nil
+	j.made, j.pending = nil, nil
 	j.bg.Unlock()
 }
 
@@ -122,6 +177,7 @@ func (j *jobsTable) setMade(project string, made bool) {
 	defer j.bg.Unlock()
 	if !made {
 		delete(j.made, project)
+		delete(j.pending, project)
 		return
 	}
 	if j.made == nil {
@@ -145,24 +201,12 @@ func (j *jobsTable) soon(project string, sync func()) {
 		j.queued = map[string]bool{}
 	}
 	j.queued[project] = true
-	delay := jobsTableDelay
-	if wait := time.Until(j.after[project]); wait > delay {
-		delay = wait
-	}
 	j.bg.Unlock()
-	time.AfterFunc(delay, func() {
+	time.AfterFunc(jobsTableDelay, func() {
 		j.bg.Lock()
 		delete(j.queued, project)
 		j.bg.Unlock()
-		start := time.Now()
 		sync()
-		took := time.Since(start)
-		j.bg.Lock()
-		if j.after == nil {
-			j.after = map[string]time.Time{}
-		}
-		j.after[project] = time.Now().Add(jobsTableIdle * took)
-		j.bg.Unlock()
 	})
 }
 
@@ -178,9 +222,13 @@ func jobsTablePath() string {
 
 // sync writes the project's table so that it holds rows (job ID to the
 // row's SQL), new ones in the order of ids, and reports whether it does;
-// a table not made is made only when create is true. No order of a
-// query's rows is promised without ORDER BY.
-func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string, rows map[string]string, create bool) bool {
+// a table not made is made only when create is true. open are the IDs of
+// rows of jobs not DONE, last the job the engine's list ended with. With
+// asked nil, rows are every job's; else they are some jobs', those asked
+// for among them if they are still there: the row of a job asked for and
+// not in rows is deleted, and the others are left as they are. No order of a query's rows is
+// promised without ORDER BY.
+func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string, rows map[string]string, open, asked map[string]bool, last string, create bool) bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	run := func(sql string) bool {
@@ -210,7 +258,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 	var gone []string
 	var add []string
 	for id, row := range have {
-		if now, ok := rows[id]; !ok || now != row {
+		if now, ok := rows[id]; ok && now != row || !ok && (asked == nil || asked[id]) {
 			gone = append(gone, id)
 		}
 	}
@@ -221,6 +269,8 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 	}
 	fail := func() bool {
 		delete(j.rows, project) // made again by the next query
+		delete(j.open, project)
+		delete(j.cursor, project)
 		j.setMade(project, false)
 		return false
 	}
@@ -252,18 +302,59 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		}
 		add = add[n:]
 	}
+	if j.open == nil {
+		j.open = map[string]map[string]bool{}
+	}
+	was := j.open[project]
+	if asked == nil || was == nil {
+		was = map[string]bool{}
+	}
+	for id := range asked {
+		delete(was, id)
+	}
+	for id := range open {
+		was[id] = true
+	}
+	j.open[project] = was
+	if j.cursor == nil {
+		j.cursor = map[string]string{}
+	}
+	j.cursor[project] = last
 	return true
+}
+
+// cursorOf returns the ID of the last job the engine listed for the
+// project's table.
+func (j *jobsTable) cursorOf(project string) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.cursor[project]
+}
+
+// openIDs returns the IDs of the project's rows of jobs not DONE.
+func (j *jobsTable) openIDs(project string) []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var ids []string
+	for id := range j.open[project] {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // tableJobsRows returns the subquery of the project's jobs as the table
 // (above), written from jobs (made first when create is true), or ""
-// when it could not be written.
-func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]any, create bool) string {
+// when it could not be written. jobs are every job of the project, or,
+// with asked set, those the engine added after the job its last list
+// ended with and those asked for (sync); last is the job this list ended
+// with.
+func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]any, last string, asked map[string]bool, create bool) string {
 	if f.jobsTable == nil {
 		return ""
 	}
 	rows := make(map[string]string, len(jobs))
 	ids := make([]string, 0, len(jobs))
+	open := map[string]bool{}
 	for _, job := range jobs {
 		_, id := jobRef(job)
 		if _, dup := rows[id]; id == "" || dup {
@@ -271,8 +362,11 @@ func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]
 		}
 		rows[id] = "(" + strings.Join(jobRow(project, job), ", ") + ")"
 		ids = append(ids, id)
+		if jobStateOf(job) != "DONE" {
+			open[id] = true
+		}
 	}
-	if !f.jobsTable.sync(f, r, project, ids, rows, create) {
+	if !f.jobsTable.sync(f, r, project, ids, rows, open, asked, last, create) {
 		return ""
 	}
 	return "(SELECT * FROM " + jobsTablePath() + ")"
@@ -292,10 +386,90 @@ func (f front) syncJobsTableSoon(r *http.Request) {
 	f.jobsTable.soon(project, func() {
 		ctx, cancel := context.WithTimeout(req.Context(), jobsTableSyncTimeout)
 		defer cancel()
-		r := req.WithContext(ctx)
-		if jobs, status, _ := f.allJobs(r, nil); status == 0 {
-			f.tableJobsRows(r, project, jobs, false)
+		f.syncJobsTable(req.WithContext(ctx), project)
+	})
+}
+
+// syncJobsTable writes the rows of the project's jobs made since the last
+// sync (those the engine added after the last it listed, and those
+// noteMade was told of) and of those not DONE then (above) to its table,
+// if it is made.
+func (f front) syncJobsTable(r *http.Request, project string) {
+	pending := f.jobsTable.takePending(project)
+	asked := map[string]bool{}
+	ids := make([]string, 0, len(pending))
+	for id := range pending {
+		asked[id] = true
+		ids = append(ids, id)
+	}
+	for _, id := range f.jobsTable.openIDs(project) {
+		if !asked[id] {
+			asked[id] = true
+			ids = append(ids, id)
 		}
+	}
+	sort.Strings(ids)
+	l := &engineList{some: true, after: f.jobsTable.cursorOf(project), ids: ids}
+	jobs, status, _ := f.listedJobs(r, nil, l)
+	if status != 0 || f.tableJobsRows(r, project, jobs, l.last, asked, false) == "" {
+		for id := range pending { // for the next sync
+			f.jobsTable.noteMade(project, id)
+		}
+	}
+}
+
+// engineListKey is the context key of the engineList of a jobs.list the
+// front sends itself (engineJobs).
+type engineListKey struct{}
+
+// engineList is what a jobs.list the front sends itself asks the engine
+// for, and what it was answered.
+type engineList struct {
+	// some, when set, asks for the jobs added after the job after (every
+	// job when after is "") and the jobs of ids alone (bigquery-emulator
+	// patch 0064); otherwise every job is listed.
+	some  bool
+	after string
+	ids   []string
+	// last is the ID of the last job the engine listed, or after when it
+	// listed none.
+	last string
+}
+
+// engineJobs is next, the engine, but for a jobs.list with an engineList
+// in its context (above), which it sends with the parameters of patch
+// 0064 when some is set, and whose last job it records, for the jobs.list
+// path to serve as it serves the engine's whole list.
+func engineJobs(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		l, ok := r.Context().Value(engineListKey{}).(*engineList)
+		if !ok || l == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if l.some {
+			q := r.URL.Query()
+			q.Set("cloudburrowAfterJobId", l.after)
+			q.Set("cloudburrowJobIds", strings.Join(l.ids, ","))
+			u := *r.URL
+			u.RawQuery = q.Encode()
+			r = r.Clone(r.Context())
+			r.URL = &u
+		}
+		rec := newRecorder()
+		next.ServeHTTP(rec, r)
+		var list struct {
+			Jobs []struct {
+				JobReference struct {
+					JobID string `json:"jobId"`
+				} `json:"jobReference"`
+			} `json:"jobs"`
+		}
+		l.last = l.after
+		if (rec.status == 0 || rec.status == http.StatusOK) && json.Unmarshal(rec.body.Bytes(), &list) == nil && len(list.Jobs) > 0 {
+			l.last = list.Jobs[len(list.Jobs)-1].JobReference.JobID
+		}
+		rec.copyTo(w)
 	})
 }
 

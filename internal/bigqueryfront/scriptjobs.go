@@ -102,6 +102,17 @@ func (j *jobRecords) adoptScript(w http.ResponseWriter, rec *recorder, kids []sc
 		j.childOrder = j.childOrder[1:]
 	}
 	j.mu.Unlock()
+	if j.made != nil && n > 0 {
+		j.made(p, parent)
+		for _, k := range kids {
+			if k.id != "" && k.id != parent {
+				if k.project == "" {
+					k.project = p
+				}
+				j.made(k.project, k.id)
+			}
+		}
+	}
 	if !insert || n == 0 || !j.patchScript(resp, p) {
 		rec.copyTo(w)
 		return

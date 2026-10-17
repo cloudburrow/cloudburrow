@@ -452,11 +452,16 @@ type frontJobs struct {
 	mu    sync.Mutex
 	jobs  map[string]map[string]any
 	order []string
+	// made is told of each job added (jobstable.go's noteMade).
+	made func(project, id string)
 }
 
 const maxFrontJobs = maxJobRecords
 
 func (j *frontJobs) add(project, id string, job map[string]any) {
+	if j.made != nil {
+		defer j.made(project, id)
+	}
 	key := project + "/" + id
 	j.mu.Lock()
 	defer j.mu.Unlock()

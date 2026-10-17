@@ -224,6 +224,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
+	// The jobs the table of JOBS rows syncs in the background (#1528).
+	records.made, own.made = jobRows.noteMade, jobRows.noteMade
 	if o.stateDir != "" {
 		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
 	}
@@ -291,7 +293,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		texts.serveJobList(w, func(w http.ResponseWriter) {
 			configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) {
 				records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
-					own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+					own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) { failed.listJobs(engineJobs(next), w, r) })
 				})
 			})
 		})
@@ -353,6 +355,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil {
 			project := projectOf("/" + j[2])
+			if id, err := url.PathUnescape(j[3]); err == nil {
+				defer jobRows.noteMade(project, id) // jobstable.go, #1528
+			}
 			if own.serveJobAction(w, r, project, j[3], j[4]) {
 				return
 			}
