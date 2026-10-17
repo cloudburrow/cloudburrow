@@ -55,7 +55,13 @@ policies:
 
 Every change happens before the call returns, so `:enable`, `:batchEnable` and `:disable` return a
 done operation, which `operations.get` answers (in memory, for the life of the process). Neither
-Terraform nor gcloud polls one that is done. `operations.list`, `cancel` and `delete` are 501.
+Terraform nor gcloud polls one that is done. `operations.list` lists every kept operation, oldest
+first, paged (`pageSize`, `pageToken`); a `filter`, or a `name` other than `operations`, is 501
+saying so, as Google documents no filter grammar for this API. `operations.cancel` of a done
+operation answers `{}` and leaves it done, as google.longrunning's cancel does; `operations.delete`
+forgets one, so `get` and a second `delete` are 404, and the change it made stays (#1530). The
+console's **Service Usage operations** page (`/apis/operations`) lists a project's operations with
+Delete.
 
 ## Not served
 

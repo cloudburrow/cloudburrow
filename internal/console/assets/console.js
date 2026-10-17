@@ -209,6 +209,9 @@ const ROUTES = [
   // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
   // provider but no route.
   { path: "/apis", service: "serviceusage", title: "APIs & Services", section: "Management tools" },
+  // Service Usage operations (#1530): what operations.list answers, with
+  // Delete.
+  { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Service Usage operations", section: "Management tools" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
   // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
   // no product icon.
