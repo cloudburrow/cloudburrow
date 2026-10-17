@@ -663,7 +663,7 @@ var parityRows = []parityRow{
 
 	// Cloud Logging
 	{Resource: "Cloud Logging log names", Service: "logging",
-		Methods:  []string{"LoggingServiceV2/ListLogs"},
+		Methods: []string{"LoggingServiceV2/ListLogs"},
 		Screen:  "/logs", Offers: "Logs Explorer's Log name picker: the log names ListLogs lists for the project, folder or organization in scope (or the log view's parent), as Google's Logs Explorer lists them in its Log name filter; picking one shows that log's entries only (#1554)",
 		Tests: []string{"TestConsoleLogNamePicker", "TestLogsExplorerLogNamePicker"}},
 	{Resource: "Cloud Logging entries", Service: "logging",
