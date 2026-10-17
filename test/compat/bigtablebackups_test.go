@@ -3,6 +3,8 @@
 package compat
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"sort"
 	"strings"
 	"testing"
@@ -273,5 +275,79 @@ func TestBigtableSchemaBundles(t *testing.T) {
 	}
 	if _, err := admin.GetSchemaBundle(ctx, "sb-src", "sb"); status.Code(err) != codes.NotFound {
 		t.Errorf("GetSchemaBundle after DeleteSchemaBundle = %v, want NotFound", err)
+	}
+}
+
+// TestBigtableSQL runs GoogleSQL for Bigtable with the official client's
+// PrepareStatement, Bind and Execute over rows written with Apply: a
+// column's latest value, CAST AS STRING, TO_INT64, a family as a map, a
+// bound STARTS_WITH, and LIMIT; what the emulator's SQL does not support is
+// refused at PrepareQuery.
+//
+// covers: google.bigtable.v2.Bigtable/PrepareQuery, google.bigtable.v2.Bigtable/ExecuteQuery
+func TestBigtableSQL(t *testing.T) {
+	h := New(t)
+	_, c := bigtableTable(t, h, "sql-users")
+	ctx := h.Context()
+	for i, k := range []string{"u#1", "u#2", "x#1"} {
+		m := bigtable.NewMutation()
+		m.Set("info", "name", bigtable.Timestamp(1000), []byte("stale"))
+		m.Set("info", "name", bigtable.Timestamp(2000), []byte("name-"+k))
+		n := make([]byte, 8)
+		binary.BigEndian.PutUint64(n, uint64(10*(i+1)))
+		m.Set("info", "n", bigtable.Timestamp(1000), n)
+		if err := c.Open("sql-users").Apply(ctx, k, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(sql string, params map[string]bigtable.SQLType, bind map[string]any) []bigtable.ResultRow {
+		t.Helper()
+		ps, err := c.PrepareStatement(ctx, sql, params)
+		if err != nil {
+			t.Fatalf("PrepareStatement(%s): %v", sql, err)
+		}
+		bs, err := ps.Bind(bind)
+		if err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		var out []bigtable.ResultRow
+		if err := bs.Execute(ctx, func(r bigtable.ResultRow) bool { out = append(out, r); return true }); err != nil {
+			t.Fatalf("Execute(%s): %v", sql, err)
+		}
+		return out
+	}
+	rows := run("SELECT _key, CAST(info['name'] AS STRING) AS name, TO_INT64(info['n']) AS n FROM `sql-users` WHERE STARTS_WITH(_key, @prefix)",
+		map[string]bigtable.SQLType{"prefix": bigtable.BytesSQLType{}}, map[string]any{"prefix": []byte("u#")})
+	if len(rows) != 2 {
+		t.Fatalf("STARTS_WITH u# read %d rows, want 2", len(rows))
+	}
+	var key []byte
+	var name string
+	var n int64
+	if err := rows[1].GetByName("_key", &key); err != nil || string(key) != "u#2" {
+		t.Errorf("_key = %q, %v", key, err)
+	}
+	if err := rows[1].GetByName("name", &name); err != nil || name != "name-u#2" {
+		t.Errorf("name = %q, %v; want the latest value", name, err)
+	}
+	if err := rows[1].GetByName("n", &n); err != nil || n != 20 {
+		t.Errorf("n = %d, %v", n, err)
+	}
+	all := run("SELECT * FROM `sql-users` LIMIT 2", nil, nil)
+	if len(all) != 2 {
+		t.Fatalf("SELECT * LIMIT 2 read %d rows", len(all))
+	}
+	var info map[string][]byte // keyed by the qualifiers' base64
+	if err := all[0].GetByName("info", &info); err != nil || len(info) != 2 || string(info[base64.StdEncoding.EncodeToString([]byte("name"))]) != "name-u#1" {
+		t.Errorf("info = %v, %v", info, err)
+	}
+	if got := run("SELECT _key FROM `sql-users` WHERE _key >= 'u#2' AND _key < 'x#2'", nil, nil); len(got) != 2 {
+		t.Errorf("a key range read %d rows, want 2", len(got))
+	}
+	if _, err := c.PrepareStatement(ctx, "SELECT COUNT(*) FROM `sql-users`", nil); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an aggregate = %v, want InvalidArgument", err)
+	}
+	if _, err := c.PrepareStatement(ctx, "SELECT _key FROM missing", nil); status.Code(err) != codes.NotFound {
+		t.Errorf("a missing table = %v, want NotFound", err)
 	}
 }

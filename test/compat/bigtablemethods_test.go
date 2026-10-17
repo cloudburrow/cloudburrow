@@ -221,22 +221,18 @@ func TestBigtablePingAndWarm(t *testing.T) {
 }
 
 // TestBigtableRefusedDataMethods records the data methods the emulator
-// answers UNIMPLEMENTED: SQL (PrepareQuery, ExecuteQuery) and the session
-// data plane (GetClientConfiguration, OpenTable, OpenAuthorizedView,
-// OpenMaterializedView). The veneer's PrepareStatement sends PrepareQuery;
-// the others have no veneer call that reaches the emulator, so the module's
-// generated stub sends them.
+// answers UNIMPLEMENTED: the session data plane (GetClientConfiguration,
+// OpenTable, OpenAuthorizedView, OpenMaterializedView), which no veneer
+// call reaches with the emulator, so the module's generated stub sends
+// them. SQL is served by the front since #1499 (TestBigtableSQL).
 //
-// covers: google.bigtable.v2.Bigtable/PrepareQuery (unimplemented), google.bigtable.v2.Bigtable/ExecuteQuery (unimplemented), google.bigtable.v2.Bigtable/GetClientConfiguration (unimplemented)
+// covers: google.bigtable.v2.Bigtable/GetClientConfiguration (unimplemented)
 // covers: google.bigtable.v2.Bigtable/OpenTable (unimplemented), google.bigtable.v2.Bigtable/OpenAuthorizedView (unimplemented), google.bigtable.v2.Bigtable/OpenMaterializedView (unimplemented)
 func TestBigtableRefusedDataMethods(t *testing.T) {
 	h := New(t)
-	_, c := bigtableTable(t, h, "sql")
+	bigtableTable(t, h, "sessions")
 	ctx := h.Context()
 	inst := fmt.Sprintf("projects/%s/instances/%s", h.Project(), bigtableInstance)
-
-	_, err := c.PrepareStatement(ctx, "SELECT _key FROM sql", nil)
-	wantRefused(t, "PrepareStatement", err, codes.Unimplemented, "the emulator does not currently support PrepareQuery")
 
 	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -244,12 +240,6 @@ func TestBigtableRefusedDataMethods(t *testing.T) {
 	}
 	defer conn.Close()
 	d := bigtablepb.NewBigtableClient(conn)
-
-	eq, err := d.ExecuteQuery(ctx, &bigtablepb.ExecuteQueryRequest{InstanceName: inst, Query: "SELECT _key FROM sql"})
-	if err == nil {
-		_, err = eq.Recv()
-	}
-	wantRefused(t, "ExecuteQuery", err, codes.Unimplemented, "the emulator does not currently support ExecuteQuery")
 
 	_, err = d.GetClientConfiguration(ctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: inst})
 	wantRefused(t, "GetClientConfiguration", err, codes.Unimplemented, "the emulator does not currently support GetClientConfiguration")
