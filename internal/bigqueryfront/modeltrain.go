@@ -70,6 +70,29 @@ type mlOptions struct {
 	PCAVarRatio   float64 `json:"pcaExplainedVarianceRatio,omitempty"`
 	ScaleFeatures bool    `json:"scaleFeatures"`
 	PCASolver     string  `json:"pcaSolver,omitempty"`
+	// BOOSTED_TREE_* (modeltree.go).
+	MaxTreeDepth   int     `json:"maxTreeDepth,omitempty"`
+	MinSplitLoss   float64 `json:"minSplitLoss,omitempty"`
+	MinChildWeight float64 `json:"minTreeChildWeight,omitempty"`
+	BoosterType    string  `json:"boosterType,omitempty"`
+	// The sampling of RANDOM_FOREST_* (modeltree.go); a boosted tree
+	// model's are 1.
+	NumParallelTree int     `json:"numParallelTree,omitempty"`
+	Subsample       float64 `json:"subsample,omitempty"`
+	ColsampleTree   float64 `json:"colsampleBytree,omitempty"`
+	ColsampleLevel  float64 `json:"colsampleBylevel,omitempty"`
+	ColsampleNode   float64 `json:"colsampleBynode,omitempty"`
+	TreeMethod      string  `json:"treeMethod,omitempty"`
+	// MATRIX_FACTORIZATION (modelmf.go).
+	NumFactors   int    `json:"numFactors,omitempty"`
+	FeedbackType string `json:"feedbackType,omitempty"`
+	UserCol      string `json:"userCol,omitempty"`
+	ItemCol      string `json:"itemCol,omitempty"`
+	RatingCol    string `json:"ratingCol,omitempty"`
+	// GlobalExplain is enable_global_explain (modelexplain.go).
+	GlobalExplain bool `json:"enableGlobalExplain,omitempty"`
+	// ARIMA_PLUS (modelarima.go).
+	TS tsOptions `json:"timeSeries"`
 	// Set are the options CREATE MODEL gave, lower case.
 	Set []string `json:"set,omitempty"`
 }
@@ -185,6 +208,17 @@ type mlTrained struct {
 	// (binary) or the predicted class index (multiclass).
 	EvalY     []float64 `json:"evalY,omitempty"`
 	EvalScore []float64 `json:"evalScore,omitempty"`
+	// Trees are a boosted tree model's trees, BaseScore its starting score
+	// (modeltree.go).
+	Trees     [][]mlNode `json:"trees,omitempty"`
+	TreeClass []int      `json:"treeClass,omitempty"`
+	BaseScore float64    `json:"baseScore,omitempty"`
+	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
+	MF *mfTrained `json:"mf,omitempty"`
+	// Global are ML.GLOBAL_EXPLAIN's rows (modelexplain.go).
+	Global []mlGlobal `json:"global,omitempty"`
+	// Arima is an ARIMA_PLUS model's series and fits (modelarima.go).
+	Arima *arimaTrained `json:"arima,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -237,6 +271,10 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return trainKMeans(opts, cols, rows)
 	case "PCA":
 		return trainPCA(opts, cols, rows)
+	case "MATRIX_FACTORIZATION":
+		return trainMF(opts, cols, rows)
+	case "ARIMA_PLUS":
+		return trainArima(opts, cols, rows)
 	}
 	var t mlTrained
 	label := "label"
@@ -263,7 +301,7 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("Unable to find the data split column '%s' in the input data", opts.SplitCol)
 	}
 	t.Label, t.LabelType = cols[li].Name, mlTypeOf(cols[li].Type)
-	logistic := opts.ModelType == "LOGISTIC_REG"
+	logistic := isClassifierType(opts.ModelType)
 	if t.LabelType == "" || (!logistic && !(mlFeature{Type: t.LabelType}).numeric()) || (logistic && t.LabelType != "STRING" && t.LabelType != "BOOL" && t.LabelType != "INT64") {
 		return t, mlInvalid("Label column %s has an unsupported type %s for model type %s", cols[li].Name, cols[li].Type, opts.ModelType)
 	}
@@ -391,6 +429,15 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 	for _, i := range eval {
 		EX, EY = append(EX, encode(i)), append(EY, y[i])
 	}
+	if isTreeModel(opts.ModelType) {
+		K := 1
+		if len(t.Classes) > 2 {
+			K = len(t.Classes)
+		}
+		t.trainBoosted(opts, X, Y, EX, EY, logistic, K)
+		t.computeGlobal(opts, evalRows(X, EX))
+		return t, nil
+	}
 	dim := len(X[0])
 	multi := logistic && len(t.Classes) > 2
 	strategy := opts.Strategy
@@ -489,7 +536,17 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			t.Eval = regressionMetrics(evY, pred)
 		}
 	}
+	t.computeGlobal(opts, evalRows(X, EX))
 	return t, nil
+}
+
+// evalRows are the evaluation rows EX, or the training rows X with no
+// split.
+func evalRows(X, EX [][]float64) [][]float64 {
+	if len(EX) > 0 {
+		return EX
+	}
+	return X
 }
 
 // learnFeatures learns each feature's statistics or categories over the
@@ -1119,6 +1176,13 @@ func rocAUC(y, p []float64) float64 {
 // values, by name (a missing name is NULL): the linear value, or the
 // positive class's probability.
 func (t mlTrained) predictRow(vals map[string]*string) float64 {
+	if len(t.Trees) > 0 {
+		z := t.treeMargin(t.encodeRow(vals))
+		if len(t.Classes) == 2 {
+			return sigmoid(z)
+		}
+		return z
+	}
 	z := t.Intercept
 	for _, ft := range t.Features {
 		x := encodeFeature(ft, vals[strings.ToLower(ft.Name)])
@@ -1147,6 +1211,9 @@ func (t mlTrained) encodeRow(vals map[string]*string) []float64 {
 
 // classProbs is a multiclass model's class probabilities for a row.
 func (t mlTrained) classProbs(vals map[string]*string) []float64 {
+	if len(t.Trees) > 0 {
+		return softmaxOf(t.treeMargins(t.encodeRow(vals), len(t.Classes)))
+	}
 	return softmax(t.ClassWeights, t.encodeRow(vals))
 }
 

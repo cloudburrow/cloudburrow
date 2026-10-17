@@ -29,7 +29,9 @@ import (
 
 // mlFunctionsServed are the ML functions of a model CloudBurrow answers.
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
-	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true}
+	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
+	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true,
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true}
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -203,12 +205,22 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	if f.models == nil {
 		return false
 	}
-	calls, msg := findMLCalls(q.Query)
+	// The ML functions of no model first (modelpreprocess.go).
+	text, code, msg := rewritePreprocess(q.Query, nil)
+	if code == 501 {
+		writeError(w, code, "notImplemented", msg)
+		return true
+	}
+	if code != 0 {
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: "invalidQuery", Message: msg})
+		return true
+	}
+	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
 		return true
 	}
-	if len(calls) == 0 {
+	if len(calls) == 0 && text == q.Query {
 		return false
 	}
 	var b strings.Builder
@@ -217,7 +229,8 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		if !mlFunctionsServed[c.fn] {
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
-				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS and ML.PRINCIPAL_COMPONENT_INFO. Nothing was run.")
+				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
+				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT and ML.GLOBAL_EXPLAIN. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -242,11 +255,11 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: why})
 			return true
 		}
-		b.WriteString(q.Query[last:c.pos])
+		b.WriteString(text[last:c.pos])
 		b.WriteString(sub)
 		last = c.end
 	}
-	b.WriteString(q.Query[last:])
+	b.WriteString(text[last:])
 	sql := b.String()
 	if !setQueryText(r, insert, sql) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
@@ -489,15 +502,43 @@ func columnNames(labels []string) []string {
 func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	t := md.Trained
 	typ := md.Options.ModelType
-	logistic := typ == "LOGISTIC_REG"
+	logistic := isClassifierType(typ)
 	binary := logistic && !t.multiclass()
+	// lin is the model's linear value (a logistic model's log-odds) of
+	// the encoded columns: its weights', or its trees' (modeltree.go).
+	lin := func(enc []string) string {
+		if len(t.Trees) > 0 {
+			return t.treesSQL(enc, 0)
+		}
+		return dotSQL(t.weightVector(), enc)
+	}
 	unsupported := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " is not supported for model type " + typ
 	}
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
 	}
+	if typ == "MATRIX_FACTORIZATION" {
+		return f.mfSubquery(r, q, md, c)
+	}
+	if typ == "ARIMA_PLUS" {
+		return f.arimaSubquery(r, q, md, c)
+	}
 	switch c.fn {
+	case "EXPLAIN_PREDICT", "GLOBAL_EXPLAIN":
+		return f.explainSubquery(r, q, md, c)
+	case "DETECT_ANOMALIES":
+		if typ == "KMEANS" || typ == "PCA" {
+			return "", 501, "Not implemented here: ML.DETECT_ANOMALIES of a " + typ + " model: CloudBurrow detects anomalies with ARIMA_PLUS models. Nothing was run."
+		}
+		return unsupported()
+	case "RECOMMEND", "FORECAST", "EXPLAIN_FORECAST", "ARIMA_EVALUATE", "ARIMA_COEFFICIENTS":
+		return unsupported()
+	case "FEATURE_IMPORTANCE":
+		if !isTreeModel(typ) {
+			return unsupported()
+		}
+		return mlRowsSubquery("STRUCT<feature STRING, importance_weight INT64, importance_gain FLOAT64, importance_cover FLOAT64>", t.featureImportance()), 0, ""
 	case "PREDICT":
 		if c.input == "" {
 			return needInput()
@@ -506,8 +547,8 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		enc := t.encodedSQL(ref)
 		out := sqlIdent("predicted_" + t.Label)
 		switch {
-		case typ == "LINEAR_REG":
-			return "(SELECT " + except(helpers) + ", " + dotSQL(t.weightVector(), enc) + " AS " + out + " FROM " + from + ")", 0, ""
+		case typ == "LINEAR_REG" || typ == "BOOSTED_TREE_REGRESSOR" || typ == "RANDOM_FOREST_REGRESSOR":
+			return "(SELECT " + except(helpers) + ", " + lin(enc) + " AS " + out + " FROM " + from + ")", 0, ""
 		case binary:
 			thr, why := c.threshold()
 			if why != "" {
@@ -518,7 +559,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			return "(SELECT * EXCEPT (_cbml_z, _cbml_p), IF(_cbml_p >= " + sqlF(thr) + ", " + pos + ", " + neg + ") AS " + out +
 				", [STRUCT(" + pos + " AS label, _cbml_p AS prob), STRUCT(" + neg + " AS label, 1 - _cbml_p AS prob)] AS " + probs +
 				" FROM (SELECT *, IF(_cbml_z >= 0, 1 / (1 + EXP(-_cbml_z)), EXP(_cbml_z) / (1 + EXP(_cbml_z))) AS _cbml_p" +
-				" FROM (SELECT " + except(helpers) + ", " + dotSQL(t.weightVector(), enc) + " AS _cbml_z FROM " + from + ")))", 0, ""
+				" FROM (SELECT " + except(helpers) + ", " + lin(enc) + " AS _cbml_z FROM " + from + ")))", 0, ""
 		case logistic:
 			if _, ok := c.struc["threshold"]; ok {
 				return "", 400, "The threshold option is only supported for binary classification models"
@@ -529,7 +570,13 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			K := len(t.Classes)
 			var zs, helpersZ, ps, cases []string
 			for k := 0; k < K; k++ {
-				zs = append(zs, fmt.Sprintf("%s AS _cbml_z%d", dotSQL(t.ClassWeights[k], enc), k))
+				z := ""
+				if len(t.Trees) > 0 {
+					z = t.treesSQL(enc, k)
+				} else {
+					z = dotSQL(t.ClassWeights[k], enc)
+				}
+				zs = append(zs, fmt.Sprintf("%s AS _cbml_z%d", z, k))
 				helpersZ = append(helpersZ, fmt.Sprintf("_cbml_z%d", k))
 			}
 			mx := "GREATEST(" + strings.Join(helpersZ, ", ") + ")"
@@ -819,7 +866,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		}
 		return mlRowsSubquery("STRUCT<principal_component_id INT64, eigenvalue FLOAT64, explained_variance_ratio FLOAT64, cumulative_explained_variance_ratio FLOAT64>", rows), 0, ""
 	case "WEIGHTS":
-		if typ == "KMEANS" || typ == "PCA" {
+		if typ == "KMEANS" || typ == "PCA" || isTreeModel(typ) {
 			return unsupported()
 		}
 		if t.multiclass() {

@@ -28,10 +28,11 @@ import (
 // ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO and
 // ML.TRAINING_INFO (modelfuncs.go). Training is modeltrain.go's.
 //
-// Served model types: LINEAR_REG and binary LOGISTIC_REG. Refused 501
-// with the reason: the other types (their training is Google's, and either
-// undocumented in the detail a faithful result needs, as for boosted
-// trees, DNNs, matrix factorization and ARIMA_PLUS, or Google's
+// Served model types: LINEAR_REG, LOGISTIC_REG, KMEANS and PCA (#1481),
+// explicit MATRIX_FACTORIZATION (modelmf.go), BOOSTED_TREE_* (modeltree.go)
+// and ARIMA_PLUS (modelarima.go) (#1504). Refused 501 with the reason: the
+// other types (their training is Google's, and either undocumented in the
+// detail a faithful result needs, as for DNNs, or Google's
 // infrastructure itself: AUTOML_*, imported TENSORFLOW/ONNX/XGBOOST models
 // read from Cloud Storage, and remote models over a Cloud resource
 // connection, which CloudBurrow has none of); a TRANSFORM clause; and the
@@ -250,7 +251,10 @@ func (md bqModel) resource(full bool) map[string]any {
 		"modelReference":   map[string]string{"projectId": md.Project, "datasetId": md.Dataset, "modelId": md.ID},
 		"creationTime":     ms(md.Created),
 		"lastModifiedTime": ms(md.Modified),
-		"modelType":        map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA"}[md.Options.ModelType],
+		"modelType": map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA",
+			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION", "BOOSTED_TREE_REGRESSOR": "BOOSTED_TREE_REGRESSOR",
+			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS",
+			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -281,7 +285,7 @@ func (md bqModel) resource(full bool) map[string]any {
 	var results []map[string]any
 	for _, it := range t.Iterations {
 		r := map[string]any{"index": it.Index, "durationMs": ms(it.DurationMs), "trainingLoss": it.Loss}
-		if o.ModelType != "KMEANS" {
+		if o.ModelType != "KMEANS" && o.ModelType != "MATRIX_FACTORIZATION" {
 			r["learnRate"] = it.LearnRate
 		}
 		if it.EvalLoss != nil {
@@ -296,6 +300,36 @@ func (md bqModel) resource(full bool) map[string]any {
 		return nil
 	}
 	switch o.ModelType {
+	case "ARIMA_PLUS":
+		var info []map[string]any
+		opts, info = md.arimaResource()
+		// The model's seasonal periods: every series' (#1518).
+		var periods []string
+		seen := map[string]bool{}
+		for _, m := range info {
+			for _, p := range m["seasonalPeriods"].([]string) {
+				if !seen[p] && p != "NO_SEASONALITY" {
+					seen[p] = true
+					periods = append(periods, p)
+				}
+			}
+		}
+		if len(periods) == 0 {
+			periods = []string{"NO_SEASONALITY"}
+		}
+		results = []map[string]any{{"index": 0, "arimaResult": map[string]any{"arimaModelInfo": info, "seasonalPeriods": periods}}}
+		var single []map[string]any
+		for _, m := range info {
+			sm := map[string]any{"nonSeasonalOrder": m["nonSeasonalOrder"], "arimaFittingMetrics": m["arimaFittingMetrics"], "hasDrift": m["hasDrift"],
+				"seasonalPeriods": m["seasonalPeriods"], "hasHolidayEffect": false}
+			if id, ok := m["timeSeriesId"]; ok {
+				sm["timeSeriesId"] = id
+			}
+			single = append(single, sm)
+		}
+		metrics = map[string]any{"arimaForecastingMetrics": map[string]any{"arimaSingleModelForecastingMetrics": single}}
+	case "MATRIX_FACTORIZATION":
+		opts, metrics = md.mfResource(res)
 	case "KMEANS":
 		res["labelColumns"] = []map[string]any{{"name": "centroid_id", "type": map[string]string{"typeKind": "INT64"}}}
 		opts = map[string]any{"numClusters": ms(int64(len(t.Centroids))), "kmeansInitializationMethod": o.KMeansInit,
@@ -367,15 +401,29 @@ func (md bqModel) resource(full bool) map[string]any {
 			"learnRateStrategy":     o.LearnRateStrat,
 			"optimizationStrategy":  t.Strategy,
 		}
-		if o.LearnRateStrat == "CONSTANT" {
+		switch {
+		case isTreeModel(o.ModelType):
+			for _, k := range []string{"learnRateStrategy", "optimizationStrategy", "l1Regularization"} {
+				delete(opts, k)
+			}
+			opts["learnRate"], opts["l1Regularization"], opts["maxTreeDepth"] = o.LearnRate, o.L1, ms(int64(o.MaxTreeDepth))
+			opts["minSplitLoss"], opts["minTreeChildWeight"], opts["boosterType"], opts["treeMethod"] = o.MinSplitLoss, ms(int64(o.MinChildWeight)), o.BoosterType, o.TreeMethod
+			opts["subsample"], opts["numParallelTree"] = o.Subsample, ms(int64(o.NumParallelTree))
+			opts["colsampleBytree"], opts["colsampleBylevel"], opts["colsampleBynode"] = o.ColsampleTree, o.ColsampleLevel, o.ColsampleNode
+			if isRandomForest(o.ModelType) {
+				delete(opts, "learnRate")
+				delete(opts, "boosterType")
+				delete(opts, "maxIterations")
+			}
+		case o.LearnRateStrat == "CONSTANT":
 			opts["learnRate"] = o.LearnRate
-		} else {
+		default:
 			opts["initialLearnRate"] = o.InitLearnRate
 		}
 		if o.SplitCol != "" {
 			opts["dataSplitColumn"] = o.SplitCol
 		}
-		if o.ModelType == "LOGISTIC_REG" {
+		if isClassifierType(o.ModelType) {
 			opts["lossType"] = "MEAN_LOG_LOSS"
 		} else {
 			opts["lossType"] = "MEAN_SQUARED_LOSS"
@@ -385,7 +433,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			metrics = map[string]any{"multiClassClassificationMetrics": map[string]any{
 				"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
 					"accuracy": num("accuracy"), "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")}}}
-		case o.ModelType == "LOGISTIC_REG":
+		case isClassifierType(o.ModelType):
 			metrics = map[string]any{"binaryClassificationMetrics": map[string]any{
 				"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
 					"accuracy": num("accuracy"), "threshold": 0.5, "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")},
@@ -580,10 +628,6 @@ type modelDDL struct {
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
 // why.
 var unsupportedModelTypes = map[string]string{
-	"BOOSTED_TREE_REGRESSOR":         "it is XGBoost trained by Google, with tree-building details BigQuery does not document",
-	"BOOSTED_TREE_CLASSIFIER":        "it is XGBoost trained by Google, with tree-building details BigQuery does not document",
-	"RANDOM_FOREST_REGRESSOR":        "its training is random and Google's",
-	"RANDOM_FOREST_CLASSIFIER":       "its training is random and Google's",
 	"DNN_REGRESSOR":                  "it is a TensorFlow network trained on Google's infrastructure",
 	"DNN_CLASSIFIER":                 "it is a TensorFlow network trained on Google's infrastructure",
 	"DNN_LINEAR_COMBINED_REGRESSOR":  "it is a TensorFlow network trained on Google's infrastructure",
@@ -591,9 +635,7 @@ var unsupportedModelTypes = map[string]string{
 	"AUTOENCODER":                    "it is a TensorFlow network trained on Google's infrastructure",
 	"AUTOML_REGRESSOR":               "AutoML is Google's service (Vertex AI)",
 	"AUTOML_CLASSIFIER":              "AutoML is Google's service (Vertex AI)",
-	"ARIMA_PLUS":                     "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	"ARIMA_PLUS_XREG":                "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
-	"MATRIX_FACTORIZATION":           "its alternating least squares training is Google's, on reserved slots",
 	"TENSORFLOW":                     "an imported TensorFlow model runs on Google's infrastructure",
 	"TENSORFLOW_LITE":                "an imported TensorFlow Lite model runs on Google's infrastructure",
 	"ONNX":                           "an imported ONNX model runs on Google's infrastructure",
@@ -683,10 +725,22 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
 		return d, true, 501, "Not implemented here: model_type " + d.opts.ModelType + ": " + why +
-			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS and PCA models. Nothing was run."
+			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER and ARIMA_PLUS models. Nothing was run."
 	}
 	if c, m := checkModelOptions(d.opts); c != 0 {
 		return d, true, c, m
+	}
+	if d.opts.ModelType == "MATRIX_FACTORIZATION" {
+		applyMFDefaults(&d.opts)
+	}
+	if isTreeModel(d.opts.ModelType) {
+		applyTreeDefaults(&d.opts)
+	}
+	if d.opts.ModelType == "ARIMA_PLUS" {
+		applyArimaDefaults(&d.opts)
+		if c, m := checkArimaOptions(d.opts); c != 0 {
+			return d, true, c, m
+		}
 	}
 	if i >= len(stmt) || !stmt[i].is("AS") {
 		return d, true, 400, "CREATE MODEL of model_type " + d.opts.ModelType + " requires a query (AS SELECT ...)"
@@ -820,6 +874,257 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				}
 				o.LabelCols = append(o.LabelCols, s)
 			}
+		case "feedback_type":
+			s, ok := str()
+			if !ok || !strings.EqualFold(s, "EXPLICIT") && !strings.EqualFold(s, "IMPLICIT") {
+				return bad()
+			}
+			o.FeedbackType = strings.ToUpper(s)
+			if o.FeedbackType == "IMPLICIT" {
+				return 501, "Not implemented here: feedback_type IMPLICIT: implicit feedback's confidence weighting (wals_alpha) and ranking metrics " +
+					"are not carried out; CloudBurrow trains EXPLICIT matrix factorization. Nothing was run."
+			}
+		case "user_col", "item_col", "rating_col":
+			s, ok := str()
+			if !ok || s == "" {
+				return bad()
+			}
+			switch name {
+			case "user_col":
+				o.UserCol = s
+			case "item_col":
+				o.ItemCol = s
+			default:
+				o.RatingCol = s
+			}
+		case "max_tree_depth", "num_parallel_tree":
+			v, ok := num()
+			if !ok || v != float64(int(v)) || v < 1 {
+				return bad()
+			}
+			if name == "num_parallel_tree" {
+				o.NumParallelTree = int(v)
+				continue
+			}
+			o.MaxTreeDepth = int(v)
+		case "min_split_loss", "min_tree_child_weight":
+			v, ok := num()
+			if !ok || v < 0 {
+				return bad()
+			}
+			if name == "min_split_loss" {
+				o.MinSplitLoss = v
+			} else {
+				o.MinChildWeight = v
+			}
+		case "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode":
+			v, ok := num()
+			if !ok || v <= 0 || v > 1 {
+				return bad()
+			}
+			switch name {
+			case "subsample":
+				o.Subsample = v
+			case "colsample_bytree":
+				o.ColsampleTree = v
+			case "colsample_bylevel":
+				o.ColsampleLevel = v
+			default:
+				o.ColsampleNode = v
+			}
+		case "booster_type", "tree_method":
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			s = strings.ToUpper(s)
+			switch {
+			case name == "booster_type" && s == "GBTREE":
+				o.BoosterType = s
+			case name == "tree_method" && (s == "AUTO" || s == "EXACT"):
+				o.TreeMethod = s
+			case name == "booster_type" && s == "DART", name == "tree_method" && (s == "APPROX" || s == "HIST"):
+				return 501, "Not implemented here: " + name + " " + s + "; CloudBurrow builds GBTREE boosters by the exact greedy method. Nothing was run."
+			default:
+				return bad()
+			}
+		case "time_series_timestamp_col", "time_series_data_col":
+			s, ok := str()
+			if !ok || s == "" {
+				return bad()
+			}
+			if name == "time_series_timestamp_col" {
+				o.TS.TimestampCol = s
+			} else {
+				o.TS.DataCol = s
+			}
+		case "time_series_id_col":
+			if s, ok := str(); ok && s != "" {
+				o.TS.IDCol = s
+				continue
+			}
+			if len(val) < 2 || !val[0].punct("[") || !val[len(val)-1].punct("]") {
+				return bad()
+			}
+			var ids []string
+			for _, t := range val[1 : len(val)-1] {
+				if t.punct(",") {
+					continue
+				}
+				s, ok := unquoteString(t.text)
+				if t.kind != tokString || !ok {
+					return bad()
+				}
+				ids = append(ids, s)
+			}
+			if len(ids) != 1 {
+				return 501, "Not implemented here: time_series_id_col of more than one column; CloudBurrow forecasts series identified by one STRING or INT64 column. Nothing was run."
+			}
+			o.TS.IDCol = ids[0]
+		case "horizon", "auto_arima_max_order", "auto_arima_min_order", "trend_smoothing_window_size", "min_time_series_length", "max_time_series_length":
+			v, ok := num()
+			if !ok || v != float64(int(v)) {
+				return bad()
+			}
+			n := int(v)
+			switch name {
+			case "horizon":
+				if n < 1 || n > 10000 {
+					return 400, "horizon must be between 1 and 10000"
+				}
+				o.TS.Horizon = n
+			case "auto_arima_max_order":
+				if n < 1 || n > 5 {
+					return 400, "auto_arima_max_order must be between 1 and 5"
+				}
+				o.TS.MaxOrder = n
+			case "auto_arima_min_order":
+				if n < 0 || n > 4 {
+					return 400, "auto_arima_min_order must be between 0 and 4"
+				}
+				o.TS.MinOrder = n
+			case "trend_smoothing_window_size":
+				if n < 1 {
+					return bad()
+				}
+				o.TS.SmoothWindow = n
+			default:
+				if n < 4 {
+					return 400, name + " must be at least 4"
+				}
+				if name == "min_time_series_length" {
+					o.TS.MinLength = n
+				} else {
+					o.TS.MaxLength = n
+				}
+			}
+		case "time_series_length_fraction":
+			v, ok := num()
+			if !ok || v <= 0 || v >= 1 {
+				return 400, "time_series_length_fraction must be in (0, 1)"
+			}
+			o.TS.LengthFraction = v
+		case "non_seasonal_order":
+			var nums []int
+			if len(val) != 7 || !val[0].punct("(") || !val[6].punct(")") || !val[2].punct(",") || !val[4].punct(",") {
+				return 400, "non_seasonal_order must be a tuple (p, d, q) of integers"
+			}
+			for _, k := range []int{1, 3, 5} {
+				n, err := strconv.Atoi(val[k].text)
+				if err != nil {
+					return 400, "non_seasonal_order must be a tuple (p, d, q) of integers"
+				}
+				nums = append(nums, n)
+			}
+			if nums[0] < 0 || nums[0] > 5 || nums[2] < 0 || nums[2] > 5 || nums[1] < 0 || nums[1] > 2 {
+				return 400, "non_seasonal_order's p and q must be between 0 and 5, and d between 0 and 2"
+			}
+			o.TS.Order = nums
+		case "data_frequency":
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			s = strings.ToUpper(s)
+			found := s == "AUTO_FREQUENCY"
+			for _, f := range arimaFreqs {
+				found = found || f.name == s
+			}
+			if !found {
+				return bad()
+			}
+			o.TS.Frequency = s
+		case "auto_arima", "include_drift", "clean_spikes_and_dips", "adjust_step_changes", "decompose_time_series":
+			b, ok := boolv()
+			if !ok {
+				return bad()
+			}
+			switch name {
+			case "auto_arima":
+				o.TS.AutoArima = b
+			case "include_drift":
+				o.TS.IncludeDrift = b
+			case "clean_spikes_and_dips":
+				o.TS.CleanSpikes = b
+			case "adjust_step_changes":
+				o.TS.AdjustSteps = b
+			default:
+				o.TS.Decompose = b
+			}
+		case "seasonalities":
+			var ss []string
+			if s, ok := str(); ok {
+				ss = []string{s}
+			} else if len(val) >= 2 && val[0].punct("[") && val[len(val)-1].punct("]") {
+				for _, t := range val[1 : len(val)-1] {
+					if t.punct(",") {
+						continue
+					}
+					s, ok := unquoteString(t.text)
+					if t.kind != tokString || !ok {
+						return bad()
+					}
+					ss = append(ss, strings.ToUpper(s))
+				}
+			}
+			if len(ss) == 1 && (strings.EqualFold(ss[0], "AUTO") || strings.EqualFold(ss[0], "NO_SEASONALITY")) {
+				o.TS.Seasonalities = strings.ToUpper(ss[0])
+				continue
+			}
+			for _, s := range ss {
+				switch strings.ToUpper(s) {
+				case "AUTO", "NO_SEASONALITY":
+					return 400, "AUTO and NO_SEASONALITY cannot be combined with other seasonalities"
+				case "DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY":
+				default:
+					return bad()
+				}
+			}
+			if len(ss) == 0 {
+				return bad()
+			}
+			o.TS.Seasonalities = strings.Join(ss, ",")
+		case "holiday_region":
+			return 501, "Not implemented here: holiday_region: its holiday effects come from Google's holiday calendar " +
+				"(bigquery-public-data.ml_datasets.holidays_and_events_for_forecasting), which CloudBurrow does not have. Nothing was run."
+		case "forecast_limit_lower_bound", "forecast_limit_upper_bound":
+			v, ok := num()
+			if !ok {
+				return bad()
+			}
+			if name == "forecast_limit_lower_bound" {
+				o.TS.LimitLower = &v
+			} else {
+				o.TS.LimitUpper = &v
+			}
+		case "hierarchical_time_series_cols":
+			return 501, "Not implemented here: hierarchical_time_series_cols: the reconciliation of hierarchical forecasts is Google's. Nothing was run."
+		case "num_factors":
+			v, ok := num()
+			if !ok || v != float64(int(v)) || v < 1 || v > 200 {
+				return 400, "num_factors must be an integer between 1 and 200"
+			}
+			o.NumFactors = int(v)
 		case "num_clusters", "num_principal_components":
 			v, ok := num()
 			if !ok || v != float64(int(v)) || v < 1 {
@@ -956,7 +1261,13 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			if s, ok := str(); !ok || !strings.EqualFold(s, "ONE_HOT_ENCODING") {
 				return 501, "Not implemented here: category_encoding_method other than ONE_HOT_ENCODING. Nothing was run."
 			}
-		case "auto_class_weights", "enable_global_explain", "calculate_p_values", "warm_start":
+		case "enable_global_explain":
+			b, ok := boolv()
+			if !ok {
+				return bad()
+			}
+			o.GlobalExplain = b
+		case "auto_class_weights", "calculate_p_values", "warm_start":
 			b, ok := boolv()
 			if !ok {
 				return bad()
@@ -970,7 +1281,9 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				"optimize_strategy, l1_reg, l2_reg, max_iterations, learn_rate_strategy, learn_rate, ls_init_learn_rate, early_stop, " +
 				"min_rel_progress, data_split_method, data_split_eval_fraction, data_split_col, category_encoding_method, num_clusters, " +
 				"kmeans_init_method, kmeans_init_col, distance_type, standardize_features, num_principal_components, " +
-				"pca_explained_variance_ratio, scale_features and pca_solver. Nothing was run."
+				"pca_explained_variance_ratio, scale_features, pca_solver, feedback_type, user_col, item_col, rating_col, num_factors, " +
+				"max_tree_depth, min_split_loss, min_tree_child_weight, booster_type, tree_method, num_parallel_tree, subsample, colsample_* and " +
+				"the ARIMA_PLUS options. Nothing was run."
 		}
 	}
 	return 0, ""
@@ -985,6 +1298,19 @@ var modelTypeOptions = map[string][]string{
 	"KMEANS": {"num_clusters", "kmeans_init_method", "kmeans_init_col", "distance_type", "standardize_features", "max_iterations",
 		"early_stop", "min_rel_progress", "warm_start"},
 	"PCA": {"num_principal_components", "pca_explained_variance_ratio", "scale_features", "pca_solver"},
+	"BOOSTED_TREE_REGRESSOR": {"input_label_cols", "max_iterations", "learn_rate", "l1_reg", "l2_reg", "early_stop", "min_rel_progress",
+		"data_split_method", "data_split_eval_fraction", "data_split_col", "category_encoding_method", "enable_global_explain", "max_tree_depth",
+		"min_split_loss", "min_tree_child_weight", "booster_type", "tree_method", "num_parallel_tree", "subsample", "colsample_bytree",
+		"colsample_bylevel", "colsample_bynode"},
+	"ARIMA_PLUS": {"time_series_timestamp_col", "time_series_data_col", "time_series_id_col", "horizon", "auto_arima", "auto_arima_max_order",
+		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
+		"decompose_time_series", "seasonalities", "trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length",
+		"max_time_series_length", "forecast_limit_lower_bound", "forecast_limit_upper_bound"},
+	"RANDOM_FOREST_REGRESSOR": {"input_label_cols", "l1_reg", "l2_reg", "early_stop", "min_rel_progress", "data_split_method",
+		"data_split_eval_fraction", "data_split_col", "enable_global_explain", "max_tree_depth", "min_split_loss", "min_tree_child_weight",
+		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},
+	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
+		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
 
 // checkModelOptions refuses an option the model type does not take, and
@@ -993,6 +1319,15 @@ func checkModelOptions(o mlOptions) (int, string) {
 	allowed, ok := modelTypeOptions[o.ModelType]
 	if o.ModelType == "LOGISTIC_REG" {
 		allowed, ok = append(append([]string(nil), modelTypeOptions["LINEAR_REG"]...), "auto_class_weights"), true
+	}
+	if o.ModelType == "BOOSTED_TREE_CLASSIFIER" {
+		allowed, ok = append(append([]string(nil), modelTypeOptions["BOOSTED_TREE_REGRESSOR"]...), "auto_class_weights"), true
+	}
+	if o.ModelType == "RANDOM_FOREST_CLASSIFIER" {
+		allowed, ok = append(append([]string(nil), modelTypeOptions["RANDOM_FOREST_REGRESSOR"]...), "auto_class_weights"), true
+	}
+	if c, m := checkTreeSampling(o); c != 0 {
+		return c, m
 	}
 	if !ok {
 		return 400, "Invalid model_type: " + o.ModelType
@@ -1152,6 +1487,12 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 					break
 				}
 			}
+			items, c, m := f.learnTransform(r, q, d.transform, d.query)
+			if c != 0 {
+				fail(c, m)
+				return true
+			}
+			d.transform = items
 			trainSQL = "SELECT " + strings.Join(d.transform, ", ") + " FROM (" + d.query + ")"
 		}
 		cols, rows, c, m := f.queryAllRows(r, q, trainSQL)

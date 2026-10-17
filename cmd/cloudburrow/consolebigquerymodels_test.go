@@ -37,6 +37,10 @@ func modelsAPI(t *testing.T, calls *[]string) *httptest.Server {
 			fmt.Fprint(w, testModel)
 		case strings.HasSuffix(r.URL.Path, "/datasets/d/models/m"):
 			fmt.Fprint(w, testModel)
+		case strings.HasSuffix(r.URL.Path, "/queries") && strings.Contains(string(b), "ML.GLOBAL_EXPLAIN"):
+			// A model trained without enable_global_explain.
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"code":400,"message":"ML.GLOBAL_EXPLAIN requires a model trained with enable_global_explain = TRUE"}}`)
 		case strings.HasSuffix(r.URL.Path, "/queries"):
 			if !strings.Contains(string(b), "ML.WEIGHTS(MODEL `p.d.m`)") {
 				t.Errorf("query %s", b)
@@ -92,13 +96,19 @@ func TestBigQueryModelsSectionAndPage(t *testing.T) {
 }
 
 // TestBigQueryModelPageResults: a KMEANS model's page shows its
-// centroids, a LOGISTIC_REG model's its confusion matrix, and a PCA
-// model's its components, from the ML functions the front answers (#1481).
+// centroids, a LOGISTIC_REG model's its confusion matrix, a PCA model's
+// its components, a MATRIX_FACTORIZATION model's its recommendations and
+// factors, and a boosted tree model's its feature importance, from the ML
+// functions the front answers (#1481, #1504).
 func TestBigQueryModelPageResults(t *testing.T) {
 	models := map[string]string{
 		"km": `"modelType":"KMEANS","trainingRuns":[{"evaluationMetrics":{"clusteringMetrics":{"daviesBouldinIndex":0.1,"meanSquaredDistance":1.5}}}]`,
 		"lg": `"modelType":"LOGISTIC_REGRESSION","trainingRuns":[{"evaluationMetrics":{"multiClassClassificationMetrics":{"aggregateClassificationMetrics":{"accuracy":0.9}}}}]`,
 		"pc": `"modelType":"PCA","trainingRuns":[{"evaluationMetrics":{"dimensionalityReductionMetrics":{"totalExplainedVarianceRatio":0.75}}}]`,
+		"bt": `"modelType":"BOOSTED_TREE_REGRESSOR","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"rf": `"modelType":"RANDOM_FOREST_CLASSIFIER","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"ar": `"modelType":"ARIMA_PLUS","trainingRuns":[{"results":[{"index":0,"arimaResult":{"arimaModelInfo":[]}}]}]`,
+		"mf": `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
 	}
 	rows := func(fields, rows string) string {
 		return `{"jobReference":{"projectId":"p","jobId":"j"},"jobComplete":true,"schema":{"fields":[` + fields + `]},"rows":[` + rows + `]}`
@@ -121,6 +131,26 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		case strings.Contains(q, "ML.CONFUSION_MATRIX"):
 			fmt.Fprint(w, rows(`{"name":"expected_label","type":"STRING"},{"name":"a","type":"INTEGER"},{"name":"b","type":"INTEGER"}`,
 				`{"f":[{"v":"a"},{"v":"7"},{"v":"1"}]},{"f":[{"v":"b"},{"v":"0"},{"v":"9"}]}`))
+		case strings.Contains(q, "ML.FEATURE_IMPORTANCE"):
+			fmt.Fprint(w, rows(`{"name":"feature","type":"STRING"},{"name":"importance_weight","type":"INTEGER"},{"name":"importance_gain","type":"FLOAT"},`+
+				`{"name":"importance_cover","type":"FLOAT"}`, `{"f":[{"v":"x"},{"v":"20"},{"v":"3.5"},{"v":"10"}]}`))
+		case strings.Contains(q, "ML.GLOBAL_EXPLAIN"):
+			fmt.Fprint(w, rows(`{"name":"feature","type":"STRING"},{"name":"attribution","type":"FLOAT"}`, `{"f":[{"v":"x"},{"v":"1.25"}]}`))
+		case strings.Contains(q, "ML.FORECAST"):
+			fmt.Fprint(w, rows(`{"name":"forecast_timestamp","type":"TIMESTAMP"},{"name":"forecast_value","type":"FLOAT"},{"name":"standard_error","type":"FLOAT"},`+
+				`{"name":"confidence_level","type":"FLOAT"},{"name":"prediction_interval_lower_bound","type":"FLOAT"},{"name":"prediction_interval_upper_bound","type":"FLOAT"}`,
+				`{"f":[{"v":"1704931200000000"},{"v":"19.5"},{"v":"0.75"},{"v":"0.95"},{"v":"18"},{"v":"21"}]}`))
+		case strings.Contains(q, "ML.ARIMA_EVALUATE"):
+			fmt.Fprint(w, rows(`{"name":"f0_","type":"STRING"},{"name":"log_likelihood","type":"FLOAT"},{"name":"AIC","type":"FLOAT"},{"name":"variance","type":"FLOAT"},`+
+				`{"name":"f1_","type":"STRING"},{"name":"has_spikes_and_dips","type":"BOOLEAN"},{"name":"has_step_changes","type":"BOOLEAN"}`,
+				`{"f":[{"v":"ARIMA(0, 1, 0) with drift"},{"v":"-9.5"},{"v":"23"},{"v":"0.6"},{"v":"WEEKLY"},{"v":"true"},{"v":"false"}]}`))
+		case strings.Contains(q, "ML.RECOMMEND"):
+			fmt.Fprint(w, rows(`{"name":"predicted_rating","type":"FLOAT"},{"name":"user","type":"INTEGER"},{"name":"item","type":"STRING"}`,
+				`{"f":[{"v":"4.5"},{"v":"7"},{"v":"film"}]}`))
+		case strings.Contains(q, "ML.WEIGHTS") && strings.Contains(q, "factor_weights"):
+			fmt.Fprint(w, rows(`{"name":"processed_input","type":"STRING"},{"name":"feature","type":"STRING"},{"name":"intercept","type":"FLOAT"},`+
+				`{"name":"f0_","type":"FLOAT","mode":"REPEATED"}`,
+				`{"f":[{"v":"user"},{"v":"7"},{"v":"0.25"},{"v":[{"v":"1.5"},{"v":"-2"}]}]}`))
 		case strings.Contains(q, "ML.PRINCIPAL_COMPONENT_INFO"):
 			fmt.Fprint(w, rows(`{"name":"principal_component_id","type":"INTEGER"},{"name":"eigenvalue","type":"FLOAT"},`+
 				`{"name":"explained_variance_ratio","type":"FLOAT"},{"name":"cumulative_explained_variance_ratio","type":"FLOAT"}`,
@@ -139,6 +169,10 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"km": {"Centroids", "Value:11.5", "a=0.25", "Davies-Bouldin index"},
 		"lg": {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
 		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
+		"bt": {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
+		"rf": {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
+		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false"},
+		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
 		if err != nil || d.Unavailable != "" {

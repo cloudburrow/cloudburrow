@@ -30,12 +30,12 @@ tracks it; a closed issue is named only where it says what was built.
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
-| BigQuery | 31 | 12 | 7 | 12 | 0 |
+| BigQuery | 45 | 15 | 16 | 14 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 3 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **54** | **14** | **16** | **18** | **6** |
+| **Total** | **68** | **17** | **25** | **20** | **6** |
 
 ## Cloud Storage
 
@@ -224,6 +224,20 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | What #1483 leaves of undelete: an external table, and a function made by `routines.insert` before the front started, are not kept by a deletion; `UNDROP SCHEMA` in a script with control flow, or whose other statements name the dataset, and in a dry run of a script (#1483) (#1503) (#1522) | not built yet | M |
 | What #1483 leaves of undelete: `UNDROP SCHEMA` in a script with control flow, or whose other statements name the dataset, and in a dry run of a script (#1483) (#1503) | not built yet | M |
 | BQML: `LINEAR_REG`, binary and multiclass `LOGISTIC_REG`, `KMEANS` and `PCA` are trained by the front, with `TRANSFORM`, ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO and models.* (#1465, #1481); every other model type, remote models, ML preprocessing functions in TRANSFORM and the other ML functions are 501 with the reason (#1504) | no emulator support: training Google does not document, or Google's infrastructure | L |
+| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (docs read again 2026-10-16: streaming to a decorator is documented for daily ingestion-time tables only, and schemaUpdateOptions name no rule for these) (#1458) | not documented by Google | S |
+| A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
+| `PARTITIONS`' `last_modified_time` is NULL for an ingestion-time partitioned table's partitions and where the engine's change table holds no write (seven days kept), and its write times do not follow the front's `clock:advance`; region `TABLE_STORAGE` has no physical byte columns, and an older table than 90 days no active or long-term split (#1458) | no emulator support (no compressed sizes; write times kept seven days) | S |
+| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `job_stages`, `object_storage_stats`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `vector_search_statistics` or `external_service_costs` (#1458) | not documented by Google (what a job without such statistics holds) | S |
+| A script the emulator runs whole (no control flow, no query before its last statement, nothing it refuses together) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
+| DML with a `FROM` of several items (#1459) | no emulator support | M |
+| `CREATE SCHEMA` of an existing dataset and `CREATE TABLE … CLONE` later in a multi-statement script (#1459) | no emulator support | M |
+| `CREATE [OR REPLACE] [TABLE] FUNCTION` of one that exists, and `DROP [TABLE] FUNCTION`, inside multi-statement scripts (#1459) | no emulator support | M |
+| `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
+| `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a dry run of a script with a `TEMP` table or function, beyond what the emulator's own dry run checks (#1459) | not built yet | S |
+| A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
+| `FOR SYSTEM_TIME AS OF` a past time of an ingestion-time partitioned table, or with a partition decorator, in a query, a snapshot or clone, or a copy of `table@time` (#1483) | not built yet | M |
+| What #1483 leaves of undelete: an external table, and a function made by `routines.insert` before the front started, are not kept by a deletion; `UNDROP SCHEMA` in a script with control flow, or whose other statements name the dataset, and in a dry run of a script (#1483) | not built yet | M |
+| BQML: `LINEAR_REG`, binary and multiclass `LOGISTIC_REG`, `KMEANS`, `PCA`, explicit `MATRIX_FACTORIZATION`, `BOOSTED_TREE_REGRESSOR`, `BOOSTED_TREE_CLASSIFIER`, `RANDOM_FOREST_REGRESSOR`, `RANDOM_FOREST_CLASSIFIER` and `ARIMA_PLUS` are trained by the front, with `TRANSFORM`, ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN and models.* (#1465, #1481, #1504; ARIMA_PLUS's seasonal decomposition, spikes and dips, step changes and forecast limits #1518), and the preprocessing functions ML.BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER, in a query and in TRANSFORM (#1504); sampled boosted trees, DNNs, `AUTOENCODER`, `ARIMA_PLUS_XREG` and ARIMA_PLUS's holiday regions, implicit matrix factorization, AutoML, imported and remote models, and the quantile, vocabulary and hashing preprocessing functions are 501 with the reason | no emulator support: training Google does not document, or Google's infrastructure | L |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |
 | BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) (#1445) | not documented by Google | S |
 | Table options: `storage_uri` (#1427) is tracked on its own, and what #1426 and #1418 leave in the rows below (#1456) | not built yet | M |
