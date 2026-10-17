@@ -79,7 +79,7 @@ resource "google_cloud_tasks_queue" "q" {
 	secretName := "projects/" + p + "/secrets/" + secret
 	queueName := "projects/" + p + "/locations/us-central1/queues/" + queue
 	targets := []tfIAMTarget{
-		{kind: "google_storage_bucket", label: "b", ref: map[string]string{"bucket": "google_storage_bucket.b.name"},
+		{kind: "google_storage_bucket", label: "b", policyData: true, ref: map[string]string{"bucket": "google_storage_bucket.b.name"},
 			read: func() map[string][]string {
 				t.Helper()
 				pol, err := sc.Bucket(bucket).IAM().Policy(ctx)
@@ -92,10 +92,10 @@ resource "google_cloud_tasks_queue" "q" {
 				}
 				return out
 			}},
-		{kind: "google_secret_manager_secret", label: "s",
+		{kind: "google_secret_manager_secret", label: "s", policyData: true,
 			ref:  map[string]string{"project": "google_secret_manager_secret.s.project", "secret_id": "google_secret_manager_secret.s.secret_id"},
 			read: fromProto(func() (*iampb.Policy, error) { return smc.GetIamPolicy(ctx, req(secretName)) }, secretName)},
-		{kind: "google_cloud_tasks_queue", label: "q",
+		{kind: "google_cloud_tasks_queue", label: "q", policyData: true,
 			ref:  map[string]string{"project": "google_cloud_tasks_queue.q.project", "location": "google_cloud_tasks_queue.q.location", "name": "google_cloud_tasks_queue.q.name"},
 			read: fromProto(func() (*iampb.Policy, error) { return tc.GetIamPolicy(ctx, req(queueName)) }, queueName)},
 	}
@@ -283,8 +283,9 @@ resource "google_bigquery_dataset" "d" {
   delete_contents_on_destroy = true
 }
 `, project, ds)
-	targets := []tfIAMTarget{{kind: "google_bigquery_dataset", label: "d",
-		ref: map[string]string{"project": "google_bigquery_dataset.d.project", "dataset_id": "google_bigquery_dataset.d.dataset_id"},
+	targets := []tfIAMTarget{{kind: "google_bigquery_dataset", label: "d", policyData: true,
+		policyDataMembers: func(member string) bool { return strings.HasSuffix(member, "@example.com") },
+		ref:               map[string]string{"project": "google_bigquery_dataset.d.project", "dataset_id": "google_bigquery_dataset.d.dataset_id"},
 		read: func() map[string][]string {
 			t.Helper()
 			d, err := svc.Datasets.Get(project, ds).Context(ctx).Do()

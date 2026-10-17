@@ -143,7 +143,7 @@ func TestTerraformCloudRunV1ServiceIAM(t *testing.T) {
 	name := runParent(h) + "/services/" + svc
 	t.Cleanup(func() { _, _ = c.Namespaces.Services.Delete("namespaces/" + h.Project() + "/services/" + svc).Do() })
 	targets := []tfIAMTarget{{
-		kind: "google_cloud_run_service", label: "s",
+		kind: "google_cloud_run_service", label: "s", policyData: true,
 		ref: map[string]string{"project": "google_cloud_run_service.s.project", "location": "google_cloud_run_service.s.location",
 			"service": "google_cloud_run_service.s.name"},
 		read: func() map[string][]string {

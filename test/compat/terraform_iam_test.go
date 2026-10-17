@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -44,6 +45,13 @@ type tfIAMTarget struct {
 	label string            // the Terraform name of the target and its IAM resources
 	ref   map[string]string // the IAM resource's arguments naming the target
 	read  func() map[string][]string
+	// policyData adds the target's data "<kind>_iam_policy" (#1304) to the
+	// member-and-binding and the policy phases, read after the IAM
+	// resources; runTFIAMPhases compares its policy_data with read.
+	policyData bool
+	// policyDataMembers, when set, keeps only the data source's members it
+	// accepts, for a read that leaves some out (a dataset's special groups).
+	policyDataMembers func(member string) bool
 }
 
 const (
@@ -79,6 +87,22 @@ data "google_iam_policy" "p" {
 		var ref strings.Builder
 		for _, k := range keys {
 			fmt.Fprintf(&ref, "  %s = %s\n", k, tg.ref[k])
+		}
+		if tg.policyData && phase != tfIAMNone {
+			after := fmt.Sprintf("%[1]s_iam_member.%[2]s, %[1]s_iam_binding.%[2]s", tg.kind, tg.label)
+			if phase == tfIAMPolicy {
+				after = fmt.Sprintf("%s_iam_policy.%s", tg.kind, tg.label)
+			}
+			fmt.Fprintf(&b, `
+data "%[1]s_iam_policy" "%[2]s" {
+%[3]s  depends_on = [%[4]s]
+}
+# A map, as the provider orders some policies' bindings at random (the
+# BigQuery dataset's, made from its access list through a Go map).
+output "%[5]s" {
+  value = { for b in jsondecode(data.%[1]s_iam_policy.%[2]s.policy_data).bindings : b.role => sort(b.members) }
+}
+`, tg.kind, tg.label, ref.String(), after, tfIAMDataOutput(tg))
 		}
 		switch phase {
 		case tfIAMMemberBinding:
@@ -130,6 +154,48 @@ func checkTFIAMPhase(t *testing.T, when string, phase tfIAMPhase, roles [2]strin
 	}
 }
 
+// tfIAMDataOutput names the output holding a target's policy_data.
+func tfIAMDataOutput(tg tfIAMTarget) string { return tg.kind + "_" + tg.label + "_policy_data" }
+
+// checkTFIAMPolicyData compares each policyData target's data source with
+// the policy the official client reads: the same roles and members.
+func checkTFIAMPolicyData(t *testing.T, m *tfModule, when string, targets []tfIAMTarget) {
+	t.Helper()
+	norm := func(in map[string][]string) string {
+		out := map[string]string{}
+		for role, members := range in {
+			ms := append([]string(nil), members...)
+			sort.Strings(ms)
+			if len(ms) != 0 {
+				out[role] = strings.Join(ms, ",")
+			}
+		}
+		return fmt.Sprint(out)
+	}
+	for _, tg := range targets {
+		if !tg.policyData {
+			continue
+		}
+		var bindings map[string][]string
+		raw := m.must("output", "-json", tfIAMDataOutput(tg))
+		if err := json.Unmarshal([]byte(raw), &bindings); err != nil {
+			t.Errorf("%s, data %s_iam_policy.%s's bindings %q: %v", when, tg.kind, tg.label, raw, err)
+			continue
+		}
+		got := map[string][]string{}
+		for role, members := range bindings {
+			for _, member := range members {
+				if tg.policyDataMembers == nil || tg.policyDataMembers(member) {
+					got[role] = append(got[role], member)
+				}
+			}
+		}
+		if g, w := norm(got), norm(tg.read()); g != w {
+			t.Errorf("%s, data %s_iam_policy.%s reads %s; the official client reads %s", when, tg.kind, tg.label, g, w)
+		}
+	}
+}
+
 // runTFIAMPhases drives the module through the phases, then destroys it.
 func runTFIAMPhases(t *testing.T, m *tfModule, base string, roles [2]string, targets []tfIAMTarget) {
 	t.Helper()
@@ -141,6 +207,9 @@ func runTFIAMPhases(t *testing.T, m *tfModule, base string, roles [2]string, tar
 		m.write(base + tfIAMResources(phase, roles, targets))
 		m.apply()
 		checkTFIAMPhase(t, "after "+when, phase, roles, targets)
+		if phase != tfIAMNone {
+			checkTFIAMPolicyData(t, m, "after "+when, targets)
+		}
 		m.planClean()
 	}
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
@@ -219,11 +288,11 @@ resource "google_bigquery_routine" "r" {
 	}
 	routine := "projects/" + project + "/datasets/" + ds + "/routines/plus_one"
 	targets := []tfIAMTarget{
-		{kind: "google_bigquery_table", label: "t", read: table("orders"), ref: map[string]string{
+		{kind: "google_bigquery_table", label: "t", policyData: true, read: table("orders"), ref: map[string]string{
 			"project": fmt.Sprintf("%q", project), "dataset_id": "google_bigquery_table.t.dataset_id", "table_id": "google_bigquery_table.t.table_id"}},
-		{kind: "google_bigquery_table", label: "v", read: table("orders_view"), ref: map[string]string{
+		{kind: "google_bigquery_table", label: "v", policyData: true, read: table("orders_view"), ref: map[string]string{
 			"project": fmt.Sprintf("%q", project), "dataset_id": "google_bigquery_table.v.dataset_id", "table_id": "google_bigquery_table.v.table_id"}},
-		{kind: "google_bigquery_routine", label: "r", ref: map[string]string{
+		{kind: "google_bigquery_routine", label: "r", policyData: true, ref: map[string]string{
 			"project": fmt.Sprintf("%q", project), "dataset_id": "google_bigquery_routine.r.dataset_id", "routine_id": "google_bigquery_routine.r.routine_id"},
 			read: func() map[string][]string {
 				t.Helper()
@@ -312,9 +381,9 @@ resource "google_cloud_run_v2_job" "j" {
 		return map[string]string{"project": res + ".project", "location": res + ".location", "name": res + ".name"}
 	}
 	targets := []tfIAMTarget{
-		{kind: "google_cloud_run_v2_service", label: "s", ref: ref("google_cloud_run_v2_service.s"),
+		{kind: "google_cloud_run_v2_service", label: "s", policyData: true, ref: ref("google_cloud_run_v2_service.s"),
 			read: read(func(r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return svcs.GetIamPolicy(ctx, r) }, svc)},
-		{kind: "google_cloud_run_v2_job", label: "j", ref: ref("google_cloud_run_v2_job.j"),
+		{kind: "google_cloud_run_v2_job", label: "j", policyData: true, ref: ref("google_cloud_run_v2_job.j"),
 			read: read(func(r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return jobs.GetIamPolicy(ctx, r) }, job)},
 	}
 	runTFIAMPhases(t, m, base, [2]string{"roles/run.invoker", "roles/run.developer"}, targets)

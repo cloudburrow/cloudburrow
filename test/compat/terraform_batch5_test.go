@@ -69,7 +69,7 @@ resource "google_storage_managed_folder" "f" {
 }
 `, h.Project(), bucket, folder)
 	targets := []tfIAMTarget{{
-		kind: "google_storage_managed_folder", label: "f",
+		kind: "google_storage_managed_folder", label: "f", policyData: true,
 		ref: map[string]string{"bucket": "google_storage_managed_folder.f.bucket", "managed_folder": "google_storage_managed_folder.f.name"},
 		read: func() map[string][]string {
 			t.Helper()
@@ -381,7 +381,7 @@ resource "google_artifact_registry_repository" "r" {
 }
 `, h.Project(), id)
 	targets := []tfIAMTarget{{
-		kind: "google_artifact_registry_repository", label: "r",
+		kind: "google_artifact_registry_repository", label: "r", policyData: true,
 		ref: map[string]string{"project": "google_artifact_registry_repository.r.project", "location": "google_artifact_registry_repository.r.location",
 			"repository": "google_artifact_registry_repository.r.name"},
 		read: func() map[string][]string {
