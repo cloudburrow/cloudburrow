@@ -4468,8 +4468,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:218 TestMemorystoreRedisClusterRefusals",
-          "test/compat/memorystorecluster_test.go:93 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:232 TestMemorystoreRedisClusterRefusals",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -4493,7 +4493,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:93 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -4537,7 +4537,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:93 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -4586,7 +4586,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:93 TestMemorystoreRedisCluster"
+          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster"
         ]
       },
       {
@@ -4609,7 +4609,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:93 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
