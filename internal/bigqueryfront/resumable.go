@@ -268,5 +268,5 @@ func (f front) finishUpload(w http.ResponseWriter, r *http.Request, s *uploadSes
 	req.RemoteAddr = r.RemoteAddr
 	req.Header.Set("Content-Type", "multipart/related; boundary="+boundary)
 	req.ContentLength = int64(len(head)) + s.size + int64(len(tail))
-	f.insertJob(w, req)
+	f.withDefaultJobKeyOf(w, req, s.job, func(w http.ResponseWriter) { f.insertJob(w, req) }) // #1456, defaultjobkey.go
 }

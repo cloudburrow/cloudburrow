@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -44,8 +45,8 @@ func (e tableEmulator) sentSince(from int) []string {
 
 // TestJobsTableWritesOnlyNewRows (#1378): an unfiltered JOBS query makes
 // the table of rows and reads it; the next writes only the rows new or
-// changed since, and deletes those of jobs gone; a filtered one reads a
-// literal of the jobs it keeps.
+// changed since, and deletes those of jobs gone; a filtered one then
+// reads the table too (#1564).
 func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}}}
 	h := Wrap(emu)
@@ -54,6 +55,8 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 			t.Fatalf("%s: %d %v", q, code, got)
 		}
 	}
+	// auto1 is still running when its row is first written.
+	emu.jobs["auto1"]["status"] = map[string]any{"state": "RUNNING"}
 	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
 	table := "`" + resultsDataset + "`.`" + jobsTableName + "`"
 	run := func(sql string) []string {
@@ -76,14 +79,20 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 	if len(sent) != 2 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) || rowsIn(sent[0]) != 1 || !strings.Contains(sent[1], table) {
 		t.Fatalf("second JOBS query sent %q, want the one new row written", sent)
 	}
+	// Once the table is made, a filtered query reads it too, brought up
+	// to date as an unfiltered one does (#1564).
 	sent = run(count + " WHERE job_id = 'auto1'")
-	if len(sent) != 1 || strings.Contains(sent[0], table) || !strings.Contains(sent[0], "UNNEST(ARRAY<") {
-		t.Fatalf("filtered JOBS query sent %q, want a literal", sent)
+	if len(sent) != 2 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) || rowsIn(sent[0]) != 1 ||
+		sent[1] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS WHERE job_id = 'auto1'" {
+		t.Fatalf("filtered JOBS query sent %q, want the new row written and the table read", sent)
 	}
-	// A job that changed, and one that is gone.
+	// A job that finished since (its row was not DONE), and one deleted
+	// through the front (noteMade): the query lists only those and the
+	// new ones (#1559).
 	emu.jobs["auto1"]["status"] = map[string]any{"state": "DONE", "errorResult": map[string]any{"reason": "x", "message": "y"}}
 	delete(emu.jobs, "auto2")
 	emu.order = append(emu.order[:1], emu.order[2:]...)
+	do(t, h, "DELETE", base+"/jobs/auto2/delete", "")
 	sent = run(count)
 	if len(sent) != 3 || !strings.HasPrefix(sent[0], "DELETE FROM "+table+" WHERE job_id IN (") ||
 		!strings.Contains(sent[0], "'auto1'") || !strings.Contains(sent[0], "'auto2'") ||
@@ -184,7 +193,8 @@ func TestJobsTableBackgroundMakesNoTable(t *testing.T) {
 
 // TestJobsTableReadByFilteredQueries (#1515): a filtered JOBS query that
 // keeps more than jobsLiteralMax jobs reads the table of rows, its WHERE
-// left to the engine; one that keeps fewer reads a literal of them.
+// left to the engine; one that keeps fewer reads a literal of them, until
+// the table is made (#1564).
 func TestJobsTableReadByFilteredQueries(t *testing.T) {
 	saved := jobsLiteralMax
 	jobsLiteralMax = 2
@@ -206,6 +216,12 @@ func TestJobsTableReadByFilteredQueries(t *testing.T) {
 		return emu.sentSince(from)
 	}
 	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	// Before the table is made, a query that keeps few jobs reads a
+	// literal of them.
+	sent := run(count + " WHERE job_id IN ('auto1', 'auto2')")
+	if len(sent) != 1 || strings.Contains(sent[0], table) || !strings.Contains(sent[0], "UNNEST(ARRAY<") {
+		t.Fatalf("JOBS query of two jobs sent %q, want a literal", sent)
+	}
 	for _, where := range []string{" WHERE job_type = 'QUERY'", " WHERE creation_time > TIMESTAMP '2000-01-01'"} {
 		sent := run(count + where)
 		last := sent[len(sent)-1]
@@ -213,9 +229,11 @@ func TestJobsTableReadByFilteredQueries(t *testing.T) {
 			t.Fatalf("%s: sent %q, want the table read", where, sent)
 		}
 	}
-	sent := run(count + " WHERE job_id IN ('auto1', 'auto2')")
-	if len(sent) != 1 || strings.Contains(sent[0], table) || !strings.Contains(sent[0], "UNNEST(ARRAY<") {
-		t.Fatalf("JOBS query of two jobs sent %q, want a literal", sent)
+	// Once it is, the table, whatever the query keeps (#1564): a literal
+	// is cut from a list of every job.
+	sent = run(count + " WHERE job_id IN ('auto1', 'auto2')")
+	if last := sent[len(sent)-1]; last != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS WHERE job_id IN ('auto1', 'auto2')" {
+		t.Fatalf("JOBS query of two jobs sent %q, want the table read", sent)
 	}
 }
 
@@ -414,5 +432,27 @@ func TestJobsBatchBoundsAnInsert(t *testing.T) {
 		if got := jobsBatch(c.rows); got != c.want {
 			t.Errorf("jobsBatch of %d rows: %d, want %d", len(c.rows), got, c.want)
 		}
+	}
+}
+
+// TestJobsTableOverflowListsEveryJob (#1559): once pending has dropped a
+// change (jobsPendingMax), the next query of every job lists them all.
+func TestJobsTableOverflowListsEveryJob(t *testing.T) {
+	var j jobsTable
+	if j.incremental("p") {
+		t.Fatal("a table not made is synced incrementally")
+	}
+	j.setMade("p", true)
+	if !j.incremental("p") {
+		t.Fatal("a made table is not synced incrementally")
+	}
+	for i := range jobsPendingMax + 1 {
+		j.noteMade("p", fmt.Sprint("job", i))
+	}
+	if j.incremental("p") {
+		t.Fatal("a table whose pending overflowed is synced incrementally")
+	}
+	if !j.incremental("p") {
+		t.Fatal("the overflow outlived the query that lists every job")
 	}
 }

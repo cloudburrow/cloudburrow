@@ -579,13 +579,15 @@ type scriptRun struct {
 	children *[]scriptChild
 	expr     int
 	// rowCount is @@row_count, the rows the last DML statement changed
-	// (NULL before one, and after a statement of another kind); frames
-	// place a statement EXECUTE IMMEDIATE ran, by its text, at the EXECUTE
-	// IMMEDIATE; intoQuery: the query running is EXECUTE IMMEDIATE ...
-	// INTO's, a STATEMENT child (execimmediate.go, #1037).
+	// (NULL before one, and after a statement of another kind); intoQuery:
+	// the query running is EXECUTE IMMEDIATE ... INTO's, a STATEMENT child
+	// (execimmediate.go, #1037).
 	rowCount  string
-	frames    map[string]scriptChild
 	intoQuery bool
+	// at is where the statement or expression running is, its child jobs'
+	// stack frames; pendingAt pending's; callers the frames of the CALLs
+	// running (scriptjobs.go, #1569).
+	at, pendingAt, callers []childFrame
 	// dry: the run is a dry run's, which checks an ALTER TABLE and
 	// changes nothing (altertabledry.go, #1416).
 	dry bool
@@ -697,6 +699,7 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 	if s.pending != "" && !s.pendingDML {
 		// The last query is a child job too: run once more, as it only
 		// reads (scriptjobs.go). Its failure is the client's request's.
+		s.at = s.pendingAt
 		s.sendStatement(s.pending)
 	}
 	if s.pending == "" && s.lastQuery != "" {
@@ -1026,6 +1029,7 @@ func (s *scriptRun) run(nodes []scriptNode) *scriptFlow {
 		if flow := s.readyRowCount(n.toks, n.caseExpr, n.conds); flow != nil { // #1037
 			return flow
 		}
+		s.place(n.toks)
 		if flow := s.runNode(n); flow != nil {
 			if flow.failed && !flow.hasPos {
 				if pos := nodePos(n); pos >= 0 {
@@ -1097,6 +1101,7 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 			if n.caseExpr != nil {
 				text = "(" + s.text(n.caseExpr) + ") = (" + text + ")"
 			}
+			s.place(c)
 			ok, flow := s.conditionText(text)
 			if flow != nil {
 				return flow
@@ -1265,7 +1270,10 @@ func (s *scriptRun) flush() *scriptFlow {
 	}
 	text, dml := s.pending, s.pendingDML
 	s.pending, s.pendingDML = "", false
+	at := s.at
+	s.at = s.pendingAt
 	rec, flow := s.sendStatement(text)
+	s.at = at
 	if flow != nil {
 		return flow
 	}
@@ -1326,6 +1334,7 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 	}
 	if (query || dml) && s.guarded == 0 {
 		s.pending, s.pendingDML, s.last, s.lastQuery = text, dml, nil, ""
+		s.pendingAt = s.at
 		return nil
 	}
 	rec, flow := s.sendStatement(text)
@@ -1617,6 +1626,7 @@ func (s *scriptRun) condition(toks []token) (bool, *scriptFlow) {
 	if flow := s.readyRowCount(toks, nil, nil); flow != nil { // #1037
 		return false, flow
 	}
+	s.place(toks)
 	return s.conditionText(s.text(toks))
 }
 
@@ -1636,6 +1646,7 @@ func (s *scriptRun) forRows(toks []token) ([]scriptVar, *scriptFlow) {
 	if s.notImpl != "" {
 		return nil, &scriptFlow{}
 	}
+	s.place(toks)
 	return s.query("SELECT * FROM "+text, 0)
 }
 
@@ -1663,6 +1674,7 @@ func (s *scriptRun) declare(toks []token) *scriptFlow {
 			return &scriptFlow{}
 		}
 		var flow *scriptFlow
+		s.place(def)
 		if v, flow = s.evaluate(text, typ); flow != nil {
 			return flow
 		}
@@ -1715,6 +1727,7 @@ func (s *scriptRun) set(toks []token) *scriptFlow {
 	if s.notImpl != "" {
 		return &scriptFlow{}
 	}
+	s.place(body[2:])
 	v, flow := s.evaluate(text, old.typ)
 	if flow != nil {
 		return flow
@@ -1743,6 +1756,7 @@ func (s *scriptRun) setTuple(toks []token) *scriptFlow {
 	if s.notImpl != "" {
 		return &scriptFlow{}
 	}
+	s.place(body[closeAt+2:])
 	return s.setColumns(names, "SELECT * FROM UNNEST([("+text+")])", s.text(toks), false)
 }
 
@@ -1929,10 +1943,8 @@ func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
 				"not a query (SELECT or WITH); BigQuery documents INTO of a query's row only. What the statements before it did was kept."
 			return &scriptFlow{}
 		}
-		s.frameAt(bound, toks)
 		return s.setColumns(names, bound, stmt, true)
 	}
-	s.frameAt(bound, toks)
 	return s.runText(bound)
 }
 

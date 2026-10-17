@@ -33,6 +33,9 @@ import (
 func TestTerraformLoggingBucketsAndLinks(t *testing.T) {
 	h := New(t)
 	opts := loggingClientOptions(h) // skips without CLOUDBURROW_TEST_LOGGING
+	// The link makes a BigQuery dataset, so a shard without BigQuery skips
+	// here, before terraform runs.
+	bq, _ := bigqueryClient(t, h)
 	m := newTFModule(t)
 	ctx := h.Context()
 	config, err := vlogging.NewConfigClient(ctx, opts...)
@@ -111,7 +114,6 @@ resource "google_logging_linked_dataset" "link" {
 	m.apply()
 	check("after apply", 45, "first")
 	// The link made its BigQuery dataset, with the _AllLogs view (#1423).
-	bq, _ := bigqueryClient(t, h)
 	if md, err := bq.Dataset(linkID).Table("_AllLogs").Metadata(ctx); err != nil || md.Type != bigquery.ViewTable {
 		t.Errorf("_AllLogs of the Terraform link = %v, %v; want a view", md, err)
 	}

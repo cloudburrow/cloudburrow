@@ -243,9 +243,43 @@ func (a *Admin) serveREST(w http.ResponseWriter, r *http.Request) {
 			reply(a.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: p}))
 			return
 		}
-	case strings.Contains(p, "/userCreds"):
-		writeError(w, refuse("User credentials", noCreds))
-		return
+	// user credentials
+	case strings.HasSuffix(p, "/userCreds") && restDatabase.MatchString(strings.TrimSuffix(p, "/userCreds")) && v == "":
+		parent := strings.TrimSuffix(p, "/userCreds")
+		switch m {
+		case http.MethodGet:
+			reply(a.ListUserCreds(ctx, &adminpb.ListUserCredsRequest{Parent: parent}))
+			return
+		case http.MethodPost:
+			uc := &adminpb.UserCreds{}
+			if !body(uc) {
+				return
+			}
+			id := q.Get("userCredsId")
+			if id == "" {
+				id = q.Get("user_creds_id")
+			}
+			reply(a.CreateUserCreds(ctx, &adminpb.CreateUserCredsRequest{Parent: parent, UserCreds: uc, UserCredsId: id}))
+			return
+		}
+	case userCredsNameRe.MatchString(p):
+		switch {
+		case v == "" && m == http.MethodGet:
+			reply(a.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: p}))
+			return
+		case v == "" && m == http.MethodDelete:
+			reply(a.DeleteUserCreds(ctx, &adminpb.DeleteUserCredsRequest{Name: p}))
+			return
+		case v == "enable" && m == http.MethodPost:
+			reply(a.EnableUserCreds(ctx, &adminpb.EnableUserCredsRequest{Name: p}))
+			return
+		case v == "disable" && m == http.MethodPost:
+			reply(a.DisableUserCreds(ctx, &adminpb.DisableUserCredsRequest{Name: p}))
+			return
+		case v == "resetPassword" && m == http.MethodPost:
+			reply(a.ResetUserPassword(ctx, &adminpb.ResetUserPasswordRequest{Name: p}))
+			return
+		}
 	}
 	writeError(w, status.Errorf(codes.Unimplemented, "%s %s is not a Firestore Admin API method served here", r.Method, r.URL.Path))
 }

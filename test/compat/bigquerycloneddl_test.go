@@ -256,3 +256,46 @@ func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 		}
 	}
 }
+
+// TestBigQueryCloneAndSnapshotInAScript (#1459, #1567): CREATE TABLE …
+// CLONE, CREATE SNAPSHOT TABLE and DROP SNAPSHOT TABLE inside a script of
+// several statements with no TEMP table or function, which the front
+// carries out a statement at a time: the clone is a TABLE with the base's
+// rows, a later statement of the script reads it, the snapshot is a
+// SNAPSHOT, and a second script drops it.
+func TestBigQueryCloneAndSnapshotInAScript(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	path := func(table string) string { return "`" + ds.DatasetID + "." + table + "`" }
+	if err := bqRun(ctx, c, "CREATE TABLE "+path("base")+" (id INT64)", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+path("base")+" VALUES (1), (2)", false); err != nil {
+		t.Fatal(err)
+	}
+	got := rows(t, ctx, c, "DECLARE n INT64 DEFAULT 1;\n"+
+		"CREATE TABLE "+path("cloned")+" CLONE "+path("base")+";\n"+
+		"CREATE SNAPSHOT TABLE "+path("snap")+" CLONE "+path("base")+";\n"+
+		"INSERT INTO "+path("cloned")+" VALUES (3);\n"+
+		"SELECT COUNT(*) FROM "+path("cloned")+" WHERE id > n;")
+	if fmt.Sprint(got) != "[[2]]" {
+		t.Errorf("the script's last statement read %v of the clone, want [[2]]", got)
+	}
+	for table, want := range map[string]bigquery.TableType{"cloned": bigquery.RegularTable, "snap": bigquery.Snapshot} {
+		md, err := ds.Table(table).Metadata(ctx)
+		if err != nil || md.Type != want {
+			t.Errorf("the script's %s is %+v (%v), want a %s", table, md, err, want)
+		}
+	}
+	if n := fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path("snap"))); n != "[[2]]" {
+		t.Errorf("the script's snapshot has %s rows, want the base's 2", n)
+	}
+	if err := bqRun(ctx, c, "DECLARE x INT64 DEFAULT 0;\nDROP SNAPSHOT TABLE "+path("snap")+";\nSELECT x;", false); err != nil {
+		t.Fatalf("DROP SNAPSHOT TABLE in a script: %v", err)
+	}
+	if _, err := ds.Table("snap").Metadata(ctx); !isNotFound(err) {
+		t.Errorf("after the script's DROP SNAPSHOT TABLE the snapshot reads %v, want NOT_FOUND", err)
+	}
+}

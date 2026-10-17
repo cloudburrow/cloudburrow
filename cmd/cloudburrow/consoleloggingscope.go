@@ -70,7 +70,7 @@ func bucketOfParent(ctx context.Context, project, name string) error {
 
 // bucketScope is the picker: the project, the organization, its folders,
 // the billing accounts Logging knows, and the selected parent.
-func (p loggingBucketsProvider) bucketScope(ctx context.Context, project string) *console.Scope {
+func (p loggingAdminScreen) bucketScope(ctx context.Context, project string) *console.Scope {
 	sc := &console.Scope{Key: bucketScopeKey, Label: "Parent"}
 	if project != "" {
 		sc.Default = "projects/" + project

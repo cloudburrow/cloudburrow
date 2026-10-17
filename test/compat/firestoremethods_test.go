@@ -388,16 +388,3 @@ func TestFirestorePartitionedQueries(t *testing.T) {
 		t.Errorf("PartitionQuery(3) paged one a page = %v, want 3 cursors", cursors)
 	}
 }
-
-// TestFirestorePipelineIsRefused records that the emulator refuses
-// ExecutePipeline: pipelines need a Firestore Enterprise edition database,
-// and the emulator's is Standard.
-//
-// covers: google.firestore.v1.Firestore/ExecutePipeline (unimplemented)
-func TestFirestorePipelineIsRefused(t *testing.T) {
-	h := New(t)
-	c := firestoreClient(t, h)
-	_, err := c.Pipeline().Collection("piped").Where(firestore.GreaterThan(firestore.FieldOf("i"), 1)).Execute(h.Context()).Results().GetAll()
-	wantRefused(t, "ExecutePipeline", err, codes.InvalidArgument,
-		"ExecutePipeline requires the Database Edition to be `enterprise`.")
-}

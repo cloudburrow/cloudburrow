@@ -1,6 +1,8 @@
 package bigqueryfront
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -136,8 +138,16 @@ func icebergConfig(raw json.RawMessage) (uri string, ok bool, msg string) {
 	if len(raw) == 0 || json.Unmarshal(raw, &c) != nil {
 		return "", false, ""
 	}
+	if c.ConnectionID != "" && c.StorageURI != "" {
+		// file_format and table_format are "Required for managed tables",
+		// and "The default is PARQUET" and "ICEBERG" (DDL reference,
+		// table_option_list, read 2026-10-17): a connection and a
+		// storage_uri make a table for Apache Iceberg (#1456).
+		c.FileFormat = cmp.Or(c.FileFormat, "PARQUET")
+		c.TableFormat = cmp.Or(c.TableFormat, "ICEBERG")
+	}
 	if c.TableFormat == "" && c.FileFormat == "" {
-		return "", false, "" // storage_uri alone: kept (tableoptions.go)
+		return "", false, "" // storage_uri alone, with no connection: kept (tableoptions.go)
 	}
 	switch {
 	case !strings.EqualFold(c.TableFormat, "ICEBERG"):
@@ -486,6 +496,32 @@ func (f front) serveExportMetadata(w http.ResponseWriter, r *http.Request, q que
 		statementType: "EXPORT_DATA"}})
 }
 
+// withIcebergDefaults sets tables.insert's body, b, as r's with its
+// biglakeConfiguration's fileFormat and tableFormat defaulted
+// (icebergConfig, #1456), when either is missing.
+func withIcebergDefaults(r *http.Request, b []byte) {
+	var t map[string]json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if dec.Decode(&t) != nil || t == nil {
+		return
+	}
+	var c map[string]any
+	if json.Unmarshal(t["biglakeConfiguration"], &c) != nil || c == nil || c["fileFormat"] != nil && c["tableFormat"] != nil {
+		return
+	}
+	if c["fileFormat"] == nil {
+		c["fileFormat"] = "PARQUET"
+	}
+	if c["tableFormat"] == nil {
+		c["tableFormat"] = "ICEBERG"
+	}
+	t["biglakeConfiguration"], _ = json.Marshal(c)
+	if out, err := json.Marshal(t); err == nil {
+		setBody(r, out)
+	}
+}
+
 // insertIcebergTable is tables.insert (insertTable): of a
 // biglakeConfiguration of tableFormat ICEBERG, the configuration is
 // checked and the table registered (above).
@@ -516,6 +552,7 @@ func (f front) insertIcebergTable(w http.ResponseWriter, r *http.Request, datase
 			return
 		}
 	}
+	withIcebergDefaults(r, b)
 	rec := newRecorder()
 	f.insertTable(rec, r, dataset, "", false)
 	for k, v := range rec.header {
@@ -547,7 +584,7 @@ func (d ddlOptions) checkIceberg() string {
 		if part, ok := o.value.(map[string]any); ok && o.key == "biglakeConfiguration" {
 			for k, v := range part {
 				conf[k] = v
-				format = format || k == "fileFormat" || k == "tableFormat"
+				format = format || k == "fileFormat" || k == "tableFormat" || k == "storageUri" && d.connection != ""
 			}
 		}
 	}
@@ -572,7 +609,8 @@ func icebergColumnRefused(bad string) string {
 }
 
 // iceberg is whether d makes a BigQuery table for Apache Iceberg: its
-// OPTIONS give a file_format or table_format.
+// OPTIONS give a file_format or table_format, or WITH CONNECTION and a
+// storage_uri (#1456: the formats' defaults).
 func (d ddlOptions) iceberg() bool {
 	if d.alter || d.view {
 		return false
@@ -583,6 +621,9 @@ func (d ddlOptions) iceberg() bool {
 				return true
 			}
 			if _, ok := part["fileFormat"]; ok {
+				return true
+			}
+			if _, ok := part["storageUri"]; ok && d.connection != "" { // the formats' defaults (icebergConfig)
 				return true
 			}
 		}

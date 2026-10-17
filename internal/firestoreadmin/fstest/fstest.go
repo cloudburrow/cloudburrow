@@ -15,7 +15,9 @@ import (
 	"testing"
 
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
+	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -102,6 +104,33 @@ func (f *Docs) Commit(_ context.Context, r *firestorepb.CommitRequest) (*firesto
 		}
 	}
 	return &firestorepb.CommitResponse{}, nil
+}
+
+// BatchWrite applies each write on its own, as the emulator does: an
+// update whose precondition is that the document exists fails NOT_FOUND
+// alone when it does not.
+func (f *Docs) BatchWrite(_ context.Context, r *firestorepb.BatchWriteRequest) (*firestorepb.BatchWriteResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := &firestorepb.BatchWriteResponse{}
+	for _, w := range r.Writes {
+		st := &rpcstatus.Status{}
+		switch op := w.Operation.(type) {
+		case *firestorepb.Write_Update:
+			if _, ok := f.docs[op.Update.Name]; !ok && w.GetCurrentDocument().GetExists() {
+				st = &rpcstatus.Status{Code: int32(codes.NotFound), Message: "no entity to update"}
+				break
+			}
+			d := op.Update
+			d.CreateTime, d.UpdateTime = timestamppb.Now(), timestamppb.Now()
+			f.docs[d.Name] = d
+		case *firestorepb.Write_Delete:
+			delete(f.docs, op.Delete)
+		}
+		out.Status = append(out.Status, st)
+		out.WriteResults = append(out.WriteResults, &firestorepb.WriteResult{})
+	}
+	return out, nil
 }
 
 // Names is the paths of the documents of the database db.

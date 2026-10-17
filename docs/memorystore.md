@@ -441,20 +441,33 @@ instances.
 each pinned by digest, for amd64 and arm64. Valkey 7.2 has no `cluster-announce-client-ipv4`, so
 a 7.2 node in `CLUSTER` mode announces the host's address to clients as its hostname
 (`cluster-preferred-endpoint-type hostname`). An `UpdateInstance` of `engine_version` to a later
-version takes an RDB snapshot of each shard's primary, forms new nodes of the new image, loads the
-snapshots, then removes the old nodes, which serve until then: writes made during the upgrade,
-after the snapshot, are not carried over. A downgrade is INVALID_ARGUMENT.
+version is a rolling upgrade (#1563): new nodes of the new image join as replicas of the old ones,
+the first of each shard is promoted once it has synced, and the old nodes, which serve every write
+until then, are removed. In `CLUSTER` mode the promotion is a `CLUSTER FAILOVER` (the old primary
+pauses its clients until the new node has its offset); in `CLUSTER_DISABLED` mode the old
+primary's writes are paused (`CLIENT PAUSE WRITE`) until the new node has caught up, which then
+stops replicating while the old primary replicates it, so a write sent to it afterwards is
+READONLY rather than lost. Every acknowledged write is kept
+(`TestMemorystoreValkeyUpgradeKeepsWrites`, `TestMemorystoreValkeyClusterUpgradeKeepsWrites`).
+The endpoints are the new nodes' host addresses afterwards. A downgrade is INVALID_ARGUMENT.
 
-**Cross-instance replication** (#1557), for `CLUSTER_DISABLED` instances without in-transit
-encryption: an instance created with `cross_instance_replication_config` `instance_role`
+**Cross-instance replication** (#1557), for `CLUSTER_DISABLED` instances: an instance created with `cross_instance_replication_config` `instance_role`
 `SECONDARY` and `primary_instance` (an `ACTIVE` `CLUSTER_DISABLED` instance of the same
 `authorization_mode`) has its primary node replicate the primary instance's (`REPLICAOF`), its
 replicas chained to it: it serves the primary's keys and refuses writes (READONLY). Each member
 reports the `membership`. `UpdateInstance` of `cross_instance_replication_config` (alone)
 switches over (a secondary to `PRIMARY`, every other member as its `secondary_instances`) and
 detaches (a secondary to `NONE`; a primary to `NONE`, or to fewer `secondary_instances`). A
-primary with secondaries is not deleted (FAILED_PRECONDITION). In `CLUSTER` mode it is 501, as a
-Redis cluster's (§8).
+primary with secondaries is not deleted (FAILED_PRECONDITION). With in-transit encryption
+(#1563) a secondary's `transit_encryption_mode` must be its primary's (else INVALID_ARGUMENT);
+each member keeps its own CA, which its clients trust, and its nodes trust every member's CA
+(given to a node when it starts, and to the running nodes by `CONFIG SET tls-ca-cert-file`
+before a switchover), so they replicate over TLS (`tls-replication`) whichever member is the
+primary (`TestMemorystoreValkeyCrossInstanceReplicationTLS`). In `CLUSTER` mode it is 501, as a
+Redis cluster's (§8): Google documents it with the same shards and slots on both, but a
+cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF not allowed in cluster mode", measured
+in `TestMemorystoreValkeyClusterUpgradeKeepsWrites` on 8.1) and its replicas follow only primaries
+of their own cluster, so a shard cannot replicate another cluster's primary.
 
 **Migration** (`StartMigration`, `FinishMigration`, #1557) into a `CLUSTER_DISABLED` instance:
 its primary replicates `self_managed_source`'s `ip_address` and `port` (state `MIGRATING`,
@@ -463,25 +476,32 @@ its offset reaches the source's (unless `force`), stops replicating, and the ins
 and `MIGRATED`. A source that is a server of this CloudBurrow instance (a Memorystore for Redis
 instance, a node of a Valkey instance or Redis cluster) is named by the host address its clients
 use and reached at its in-cluster address; any other address is replicated from as it is.
-`network_attachment` is checked and kept. A source with AUTH (`self_managed_source` has no
-credentials), a `CLUSTER` mode target and in-transit encryption are not served (501 with the
-reason).
+`network_attachment` is checked and kept. A source with AUTH is not served:
+`self_managed_source` has no credentials (rechecked in googleapis' `memorystore/v1` proto,
+#1563), and Google's guide has AUTH and TLS turned off on the source. A `CLUSTER` mode target is
+501: Google's migration replicates each source shard into the target shard of the same slots,
+continuously until `FinishMigration`, which a cluster-mode node cannot do (it refuses
+`REPLICAOF`), and a keyspace scan would copy the keys once and lose the writes made during the
+migration. A target with in-transit encryption is 501 too (with the reason).
 
 **gcloud, Terraform and the console** (#1557). gcloud 587.0.0's `memorystore instances create
 --kms-key`, `--engine-version`, `--cross-instance-replication-config-role=secondary
---primary-instance`, `instances update --engine-version` and
+--primary-instance` (with `--transit-encryption-mode=server-authentication` too,
+`TestGcloudMemorystore1563`), `instances update --engine-version` and
 `--cross-instance-replication-config-role=none`, `start-migration` and `finish-migration` are
 tested (`TestGcloudMemorystore1557`); `UpdateInstance` takes a message field's own paths in its
 `update_mask` (`cross_instance_replication_config.instance_role`), as gcloud sends them.
 `google_memorystore_instance`'s `kms_key`, `engine_version` (changed in place, the same `uid`) and
-`cross_instance_replication_config` apply and plan empty (`TestTerraformMemorystore1557`); the
+`cross_instance_replication_config` apply and plan empty (`TestTerraformMemorystore1557`; with
+`transit_encryption_mode` `SERVER_AUTHENTICATION` on both, `TestTerraformMemorystore1563`); the
 provider has no migration fields. The console's Create instance has **Engine version**,
 **Persistence**, **Customer-managed encryption key** and **Secondary of (cross-instance
 replication)**; Edit has **Engine version** (an upgrade); the instance's page shows its
 Encryption, key and key state, its cross-instance replication role, primary, secondaries and
 membership, and a migration's state and source; a secondary's page has **Switchover** and
 **Detach**, a `CLUSTER_DISABLED` instance's **Start migration** (source IP and port) and, while
-migrating, **Finish migration** (`TestConsoleValkeyReplicationMigrationVersions`,
+migrating, **Finish migration**; **Enable in-transit encryption** with **Secondary of** makes a
+TLS secondary (`TestConsoleValkeyReplicationMigrationVersions`, `TestConsoleValkeySecondaryWithTLS`,
 `TestMemorystoreValkeySecondaryThroughThePage`).
 
 Not served: node types whose size is not modelled here and server CA modes, each 501 with the

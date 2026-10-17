@@ -272,54 +272,6 @@ func TestFirestoreAdminFields(t *testing.T) {
 	}
 }
 
-// TestFirestoreAdminRefusals: user credentials answer UNIMPLEMENTED, saying
-// why: they are for Firestore with MongoDB compatibility, which the
-// emulator is not. Exports, imports, bulk deletes, backups, restores and
-// clones are served (TestFirestoreExportImport,
-// TestFirestoreBackupRestoreClone, #1500).
-//
-// covers: google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/GetUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ListUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds (unimplemented)
-// covers: google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword (unimplemented), google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds (unimplemented)
-func TestFirestoreAdminRefusals(t *testing.T) {
-	h := New(t)
-	c := firestoreAdmin(t, h)
-	ctx := h.Context()
-	db := "projects/" + h.Project() + "/databases/(default)"
-	for what, err := range map[string]error{
-		"CreateUserCreds": func() error {
-			_, err := c.CreateUserCreds(ctx, &adminpb.CreateUserCredsRequest{Parent: db, UserCredsId: "u1", UserCreds: &adminpb.UserCreds{}})
-			return err
-		}(),
-		"GetUserCreds": func() error {
-			_, err := c.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: db + "/userCreds/u1"})
-			return err
-		}(),
-		"ListUserCreds": func() error {
-			_, err := c.ListUserCreds(ctx, &adminpb.ListUserCredsRequest{Parent: db})
-			return err
-		}(),
-		"EnableUserCreds": func() error {
-			_, err := c.EnableUserCreds(ctx, &adminpb.EnableUserCredsRequest{Name: db + "/userCreds/u1"})
-			return err
-		}(),
-		"DisableUserCreds": func() error {
-			_, err := c.DisableUserCreds(ctx, &adminpb.DisableUserCredsRequest{Name: db + "/userCreds/u1"})
-			return err
-		}(),
-		"ResetUserPassword": func() error {
-			_, err := c.ResetUserPassword(ctx, &adminpb.ResetUserPasswordRequest{Name: db + "/userCreds/u1"})
-			return err
-		}(),
-		"DeleteUserCreds": func() error {
-			return c.DeleteUserCreds(ctx, &adminpb.DeleteUserCredsRequest{Name: db + "/userCreds/u1"})
-		}(),
-	} {
-		if status.Code(err) != codes.Unimplemented || len(status.Convert(err).Message()) < 20 {
-			t.Errorf("%s: %v, want UNIMPLEMENTED with a reason", what, err)
-		}
-	}
-}
-
 // TestFirestoreAdminBackupSchedules (#1461): a daily and a weekly backup
 // schedule are created on `(default)` through the official Firestore Admin
 // client, listed and got, a second daily one is refused ALREADY_EXISTS, a

@@ -42,6 +42,14 @@ type savedState struct {
 	LastBackup map[string]time.Time `json:"lastBackup,omitempty"`
 	// Seen is every database a documents call has named (seen.go, #1550).
 	Seen []string `json:"seen,omitempty"`
+	// UserCreds are the user credentials, each with its password's
+	// digest, never the password (#1500).
+	UserCreds map[string]savedCreds `json:"userCreds,omitempty"`
+}
+
+type savedCreds struct {
+	UserCreds []byte `json:"userCreds"`
+	Digest    []byte `json:"digest"`
 }
 
 // KeepState restores the API's state from dir, when it holds any, and
@@ -135,8 +143,17 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 		backups[name] = b
 		st.MarkRead(name, b)
 	}
+	userCreds := make(map[string]*creds, len(s.UserCreds))
+	for name, sc := range s.UserCreds {
+		uc := &adminpb.UserCreds{}
+		if err := proto.Unmarshal(sc.UserCreds, uc); err != nil {
+			return fmt.Errorf("the user creds %s: %w", name, err)
+		}
+		userCreds[name] = &creds{UserCreds: uc, Digest: sc.Digest}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.userCreds = userCreds
 	a.databases, a.indexes, a.fields, a.schedules, a.ops, a.backups = dbs, idx, fields, scheds, ops, backups
 	a.opOrder = s.OpOrder
 	a.seeded = map[string]bool{}
@@ -207,6 +224,16 @@ func (a *Admin) save() error {
 	}
 	m, e = frontstate.EncodeMap(metas)
 	enc(&s.Backups, m, e)
+	for name, c := range a.userCreds {
+		b, e := proto.Marshal(c.UserCreds)
+		if e != nil && err == nil {
+			err = e
+		}
+		if s.UserCreds == nil {
+			s.UserCreds = map[string]savedCreds{}
+		}
+		s.UserCreds[name] = savedCreds{UserCreds: b, Digest: c.Digest}
+	}
 	s.OpOrder = append([]string(nil), a.opOrder...)
 	if len(a.seeded) > 0 {
 		s.Seeded = make(map[string]bool, len(a.seeded))
@@ -229,7 +256,7 @@ func (a *Admin) save() error {
 }
 
 // ResetState forgets every database, index, field override, schedule,
-// operation and backup, and clears the state directory
+// operation, backup and user's credentials, and clears the state directory
 // (`cloudburrow reset`, #1514). The emulator's documents are not touched.
 func (a *Admin) ResetState() error {
 	a.mu.Lock()
@@ -243,6 +270,7 @@ func (a *Admin) ResetState() error {
 	a.backups = map[string]*backup{}
 	a.lastBackup = map[string]time.Time{}
 	a.seen = map[string]bool{}
+	a.userCreds = map[string]*creds{}
 	st := a.state
 	a.mu.Unlock()
 	if st == nil {

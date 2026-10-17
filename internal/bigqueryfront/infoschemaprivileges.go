@@ -136,6 +136,9 @@ func (f front) objectPrivilegesRows(r *http.Request, dataset string, meta *datas
 	}
 	var rows [][]string
 	for _, e := range ds.Access {
+		if !meta.keeps(dataset) {
+			break // the query's object_name names no row of the dataset's own (#1559)
+		}
 		grantee, role := accessGrantee(e), str(e, "role")
 		if grantee == "" || role == "" {
 			continue
@@ -147,12 +150,20 @@ func (f front) objectPrivilegesRows(r *http.Request, dataset string, meta *datas
 			sqlString(role), sqlString(grantee)})
 	}
 	if f.iam != nil {
-		tables, st, msg := f.tablesOf(r, dataset, meta)
-		if st != 0 {
-			return "", st, msg
-		}
-		for _, t := range tables {
-			id := str(t, "tableId")
+		// Only a table with a policy kept has rows, so only those are read
+		// (tables.get), not every table of the dataset (#1559).
+		for _, id := range f.iam.ids(project, dataset, "tables") {
+			if dataset == resultsDataset && id == jobsTableName || !meta.keeps(id) {
+				continue
+			}
+			st, got := f.get(r, tablePath(dataset, id))
+			if st == http.StatusNotFound {
+				continue // deleted meanwhile
+			}
+			var t infoTable
+			if st != http.StatusOK || json.Unmarshal(got, &t) != nil {
+				return "", http.StatusInternalServerError, "cloudburrow: could not read a table: " + errorMessage(got, st)
+			}
 			for _, b := range f.iam.bindings(iamKey(project, dataset, "tables", id), str(t, "creationTime")) {
 				members := append([]string(nil), b.Members...)
 				sort.Strings(members)
