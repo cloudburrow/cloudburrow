@@ -4,12 +4,15 @@ package compat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/googleapi"
 )
 
 // TestBigQueryLoadFieldsOutsideTheSchema (#1339): a NEWLINE_DELIMITED_JSON
@@ -21,7 +24,11 @@ import (
 // status.errors, and the others load. A load with autodetect is held to
 // the schema detected from its first 500 records, so a field first seen
 // after them fails the load too, and loads under ignoreUnknownValues. A
-// CSV record with more values than columns follows the same rule.
+// CSV record with more values than columns follows the same rule. A field
+// outside the schema whose value is null, at the top or in a REPEATED
+// RECORD, is ignored under ignoreUnknownValues ("the extra values are
+// ignored", #1457); without it the load is 501, as the reference does not
+// say whether a null is an extra value.
 //
 // covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.get, bigquery.tables.insert, bigquery.jobs.query
 func TestBigQueryLoadFieldsOutsideTheSchema(t *testing.T) {
@@ -99,6 +106,8 @@ func TestBigQueryLoadFieldsOutsideTheSchema(t *testing.T) {
 
 	top := `{"i":1,"r":[{"x":"a"}]}` + "\n" + `{"i":2,"zz":5}` + "\n"
 	nested := `{"i":1,"r":[{"x":"a"},{"x":"b","y":1}]}` + "\n"
+	nullTop := `{"i":1,"r":[{"x":"a"}]}` + "\n" + `{"i":2,"zz":null}` + "\n"
+	nullNested := `{"i":1,"r":[{"x":"a"},{"x":"b","y":null}]}` + "\n"
 	for _, c := range []struct {
 		name, data string
 		set        func(*bigquery.FileConfig)
@@ -110,6 +119,10 @@ func TestBigQueryLoadFieldsOutsideTheSchema(t *testing.T) {
 		{"nested", nested, withSchema(none), "r.y", "", 0},
 		{"ignored", top, withSchema(func(fc *bigquery.FileConfig) { fc.IgnoreUnknownValues = true }), "", "1|1 / 2|0", 0},
 		{"left_out", top, withSchema(func(fc *bigquery.FileConfig) { fc.MaxBadRecords = 1 }), "", "1|1", 1},
+		// #1457: a null field outside the schema, ignored as any extra
+		// value under ignoreUnknownValues.
+		{"null_ignored", nullTop, withSchema(func(fc *bigquery.FileConfig) { fc.IgnoreUnknownValues = true }), "", "1|1 / 2|0", 0},
+		{"null_nested_ignored", nullNested, withSchema(func(fc *bigquery.FileConfig) { fc.IgnoreUnknownValues = true }), "", "1|2", 0},
 	} {
 		for from, src := range sources(c.name+".json", c.data, bigquery.JSON, c.set) {
 			table := c.name + "_" + from
@@ -134,6 +147,22 @@ func TestBigQueryLoadFieldsOutsideTheSchema(t *testing.T) {
 			if len(st.Errors) != c.listed {
 				t.Errorf("%s: status.errors %v, want %d", table, st.Errors, c.listed)
 			}
+		}
+	}
+
+	// #1457: without ignoreUnknownValues, a null field outside the schema
+	// stays 501: the reference does not say whether a null is an extra
+	// value. Nothing is loaded.
+	for from, src := range sources("null_strict.json", nullTop, bigquery.JSON, withSchema(none)) {
+		table := "null_strict_" + from
+		makeTable(table, schema)
+		_, err := run(table, src)
+		var ge *googleapi.Error
+		if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented || !strings.Contains(ge.Message, "zz") {
+			t.Errorf("%s: the load: %v, want 501 naming zz", table, err)
+		}
+		if n := countRows(t, h, ds.Table(table)); n != 0 {
+			t.Errorf("%s: the refused load wrote %d rows", table, n)
 		}
 	}
 

@@ -38,7 +38,7 @@ import (
 // transaction: since #1079 whatever its columns, as the emulator loads
 // each object it reads in a transaction of its own. With no Cloud Storage
 // given to the front (--storage), such a load into BYTES or FLOAT64
-// columns is 501, and so is any of several objects.
+// columns is 501, and one of several objects 404 notFound (writeNoStorage).
 
 // jsonLoad reads a JSON load's data when its columns need it (above). It
 // returns what csvLoad returns: the request to send on, the handler to
@@ -71,7 +71,7 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 	out := r
 	if len(l.SourceURIs) > 0 {
 		if f.storage == nil && !storedValues(fields) && !stamps && severalObjects(l.SourceURIs) {
-			writeError(w, http.StatusNotImplemented, "notImplemented", severalObjectsMsg)
+			writeNoStorage(w, l.SourceURIs)
 			return r, next, nil, false
 		}
 		if f.storage == nil {

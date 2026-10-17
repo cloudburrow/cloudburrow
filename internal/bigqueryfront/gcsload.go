@@ -304,7 +304,11 @@ func (s *storageReader) objectSizes(ctx context.Context, uris []string) (files, 
 // the objects to the emulator as one upload, which it loads in one
 // transaction; a Parquet load the front carries out itself
 // (parquetload.go). With no Cloud Storage given to the front (--storage),
-// a load of several objects is 501, and one of a single object is sent on.
+// a load of several objects names objects there is no Cloud Storage to
+// hold, and is answered as BigQuery answers a URI that names none: 404
+// notFound, "Not found: URI" (#1457), the answer an instance whose Cloud
+// Storage is not enabled gives (storageReader.unreachable); a load of a
+// single object is sent on.
 
 // severalObjects reports whether uris can name more than one object:
 // more than one URI, or a wildcard.
@@ -312,7 +316,9 @@ func severalObjects(uris []string) bool {
 	return len(uris) > 1 || len(uris) == 1 && strings.Contains(uris[0], "*")
 }
 
-const severalObjectsMsg = "Not implemented here: a load of several Cloud Storage objects (more than one URI, or a " +
-	"wildcard), with no Cloud Storage for CloudBurrow to read them from: the emulator behind CloudBurrow loads each " +
-	"object in a transaction of its own, so a load that fails part way would leave the objects before it loaded " +
-	"(measured, #1079). Nothing was loaded."
+// writeNoStorage answers a load of several objects (severalObjects) made
+// with no Cloud Storage given to the front.
+func writeNoStorage(w http.ResponseWriter, uris []string) {
+	writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: URI %s: CloudBurrow was given no Cloud "+
+		"Storage to read it from; is Cloud Storage enabled? Nothing was loaded.", uris[0]))
+}

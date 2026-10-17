@@ -43,7 +43,8 @@ import (
 // it on as an upload of the same job (#944, gcsload.go), so it is loaded
 // the same way, each file's leading rows skipped. With the front given no
 // Cloud Storage to read (--storage), it is 501 unless skipLeadingRows is 1,
-// as it was before.
+// as it was before, and a load of several objects is 404 notFound
+// (writeNoStorage, #1457).
 //
 // A load with autodetect and no columns given is not changed, but for its
 // CSV options (csvDialect): with no schema, it is checked in the table it
@@ -122,7 +123,7 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 	if len(l.SourceURIs) > 0 {
 		if f.storage == nil {
 			if severalObjects(l.SourceURIs) { // #1079
-				writeError(w, http.StatusNotImplemented, "notImplemented", severalObjectsMsg)
+				writeNoStorage(w, l.SourceURIs)
 				return r, next, nil, false
 			}
 			if skip == 1 && !d.optionsSet() && !d.values || len(cols) == 0 && !d.optionsSet() {
