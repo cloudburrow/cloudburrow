@@ -120,15 +120,23 @@ func TestSessionsServeTheGoClient(t *testing.T) {
 		t.Errorf("%d classic calls after session routing, want none", n)
 	}
 	_ = c.Close()
-	opened := 0
+	// A session is logged as its handler returns, which the client's
+	// Close does not wait for (#1575: under GOMAXPROCS=1 it had not yet returned).
+	for !openTableLogged(f) {
+		if ctx.Err() != nil {
+			t.Fatal("no OpenTable session was logged")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func openTableLogged(f *Front) bool {
 	for _, call := range f.Calls(0) {
 		if call.Method == openTable {
-			opened++
+			return true
 		}
 	}
-	if opened == 0 {
-		t.Error("no OpenTable session was logged")
-	}
+	return false
 }
 
 func lastSeq(f *Front) uint64 {
