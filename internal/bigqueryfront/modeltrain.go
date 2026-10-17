@@ -89,6 +89,13 @@ type mlOptions struct {
 	UserCol      string `json:"userCol,omitempty"`
 	ItemCol      string `json:"itemCol,omitempty"`
 	RatingCol    string `json:"ratingCol,omitempty"`
+	// DNN_* (modeldnn.go): HiddenUnits nil is the documented default,
+	// one layer sized by the rows; BatchSize 0 min(32, rows).
+	HiddenUnits []int   `json:"hiddenUnits,omitempty"`
+	Activation  string  `json:"activationFn,omitempty"`
+	Dropout     float64 `json:"dropout,omitempty"`
+	BatchSize   int     `json:"batchSize,omitempty"`
+	Optimizer   string  `json:"optimizer,omitempty"`
 	// GlobalExplain is enable_global_explain (modelexplain.go).
 	GlobalExplain bool `json:"enableGlobalExplain,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
@@ -213,6 +220,8 @@ type mlTrained struct {
 	Trees     [][]mlNode `json:"trees,omitempty"`
 	TreeClass []int      `json:"treeClass,omitempty"`
 	BaseScore float64    `json:"baseScore,omitempty"`
+	// DNN is a DNN_* model's network (modeldnn.go).
+	DNN *dnnTrained `json:"dnn,omitempty"`
 	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
 	MF *mfTrained `json:"mf,omitempty"`
 	// Global are ML.GLOBAL_EXPLAIN's rows (modelexplain.go).
@@ -275,6 +284,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return trainMF(opts, cols, rows)
 	case "ARIMA_PLUS":
 		return trainArima(opts, cols, rows)
+	case "AUTOENCODER":
+		return trainAutoencoder(opts, cols, rows)
 	}
 	var t mlTrained
 	label := "label"
@@ -436,6 +447,14 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		}
 		t.trainBoosted(opts, X, Y, EX, EY, logistic, K)
 		t.computeGlobal(opts, evalRows(X, EX))
+		return t, nil
+	}
+	if isDNN(opts.ModelType) {
+		K := 1
+		if len(t.Classes) > 2 {
+			K = len(t.Classes)
+		}
+		t.trainDNN(opts, X, Y, EX, EY, logistic, K)
 		return t, nil
 	}
 	dim := len(X[0])
@@ -1176,6 +1195,13 @@ func rocAUC(y, p []float64) float64 {
 // values, by name (a missing name is NULL): the linear value, or the
 // positive class's probability.
 func (t mlTrained) predictRow(vals map[string]*string) float64 {
+	if t.DNN != nil {
+		z := t.DNN.forward(t.encodeRow(vals)[1:])[0]
+		if len(t.Classes) == 2 {
+			return sigmoid(z)
+		}
+		return z
+	}
 	if len(t.Trees) > 0 {
 		z := t.treeMargin(t.encodeRow(vals))
 		if len(t.Classes) == 2 {
@@ -1211,6 +1237,9 @@ func (t mlTrained) encodeRow(vals map[string]*string) []float64 {
 
 // classProbs is a multiclass model's class probabilities for a row.
 func (t mlTrained) classProbs(vals map[string]*string) []float64 {
+	if t.DNN != nil {
+		return softmaxOf(t.DNN.forward(t.encodeRow(vals)[1:]))
+	}
 	if len(t.Trees) > 0 {
 		return softmaxOf(t.treeMargins(t.encodeRow(vals), len(t.Classes)))
 	}

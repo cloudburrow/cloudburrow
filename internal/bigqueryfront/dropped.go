@@ -91,7 +91,7 @@ type droppedTable struct {
 	// MATERIALIZED_VIEW (its resource only) or SNAPSHOT (its rows, Final)
 	// (#1483, droppedkeep.go), or EXTERNAL (its resource only, #1522).
 	Kind string `json:"kind,omitempty"`
-	// ForUpdate: Copy keeps each change's _CHANGE_IS_FOR_UPDATE (#1483).
+	// ForUpdate: Copy keeps each change's update flag (#1483).
 	ForUpdate bool `json:"forUpdate,omitempty"`
 	// Extras are the front's own records of the table (droppedkeep.go).
 	Extras *keptExtras `json:"extras,omitempty"`
@@ -374,8 +374,8 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 	}
 	if !snapshot && run(fmt.Sprintf("CREATE TABLE %s AS SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, googlesqlite_change_micros AS "+
 		"_cloudburrow_micros, googlesqlite_change_rowid AS _cloudburrow_rowid, rowid AS _cloudburrow_order, "+
-		"_CHANGE_IS_FOR_UPDATE AS _cloudburrow_for_update FROM %s",
-		dest, list, quotePath([]string{project, dataset, table + changeTableSuffix}))) {
+		"%s AS _cloudburrow_for_update FROM %s",
+		dest, list, changeForUpdateColumn, quotePath([]string{project, dataset, table + changeTableSuffix}))) {
 		d.ForUpdate = true
 		return d, true
 	}
@@ -711,12 +711,15 @@ func pseudoColumn(name string) bool {
 // a dataset with the same name already exists, the statement has no
 // effect". It reports whether q had one.
 //
-// In a multi-statement query (#1483) each UNDROP SCHEMA is carried out
-// before the query runs, and sent to the engine as a statement that does
-// nothing. That is BigQuery's order only when no other statement can see
-// the dataset, so it is 501, nothing run, when another statement names
-// the dataset (or the query's default dataset is it), when the script has
-// control flow (IF, a loop, an EXCEPTION handler, RETURN), or when an
+// A multi-statement query is carried out a statement at a time (#1548,
+// runScript), so each UNDROP SCHEMA runs in its turn, alone, as BigQuery
+// runs it. Only a script that cannot be run so (one with a TEMP table or
+// function, which lasts only for its request, or a transaction's) keeps
+// #1483's way: each UNDROP SCHEMA carried out before the query runs, and
+// sent to the engine as a statement that does nothing. That is BigQuery's
+// order only when no other statement can see the dataset, so it is 501,
+// nothing run, when another statement names the dataset (or the query's
+// default dataset is it), when the script has control flow, or when an
 // UNDROP SCHEMA after other statements would fail (BigQuery runs those
 // first); one that fails as the first statement fails the query, as alone.
 func (f front) undropSchema(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
@@ -772,6 +775,15 @@ func (f front) undropSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 	}
 	if len(undrops) == 0 {
 		return false
+	}
+	if n > 1 && !txnRequest(r) && !hasTemp(q.Query) {
+		// #1548: the front carries out the script a statement at a time
+		// (scriptflow.go), each statement in its turn through runQuery, so
+		// each UNDROP SCHEMA is carried out here, alone, when BigQuery
+		// would run it: after the statements before it, whatever control
+		// flow or other statement names the dataset.
+		f.runScript(w, r, q, insert)
+		return true
 	}
 	if n > 1 {
 		var def struct {

@@ -31,7 +31,7 @@ import (
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true,
-	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true}
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true}
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -215,6 +215,12 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: "invalidQuery", Message: msg})
 		return true
 	}
+	if strings.Contains(text, mlVocabPrefix) {
+		if msg := f.ensureMLVocab(r); msg != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the vocabulary functions: "+msg)
+			return true
+		}
+	}
 	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
@@ -230,7 +236,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
-				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT and ML.GLOBAL_EXPLAIN. Nothing was run.")
+				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN and ML.RECONSTRUCTION_LOSS. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -524,7 +530,12 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if typ == "ARIMA_PLUS" {
 		return f.arimaSubquery(r, q, md, c)
 	}
+	if typ == "AUTOENCODER" && c.fn != "TRAINING_INFO" && c.fn != "FEATURE_INFO" {
+		return f.autoencoderSubquery(r, q, md, c) // modeldnn.go
+	}
 	switch c.fn {
+	case "RECONSTRUCTION_LOSS":
+		return unsupported()
 	case "EXPLAIN_PREDICT", "GLOBAL_EXPLAIN":
 		return f.explainSubquery(r, q, md, c)
 	case "DETECT_ANOMALIES":
@@ -546,8 +557,16 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		from, ref, helpers := md.mlInput(c.input)
 		enc := t.encodedSQL(ref)
 		out := sqlIdent("predicted_" + t.Label)
+		if t.DNN != nil {
+			// The network's layers, a subquery each (modeldnn.go); its
+			// outputs are _cbml_o<k>.
+			var added []string
+			from, added = t.DNN.dnnFrom(from, enc)
+			helpers = append(helpers, added...)
+			lin = func([]string) string { return "_cbml_o0" }
+		}
 		switch {
-		case typ == "LINEAR_REG" || typ == "BOOSTED_TREE_REGRESSOR" || typ == "RANDOM_FOREST_REGRESSOR":
+		case typ == "LINEAR_REG" || typ == "BOOSTED_TREE_REGRESSOR" || typ == "RANDOM_FOREST_REGRESSOR" || typ == "DNN_REGRESSOR":
 			return "(SELECT " + except(helpers) + ", " + lin(enc) + " AS " + out + " FROM " + from + ")", 0, ""
 		case binary:
 			thr, why := c.threshold()
@@ -571,7 +590,9 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			var zs, helpersZ, ps, cases []string
 			for k := 0; k < K; k++ {
 				z := ""
-				if len(t.Trees) > 0 {
+				if t.DNN != nil {
+					z = fmt.Sprintf("_cbml_o%d", k)
+				} else if len(t.Trees) > 0 {
 					z = t.treesSQL(enc, k)
 				} else {
 					z = dotSQL(t.ClassWeights[k], enc)
@@ -866,7 +887,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		}
 		return mlRowsSubquery("STRUCT<principal_component_id INT64, eigenvalue FLOAT64, explained_variance_ratio FLOAT64, cumulative_explained_variance_ratio FLOAT64>", rows), 0, ""
 	case "WEIGHTS":
-		if typ == "KMEANS" || typ == "PCA" || isTreeModel(typ) {
+		if typ == "KMEANS" || typ == "PCA" || isTreeModel(typ) || isDNN(typ) {
 			return unsupported()
 		}
 		if t.multiclass() {

@@ -63,7 +63,7 @@ func (f front) historySource(ds, table string) string {
 
 // hasHistory reports whether ds.table has a change table (googlesqlite
 // patch 0036 gives none to a table of a column of a change column's
-// name, _CHANGE_IS_FOR_UPDATE say, patch 0063).
+// name, _CHANGE_TYPE say, patches 0063 and 0065).
 func (f front) hasHistory(r *http.Request, ds, table string) bool {
 	return f.runDML(r, "SELECT COUNT(*) FROM "+quotePath([]string{projectOf(f.base), ds, table + changeTableSuffix})) == ""
 }
@@ -108,7 +108,7 @@ func (f front) carryHistory(r *http.Request, src, ds, table string, cols []carri
 		vals += ", "
 	}
 	shift := "(SELECT 2 * (COALESCE(MAX(ABS(cloudburrow_row)), 0) + 1) FROM " + src + ")"
-	target := "INSERT INTO " + changes + " (" + list + "_CHANGE_TYPE, _CHANGE_TIMESTAMP, _CHANGE_IS_FOR_UPDATE, " +
+	target := "INSERT INTO " + changes + " (" + list + "_CHANGE_TYPE, _CHANGE_TIMESTAMP, " + changeForUpdateColumn + ", " +
 		"googlesqlite_change_micros, googlesqlite_change_rowid) "
 	end, endVals := changeEnd, ""
 	if replaced {
@@ -120,11 +120,11 @@ func (f front) carryHistory(r *http.Request, src, ds, table string, cols []carri
 	}
 	endTarget := target
 	if !replaced {
-		endTarget = "INSERT INTO " + changes + " (_CHANGE_TYPE, _CHANGE_TIMESTAMP, _CHANGE_IS_FOR_UPDATE, " +
+		endTarget = "INSERT INTO " + changes + " (_CHANGE_TYPE, _CHANGE_TIMESTAMP, " + changeForUpdateColumn + ", " +
 			"googlesqlite_change_micros, googlesqlite_change_rowid) "
 	}
 	qs = append(qs,
-		fmt.Sprintf("%sSELECT %s_CHANGE_TYPE, _CHANGE_TIMESTAMP, _CHANGE_IS_FOR_UPDATE, cloudburrow_micros, cloudburrow_row - %s "+
+		fmt.Sprintf("%sSELECT %s_CHANGE_TYPE, _CHANGE_TIMESTAMP, "+changeForUpdateColumn+", cloudburrow_micros, cloudburrow_row - %s "+
 			"FROM %s ORDER BY cloudburrow_order", target, vals, shift, src),
 		// The rebuild's time is the new START row's, the latest.
 		fmt.Sprintf("%sSELECT %s'%s', TIMESTAMP_MICROS(cloudburrow_at), FALSE, cloudburrow_at, cloudburrow_row - %s FROM "+

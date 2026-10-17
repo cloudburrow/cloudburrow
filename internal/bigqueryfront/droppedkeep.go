@@ -154,7 +154,7 @@ func keptHistory(t droppedTable, fields []field) string {
 	}
 	deleted := t.Deleted * 1000
 	return fmt.Sprintf("(SELECT %s, _cloudburrow_change AS _CHANGE_TYPE, TIMESTAMP_MICROS(_cloudburrow_micros) AS _CHANGE_TIMESTAMP, "+
-		"%s AS _CHANGE_IS_FOR_UPDATE, _cloudburrow_micros AS cloudburrow_micros, _cloudburrow_rowid AS cloudburrow_row, "+
+		"%s AS "+changeForUpdateColumn+", _cloudburrow_micros AS cloudburrow_micros, _cloudburrow_rowid AS cloudburrow_row, "+
 		"_cloudburrow_order AS cloudburrow_order FROM %s "+
 		"UNION ALL SELECT %s, '%s', TIMESTAMP_MICROS(%d), FALSE, %d, _cloudburrow_rowid, "+
 		"(SELECT MAX(_cloudburrow_order) + 1 FROM %s) FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY _cloudburrow_rowid "+
