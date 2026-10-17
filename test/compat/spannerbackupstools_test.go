@@ -65,7 +65,8 @@ func TestGcloudSpannerBackups(t *testing.T) {
 }
 
 // TestTerraformSpannerBackupScheduleAndInstanceConfig (#1498): a
-// google_spanner_instance_config (custom, from regional-us-central1) and a
+// google_spanner_instance_config (custom, from regional-us-central1, with a
+// read-only replica: the provider adds the base's replicas) and a
 // google_spanner_backup_schedule apply through `cloudburrow terraform` with
 // egress blocked, plan clean, are read back with the official clients, and
 // destroy.
@@ -86,11 +87,6 @@ resource "google_spanner_instance_config" "c" {
   name         = "custom-tf-config"
   display_name = "TF custom"
   base_config  = "regional-us-central1"
-  replicas {
-    location                = "us-central1"
-    type                    = "READ_WRITE"
-    default_leader_location = true
-  }
   replicas {
     location                = "us-east1"
     type                    = "READ_ONLY"
@@ -126,11 +122,11 @@ resource "google_spanner_backup_schedule" "s" {
 `, h.Project(), id, db))
 	m.must("init", "-input=false", "-no-color")
 	m.apply()
-	m.planClean()
 	c, err := f.inst.GetInstanceConfig(f.ctx, &instancepb.GetInstanceConfigRequest{Name: project + "/instanceConfigs/custom-tf-config"})
-	if err != nil || c.GetConfigType() != instancepb.InstanceConfig_USER_MANAGED || len(c.GetReplicas()) < 2 {
+	if err != nil || c.GetConfigType() != instancepb.InstanceConfig_USER_MANAGED || len(c.GetReplicas()) != 4 {
 		t.Errorf("the configuration Terraform made = %v, %v", c, err)
 	}
+	m.planClean()
 	sched := project + "/instances/" + id + "/databases/" + db + "/backupSchedules/tf-daily"
 	s, err := f.db.GetBackupSchedule(f.ctx, &databasepb.GetBackupScheduleRequest{Name: sched})
 	if err != nil || s.GetSpec().GetCronSpec().GetText() != "0 12 * * *" || s.GetRetentionDuration().AsDuration() != 48*time.Hour {
