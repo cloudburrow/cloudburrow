@@ -185,9 +185,9 @@ func writableBigQuery(statement string) (string, error) {
 // scriptDMLSentences says what each DML statement of a script changed, in
 // the order the script ran them, from its child jobs (#1353): each DML
 // child's statementType and counts, worded as dmlSentence words a statement
-// of its own, after the line it starts on where the child names it (the
-// front gives no position to a script's last statement). jobs.list lists
-// the newest job first.
+// of its own, after the line it starts on, its innermost stack frame's
+// (#1569: the last statement's too), where the child names it. jobs.list
+// lists the newest job first.
 func scriptDMLSentences(children []*bqv2.JobListJobs) []string {
 	type stmt struct {
 		created int64
