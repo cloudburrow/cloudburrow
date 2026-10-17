@@ -36,6 +36,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 	"github.com/cloudburrow/cloudburrow/internal/spannerfront"
@@ -159,12 +160,22 @@ func HandlerWith(upstream string, ring *calllog.Ring, logf func(string, ...any),
 // Server serves h on both protocols an emulator port carries: HTTP/1.1 and
 // cleartext HTTP/2 with prior knowledge, which is how the official clients
 // speak gRPC to an emulator.
-func Server(h http.Handler, logf func(string, ...any)) *http.Server {
+//
+// Every request passes the Host and Origin checks first (#1587): the
+// host's tunnels to Firestore and Datastore check them, but Spanner's gRPC
+// port is tunnelled raw, and a pod comes to the front directly. service,
+// the cluster Service the front serves, is the name pods dial it by, which
+// the Host check then passes too (hostguard.WrapService); none is Wrap.
+func Server(h http.Handler, logf func(string, ...any), service ...string) *http.Server {
+	name := ""
+	if len(service) > 0 {
+		name = service[0]
+	}
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	return &http.Server{
-		Handler:   h,
+		Handler:   hostguard.WrapService(h, name),
 		Protocols: &protocols,
 		// The emulators set no stream limit; Go's default of 250 could
 		// queue a client's new calls behind its long-lived streams.
@@ -208,6 +219,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The named Datastore databases calls name, which the emulator cannot
 	// list, kept for the project's purge (#1550).
 	datastoreDBs := fs.Bool("datastore-databases", false, "record the named Datastore databases calls name, for a project's purge")
+	// The cluster Service the front serves, which pods dial it by (#1587).
+	service := fs.String("service", "", "the cluster Service the front serves, such as firestore: pods dial it by that name, which the Host check passes")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -276,7 +289,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		listeners = append(listeners, l)
 		// Both ports carry the intercepts: Spanner's REST port is the
 		// same API as its gRPC one.
-		servers = append(servers, Server(HandlerWith(p[1], ring, logger.Printf, icpt), logger.Printf))
+		servers = append(servers, Server(HandlerWith(p[1], ring, logger.Printf, icpt), logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
 	}
 	go func() {

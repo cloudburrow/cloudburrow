@@ -115,3 +115,36 @@ func TestAllowOriginsRefusesAWildcard(t *testing.T) {
 		t.Error("a wildcard origin was accepted")
 	}
 }
+
+// WrapService (#1587) is Wrap for a front in a pod: it also answers to the
+// names pods dial its Service by, in any namespace, and to no other
+// Service's, and it still checks Origin.
+func TestWrapServiceAnswersToItsServiceName(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		service, host, origin string
+		want                  int
+	}{
+		{"bigquery", "bigquery.cloudburrow.svc.cluster.local:9050", "", http.StatusOK},
+		{"bigquery", "BigQuery.team-a.svc:9050", "", http.StatusOK},
+		{"bigquery", "bigquery:9050", "", http.StatusOK},
+		{"bigquery", "127.0.0.1:9050", "", http.StatusOK},
+		{"bigquery", "bigquery.cloudburrow:9050", "", http.StatusMisdirectedRequest},
+		{"bigquery", "bigquery.attacker.example:9050", "", http.StatusMisdirectedRequest},
+		{"bigquery", "pubsub.cloudburrow.svc.cluster.local:9050", "", http.StatusMisdirectedRequest},
+		{"bigquery", "bigquery.cloudburrow.svc.cluster.local:9050", "https://evil.example", http.StatusForbidden},
+		{"", ".x.svc:9050", "", http.StatusMisdirectedRequest},
+		{"", "bigquery.cloudburrow.svc.cluster.local:9050", "", http.StatusMisdirectedRequest},
+	} {
+		h := WrapService(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}), c.service)
+		req := httptest.NewRequest("GET", "http://"+c.host+"/x", nil)
+		if c.origin != "" {
+			req.Header.Set("Origin", c.origin)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("WrapService(%q): Host %s, Origin %q: status %d, want %d", c.service, c.host, c.origin, rec.Code, c.want)
+		}
+	}
+}

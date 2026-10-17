@@ -43,6 +43,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
@@ -187,8 +188,12 @@ func (f *Front) Server() *grpc.Server {
 // net/http, which answers frontready.Path alone.
 func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	grpcSrv := f.Server()
+	// The REST admin API and the reset are HTTP/1.1, which a browser can
+	// send, and the host's tunnel to this port is raw (gRPC only, #725),
+	// so the Host and Origin checks are here (#1587). Pods name the
+	// Service; a kubelet probe the pod's address.
 	srv := &http.Server{
-		Handler:           frontready.Wrap(f.httpHandler(), f.addr),
+		Handler:           hostguard.WrapService(frontready.Wrap(f.httpHandler(), f.addr), "bigtable"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)

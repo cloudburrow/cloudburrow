@@ -14,7 +14,12 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
+
+// ServiceName is the cluster Service the front serves: pods dial it as
+// bigquery.<namespace>.svc.cluster.local (components.bigQueryBackend).
+const ServiceName = "bigquery"
 
 // ErrUsage means the arguments were refused; the reason has been written.
 var ErrUsage = errors.New("usage")
@@ -80,8 +85,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *readListen != "" {
 		ready = append(ready, *readUpstream)
 	}
+	// Behind the Host and Origin checks (#1587): the host's tunnel checks
+	// them too, but a pod, or a page that reached the Service some other
+	// way, comes here directly. Pods name the Service (ServiceName), and
+	// a kubelet probe the pod's address, which the Host check passes.
 	srv := &http.Server{
-		Handler:           frontready.Wrap(handler, ready...),
+		Handler:           hostguard.WrapService(frontready.Wrap(handler, ready...), ServiceName),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}

@@ -919,7 +919,9 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 // BigQuery's Storage Read port speak gRPC only and do not answer
 // HTTP/1.1, and browsers do not speak cleartext HTTP/2. Cloud SQL and
 // Memorystore are database wire protocols, not HTTP. Storage's own server
-// checks Host itself (#676).
+// checks Host itself (#676). Whatever HTTP/1.1 the fronts in the pods serve
+// on a raw tunnel's port, such as Bigtable's REST admin API, they check Host
+// and Origin themselves (hostguard.WrapService, #1587).
 func guardedTunnel(s config.Service) bool {
 	switch s {
 	case config.ServicePubSub, config.ServiceFirestore, config.ServiceDatastore, config.ServiceBigQuery:

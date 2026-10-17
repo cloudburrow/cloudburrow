@@ -193,3 +193,36 @@ func TestFrontAnswersTheEmulatorsReadiness(t *testing.T) {
 		t.Errorf("readiness: %d %s", resp.StatusCode, body)
 	}
 }
+
+// #1587: the REST admin API and the reset are HTTP/1.1, and the host's
+// tunnel to this port is raw, so the front checks Host and Origin itself.
+func TestFrontRefusesForeignHostAndOrigin(t *testing.T) {
+	addr := serve(t)
+	for _, c := range []struct {
+		method, host, origin string
+		want                 int
+	}{
+		{http.MethodGet, "attacker.example:8086", "", http.StatusMisdirectedRequest},
+		{http.MethodPost, "127.0.0.1:8086", "https://evil.example", http.StatusForbidden},
+		{http.MethodGet, "bigtable.cloudburrow.svc.cluster.local:8086", "https://evil.example", http.StatusForbidden},
+		{http.MethodGet, "bigtable.cloudburrow.svc.cluster.local:8086", "", http.StatusOK},
+		{http.MethodGet, "127.0.0.1:8086", "", http.StatusOK},
+	} {
+		req, err := http.NewRequest(c.method, "http://"+addr+"/v2/projects/p/instances/i/tables", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = c.host
+		if c.origin != "" {
+			req.Header.Set("Origin", c.origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("%s Host %s, Origin %q: status %d, want %d", c.method, c.host, c.origin, resp.StatusCode, c.want)
+		}
+	}
+}
