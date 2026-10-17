@@ -153,6 +153,10 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 			}
 		}
 		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), src)
+		if ext := spec.External; ext != nil && ext.Physical && ext.PhysicalRestored && spec.MySQL() {
+			// The restored copy has the source's accounts (#1570).
+			b.Args = append(append([]string{}, b.Args...), "--init-file=/var/lib/mysql/"+physicalInitFile)
+		}
 	}
 	return b
 }
@@ -337,6 +341,9 @@ func replicaSetup(spec sqladmin.Spec) string {
 		return ""
 	case ext != nil && ext.SyncMode == "OFFLINE":
 		return mysqlOfflineSetup
+	case ext != nil && ext.Physical:
+		// Restored from an XtraBackup backup (#1570, sqlphysical.go).
+		return mysqlPhysicalSetup
 	case ext != nil && (ext.DumpFile != "" || ext.Demoted):
 		return "export CLOUDSQL_SEEDED=1\n" + mysqlReplicaSetup
 	}

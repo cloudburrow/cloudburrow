@@ -106,7 +106,7 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a physical
-(`PHYSICAL`) external sync (#1570; see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
+(`PHYSICAL`) external sync on an instance not started with `--mode persistent` (#1570; see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
 and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
 upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and high
 availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (#1462). A legacy failover replica
@@ -450,10 +450,43 @@ own, GTIDs on, read-only); the source is verified first, as for `startExternalSy
 `promoteReplica` makes it a primary again. In the console, a standalone MySQL instance's page has
 **Demote** (either method); gcloud and Terraform have no demote command or resource.
 
-501, naming why: `migrationType` `PHYSICAL` (Google restores an XtraBackup physical backup from
-Cloud Storage into the replica's data directory; the instance images have no XtraBackup, and the
-restore would need the backup's files copied into the server's volume before it starts, #1570),
-`demoteMaster` with `skipReplicationSetup` (the replication is then set up by hand with Cloud
+**A physical sync** (#1570), for MySQL: `startExternalSync` with `migrationType` `PHYSICAL`
+gives the replica a Percona XtraBackup backup of the source instead of a dump, and then
+replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binlog_info`).
+
+- **The backup** is the folder `xtrabackup --backup --target-dir` writes, uploaded to Cloud
+  Storage, and the source representation instance's `dumpFilePath` names the folder
+  (`gs://BUCKET/FOLDER`). A replica created with a folder that holds `xtrabackup_checkpoints` is
+  not seeded from it as from a dump: it waits for the physical sync. With no `dumpFilePath`, and a
+  source that is a CloudBurrow instance's server (`sqlinst-NAME:3306`, or `cloudsql-mysql:3306`),
+  the sync takes the backup itself, with the source's volume mounted and the replication user.
+- **How it runs**: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
+  of the replica's major version (`8.0`, XtraBackup 8.0.35, or `8.4`, 8.4.0; pinned by digest, and
+  pulled by the node the first time), on the replica's volume while its server is stopped: the
+  backup's files are first written onto that volume, then `xtrabackup --prepare` and
+  `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
+  and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
+  password back to the instance's (the copy has the source's accounts), unlogged.
+- **It needs `--mode persistent`**: the restore is onto the replica's volume, which an
+  instance's server in an ephemeral instance has none of. Elsewhere it is 501, saying so.
+- **`verifyExternalSyncSettings`** with `migrationType` `PHYSICAL` answers
+  `UNSUPPORTED_MIGRATION_TYPE` (a PostgreSQL replica, or `syncMode` `OFFLINE`),
+  `CONNECTION_FAILURE`, `INCOMPATIBLE_DATABASE_VERSION` (the source's or the backup's
+  `xtrabackup_info` `server_version` of another major version), `INCOMPATIBLE_DATABASE_MINOR_VERSION`
+  (a source newer than the replica's server, which cannot open its files), `BINLOG_NOT_ENABLED`,
+  `UNSUPPORTED_GTID_MODE`, `UNSUPPORTED_BINLOG_FORMAT`, `UNSUPPORTED_DATABASE_SETTINGS`
+  (`innodb_page_size` other than 16384, `lower_case_table_names` other than 0, which a physical
+  copy keeps), `UNSUPPORTED_STORAGE_ENGINE` (a table not in InnoDB), `INVALID_FILE_INFO` (a folder
+  without `xtrabackup_checkpoints`, `xtrabackup_info` or `xtrabackup_binlog_info`, an unextracted
+  `.xbstream` or a qpress backup, or no `dumpFilePath` for a source outside CloudBurrow),
+  `INSUFFICIENT_PRIVILEGE` and `REPLICA_ALREADY_SETUP`. The replication user needs
+  `REPLICATION SLAVE`, `REPLICATION CLIENT` and `SELECT` (so every table's engine can be seen),
+  and, when the sync takes the backup, XtraBackup's `RELOAD`, `PROCESS`, `BACKUP_ADMIN` and
+  `SELECT` on `performance_schema.log_status`. A zstd-compressed backup is decompressed first.
+- In the console, a MySQL replica's **Verify external sync settings** and **Start external sync**
+  have a **Migration type**, `LOGICAL` or `PHYSICAL`.
+
+501, naming why: `demoteMaster` with `skipReplicationSetup` (the replication is then set up by hand with Cloud
 SQL's `mysql.*` stored procedures, `mysql.setupExternalSourceAutoPosition` and the rest, which a
 stock MySQL server has not), and `demote` of a PostgreSQL instance (the subscription's first copy
 of the source's tables collides with the rows the instance has).

@@ -93,8 +93,37 @@ func TestCloudSQLConsoleExternalPrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if b := bodies["POST /v1/projects/proj/instances/rep/startExternalSync"]; !strings.Contains(b, `"syncMode":"ONLINE"`) ||
-		!strings.Contains(b, `"skipVerification":true`) {
+		!strings.Contains(b, `"skipVerification":true`) || strings.Contains(b, "migrationType") {
 		t.Errorf("startExternalSync body %s", b)
+	}
+
+	// The migration type (#1570): a MySQL replica's sync forms offer
+	// LOGICAL and PHYSICAL, and PHYSICAL reaches both methods.
+	for _, a := range d.Actions {
+		if a.ID != "verify-external-sync" && a.ID != "start-external-sync" {
+			continue
+		}
+		var found bool
+		for _, f := range a.Fields {
+			if f.Name == "migrationType" && strings.Join(f.Options, ",") == "LOGICAL,PHYSICAL" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s has no migrationType choice: %+v", a.ID, a.Fields)
+		}
+	}
+	if err := p.ActAt(ctx, "proj", []string{"rep"}, "start-external-sync", map[string]string{"migrationType": "PHYSICAL"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/rep/startExternalSync"]; !strings.Contains(b, `"migrationType":"PHYSICAL"`) {
+		t.Errorf("startExternalSync PHYSICAL body %s", b)
+	}
+	if _, err := p.ActAtResult(ctx, "proj", []string{"rep"}, "verify-external-sync", map[string]string{"migrationType": "PHYSICAL"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/rep/verifyExternalSyncSettings"]; !strings.Contains(b, `"migrationType":"PHYSICAL"`) {
+		t.Errorf("verifyExternalSyncSettings PHYSICAL body %s", b)
 	}
 }
 
@@ -146,6 +175,13 @@ func TestCloudSQLConsoleExternalPostgres(t *testing.T) {
 	}
 	if !ids["verify-external-sync"] || !ids["start-external-sync"] {
 		t.Errorf("a PostgreSQL external replica's actions: %v", ids)
+	}
+	for _, a := range d.Actions {
+		for _, f := range a.Fields {
+			if f.Name == "migrationType" {
+				t.Errorf("%s of a PostgreSQL replica offers a migration type; PHYSICAL is for MySQL", a.ID)
+			}
+		}
 	}
 	if err := p.ActAt(ctx, "proj", []string{"pgrep"}, "start-external-sync", map[string]string{"syncMode": "OFFLINE"}); err != nil {
 		t.Fatal(err)

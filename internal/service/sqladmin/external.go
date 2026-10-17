@@ -85,6 +85,12 @@ type ExternalSource struct {
 	// and replicates from the source by GTID auto-positioning, with no
 	// dump.
 	Demoted bool `json:"demoted,omitempty"`
+	// Physical is a startExternalSync with migrationType PHYSICAL (#1570):
+	// the replica is given an XtraBackup backup of the source, from
+	// DumpFile's folder or taken by the sync, and PhysicalRestored is set
+	// once it has been, so a restart replicates instead of restoring again.
+	Physical         bool `json:"physical,omitempty"`
+	PhysicalRestored bool `json:"physicalRestored,omitempty"`
 }
 
 // instanceServicePrefix and upMySQLService are the Services a created
@@ -530,9 +536,11 @@ func decodeSync(r *http.Request) (syncRequest, error) {
 	default:
 		return req, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for syncMode: %s.", req.SyncMode)
 	}
-	if req.MigrationType == "PHYSICAL" {
-		return req, unimplemented("migrationType PHYSICAL", "a physical migration restores an XtraBackup physical backup from Cloud Storage into the replica's data directory, "+
-			"and the instance images have no XtraBackup (#1570); LOGICAL, a dump of the source's databases, is served")
+	switch req.MigrationType {
+	case "", "MIGRATION_TYPE_UNSPECIFIED", "LOGICAL", "PHYSICAL":
+		// PHYSICAL restores an XtraBackup backup (#1570, physical.go).
+	default:
+		return req, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for migrationType: %s.", req.MigrationType)
 	}
 	return req, nil
 }
@@ -550,7 +558,13 @@ func (s *Server) verifyExternalSyncSettings(r *http.Request, project, name strin
 	s.emu.RLock()
 	spec := c.spec
 	s.emu.RUnlock()
-	errs := verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), spec.ExternalSyncStarted, req.SyncMode == "OFFLINE")
+	var errs []any
+	if req.MigrationType == "PHYSICAL" {
+		errs = s.verifyPhysicalSync(r.Context(), spec, s.sourceAddr(spec.External), s.installedVersion(r.Context(), c),
+			spec.ExternalSyncStarted, req.SyncMode == "OFFLINE")
+	} else {
+		errs = verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), spec.ExternalSyncStarted, req.SyncMode == "OFFLINE")
+	}
 	if req.VerifyConn {
 		var conn []any
 		for _, e := range errs {
@@ -584,8 +598,22 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 	if spec.ExternalSyncStarted {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: replication to %s has already been started.", name)
 	}
+	physical := req.MigrationType == "PHYSICAL"
+	if physical && spec.MySQL() {
+		if err := s.physicalUnsupported(spec); err != nil {
+			return nil, err
+		}
+	}
 	if !req.SkipVerification {
-		if errs := verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), false, req.SyncMode == "OFFLINE"); len(errs) > 0 {
+		// Skipped, a physical sync still reads the backup's files before it
+		// stops the replica (restorePhysical).
+		var errs []any
+		if physical {
+			errs = s.verifyPhysicalSync(r.Context(), spec, s.sourceAddr(spec.External), s.installedVersion(r.Context(), c), false, req.SyncMode == "OFFLINE")
+		} else {
+			errs = verifyExternalSync(r.Context(), spec, s.sourceAddr(spec.External), false, req.SyncMode == "OFFLINE")
+		}
+		if len(errs) > 0 {
 			var d []string
 			for _, e := range errs {
 				m := e.(map[string]any)
@@ -605,6 +633,7 @@ func (s *Server) startExternalSync(r *http.Request, base, project, name string) 
 	if req.SyncMode == "OFFLINE" {
 		ext.SyncMode = "OFFLINE"
 	}
+	ext.Physical, ext.PhysicalRestored = physical, false
 	c.spec.External = &ext
 	c.state = "MAINTENANCE"
 	err = s.saveLocked()
@@ -641,6 +670,11 @@ func (s *Server) seedExternal(ctx context.Context, name string, spec Spec) error
 	s.emu.RUnlock()
 	if c == nil || s.transfers == nil {
 		return s.noTransfers("a replica seeded from dumpFilePath")
+	}
+	if s.isPhysicalBackup(ctx, ext.DumpFile) {
+		// An XtraBackup backup's folder (#1570): the replica waits for
+		// startExternalSync with migrationType PHYSICAL to restore it.
+		return nil
 	}
 	bucket, object, err := parseGCSURI(ext.DumpFile)
 	if err != nil {
