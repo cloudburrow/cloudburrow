@@ -36,8 +36,14 @@ Every 30 s the harness also samples:
   files of every process in it, and its restart count;
 - the state directory's size.
 
-Neither the front nor the pods serve pprof, so goroutines are not counted directly; threads and
-memory stand in for them.
+- the goroutines of each process named in `CLOUDBURROW_SOAK_PPROF` (below), read from its pprof
+  endpoint; where none is named, threads and memory stand in for them.
+
+`up`, the storage server and every front (each a `cloudburrow-storage` command) serve the Go
+runtime's profiles (`net/http/pprof`) when `CLOUDBURROW_DEBUG_PPROF` names a loopback address,
+such as `127.0.0.1:6060`; it is unset, and nothing listens, by default. A heap profile and a
+goroutine dump are then `go tool pprof http://<addr>/debug/pprof/heap` and
+`curl 'http://<addr>/debug/pprof/goroutine?debug=1'`.
 
 ## Running it
 
@@ -50,7 +56,23 @@ bin/cloudburrow up --detach --name soak-1 --port-base 29400 --state-dir "$state"
   --services storage,pubsub,tasks,secretmanager,firestore,bigquery,logging
 ```
 
-`up --detach` prints the process ID. Then export the endpoints (never print them: they include the
+`up --detach` prints the process ID. To profile the Go processes as well, start `up` with
+`CLOUDBURROW_DEBUG_PPROF=127.0.0.1:<port>` (a port outside the instance's), and turn it on in a
+pod's container, then reach the pod's loopback with a port-forward:
+
+```sh
+export KUBECONFIG="$state/soak-1/kubeconfig"
+kubectl -n cloudburrow set env deploy/storage -c storage CLOUDBURROW_DEBUG_PPROF=127.0.0.1:6060
+kubectl -n cloudburrow set env deploy/bigquery -c front CLOUDBURROW_DEBUG_PPROF=127.0.0.1:6060
+kubectl -n cloudburrow port-forward deploy/storage 29491:6060 &
+```
+
+Set it on one container of a pod only: the containers share the pod's loopback, and a second
+listener on the same port is refused (the process goes on without it). `set env` restarts the
+pod, so do it before the run. The BigQuery emulator itself is not a CloudBurrow process and serves
+no profile.
+
+Then export the endpoints (never print them: they include the
 admin token) and run:
 
 ```sh
@@ -76,6 +98,7 @@ Then `bin/cloudburrow stop --name soak-1 --state-dir "$state"` and
 | `CLOUDBURROW_SOAK_PID` | none | the `up` process to sample |
 | `CLOUDBURROW_SOAK_NODE` | none | the kind node container to sample, `cloudburrow-<name>-control-plane` |
 | `CLOUDBURROW_SOAK_STATE_DIR` | none | the state directory to measure |
+| `CLOUDBURROW_SOAK_PPROF` | none | comma-separated `name=127.0.0.1:<port>` pprof endpoints whose goroutines to sample, such as `host=127.0.0.1:29490,storage=127.0.0.1:29491` |
 
 A group whose endpoint is not exported does not run. The harness refuses an endpoint that is not
 loopback, and refuses to start with Google credentials in the environment.
@@ -97,6 +120,12 @@ Expected, and not a leak:
   bound (`--emulator-heap-mib`) is what stops it.
 - Secret Manager keeps each secret in a Kubernetes Secret and reads it with `kubectl`, so its calls
   take a few hundred milliseconds; see [compatibility.md](compatibility.md).
+- Storage keeps every overwritten generation under the bucket's soft delete policy (7 days by
+  default), as Cloud Storage does: the storage workload's blobs come to about 20 GB an hour, and
+  its metadata grows with them.
+- BigQuery's tables grow with the rows streamed, and its queries over them slow; so does the
+  emulator's live heap, about 1 MiB a minute at the soak's rate, under the `GOMEMLIMIT` its
+  container has (`--bigquery-heap-mib`, #1618, below).
 
 ## Results
 
@@ -184,3 +213,156 @@ Since #1611 the default is 1024 MiB (limit 1.5 GiB): 512 MiB held the soak's 200
 100,000 documents of about 1 KB held 330 MiB of Firestore's heap and it filled before 200,000 were in, and the
 emulator exited, losing every document. See [configuration.md](configuration.md#settings).
 
+### 90 minutes (#1609)
+
+The second run (2026-10-17, #1609): every group for 90 minutes on one instance, on the same
+shared Mac, `CLOUDBURROW_SOAK_RATE=1`, with `CLOUDBURROW_DEBUG_PPROF` on in `up`, the storage
+server and the BigQuery front, a heap profile and goroutine dump of each every 10 minutes, and the
+BigQuery engine's SQLite file and the storage server's metadata store measured with them. It asked,
+of each growth the first run left unexplained, whether it was still growing at 90 minutes.
+
+Memory is each container's anonymous memory (the `up` process's resident memory), at the sample
+nearest each mark; latency is p50 / p99 of the minute ending there.
+
+| | Start | 30 min | 60 min | 90 min | Verdict |
+|---|---|---|---|---|---|
+| storage pod | 31 MiB | 66 MiB | 199 MiB | 122 MiB | the store rewrote kept versions: fixed |
+| storage upload | 10.2 / 307 ms | 7.0 / 82 ms | 23.9 / 650 ms | 24.0 / 307 ms | the same |
+| storage download | 1.6 / 75 ms | 1.2 / 62 ms | 3.3 / 226 ms | 2.6 / 94 ms | |
+| storage metadata (snapshot + log) | 1.0 MB | 19 MB | 47 MB | 152 MB | kept versions: expected |
+| storage blobs | 0.2 GB | 10 GB | 20 GB | 29 GB | kept versions: expected |
+| bigquery emulator | 99 MiB | 174 MiB | 283 MiB | 318 MiB | its live heap, with the table: #1618, below |
+| bigquery engine SQLite | 1 MB | 40 MB | 80 MB | 139 MB | rows and their change history: expected; the front's jobs: fixed |
+| bigquery front | 28 MiB, 23 goroutines | 29 MiB, 23 | 33 MiB, 23 | 33 MiB, 24 | flat |
+| bigquery insert | 107 / 300 ms | 122 / 257 ms | 262 / 775 ms | 315 / 764 ms | the front's jobs: fixed |
+| bigquery `GROUP BY` | 44 / 60 ms | 109 / 123 ms | 288 / 704 ms | 426 / 539 ms | a table of 107,320 rows: expected |
+| secretmanager access | 210 / 408 ms | 283 / 470 ms | 330 / 881 ms | 337 / 610 ms | versions kept as annotations: #1596 |
+| `up` (Tasks, Secret Manager, Logging) | 290 MiB, 118 goroutines | 332 MiB, 115 | 279 MiB, 117 | 151 MiB, 117 | flat |
+| logging read | 3.5 / 6 ms | 18.0 / 28 ms | 19.4 / 49 ms | 20.3 / 31 ms | the store full at 17 min: expected |
+| tasks create | 6.3 / 99 ms | 6.1 / 43 ms | 8.6 / 158 ms | 7.3 / 61 ms | flat |
+| pubsub emulator | 292 MiB | 396 MiB | 518 MiB | 638 MiB | acknowledged messages kept (#1603): #1619, below |
+| pubsub publish | 12.7 / 29 ms | 12.0 / 22 ms | 12.7 / 42 ms | 13.3 / 38 ms | flat |
+| firestore emulator | 358 MiB | 427 MiB | 449 MiB | 461 MiB | levels off |
+| firestore set | 4.2 / 23 ms | 2.5 / 13 ms | 3.5 / 38 ms | 4.3 / 24 ms | flat |
+
+Pub/Sub delivered all 215,834 messages to both subscriptions with none redelivered, Tasks all
+107,831 tasks once each, BigQuery counted the 107,320 rows streamed; no container restarted, and
+the storage server's goroutines held at 42, the BigQuery front's at 23 and `up`'s at 115–118. The
+only errors were Secret Manager's: 868 of 1,787 `AddSecretVersion` calls failed INTERNAL from the
+secret's 905th version on (#1596).
+
+What each growth was:
+
+- **Storage: kept versions were rewritten at each overwrite (fixed).** The harness overwrites a
+  ring of 32 names about 7 times a second, and under the bucket's default 7-day soft delete policy
+  each overwritten generation is kept, soft-deleted, as Cloud Storage keeps it. The metadata store
+  held a name's kept versions as one JSON array, which every overwrite read, wrote whole and logged
+  again: by 300 versions an overwrite logged 350 KB, the store compacted every few seconds, and the
+  heap profile put 82% of the server's allocations (3.8 GB in its first 10 minutes) in that write
+  and the compactions' base64 encoding. The store now appends: its log records the version added
+  alone, whatever the number kept before it, and versioned buckets' noncurrent versions the same
+  way (`TestOverwriteLogsOnlyTheVersionItKeeps`, `TestMetadataStoreAppend`).
+- **Storage: the kept versions themselves (expected).** About 0.9 KB of metadata and the object's
+  bytes per overwrite, kept until the soft delete policy's 7 days pass, when `Sweep` drops them:
+  29 GB of blobs by 90 minutes. A soak that should not keep them can give its bucket a soft delete
+  retention of 0.
+- **BigQuery: the front's own jobs were never deleted (fixed).** Each streamed `insertAll` runs an
+  `INSERT` and a `COUNT(*)` of the front's own, so 11 minutes in the engine's jobs table held 2,793
+  jobs no client can read beside the client's 350, growing without end, each a row every keyed read
+  of the table visits. The front now deletes a job of its own once its `jobs.query` has answered it
+  complete with every row (`TestTheFrontDeletesItsOwnFinishedJobs`).
+- **BigQuery: the emulator's memory (not a leak; #1618).** Nearly all in one anonymous mapping,
+  and not its database. On a standalone emulator of the same image, 6,300 queries in a loop took
+  it to 2.3 GB, of which a collection after two idle minutes returned 0.7 GB, and under
+  `GOMEMLIMIT=300MiB` 4,500 held it at 281 MB: garbage the collector reclaims, which the default
+  GOGC lets run to several times the live heap (most likely because GoogleSQL's wasm memory counts
+  as live, and the C++ objects it frees wait for finalizers).
+- **BigQuery: the table (expected).** Queries read a table that grows by 20 rows a second, and the
+  change history doubles what each insert writes.
+- **Secret Manager (#1596).** Each secret's versions are annotations on one Kubernetes Secret,
+  read with `kubectl` at each call; the latency follows the versions kept, and Kubernetes' 256 KiB
+  cap on annotations refuses the 905th. #1596 moves each version to a Secret of its own.
+- **Pub/Sub's JVM (#1619)** was still rising by 4 MiB a minute at 90 minutes, with no effect on
+  latency or delivery; Firestore's levelled off by 60 minutes. It is #1603's retention: the
+  60-minute run below counted the live messages.
+
+After the fixes, a 15-minute run of the storage, bigquery and secretmanager groups alone (with
+#1596's branch merged in, locally, for Secret Manager), against the first run's figures at 15
+minutes:
+
+| | First run, 15 min | After, 15 min |
+|---|---|---|
+| storage pod | 47 MiB | 42 MiB |
+| storage upload | 7.2 / 91 ms | 8.7 / 265 ms |
+| storage metadata log, last record | up to about 1 MB | 2.4 KB |
+| engine jobs table at 11 min | 2,793 of the front's, 350 of the client's | 0 of the front's, 362 of the client's |
+| bigquery insert | 107 / 211 ms | 146 / 454 ms |
+| bigquery `COUNT(*)` / `GROUP BY` p50 | 37 / 66 ms | 25 / 58 ms |
+| bigquery emulator | 138 MiB | 142 MiB |
+| secretmanager access | 240 / 383 ms | 1.2 / 97 ms, with #1596 |
+| secretmanager add | 373 / 419 ms | 119 / 464 ms, with #1596, no errors |
+
+Goroutines held: `up` 55–56, the storage server 16–17, the BigQuery front 21–23. A streamed insert
+now costs two more calls to the engine (the deletions of its two jobs), which is the 15-minute
+insert latency above; what it saves, a jobs table that grows with every insert, showed in the first
+run only after 30 minutes. A longer run after the fixes is the next measurement.
+
+### 60 minutes after the fixes (#1618, #1619)
+
+The third run (2026-10-18): the `bigquery` and `pubsub` groups for 60 minutes on one instance of
+`storage,pubsub,bigquery`, `CLOUDBURROW_SOAK_RATE=1`, built from #1609's fixes with #1603's heap
+bound (1024 MiB, the default) and #1618's `GOMEMLIMIT` (512 MiB, the default). The BigQuery
+emulator's container ran with `GODEBUG=gctrace=1`, and the Pub/Sub emulator's JVM with
+`-Xlog:gc -XX:+PrintClassHistogram` and a SIGQUIT every 9 minutes, each a full collection and a
+histogram of the live objects. The other groups did not run, so the machine was less loaded than
+in the 90-minute run. The run was clean: 71,980 rows streamed and 71,980 counted; 143,946
+messages published, none lost or redelivered on either subscription; no errors, no restarts.
+
+BigQuery, latency p50 / p99 of the minute ending at each mark; the emulator's live heap is what a
+collection left, from its trace:
+
+| | 1 min | 15 min | 30 min | 60 min | 90-minute run, 60 min |
+|---|---|---|---|---|---|
+| insert | 87 / 195 ms | 129 / 354 ms | 139 / 527 ms | 225 / 458 ms | 262 / 775 ms |
+| `COUNT(*)` | 15 / 30 ms | 48 / 73 ms | 63 / 69 ms | 68 / 77 ms | |
+| `GROUP BY` | 17 / 35 ms | 78 / 107 ms | 126 / 165 ms | 208 / 254 ms | 288 / 704 ms |
+| emulator container | 97 MiB | 141 MiB | 188 MiB | 278 MiB | 283 MiB |
+| emulator live heap | 77 MB | 92 MB | 108 MB | 141 MB | |
+| emulator heap goal | 154 MB | 185 MB | 218 MB | 283 MB | |
+| front container | 30 MiB | 30 MiB | 30 MiB | 34 MiB | 33 MiB |
+
+- **The front's job deletions** (two more engine calls a streamed insert) cost the inserts of the
+  first half hour: 129 and 139 ms at 15 and 30 minutes, against 107 and 122 ms in the runs before
+  them. By 60 minutes they had paid for that: 225 / 458 ms, against 262 / 775 ms, on a machine
+  with less else running. The insert still slows over the hour, with the table, as the
+  `GROUP BY` does.
+- **The emulator's memory is its live heap, not garbage.** It collects once for every streamed
+  insert (7,199 forced collections in the hour, for 7,198 inserts), most likely patch 0017's
+  collection before each rebuild of the engine's catalog (#1057), which an insert's statements
+  would then cause. So its heap never
+  doubled past its live size, as it did on #1618's standalone emulator, which ran queries and no
+  inserts; the live heap itself rose 77 → 141 MB, about 1 MB a minute, and the container followed
+  it to 278 MiB, as it reached 283 MiB at 60 minutes before the fixes. The 512 MiB `GOMEMLIMIT`
+  never engaged, and binds only past about twice what this run's live heap reached; it is what
+  holds a workload of queries alone, whose garbage waits for the heap to double
+  ([configuration.md](configuration.md#settings), `--bigquery-heap-mib`).
+
+Pub/Sub, the emulator's live heap after each full collection, and the live `PubsubMessage`
+objects in it, by the JVM's uptime (the soak's minute, within a minute):
+
+| Uptime | 6 min | 15 | 24 | 33 | 42 | 51 | 60 |
+|---|---|---|---|---|---|---|---|
+| live heap | 22 MiB | 42 | 57 | 74 | 95 | 112 | 127 |
+| `PubsubMessage` objects live | 13,143 | 35,115 | 56,709 | 78,305 | 99,907 | 121,500 | 143,098 |
+| container | | 313 MiB | | 359 MiB | | | 478 MiB |
+
+**#1619 is #1603's retention, nothing new.** The live messages are the messages published so
+far (143,098 of 143,946 at 60 minutes: one object a message, though both subscriptions hold it),
+and the live heap grows by them, about 1.9 MiB a minute; the container grows by more, about
+4 MiB a minute, as
+the JVM commits heap ahead of it (307 MiB committed at 60 minutes). Google's emulator keeps every
+acknowledged message in its subscriptions' backlogs until they are deleted (#1603,
+[compatibility.md](compatibility.md#pubsub--googlepubsubv1)). Under the default heap of 1024 MiB
+the soak's rate would fill it after about 9 hours; the emulator then exits
+(`-XX:+ExitOnOutOfMemoryError`), its container restarts empty, and the front creates its topics,
+subscriptions, schemas and snapshots again (#1608), losing the messages not yet delivered.

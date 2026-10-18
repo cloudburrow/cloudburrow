@@ -23,9 +23,10 @@ import (
 // what has passed its hardDeleteTime; reads treat it as gone before then.
 //
 // An object's soft-deleted versions are one record under softObjectPrefix,
-// oldest first, each tagged with the bucket generation it was deleted from,
-// so a later bucket of the same name does not see them. A soft-deleted
-// bucket is one record under softBucketPrefix/<name>/<generation>.
+// a JSON array that discard appends to (read oldest first), each tagged
+// with the bucket generation it was deleted from, so a later bucket of the
+// same name does not see them. A soft-deleted bucket is one record under
+// softBucketPrefix/<name>/<generation>.
 
 const (
 	softObjectPrefix = "softdeleted/"
@@ -111,7 +112,13 @@ func getSoftDeleted(tx Tx, bucket, name string) ([]objectRecord, error) {
 		return nil, nil
 	}
 	var vs []objectRecord
-	return vs, json.Unmarshal(raw, &vs)
+	if err := json.Unmarshal(raw, &vs); err != nil {
+		return nil, err
+	}
+	// Oldest first. discard appends, which keeps that order unless an older
+	// generation leaves the bucket after a newer one.
+	sort.SliceStable(vs, func(i, j int) bool { return vs[i].Generation < vs[j].Generation })
+	return vs, nil
 }
 
 func putSoftDeleted(tx Tx, bucket, name string, vs []objectRecord) error {
@@ -136,12 +143,16 @@ func discard(tx Tx, b bucketRecord, o objectRecord, now time.Time) error {
 	if d == 0 {
 		return nil
 	}
-	vs, err := getSoftDeleted(tx, b.Name, o.Name)
+	o.SoftDeleted, o.HardDelete, o.BucketGeneration = now, now.Add(d), b.Generation
+	raw, err := json.Marshal(o)
 	if err != nil {
 		return err
 	}
-	o.SoftDeleted, o.HardDelete, o.BucketGeneration = now, now.Add(d), b.Generation
-	return putSoftDeleted(tx, b.Name, o.Name, append(vs, o))
+	// Appended, not read and written whole: an object overwritten all day
+	// under the 7-day policy holds thousands of versions, and writing them
+	// all again at each overwrite made every upload cost them (#1609).
+	tx.Append(softObjectKey(b.Name, o.Name), raw)
+	return nil
 }
 
 // softVersions are the soft-deleted versions of bucket/name that are still

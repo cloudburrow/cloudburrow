@@ -1092,6 +1092,9 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/1.1", 1, 1
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, req)
+	if method == http.MethodPost && path == "/queries" && rec.status == http.StatusOK {
+		f.forgetInternalJob(r, rec.body.Bytes())
+	}
 	return rec.status, rec.body.Bytes()
 }
 

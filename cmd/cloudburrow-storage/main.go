@@ -32,6 +32,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
+	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 	"github.com/cloudburrow/cloudburrow/internal/supervisor"
@@ -40,6 +41,15 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Off unless CLOUDBURROW_DEBUG_PPROF names a loopback address (#1609).
+	// install-self is an init container's one-shot copy: it never listens.
+	// A debug aid that cannot listen (two containers of a pod given the
+	// same port) is named, and the command goes on without it.
+	if len(os.Args) < 2 || os.Args[1] != "install-self" {
+		if _, err := debugpprof.Start(os.Getenv, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "cloudburrow-storage: warning:", err)
+		}
+	}
 	if len(os.Args) > 1 && os.Args[1] == "bigquery-front" {
 		if err := bigqueryfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, bigqueryfront.ErrUsage) {

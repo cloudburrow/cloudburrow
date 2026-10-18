@@ -160,6 +160,11 @@ type Front struct {
 	// growing restart back-off never applies. The backend's container then
 	// has no liveness probe.
 	SuperviseBackend bool
+	// Env is the front's container environment, rendered in sorted order;
+	// MemoryRequest, when set, its memory request (default 16Mi).
+	// WithGoMemLimit sets both (#1618).
+	Env           map[string]string
+	MemoryRequest string
 }
 
 // Where the supervisor is put in a supervised backend's container.
@@ -300,6 +305,68 @@ func (b Backend) WithJVMHeap(heapMiB int) Backend {
 	b.Env = env
 	b.MemoryRequest = fmt.Sprintf("%dMi", heapMiB/2+256)
 	b.MemoryLimit = fmt.Sprintf("%dMi", heapMiB+JVMOverheadMiB)
+	return b
+}
+
+// Go memory limits (#1618). A Go process collects when its heap has grown
+// by GOGC (100%) since the last collection, so with no GOMEMLIMIT its
+// memory runs to about twice its live heap, and further when much of the
+// live heap is memory it does not free itself: the BigQuery emulator's
+// GoogleSQL runs in wasm, and the C++ objects it frees wait for finalizers.
+// Measured on a standalone BigQuery emulator, 6,300 queries took it to
+// 2.3 GB with no limit and 4,500 held at 281 MB under 300 MiB. GOMEMLIMIT
+// is soft: past it the runtime collects more often (and gives up past half
+// its CPU), it never fails an allocation, so no container gets a memory
+// limit that Kubernetes would kill it at. The BigQuery emulator's is
+// config.BigQueryHeapMiB; the storage server's and the fronts' are these.
+const (
+	// StorageGoMemLimitMiB: the storage server held 31-66 MiB over the
+	// 90-minute soak's first 30 minutes, and 42 MiB at 15 minutes once it
+	// appended kept versions (docs/soak.md); an upload or download streams.
+	StorageGoMemLimitMiB = 512
+	// FrontGoMemLimitMiB: the BigQuery front held 28-33 MiB over the
+	// 90-minute soak; the fronts keep their records and data copies in
+	// files (FrontStateDir), not in memory.
+	FrontGoMemLimitMiB = 256
+	// A front's memory request, beside the 16Mi it had before: what the
+	// BigQuery front held.
+	frontMemoryRequest = "32Mi"
+)
+
+// goMemLimitEnv returns env with GOMEMLIMIT set to mib MiB, as a new map.
+func goMemLimitEnv(env map[string]string, mib int) map[string]string {
+	out := make(map[string]string, len(env)+1)
+	for k, v := range env {
+		out[k] = v
+	}
+	out["GOMEMLIMIT"] = fmt.Sprintf("%dMiB", mib)
+	return out
+}
+
+// WithGoMemLimit sets the GOMEMLIMIT of the backend's own process, a Go
+// one (the BigQuery emulator, the storage server), to mib MiB, and its
+// container's memory request to request; mib 0 leaves the backend as it
+// was. It sets no memory limit (see StorageGoMemLimitMiB). A supervised
+// backend's supervisor reads it too, and holds a few MiB.
+func (b Backend) WithGoMemLimit(mib int, request string) Backend {
+	if mib <= 0 {
+		return b
+	}
+	b.Env = goMemLimitEnv(b.Env, mib)
+	b.MemoryRequest = request
+	return b
+}
+
+// withFrontGoMemLimit gives the backend's front, every one a CloudBurrow
+// process from the storage image, FrontGoMemLimitMiB and its request.
+func (b Backend) withFrontGoMemLimit() Backend {
+	if b.Front == nil {
+		return b
+	}
+	f := *b.Front
+	f.Env = goMemLimitEnv(f.Env, FrontGoMemLimitMiB)
+	f.MemoryRequest = frontMemoryRequest
+	b.Front = &f
 	return b
 }
 
@@ -490,17 +557,7 @@ spec:
 	if len(b.Args) > 0 {
 		fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(b.Args))
 	}
-	if len(b.Env) > 0 {
-		sb.WriteString("          env:\n")
-		names := make([]string, 0, len(b.Env))
-		for k := range b.Env {
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		for _, k := range names {
-			fmt.Fprintf(&sb, "            - name: %s\n              value: %q\n", k, b.Env[k])
-		}
-	}
+	writeEnv(&sb, b.Env)
 
 	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", containerPort)
 	for _, p := range b.ExtraPorts {
@@ -572,6 +629,7 @@ spec:
 		if len(f.Args) > 0 {
 			fmt.Fprintf(&sb, "          args: [%s]\n", quoteList(f.Args))
 		}
+		writeEnv(&sb, f.Env)
 		fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", b.Port)
 		for _, e := range f.Extra {
 			fmt.Fprintf(&sb, "            - containerPort: %d\n", e.Port)
@@ -584,8 +642,8 @@ spec:
           resources:
             requests:
               cpu: 10m
-              memory: 16Mi
-`, b.Port)
+              memory: %s
+`, b.Port, frontRequest(f))
 		if f.StateDir != "" {
 			fmt.Fprintf(&sb, "          volumeMounts:\n            - name: front-state\n              mountPath: %s\n", f.StateDir)
 		}
@@ -657,6 +715,31 @@ spec:
 	}
 
 	return sb.String()
+}
+
+// writeEnv renders a container's env, in sorted order so the same
+// backend produces the same manifest on every run.
+func writeEnv(sb *strings.Builder, env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	sb.WriteString("          env:\n")
+	names := make([]string, 0, len(env))
+	for k := range env {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		fmt.Fprintf(sb, "            - name: %s\n              value: %q\n", k, env[k])
+	}
+}
+
+// frontRequest is the front's memory request.
+func frontRequest(f *Front) string {
+	if f.MemoryRequest != "" {
+		return f.MemoryRequest
+	}
+	return "16Mi"
 }
 
 func quoteList(items []string) string {

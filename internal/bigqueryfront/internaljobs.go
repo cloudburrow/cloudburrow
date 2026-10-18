@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -121,4 +122,34 @@ func refuseInternalJobID(w http.ResponseWriter, r *http.Request, id string) bool
 	}
 	writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid job ID %q: job IDs beginning %q are reserved by CloudBurrow for its own queries", id, internalJobPrefix))
 	return true
+}
+
+// forgetInternalJob deletes, on the engine, the job of the front's own that
+// a jobs.query of its own (send) answered with got, once nothing can read
+// it again: complete, and with every row in got (no pageToken).
+//
+// The engine kept every one (#1609): each streamed insertAll is an INSERT
+// and a COUNT(*) of the front's own, so in the 90-minute soak the engine's
+// jobs table held eight jobs no client could read for each one a client
+// made, every one a row each keyed read of the table visits (googlesqlite
+// compiles its WHERE to a function call: see the engine patch of #1103).
+// No client sees them (above), so their deletion changes nothing a client
+// sees.
+func (f front) forgetInternalJob(r *http.Request, got []byte) {
+	var res struct {
+		JobReference struct {
+			JobID    string `json:"jobId"`
+			Location string `json:"location"`
+		} `json:"jobReference"`
+		JobComplete bool   `json:"jobComplete"`
+		PageToken   string `json:"pageToken"`
+	}
+	if json.Unmarshal(got, &res) != nil || !res.JobComplete || res.PageToken != "" || !isInternalJobID(res.JobReference.JobID) {
+		return
+	}
+	path := "/jobs/" + url.PathEscape(res.JobReference.JobID) + "/delete"
+	if res.JobReference.Location != "" {
+		path += "?location=" + url.QueryEscape(res.JobReference.Location)
+	}
+	_, _ = f.send(r, http.MethodDelete, path, nil)
 }

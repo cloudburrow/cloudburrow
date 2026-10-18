@@ -280,7 +280,7 @@ func TestPubSubManifestPutsTheFrontOnTheServicePort(t *testing.T) {
 		"port: 8085\n      targetPort: 8085\n",
 		// The front's state is on an emptyDir (#898): it outlives the
 		// front's container and goes with the pod.
-		"              memory: 16Mi\n          volumeMounts:\n            - name: front-state\n              mountPath: /var/lib/pubsub-front\n" +
+		"              memory: " + frontMemoryRequest + "\n          volumeMounts:\n            - name: front-state\n              mountPath: /var/lib/pubsub-front\n" +
 			"      volumes:\n        - name: front-state\n          emptyDir: {}\n",
 	} {
 		if !strings.Contains(m, want) {
