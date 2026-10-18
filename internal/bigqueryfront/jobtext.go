@@ -140,6 +140,11 @@ type jobTexts struct {
 	// path is the file they are kept in (keep, jobtextstate.go), or "".
 	path string
 	logf func(string, ...any)
+	// made is told of each job whose text is added (jobstable.go's
+	// noteMade): the front adds it once the engine has the job, which a
+	// background sync of the table of JOBS rows may have listed and
+	// written without it (#1617).
+	made func(project, id string)
 }
 
 const maxJobTexts = 1000
@@ -149,6 +154,9 @@ func (j *jobTexts) add(project, id string, t jobText) {
 		return
 	}
 	key := project + "/" + id
+	if j.made != nil {
+		defer j.made(project, id) // after mu is released
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if j.texts == nil {
