@@ -266,6 +266,7 @@ func firestoreBackend(project string) Backend {
 		Port:  FirestorePort,
 		Command: []string{"gcloud", "beta", "emulators", "firestore", "start",
 			fmt.Sprintf("--host-port=127.0.0.1:%d", FirestoreEmulatorPort)},
+		JVM:   true,
 		Front: firestoreFront(),
 	}
 }
@@ -327,7 +328,7 @@ const DatastoreLockFile = "/data/datastore.lock"
 // measured).
 func datastoreBackend(project string, persistent bool) Backend {
 	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort,
-		Front: datastoreFront()}
+		JVM: true, Front: datastoreFront()}
 	if !persistent {
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,

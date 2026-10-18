@@ -112,6 +112,14 @@ type Backend struct {
 	// Name: a Cloud SQL high-availability instance's Service selects its
 	// primary's server, which a failover changes (#1408).
 	Selects string
+	// JVM marks a backend whose process is a Java emulator (Pub/Sub,
+	// Firestore, Datastore), whose heap LifecycleComponent.Backends bounds
+	// with WithJVMHeap (#1603).
+	JVM bool
+	// MemoryRequest and MemoryLimit, when set, are the backend container's
+	// memory request and limit, Kubernetes quantities such as "512Mi".
+	// Empty leaves the request at 64Mi and sets no limit.
+	MemoryRequest, MemoryLimit string
 }
 
 // Front is a container that stands in front of a backend in its pod.
@@ -231,6 +239,7 @@ func PubSubBackend(project, frontImage string) Backend {
 			// the front (#1114).
 			fmt.Sprintf("--host-port=127.0.0.1:%d", PubSubEmulatorPort)},
 		Persistent: false,
+		JVM:        true,
 		Front: &Front{
 			Name:       "front",
 			Image:      frontImage,
@@ -243,6 +252,53 @@ func PubSubBackend(project, frontImage string) Backend {
 			StateDir:     path.Dir(PubSubFrontStateFile),
 		},
 	}
+}
+
+// JVMOverheadMiB is what a Java emulator's container holds beyond its
+// heap: the gcloud wrapper's Python process (about 75 MiB), and the JVM's
+// metaspace, code cache, thread stacks, GC structures and Netty's buffers,
+// which came to about 170 MiB beside a heap of under 60 MiB committed in the
+// soak (#1603). The container's limit is the heap's maximum plus this.
+const JVMOverheadMiB = 512
+
+// jvmOptions are the JVM options WithJVMHeap passes, after -Xmx.
+//
+// ExitOnOutOfMemoryError: Google's Pub/Sub emulator keeps every message a
+// subscription was sent until the subscription is deleted (#1603), so a
+// bounded heap fills. Measured with a 256 MiB heap: after 175,000
+// acknowledged 1 KB messages the emulator spent its time in full
+// collections and answered no call, every Publish timing out, its pod not
+// ready, for as long as it was left (6 minutes); with this option it logged
+// "Terminating due to java.lang.OutOfMemoryError: Java heap space", its
+// container restarted, and it served again, empty, within seconds.
+const jvmOptions = "-XX:+ExitOnOutOfMemoryError"
+
+// WithJVMHeap bounds a Java emulator's heap at heapMiB, through
+// JAVA_TOOL_OPTIONS, which every JVM reads whatever starts it (the gcloud
+// wrapper, the emulator's own script, or Datastore's exec of java), and
+// sets its container's memory request to half the heap plus 256 MiB and
+// its limit to the heap plus JVMOverheadMiB (#1603).
+//
+// Without a bound the JVM sized its heap at a quarter of what the kind
+// node sees (24 GiB: about 6 GiB) and grew it rather than collect it, so
+// the containers' memory only rose. Under a 256 MiB bound the 30-minute
+// soak of docs/soak.md ran clean: Firestore's live heap held at 20-27 MiB,
+// and Pub/Sub's grew by the messages its subscriptions keep (see
+// jvmOptions), which a bound turns from unbounded growth into a restart.
+// heapMiB 0 leaves the backend as it was, unbounded.
+func (b Backend) WithJVMHeap(heapMiB int) Backend {
+	if heapMiB <= 0 {
+		return b
+	}
+	env := make(map[string]string, len(b.Env)+1)
+	for k, v := range b.Env {
+		env[k] = v
+	}
+	env["JAVA_TOOL_OPTIONS"] = fmt.Sprintf("-Xmx%dm %s", heapMiB, jvmOptions)
+	b.Env = env
+	b.MemoryRequest = fmt.Sprintf("%dMi", heapMiB/2+256)
+	b.MemoryLimit = fmt.Sprintf("%dMi", heapMiB+JVMOverheadMiB)
+	return b
 }
 
 // BuiltinStorageBackend is CloudBurrow's own Cloud Storage server (#514),
@@ -486,11 +542,14 @@ spec:
             failureThreshold: 3
 `, f.BackendLivenessPath, b.Port)
 	}
-	sb.WriteString(`          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-`)
+	request := b.MemoryRequest
+	if request == "" {
+		request = "64Mi"
+	}
+	fmt.Fprintf(&sb, "          resources:\n            requests:\n              cpu: 50m\n              memory: %s\n", request)
+	if b.MemoryLimit != "" {
+		fmt.Fprintf(&sb, "            limits:\n              memory: %s\n", b.MemoryLimit)
+	}
 	// The data volume is the backend's alone: its mount is written before
 	// the front's container starts, so it can never land under the front
 	// (#915, TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer).

@@ -341,6 +341,20 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
   it answered a plain-text 404. CloudBurrow's front serves them instead (#1367, the IAM row below).
 - The emulator describes itself as a "fake" that "may be incomplete or differ from the real
   system."
+- **A subscription keeps every message it was sent, acknowledged or not, for as long as it
+  exists** (#1603, measured; [soak.md](soak.md#results)). The emulator's backlog of a
+  subscription (`MessageBacklog`) never removes a message, only marks it acknowledged, so its heap
+  grows with every message published: about 0.9 KB per message of the soak's (a few bytes of data
+  and two attributes, on two subscriptions), and 1.5 KB per 1 KB message on one. Deleting the
+  subscription frees it (`DeleteSubscription`, detaching it, or `cloudburrow reset --service
+  pubsub`): after the soak deleted its topic and subscriptions the live heap fell from 109 to
+  10 MiB. CloudBurrow bounds the heap (`--emulator-heap-mib`, 512 MiB by default,
+  [configuration.md](configuration.md#settings)), which holds about 350,000 such 1 KB messages, or
+  550,000 of the soak's. **When the heap is full the emulator exits and its container restarts,
+  empty**: every topic and subscription is lost, as in any restart. Unbounded, it would instead
+  have grown to a quarter of the cluster node's memory; bounded without that exit, it was measured
+  to answer nothing at all (every `Publish` timing out) until its pod was deleted. A publisher that
+  runs for hours should delete and recreate its subscriptions, or raise the bound.
 
 **CloudBurrow's front** (#873). The emulator stores a subscription's `expiration_policy` and never
 acts on it, so the Pub/Sub pod runs `cloudburrow-storage pubsub-front` (`internal/pubsubfront`)

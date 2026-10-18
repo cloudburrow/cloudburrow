@@ -575,3 +575,58 @@ func TestCloudBuildHostSteps(t *testing.T) {
 		})
 	}
 }
+
+// TestEmulatorHeap: the Java emulators' heap bound (#1603) defaults to
+// DefaultEmulatorHeapMiB, is set by flag, environment or file, 0 turns it
+// off, and a value the emulators cannot run in, or that bounds nothing, is
+// refused.
+func TestEmulatorHeap(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		file    string
+		want    int
+		wantErr string
+	}{
+		{name: "default", want: DefaultEmulatorHeapMiB},
+		{name: "flag", args: []string{"--emulator-heap-mib", "1024"}, want: 1024},
+		{name: "env", env: map[string]string{EnvPrefix + "EMULATOR_HEAP_MIB": "768"}, want: 768},
+		{name: "file", file: `{"emulatorHeapMiB":256}`, want: 256},
+		{name: "flag beats env", args: []string{"--emulator-heap-mib=300"},
+			env: map[string]string{EnvPrefix + "EMULATOR_HEAP_MIB": "768"}, want: 300},
+		{name: "0 is unbounded", env: map[string]string{EnvPrefix + "EMULATOR_HEAP_MIB": "0"}, want: 0},
+		{name: "bad env", env: map[string]string{EnvPrefix + "EMULATOR_HEAP_MIB": "512m"}, wantErr: "must be an integer number of MiB"},
+		{name: "too small", args: []string{"--emulator-heap-mib", "64"}, wantErr: "emulatorHeapMiB"},
+		{name: "too large", file: `{"emulatorHeapMiB":32768}`, wantErr: "emulatorHeapMiB"},
+		{name: "negative", args: []string{"--emulator-heap-mib", "-1"}, wantErr: "emulatorHeapMiB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if tc.file != "" {
+				writeFile(t, dir, DefaultFileName, tc.file)
+			}
+			cfg, err := Load(Options{Args: tc.args, Getenv: envMap(tc.env), WorkDir: dir})
+			if err == nil && tc.wantErr != "" {
+				err = cfg.Validate()
+			}
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load = %v; want an error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate = %v", err)
+			}
+			if cfg.EmulatorHeapMiB != tc.want {
+				t.Errorf("EmulatorHeapMiB = %d, want %d", cfg.EmulatorHeapMiB, tc.want)
+			}
+		})
+	}
+}
