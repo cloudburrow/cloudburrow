@@ -182,7 +182,11 @@ One run, not an average, and not a promise about another machine.
 
 Cold start is `up --detach` for a new instance: creating the cluster and pulling images (the
 second profile ran after the first, so images they share were already pulled). Warm start is
-`up --detach` after `stop`, restarting the existing cluster. Memory is read 30 s after ready. `up` prints the slowest components once it is ready, and `/readyz` reports
+`up --detach` after `stop`, restarting the existing cluster. Since #1610 a warm start waits for the
+cluster's Service network, then replaces CoreDNS's and Knative's pods, which the restarted node had
+started before that network worked, and the controller manager runs without leader election: five
+warm starts of the default profile on macOS/arm64 took 26 to 32 s (mean 29 s), from 23 to 53 s
+(mean 35 s) before. Memory is read 30 s after ready. `up` prints the slowest components once it is ready, and `/readyz` reports
 each one's time (`timing`). Re-run the workflow to measure a change.
 
 ## Platforms
