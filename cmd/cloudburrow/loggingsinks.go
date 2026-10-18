@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -273,6 +274,37 @@ func (t linkedTables) Append(ctx context.Context, project, dataset string, rows 
 		savers[i] = sinkRow{values: rows[i], id: ids[i]}
 	}
 	return c.Dataset(dataset).Table(logging.LinkedEntriesTable).Inserter().Put(ctx, savers)
+}
+
+// Now is the BigQuery front's clock, which CURRENT_TIMESTAMP() reads in a
+// linked dataset's views: a clock:advance of 0 seconds only reads it
+// (bigqueryfront/streamingbuffer.go, #1602).
+func (t linkedTables) Now(ctx context.Context) (time.Time, error) {
+	f := t.tunnel()
+	if f == nil || f.HostAddr() == "" {
+		return time.Time{}, errors.New("BigQuery has not started on this instance")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+f.HostAddr()+"/cloudburrow/bigquery/v2/clock:advance",
+		strings.NewReader(`{"seconds":0}`))
+	if err != nil {
+		return time.Time{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Transport: linkedTransport{next: http.DefaultTransport}, Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer resp.Body.Close()
+	var got struct {
+		Time time.Time `json:"time"`
+	}
+	if resp.StatusCode != http.StatusOK {
+		return time.Time{}, fmt.Errorf("BigQuery's clock: %s", resp.Status)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || got.Time.IsZero() {
+		return time.Time{}, fmt.Errorf("BigQuery's clock: %v", err)
+	}
+	return got.Time, nil
 }
 
 func (t linkedTables) Delete(ctx context.Context, project, dataset string) error {

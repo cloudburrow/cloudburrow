@@ -23,6 +23,8 @@ import (
 // folder apply, plan clean, and read back through the official clients.
 func TestTerraformKMSHSMEkmAndAutokey(t *testing.T) {
 	h := New(t)
+	h.Endpoint(EnvKMS)
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	m := newTFModule(t)
 	c := kmsClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_KMS
 	ctx := h.Context()

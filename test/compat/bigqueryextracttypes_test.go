@@ -175,8 +175,8 @@ func TestBigQueryExtractOfEveryType(t *testing.T) {
 		t.Errorf("AVRO row %v, %v", v, err)
 	}
 
-	// PARQUET: INTERVAL a STRING, GEOGRAPHY a WKT STRING, RANGE a group
-	// of start and end.
+	// PARQUET: INTERVAL a STRING, GEOGRAPHY GeoParquet's WKB (#1595),
+	// RANGE a group of start and end.
 	if err := extract("iv", "flat.parquet", bigquery.Parquet); err != nil {
 		t.Fatalf("a PARQUET extract of an INTERVAL, a GEOGRAPHY and a RANGE: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestBigQueryExtractOfEveryType(t *testing.T) {
 	for i := 0; i < int(tbl.NumCols()); i++ {
 		got = append(got, tbl.Schema().Field(i).Name+" "+tbl.Schema().Field(i).Type.String()+" "+tbl.Column(i).Data().Chunk(0).String())
 	}
-	want := []string{`i utf8 ["1-2 3 4:5:6.789"]`, `g utf8 ["POINT(1 2)"]`,
+	want := []string{`i utf8 ["1-2 3 4:5:6.789"]`, `g binary ["\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\x00@"]`,
 		// The bounds are written isAdjustedToUTC false (extractparquet.go),
 		// which arrow-go v18 reads as no time zone (v15 read it as UTC);
 		// the file is the same.

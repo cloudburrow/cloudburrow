@@ -42,7 +42,11 @@ type linkFixture struct {
 }
 
 func newLinkFixture(t *testing.T, h *Harness, prefix string) *linkFixture {
-	ctx := h.Context()
+	// Each expect waits up to a minute for the linked dataset to follow, and
+	// a test makes several: h.Context()'s one minute for them all ran out
+	// on a loaded machine (#1568).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	t.Cleanup(cancel)
 	bq, project := bigqueryClient(t, h)
 	cfg, err := vlogging.NewConfigClient(ctx, loggingClientOptions(h)...)
 	if err != nil {
@@ -183,6 +187,7 @@ func (f *linkFixture) expect(when, view, want string) {
 // Log Analytics, so CreateLink on it is FAILED_PRECONDITION.
 func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	f := newLinkFixture(t, h, "lav")
 	ctx := f.ctx
 	f.write("old", ltype.LogSeverity_ERROR, time.Now().Add(-3*24*time.Hour))
@@ -260,6 +265,7 @@ func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 // read-only (403).
 func TestLoggingLinkedDatasetAcrossRestarts(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	// The fixture first: it skips where BigQuery is not served, before the
 	// restarter looks for the emulator's pod (main run 38946612957).
 	f := newLinkFixture(t, h, "lar")

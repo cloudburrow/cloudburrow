@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,15 +41,26 @@ func TestBigQueryDefaultKeyOfResumableAndCloudStorageLoads(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
+		// Not ctx: h.Context's 60 seconds may be spent by the time the
+		// cleanups run, and a key left set reaches every later test's
+		// tables.
+		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		q := c.Query("ALTER PROJECT SET OPTIONS (" + r + "default_kms_key_name` = NULL)")
 		q.Location = region
-		_, _ = q.Read(ctx)
+		if _, err := q.Read(cctx); err != nil {
+			t.Errorf("clearing the project's default_kms_key_name: %v", err)
+		}
 	})
 	ds := c.Dataset(strings.ReplaceAll(project, "-", "_") + "_loadkeys")
 	if err := ds.Create(ctx, &bigquery.DatasetMetadata{Location: region}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ds.DeleteWithContents(ctx) })
+	t.Cleanup(func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = ds.DeleteWithContents(cctx)
+	})
 	key := "projects/" + project + "/locations/us/keyRings/r/cryptoKeys/k"
 	exec("ALTER PROJECT SET OPTIONS (" + r + "default_kms_key_name` = '" + key + "')")
 	schema := bigquery.Schema{{Name: "a", Type: bigquery.IntegerFieldType}}

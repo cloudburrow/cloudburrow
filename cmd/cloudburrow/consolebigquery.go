@@ -276,9 +276,18 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		Columns: []string{"Type", "Mode", "Description"}, NameColumn: "Field", Noun: "fields",
 	}
 	schema.Items = schemaRows(md.Schema, "")
+	schemaNote := ""
 	schema.Total = len(schema.Items)
 	if schema.Total == 0 {
 		schema.Note = "This table has no schema."
+	} else if tags, err := p.readGovernanceTags(ctx, datasetID, tableID); err == nil && len(tags) > 0 {
+		// Each field's data governance tags (#1456,
+		// consolebigquerygovernance.go).
+		schema.Columns = append(schema.Columns, governanceTagsColumn)
+		for i := range schema.Items {
+			schema.Items[i].Fields[governanceTagsColumn] = orDash(tags[schema.Items[i].Name])
+		}
+		schemaNote = governanceTagsNote
 	}
 
 	props := []console.Property{
@@ -330,7 +339,7 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			{Label: "Fields", Value: fmt.Sprint(len(md.Schema))},
 		},
 		Sections: []console.Section{
-			{ID: "schema", Label: "Schema", Listing: schema},
+			{ID: "schema", Label: "Schema", Listing: schema, Note: schemaNote},
 			{
 				ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: groups,

@@ -267,9 +267,9 @@ type operationMeta struct {
 	Destination string `json:"destinationFolderId"`
 	Folder      string `json:"folderId"`
 	// A bulk restore's counts (#1279).
-	Restored string `json:"successfulObjectCount"`
-	Skipped  string `json:"skippedObjectCount"`
-	Failed   string `json:"failedObjectCount"`
+	Restored string `json:"succeededCount"`
+	Skipped  string `json:"skippedCount"`
+	Failed   string `json:"failedCount"`
 }
 
 func readOperationMeta(op *storagev1.GoogleLongrunningOperation) operationMeta {

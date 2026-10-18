@@ -38,6 +38,8 @@ import (
 // covers: google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig, google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig
 func TestTerraformKMSProjectAutokeyConfig(t *testing.T) {
 	h := New(t)
+	h.Endpoint(EnvKMS)
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	h.Endpoint(EnvKMS) // skips without CLOUDBURROW_TEST_KMS
 	ac := kmsAdminClient(t, h)
 	m := newTFModule(t)
@@ -161,6 +163,9 @@ resource "google_organization_iam_audit_config" "a" {
 // covers: storage.projects.serviceAccount.get, storage.buckets.get, storage.objects.get, storage.objects.list, google.cloud.kms.v1.KeyManagementService/GetKeyRing, google.cloud.kms.v1.KeyManagementService/ListKeyRings, google.cloud.kms.v1.KeyManagementService/ListCryptoKeys, google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions, google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/ListSecrets, google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Subscriber/GetSubscription
 func TestTerraformDataSourcesBatch10(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
 	h.Endpoint(EnvKMS)
 	h.Endpoint(EnvSecrets)
 	h.Endpoint(EnvStorage)

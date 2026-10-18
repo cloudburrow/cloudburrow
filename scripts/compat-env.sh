@@ -55,7 +55,8 @@ usage() { sed -n '/^# Usage:/,/^# Requires/p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
   STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER SERVICEUSAGE
-  RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY RUN_SQLADMIN TASKS_LOGGING BIGQUERY_RESOURCEMANAGER LOGGING_RESOURCEMANAGER RUN_RESOURCEMANAGER RUN_SERVICEUSAGE SINK_LOGGING SINK_STORAGE SINK_PUBSUB FIRESTORE_STORAGE
+  RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY RUN_SQLADMIN TASKS_LOGGING BIGQUERY_RESOURCEMANAGER LOGGING_RESOURCEMANAGER RUN_RESOURCEMANAGER SQL_RESOURCEMANAGER RUN_SERVICEUSAGE RUN_MYSQL SINK_LOGGING SINK_STORAGE SINK_PUBSUB FIRESTORE_STORAGE
+  CMEK_KMS CLOUDSQL_SECRETS NOPUBSUB_STORAGE APPENGINE_URL
   SPANNER SPANNER_REST DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN CLOUDSQL_CONNECTOR BACKUPDR
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
   LOCALAI PREDICTION GCLOUD TOFU
@@ -186,6 +187,21 @@ cors_origin() {
   VALUE=${v%%,*}
 }
 
+# flag_value <name>: the value the instance was started with --<name> for,
+# from the flags; empty when it was given none.
+flag_value() {
+  local i v=""
+  for ((i = 0; i < ${#FLAGS[@]}; i++)); do
+    case "${FLAGS[$i]}" in
+      "--$1"|"-$1") v=${FLAGS[$((i + 1))]:-} ;;
+      "--$1="*|"-$1="*) v=${FLAGS[$i]#*=} ;;
+      *) continue ;;
+    esac
+    break
+  done
+  VALUE=$v
+}
+
 # The tests run the CLI with CLOUDBURROW_TEST_CLI_ARGS from test/compat, not
 # from here, so a relative state directory would name another one.
 warn_relative_state_dir() {
@@ -264,22 +280,28 @@ value() {
     # cloudburrow command, such as `cloudburrow terraform`.
     CLI) VALUE=$cli ;;
     CLI_ARGS) cli_args; warn_relative_state_dir ;;
-    STORAGE|RUN_STORAGE|SINK_STORAGE|FIRESTORE_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
+    # NOPUBSUB_STORAGE, CMEK_KMS and CLOUDSQL_SECRETS: the shards' names for a
+    # service beside their own (#1568), as RUN_STORAGE and the rest.
+    STORAGE|RUN_STORAGE|SINK_STORAGE|FIRESTORE_STORAGE|NOPUBSUB_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
     # An origin the storage server answers beyond loopback ones (#677).
     CORS_ORIGIN) cors_origin ;;
+    # Where Cloud Tasks and Cloud Scheduler deliver App Engine targets
+    # (#1506), from the flags; empty when the instance was given none.
+    APPENGINE_URL) flag_value appengine-url ;;
     PUBSUB|RUN_PUBSUB|SINK_PUBSUB) from_env '.PUBSUB_EMULATOR_HOST // empty' ;;
     # Cloud Tasks, Secret Manager and Cloud Run have no emulator variable.
     TASKS) from_runtime '.endpoints.tasks // empty' ;;
-    SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
+    SECRETS|CLOUDSQL_SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
     RUN) from_runtime '.endpoints.run // empty' ;;
     SCHEDULER|RUN_SCHEDULER) from_env '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' ;;
-    KMS|RUN_KMS) from_env '.CLOUDBURROW_KMS_ENDPOINT // empty' ;;
+    KMS|RUN_KMS|CMEK_KMS) from_env '.CLOUDBURROW_KMS_ENDPOINT // empty' ;;
     LOGGING|RUN_LOGGING|TASKS_LOGGING|SINK_LOGGING) from_env '.CLOUDBURROW_LOGGING_ENDPOINT // empty' ;;
     # BIGQUERY_RESOURCEMANAGER: the same, for BigQuery's JOBS_BY_FOLDER test
     # in the emulators shard, and LOGGING_RESOURCEMANAGER, for the Logging
-    # folder and organization tests in served, so the Resource Manager suite
-    # stays in storage.
-    RESOURCEMANAGER|BIGQUERY_RESOURCEMANAGER|LOGGING_RESOURCEMANAGER|RUN_RESOURCEMANAGER) from_env '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' ;;
+    # folder and organization tests in served, and SQL_RESOURCEMANAGER, for
+    # the purged project's Cloud SQL and Backup and DR's folders in sql
+    # (#1568), so the Resource Manager suite stays in storage.
+    RESOURCEMANAGER|BIGQUERY_RESOURCEMANAGER|LOGGING_RESOURCEMANAGER|RUN_RESOURCEMANAGER|SQL_RESOURCEMANAGER) from_env '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' ;;
     # Service Usage (#1352), always served beside Resource Manager.
     SERVICEUSAGE|RUN_SERVICEUSAGE) from_env '.CLOUDBURROW_SERVICEUSAGE_ENDPOINT // empty' ;;
     SPANNER) from_env '.SPANNER_EMULATOR_HOST // empty' ;;
@@ -294,7 +316,9 @@ value() {
     # The admin API (#1302), and the project its one instance is in.
     MEMORYSTORE_ADMIN) from_env '.CLOUDBURROW_MEMORYSTORE_ENDPOINT // empty' ;;
     MEMORYSTORE_PROJECT) from_env '.GOOGLE_CLOUD_PROJECT // empty' ;;
-    MYSQL) from_env 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' ;;
+    # RUN_MYSQL: the same, for the run shard's Cloud SQL for MySQL volume
+    # (#1568), so the MySQL suite stays in sql.
+    MYSQL|RUN_MYSQL) from_env 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' ;;
     MYSQL_PASSWORD) from_env '.MYSQL_PASSWORD // empty' ;;
     CLOUDSQL) from_env 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' ;;
     # The Cloud SQL Admin API over both servers (#1301).

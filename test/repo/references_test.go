@@ -34,8 +34,12 @@ func TestNoFakeGCSServerReferences(t *testing.T) {
 	// fake-gcs-server itself; its go.sum records the module's sums, and
 	// nothing of CloudBurrow's uses it.
 	upstream := "third_party/bigquery-emulator/go.sum"
+	// An upgrade from a release that ran fake-gcs-server (v0.1.0) has to
+	// find that server's container and volume layout by name to copy its
+	// buckets out (#1606); nothing else of CloudBurrow's names it.
+	migration := map[string]bool{"cmd/cloudburrow/earlierstorage.go": true}
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
-		if f == "" || f == self || f == upstream || strings.HasPrefix(f, "docs/") {
+		if f == "" || f == self || f == upstream || migration[f] || strings.HasPrefix(f, "docs/") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(dir, f))

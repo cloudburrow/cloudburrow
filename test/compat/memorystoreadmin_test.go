@@ -31,10 +31,10 @@ const (
 // redis/apiv1: the one instance is listed and described as the Valkey
 // server `--services memorystore` runs — its host and port are the RESP
 // endpoint, which a Redis client then reaches, READY, REDIS_7_2 and 1 GB —
-// AUTH is off, and it cannot be deleted.
+// AUTH is off, so GetInstanceAuthString answers an empty string
+// (cloud_redis.proto: "If AUTH is not enabled for the instance the response
+// will be empty", #1595), and it cannot be deleted.
 //
-// unverified: google.cloud.redis.v1.CloudRedis/GetInstanceAuthString FAILED_PRECONDITION: an instance with AUTH disabled
-// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/redis/v1/cloud_redis.proto
 // unverified: google.cloud.redis.v1.CloudRedis/DeleteInstance FAILED_PRECONDITION: the instance `up` runs (CloudBurrow's own)
 // Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/redis/v1/cloud_redis.proto
 func TestMemorystoreAdminDescribesTheServer(t *testing.T) {
@@ -99,8 +99,8 @@ func TestMemorystoreAdminDescribesTheServer(t *testing.T) {
 	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: "projects/" + project + "/locations/us-central1/instances/nope"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetInstance(unknown) = %v, want NOT_FOUND", err)
 	}
-	if _, err := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); status.Code(err) != codes.FailedPrecondition {
-		t.Errorf("GetInstanceAuthString with AUTH off = %v, want FAILED_PRECONDITION", err)
+	if auth, err := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); err != nil || auth.GetAuthString() != "" {
+		t.Errorf("GetInstanceAuthString with AUTH off = %q, %v; want an empty string", auth.GetAuthString(), err)
 	}
 	if _, err := c.DeleteInstance(ctx, &redispb.DeleteInstanceRequest{Name: name}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("DeleteInstance(the server up runs) = %v, want FAILED_PRECONDITION", err)

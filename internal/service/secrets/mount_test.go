@@ -63,7 +63,7 @@ func TestResolveSecretRefMountsTheDecryptedPayload(t *testing.T) {
 	if got, ok := mounted(t, fake, 1); !ok || got != "hunter2" {
 		t.Errorf("mounted = %q, %v", got, ok)
 	}
-	stored := fake.object(t, "p", "a")["data"].(map[string]any)[VersionKey(1)].(string)
+	stored := fake.version(t, "p", "a", 1)["data"].(map[string]any)[VersionKey(1)].(string)
 	raw, _ := base64.StdEncoding.DecodeString(stored)
 	if strings.Contains(string(raw), "hunter2") {
 		t.Error("the stored Secret holds the plaintext")
@@ -152,7 +152,7 @@ func TestResolveSecretRefWithoutAKeyNeedsNoMount(t *testing.T) {
 	s, _, fake := kubeCMEKStore(t)
 	seedKube(t, s, "p", "plain", "x")
 	name, _, err := s.ResolveSecretRef("p", "plain", "1")
-	if err != nil || name != KubernetesSecretName("p", "plain") {
+	if err != nil || name != VersionSecretName("p", "plain", 1) {
 		t.Fatalf("resolved to %q, %v", name, err)
 	}
 	if _, ok := fake.objects[MountSecretName("p", "plain")]; ok {

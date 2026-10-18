@@ -263,6 +263,13 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	// The table made again keeps its creationTime, as addColumns' does,
 	// and so its row access policies (SET DATA TYPE alone, above).
 	f.keepCreationTime(r, src, meta)
+	// A column's data governance tags follow its RENAME COLUMN and go with
+	// its DROP COLUMN (#1456, governancetags.go).
+	renamed := map[string]string{}
+	for _, c := range cols {
+		renamed[strings.ToLower(c.from)] = str(c.field, "name")
+	}
+	f.tables.renameGovernanceTags(streamKey(projectOf(f.base), ds, table), str(meta, "creationTime"), renamed)
 	if msg := f.runDML(r, "INSERT INTO "+quotePath([]string{ds, table})+" ("+list+") SELECT "+list+" FROM "+
 		quotePath([]string{scratch.DatasetID, scratch.TableID})); msg != "" {
 		keep = true

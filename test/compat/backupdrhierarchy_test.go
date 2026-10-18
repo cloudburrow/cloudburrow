@@ -43,6 +43,9 @@ func TestBackupDRFetchUnderFolders(t *testing.T) {
 	}
 	bdr := backupDRService(t, h)
 	svc := sqlAdminService(t, h)
+	// Resource Manager as the sql shard's SQL_RESOURCEMANAGER (#1568), so
+	// the Resource Manager suite stays in storage.
+	shardEndpoint(h, envSQLResourceManager, EnvResourceManager)
 	fc, _, pc := foldersClients(t, h)
 	ctx := h.Context()
 	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)

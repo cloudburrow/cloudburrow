@@ -28,6 +28,10 @@ import (
 //   - The answer is a done operation, read back with
 //     buckets.operations.get and listed by buckets.operations.list.
 //   - A malformed time is 400, and a missing bucket 404.
+//   - Of a name's several matching generations only the latest is
+//     restored and the rest are skipped, and the metadata counts
+//     succeededCount and skippedCount and echoes the request, as the
+//     bulkRestore reference documents (#1595).
 //
 // covers: storage.objects.bulkRestore
 func TestStorageBulkRestore(t *testing.T) {
@@ -68,8 +72,8 @@ func TestStorageBulkRestore(t *testing.T) {
 			Common struct {
 				Type string `json:"type"`
 			} `json:"commonMetadata"`
-			Restored int64 `json:"successfulObjectCount,string"`
-			Skipped  int64 `json:"skippedObjectCount,string"`
+			Restored int64 `json:"succeededCount,string"`
+			Skipped  int64 `json:"skippedCount,string"`
 		}
 		_ = json.Unmarshal(op.Metadata, &m)
 		return meta{m.Common.Type, m.Restored, m.Skipped}
@@ -122,6 +126,52 @@ func TestStorageBulkRestore(t *testing.T) {
 		t.Error(err)
 	} else if got, _ := io.ReadAll(r); string(got) != "x" {
 		t.Errorf("keep.txt after allowOverwrite reads %q; want the restored x", got)
+	}
+
+	// Two soft-deleted generations of one name, the latest deleted first,
+	// in a versioned bucket where each generation is deleted on its own:
+	// the latest generation is restored, not the last deleted.
+	vh := c.Bucket(h.Project() + "-bulkrestore-v")
+	if err := vh.Create(ctx, h.Project(), &storage.BucketAttrs{VersioningEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { emptyAndDelete(ctx, vh) })
+	var gens []int64
+	for _, body := range []string{"first", "second"} {
+		w := vh.Object("twice.txt").NewWriter(ctx)
+		_, _ = io.WriteString(w, body)
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		gens = append(gens, w.Attrs().Generation)
+	}
+	for _, g := range []int64{0, gens[1], gens[0]} {
+		o := vh.Object("twice.txt")
+		if g != 0 {
+			o = o.Generation(g)
+		}
+		if err := o.Delete(ctx); err != nil {
+			t.Fatalf("delete twice.txt generation %d: %v", g, err)
+		}
+	}
+	op, err = s.Objects.BulkRestore(vh.BucketName(), &storagev1.BulkRestoreObjectsRequest{MatchGlobs: []string{"twice.txt"}}).Context(ctx).Do()
+	if m := readMeta(op); err != nil || m.Restored != 1 || m.Skipped < 1 {
+		t.Errorf("bulkRestore of two generations = %+v, %v; want 1 restored and the other skipped", m, err)
+	}
+	var echo struct {
+		MatchGlobs     []string `json:"matchGlobs"`
+		AllowOverwrite *bool    `json:"allowOverwrite"`
+	}
+	if op != nil {
+		_ = json.Unmarshal(op.Metadata, &echo)
+	}
+	if len(echo.MatchGlobs) != 1 || echo.MatchGlobs[0] != "twice.txt" || echo.AllowOverwrite == nil || *echo.AllowOverwrite {
+		t.Errorf("bulkRestore metadata echoes matchGlobs %v, allowOverwrite %v; want [twice.txt], false", echo.MatchGlobs, echo.AllowOverwrite)
+	}
+	if r, err := vh.Object("twice.txt").NewReader(ctx); err != nil {
+		t.Error(err)
+	} else if got, _ := io.ReadAll(r); string(got) != "second" {
+		t.Errorf("twice.txt after the bulk restore reads %q; want the latest generation's \"second\" (generations %v)", got, gens)
 	}
 
 	if _, err := s.Objects.BulkRestore(b, &storagev1.BulkRestoreObjectsRequest{CreatedBeforeTime: "yesterday"}).Context(ctx).Do(); httpCode(err) != http.StatusBadRequest {

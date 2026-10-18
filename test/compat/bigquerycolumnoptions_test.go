@@ -20,7 +20,7 @@ import (
 // Table.Metadata (each field's Description, the NUMERIC's precision, scale
 // and RoundingMode, the table's description) and
 // INFORMATION_SCHEMA.COLUMN_FIELD_PATHS. Refused, nothing made: a column
-// option the front does not set (data_governance_tags) 501, a data_policies entry not a policy's 400 (#1456), a description that
+// data_governance_tags of two tags 400 (#1456, TestBigQueryDataGovernanceTags), a data_policies entry not a policy's 400 (#1456), a description that
 // is a subquery 400, a rounding_mode of an INT64 column 400. Measured
 // first: the table was made and no column read a description; a STRUCT
 // field's description failed 400 "Nested column options are unsupported".
@@ -71,8 +71,8 @@ func TestBigQueryCreateTableColumnOptions(t *testing.T) {
 			cols string
 			code int
 		}{
-			{"(a STRING OPTIONS (data_policies = ['p']))", http.StatusBadRequest}, // not a policy's {'name': ...}, #1456
-			{"(a STRING OPTIONS (data_governance_tags = [('p/k', 'v')]))", http.StatusNotImplemented},
+			{"(a STRING OPTIONS (data_policies = ['p']))", http.StatusBadRequest},                               // not a policy's {'name': ...}, #1456
+			{"(a STRING OPTIONS (data_governance_tags = [('p/k', 'v'), ('p/l', 'w')]))", http.StatusBadRequest}, // one tag a field, #1456
 			{"(a STRING OPTIONS (description = (SELECT 'x')))", http.StatusBadRequest},
 			{"(a INT64 OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'))", http.StatusBadRequest},
 		} {

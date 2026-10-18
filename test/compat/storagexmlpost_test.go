@@ -156,13 +156,13 @@ func TestStorageXMLFormPostPolicyV4(t *testing.T) {
 		changed[k] = v
 	}
 	changed["content-type"] = "text/html"
-	if resp, body := submitForm(t, h, p.URL, changed, "x"); resp.StatusCode != http.StatusForbidden || xmlErrorCode(body) != "AccessDenied" {
-		t.Errorf("a field off its eq condition = %d %s; want 403", resp.StatusCode, body)
+	if resp, body := submitForm(t, h, p.URL, changed, "x"); resp.StatusCode != http.StatusBadRequest || xmlErrorCode(body) != "InvalidPolicyDocument" {
+		t.Errorf("a field off its eq condition = %d %s; want 400 InvalidPolicyDocument", resp.StatusCode, body)
 	}
 	delete(changed, "content-type")
 	changed["content-type"], changed["x-goog-meta-unsigned"] = "text/plain", "1"
-	if resp, body := submitForm(t, h, p.URL, changed, "x"); resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "Extra input fields") {
-		t.Errorf("a field the policy does not name = %d %s; want 403", resp.StatusCode, body)
+	if resp, body := submitForm(t, h, p.URL, changed, "x"); resp.StatusCode != http.StatusBadRequest || xmlErrorCode(body) != "InvalidPolicyDocument" || !strings.Contains(body, "Extra input fields") {
+		t.Errorf("a field the policy does not name = %d %s; want 400 InvalidPolicyDocument", resp.StatusCode, body)
 	}
 	delete(changed, "x-goog-meta-unsigned")
 	// Change the first byte whatever it is ("00" was a no-op 1 run in 256).

@@ -235,7 +235,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	}
 	if dest.exists && dest.snapshot != nil {
 		// A snapshot is read-only (#1002, snapshots.go).
-		writeError(w, http.StatusBadRequest, "invalid", snapshotWriteMessage(project, dest.ref.DatasetID,
+		writeError(w, http.StatusForbidden, "accessDenied", snapshotWriteMessage(project, dest.ref.DatasetID,
 			dest.ref.TableID, "a copy job"))
 		return
 	}

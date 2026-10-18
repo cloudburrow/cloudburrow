@@ -26,7 +26,8 @@ import (
 // covers: sql.instances.executeSql, sql.instances.preCheckMajorVersionUpgrade, sql.instances.truncateLog, sql.instances.delete, sql.instances.restoreBackup, sql.Backups.CreateBackup, sql.Backups.ListBackups, sql.Backups.GetBackup, sql.Backups.UpdateBackup, sql.Backups.DeleteBackup
 func TestConsoleCloudSQLDataAPIAndProjectBackups(t *testing.T) {
 	h := New(t)
-	if os.Getenv(EnvCloudSQL) == "" {
+	shardEndpoint(h, envCloudSQLSecrets, EnvSecrets)
+	if os.Getenv(EnvCloudSQL) == "" || os.Getenv(EnvSecrets) == "" {
 		t.Skip("needs --services cloudsql,secretmanager")
 	}
 	sqlShardSecrets(t, h) // the password's secret version

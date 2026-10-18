@@ -47,6 +47,7 @@ func memorystoreKey(t *testing.T, h *Harness, project string) string {
 // INVALID_ARGUMENT.
 func TestMemorystoreCustomerManagedKey(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	c, project := memorystoreAdminClient(t, h)
 	kc := kmsClients(t, h)["grpc"]
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)

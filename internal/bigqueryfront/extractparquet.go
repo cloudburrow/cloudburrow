@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet"
 	"github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/metadata"
 	pqschema "github.com/apache/arrow-go/v18/parquet/schema"
 )
 
@@ -57,7 +59,15 @@ type parquetLeaf struct {
 	// geography is a GEOGRAPHY column: BYTE_ARRAY written with no logical
 	// type, which parquetGeography then sets to GEOGRAPHY in the footer.
 	geography bool
+	// geoParquet is a top-level GEOGRAPHY column of an export without
+	// nativeGeographyExportEnabled: WKB in a plain BYTE_ARRAY, named in
+	// the file's GeoParquet "geo" metadata (geoParquetMetadata).
+	geoParquet bool
 }
+
+// geoParquetType is the type parquetFields gives a top-level GEOGRAPHY
+// column written as GeoParquet; it is no BigQuery type.
+const geoParquetType = "_GEOPARQUET"
 
 // parquetExportType is the Parquet type the front writes a column of the
 // BigQuery type typ as, and whether it writes one; a RECORD is not here.
@@ -83,6 +93,8 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}}, true
 	case "GEOGRAPHY":
 		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}, geography: true}, true
+	case geoParquetType:
+		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}, geoParquet: true}, true
 	case "NUMERIC":
 		return parquetLeaf{phys: parquet.Types.FixedLenByteArray, logical: pqschema.NewDecimalLogicalType(38, 9), length: 16, precision: 38, scale: 9}, true
 	case "BIGNUMERIC":
@@ -144,14 +156,17 @@ func parquetUnwritten(fields []field, prefix string) (string, string) {
 // parquetFields is the schema the front writes fields in, and each row's
 // values for it (#957):
 //
-//   - GEOGRAPHY without nativeGeographyExportEnabled is a STRING of WKT:
-//     "When you export spatial data from BigQuery, GEOGRAPHY column values
-//     are always formatted as WKT strings" (gis-data). The export page
-//     says GeoParquet metadata is added, but GeoParquet 1.x holds WKB, not
-//     WKT, and its version and CRS are not given: none is written
-//     (UNVERIFIED against BigQuery).
+//   - GEOGRAPHY without nativeGeographyExportEnabled, at the top level, is
+//     GeoParquet: "The GEOGRAPHY logical type is represented with
+//     GeoParquet metadata added to the exported file(s)" (exporting-data,
+//     read 2026-10-17; #1595), so its values are WKB in a plain
+//     BYTE_ARRAY and the file's "geo" key names it (geoParquetMetadata).
+//     GeoParquet has no nested or repeated geometry column, so one inside
+//     a RECORD, or REPEATED, stays a STRING of WKT, as "GEOGRAPHY column values are always
+//     formatted as WKT strings" (gis-data). The GeoParquet version, 1.1.0,
+//     and its bbox and geometry_types are CloudBurrow's: the page gives
+//     none (UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/bigquery/docs/exporting-data>)).
 //
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 //   - INTERVAL, which the Parquet table does not list, is a STRING of its
 //     canonical text "[sign]Y-M [sign]D [sign]H:M:S[.F]" (UNVERIFIED).
 //
@@ -163,11 +178,18 @@ func parquetUnwritten(fields []field, prefix string) (string, string) {
 //
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 func parquetFields(fields []field, nativeGeo bool) []field {
+	return parquetFieldsAt(fields, nativeGeo, true)
+}
+
+func parquetFieldsAt(fields []field, nativeGeo, top bool) []field {
 	out := make([]field, len(fields))
 	for i, fl := range fields {
 		switch strings.ToUpper(fl.Type) {
 		case "GEOGRAPHY":
-			if !nativeGeo {
+			switch {
+			case !nativeGeo && top && !strings.EqualFold(fl.Mode, "REPEATED"):
+				fl.Type = geoParquetType
+			case !nativeGeo:
 				fl.Type = "STRING"
 			}
 		case "INTERVAL":
@@ -177,7 +199,7 @@ func parquetFields(fields []field, nativeGeo bool) []field {
 			fl.Type, fl.RangeElementType = "RECORD", nil
 			fl.Fields = []field{{Name: "start", Type: elem, Mode: "NULLABLE"}, {Name: "end", Type: elem, Mode: "NULLABLE"}}
 		case "RECORD", "STRUCT":
-			fl.Fields = parquetFields(fl.Fields, nativeGeo)
+			fl.Fields = parquetFieldsAt(fl.Fields, nativeGeo, false)
 		}
 		out[i] = fl
 	}
@@ -454,7 +476,7 @@ func parquetValue(typ string, leaf parquetLeaf, s string) (any, error) {
 	case "BYTES":
 		b, err := base64.StdEncoding.DecodeString(s)
 		return parquet.ByteArray(b), err
-	case "GEOGRAPHY":
+	case "GEOGRAPHY", geoParquetType:
 		b, err := wktToWKB(s) // wkb.go
 		return parquet.ByteArray(b), err
 	case "NUMERIC", "BIGNUMERIC":
@@ -544,19 +566,31 @@ func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	}
 	opts := []parquet.WriterProperty{parquet.WithCompression(codec)}
 	var geo []bool // by leaf column, in order
+	var geoColumns []string
 	for _, c := range cols {
 		geo = append(geo, c.leaf.geography)
+		if c.leaf.geoParquet {
+			geoColumns = append(geoColumns, c.name)
+		}
 	}
 	sch := pqschema.NewSchema(root)
-	for i, g := range geo {
-		if g {
+	for i, c := range cols {
+		if c.leaf.geography || c.leaf.geoParquet {
 			// Parquet: "the sort order for GEOGRAPHY is undefined", so no
 			// min and max statistics.
 			opts = append(opts, parquet.WithStatsPath(sch.Column(i).ColumnPath(), false))
 		}
 	}
 	var buf bytes.Buffer
-	fw := file.NewParquetWriter(&buf, root, file.WithWriterProps(parquet.NewWriterProperties(opts...)))
+	wopts := []file.WriteOption{file.WithWriterProps(parquet.NewWriterProperties(opts...))}
+	if len(geoColumns) > 0 {
+		kv := metadata.NewKeyValueMetadata()
+		if err := kv.Append("geo", geoParquetMetadata(geoColumns)); err != nil {
+			return nil, err.Error()
+		}
+		wopts = append(wopts, file.WithWriteMetadata(kv))
+	}
+	fw := file.NewParquetWriter(&buf, root, wopts...)
 	rg := fw.AppendRowGroup()
 	for _, c := range cols {
 		cw, err := rg.NextColumn()
@@ -625,4 +659,18 @@ func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 		return nil, err.Error()
 	}
 	return out, ""
+}
+
+// geoParquetMetadata is the GeoParquet "geo" file metadata of an export
+// whose top-level GEOGRAPHY columns are columns (above): GeoParquet 1.1.0,
+// WKB, the first the primary column, BigQuery's spherical edges, and no
+// crs, which GeoParquet reads as OGC:CRS84, BigQuery's WGS 84 longitude
+// and latitude.
+func geoParquetMetadata(columns []string) string {
+	cols := map[string]any{}
+	for _, c := range columns {
+		cols[c] = map[string]any{"encoding": "WKB", "geometry_types": []string{}, "edges": "spherical"}
+	}
+	b, _ := json.Marshal(map[string]any{"version": "1.1.0", "primary_column": columns[0], "columns": cols})
+	return string(b)
 }

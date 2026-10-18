@@ -146,10 +146,10 @@ func TestStorageXMLFormPostPolicyInProcess(t *testing.T) {
 		}
 		f = append(f, kv)
 	}
-	if resp, body := formPost(t, p.URL, f, "x"); resp.StatusCode != 403 || xmlCode(body) != "AccessDenied" {
+	if resp, body := formPost(t, p.URL, f, "x"); resp.StatusCode != 400 || xmlCode(body) != "InvalidPolicyDocument" {
 		t.Errorf("a failed eq condition = %d %s", resp.StatusCode, body)
 	}
-	if resp, body := formPost(t, p.URL, ordered(p, [2]string{"x-goog-meta-extra", "1"}), "x"); resp.StatusCode != 403 || !strings.Contains(body, "Extra input fields") {
+	if resp, body := formPost(t, p.URL, ordered(p, [2]string{"x-goog-meta-extra", "1"}), "x"); resp.StatusCode != 400 || xmlCode(body) != "InvalidPolicyDocument" || !strings.Contains(body, "Extra input fields") {
 		t.Errorf("an extra field = %d %s", resp.StatusCode, body)
 	}
 	if resp, body := formPost(t, p.URL, ordered(p, [2]string{"x-ignore-me", "1"}), "x"); resp.StatusCode != 201 {

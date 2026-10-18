@@ -104,8 +104,9 @@ func TestStorageXMLPreflightMismatch200NoHeadersInProcess(t *testing.T) {
 	}
 }
 
-// JSON API endpoints allow an allowed origin whatever the bucket says, and
-// send no Allow-Credentials (#677).
+// JSON API endpoints allow an allowed origin whatever the bucket says; a
+// simple request gets Allow-Credentials true, and an OPTIONS with no
+// Access-Control-Request-Method gets it with 404 (cross-origin, #1595).
 //
 // unverified: storage.objects.get 200: the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed)
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/cross-origin
@@ -123,8 +124,12 @@ func TestStorageJSONAllowsAllowedOriginsInProcess(t *testing.T) {
 			}
 		}
 		actual := corsRequest(t, "GET", base+"/storage/v1/b/cors-bucket/o", map[string]string{"Origin": origin})
-		if actual.StatusCode != 200 || actual.Header.Get("Access-Control-Allow-Origin") != origin || actual.Header.Get("Access-Control-Allow-Credentials") != "" {
+		if actual.StatusCode != 200 || actual.Header.Get("Access-Control-Allow-Origin") != origin || actual.Header.Get("Access-Control-Allow-Credentials") != "true" {
 			t.Errorf("%s: an actual JSON request = %d %v", origin, actual.StatusCode, actual.Header)
+		}
+		empty := corsRequest(t, "OPTIONS", base+"/storage/v1/b/cors-bucket/o", map[string]string{"Origin": origin})
+		if empty.StatusCode != 404 || empty.Header.Get("Access-Control-Allow-Credentials") != "true" {
+			t.Errorf("%s: an OPTIONS with no Access-Control-Request-Method = %d %v; want 404 with Allow-Credentials true", origin, empty.StatusCode, empty.Header)
 		}
 	}
 }

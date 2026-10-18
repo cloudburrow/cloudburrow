@@ -30,6 +30,7 @@ import (
 // malformed topic is INVALID_ARGUMENT.
 func TestCloudBuildPubsubTrigger(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
 	ps := pubsubClient(t, h)
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
@@ -106,6 +107,7 @@ func TestCloudBuildPubsubTrigger(t *testing.T) {
 // trigger and its subscription.
 func TestTerraformCloudBuildPubsubTrigger(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
 	ps := pubsubClient(t, h)
 	m := newTFModule(t)
 	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN

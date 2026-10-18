@@ -10,8 +10,8 @@ import (
 )
 
 // v1 list selectors (#1420): Kubernetes' label selector grammar, which
-// gcloud's task state filters send, and fieldSelector on metadata.name and
-// metadata.namespace.
+// gcloud's task state filters send; a fieldSelector is ignored, as Cloud
+// Run documents, whatever it names.
 func TestV1Selectors(t *testing.T) {
 	sel := func(label, field string) (v1Selector, error) {
 		q := url.Values{}
@@ -44,9 +44,11 @@ func TestV1Selectors(t *testing.T) {
 		{"!run.googleapis.com/execution", "", false},
 		{"!missing", "", true},
 		{"", "metadata.name=t-task0", true},
-		{"", "metadata.name==t-task0,metadata.namespace=p", true},
-		{"", "metadata.name!=t-task0", false},
-		{"run.googleapis.com/execution=e1", "metadata.name=other", false},
+		{"", "metadata.name!=t-task0", true},
+		{"", "status.phase=Running", true},
+		{"", "metadata.name", true},
+		{"run.googleapis.com/execution=e1", "metadata.name=other", true},
+		{"run.googleapis.com/execution=e2", "metadata.name=t-task0", false},
 	} {
 		s, err := sel(tc.label, tc.field)
 		if err != nil {
@@ -59,7 +61,7 @@ func TestV1Selectors(t *testing.T) {
 	}
 	for _, tc := range []struct{ label, field string }{
 		{"a > 1", ""}, {"a < 1", ""}, {"a in (x", ""}, {"a in ((x))", ""}, {",", ""}, {"a=b c", ""},
-		{"bad key!=x", ""}, {"a in (b c)", ""}, {"", "status.phase=Running"}, {"", "metadata.name"},
+		{"bad key!=x", ""}, {"a in (b c)", ""},
 	} {
 		if _, err := sel(tc.label, tc.field); err == nil || err.Error() == "" {
 			t.Errorf("selector %q %q was accepted; want INVALID_ARGUMENT", tc.label, tc.field)

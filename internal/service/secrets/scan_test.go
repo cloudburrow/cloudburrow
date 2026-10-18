@@ -27,16 +27,22 @@ func (r *listingRunner) Run(_ context.Context, _ string, args ...string) (string
 // ListSecrets and ListVersions over Kubernetes read with the one kubectl
 // list, not a kubectl get per secret or version, while they hold the Store's
 // lock: with a few hundred records, a get each kept every other request
-// waiting (#1232).
+// waiting (#1232). Since #1596 the list is read once, and later reads are
+// answered from it.
 func TestListingsAreOneKubectlList(t *testing.T) {
 	r := &listingRunner{}
 	for i := 0; i < 30; i++ {
 		id := fmt.Sprintf("s%d", i)
 		sec, _ := json.Marshal(Secret{Name: SecretName("p", id)})
 		ver, _ := json.Marshal(Version{Name: VersionName("p", id, 1), Number: 1, State: StateEnabled})
+		labels := map[string]string{OwnerLabel: "true", ServiceLabel: ServiceLabelValue}
 		r.items = append(r.items, map[string]any{
-			"metadata": map[string]any{"name": KubernetesSecretName("p", id), "annotations": map[string]string{
-				SecretAnnotation: string(sec), VersionAnnotationPrefix + "1": string(ver),
+			"metadata": map[string]any{"name": KubernetesSecretName("p", id), "labels": labels, "annotations": map[string]string{
+				SecretAnnotation: string(sec), SecretIDAnnotation: id, "cloudburrow.dev/secret-project": "p",
+			}},
+		}, map[string]any{
+			"metadata": map[string]any{"name": VersionSecretName("p", id, 1), "labels": labels, "annotations": map[string]string{
+				VersionMetadataAnnotation: string(ver), versionNumberAnnotation: "1",
 				SecretIDAnnotation: id, "cloudburrow.dev/secret-project": "p",
 			}},
 			"data": map[string]string{VersionKey(1): base64.StdEncoding.EncodeToString([]byte("payload"))},
@@ -56,7 +62,7 @@ func TestListingsAreOneKubectlList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 1 || string(versions[0].Payload) != "payload" || len(r.calls) != 1 {
-		t.Errorf("listVersions returned %v with %d kubectl calls; want version 1 and its payload with one list", versions, len(r.calls))
+	if len(versions) != 1 || string(versions[0].Payload) != "payload" || len(r.calls) != 0 {
+		t.Errorf("listVersions returned %v with %d kubectl calls; want version 1 and its payload from what the list read (#1596)", versions, len(r.calls))
 	}
 }

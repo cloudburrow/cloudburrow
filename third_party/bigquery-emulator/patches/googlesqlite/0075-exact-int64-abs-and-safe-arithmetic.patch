@@ -1,0 +1,460 @@
+CloudBurrow patch 75 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1599).
+
+ABS converted its argument to float64, so the ABS of an INT64 above 2^53
+lost its low bits (ABS(-9007199254740993) was 9007199254740992), and of
+the INT64 minimum gave 2^63 rounded, not BigQuery's error; SAFE_ADD,
+SAFE_SUBTRACT, SAFE_MULTIPLY and SAFE_NEGATE did the same. INT64 +, - and
+* wrapped around on overflow. And the safe form of add, subtract,
+multiply and divide (googlesqlite_safe_multiply) has the name of
+SAFE_ADD, SAFE_SUBTRACT, SAFE_MULTIPLY and SAFE_DIVIDE, so which of the
+two SQLite kept hung on a Go map's order: SAFE_MULTIPLY(-2^63, -1) gave
+the wrapped -2^63, not NULL.
+
+Now ABS of an INT64 is exact, and of -9223372036854775808 fails
+"int64 overflow: ABS(-9223372036854775808)" (the form of unary minus's
+error, patch 0005); ABS of a NUMERIC or BIGNUMERIC is exact; the SAFE_
+functions of INT64s are exact, and NULL where the result overflows
+INT64, as BigQuery's mathematical functions reference documents; INT64
++, - and * fail "int64 overflow: 9223372036854775807 + 1" (GoogleSQL's
+form); and a function's own name wins over another's safe form.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/function_register.go b/internal/function_register.go
+index 041fbf5..34c09b2 100644
+--- a/internal/function_register.go
++++ b/internal/function_register.go
+@@ -239,8 +239,17 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
+ 		return fmt.Errorf("failed to register collate function: %w", err)
+ 	}
+ 
+-	for _, values := range normalFuncMap {
++	for name, values := range normalFuncMap {
+ 		for _, v := range values {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1599): the safe
++			// form of add, subtract, multiply and divide has the name of
++			// SAFE_ADD, SAFE_SUBTRACT, SAFE_MULTIPLY and SAFE_DIVIDE
++			// (googlesqlite_safe_multiply), and which of the two SQLite
++			// kept hung on this map's order, so SAFE_MULTIPLY was at times
++			// the safe *. The function of that name wins.
++			if _, own := normalFuncMap["safe_"+name]; own && v.Name == "googlesqlite_safe_"+name {
++				continue
++			}
+ 			flags := deterministic
+ 			if v.NonDeterministic {
+ 				flags = sqlitex.FunctionFlags{}
+diff --git a/internal/functions/math/abs.go b/internal/functions/math/abs.go
+index 7a5b84d..aa658c1 100644
+--- a/internal/functions/math/abs.go
++++ b/internal/functions/math/abs.go
+@@ -1,12 +1,33 @@
+ package math
+ 
+ import (
++	"fmt"
+ 	"math"
++	"math/big"
+ 
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+ func ABS(a value.Value) (value.Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): an INT64 stays an
++	// INT64, exactly; by float64, one above 2^53 lost its low bits
++	// (ABS(-9007199254740993) was 9007199254740992). BigQuery "returns an
++	// error if the argument is an integer and the output value can't be
++	// represented as the same type", which is ABS of the INT64 minimum;
++	// the message is in the form of unary minus's (patch 0005). A NUMERIC
++	// or BIGNUMERIC stays one, exactly.
++	switch v := a.(type) {
++	case value.IntValue:
++		if int64(v) == math.MinInt64 {
++			return nil, fmt.Errorf("int64 overflow: ABS(%d)", int64(v))
++		}
++		if v < 0 {
++			return -v, nil
++		}
++		return v, nil
++	case *value.NumericValue:
++		return &value.NumericValue{Rat: new(big.Rat).Abs(v.Rat), IsBigNumeric: v.IsBigNumeric}, nil
++	}
+ 	f64, err := a.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/functions/math/int64_exact_cloudburrow_test.go b/internal/functions/math/int64_exact_cloudburrow_test.go
+new file mode 100644
+index 0000000..2eddaa3
+--- /dev/null
++++ b/internal/functions/math/int64_exact_cloudburrow_test.go
+@@ -0,0 +1,92 @@
++package math
++
++import (
++	"math"
++	"math/big"
++	"testing"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1599): ABS of an INT64 is
++// exact, and of the INT64 minimum an overflow error; SAFE_ADD,
++// SAFE_SUBTRACT, SAFE_MULTIPLY and SAFE_NEGATE of INT64s are exact, and
++// NULL on overflow.
++func TestABSInt64Exact(t *testing.T) {
++	for x, want := range map[int64]int64{
++		-9007199254740993:    9007199254740993,
++		-6889379130834334227: 6889379130834334227,
++		math.MaxInt64:        math.MaxInt64,
++		-math.MaxInt64:       math.MaxInt64,
++		0:                    0,
++		25:                   25,
++		-25:                  25,
++	} {
++		got, err := ABS(value.IntValue(x))
++		if err != nil || got != value.IntValue(want) {
++			t.Errorf("ABS(%d) = %v, %v; want %d", x, got, err, want)
++		}
++	}
++	if _, err := ABS(value.IntValue(math.MinInt64)); err == nil || err.Error() != "int64 overflow: ABS(-9223372036854775808)" {
++		t.Errorf("ABS(INT64 minimum): %v; want int64 overflow: ABS(-9223372036854775808)", err)
++	}
++	n, _ := new(big.Rat).SetString("-12345678901234567890123456789.123456789")
++	got, err := ABS(&value.NumericValue{Rat: n})
++	if nv, ok := got.(*value.NumericValue); err != nil || !ok || nv.Rat.FloatString(9) != "12345678901234567890123456789.123456789" {
++		t.Errorf("ABS(NUMERIC) = %v, %v", got, err)
++	}
++	if got, err := ABS(value.FloatValue(-2.5)); err != nil || got != value.FloatValue(2.5) {
++		t.Errorf("ABS(-2.5) = %v, %v", got, err)
++	}
++}
++
++func TestSafeInt64Exact(t *testing.T) {
++	const max, min = math.MaxInt64, math.MinInt64
++	type c struct {
++		x, y int64
++		want any // int64, or nil for NULL
++	}
++	check := func(name string, f func(x, y value.Value) (value.Value, error), cases []c) {
++		t.Helper()
++		for _, k := range cases {
++			got, err := f(value.IntValue(k.x), value.IntValue(k.y))
++			if err != nil {
++				t.Errorf("%s(%d, %d): %v", name, k.x, k.y, err)
++				continue
++			}
++			if k.want == nil {
++				if got != nil {
++					t.Errorf("%s(%d, %d) = %v; want NULL", name, k.x, k.y, got)
++				}
++				continue
++			}
++			if got != value.IntValue(k.want.(int64)) {
++				t.Errorf("%s(%d, %d) = %v; want %d", name, k.x, k.y, got, k.want)
++			}
++		}
++	}
++	check("SAFE_ADD", SAFE_ADD, []c{
++		{9007199254740993, 2, int64(9007199254740995)}, {max, 1, nil}, {min, -1, nil},
++		{max, min, int64(-1)}, {max - 1, 1, int64(max)}, {-5, 3, int64(-2)},
++	})
++	check("SAFE_SUBTRACT", SAFE_SUBTRACT, []c{
++		{9007199254740995, 2, int64(9007199254740993)}, {min, 1, nil}, {max, -1, nil},
++		{0, min, nil}, {-1, min, int64(max)}, {min + 1, 1, int64(min)},
++	})
++	check("SAFE_MULTIPLY", SAFE_MULTIPLY, []c{
++		{3037000499, 3037000499, int64(9223372030926249001)}, {3037000500, 3037000500, nil},
++		{-4611686018427387904, 2, int64(min)}, {4611686018427387904, 2, nil}, {min, -1, nil},
++		{min, 1, int64(min)}, {-3, 7, int64(-21)}, {-3, -7, int64(21)}, {0, min, int64(0)},
++		{9007199254740993, 1, int64(9007199254740993)},
++	})
++	for x, want := range map[int64]any{1: int64(-1), -1: int64(1), 0: int64(0), max: int64(-max), min: nil, -9007199254740993: int64(9007199254740993)} {
++		got, err := SAFE_NEGATE(value.IntValue(x))
++		if err != nil || (want == nil) != (got == nil) || want != nil && got != value.IntValue(want.(int64)) {
++			t.Errorf("SAFE_NEGATE(%d) = %v, %v; want %v", x, got, err, want)
++		}
++	}
++	// A FLOAT64 still goes by float64.
++	if got, err := SAFE_ADD(value.FloatValue(0.5), value.IntValue(1)); err != nil || got != value.FloatValue(1.5) {
++		t.Errorf("SAFE_ADD(0.5, 1) = %v, %v", got, err)
++	}
++}
+diff --git a/internal/functions/math/safe_add.go b/internal/functions/math/safe_add.go
+index 5c605ab..9be992b 100644
+--- a/internal/functions/math/safe_add.go
++++ b/internal/functions/math/safe_add.go
+@@ -5,6 +5,11 @@ import (
+ )
+ 
+ func SAFE_ADD(x, y value.Value) (value.Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): two INT64s exactly,
++	// NULL on overflow (safe_int64_cloudburrow.go).
++	if xi, yi, ok := safeInt64s(x, y); ok {
++		return safeAddInt64(xi, yi), nil
++	}
+ 	xv, err := x.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/functions/math/safe_int64_cloudburrow.go b/internal/functions/math/safe_int64_cloudburrow.go
+new file mode 100644
+index 0000000..4ed93de
+--- /dev/null
++++ b/internal/functions/math/safe_int64_cloudburrow.go
+@@ -0,0 +1,71 @@
++package math
++
++import (
++	"math"
++	"math/bits"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1599): SAFE_ADD,
++// SAFE_SUBTRACT, SAFE_MULTIPLY and SAFE_NEGATE of INT64s are INT64s,
++// exactly, and NULL where the result overflows INT64, as BigQuery
++// documents ("returns NULL if overflow occurs"); by float64, an INT64
++// above 2^53 lost its low bits and an overflow was never NULL.
++
++// safeInt64s is x and y when both are INT64s.
++func safeInt64s(x, y value.Value) (int64, int64, bool) {
++	xi, ok := x.(value.IntValue)
++	if !ok {
++		return 0, 0, false
++	}
++	yi, ok := y.(value.IntValue)
++	if !ok {
++		return 0, 0, false
++	}
++	return int64(xi), int64(yi), true
++}
++
++func safeAddInt64(x, y int64) value.Value {
++	s := x + y
++	if (x >= 0) == (y >= 0) && (s >= 0) != (x >= 0) {
++		return nil
++	}
++	return value.IntValue(s)
++}
++
++func safeSubtractInt64(x, y int64) value.Value {
++	d := x - y
++	if (x >= 0) != (y >= 0) && (d >= 0) != (x >= 0) {
++		return nil
++	}
++	return value.IntValue(d)
++}
++
++func safeMultiplyInt64(x, y int64) value.Value {
++	if x == 0 || y == 0 {
++		return value.IntValue(0)
++	}
++	ux, uy := uint64(x), uint64(y)
++	neg := (x < 0) != (y < 0)
++	if x < 0 {
++		ux = -ux
++	}
++	if y < 0 {
++		uy = -uy
++	}
++	hi, lo := bits.Mul64(ux, uy)
++	if hi != 0 {
++		return nil
++	}
++	if neg {
++		if lo > 1<<63 {
++			return nil
++		}
++		return value.IntValue(-int64(lo-1) - 1)
++	}
++	if lo > math.MaxInt64 {
++		return nil
++	}
++	return value.IntValue(int64(lo))
++}
+diff --git a/internal/functions/math/safe_multiply.go b/internal/functions/math/safe_multiply.go
+index 4fd30f2..1d3398d 100644
+--- a/internal/functions/math/safe_multiply.go
++++ b/internal/functions/math/safe_multiply.go
+@@ -5,6 +5,11 @@ import (
+ )
+ 
+ func SAFE_MULTIPLY(x, y value.Value) (value.Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): two INT64s exactly,
++	// NULL on overflow (safe_int64_cloudburrow.go).
++	if xi, yi, ok := safeInt64s(x, y); ok {
++		return safeMultiplyInt64(xi, yi), nil
++	}
+ 	xv, err := x.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/functions/math/safe_negate.go b/internal/functions/math/safe_negate.go
+index d226fd2..fd686cb 100644
+--- a/internal/functions/math/safe_negate.go
++++ b/internal/functions/math/safe_negate.go
+@@ -5,6 +5,11 @@ import (
+ )
+ 
+ func SAFE_NEGATE(x value.Value) (value.Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): an INT64 exactly,
++	// NULL for the INT64 minimum, whose negation overflows.
++	if xi, ok := x.(value.IntValue); ok {
++		return safeSubtractInt64(0, int64(xi)), nil
++	}
+ 	xv, err := x.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/functions/math/safe_subtract.go b/internal/functions/math/safe_subtract.go
+index 913c781..065351e 100644
+--- a/internal/functions/math/safe_subtract.go
++++ b/internal/functions/math/safe_subtract.go
+@@ -5,6 +5,11 @@ import (
+ )
+ 
+ func SAFE_SUBTRACT(x, y value.Value) (value.Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): two INT64s exactly,
++	// NULL on overflow (safe_int64_cloudburrow.go).
++	if xi, yi, ok := safeInt64s(x, y); ok {
++		return safeSubtractInt64(xi, yi), nil
++	}
+ 	xv, err := x.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+diff --git a/internal/value/value_int.go b/internal/value/value_int.go
+index 08d938d..c4a7690 100644
+--- a/internal/value/value_int.go
++++ b/internal/value/value_int.go
+@@ -2,6 +2,7 @@ package value
+ 
+ import (
+ 	"fmt"
++	"math"
+ 	"math/big"
+ 	"time"
+ )
+@@ -18,7 +19,15 @@ func (iv IntValue) Add(v Value) (Value, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return IntValue(int64(iv) + v2), nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): an INT64 result
++	// that overflows fails, as in GoogleSQL, where it wrapped around
++	// (so SAFE_ADD, which may run as this function's safe form, gave
++	// the wrapped value, not NULL).
++	r := int64(iv) + v2
++	if (int64(iv) >= 0) == (v2 >= 0) && (r >= 0) != (int64(iv) >= 0) {
++		return nil, fmt.Errorf("int64 overflow: %d + %d", int64(iv), v2)
++	}
++	return IntValue(r), nil
+ }
+ 
+ func (iv IntValue) Sub(v Value) (Value, error) {
+@@ -31,7 +40,15 @@ func (iv IntValue) Sub(v Value) (Value, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return IntValue(int64(iv) - v2), nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): an INT64 result
++	// that overflows fails, as in GoogleSQL, where it wrapped around
++	// (so SAFE_SUBTRACT, which may run as this function's safe form, gave
++	// the wrapped value, not NULL).
++	r := int64(iv) - v2
++	if (int64(iv) >= 0) != (v2 >= 0) && (r >= 0) != (int64(iv) >= 0) {
++		return nil, fmt.Errorf("int64 overflow: %d - %d", int64(iv), v2)
++	}
++	return IntValue(r), nil
+ }
+ 
+ func (iv IntValue) Mul(v Value) (Value, error) {
+@@ -44,9 +61,26 @@ func (iv IntValue) Mul(v Value) (Value, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1599): an INT64 product
++	// that overflows fails, as in GoogleSQL, where it wrapped around.
++	if cloudburrowMulOverflows(int64(iv), v2) {
++		return nil, fmt.Errorf("int64 overflow: %d * %d", int64(iv), v2)
++	}
+ 	return IntValue(int64(iv) * v2), nil
+ }
+ 
++// cloudburrowMulOverflows is whether x * y is outside INT64 (CloudBurrow
++// patch, cloudburrow/cloudburrow#1599).
++func cloudburrowMulOverflows(x, y int64) bool {
++	if x == 0 || y == 0 {
++		return false
++	}
++	if (x == -1 && y == math.MinInt64) || (y == -1 && x == math.MinInt64) {
++		return true
++	}
++	return (x*y)/y != x
++}
++
+ func (iv IntValue) Div(v Value) (Value, error) {
+ 	v2, err := v.ToFloat64()
+ 	if err != nil {
+diff --git a/internal/value/value_int_overflow_cloudburrow_test.go b/internal/value/value_int_overflow_cloudburrow_test.go
+new file mode 100644
+index 0000000..c4b61e4
+--- /dev/null
++++ b/internal/value/value_int_overflow_cloudburrow_test.go
+@@ -0,0 +1,55 @@
++package value
++
++import (
++	"math"
++	"testing"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1599): INT64 +, - and * fail
++// on overflow, in GoogleSQL's form, and are exact up to it.
++func TestIntValueOverflow(t *testing.T) {
++	const max, min = math.MaxInt64, math.MinInt64
++	type c struct {
++		op   string
++		x, y int64
++		want int64
++		err  string
++	}
++	for _, k := range []c{
++		{"+", max, 1, 0, "int64 overflow: 9223372036854775807 + 1"},
++		{"+", min, -1, 0, "int64 overflow: -9223372036854775808 + -1"},
++		{"+", max, min, -1, ""},
++		{"+", 9007199254740993, 2, 9007199254740995, ""},
++		{"-", min, 1, 0, "int64 overflow: -9223372036854775808 - 1"},
++		{"-", 0, min, 0, "int64 overflow: 0 - -9223372036854775808"},
++		{"-", -1, min, max, ""},
++		{"*", max, 2, 0, "int64 overflow: 9223372036854775807 * 2"},
++		{"*", min, -1, 0, "int64 overflow: -9223372036854775808 * -1"},
++		{"*", -1, min, 0, "int64 overflow: -1 * -9223372036854775808"},
++		{"*", 3037000500, 3037000500, 0, "int64 overflow: 3037000500 * 3037000500"},
++		{"*", 3037000499, 3037000499, 9223372030926249001, ""},
++		{"*", -4611686018427387904, 2, min, ""},
++		{"*", min, 1, min, ""},
++		{"*", 0, min, 0, ""},
++	} {
++		var got Value
++		var err error
++		switch k.op {
++		case "+":
++			got, err = IntValue(k.x).Add(IntValue(k.y))
++		case "-":
++			got, err = IntValue(k.x).Sub(IntValue(k.y))
++		case "*":
++			got, err = IntValue(k.x).Mul(IntValue(k.y))
++		}
++		if k.err != "" {
++			if err == nil || err.Error() != k.err {
++				t.Errorf("%d %s %d = %v, %v; want %s", k.x, k.op, k.y, got, err, k.err)
++			}
++			continue
++		}
++		if err != nil || got != IntValue(k.want) {
++			t.Errorf("%d %s %d = %v, %v; want %d", k.x, k.op, k.y, got, err, k.want)
++		}
++	}
++}

@@ -56,9 +56,10 @@ func init() {
 }
 
 // unqualifiedSchemataLinks returns sql's references to
-// [project.]INFORMATION_SCHEMA.SCHEMATA_LINKS with no region qualifier
-// (#1392), which BigQuery reads in the US region: each is answered as
-// `region-us`.INFORMATION_SCHEMA.SCHEMATA_LINKS (withInformationSchemaJobs).
+// [project.]INFORMATION_SCHEMA.SCHEMATA_LINKS (#1392) or SCHEMATA_OPTIONS
+// (#1595) with no region qualifier, which BigQuery reads in the US
+// region: each is answered as `region-us`.INFORMATION_SCHEMA.<view>
+// (withInformationSchemaJobs).
 // A three-part name is the project's when its first part is project, the
 // request's: another is a dataset's, refused 400 (regionOnlyInfoSchema),
 // or another project's, 501.
@@ -74,12 +75,16 @@ func unqualifiedSchemataLinks(sql, project string) []jobsRef {
 		}
 		parts, next := path(t, i)
 		n := len(parts)
-		if n < 2 || n > 3 || !strings.EqualFold(parts[n-2], "INFORMATION_SCHEMA") || !strings.EqualFold(parts[n-1], "SCHEMATA_LINKS") ||
+		view := ""
+		if n >= 2 {
+			view = strings.ToUpper(parts[n-1])
+		}
+		if n < 2 || n > 3 || !strings.EqualFold(parts[n-2], "INFORMATION_SCHEMA") || view != "SCHEMATA_LINKS" && view != "SCHEMATA_OPTIONS" ||
 			n == 3 && parts[0] != project {
 			i = next - 1
 			continue
 		}
-		ref := jobsRef{pos: t[i].pos, end: t[next-1].end, region: "region-us", view: "SCHEMATA_LINKS"}
+		ref := jobsRef{pos: t[i].pos, end: t[next-1].end, region: "region-us", view: view}
 		if next < len(t) && (t[next].is("AS") || t[next].kind == tokQuoted ||
 			t[next].kind == tokWord && !reservedWords[strings.ToUpper(t[next].text)]) {
 			ref.alias = true

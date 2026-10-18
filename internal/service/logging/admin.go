@@ -81,7 +81,10 @@ type Admin struct {
 	h   Hierarchy // folders and the organization, or nil (#1395)
 	db  store.Store
 	now func() time.Time
-	ops int // operations answered, for unique names (#1292)
+	// clock is the Logging clock (Server.clock), nil for now; guarded by
+	// copies.mu (analytics.go logNow, #1602).
+	clock func() time.Time
+	ops   int // operations answered, for unique names (#1292)
 	// copies are the CopyLogEntries operations (copy.go, #1394).
 	copies copies
 	// linked makes and fills links' BigQuery datasets (analytics.go,
@@ -552,6 +555,14 @@ type configServer struct {
 // checkDestination checks a sink destination against the forms the proto
 // documents. Whether the destination exists is found at delivery
 // (deliver.go), as Google reports a missing one as a sink error.
+// sameProjectBucket is whether a sink of p writes to a log bucket of p:
+// logging.googleapis.com/projects/{p}/locations/*/buckets/*.
+func sameProjectBucket(p parent, d string) bool {
+	parts := strings.Split(d, "/")
+	return p.isProject() && len(parts) == 7 && parts[0] == "logging.googleapis.com" && parts[1] == "projects" &&
+		parts[2] == p.id && parts[3] == "locations" && parts[5] == "buckets"
+}
+
 func checkDestination(d string) error {
 	parts := strings.Split(d, "/")
 	ok := false
@@ -684,10 +695,17 @@ func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) 
 // has the project number (links.go serviceAccount), which logging_config.proto
 // documents for unique_writer_identity and for every non-project sink, so a
 // Terraform IAM grant has a member. Nothing is enforced on it (ADR-0004).
+// A sink that writes to a log bucket of its own project has none:
+// configure_export_v2 says "All sinks have a writer identity except for
+// sinks that write to a log bucket in the same Google Cloud project in
+// which the log entries originate" (#1595).
 func (a *Admin) stampSink(p parent, sk *loggingpb.LogSink, old *loggingpb.LogSink) {
 	now := timestamppb.New(a.now())
 	sk.CreateTime, sk.UpdateTime = now, now
 	sk.WriterIdentity = "serviceAccount:" + serviceAccount(p)
+	if sameProjectBucket(p, sk.GetDestination()) {
+		sk.WriterIdentity = ""
+	}
 	if old != nil {
 		sk.CreateTime = old.GetCreateTime()
 	}

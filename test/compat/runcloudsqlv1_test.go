@@ -13,13 +13,16 @@ import (
 )
 
 // runCloudSQLMySQLConn is the connection name of the instance's MySQL, or a
-// skip when Cloud SQL for MySQL is not on this instance.
+// skip when Cloud SQL for MySQL is not on this instance: its endpoint, as
+// the run shard's RUN_MYSQL so the MySQL suite stays in sql (#1568), and
+// the Admin API's.
 func runCloudSQLMySQLConn(t *testing.T, h *Harness) string {
 	t.Helper()
-	if strings.TrimSpace(os.Getenv(EnvMySQLPassword)) == "" ||
-		(strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_RUN_SQLADMIN")) == "" && strings.TrimSpace(os.Getenv(EnvSQLAdmin)) == "") {
+	if strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_RUN_MYSQL")) == "" && strings.TrimSpace(os.Getenv(EnvMySQL)) == "" {
 		t.Skip("Cloud SQL for MySQL is not enabled on this instance; run with --services run,cloudsql-mysql")
 	}
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_MYSQL", EnvMySQL)
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_SQLADMIN", EnvSQLAdmin)
 	return h.Project() + ":us-central1:mysql"
 }
 

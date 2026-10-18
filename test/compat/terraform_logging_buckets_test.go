@@ -32,6 +32,7 @@ import (
 // covers: google.logging.v2.ConfigServiceV2/GetBucket, google.logging.v2.ConfigServiceV2/CreateBucket, google.logging.v2.ConfigServiceV2/UpdateBucket, google.logging.v2.ConfigServiceV2/DeleteBucket, google.logging.v2.ConfigServiceV2/CreateLink, google.logging.v2.ConfigServiceV2/GetLink, google.logging.v2.ConfigServiceV2/DeleteLink
 func TestTerraformLoggingBucketsAndLinks(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	opts := loggingClientOptions(h) // skips without CLOUDBURROW_TEST_LOGGING
 	// The link makes a BigQuery dataset, so a shard without BigQuery skips
 	// here, before terraform runs.

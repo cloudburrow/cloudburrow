@@ -480,6 +480,7 @@ func TestStorageNotificationsWithoutPubSub(t *testing.T) {
 		t.Skip("the instance serves Pub/Sub; TestNotificationConfigsCRUDThroughTheSDK covers notifications with it")
 	}
 	h := New(t)
+	shardEndpoint(h, envNoPubSubStorage, EnvStorage)
 	s := storageJSON(t, h)
 	b := locatedBucket(t, h, "-nps", "US")
 	_, err := s.Notifications.Insert(b, &storagev1.Notification{Topic: "//pubsub.googleapis.com/projects/" + h.Project() + "/topics/t", PayloadFormat: "JSON_API_V1"}).Do()

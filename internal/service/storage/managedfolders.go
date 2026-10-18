@@ -72,11 +72,17 @@ func managedFolderKey(bucket, name string) string { return managedFolderPrefix +
 // maxManagedFolderName is the longest name, in bytes, as for an object.
 const maxManagedFolderName = 1024
 
-// managedFolderName validates a name and returns it ending in "/".
-// UNVERIFIED: the naming rules are the object name rules the managed
+// maxManagedFolderSlashes is the deepest nesting: "At most, a managed
+// folder name can have 15 /s" (managed-folders, read 2026-10-17).
+const maxManagedFolderSlashes = 15
+
+// managedFolderName validates a name and returns it ending in "/". The
+// rules are the managed folders page's "Managed folder names" (read
+// 2026-10-17): 1-1024 bytes of UTF-8, no carriage return or line feed, at
+// most 15 "/"s, not starting with ".well-known/acme-challenge/", and not
+// named "." or ".." (refused here as any segment, with an empty segment
+// too). Google's statuses and messages are not stated (UNVERIFIED).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
-// folders page points to, with no empty segment; Google's exact messages
-// are not stated.
 func managedFolderName(name string) (string, error) {
 	if name == "" {
 		return "", required("name")
@@ -93,6 +99,11 @@ func managedFolderName(name string) (string, error) {
 		return "", badRequest("Invalid argument: a managed folder name cannot contain a carriage return or a line feed")
 	case strings.HasPrefix(name, "/") || strings.Contains(name, "//"):
 		return "", badRequest("Invalid argument: managed folder name %q has an empty segment", name)
+	case strings.Count(name, "/") > maxManagedFolderSlashes:
+		return "", badRequest("Invalid argument: managed folder name %q has %d /s: at most %d, so managed folders nest up to %d levels deep",
+			name, strings.Count(name, "/"), maxManagedFolderSlashes, maxManagedFolderSlashes)
+	case strings.HasPrefix(name, ".well-known/acme-challenge/"):
+		return "", badRequest("Invalid argument: managed folder names cannot start with .well-known/acme-challenge/")
 	}
 	for _, seg := range strings.Split(strings.TrimSuffix(name, "/"), "/") {
 		if seg == "." || seg == ".." {

@@ -119,34 +119,64 @@ func renderVolumes(b *strings.Builder, volumes []*runpb.Volume, o containerRende
 				}
 				items = []*runpb.VersionToPath{{Path: id, Version: "latest"}}
 			}
-			var secretName string
-			var lines strings.Builder
+			// Each version is stored in a Kubernetes Secret of its own
+			// (#1596), and a version under a customer-managed key is mounted
+			// from a decrypted copy (#1489), so the items may name several
+			// Secrets. One Secret is a secret volume; several are a projected
+			// volume with a source per Secret, in the order the items name
+			// them.
+			type item struct {
+				key, path string
+				mode      int32
+			}
+			type source struct {
+				name  string
+				items []item
+			}
+			var sources []*source
 			for _, it := range items {
 				name, key, err := o.secrets.ResolveSecretRef(o.project, s.GetSecret(), it.GetVersion())
 				if err != nil {
 					return err
 				}
-				if secretName != "" && name != secretName {
-					// Versions under a customer-managed key are mounted from
-					// a decrypted copy (#1489), the others from the Secret
-					// that stores them, and one secret volume reads one
-					// Kubernetes Secret.
-					return apierror.Unimplemented("volume %q mounts versions of secret %q with and without a "+
-						"customer-managed key, which CloudBurrow mounts from different Kubernetes Secrets; "+
-						"mount them in two volumes", v.GetName(), s.GetSecret())
+				var src *source
+				for _, have := range sources {
+					if have.name == name {
+						src = have
+					}
 				}
-				secretName = name
-				fmt.Fprintf(&lines, "              - key: %s\n                path: %q\n", key, it.GetPath())
-				if it.GetMode() != 0 {
-					fmt.Fprintf(&lines, "                mode: %d\n", it.GetMode())
+				if src == nil {
+					src = &source{name: name}
+					sources = append(sources, src)
+				}
+				src.items = append(src.items, item{key: key, path: it.GetPath(), mode: it.GetMode()})
+			}
+			writeItems := func(indent string, its []item) {
+				for _, it := range its {
+					fmt.Fprintf(b, "%s- key: %s\n%s  path: %q\n", indent, it.key, indent, it.path)
+					if it.mode != 0 {
+						fmt.Fprintf(b, "%s  mode: %d\n", indent, it.mode)
+					}
 				}
 			}
-			fmt.Fprintf(b, "          secret:\n            secretName: %s\n", secretName)
+			if len(sources) == 1 {
+				fmt.Fprintf(b, "          secret:\n            secretName: %s\n", sources[0].name)
+				if m := s.GetDefaultMode(); m != 0 {
+					fmt.Fprintf(b, "            defaultMode: %d\n", m)
+				}
+				b.WriteString("            items:\n")
+				writeItems("              ", sources[0].items)
+				continue
+			}
+			b.WriteString("          projected:\n")
 			if m := s.GetDefaultMode(); m != 0 {
 				fmt.Fprintf(b, "            defaultMode: %d\n", m)
 			}
-			b.WriteString("            items:\n")
-			b.WriteString(lines.String())
+			b.WriteString("            sources:\n")
+			for _, src := range sources {
+				fmt.Fprintf(b, "              - secret:\n                  name: %s\n                  items:\n", src.name)
+				writeItems("                    ", src.items)
+			}
 		case v.GetNfs() != nil:
 			n := v.GetNfs()
 			if !o.batch {

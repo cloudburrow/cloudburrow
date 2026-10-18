@@ -214,7 +214,15 @@ type Server struct {
 // entry an enabled exclusion matches is accepted and not stored, as Google's
 // _Default sink drops it.
 // It also gives CopyLogEntries (copy.go) the entries it copies.
-func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.bucketEntries) }
+// And it gives the admin the Logging clock, which retention is measured
+// by in a linked dataset (#1602).
+func (s *Server) UseAdmin(a *Admin) {
+	s.admin = a
+	a.useEntries(s.store.bucketEntries)
+	a.copies.mu.Lock()
+	a.clock = s.clock
+	a.copies.mu.Unlock()
+}
 
 // CountMatching counts project's stored entries that filter matches with a
 // timestamp at or after since, for a log-based metric's console page. The
@@ -254,11 +262,16 @@ const (
 	// MaxFutureSkew is how far ahead of now a timestamp may be. Google
 	// rejects entries more than a day in the future with INVALID_ARGUMENT.
 	MaxFutureSkew = 24 * time.Hour
-	// Retention is the _Default bucket's retention. Google accepts entries
-	// older than a bucket's retention but does not store them, so an entry
-	// older than this when written is not stored; a read applies each
-	// bucket's own retention_days (#1410).
-	Retention = 30 * 24 * time.Hour
+	// Retention is the _Default bucket's default retention. The oldest
+	// timestamp a bucket stores is "Determined by the retention period of
+	// the log bucket", and older entries are still routed to sinks
+	// (logging/quotas, #1595): so an entry is stored whatever its age, a read
+	// shows it only inside each bucket's own retention_days (#1410), and
+	// only one older than the longest retention any bucket can have
+	// (MaxRetention) is not stored at all; every entry is routed to sinks.
+	Retention = defaultRetention * 24 * time.Hour
+	// MaxRetention is the longest retention_days a bucket can have.
+	MaxRetention = maxRetention * 24 * time.Hour
 )
 
 // logIDRe is a decoded log ID's documented alphabet and length.
@@ -299,7 +312,7 @@ func parseProjectParent(field, name string) (string, error) {
 
 // prepare validates one entry and fills what the request supplies, the way
 // the API documents request-level defaults. keep is false for an entry that
-// is accepted but, being older than the retention period, is not stored.
+// is accepted but, being older than any bucket's retention, is not stored.
 func (s *Server) prepare(req *loggingpb.WriteLogEntriesRequest, in *loggingpb.LogEntry, now time.Time) (e *loggingpb.LogEntry, keep bool, err error) {
 	if n := proto.Size(in); n > MaxEntryBytes {
 		return nil, false, apierror.InvalidArgument("the entry is %d bytes, over the %d-byte (256 KiB) limit", n, MaxEntryBytes)
@@ -343,7 +356,7 @@ func (s *Server) prepare(req *loggingpb.WriteLogEntriesRequest, in *loggingpb.Lo
 		return nil, false, apierror.InvalidArgument("timestamp %s is more than 24 hours in the future", ts.Format(time.RFC3339Nano))
 	}
 	e.ReceiveTimestamp = timestamppb.New(now)
-	return e, !ts.Before(now.Add(-Retention)), nil
+	return e, !ts.Before(now.Add(-MaxRetention)), nil
 }
 
 // WriteLogEntries writes a batch.
@@ -381,13 +394,13 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			failed[int32(i)] = status.New(ae.Code, ae.Message).Proto()
 			continue
 		}
+		rt := s.routeOf(e, sinks, exclusions)
+		deliveries = append(deliveries, rt.out...)
 		if !keep {
 			continue
 		}
-		rt := s.routeOf(e, sinks, exclusions)
 		hidden := s.excluded(e, exclusions) || rt.intercepted
 		buckets := rt.buckets
-		deliveries = append(deliveries, rt.out...)
 		if hidden && len(buckets) == 0 {
 			continue
 		}

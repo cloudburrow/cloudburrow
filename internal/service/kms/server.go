@@ -197,7 +197,8 @@ func (s *Server) now() time.Time { return s.clock.Now() }
 // beside them (cloudkms_v1.yaml:13), and the Locations mixin (#1291). The
 // Operations mixin is registered apart (Operations).
 func (s *Server) Register(g grpc.ServiceRegistrar) {
-	kmspb.RegisterKeyManagementServiceServer(g, s)
+	// KeyManagementService with DeleteKeyRing, which kmspb lacks (deletering.go).
+	g.RegisterService(keyManagementServiceDesc(), s)
 	kmspb.RegisterEkmServiceServer(g, s.Ekm())
 	kmspb.RegisterAutokeyServer(g, s.Autokey())
 	kmspb.RegisterAutokeyAdminServer(g, s.AutokeyAdmin())
@@ -291,6 +292,11 @@ func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingReques
 		return nil, apierror.Wrap(err)
 	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("KeyRing %s already exists", name))
+	}
+	if held, err := s.ringHeld(name); err != nil {
+		return nil, apierror.Wrap(apierror.Internal(err, "read the hold on %s", name))
+	} else if held {
+		return nil, apierror.Wrap(apierror.AlreadyExists("KeyRing %s was deleted less than %s ago: its name becomes available for reuse after that", name, ringReuseAfter))
 	}
 	r := keyRing{Name: name, Created: s.now().UTC()}
 	if err := s.put(dbKey(ringPrefix, name), r); err != nil {
@@ -759,7 +765,36 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return s.toVersion(v), nil
+	out := s.toVersion(v)
+	if pendingGeneration(k, v) {
+		out.State, out.GenerateTime = kmspb.CryptoKeyVersion_PENDING_GENERATION, nil
+	}
+	return out, nil
+}
+
+// pendingGeneration reports whether a new version is answered as
+// PENDING_GENERATION: "When a key version for an asymmetric key is
+// created, it starts with a state of pending generation", and "Cloud Key
+// Management Service will automatically change the state to enabled as
+// soon as the version is ready" (https://docs.cloud.google.com/kms/docs/key-states,
+// read 2026-10-17). CloudBurrow generates the material before it answers,
+// so the version is ready once the create returns: the create answers
+// PENDING_GENERATION, with no generate_time, and every later read ENABLED,
+// as a client polling for ENABLED expects. An EXTERNAL or EXTERNAL_VPC
+// version is ENABLED at once (external.go), and one created DISABLED
+// keeps that state.
+func pendingGeneration(k cryptoKey, v keyVersion) bool {
+	switch k.purpose() {
+	case kmspb.CryptoKey_ASYMMETRIC_SIGN, kmspb.CryptoKey_ASYMMETRIC_DECRYPT, kmspb.CryptoKey_KEY_ENCAPSULATION:
+	default:
+		return false
+	}
+	switch v.protectionLevel() {
+	case kmspb.ProtectionLevel_SOFTWARE, kmspb.ProtectionLevel_HSM:
+	default:
+		return false
+	}
+	return v.state() == kmspb.CryptoKeyVersion_ENABLED
 }
 
 func (s *Server) GetCryptoKeyVersion(_ context.Context, req *kmspb.GetCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {

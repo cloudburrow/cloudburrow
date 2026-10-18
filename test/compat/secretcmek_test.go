@@ -73,6 +73,7 @@ func setKeyVersionState(t *testing.T, h *Harness, kc *kms.KeyManagementClient, k
 // new versions only, and removes it.
 func TestSecretManagerCMEK(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	ctx := h.Context()
 	kc := kmsClients(t, h)["grpc"]
 	keys := cmekKeys(t, h, kc, "global", "us-east1")
@@ -200,6 +201,7 @@ func cmekReplica(location, key string) *secretmanagerpb.Replication {
 // --set-kms-key` and removes it with `--remove-cmek`.
 func TestGcloudSecretsCMEK(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	h.Endpoint(EnvSecrets)
 	h.Endpoint(EnvKMS)
 	keys := cmekKeys(t, h, kmsClients(t, h)["grpc"], "global")
@@ -243,6 +245,7 @@ func TestGcloudSecretsCMEK(t *testing.T) {
 // the secret.
 func TestTerraformSecretCMEK(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	h.Endpoint(EnvSecrets)
 	h.Endpoint(EnvKMS)
 	m := newTFModule(t)

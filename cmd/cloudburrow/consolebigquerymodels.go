@@ -165,6 +165,10 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 				console.Property{Label: "Optimization", Value: orDash(o.OptimizationStrategy)},
 				console.Property{Label: "Data split", Value: orDash(o.DataSplitMethod)},
 				console.Property{Label: "L1 / L2", Value: fmt.Sprintf("%g / %g", o.L1Regularization, o.L2Regularization)})
+			if o.CategoryEncodingMethod != "" {
+				// A boosted tree's (#1595): LABEL_ENCODING by default.
+				props = append(props, console.Property{Label: "Category encoding", Value: o.CategoryEncodingMethod})
+			}
 		}
 		if em := run.EvaluationMetrics; em != nil {
 			f := func(l string, v float64) {

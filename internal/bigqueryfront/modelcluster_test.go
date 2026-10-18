@@ -18,7 +18,7 @@ func TestTrainMulticlassLogistic(t *testing.T) {
 	o := defaultMLOptions()
 	o.ModelType = "LOGISTIC_REG"
 	o.MaxIterations = 50
-	m, f := trainModel(o, cols, rows)
+	m, f := trainModelT(o, cols, rows)
 	if f != nil {
 		t.Fatal(f)
 	}
@@ -64,7 +64,7 @@ func TestTrainKMeans(t *testing.T) {
 				r = append(r, row[:2])
 			}
 		}
-		m, f := trainModel(o, c, r)
+		m, f := trainModelT(o, c, r)
 		if f != nil {
 			t.Fatalf("%s: %v", init, f)
 		}
@@ -77,7 +77,7 @@ func TestTrainKMeans(t *testing.T) {
 	}
 	o := defaultMLOptions()
 	o.ModelType, o.NumClusters, o.KMeansInit, o.KMeansInitCol = "KMEANS", 3, "CUSTOM", "init"
-	if _, f := trainModel(o, cols, rows); f == nil || f.code != 400 {
+	if _, f := trainModelT(o, cols, rows); f == nil || f.code != 400 {
 		t.Errorf("custom init with 2 TRUE rows for 3 clusters: %v", f)
 	}
 }
@@ -92,7 +92,7 @@ func TestTrainPCA(t *testing.T) {
 	}
 	o := defaultMLOptions()
 	o.ModelType, o.NumPC = "PCA", 1
-	m, f := trainModel(o, cols, rows)
+	m, f := trainModelT(o, cols, rows)
 	if f != nil {
 		t.Fatal(f)
 	}
@@ -108,11 +108,11 @@ func TestTrainPCA(t *testing.T) {
 		t.Errorf("total variance %v", m.TotalVariance)
 	}
 	o.NumPC, o.PCAVarRatio = 0, 0.5
-	if m, f = trainModel(o, cols, rows); f != nil || len(m.Components) != 1 {
+	if m, f = trainModelT(o, cols, rows); f != nil || len(m.Components) != 1 {
 		t.Errorf("by ratio: %v %d", f, len(m.Components))
 	}
 	o.NumPC, o.PCAVarRatio = 1, 0
-	if _, f := trainModel(o, []mlColumn{{"x", "FLOAT"}, {"c", "STRING"}}, rows); f == nil || f.code != 501 {
+	if _, f := trainModelT(o, []mlColumn{{"x", "FLOAT"}, {"c", "STRING"}}, rows); f == nil || f.code != 501 {
 		t.Errorf("categorical PCA: %v", f)
 	}
 }

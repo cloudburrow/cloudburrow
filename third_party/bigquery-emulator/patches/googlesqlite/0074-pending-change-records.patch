@@ -1,0 +1,447 @@
+CloudBurrow patch 74 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1597). Applies after patch 0067; needs 0036,
+0041, 0044 and 0065.
+
+The cost: patch 0036 wrote every row a table was given twice, once to the
+table and once, with all its values, to its change table, whatever the
+table's options. BigQuery's CHANGES needs enable_change_history, but
+APPENDS reads any regular table's inserts within its time travel window,
+"even if that data is later deleted", and time travel reads any table's
+past (https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/time-series-functions,
+read 2026-10-17; https://cloud.google.com/bigquery/docs/time-travel), so
+every table keeps a history; what it need not keep is a second copy of
+the rows it still has unchanged.
+
+The record of a row inserted, or of the new row of an UPDATE, is now
+pending: the change table keeps its type, time and row identity, and
+googlesqlite_change_pending 1, but no values. The trigger of the change
+that next touches the row (UPDATE, DELETE, MERGE, TRUNCATE TABLE, a
+WRITE_TRUNCATE) writes the row's old values into its pending record
+first, so a pending record's values are always its row's in the table.
+A statement that names a change table (CloudBurrow's front's APPENDS,
+CHANGES, time travel, undelete and rebuild reads) settles its pending
+records from the table before it runs, and CREATE OR REPLACE TABLE before
+it drops the table it replaces; so every reader reads the history as
+before. A change table made before the patch keeps every record's values.
+
+Measured (the engine alone, a table of five columns, 50,000 rows inserted
+by 1,000, 10,000 updated, 10,000 deleted): the same insert time (5.9 s,
+the analysis dominates), an UPDATE 162 ms (136 before) and a DELETE 104 ms
+(74), the first read of the change table 218 ms (100), and the database
+39.7 MB (51.9 before; 16.3 with no history at all), a third less for the
+history. change_history_pending_test.go fails without the patch and
+passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/driver.go
++++ b/driver.go
+@@ -459,6 +459,11 @@
+ 	defer func() { e = c.translateConnDone(e) }()
+ 	defer recoverPanicAsError(&e)
+ 	conn := internal.NewConnWithOptions(c.conn, nil, c.systemVars, c.scriptVars, c.materializeCTE)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1597): a read of a change
++	// table reads the values of its pending records.
++	if err := internal.SettleChangesNamedIn(ctx, conn, query); err != nil {
++		return nil, err
++	}
+ 	actionFuncs, err := c.analyzer.Analyze(ctx, conn, query, nil)
+ 	if err != nil {
+ 		return nil, err
+@@ -497,6 +502,11 @@
+ 		return c.conn.ExecContext(ctx, raw, vals...)
+ 	}
+ 	conn := internal.NewConnWithOptions(c.conn, nil, c.systemVars, c.scriptVars, c.materializeCTE)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1597): a read of a change
++	// table reads the values of its pending records.
++	if err := internal.SettleChangesNamedIn(ctx, conn, query); err != nil {
++		return nil, err
++	}
+ 	actionFuncs, err := c.analyzer.Analyze(ctx, conn, query, args)
+ 	if err != nil {
+ 		return nil, err
+@@ -533,6 +543,11 @@
+ 	defer func() { e = c.translateConnDone(e) }()
+ 	defer recoverPanicAsError(&e)
+ 	conn := internal.NewConnWithOptions(c.conn, nil, c.systemVars, c.scriptVars, c.materializeCTE)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1597): a read of a change
++	// table reads the values of its pending records.
++	if err := internal.SettleChangesNamedIn(ctx, conn, query); err != nil {
++		return nil, err
++	}
+ 	actionFuncs, err := c.analyzer.Analyze(ctx, conn, query, args)
+ 	if err != nil {
+ 		return nil, err
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -169,7 +169,11 @@
+ 		}
+ 		defs = append(defs, c.SQLiteSchema())
+ 	}
+-	defs = append(defs, "`"+changeMicrosColumn+"` INTEGER", "`"+changeRowidColumn+"` INTEGER")
++	defs = append(defs, "`"+changeMicrosColumn+"` INTEGER", "`"+changeRowidColumn+"` INTEGER",
++		// CloudBurrow patch (cloudburrow/cloudburrow#1597): an INSERT
++		// or UPDATE record keeps no values while its row is unchanged
++		// in the table (change_history_pending.go).
++		"`"+changePendingColumn+"` INTEGER")
+ 	ins, del, upd := encodedLiteral(value.StringValue("INSERT")), encodedLiteral(value.StringValue("DELETE")),
+ 		encodedLiteral(value.StringValue("UPDATE"))
+ 	no, yes := encodedLiteral(value.BoolValue(false)), encodedLiteral(value.BoolValue(true))
+@@ -191,6 +195,17 @@
+ 		return fmt.Sprintf("%s VALUES (%s%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), %srowid)",
+ 			target, v, typ, forUpdate, prefix)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1597): the record of
++	// a row inserted or updated is pending, its values the row's in the
++	// table, until the row is changed again or the record is read
++	// (change_history_pending.go).
++	pendingTarget := fmt.Sprintf("INSERT INTO `%s` (`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`"+changeForUpdateColumn+"`,`%s`,`%s`,`%s`)",
++		change, changeMicrosColumn, changeRowidColumn, changePendingColumn)
++	pendingRow := func(typ string) string {
++		return fmt.Sprintf("%s VALUES (%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), NEW.rowid, 1)",
++			pendingTarget, typ, no)
++	}
++	settle := settlePendingChange(change, cols)
+ 	prune := fmt.Sprintf("DELETE FROM `%s` WHERE `%s` < googlesqlite_change_micros() - %d", change, changeMicrosColumn, changeRetention.Microseconds())
+ 	// An UPDATE of a row the transaction inserted (the emulator's
+ 	// rounding triggers, which round a NUMERIC as it is inserted) is part
+@@ -203,8 +218,8 @@
+ 	for i, c := range cols {
+ 		sets[i] = c + " = NEW." + c
+ 	}
+-	fold := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = OLD.rowid AND `%s` = googlesqlite_change_micros() AND `_CHANGE_TYPE` = %s",
+-		change, strings.Join(sets, ","), changeRowidColumn, changeMicrosColumn, ins)
++	fold := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = OLD.rowid AND `%s` = googlesqlite_change_micros() AND `_CHANGE_TYPE` = %s AND `%s` IS NULL",
++		change, strings.Join(sets, ","), changeRowidColumn, changeMicrosColumn, ins, changePendingColumn)
+ 	trigger := func(name, event, when, body string) string {
+ 		if when != "" {
+ 			when = "WHEN " + when + " "
+@@ -221,9 +236,9 @@
+ 		fmt.Sprintf("CREATE TABLE `%s` (%s)", change, strings.Join(defs, ",")),
+ 		fmt.Sprintf("CREATE INDEX `%s$time` ON `%s`(`%s`)", change, change, changeMicrosColumn),
+ 		fmt.Sprintf("CREATE INDEX `%s$row` ON `%s`(`%s`)", change, change, changeRowidColumn),
+-		trigger("insert", "INSERT", "", row("NEW.", ins, no)),
+-		trigger("delete", "DELETE", "", row("OLD.", del, no)),
+-		trigger("update", "UPDATE", "NOT "+inserted, row("OLD.", del, yes)+"; "+row("NEW.", upd, no)),
++		trigger("insert", "INSERT", "", pendingRow(ins)),
++		trigger("delete", "DELETE", "", settle+"; "+row("OLD.", del, no)),
++		trigger("update", "UPDATE", "NOT "+inserted, settle+"; "+row("OLD.", del, yes)+"; "+pendingRow(upd)),
+ 	}
+ 	if n > 0 {
+ 		stmts = append(stmts, trigger("fold", "UPDATE", inserted, fold))
+@@ -231,8 +246,8 @@
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1460): when the history
+ 	// starts (change_history_rows.go).
+ 	stmts = append(stmts, changeStartRow(change))
+-	stmts = append(stmts, fmt.Sprintf("%s SELECT %s%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), rowid FROM `%s`",
+-		target, all, ins, no, base))
++	stmts = append(stmts, fmt.Sprintf("%s SELECT %s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), rowid, 1 FROM `%s`",
++		pendingTarget, ins, no, base))
+ 	for _, s := range stmts {
+ 		if _, err := conn.ExecContext(ctx, s); err != nil {
+ 			return fmt.Errorf("change history of %s: %w", base, err)
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -32,6 +32,11 @@
+ 
+ func (a *CreateTableStmtAction) Prepare(ctx context.Context, conn *Conn) (driver.Stmt, error) {
+ 	if a.spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateOrReplace {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1597): the replaced
++		// rows' values, before they go (change_history_pending.go).
++		if err := settlePendingChanges(ctx, conn, a.spec.TableName()+changeTableSuffix); err != nil {
++			return nil, err
++		}
+ 		if _, err := conn.ExecContext(
+ 			ctx,
+ 			fmt.Sprintf("DROP TABLE IF EXISTS `%s`", a.spec.TableName()),
+@@ -72,6 +77,11 @@
+ 	// REPLACE differently from CREATE TEMP, so we need the explicit
+ 	// drop here as well.
+ 	if a.spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateOrReplace || a.spec.IsTemp {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1597): the replaced
++		// rows' values, before they go (change_history_pending.go).
++		if err := settlePendingChanges(ctx, conn, a.spec.TableName()+changeTableSuffix); err != nil {
++			return err
++		}
+ 		if _, err := conn.ExecContext(
+ 			ctx,
+ 			fmt.Sprintf("DROP TABLE IF EXISTS `%s`", a.spec.TableName()),
+--- /dev/null
++++ b/internal/change_history_pending.go
+@@ -0,0 +1,176 @@
++package internal
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++)
++
++// Pending change records (CloudBurrow patch, cloudburrow/cloudburrow#1597).
++//
++// Patch 0036 wrote every row a table was given twice: once to the table
++// and once, with all its values, to the table's change table. BigQuery's
++// APPENDS and time travel read any table's history within its time travel
++// window, and CHANGES a table's with enable_change_history
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/time-series-functions,
++// https://cloud.google.com/bigquery/docs/time-travel), so every table keeps
++// a history; but the values of a row inserted, or of the new row of an
++// UPDATE, are the row's in the table for as long as it is not changed
++// again. The record of an INSERT or an UPDATE is now pending: the change
++// table keeps its type, time and row identity, and changePendingColumn 1,
++// but no values. The change that next touches the row (an UPDATE, a
++// DELETE, MERGE, TRUNCATE TABLE, a WRITE_TRUNCATE), whose trigger has the
++// row's old values, settles it first: writes those values into the
++// pending record and clears the mark. So a pending record's values are
++// always its row's in the table, and a reader of a change table settles
++// the pending ones from the table before it reads (SettleChangesNamedIn);
++// as does CREATE OR REPLACE TABLE before it drops the table it replaces.
++// A table whose history is never read keeps no second copy of its rows,
++// only one small record of each change; a DELETE or an UPDATE copies the
++// old rows, as before. A change table made before this patch has no
++// changePendingColumn and keeps every record's values, as it did.
++
++// changePendingColumn is the change table's SQLite column that marks a
++// record whose values are its row's in the table; the catalog does not
++// name it.
++const changePendingColumn = "googlesqlite_change_pending"
++
++// settlePendingChange is the trigger statement that writes the old values
++// of the row a trigger fires on, of the columns cols, into its pending
++// record in change.
++func settlePendingChange(change string, cols []string) string {
++	sets := make([]string, 0, len(cols)+1)
++	for _, c := range cols {
++		sets = append(sets, c+" = OLD."+c)
++	}
++	sets = append(sets, "`"+changePendingColumn+"` = NULL")
++	return fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = OLD.rowid AND `%s` IS NOT NULL",
++		change, strings.Join(sets, ", "), changeRowidColumn, changePendingColumn)
++}
++
++// settlePendingChanges writes into each pending record of the change table
++// change the values of its row in the table, and clears its mark. A change
++// table without pending records, or without the column, is left as it is.
++func settlePendingChanges(ctx context.Context, conn *Conn, change string) error {
++	if !isChangeTableName(change) {
++		return nil
++	}
++	base := strings.TrimSuffix(change, changeTableSuffix)
++	columns := func(table string) (map[string]bool, []string, error) {
++		rows, err := conn.QueryContext(ctx, "SELECT name FROM pragma_table_info(@t)", sql.Named("t", table))
++		if err != nil {
++			return nil, nil, err
++		}
++		defer rows.Close()
++		set := map[string]bool{}
++		var order []string
++		for rows.Next() {
++			var name string
++			if err := rows.Scan(&name); err != nil {
++				return nil, nil, err
++			}
++			set[name] = true
++			order = append(order, name)
++		}
++		return set, order, rows.Err()
++	}
++	have, order, err := columns(change)
++	if err != nil || !have[changePendingColumn] {
++		return err
++	}
++	var pending int
++	if err := conn.QueryRowContext(ctx, fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM `%s` WHERE `%s` IS NOT NULL)",
++		change, changePendingColumn)).Scan(&pending); err != nil || pending == 0 {
++		return err
++	}
++	inBase, _, err := columns(base)
++	if err != nil {
++		return err
++	}
++	var cols []string
++	for _, c := range order {
++		if isChangeColumn(c) || strings.HasPrefix(c, "googlesqlite_") || !inBase[c] {
++			continue
++		}
++		cols = append(cols, "`"+c+"`")
++	}
++	set := "`" + changePendingColumn + "` = NULL"
++	if len(inBase) > 0 && len(cols) > 0 {
++		list := strings.Join(cols, ",")
++		set = fmt.Sprintf("(%s) = (SELECT %s FROM `%s` WHERE `%s`.rowid = `%s`.`%s`), %s",
++			list, list, base, base, change, changeRowidColumn, set)
++	}
++	if _, err := conn.ExecContext(ctx, fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` IS NOT NULL", change, set, changePendingColumn)); err != nil {
++		return fmt.Errorf("change history of %s: %w", base, err)
++	}
++	return nil
++}
++
++// SettleChangesNamedIn settles the pending records (above) of each change
++// table query may name, a statement about to run: each whose table id
++// (the last element of its path, which a SQLite name joins with "_") is
++// one query names with changeTableSuffix.
++func SettleChangesNamedIn(ctx context.Context, conn *Conn, query string) error {
++	ids := changeTableIDs(query)
++	if len(ids) == 0 {
++		return nil
++	}
++	rows, err := conn.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE @suffix",
++		sql.Named("suffix", "%"+changeTableSuffix))
++	if err != nil {
++		return err
++	}
++	var named []string
++	for rows.Next() {
++		var name string
++		if err := rows.Scan(&name); err != nil {
++			rows.Close()
++			return err
++		}
++		for _, id := range ids {
++			if name == id || strings.HasSuffix(name, "_"+id) || strings.HasSuffix(name, "."+id) {
++				named = append(named, name)
++				break
++			}
++		}
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return err
++	}
++	rows.Close()
++	for _, name := range named {
++		if err := settlePendingChanges(ctx, conn, name); err != nil {
++			return err
++		}
++	}
++	return nil
++}
++
++// changeTableIDs returns the table ids query names with changeTableSuffix,
++// each with the suffix: the letters, digits, underscores, hyphens and
++// other than ASCII characters (BigQuery's table ids take Unicode letters)
++// before each.
++func changeTableIDs(query string) []string {
++	var ids []string
++	for rest := query; ; {
++		i := strings.Index(rest, changeTableSuffix)
++		if i < 0 {
++			return ids
++		}
++		j := i
++		for j > 0 {
++			c := rest[j-1]
++			if c == '_' || c == '-' || c >= 0x80 || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' {
++				j--
++				continue
++			}
++			break
++		}
++		if j < i {
++			ids = append(ids, rest[j:i]+changeTableSuffix)
++		}
++		rest = rest[i+len(changeTableSuffix):]
++	}
++}
+--- /dev/null
++++ b/change_history_pending_test.go
+@@ -0,0 +1,93 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestChangeHistoryPending is CloudBurrow's regression test of its patch
++// 0074 (cloudburrow/cloudburrow#1597): a row inserted, or the new row of
++// an UPDATE, is not copied into the change table, whose record of it is
++// pending, until the row is changed again (its old values are then
++// written into the record) or the change table is read (its values are
++// then read from the table); the history read is the same.
++func TestChangeHistoryPending(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) sql.Result {
++		t.Helper()
++		res, err := db.ExecContext(ctx, q)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		return res
++	}
++	// The records that keep no values (the START row keeps no row id),
++	// in SQLite, without settling them
++	// as a read of the change table through GoogleSQL does.
++	bare := func(cond string) int64 {
++		t.Helper()
++		n, err := exec(googlesqlite.RawSQLitePrefix + "UPDATE `p_d_Produce$changes` SET googlesqlite_change_pending = googlesqlite_change_pending " +
++			"WHERE product IS NULL AND inventory IS NULL AND " + cond).RowsAffected()
++		if err != nil {
++			t.Fatal(err)
++		}
++		return n
++	}
++	exec("CREATE TABLE `p.d.Produce` (product STRING, inventory INT64)")
++	exec("INSERT INTO `p.d.Produce` VALUES ('bananas', 20), ('carrots', 30), ('kiwis', 5)")
++	if n := bare("googlesqlite_change_pending = 1"); n != 3 {
++		t.Errorf("after an INSERT of 3 rows: %d records without values, want 3", n)
++	}
++	exec("DELETE `p.d.Produce` WHERE product = 'bananas'")
++	exec("UPDATE `p.d.Produce` SET inventory = inventory - 10 WHERE product = 'carrots'")
++	// kiwis' INSERT and carrots' UPDATE are pending; bananas' INSERT and
++	// carrots' were given their values by the DELETE and the UPDATE.
++	if n := bare("googlesqlite_change_pending = 1"); n != 2 {
++		t.Errorf("after a DELETE and an UPDATE: %d pending records, want 2", n)
++	}
++	if n := bare("googlesqlite_change_pending IS NULL AND googlesqlite_change_rowid IS NOT NULL"); n != 0 {
++		t.Errorf("after a DELETE and an UPDATE: %d settled records without values, want 0", n)
++	}
++	rows, err := db.QueryContext(ctx, "SELECT product, inventory, _CHANGE_TYPE FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY rowid")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var got []string
++	for rows.Next() {
++		var product, typ string
++		var inventory int64
++		if err := rows.Scan(&product, &inventory, &typ); err != nil {
++			t.Fatal(err)
++		}
++		got = append(got, product+" "+typ+" "+string(rune('0'+inventory/10))+string(rune('0'+inventory%10)))
++	}
++	rows.Close()
++	want := []string{"bananas INSERT 20", "carrots INSERT 30", "kiwis INSERT 05", "bananas DELETE 20", "carrots DELETE 30", "carrots UPDATE 20"}
++	if len(got) != len(want) {
++		t.Fatalf("history %v, want %v", got, want)
++	}
++	for i := range want {
++		if got[i] != want[i] {
++			t.Errorf("history %v, want %v", got, want)
++			break
++		}
++	}
++	if n := bare("googlesqlite_change_pending = 1"); n != 0 {
++		t.Errorf("after a read of the change table: %d pending records, want 0", n)
++	}
++	// A record a read settled keeps its values when its row changes.
++	exec("UPDATE `p.d.Produce` SET inventory = 6 WHERE product = 'kiwis'")
++	var n int64
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.Produce$changes` WHERE product = 'kiwis' AND inventory = 5").Scan(&n); err != nil || n != 2 {
++		t.Errorf("kiwis' INSERT and its update's DELETE: %d (%v), want 2", n, err)
++	}
++}

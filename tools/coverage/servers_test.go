@@ -137,6 +137,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		if strings.HasPrefix(m, "cloudresourcemanager.folders.capabilities.") {
 			continue
 		}
+		// KMS DeleteKeyRing (#1595) has no descriptor (service.proto has
+		// no such RPC yet); TestDeleteKeyRingOverGRPC calls it over gRPC
+		// (internal/service/kms).
+		if m == "google.cloud.kms.v1.KeyManagementService/DeleteKeyRing" {
+			continue
+		}
 		methods = append(methods, m)
 	}
 	sort.Strings(methods)

@@ -149,9 +149,9 @@ func (f front) keepViewTexts(w http.ResponseWriter, r *http.Request, q queryOpti
 	rec.copyTo(w)
 }
 
-// getTable answers tables.get, with the client's text of a view's query
+// getTableAnswered answers tables.get, with the client's text of a view's query
 // when the front kept it (above).
-func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table string) {
+func (f front) getTableAnswered(w http.ResponseWriter, r *http.Request, dataset, table string) {
 	if f.tables.watched(streamKey(projectOf(f.base), dataset, table)) { // #1415, materializedviews.go
 		f.syncGot(r, dataset, table)
 	}

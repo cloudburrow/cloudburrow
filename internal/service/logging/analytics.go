@@ -31,7 +31,19 @@ package logging
 // now has and the entries it now holds, so an entry DeleteLog removed, or
 // one past the retention, is gone from its table too. Between those, an
 // entry that ages past the retention leaves every view as it leaves the
-// bucket, by the views' own timestamp condition. A log view filter
+// bucket, by the views' own timestamp condition. That condition is the
+// Logging clock's, not BigQuery's (#1602): Google ages an entry out by its
+// `timestamp` ("used to compute the log entry's age and to enforce the
+// logs retention period", the LogEntry reference), and here the Logging
+// and BigQuery clocks are two, each moved by its own clock:advance. So a
+// view reads the Logging clock as CURRENT_TIMESTAMP() less the skew of
+// BigQuery's clock over it (LinkedClock), measured as the dataset is made;
+// when the skew changes, as either clock is moved, KeepLinkedDatasets (and
+// the Logging clock:advance) makes the dataset again. Google documents a
+// 7-day grace period after a retention is shortened, in which expired
+// entries "aren't deleted" but "You can't query or view" them
+// (docs.cloud.google.com/logging/docs/buckets): here they leave the views
+// at once, as they leave ListLogEntries. A log view filter
 // CloudBurrow does not evaluate is refused UNIMPLEMENTED on a linked bucket
 // (by CreateLink, CreateView and UpdateView), since its view could not
 // hold what the log view holds.
@@ -93,6 +105,12 @@ const LinkedViewsColumn = "_cloudburrow_views"
 // its query.
 type LinkedView struct {
 	ID, Query string
+}
+
+// LinkedClock is a LinkedDatasets that also reads BigQuery's clock, the one
+// CURRENT_TIMESTAMP() reads in a view (#1602).
+type LinkedClock interface {
+	Now(ctx context.Context) (time.Time, error)
 }
 
 // LinkedDatasets makes and fills linked datasets in the instance's
@@ -296,6 +314,9 @@ type linkSync struct {
 	// entries stored after is not.
 	snap sync.RWMutex
 	gen  map[string]uint64
+	// skew is, by dataset, how far BigQuery's clock was ahead of the
+	// Logging clock when its views were made (#1602). Guarded by mu.
+	skew map[string]time.Duration
 }
 
 // hold read-locks snap, for WriteLogEntries to store entries under, and
@@ -392,15 +413,51 @@ func linkedColumns() string {
 }
 
 // viewQueries are the dataset's views: one per log view, of the rows that
-// list it, inside the bucket's retention.
-func viewQueries(project, dataset string, views []bucketView, days int32) []LinkedView {
+// list it, inside the bucket's retention by the Logging clock, which is
+// BigQuery's CURRENT_TIMESTAMP() less skew (#1602).
+func viewQueries(project, dataset string, views []bucketView, days int32, skew time.Duration) []LinkedView {
+	now := "CURRENT_TIMESTAMP()"
+	if s := int64(skew / time.Second); s != 0 {
+		now = fmt.Sprintf("TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL %d SECOND)", s)
+	}
 	out := make([]LinkedView, 0, len(views))
 	for _, v := range views {
 		out = append(out, LinkedView{ID: v.id, Query: fmt.Sprintf(
-			"SELECT %s FROM `%s.%s.%s` WHERE '%s' IN UNNEST(`%s`) AND `timestamp` >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL %d DAY)",
-			linkedColumns(), project, dataset, LinkedEntriesTable, v.id, LinkedViewsColumn, days)})
+			"SELECT %s FROM `%s.%s.%s` WHERE '%s' IN UNNEST(`%s`) AND `timestamp` >= TIMESTAMP_SUB(%s, INTERVAL %d DAY)",
+			linkedColumns(), project, dataset, LinkedEntriesTable, v.id, LinkedViewsColumn, now, days)})
 	}
 	return out
+}
+
+// skewSlack is how far a measured skew may move before the views are made
+// again: the measure itself takes a request to BigQuery.
+const skewSlack = 2 * time.Second
+
+// clockSkew is how far BigQuery's clock is ahead of the Logging clock,
+// to the second; ok is false when it cannot be read, and the skew is then
+// 0.
+func (a *Admin) clockSkew(ctx context.Context, l LinkedDatasets) (time.Duration, bool) {
+	c, isClock := l.(LinkedClock)
+	if !isClock {
+		return 0, false
+	}
+	bq, err := c.Now(ctx)
+	if err != nil {
+		return 0, false
+	}
+	return bq.Sub(a.logNow()).Round(time.Second), true
+}
+
+// logNow is the Logging clock (Server.clock), which retention is measured
+// by: now, plus how far its clock:advance moved it.
+func (a *Admin) logNow() time.Time {
+	a.copies.mu.Lock()
+	c := a.clock
+	a.copies.mu.Unlock()
+	if c != nil {
+		return c()
+	}
+	return a.now()
 }
 
 // linkedRows are es, those inside the retention at now, as rows of the
@@ -468,6 +525,7 @@ func (a *Admin) syncLink(ctx context.Context, ref bucketRef, l *loggingpb.Link, 
 	}
 	days := a.retentionDays(ref)
 	key := project + "." + dataset
+	skew, _ := a.clockSkew(ctx, a.linked)
 	a.linkSync.mu.Lock()
 	defer a.linkSync.mu.Unlock()
 	a.copies.mu.Lock()
@@ -488,10 +546,14 @@ func (a *Admin) syncLink(ctx context.Context, ref bucketRef, l *loggingpb.Link, 
 			return linkError(project, dataset, err)
 		}
 	}
-	if err := a.linked.Create(ctx, project, dataset, linkDatasetDescription(lr), linkedSchema(), viewQueries(project, dataset, views, days)); err != nil {
+	if err := a.linked.Create(ctx, project, dataset, linkDatasetDescription(lr), linkedSchema(), viewQueries(project, dataset, views, days, skew)); err != nil {
 		return linkError(project, dataset, err)
 	}
-	rows, ids := linkedRows(entries, views, a.now(), days)
+	if a.linkSync.skew == nil {
+		a.linkSync.skew = map[string]time.Duration{}
+	}
+	a.linkSync.skew[key] = skew
+	rows, ids := linkedRows(entries, views, a.logNow(), days)
 	if err := appendRows(ctx, a.linked, project, dataset, rows, ids); err != nil {
 		if fresh {
 			_ = a.linked.Delete(ctx, project, dataset)
@@ -548,8 +610,10 @@ func (a *Admin) allLinks() []linkRef {
 
 // EnsureLinkedDatasets makes again, and fills, each link's dataset that
 // BigQuery no longer has: after an emulator restart, which loses what the
-// emulator held, or an instance's restart with a new emulator. It reports
-// how many it made.
+// emulator held, or an instance's restart with a new emulator. It also
+// makes again each dataset whose views measure retention by a skew of the
+// two clocks that is no longer theirs, or that this process did not make
+// (#1602). It reports how many it made.
 func (a *Admin) EnsureLinkedDatasets(ctx context.Context) int {
 	a.mu.Lock()
 	l, refs := a.linked, a.allLinks()
@@ -558,6 +622,11 @@ func (a *Admin) EnsureLinkedDatasets(ctx context.Context) int {
 		return 0
 	}
 	made := 0
+	var skew time.Duration
+	measured := false
+	if len(refs) > 0 {
+		skew, measured = a.clockSkew(ctx, l) // once: a read of BigQuery's clock is a request
+	}
 	for _, ref := range refs {
 		a.mu.Lock()
 		link, err := a.getLink(ref)
@@ -566,16 +635,33 @@ func (a *Admin) EnsureLinkedDatasets(ctx context.Context) int {
 			continue
 		}
 		project, dataset := linkedDataset(link)
-		if ok, err := l.Exists(ctx, project, dataset); err != nil || ok {
-			continue // BigQuery not answering (yet), or the dataset is there
+		ok, err := l.Exists(ctx, project, dataset)
+		if err != nil {
+			continue // BigQuery not answering (yet)
+		}
+		if ok && !a.skewMoved(skew, measured, project+"."+dataset) {
+			continue // the dataset is there, its views by the clocks' skew
 		}
 		a.mu.Lock()
-		if _, err := a.getLink(ref); err == nil && a.syncLink(ctx, ref.bucket, link, true) == nil {
+		if _, err := a.getLink(ref); err == nil && a.syncLink(ctx, ref.bucket, link, !ok) == nil {
 			made++
 		}
 		a.mu.Unlock()
 	}
 	return made
+}
+
+// skewMoved is whether the dataset key's views were made by a skew of
+// BigQuery's clock over the Logging clock other than skew, or were not
+// made by this process. A skew that was not measured has not moved.
+func (a *Admin) skewMoved(skew time.Duration, measured bool, key string) bool {
+	if !measured {
+		return false
+	}
+	a.linkSync.mu.Lock()
+	made, known := a.linkSync.skew[key]
+	a.linkSync.mu.Unlock()
+	return !known || (skew-made).Abs() > skewSlack
 }
 
 // KeepLinkedDatasets runs EnsureLinkedDatasets now and every period until
@@ -674,7 +760,7 @@ func (s *Server) linkWrites(es []*loggingpb.LogEntry, routes map[*loggingpb.LogE
 			}
 		}
 	}
-	now := s.now()
+	now := s.clock()
 	s.d.wg.Add(1)
 	go func() {
 		defer s.d.wg.Done()

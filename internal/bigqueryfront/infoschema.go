@@ -41,18 +41,19 @@ var unbuiltInfoSchema = map[string]bool{
 	"TABLE_CONSTRAINTS": true, "KEY_COLUMN_USAGE": true, "CONSTRAINT_COLUMN_USAGE": true,
 	"SEARCH_INDEXES": true, "SEARCH_INDEX_COLUMNS": true, "SEARCH_INDEX_OPTIONS": true,
 	"VECTOR_INDEXES": true, "VECTOR_INDEX_COLUMNS": true, "VECTOR_INDEX_OPTIONS": true,
-	"SCHEMATA_OPTIONS": true,
 }
 
 // regionOnlyInfoSchema are the views BigQuery documents region-qualified
 // only ("Queries against this view must include a region qualifier",
 // https://cloud.google.com/bigquery/docs/information-schema-object-privileges,
-// -datasets-schemata-links): a dataset-qualified reference to one is
-// refused 400 invalidQuery (#1458; the wording is BigQuery's documented
-// rule, the error's own text UNVERIFIED). Their region forms are built
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-object-privileges
-// (infoschemaprivileges.go).
-var regionOnlyInfoSchema = map[string]bool{"OBJECT_PRIVILEGES": true, "SCHEMATA_LINKS": true}
+// -datasets-schemata-links, and since #1595 -datasets-schemata-options,
+// read 2026-10-17, whose scopes are the project's and a region's only): a
+// dataset-qualified reference to one is refused 400 invalidQuery (#1458;
+// the wording is BigQuery's documented rule, the error's own text
+// UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/bigquery/docs/information-schema-object-privileges>)).
+// Their region forms are built in infoschemaprivileges.go and
+// infoschemaschemata.go.
+var regionOnlyInfoSchema = map[string]bool{"OBJECT_PRIVILEGES": true, "SCHEMATA_LINKS": true, "SCHEMATA_OPTIONS": true}
 
 // engineInfoSchema are the views the engine serves itself.
 var engineInfoSchema = map[string]bool{"TABLES": true, "COLUMNS": true, "TABLE_OPTIONS": true}
@@ -768,12 +769,21 @@ func parametersRows(project, dataset string, def map[string]any) [][]string {
 	if rt := returnType(def); rt != "" {
 		rows = append(rows, append(append([]string{}, h...), "0", "NULL", sqlString("YES"), "NULL", sqlString(rt), "NULL", "NULL"))
 	}
+	procedure := strings.EqualFold(str(def, "routineType"), "PROCEDURE")
 	for i, a := range arguments(def) {
-		mode := strings.ToUpper(str(a, "mode"))
-		if mode == "" {
-			mode = "IN"
+		// A procedure's argument is IN, OUT or INOUT; a function's is
+		// NULL, as the PARAMETERS page's example row of a function
+		// argument is (information-schema-parameters, read 2026-10-17;
+		// #1595).
+		mode := "NULL"
+		if procedure {
+			m := strings.ToUpper(str(a, "mode"))
+			if m == "" {
+				m = "IN"
+			}
+			mode = sqlString(m)
 		}
-		rows = append(rows, append(append([]string{}, h...), strconv.Itoa(i+1), sqlString(mode), sqlString("NO"),
+		rows = append(rows, append(append([]string{}, h...), strconv.Itoa(i+1), mode, sqlString("NO"),
 			sqlOrNull(str(a, "name")), sqlString(argumentType(a)), "NULL", "NULL"))
 	}
 	return rows

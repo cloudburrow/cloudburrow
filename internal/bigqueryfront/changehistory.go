@@ -43,16 +43,21 @@ import (
 // with the time of its transaction, kept seven days. The front checks
 // the call as BigQuery does and writes it as a subquery of the change
 // table, the window's rows, and runs the query so; the job keeps the
-// statement the client sent. Its costs: every write to every table is
-// written twice (CHANGES needs no history of a table without the option,
-// but APPENDS and time travel read any table's, and the option can be set
-// later), and a DELETE or TRUNCATE copies the deleted rows; what is older
-// than the dataset's time travel window is let go of (#1503,
-// changehistoryretention.go).
-// Measured (#1466, the engine alone, 50,000 rows inserted, 10,000 updated
-// and 10,000 deleted): the same insert time (the analysis dominates), an
-// UPDATE and a DELETE about three times as long, and a database about
-// five times as large. It stays: recording only once a table has the
+// statement the client sent. Its costs: every table keeps a history
+// (CHANGES needs none of a table without the option, but APPENDS and time
+// travel read any table's, and the option can be set later), and a DELETE
+// or TRUNCATE copies the deleted rows; what is older than the dataset's
+// time travel window is let go of (#1503, changehistoryretention.go).
+// Since #1597 (googlesqlite patch 0074) a row inserted or updated is not
+// copied into the change table while it is unchanged in the table: its
+// record is pending, its values the row's, until the row changes again
+// (the change's trigger writes the old values in) or a query names the
+// change table, which every read here does (the engine reads the pending
+// values from the table first). Measured (the engine alone, 50,000 rows
+// inserted, 10,000 updated and 10,000 deleted): the same insert time (the
+// analysis dominates), an UPDATE and a DELETE a fifth to two fifths
+// slower than with whole copies, and a database of 39.7 MB rather than
+// 51.9 (16.3 with no history). Recording only once a table has the
 // option, or is read with APPENDS, would leave APPENDS and time travel
 // without the rows before.
 //

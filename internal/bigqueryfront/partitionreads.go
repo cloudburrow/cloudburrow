@@ -224,6 +224,9 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 			f.send(r, http.MethodDelete, tablePath(resultsDataset, id), nil)
 		}
 	}()
+	// The spans of q.Query whose parameters the rewritten query no longer
+	// names.
+	var dropped [][2]int
 	for _, tr := range reads {
 		ref := fmt.Sprintf("%s:%s.%s", project, tr.dataset, tr.table)
 		// FOR SYSTEM_TIME AS OF (#1276).
@@ -243,11 +246,22 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 			if !ok {
 				return false // not found: the engine's own error
 			}
-			past, code, msg := f.systemTime(r, q, tr.dataset, ref, m, expr)
+			// The time's own statement carries only the parameters expr
+			// names.
+			at := q
+			from, to := tr.stmt[k+4].pos, tr.stmt[end-1].end
+			at.QueryParameters = paramsWhere(q, func(pos int) bool { return pos >= from && pos < to })
+			past, code, msg := f.systemTime(r, at, tr.dataset, ref, m, expr)
 			if code == 0 && past != 0 {
 				var text string
+				held := len(scratches)
 				if text, code, msg = f.historyRead(r, tr, m, ref, past, expr, &scratches); code == 0 {
 					edits = append(edits, edit{tr.stmt[tr.at].pos, tr.stmt[tr.next-1].end, text})
+				}
+				if len(scratches) > held {
+					// Read from a scratch table: the query no longer names
+					// expr's parameters (#1458).
+					dropped = append(dropped, [2]int{from, to})
 				}
 			}
 			if code != 0 {
@@ -298,7 +312,25 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 		return true
 	}
 	client := jobText{query: q.Query}
+	if len(q.QueryParameters) == 0 {
+		dropped = nil
+	}
+	if len(dropped) > 0 {
+		client.params, client.paramMode, client.paramsSet = q.QueryParameters, q.ParameterMode, true
+		q.QueryParameters = paramsWhere(q, func(pos int) bool {
+			for _, d := range dropped {
+				if pos >= d[0] && pos < d[1] {
+					return false
+				}
+			}
+			return true
+		})
+	}
 	q.Query = sql
+	if len(dropped) > 0 && !setQueryParameters(r, insert, q) {
+		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+		return true
+	}
 	rec := newRecorder()
 	f.runQuery(rec, r, q, insert)
 	f.clientText(w, rec, client)

@@ -41,7 +41,7 @@ func TestTreeShapExact(t *testing.T) {
 	o.ModelType, o.LabelCols, o.MaxIterations = "BOOSTED_TREE_REGRESSOR", []string{"y"}, 3
 	o.Set = []string{"model_type", "input_label_cols", "max_iterations"}
 	applyTreeDefaults(&o)
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}

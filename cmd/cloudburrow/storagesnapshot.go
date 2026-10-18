@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
@@ -21,6 +22,9 @@ import (
 // key secrets are left out by the server, so the archive holds no secret.
 type builtinStorageSnapshotter struct {
 	tunnel *netfwd.Forwarder
+	// project is the instance's: an archive from before the builtin server
+	// does not name a bucket's project, and its buckets are created in this.
+	project string
 }
 
 func (s *builtinStorageSnapshotter) Name() string { return "storage" }
@@ -80,6 +84,9 @@ func (s *builtinStorageSnapshotter) Import(ctx context.Context, r admin.EntryRea
 	}
 	// state.json first, then the blobs, as the server reads them.
 	names := r.List("")
+	if !slices.Contains(names, "state.json") && slices.Contains(names, legacyBucketsEntry) {
+		return s.importLegacy(ctx, r)
+	}
 	sort.SliceStable(names, func(i, j int) bool { return names[i] == "state.json" && names[j] != "state.json" })
 	pr, pw := io.Pipe()
 	go func() {
