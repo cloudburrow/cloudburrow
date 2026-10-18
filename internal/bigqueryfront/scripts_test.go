@@ -33,6 +33,9 @@ type jobsEmulator struct {
 	// deleted are the jobs.delete requests' job IDs, in order. The jobs
 	// stay in jobs and order, as an engine's would if its delete failed.
 	deleted []string
+	// msTimes gives each job its times in milliseconds, as the engine
+	// does since bigquery-emulator patch 0013 (jobrecords.go).
+	msTimes bool
 }
 
 func (e *jobsEmulator) record(job map[string]any) map[string]any {
@@ -48,6 +51,10 @@ func (e *jobsEmulator) record(job map[string]any) map[string]any {
 	}
 	id := ref["jobId"].(string)
 	job["status"] = map[string]any{"state": "DONE"}
+	if e.msTimes {
+		ms := fmt.Sprint(1790000000000 + int64(e.n)*1000)
+		job["statistics"] = map[string]any{"creationTime": ms, "startTime": ms, "endTime": ms}
+	}
 	if e.jobs == nil {
 		e.jobs = map[string]map[string]any{}
 	}

@@ -49,9 +49,9 @@ func TestEngineIdleTimeoutMatchesPatch(t *testing.T) {
 	}
 }
 
-// countingEngine is an engine whose server closes a connection idle for
+// idleClosingEngine is an engine whose server closes a connection idle for
 // idle, and which counts the POSTs it runs.
-func countingEngine(t *testing.T, idle time.Duration) (*httptest.Server, *atomic.Int32) {
+func idleClosingEngine(t *testing.T, idle time.Duration) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var runs atomic.Int32
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func TestProxyStaleConnection(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			engine, runs := countingEngine(t, serverIdle)
+			engine, runs := idleClosingEngine(t, serverIdle)
 			h := proxyThrough(strings.TrimPrefix(engine.URL, "http://"), t.Logf, tc.transport)
 			if rec := postInsert(h); rec.Code != http.StatusOK {
 				t.Fatalf("first insert: %d %s", rec.Code, rec.Body)
@@ -168,7 +168,7 @@ func TestProxyRetriesUnsentPOST(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			engine, runs := countingEngine(t, time.Minute)
+			engine, runs := idleClosingEngine(t, time.Minute)
 			var mu sync.Mutex
 			var flags []*atomic.Bool
 			dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
