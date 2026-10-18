@@ -511,6 +511,15 @@ var contrastPairings = []pairing{
 	{"var(--error)", []string{"var(--surface-alt)"}, nonTextMin,
 		".meter-fill.is-high against .meter-track"},
 
+	// Non-text: a text field's or select's edge (WCAG 1.4.11), against the
+	// surfaces fields sit on, measured in the browser too (#1604).
+	{"var(--field-border)", []string{"var(--surface)"}, nonTextMin,
+		".form-row input/select/textarea, .filter, .actions select, .page-size select, .query-editor, .search input"},
+	{"var(--field-border)", []string{"var(--bg)"}, nonTextMin,
+		"a field on the page background"},
+	{"var(--field-border)", []string{"var(--surface-alt)"}, nonTextMin,
+		"a field on a filled card or panel"},
+
 	// Non-text: status marks. Each carries a label too, but the dot is the
 	// part that is scanned for.
 	{"var(--ok)", []string{"var(--surface)"}, nonTextMin, ".status[data-state=ok]::before, .timeline-bar"},

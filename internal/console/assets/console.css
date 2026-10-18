@@ -14,6 +14,12 @@
   --surface: #ffffff;
   --surface-alt: #f8f9fa;
   --border: #dadce0;
+  /* A text field's or select's own edge, held to 3:1 against what it sits on
+     (WCAG 1.4.11): --border, a divider colour, measured 1.37:1 on white, so
+     an empty field was a box only to someone who could already see it was
+     one. Dividers keep --border. TestTokensMeetContrast, and the browser
+     suite's TestContrastInBothThemes (#1604). */
+  --field-border: #80868b;
   --text: #202124;
   --text-muted: #5f6368;
   /* #1967d2 rather than #1a73e8: the lighter blue measured 4.51:1 on white,
@@ -89,6 +95,7 @@
   --surface: #292a2d;
   --surface-alt: #35363a;
   --border: #5f6368;
+  --field-border: #8e9196;
   --text: #e8eaed;
   /* #a0a6ac rather than #9aa0a6: the lighter hover layer took muted text on
      a hovered row to 4.35:1. TestTokensMeetContrast. */
@@ -124,6 +131,7 @@
     --surface: #292a2d;
     --surface-alt: #35363a;
     --border: #5f6368;
+    --field-border: #8e9196;
     --text: #e8eaed;
     --text-muted: #a0a6ac;
     --accent: #8ab4f8;
@@ -173,6 +181,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   border-radius: var(--radius-control);
 }
 
+/* Placeholders were Chrome's own #757575 at its default opacity: 4.37:1 on
+   the search field's fill and 2.62:1 on the dark one, below the 4.5:1 any
+   text needs (WCAG 1.4.3; #1604). */
+::placeholder { color: var(--text-muted); opacity: 1; }
+
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -214,7 +227,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .project-picker select {
   background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-control);
+  border: 1px solid var(--field-border); border-radius: var(--radius-control);
   height: 36px; padding: 0 10px; font: inherit; max-width: 220px;
 }
 .project-picker select:hover { background: var(--state-hover); }
@@ -230,12 +243,13 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .search input {
   width: 100%; height: 40px; padding: 0 12px 0 44px; font: inherit;
   background: var(--surface-alt); color: var(--text);
-  /* Filled, borderless, and only bordered on focus — the search field is the
-     one control in the bar that is a surface rather than a button. */
-  border: 1px solid transparent; border-radius: var(--radius);
+  /* Filled, and edged in the field colour: the fill alone measured 1.05:1
+     against the bar, under the 3:1 a control's boundary needs (WCAG 1.4.11),
+     so the field was found by its placeholder and icon only (#1604). */
+  border: 1px solid var(--field-border); border-radius: var(--radius);
 }
 .search input:hover { background: var(--surface-alt); box-shadow: var(--shadow-menu); }
-.search input:focus { background: var(--surface); border-color: var(--border); outline: none;
+.search input:focus { background: var(--surface); border-color: var(--field-border); outline: none;
                       box-shadow: var(--shadow-menu); }
 /* The rule above outranks the global :focus-visible, so without this the
    toolbar's search field had no focus ring at all. */
@@ -452,10 +466,12 @@ h1 { font-size: var(--text-title-size); font-weight: 400;
 .card dt { color: var(--text-muted); }
 .card dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 
-.actions { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+/* Wraps, so a bar of filters reflows at 320px rather than pushing the page
+   sideways: the Logs Explorer's ran to 1,492px (WCAG 1.4.10; #1604). */
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
 .filter { flex: 1 1 auto; max-width: 360px; height: 36px; padding: 0 12px; font: inherit;
           background: var(--surface); color: var(--text);
-          border: 1px solid var(--border); border-radius: var(--radius-control); }
+          border: 1px solid var(--field-border); border-radius: var(--radius-control); }
 
 button.primary, button.secondary {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -629,6 +645,10 @@ td a { color: var(--accent); }
      comes later in this file: unscoped, this and the 599px limit below never
      applied, and at 360px a long project name pushed the page sideways (#700). */
   .project-picker .picker-button { max-width: 180px; }
+  /* And it is the picker that gives way when the bar is still too wide: at
+     640px (1280px at 200% zoom) a long project name held it at full width
+     and the bar ran 72px past the window (WCAG 1.4.4, 1.4.10; #1604). */
+  .project-picker, .project-picker .picker-button { min-width: 0; }
 }
 
 @media (max-width: 599px) {
@@ -649,8 +669,22 @@ td a { color: var(--accent); }
   .avatar { width: 28px; height: 28px; }
   /* The picker gives up width before anything gives up its place: the
      project name ellipsises, and the control stays where it is. */
-  .project-picker { min-width: 0; }
-  .project-picker .picker-button { max-width: 96px; min-width: 0; padding: 0 8px; }
+  .project-picker .picker-button { max-width: 96px; padding: 0 8px; }
+  /* The picker's menu is wider than the space right of the picker, so it
+     spans the window under the bar instead of hanging off its right edge. */
+  .project-picker .picker-panel {
+    position: fixed; left: 8px; right: 8px; top: calc(var(--toolbar-h) + 4px);
+    min-width: 0; max-width: none;
+  }
+  .toolbar .toolbar-end .panel { max-width: calc(100vw - 16px); }
+}
+
+/* 320px is the width WCAG 1.4.10 reflows to (1280px at 400% zoom): every
+   control in the bar stays, on tighter spacing (#1604). */
+@media (max-width: 359px) {
+  .toolbar { gap: 2px; padding: 0 4px; }
+  .icon-button { width: 32px; }
+  .project-picker .picker-button { padding: 0 6px; }
 }
 
 /* --- create dialog and row actions ---------------------------------- */
@@ -702,7 +736,7 @@ td a { color: var(--accent); }
 .form-row textarea {
   width: 100%; padding: 8px 12px; font: inherit;
   background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  border: 1px solid var(--field-border); border-radius: var(--radius);
 }
 .form-row textarea { resize: vertical; min-height: 96px; }
 .form-help { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--text-muted); }
@@ -942,7 +976,7 @@ td.mono { word-break: break-word; }
 .actions select {
   padding: 8px 12px; font: inherit;
   background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  border: 1px solid var(--field-border); border-radius: var(--radius);
 }
 
 /* AI Playground. The output is a live region that grows token by token, so it
@@ -952,7 +986,7 @@ td.mono { word-break: break-word; }
   box-sizing: border-box;
   font: inherit;
   padding: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
@@ -1228,7 +1262,7 @@ tbody tr.is-selected { background: var(--nav-selected); }
 .page-size select {
   height: 32px; padding: 0 6px; font: inherit;
   background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-control);
+  border: 1px solid var(--field-border); border-radius: var(--radius-control);
 }
 .page-range { font-variant-numeric: tabular-nums; }
 .table-footer .icon-button { width: 32px; height: 32px; }
@@ -1280,7 +1314,7 @@ thead th {
 .query-editor {
   width: 100%; padding: 12px; resize: vertical; min-height: 120px;
   background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius);
+  border: 1px solid var(--field-border); border-radius: var(--radius);
   font-family: var(--mono); font-size: var(--text-caption-size);
   line-height: 1.5; tab-size: 2;
 }
