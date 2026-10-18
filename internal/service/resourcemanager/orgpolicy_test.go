@@ -2,8 +2,10 @@ package resourcemanager
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
@@ -124,5 +126,43 @@ func TestV1OrgPolicyOnFoldersAndTheOrganization(t *testing.T) {
 		if code(err) != http.StatusNotFound {
 			t.Errorf("an absent folder's or organization's policy = %v; want 404", err)
 		}
+	}
+}
+
+// TestOrgPolicyEtagInTheURLSafeAlphabet: gcloud's apitools decodes the v1
+// etag (a bytes field) and sends it back URL-safe, so an etag with a "/" or
+// "+" comes back with "_" or "-". It names the same policy and is taken;
+// an etag of other bytes is still ABORTED. main's CI run 39049056201 failed
+// TestGcloudFolderAndOrganizationOrgPolicies on such an etag.
+func TestOrgPolicyEtagInTheURLSafeAlphabet(t *testing.T) {
+	reg, _, _ := startAPI(t)
+	f, err := reg.CreateFolder(OrganizationName, "Etags")
+	if err != nil {
+		t.Fatal(err)
+	}
+	constraint := ""
+	for i := 0; constraint == ""; i++ {
+		c := fmt.Sprintf("constraints/custom.etag%d", i)
+		if e := policyEtag([]byte(c)); strings.ContainsAny(e, "+/") {
+			constraint = c
+		}
+	}
+	cur, err := reg.OrgPolicy(f.Name, constraint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	urlSafe := strings.NewReplacer("+", "-", "/", "_").Replace(cur.Etag)
+	set, err := reg.SetOrgPolicy(f.Name, &crmv1.OrgPolicy{Constraint: constraint, Etag: urlSafe,
+		ListPolicy: &crmv1.ListPolicy{AllowedValues: []string{"in:us-locations"}}})
+	if err != nil {
+		t.Fatalf("SetOrgPolicy with the etag %q (the current %q, URL-safe): %v", urlSafe, cur.Etag, err)
+	}
+	if _, err := reg.SetOrgPolicy(f.Name, &crmv1.OrgPolicy{Constraint: constraint, Etag: urlSafe,
+		ListPolicy: &crmv1.ListPolicy{AllowedValues: []string{"in:eu-locations"}}}); err == nil {
+		t.Error("SetOrgPolicy with the previous etag succeeded; want ABORTED")
+	}
+	stale := strings.NewReplacer("+", "-", "/", "_").Replace(set.Etag)
+	if err := reg.ClearOrgPolicy(f.Name, constraint, stale); err != nil {
+		t.Errorf("ClearOrgPolicy with the current etag, URL-safe: %v", err)
 	}
 }

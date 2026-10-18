@@ -611,7 +611,7 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) {
 		return nil, apierror.Unimplemented("server CA modes are not served for a Memorystore for Valkey instance here")
 	}
-	primary, err := cirPrimary(in, mode, tlsOn)
+	primary, err := cirPrimary(in, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -798,9 +798,6 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 			}
 			if valkeyVersions[v] <= valkeyVersions[vf.EngineVersion] {
 				return nil, apierror.InvalidArgument("engine_version %q is not a later version than %s: an instance is only upgraded", v, vf.EngineVersion)
-			}
-			if _, ok := c.rt.(Shell); !ok {
-				return nil, apierror.Unimplemented("engine upgrades are not supported by this instance's servers")
 			}
 			upgradeTo = v
 		}

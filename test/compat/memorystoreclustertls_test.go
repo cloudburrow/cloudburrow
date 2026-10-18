@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -65,7 +66,9 @@ func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			_ = op.Wait(wctx)
 		}
 	})
 	cl, err := op.Wait(memorystoreWait(t))
@@ -139,7 +142,9 @@ func TestMemorystoreValkeyInTransitEncryption(t *testing.T) {
 		}
 		t.Cleanup(func() {
 			if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-				_ = op.Wait(h.Context())
+				wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				_ = op.Wait(wctx)
 			}
 		})
 		inst, err := op.Wait(memorystoreWait(t))

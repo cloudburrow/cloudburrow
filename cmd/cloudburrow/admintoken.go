@@ -19,6 +19,29 @@ import (
 // bundle. A workload in the cluster that reaches the control port through
 // Docker Desktop's host.docker.internal gets 401 without it.
 
+// privateInstanceDir creates the instance's state directory readable by
+// its owner only, and tightens one that is not: it holds the admin token,
+// the generated key, the kubeconfig and up.log, and os.MkdirAll leaves the
+// mode of a directory that already exists alone, so one an older version,
+// a umask or the user made 0755 would stay readable by every local user
+// (#1586).
+func privateInstanceDir(cfg config.Config) error {
+	dir := cfg.InstanceDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+		if err := os.Chmod(dir, perm&0o700); err != nil {
+			return fmt.Errorf("make %s owner-only: %w", dir, err)
+		}
+	}
+	return nil
+}
+
 func adminTokenPath(cfg config.Config) string { return filepath.Join(cfg.InstanceDir(), "admin-token") }
 
 // newAdminToken mints a token: 32 random bytes, hex.

@@ -46,6 +46,7 @@ func defaultLogsClient(ctx context.Context, t *testing.T, h *Harness) *storage.C
 // bucket list.
 func TestCloudBuildDefaultLogsBucket(t *testing.T) {
 	h := New(t)
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage) // the build's log goes to a bucket
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}

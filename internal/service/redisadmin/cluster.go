@@ -627,6 +627,10 @@ func (r *clusterRecord) spec(server string) Spec {
 	cfg := serverConfigs(r.RedisConfigs)
 	tls := func(s Spec) Spec {
 		s.TransitCA, s.TransitCAKey, s.TransitTrust = r.TransitCA, r.TransitCAKey, r.TransitCA
+		if s.TransitCA != "" {
+			// Cross-instance replication's members' CAs (crossinstance.go).
+			s.TransitTrust += r.peerCAs()
+		}
 		if r.AdminPassword != "" {
 			// The default user's password; the replicas sync with it.
 			s.Password = r.AdminPassword

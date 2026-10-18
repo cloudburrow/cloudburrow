@@ -133,6 +133,29 @@ const (
 	CloudSQLMySQL80Image    = "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"           // 8.0.46
 )
 
+// The Percona XtraBackup images a Cloud SQL for MySQL instance's physical
+// external sync (#1570) runs as a Job, the official percona/percona-xtrabackup
+// of the instance's major version, pinned by the index digest, which
+// carries linux/amd64 and linux/arm64 (checked with docker buildx
+// imagetools inspect, 2026-10-17): XtraBackup 8.0.35-36 and 8.4.0-7. A
+// node pulls one only when a physical sync runs.
+const (
+	XtraBackup80Image = "percona/percona-xtrabackup:8.0@sha256:368c3429c4ccddc46eb88e7f6afb0dd31db28e5611a053f4bb6401e4251a3319"
+	XtraBackup84Image = "percona/percona-xtrabackup:8.4@sha256:bf1478c188271b2478faddb92a27e8378364b672b8e399c0df1c17fef8cb0ceb"
+)
+
+// XtraBackupImage is the XtraBackup image for a MySQL databaseVersion, or
+// "" for one it has none for.
+func XtraBackupImage(version string) string {
+	switch {
+	case strings.HasPrefix(version, "MYSQL_8_0"):
+		return XtraBackup80Image
+	case strings.HasPrefix(version, "MYSQL_8_4"):
+		return XtraBackup84Image
+	}
+	return ""
+}
+
 // CloudSQLVersionImages are the images of the Cloud SQL databaseVersion
 // values a created instance can have, by that value.
 var CloudSQLVersionImages = map[string]string{
@@ -224,12 +247,14 @@ func withState(f *Front) *Front {
 	return f
 }
 
-func callFront(port, upstream int) *Front {
+// service is the Service's name, which pods dial the front by and its Host
+// check passes (#1587).
+func callFront(service string, port, upstream int) *Front {
 	return &Front{
 		Name:       "front",
 		PullPolicy: "Never",
 		Args: []string{"call-front", "--listen", fmt.Sprintf("0.0.0.0:%d", port),
-			"--upstream", fmt.Sprintf("127.0.0.1:%d", upstream)},
+			"--upstream", fmt.Sprintf("127.0.0.1:%d", upstream), "--service", service},
 		UpstreamPort: upstream,
 	}
 }
@@ -250,7 +275,7 @@ func firestoreBackend(project string) Backend {
 // alone; and PartitionQuery, which it does not serve (internal/queryfront,
 // #1405).
 func firestoreFront() *Front {
-	f := callFront(FirestorePort, FirestoreEmulatorPort)
+	f := callFront("firestore", FirestorePort, FirestoreEmulatorPort)
 	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore")
 	return withState(f)
 }
@@ -260,7 +285,7 @@ func firestoreFront() *Front {
 // #1405), and recording the named databases calls name, for a project's
 // purge (internal/callfront, #1550).
 func datastoreFront() *Front {
-	f := callFront(DatastorePort, DatastoreEmulatorPort)
+	f := callFront("datastore", DatastorePort, DatastoreEmulatorPort)
 	f.Args = append(f.Args, "--queries", "datastore", "--datastore-databases")
 	return f
 }
@@ -366,7 +391,7 @@ func bigtableBackend(project string) Backend {
 // front (#1331), on a second Service port, so the calls the Terraform
 // provider makes over REST are in the same call log as the clients' gRPC.
 func spannerBackend() Backend {
-	front := callFront(SpannerPort, SpannerEmulatorPort)
+	front := callFront("spanner", SpannerPort, SpannerEmulatorPort)
 	front.Args = append(front.Args, "--rest-listen", fmt.Sprintf("0.0.0.0:%d", SpannerRESTPort),
 		"--rest-upstream", fmt.Sprintf("127.0.0.1:%d", SpannerEmulatorRESTPort),
 		"--spanner-instances")

@@ -132,7 +132,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Resource Manager first: it is where the projects every other screen is
 	// scoped to come from.
 	if d.projects != nil {
-		providers = append(providers, projectsProvider{registry: d.projects}, hierarchyProvider{registry: d.projects}, tagsProvider{registry: d.projects},
+		h := hierarchyProvider{registry: d.projects}
+		if enabled[config.ServiceLogging] && d.logging != nil {
+			// A folder's and organization's Log router tab (#1572).
+			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
+		}
+		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
 			projectIAMProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {

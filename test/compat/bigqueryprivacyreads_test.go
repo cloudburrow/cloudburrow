@@ -25,9 +25,9 @@ import (
 //     join on its join_allowed_columns of any kind and refuses a CROSS JOIN.
 //
 // What BigQuery does not document stays 501: a read of the view outside
-// its own SELECT WITH AGGREGATION_THRESHOLD (in a subquery or CTE whose
-// rows are not aggregated, through another view), and a JOIN_ANY met only
-// by a LEFT JOIN.
+// its own SELECT WITH AGGREGATION_THRESHOLD in a query with the clause (in
+// a subquery or CTE whose rows are not aggregated). #1517 serves the rest
+// (TestBigQueryPrivacyPolicyRest).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.getQueryResults
 func TestBigQueryPrivacyPolicyReads(t *testing.T) {
@@ -141,17 +141,14 @@ func TestBigQueryPrivacyPolicyReads(t *testing.T) {
 	}
 
 	// What BigQuery does not document stays 501.
-	run("CREATE VIEW `" + d + ".Around` AS SELECT * FROM " + exam)
 	for what, sql := range map[string]string{
-		"a read in a subquery, not aggregated":     "SELECT * FROM (SELECT * FROM " + exam + ")",
-		"a CTE read by the clause":                 "WITH e AS (SELECT * FROM " + exam + ") SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM e",
-		"a view reading the view":                  "SELECT * FROM `" + d + ".Around`",
-		"JOIN_ANY met by a LEFT JOIN only":         "SELECT * FROM " + anyV + " LEFT JOIN " + student + " USING (test_score)",
-		"two clauses in one query":                 "SELECT (" + inner + " LIMIT 1), (" + inner + " LIMIT 1)",
-		"the clause over a subquery of the view":   "SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM (SELECT * FROM " + exam + ")",
-		"a script's read in a subquery, in a turn": "SELECT 1;\nSELECT * FROM (SELECT * FROM " + exam + ")",
+		"a CTE read by the clause":               "WITH e AS (SELECT * FROM " + exam + ") SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM e",
+		"the clause over a subquery of the view": "SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM (SELECT * FROM " + exam + ")",
 	} {
 		_, err := privacyRows(t, c, h, sql, false)
 		wantReason(t, what, err, http.StatusNotImplemented, "notImplemented")
 	}
+	// #1517: with no clause at all, BigQuery's 400, in a script's turn too.
+	_, err = privacyRows(t, c, h, "SELECT 1;\nSELECT * FROM (SELECT * FROM "+exam+")", false)
+	wantReason(t, "a script's read in a subquery, in a turn", err, http.StatusBadRequest, "invalidQuery")
 }

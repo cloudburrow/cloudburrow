@@ -88,7 +88,15 @@ var credentialPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(cbl_[A-Za-z0-9_\-]+)`),
 	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*)(bearer\s+)?\S+`),
 	regexp.MustCompile(`(?i)((?:api[_-]?key|password|secret|token|credential)\s*[:=]\s*)\S+`),
-	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
+	// The same keys as JSON or YAML keys, quoted: "access_token": "...".
+	// The value's quotes are kept, so a JSON document stays parseable (#1586).
+	regexp.MustCompile(`(?i)((?:api[_-]?key|password|secret|token|credential)s?["']\s*:\s*)"[^"]*"`),
+	// A bearer token with no Authorization in front of it, as curl's -H
+	// argument or an error message quotes it (#1586).
+	regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}`),
+	// The whole key, not only its first line: the body is the secret. A
+	// block with no END line is cut to the end of the message (#1586).
+	regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\z)`),
 	regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]+`),
 }
 
@@ -100,7 +108,11 @@ func Redact(message string) string {
 			// The prefix is kept so the line still says what kind of thing
 			// was there; a line that loses its shape loses its meaning.
 			if i := strings.IndexAny(match, ":="); i >= 0 && !strings.HasPrefix(match, "ya29.") &&
-				!strings.HasPrefix(match, "cbl_") && !strings.HasPrefix(match, "eyJ") {
+				!strings.HasPrefix(match, "cbl_") && !strings.HasPrefix(match, "eyJ") &&
+				!strings.HasPrefix(match, "-----BEGIN") {
+				if strings.HasSuffix(match, `"`) && strings.Count(match[i:], `"`) >= 2 {
+					return match[:i+1] + ` "[REDACTED]"`
+				}
 				return match[:i+1] + " [REDACTED]"
 			}
 			return "[REDACTED]"

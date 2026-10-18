@@ -50,6 +50,10 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	// address (#1364). A CA that cannot be read leaves the rest of the API
 	// serving, and connectSettings says why.
 	_ = srv.EnableConnector(cfg.CloudSQLConnectorAddr(), cfg.InstanceDir())
+	// Recorded for `env`, a separate process (#1571).
+	if err := recordCloudSQLConnector(cfg); err != nil && logw != nil {
+		fmt.Fprintf(logw, "cloudsql: recording the connector address: %v\n", err)
+	}
 	srv.SetConnectorOwner(cfg.Name)
 	// Instance writes (#1330): each created instance is a server of its
 	// own in the cluster, kept across `up` when the instance is persistent.

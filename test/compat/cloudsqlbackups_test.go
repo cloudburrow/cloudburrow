@@ -249,6 +249,7 @@ func TestGcloudSQLBackups(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("needs --services cloudsql")
 	}
+	h.Endpoint(EnvSQLAdmin) // gcloud sql backups goes through the Admin API
 	c := pgConnect(t, h, "cloudburrow")
 	exec := func(s string) {
 		t.Helper()

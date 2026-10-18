@@ -395,7 +395,7 @@ no external key manager, and IAM is not enforced. It exists so an application th
 with Cloud KMS can run locally. Never use it to protect real data. See
 [compatibility.md](compatibility.md#cloud-kms--googlecloudkmsv1).
 
-## Console
+## Opt-in emulators and their variables
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
 `--port-spanner` (`9013`, and `--port-spanner-rest` `9022` for its REST API), `--port-bigquery` (`9014`), `--port-bigquery-storage` (`9015`) and
@@ -422,7 +422,7 @@ server trusts every connection. See [cloudsql.md](cloudsql.md#2-what-you-get).
 **Resource Manager v3** is always served, on `--port-resourcemanager` (default `9007`). `env`
 exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT`, to pass to `option.WithEndpoint`, and
 `CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER`. Only the v3 Projects API is served; see
-[compatibility.md](compatibility.md#resource-manager--googlecloudresourcemanagerv3-projects-only).
+[compatibility.md](compatibility.md#resource-manager--googlecloudresourcemanagerv3-projects-folders-organizations-tags-liens).
 
 **BigQuery has no emulator variable in any official client library**, so `env` exports
 CloudBurrow's own: `CLOUDBURROW_BIGQUERY_ENDPOINT` for REST and
@@ -441,6 +441,8 @@ client, err := bigquery.NewClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"),
     option.WithEndpoint(os.Getenv("CLOUDBURROW_BIGQUERY_ENDPOINT")),
     option.WithoutAuthentication())
 ```
+
+## Console
 
 `--port-console` (default `9090`, `CLOUDBURROW_PORT_CONSOLE`) serves the web console, and
 `up` prints the URL. The assets are embedded in the binary, so it works with no network.
@@ -520,6 +522,12 @@ API allows the origin whatever they say. A request with no `Origin`, which is ho
 `gcloud`, Terraform and `curl` call, is never checked. `cloudburrow storage-server` takes the same
 `--cors-allow-origin`. The threat model is in
 [ADR-0004](adr/0004-local-access-and-no-authentication.md) (#677).
+
+Every other listener, the service APIs, the tunnels to the upstream emulators, the metadata
+server, the control port and the console, applies the same origin rule to browser requests
+(#1586): a loopback origin, the listener's own, or one named with `--cors-allow-origin`. Any other
+gets 403 before the request runs, so a page on another site can neither read nor change local
+state. See [security.md](security.md).
 
 ## Credentials and metadata
 
@@ -609,7 +617,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
 | `--hooks-dir` | `CLOUDBURROW_HOOKS_DIR` | `hooksDir` | `.cloudburrow/hooks` | Directory of `ready.d` and `shutdown.d` scripts. The default, or a `hooksDir` from a discovered file, needs [trust](#trust). See [Lifecycle hooks](#lifecycle-hooks). |
 | `--hook-timeout` | `CLOUDBURROW_HOOK_TIMEOUT` | `hookTimeout` | `5m` | Time limit for each hook script; one that runs past it is killed. |
-| `--cors-allow-origin` | `CLOUDBURROW_CORS_ALLOW_ORIGIN` | `storage.corsAllowOrigins` | none (loopback origins only) | A web origin, `scheme://host[:port]`, whose browser requests Cloud Storage answers beyond loopback ones. Repeatable or comma-separated; the variable is comma-separated and the file key a list. A discovered `./cloudburrow.json` cannot set it. See [Browser access to Cloud Storage](#browser-access-to-cloud-storage). |
+| `--cors-allow-origin` | `CLOUDBURROW_CORS_ALLOW_ORIGIN` | `storage.corsAllowOrigins` | none (loopback origins only) | A web origin, `scheme://host[:port]`, whose browser requests Cloud Storage, and every other listener, answer beyond loopback ones. Repeatable or comma-separated; the variable is comma-separated and the file key a list. A discovered `./cloudburrow.json` cannot set it. See [Browser access to Cloud Storage](#browser-access-to-cloud-storage). |
 | `--hook-env` | `CLOUDBURROW_HOOK_ENV` | `hookEnv` | none | Comma-separated variables of `up`'s environment passed to hooks beyond the minimal set. |
 | `--seed-file` | `CLOUDBURROW_SEED_FILE` | `seedFile` | unset | Seed document (the `/admin/seed` body) applied every time `up` starts. See [Admin API](#admin-api). |
 | `--local-ai-model` | — | `localAI.modelPath` | unset | Host path to a `.litertlm` model. Setting it enables the local generation endpoint; unset, nothing is bound. `up` fails at startup if the file does not exist (#602). See [generation.md](generation.md). |
@@ -816,7 +824,7 @@ From the CLI, against the running `up` of the configured instance (`--name`):
 ```sh
 cloudburrow seed seed.json                   # POST /admin/seed; --if-not-exists to repeat safely
 cloudburrow reset                            # POST /admin/reset
-cloudburrow reset --service pubsub --project p
+cloudburrow reset --service pubsub --project dev-project
 cloudburrow reset --reseed                   # reset, then re-apply up's --seed-file
 cloudburrow events --service tasks --limit 20
 cloudburrow events --since 10m --format json # one JSON object per line
@@ -831,10 +839,10 @@ The same with curl:
 ```sh
 TOKEN="Authorization: Bearer $(cat ~/.cloudburrow/cloudburrow/admin-token)"
 curl -H "$TOKEN" -X POST localhost:9000/admin/seed -d '{
-  "components": {"tasks": {"queues": ["projects/p/locations/us-central1/queues/work"]}}
+  "components": {"tasks": {"queues": ["projects/dev-project/locations/us-central1/queues/work"]}}
 }'
 curl -H "$TOKEN" -X POST localhost:9000/admin/reset
-curl -H "$TOKEN" -X POST "localhost:9000/admin/reset?service=pubsub&project=p"
+curl -H "$TOKEN" -X POST "localhost:9000/admin/reset?service=pubsub&project=dev-project"
 curl -H "$TOKEN" "localhost:9000/admin/events?service=tasks&limit=20"
 ```
 
@@ -913,10 +921,14 @@ in its state directory.
 **Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
 Pub/Sub schemas, topics and subscriptions, Secret Manager secrets with their versions, and Cloud
 Scheduler jobs (#600). The schema is
-[`seed.schema.json`](seed.schema.json):
+[`seed.schema.json`](seed.schema.json). A component is seeded only on an instance that serves it,
+and Cloud Scheduler is opt-in, so this one needs an `up` whose `--services` include `scheduler`
+as well as `storage`, `pubsub` and `secretmanager`; on the default services it is refused with
+`unknown component "scheduler"` and nothing is seeded. `$TOKEN` is the header from the curl
+example above:
 
 ```sh
-curl -X POST localhost:9000/admin/seed -d '{"components": {
+curl -H "$TOKEN" -X POST localhost:9000/admin/seed -d '{"components": {
   "storage": {"buckets": [{"name": "assets", "objects": [
     {"name": "config.json", "content": "{\"debug\": true}", "contentType": "application/json"},
     {"name": "logo.png", "contentBase64": "iVBORw0KGgo="}]}]},

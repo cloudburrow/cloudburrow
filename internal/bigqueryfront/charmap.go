@@ -221,7 +221,8 @@ func charMapFormat(charMap, format string) string {
 // the names once their unsupported characters are replaced with
 // underscores, "except periods in Parquet file column names" (#1373,
 // pqOptions.name), and one still refused is 501, as BigQuery does not
-// document how it names it.
+// document how it names it; one refused only for its periods, which the
+// map keeps, is 400 (#1547, below).
 func parquetCharMapNames(file []field, charMap string) (int, string) {
 	m := strings.ToUpper(charMap)
 	check := checkColumnName
@@ -233,10 +234,38 @@ func parquetCharMapNames(file []field, charMap string) (int, string) {
 		return 0, ""
 	}
 	if m == "V1" || m == "V2" {
+		if name := periodOnly(file, check); name != "" {
+			// #1547, UNVERIFIED: "Periods are not replaced by underscores
+			// in Parquet file column names when a column name character
+			// map is used" (Specifying a schema, flexible column names,
+			// read 2026-10-17), a period is not a supported character
+			// ("A period (.)"), and "Load jobs with unsupported characters
+			// in column names fail with an error message": the load fails.
+			return http.StatusBadRequest, fmt.Sprintf("Invalid field name %q of the Parquet file: under "+
+				"columnNameCharacterMap %s, \"Periods are not replaced by underscores in Parquet file column names\", "+
+				"and a column name cannot hold a period.", name, m)
+		}
 		return http.StatusNotImplemented, "under columnNameCharacterMap " + m + " of a file whose column is still refused " +
 			"once its unsupported characters (but periods) are replaced with underscores: " + bad + " BigQuery's " +
 			"documentation does not say how it names such a column (\"Invalid column names will be normalized\")"
 	}
 	return http.StatusBadRequest, bad + " The name is the Parquet file's; columnNameCharacterMap STRICT, the default, " +
 		"refuses it rather than renaming it."
+}
+
+// periodOnly is the first name in fields, at any depth, that check
+// refuses, when it is refused only for its periods (#1547), or "".
+func periodOnly(fields []field, check func(string) string) string {
+	for _, fl := range fields {
+		if check(fl.Name) != "" {
+			if strings.Contains(fl.Name, ".") && check(strings.ReplaceAll(fl.Name, ".", "_")) == "" {
+				return fl.Name
+			}
+			return ""
+		}
+		if n := periodOnly(fl.Fields, check); n != "" {
+			return n
+		}
+	}
+	return ""
 }

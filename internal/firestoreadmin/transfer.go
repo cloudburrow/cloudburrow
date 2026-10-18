@@ -74,6 +74,13 @@ func (a *Admin) docs() (firestorepb.FirestoreClient, error) {
 
 // readAll is every document of the database dbName, in name order.
 func (a *Admin) readAll(ctx context.Context, dbName string) ([]*firestorepb.Document, error) {
+	return a.readAllAt(ctx, dbName, nil, nil)
+}
+
+// readAllAt is readAll in the emulator's transaction tx, or at readTime,
+// when either is set: the emulator keeps each document's versions, and
+// locks what a transaction reads.
+func (a *Admin) readAllAt(ctx context.Context, dbName string, tx []byte, readTime *timestamppb.Timestamp) ([]*firestorepb.Document, error) {
 	ctx = asOwner(ctx)
 	c, err := a.docs()
 	if err != nil {
@@ -85,7 +92,11 @@ func (a *Admin) readAll(ctx context.Context, dbName string) ([]*firestorepb.Docu
 		var ids []string
 		tok := ""
 		for {
-			r, err := c.ListCollectionIds(ctx, &firestorepb.ListCollectionIdsRequest{Parent: parent, PageToken: tok, PageSize: 300})
+			lr := &firestorepb.ListCollectionIdsRequest{Parent: parent, PageToken: tok, PageSize: 300}
+			if readTime != nil {
+				lr.ConsistencySelector = &firestorepb.ListCollectionIdsRequest_ReadTime{ReadTime: readTime}
+			}
+			r, err := c.ListCollectionIds(ctx, lr)
 			if err != nil {
 				return status.Errorf(status.Code(err), "listing the collections of %s: %v", parent, status.Convert(err).Message())
 			}
@@ -98,8 +109,15 @@ func (a *Admin) readAll(ctx context.Context, dbName string) ([]*firestorepb.Docu
 		for _, id := range ids {
 			tok := ""
 			for {
-				r, err := c.ListDocuments(ctx, &firestorepb.ListDocumentsRequest{Parent: parent, CollectionId: id,
-					PageSize: 300, PageToken: tok, ShowMissing: true})
+				dr := &firestorepb.ListDocumentsRequest{Parent: parent, CollectionId: id,
+					PageSize: 300, PageToken: tok, ShowMissing: true}
+				switch {
+				case tx != nil:
+					dr.ConsistencySelector = &firestorepb.ListDocumentsRequest_Transaction{Transaction: tx}
+				case readTime != nil:
+					dr.ConsistencySelector = &firestorepb.ListDocumentsRequest_ReadTime{ReadTime: readTime}
+				}
+				r, err := c.ListDocuments(ctx, dr)
 				if err != nil {
 					return status.Errorf(status.Code(err), "listing %s/%s: %v", parent, id, status.Convert(err).Message())
 				}

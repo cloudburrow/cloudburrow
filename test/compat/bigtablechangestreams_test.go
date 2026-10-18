@@ -137,7 +137,11 @@ func TestBigtableChangeStreams(t *testing.T) {
 		t.Fatalf("TableInfo = %+v, %v; want a retention of 36h", ti, err)
 	}
 	tbl := c.Open("streamed")
-	start := time.Now()
+	// The front stamps commits on its own clock, which on Docker Desktop
+	// trails the host's by up to a second: a start taken here just before
+	// the first write could be after its commit, and the read from it left
+	// that write out. The table is new, so nothing older can come in.
+	start := time.Now().Add(-5 * time.Second)
 	m := bigtable.NewMutation()
 	m.Set("f", "q", bigtable.ServerTime, []byte("v1"))
 	if err := tbl.Apply(ctx, "r1", m); err != nil {

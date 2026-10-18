@@ -246,6 +246,8 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 	h.Endpoint(EnvKMS)
 	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	ctx := h.Context()
+	// KMS first: without it the test skips before it makes a folder.
+	cleanupAdmin := kmsAdminClient(t, h)
 	fc, _, pc := foldersClients(t, h)
 	fop, err := fc.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{Parent: localOrg, DisplayName: folderLabel(h, "autokey-")}})
 	if err != nil {
@@ -265,7 +267,6 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 	}
 	cfgName := folder.GetName() + "/autokeyConfig"
 	keyProject := "projects/" + h.Project()
-	cleanupAdmin := kmsAdminClient(t, h)
 	t.Cleanup(func() {
 		_, _ = cleanupAdmin.UpdateAutokeyConfig(context.Background(), &kmspb.UpdateAutokeyConfigRequest{AutokeyConfig: &kmspb.AutokeyConfig{Name: cfgName},
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"key_project"}}})

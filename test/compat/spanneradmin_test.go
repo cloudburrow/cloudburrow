@@ -267,6 +267,8 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 // configurations, partition updates, roles and operation listings it
 // refused before #1498 it serves (spannerbackups_test.go), and
 // AddSplitPoints since #1523 (TestSpannerAddSplitPoints).
+// InternalUpdateGraphOperation stays refused: Google documents it as an
+// internal API called by Spanner Graph jobs, with no behaviour to serve.
 //
 // A method the front starts serving fails this test, which is the signal
 // to move it to a test that verifies it.

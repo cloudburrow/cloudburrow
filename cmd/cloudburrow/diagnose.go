@@ -219,13 +219,7 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl, admi
 			{"events", "kubernetes/events.json", cfg.Cluster.Namespace, "events"},
 			{"knative services", "kubernetes/ksvc.json", "", "ksvc"},
 		} {
-			args := []string{"get", q.kind, "-o", "json"}
-			if q.ns != "" {
-				args = append([]string{"-n", q.ns}, args...)
-			} else {
-				args = append([]string{"-A", "-l", "cloudburrow.dev/instance=" + cfg.Name}, args...)
-			}
-			raw, err := k.run(ctx, args...)
+			raw, err := k.run(ctx, diagnoseGetArgs(q.ns, q.kind, cfg.Name)...)
 			if err != nil {
 				b.fail(q.step, err)
 				continue
@@ -360,4 +354,17 @@ func dirOf(path string) string {
 		return path[:i+1]
 	}
 	return "."
+}
+
+// diagnoseGetArgs is the kubectl get of one diagnose step: in ns, or across
+// every namespace for this instance's labelled objects. The flags follow the
+// verb, since kubectl reads a leading -A as the start of a plugin's name and
+// refuses ("flags cannot be placed before plugin name"), which failed the
+// knative services step on every run (#1583).
+func diagnoseGetArgs(ns, kind, instance string) []string {
+	args := []string{"get", kind, "-o", "json"}
+	if ns != "" {
+		return append(args, "-n", ns)
+	}
+	return append(args, "-A", "-l", "cloudburrow.dev/instance="+instance)
 }

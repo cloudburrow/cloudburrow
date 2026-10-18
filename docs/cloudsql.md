@@ -106,7 +106,7 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a physical
-(`PHYSICAL`) external sync (see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
+(`PHYSICAL`) external sync on an instance not started with `--mode persistent` (#1570; see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
 and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
 upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and high
 availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (#1462). A legacy failover replica
@@ -155,7 +155,6 @@ Refused with 501, each naming what is missing:
 | `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
 | `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `demote`, `demoteMaster` | they make a Cloud SQL instance a replica of an external primary, to migrate back out of Cloud SQL; the other direction, `startExternalSync`, is served (#1501) |
 | `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
 | `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
@@ -431,10 +430,66 @@ Not as Google: sequences are set by the schema copy but not replicated after (pg
 synchronises them); users are not migrated, as on Cloud SQL; the publication stays on the
 source after the promotion.
 
-501, naming why: `migrationType` `PHYSICAL` (an XtraBackup physical backup), and `demote` and
-`demoteMaster` (the reverse direction; Google's custom import demotes a promoted instance and
-then sets replication up with Cloud SQL's `mysql.*` stored procedures, which CloudBurrow's
-servers do not have).
+**Demoting an instance** (#1524), the reverse direction, for MySQL: a standalone instance
+(not a replica, with no replicas of its own, not `REGIONAL`) becomes a read replica of the server
+a source representation instance records. Its server restarts as a replica (a server ID of its
+own, GTIDs on, read-only); the source is verified first, as for `startExternalSync`.
+
+- **`demoteMaster`** (`DEMOTE_MASTER`), with `demoteMasterContext.masterInstanceName` the source
+  representation instance and optionally `replicaConfiguration.mysqlReplicaConfiguration`'s
+  `username` and `password` (else the source representation instance's), keeps the instance's
+  data and replicates from the source by GTID auto-positioning. `verifyGtidConsistency`, true
+  unless sent false, refuses it 400 when the instance has executed a transaction the source has
+  not (`GTID_SUBSET`).
+- **`demote`** (`DEMOTE`), with `demoteContext.sourceRepresentativeInstanceName`, is Database
+  Migration Service's step for a migration to an existing instance: the instance is left a
+  replica waiting for `startExternalSync` (as the source representation instance's `username` and
+  `password`), which dumps the source's databases into it and starts
+  replicating. Its own databases that the source has not stay.
+
+`promoteReplica` makes it a primary again. In the console, a standalone MySQL instance's page has
+**Demote** (either method); gcloud and Terraform have no demote command or resource.
+
+**A physical sync** (#1570), for MySQL: `startExternalSync` with `migrationType` `PHYSICAL`
+gives the replica a Percona XtraBackup backup of the source instead of a dump, and then
+replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binlog_info`).
+
+- **The backup** is the folder `xtrabackup --backup --target-dir` writes, uploaded to Cloud
+  Storage, and the source representation instance's `dumpFilePath` names the folder
+  (`gs://BUCKET/FOLDER`). A replica created with a folder that holds `xtrabackup_checkpoints` is
+  not seeded from it as from a dump: it waits for the physical sync. With no `dumpFilePath`, and a
+  source that is a CloudBurrow instance's server (`sqlinst-NAME:3306`, or `cloudsql-mysql:3306`),
+  the sync takes the backup itself, with the source's volume mounted and the replication user.
+- **How it runs**: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
+  of the replica's major version (`8.0`, XtraBackup 8.0.35, or `8.4`, 8.4.0; pinned by digest, and
+  pulled by the node the first time), on the replica's volume while its server is stopped: the
+  backup's files are first written onto that volume, then `xtrabackup --prepare` and
+  `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
+  and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
+  password back to the instance's (the copy has the source's accounts), unlogged.
+- **It needs `--mode persistent`**: the restore is onto the replica's volume, which an
+  instance's server in an ephemeral instance has none of. Elsewhere it is 501, saying so.
+- **`verifyExternalSyncSettings`** with `migrationType` `PHYSICAL` answers
+  `UNSUPPORTED_MIGRATION_TYPE` (a PostgreSQL replica, or `syncMode` `OFFLINE`),
+  `CONNECTION_FAILURE`, `INCOMPATIBLE_DATABASE_VERSION` (the source's or the backup's
+  `xtrabackup_info` `server_version` of another major version), `INCOMPATIBLE_DATABASE_MINOR_VERSION`
+  (a source newer than the replica's server, which cannot open its files), `BINLOG_NOT_ENABLED`,
+  `UNSUPPORTED_GTID_MODE`, `UNSUPPORTED_BINLOG_FORMAT`, `UNSUPPORTED_DATABASE_SETTINGS`
+  (`innodb_page_size` other than 16384, `lower_case_table_names` other than 0, which a physical
+  copy keeps), `UNSUPPORTED_STORAGE_ENGINE` (a table not in InnoDB), `INVALID_FILE_INFO` (a folder
+  without `xtrabackup_checkpoints`, `xtrabackup_info` or `xtrabackup_binlog_info`, an unextracted
+  `.xbstream` or a qpress backup, or no `dumpFilePath` for a source outside CloudBurrow),
+  `INSUFFICIENT_PRIVILEGE` and `REPLICA_ALREADY_SETUP`. The replication user needs
+  `REPLICATION SLAVE`, `REPLICATION CLIENT` and `SELECT` (so every table's engine can be seen),
+  and, when the sync takes the backup, XtraBackup's `RELOAD`, `PROCESS`, `BACKUP_ADMIN` and
+  `SELECT` on `performance_schema.log_status`. A zstd-compressed backup is decompressed first.
+- In the console, a MySQL replica's **Verify external sync settings** and **Start external sync**
+  have a **Migration type**, `LOGICAL` or `PHYSICAL`.
+
+501, naming why: `demoteMaster` with `skipReplicationSetup` (the replication is then set up by hand with Cloud
+SQL's `mysql.*` stored procedures, `mysql.setupExternalSourceAutoPosition` and the rest, which a
+stock MySQL server has not), and `demote` of a PostgreSQL instance (the subscription's first copy
+of the source's tables collides with the rows the instance has).
 
 ### Database versions and major version upgrades (#1381)
 
@@ -537,7 +592,7 @@ flags, deletion protection, automated backups and their start time, sent as one
 `instances.clone` are served, for created instances and for the servers `up` runs, so
 `gcloud sql backups create`, `list`, `restore` and `delete` work.
 
-- **A backup is a real dump**, taken with the mechanism `cloudburrow snapshot` uses for
+- **A backup is a real dump**, taken with the mechanism `cloudburrow state save` uses for
   Cloud SQL: `pg_dump -Fc` of each database (or `mysqldump --single-transaction --routines
   --triggers --events` of each database but MySQL's own), run inside the server's pod, and
   kept on the host in `cloudsql-backups/<id>/` in the instance directory. A created
@@ -782,7 +837,10 @@ Proxy), so `--port-base` does not move it. What Cloud SQL varies between instanc
 address, and that is what a second CloudBurrow instance varies too (#1364):
 `--cloudsql-connector host:port` (`CLOUDBURROW_CLOUDSQL_CONNECTOR`, `cloudsqlConnector` in the
 file) is where the listener binds, and `connectSettings` reports its host. When it is set,
-`cloudburrow env` exports it as `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT`.
+`cloudburrow env` exports it as `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT`. `up` records the
+address in the instance's state directory (`cloudsql-connector.json`), so
+`cloudburrow env --name … --state-dir …` reports it without the flag being passed again (#1571);
+an `up` at the default removes the record.
 
 - **Linux: another loopback address, nothing else changes.** All of `127.0.0.0/8` is routed to
   `lo` with no setup, so `--cloudsql-connector 127.0.0.2:3307` binds without root, and an
@@ -825,12 +883,15 @@ pointed at it by its own flags:
 ```sh
 export CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)   # pinned, SHA-256 checked
 $CLOUDBURROW_TEST_CLOUD_SQL_PROXY --sqladmin-api-endpoint "$CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL" --token local \
-  "$PROJECT:us-central1:postgres?port=6432" "$PROJECT:us-central1:mysql?port=6306"
+  "${GOOGLE_CLOUD_PROJECT}:us-central1:postgres?port=6432" "${GOOGLE_CLOUD_PROJECT}:us-central1:mysql?port=6306"
 psql "host=127.0.0.1 port=6432 user=cloudburrow dbname=cloudburrow sslmode=disable"
 ```
 
 `--sqladmin-api-endpoint` is the Admin API's URL, which `cloudburrow env` exports as
-`CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL`. Any `--token` will do, as tokens are not checked; pass one,
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL`, and the project is the `GOOGLE_CLOUD_PROJECT` it exports.
+Keep the braces: in zsh, macOS's default shell, an unbraced variable followed by `:us-central1`
+takes `:u` as its (uppercase) modifier, so a project `demo-a` gives `DEMO-As-central1:postgres`,
+which the proxy refuses as a connection name. Any `--token` will do, as tokens are not checked; pass one,
 so the proxy does not go looking for Google credentials. Leave
 `--auto-iam-authn` off: it is IAM database authentication, which is 501 (below). The proxy then
 calls `connectSettings` and `generateEphemeralCert` and dials the reported address at 3307. It
@@ -857,7 +918,7 @@ Run gives it: a Unix socket at `<mountPath>/<connection name>`, PostgreSQL's at
 `/cloudsql/<connection name>/.s.PGSQL.5432`. An application connects as it would on Cloud Run:
 
 ```sh
-psql -h /cloudsql/$PROJECT:us-central1:postgres -U cloudburrow -d cloudburrow
+psql -h "/cloudsql/${PROJECT}:us-central1:postgres" -U cloudburrow -d cloudburrow
 ```
 
 ```go
@@ -898,13 +959,13 @@ Cloud SQL connections field shows its instances.
 
 ```sh
 gcloud run deploy web --image=$IMAGE --region=us-central1 \
-  --add-cloudsql-instances=$PROJECT:us-central1:postgres
+  --add-cloudsql-instances="${GOOGLE_CLOUD_PROJECT}:us-central1:postgres"
 ```
 
 MySQL's socket is `/cloudsql/<connection name>` itself:
 
 ```sh
-mysql -S /cloudsql/$PROJECT:us-central1:mysql -u cloudburrow cloudburrow
+mysql -S "/cloudsql/${PROJECT}:us-central1:mysql" -u cloudburrow cloudburrow
 ```
 
 Verified by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume` (PostgreSQL),

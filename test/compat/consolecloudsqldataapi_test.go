@@ -30,6 +30,7 @@ func TestConsoleCloudSQLDataAPIAndProjectBackups(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) == "" || os.Getenv(EnvSecrets) == "" {
 		t.Skip("needs --services cloudsql,secretmanager")
 	}
+	sqlShardSecrets(t, h) // the password's secret version
 	addr := consoleAddr(t, h)
 	svc := sqlAdminService(t, h)
 	project := h.Project()

@@ -357,11 +357,7 @@ func (j *jobFailures) getJob(next http.Handler, w http.ResponseWriter, r *http.R
 		return
 	}
 	if results {
-		code := http.StatusBadRequest
-		if e.Reason == "notImplemented" {
-			code = http.StatusNotImplemented
-		}
-		writeError(w, code, e.Reason, e.Message)
+		writeError(w, reasonStatus(e.Reason, http.StatusBadRequest), e.Reason, e.Message) // #1581, errorcodes.go
 		return
 	}
 	rec := newRecorder()

@@ -143,12 +143,28 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		return checkTableID(ref.TableID)
 	}
 	var msg, reason string
-	var afterLoad func() // #1000, loadFloat
+	var afterLoad func()                          // #1000, loadFloat
+	var kept json.RawMessage                      // #1547: the client's load, when the front rewrote it
+	var detectedFix func(*http.Request, *jobBody) // #1547
 	switch {
 	case c.Load != nil:
 		if why := loadNotHere(r); why != "" { // #1457, loadtable.go
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why+". Nothing was loaded.")
 			return
+		}
+		out, k, fix, ok := f.loadVariant(w, r) // #1547, loadvariants.go
+		if !ok {
+			return
+		}
+		if out != r {
+			r, kept, detectedFix = out, k, fix
+			var nj jobBody
+			if !decodeJob(r, &nj) || nj.Configuration.Load == nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not read the load again")
+				return
+			}
+			job = nj
+			c = job.Configuration
 		}
 		if d := c.Load.DestinationTable; d != nil && strings.Index(d.TableID, "$") > 0 { // a partition, #1273
 			if msg := checkTableID(d.TableID[:strings.Index(d.TableID, "$")]); msg != "" {
@@ -175,6 +191,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if check(c.Load.DestinationTable) == "" && !f.csvDetect(w, r, &job) { // #1338, csvdetect.go
 			return
 		}
+		if detectedFix != nil {
+			detectedFix(r, &job)
+		}
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
 		if d := c.Load.DestinationTable; msg == "" && d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a load job") { // #1002
@@ -193,7 +212,10 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			afterLoad = f.loadFloat(r, c.Load.Schema, c.Load.DestinationTable)
 		}
 		if msg == "" {
-			l := clientLoad(r, c.Load.SourceURIs)             // #998, before truncateData edits the body
+			l := clientLoad(r, c.Load.SourceURIs) // #998, before truncateData edits the body
+			if kept != nil {
+				l = kept
+			}
 			t, ok := truncateData(r, c.Load.WriteDisposition) // #1067
 			if l != nil {
 				t.load, ok = l, true

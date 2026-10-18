@@ -239,10 +239,20 @@ func (s *Server) bringUp(name, opID string) {
 	if c == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+	timeout := startTimeout
+	if ext := spec.External; ext != nil && ext.Physical && !ext.PhysicalRestored {
+		// The XtraBackup image's pull, the backup and its restore (#1570).
+		timeout = physicalTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	// A server whose key cannot be used is not started (#1538).
 	err := s.keyUsable(spec)
+	if err == nil {
+		// A physical sync's backup is restored first (#1570), and Start
+		// then sets up replication from its GTIDs.
+		spec, err = s.restorePhysical(ctx, name, spec)
+	}
 	if err == nil {
 		err = s.writes.prov.Start(ctx, spec)
 	}
@@ -273,6 +283,10 @@ func (s *Server) bringUp(name, opID string) {
 // starts in seconds, a first MySQL initialises its data directory in
 // about half a minute.
 const startTimeout = 5 * time.Minute
+
+// physicalTimeout bounds a physical sync's start, which pulls the
+// XtraBackup image and copies the source's data files twice.
+const physicalTimeout = 20 * time.Minute
 
 var instanceNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
 

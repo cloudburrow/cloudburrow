@@ -556,8 +556,9 @@ func (a *ArtifactRegistryServer) ListDockerImages(_ context.Context, req *arpb.L
 	if isPackageRepo(req.GetParent()) {
 		return nil, apierror.FailedPrecondition("%s is not a DOCKER repository", req.GetParent())
 	}
-	if req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("order_by is not supported")
+	less, err := dockerImageOrder(req.GetOrderBy())
+	if err != nil {
+		return nil, err
 	}
 	st, err := contentStore(req.GetParent())
 	if err != nil {
@@ -570,11 +571,84 @@ func (a *ArtifactRegistryServer) ListDockerImages(_ context.Context, req *arpb.L
 			all = append(all, dockerImageOf(req.GetParent(), im, m))
 		}
 	}
+	if less != nil {
+		sort.SliceStable(all, func(i, j int) bool { return less(all[i], all[j]) })
+	}
 	page, next, err := pageOf(all, req.GetPageSize(), req.GetPageToken())
 	if err != nil {
 		return nil, err
 	}
 	return &arpb.ListDockerImagesResponse{DockerImages: page, NextPageToken: next}, nil
+}
+
+// dockerImageOrder is ListDockerImages' order_by (#1304): a
+// comma-separated list of fields, each optionally followed by "desc" or
+// "asc", among name, upload_time, update_time, build_time and
+// image_size_bytes; Terraform's google_artifact_registry_docker_image sends
+// "update_time desc" to find an image's newest manifest. An empty order is
+// the listing's own (nil); any other field is INVALID_ARGUMENT.
+func dockerImageOrder(orderBy string) (func(a, b *arpb.DockerImage) bool, error) {
+	if strings.TrimSpace(orderBy) == "" {
+		return nil, nil
+	}
+	type key struct {
+		cmp  func(a, b *arpb.DockerImage) int
+		desc bool
+	}
+	ts := func(f func(*arpb.DockerImage) *timestamppb.Timestamp) func(a, b *arpb.DockerImage) int {
+		return func(a, b *arpb.DockerImage) int { return f(a).AsTime().Compare(f(b).AsTime()) }
+	}
+	fields := map[string]func(a, b *arpb.DockerImage) int{
+		"name":             func(a, b *arpb.DockerImage) int { return strings.Compare(a.GetName(), b.GetName()) },
+		"upload_time":      ts((*arpb.DockerImage).GetUploadTime),
+		"update_time":      ts((*arpb.DockerImage).GetUpdateTime),
+		"build_time":       ts((*arpb.DockerImage).GetBuildTime),
+		"image_size_bytes": func(a, b *arpb.DockerImage) int { return cmpInt64(a.GetImageSizeBytes(), b.GetImageSizeBytes()) },
+	}
+	var keys []key
+	for _, part := range strings.Split(orderBy, ",") {
+		words := strings.Fields(part)
+		if len(words) == 0 || len(words) > 2 {
+			return nil, apierror.InvalidArgument("invalid order_by %q", orderBy)
+		}
+		cmp, ok := fields[words[0]]
+		if !ok {
+			return nil, apierror.InvalidArgument("invalid order_by %q: %q is not a field to order docker images by", orderBy, words[0])
+		}
+		k := key{cmp: cmp}
+		if len(words) == 2 {
+			switch strings.ToLower(words[1]) {
+			case "desc":
+				k.desc = true
+			case "asc":
+			default:
+				return nil, apierror.InvalidArgument("invalid order_by %q", orderBy)
+			}
+		}
+		keys = append(keys, k)
+	}
+	return func(a, b *arpb.DockerImage) bool {
+		for _, k := range keys {
+			c := k.cmp(a, b)
+			if k.desc {
+				c = -c
+			}
+			if c != 0 {
+				return c < 0
+			}
+		}
+		return false
+	}, nil
+}
+
+func cmpInt64(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
 }
 
 // GetDockerImage reads one, named {image}@{digest}.

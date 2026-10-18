@@ -29,8 +29,9 @@
 // ExportDocuments and ImportDocuments go through the instance's Cloud
 // Storage, and BulkDeleteDocuments through the emulator's own calls
 // (transfer.go); CloneDatabase copies the documents as they are now
-// (backups.go). User credentials answer UNIMPLEMENTED (501 over REST),
-// naming why.
+// (backups.go). User credentials are kept for Enterprise edition databases
+// (usercreds.go), and pipelines run over the emulator's documents
+// (pipeline.go).
 package firestoreadmin
 
 import (
@@ -48,6 +49,7 @@ import (
 	"time"
 
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
+	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -101,6 +103,8 @@ type Admin struct {
 	// seen is every database a documents call has named (seen.go,
 	// #1550), by name.
 	seen map[string]bool
+	// userCreds by name (usercreds.go, #1500).
+	userCreds map[string]*creds
 
 	// storage is the instance's Cloud Storage, for exports and imports.
 	storage string
@@ -128,10 +132,12 @@ func New(emulator string) *Admin {
 		backups:    map[string]*backup{},
 		lastBackup: map[string]time.Time{},
 		seen:       map[string]bool{},
+		userCreds:  map[string]*creds{},
 	}
 	a.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(a.persistAfter))
 	adminpb.RegisterFirestoreAdminServer(a.grpc, a)
 	longrunningpb.RegisterOperationsServer(a.grpc, a)
+	firestorepb.RegisterFirestoreServer(a.grpc, pipelineServer{a: a})
 	return a
 }
 
@@ -151,9 +157,12 @@ func (a *Admin) Claims(r *http.Request) bool {
 		return true
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-		return strings.HasPrefix(r.URL.Path, adminService) || strings.HasPrefix(r.URL.Path, opsService)
+		return strings.HasPrefix(r.URL.Path, adminService) || strings.HasPrefix(r.URL.Path, opsService) || r.URL.Path == pipelineMethod
 	}
 	p := r.URL.Path
+	if executePipelinePath.MatchString(p) {
+		return true
+	}
 	if !strings.HasPrefix(p, "/v1/projects/") {
 		return false
 	}
@@ -179,6 +188,10 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// The state is written as the call returns (state.go); a gRPC call's
 	// before it is answered, by the server's interceptor.
+	if m := executePipelinePath.FindStringSubmatch(r.URL.Path); m != nil {
+		a.servePipelineREST(w, r, m[1])
+		return
+	}
 	defer a.persist()
 	a.serveREST(w, r)
 }
@@ -324,9 +337,6 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 	case adminpb.Database_DATABASE_TYPE_UNSPECIFIED:
 		return nil, status.Error(codes.InvalidArgument, "type is required: FIRESTORE_NATIVE or DATASTORE_MODE.")
 	}
-	if in.GetDatabaseEdition() == adminpb.Database_ENTERPRISE {
-		return nil, status.Error(codes.Unimplemented, "the Enterprise edition is not served here: the Firestore emulator is the Standard edition")
-	}
 	if in.GetCmekConfig() != nil {
 		return nil, status.Error(codes.Unimplemented, "customer-managed encryption (cmek_config) is not served here: the emulator does not encrypt with Cloud KMS keys")
 	}
@@ -345,8 +355,11 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 		PointInTimeRecoveryEnablement: orDefault(in.GetPointInTimeRecoveryEnablement(), adminpb.Database_POINT_IN_TIME_RECOVERY_DISABLED),
 		AppEngineIntegrationMode:      orDefault(in.GetAppEngineIntegrationMode(), adminpb.Database_DISABLED),
 		DeleteProtectionState:         orDefault(in.GetDeleteProtectionState(), adminpb.Database_DELETE_PROTECTION_DISABLED),
-		DatabaseEdition:               adminpb.Database_STANDARD,
-		Tags:                          in.GetTags(),
+		// An Enterprise edition database is served (#1500): its documents
+		// are the emulator's, and the front runs its pipelines and keeps
+		// its user credentials.
+		DatabaseEdition: orDefault(in.GetDatabaseEdition(), adminpb.Database_STANDARD),
+		Tags:            in.GetTags(),
 	}
 	a.databases[name] = db
 	return a.done(name, &adminpb.CreateDatabaseMetadata{}, a.describe(db))
@@ -452,6 +465,11 @@ func (a *Admin) DeleteDatabase(ctx context.Context, req *adminpb.DeleteDatabaseR
 		if strings.HasPrefix(n, db.Name+"/") {
 			delete(a.schedules, n)
 			delete(a.lastBackup, n)
+		}
+	}
+	for n := range a.userCreds {
+		if strings.HasPrefix(n, db.Name+"/") {
+			delete(a.userCreds, n)
 		}
 	}
 	gone := a.describe(db)
@@ -868,34 +886,8 @@ func (a *Admin) ListFields(_ context.Context, req *adminpb.ListFieldsRequest) (*
 
 // --- refused ---
 
-const (
-	noCreds = "is not served here: user credentials are for Firestore with MongoDB compatibility, which the emulator is not"
-)
-
 func refuse(method, why string) error {
 	return status.Errorf(codes.Unimplemented, "%s %s", method, why)
-}
-
-func (a *Admin) CreateUserCreds(context.Context, *adminpb.CreateUserCredsRequest) (*adminpb.UserCreds, error) {
-	return nil, refuse("CreateUserCreds", noCreds)
-}
-func (a *Admin) GetUserCreds(context.Context, *adminpb.GetUserCredsRequest) (*adminpb.UserCreds, error) {
-	return nil, refuse("GetUserCreds", noCreds)
-}
-func (a *Admin) ListUserCreds(context.Context, *adminpb.ListUserCredsRequest) (*adminpb.ListUserCredsResponse, error) {
-	return nil, refuse("ListUserCreds", noCreds)
-}
-func (a *Admin) EnableUserCreds(context.Context, *adminpb.EnableUserCredsRequest) (*adminpb.UserCreds, error) {
-	return nil, refuse("EnableUserCreds", noCreds)
-}
-func (a *Admin) DisableUserCreds(context.Context, *adminpb.DisableUserCredsRequest) (*adminpb.UserCreds, error) {
-	return nil, refuse("DisableUserCreds", noCreds)
-}
-func (a *Admin) ResetUserPassword(context.Context, *adminpb.ResetUserPasswordRequest) (*adminpb.UserCreds, error) {
-	return nil, refuse("ResetUserPassword", noCreds)
-}
-func (a *Admin) DeleteUserCreds(context.Context, *adminpb.DeleteUserCredsRequest) (*emptypb.Empty, error) {
-	return nil, refuse("DeleteUserCreds", noCreds)
 }
 
 // --- operations ---

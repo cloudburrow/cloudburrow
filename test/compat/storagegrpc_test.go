@@ -116,6 +116,12 @@ func TestStorageGRPCBuckets(t *testing.T) {
 	}
 
 	cur, _ := bh.Attrs(ctx)
+	if err := bh.If(storage.BucketConditions{MetagenerationMatch: cur.MetaGeneration - 1}).LockRetentionPolicy(ctx); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("LockRetentionPolicy with a stale metageneration = %v, want FAILED_PRECONDITION", err)
+	}
+	if ja, _ := j.Bucket(name).Attrs(ctx); ja == nil || ja.RetentionPolicy == nil || ja.RetentionPolicy.IsLocked {
+		t.Errorf("a refused lock left retention %+v", ja)
+	}
 	if err := bh.If(storage.BucketConditions{MetagenerationMatch: cur.MetaGeneration}).LockRetentionPolicy(ctx); err != nil {
 		t.Fatalf("LockRetentionPolicy: %v", err)
 	}

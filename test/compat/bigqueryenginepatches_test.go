@@ -206,6 +206,32 @@ func TestBigQueryIntervalComparison(t *testing.T) {
 			t.Errorf("WHERE %s: %v, want %s", tc.where, rows, tc.want)
 		}
 	}
+	// ORDER BY, MIN and MAX order an INTERVAL by its length (patch 0010's
+	// comparison, #1138): 1 DAY and 24 HOUR tie, and id breaks the tie.
+	for _, tc := range []struct{ sql, want string }{
+		{"SELECT id FROM " + ds.DatasetID + ".iv ORDER BY v, id", "[[4] [1] [2] [3]]"},
+		{"SELECT id FROM " + ds.DatasetID + ".iv ORDER BY v DESC, id", "[[3] [1] [2] [4]]"},
+		{"SELECT CAST(MIN(v) AS STRING), CAST(MAX(v) AS STRING) FROM " + ds.DatasetID + ".iv", "[[0-0 0 -0:0:1 0-0 2 0:0:0]]"},
+	} {
+		it, err := c.Query(tc.sql).Read(ctx)
+		if err != nil {
+			t.Errorf("%s: %v", tc.sql, err)
+			continue
+		}
+		var rows [][]bigquery.Value
+		for {
+			var row []bigquery.Value
+			if err := it.Next(&row); errors.Is(err, iterator.Done) {
+				break
+			} else if err != nil {
+				t.Fatalf("%s: %v", tc.sql, err)
+			}
+			rows = append(rows, row)
+		}
+		if fmt.Sprint(rows) != tc.want {
+			t.Errorf("%s: %v, want %s", tc.sql, rows, tc.want)
+		}
+	}
 }
 
 // TestBigQueryRepeatedFieldLeftOutIsAnEmptyArray (#1124): in BigQuery a
@@ -329,5 +355,41 @@ func TestBigQueryGeographyWKT(t *testing.T) {
 	}
 	if want := []string{"POINT(3 4)", "POINT(5 6)"}; !reflect.DeepEqual(sortedCopy(listed), want) {
 		t.Errorf("tabledata.list: %v, want %v", listed, want)
+	}
+
+	// Since #1138 WKT inside a RECORD or a REPEATED column is written so at
+	// any depth, and given text's numbers in BigQuery's (POINT(1.0 2) reads
+	// POINT(1 2)): bigquery-emulator patches 0005 and 0006, read back in
+	// tabledata.list and in a query.
+	nested := bigquery.Schema{
+		{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{
+			{Name: "g", Type: bigquery.GeographyFieldType},
+			{Name: "inner", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "g", Type: bigquery.GeographyFieldType}}},
+		}},
+		{Name: "gs", Type: bigquery.GeographyFieldType, Repeated: true},
+	}
+	ntbl := ds.Table("geo_nested")
+	if err := ntbl.Create(ctx, &bigquery.TableMetadata{Schema: nested}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ntbl.Inserter().Put(ctx, []*bigquery.ValuesSaver{{Schema: nested, InsertID: "1", Row: []bigquery.Value{
+		[]bigquery.Value{"POINT (7 8)", []bigquery.Value{"POINT (1.0 2)"}},
+		[]bigquery.Value{"POINT (1.0 2)", "LINESTRING (1 2, 3 4)"},
+	}}}); err != nil {
+		t.Fatalf("Inserter.Put of nested geographies: %v", err)
+	}
+	const wantNested = "[[POINT(7 8) [POINT(1 2)]] [POINT(1 2) LINESTRING(1 2, 3 4)]]"
+	nit := ntbl.Read(ctx)
+	var nrow []bigquery.Value
+	if err := nit.Next(&nrow); err != nil || fmt.Sprint(nrow) != wantNested {
+		t.Errorf("tabledata.list of nested geographies: %v (%v), want %s", nrow, err, wantNested)
+	}
+	qit, err := c.Query("SELECT r, gs FROM " + ds.DatasetID + ".geo_nested").Read(ctx)
+	if err != nil {
+		t.Fatalf("query nested geographies: %v", err)
+	}
+	nrow = nil
+	if err := qit.Next(&nrow); err != nil || fmt.Sprint(nrow) != wantNested {
+		t.Errorf("a query of nested geographies: %v (%v), want %s", nrow, err, wantNested)
 	}
 }

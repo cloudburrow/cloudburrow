@@ -20,7 +20,8 @@ import (
 // reads its rows by the listed names, and jobs.get shows the client's
 // text. OR REPLACE, IF NOT EXISTS and OPTIONS are kept. A list of another
 // length than the query's, a name BigQuery refuses and a name listed twice
-// are 400 invalidQuery, nothing made. Measured first: the emulator refused
+// are 400 invalidQuery, a query of a table that does not exist 404
+// notFound (#1582), nothing made. Measured first: the emulator refused
 // the statement, 400 "CREATE VIEW with explicit column list is not
 // supported".
 //
@@ -112,7 +113,12 @@ func TestBigQueryCreateViewWithAColumnList(t *testing.T) {
 			"dup":    "CREATE VIEW " + path("dup") + " (c, C) AS SELECT a, b FROM " + path("base"),
 			"noread": "CREATE VIEW " + path("noread") + " (c) AS SELECT a FROM " + path("missing"),
 		} {
-			wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusBadRequest, "invalidQuery")
+			code, reason := http.StatusBadRequest, "invalidQuery"
+			if view == "noread" {
+				// A query of a table that does not exist: 404 notFound (#1582).
+				code, reason = http.StatusNotFound, "notFound"
+			}
+			wantReason(t, sql, bqRun(ctx, c, sql, insert), code, reason)
 			if tableExists(t, ctx, ds.Table(view)) {
 				t.Errorf("the refused %s made %s", sql, view)
 			}

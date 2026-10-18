@@ -289,7 +289,7 @@ resource "google_cloud_run_v2_worker_pool" "p" {
 }
 `, h.Project(), id, jobImage)
 	targets := []tfIAMTarget{{
-		kind: "google_cloud_run_v2_worker_pool", label: "p",
+		kind: "google_cloud_run_v2_worker_pool", label: "p", policyData: true,
 		ref: map[string]string{"project": "google_cloud_run_v2_worker_pool.p.project", "location": "google_cloud_run_v2_worker_pool.p.location",
 			"name": "google_cloud_run_v2_worker_pool.p.name"},
 		read: func() map[string][]string {

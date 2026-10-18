@@ -13,18 +13,34 @@ eval "$(cloudburrow env)"
 
 prints, and exports, everything a Google client needs to reach a **running** instance. It takes
 the flags `up` was started with, so it names the same instance, and it prints the ports that
-instance bound:
+instance bound. For the default instance and services, with each line's comment cut:
 
 ```
+export CLOUDBURROW_DOMAIN="cloudburrow.localhost"
+export CLOUDBURROW_INGRESS="http://127.0.0.1:9080"
+export CLOUDBURROW_RESOURCEMANAGER_ENDPOINT="127.0.0.1:9007"
+export CLOUDBURROW_RUN_ENDPOINT="127.0.0.1:9004"
+export CLOUDBURROW_SECRETMANAGER_ENDPOINT="127.0.0.1:9006"
+export CLOUDBURROW_SERVICEUSAGE_ENDPOINT="127.0.0.1:9023"
+export CLOUDBURROW_TASKS_ENDPOINT="127.0.0.1:9003"
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER="http://127.0.0.1:9007/"
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDTASKS="http://127.0.0.1:9003/"
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS="http://127.0.0.1:9005/"
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB="http://127.0.0.1:9002/"
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_SECRETMANAGER="http://127.0.0.1:9006/"
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE="http://127.0.0.1:9023/"
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE="http://127.0.0.1:9001/storage/v1/"
 export CLOUDSDK_CORE_PROJECT="cloudburrow"
 export GCE_METADATA_HOST="127.0.0.1:9005"
-export GOOGLE_APPLICATION_CREDENTIALS="~/.cloudburrow/cloudburrow/credentials.json"
+export GOOGLE_APPLICATION_CREDENTIALS="/Users/you/.cloudburrow/cloudburrow/credentials.json"
 export GOOGLE_CLOUD_PROJECT="cloudburrow"
 export PUBSUB_EMULATOR_HOST="127.0.0.1:9002"
 export STORAGE_EMULATOR_HOST="http://127.0.0.1:9001"
+export STORAGE_EMULATOR_HOST_GRPC="127.0.0.1:9001"
 ```
+
+The credentials path is absolute, since a quoted `~` is not expanded. Each line ends with a
+comment naming what reads it, and an opt-in service adds its own lines.
 
 **An instance that is not running has no endpoints, so `env` fails.** It exits 1, prints nothing on
 stdout, and creates no state for that name, so `eval "$(cloudburrow env --name typo)"` exports
@@ -199,9 +215,9 @@ where the source credential is the fixture and every call stays on loopback.
 **`gcloud storage`** — the bucket list came from CloudBurrow:
 
 ```
-$ export CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE="http://127.0.0.1:8462/storage/v1/"
+$ eval "$(cloudburrow env)"   # exports CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE and GCE_METADATA_HOST
 $ export CLOUDSDK_AUTH_ACCESS_TOKEN=$(curl -sH 'Metadata-Flavor: Google' \
-    http://127.0.0.1:9005/computeMetadata/v1/instance/service-accounts/default/token | jq -r .access_token)
+    "http://$GCE_METADATA_HOST/computeMetadata/v1/instance/service-accounts/default/token" | jq -r .access_token)
 $ gcloud storage ls
 gs://cb-e2e-21250000-bucket/
 gs://cb-env-bucket/

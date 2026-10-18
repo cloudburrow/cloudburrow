@@ -253,7 +253,7 @@ func TestTerraformProjectIAM(t *testing.T) {
 	ctx := h.Context()
 	id := iamProject(t, h, "tfiam-")
 	runTFIAMPhases(t, m, "", [2]string{"roles/viewer", "roles/editor"}, []tfIAMTarget{{
-		kind: "google_project", label: "p", ref: map[string]string{"project": fmt.Sprintf("%q", id)},
+		kind: "google_project", label: "p", policyData: true, ref: map[string]string{"project": fmt.Sprintf("%q", id)},
 		read: func() map[string][]string {
 			t.Helper()
 			p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + id})

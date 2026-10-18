@@ -122,7 +122,6 @@ func TestRefusedVerbsSayWhy(t *testing.T) {
 	}
 	for what, call := range map[string]func() error{
 		"Certificate Authority Service": func() error { _, err := svc.Instances.ListServerCertificates("proj", "pg").Do(); return err },
-		"external primary":              func() error { _, err := svc.Instances.Demote("proj", "pg", nil).Do(); return err },
 		"no Google-managed maintenance": func() error {
 			_, err := svc.Projects.Instances.RescheduleMaintenance("proj", "pg", &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{}).Do()
 			return err

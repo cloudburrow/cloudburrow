@@ -113,6 +113,24 @@ func TestCloudRunRevisionReadsASecretManagerSecret(t *testing.T) {
 	if !strings.Contains(manifest, "secretKeyRef") {
 		t.Errorf("the revision does not reference a secret:\n%s", manifest)
 	}
+
+	// latest is pinned at deployment (#1576): a version added under the
+	// running revision is not what it reads, and no new revision is made.
+	const later = "a-version-added-after-deploy"
+	if _, err := sc.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{
+		Parent: secretName, Payload: &secretmanagerpb.SecretPayload{Data: []byte(later)},
+	}); err != nil {
+		t.Fatalf("AddSecretVersion (later): %v", err)
+	}
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
+		body, code := secretEnvGet(t, base, host)
+		if code != http.StatusOK || !strings.Contains(body, payload) || strings.Contains(body, later) {
+			t.Fatalf("after a later version, the running revision answers %d %q; want the version it was deployed with", code, strings.TrimSpace(body))
+		}
+	}
+	if now, err := rc.GetService(ctx, &runpb.GetServiceRequest{Name: svcName}); err != nil || now.GetLatestReadyRevision() != svc.GetLatestReadyRevision() {
+		t.Errorf("after a later version, the service's latest ready revision is %q (%v), want %q", now.GetLatestReadyRevision(), err, svc.GetLatestReadyRevision())
+	}
 }
 
 // TestSecretKeyRefToAnInaccessibleVersionIsRefused proves the deployment

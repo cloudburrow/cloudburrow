@@ -10,17 +10,16 @@ import (
 	vlogging "cloud.google.com/go/logging/apiv2"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // covers: google.logging.v2.ConfigServiceV2/CreateBucketAsync
 // covers: google.logging.v2.ConfigServiceV2/UpdateBucketAsync
-// covers: google.logging.v2.ConfigServiceV2/CreateLink
-// covers: google.logging.v2.ConfigServiceV2/GetLink
-// covers: google.logging.v2.ConfigServiceV2/ListLinks
-// covers: google.logging.v2.ConfigServiceV2/DeleteLink
 // covers: google.logging.v2.ConfigServiceV2/GetSettings
 // covers: google.logging.v2.ConfigServiceV2/UpdateSettings
 // covers: google.logging.v2.ConfigServiceV2/GetCmekSettings
@@ -28,10 +27,10 @@ import (
 //
 // TestLoggingLinksSettingsAndAsyncBuckets (#1292), through the official
 // ConfigClient: CreateBucketAsync and UpdateBucketAsync answer operations
-// whose Wait returns the bucket; a link on a bucket without Log Analytics is
-// FAILED_PRECONDITION, and on one with it is created, read, listed and
-// deleted, each through its operation; the project's settings are read,
-// changed and read back, and a KMS key is refused UNIMPLEMENTED.
+// whose Wait returns the bucket; the project's settings are read, changed
+// and read back, and a KMS key is refused UNIMPLEMENTED. The links, which
+// make BigQuery datasets, are TestLoggingLinksToBigQuery's, so this runs on
+// an instance with Cloud Logging and no BigQuery (#1304).
 func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 	h := New(t)
 	shardEndpoint(h, envSinkLogging, EnvLogging)
@@ -41,9 +40,7 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	// A link makes a BigQuery dataset in the bucket's project, which must
-	// be the one the instance's BigQuery serves (#1423).
-	project := "projects/" + linkProject(t)
+	project := "projects/" + h.Project()
 	global := project + "/locations/global"
 	id := fmt.Sprintf("links-%d", time.Now().UnixNano())
 
@@ -61,9 +58,6 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.DeleteBucket(ctx, &loggingpb.DeleteBucketRequest{Name: b.GetName()}) })
 
-	if _, err := c.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: b.GetName(), LinkId: "early"}); status.Code(err) != codes.FailedPrecondition {
-		t.Errorf("CreateLink without Log Analytics = %v; want FAILED_PRECONDITION", err)
-	}
 	uop, err := c.UpdateBucketAsync(ctx, &loggingpb.UpdateBucketRequest{Name: b.GetName(),
 		Bucket: &loggingpb.LogBucket{AnalyticsEnabled: true}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"analytics_enabled"}}})
 	if err != nil {
@@ -71,6 +65,84 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 	}
 	if ub, err := uop.Wait(ctx); err != nil || !ub.GetAnalyticsEnabled() {
 		t.Fatalf("UpdateBucketAsync.Wait = %v, %v", ub, err)
+	}
+
+	st, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: project + "/settings"})
+	if err != nil || st.GetName() != project+"/settings" || st.GetKmsServiceAccountId() == "" {
+		t.Fatalf("GetSettings = %v, %v", st, err)
+	}
+	t.Cleanup(func() {
+		_, _ = c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings", Settings: st,
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"storage_location", "disable_default_sink"}}})
+	})
+	up, err := c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings",
+		Settings:   &loggingpb.Settings{StorageLocation: "europe-west1", DisableDefaultSink: true},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"storage_location", "disable_default_sink"}}})
+	if err != nil || up.GetStorageLocation() != "europe-west1" || !up.GetDisableDefaultSink() {
+		t.Fatalf("UpdateSettings = %v, %v", up, err)
+	}
+	if got, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: project + "/settings"}); err != nil || got.GetStorageLocation() != "europe-west1" || !got.GetDisableDefaultSink() {
+		t.Errorf("GetSettings after UpdateSettings = %v, %v", got, err)
+	}
+	if _, err := c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings",
+		Settings: &loggingpb.Settings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("UpdateSettings with a KMS key = %v; want UNIMPLEMENTED", err)
+	}
+	cmek, err := c.GetCmekSettings(ctx, &loggingpb.GetCmekSettingsRequest{Name: project + "/cmekSettings"})
+	if err != nil || cmek.GetKmsKeyName() != "" || cmek.GetServiceAccountId() == "" {
+		t.Errorf("GetCmekSettings = %v, %v", cmek, err)
+	}
+	if _, err := c.UpdateCmekSettings(ctx, &loggingpb.UpdateCmekSettingsRequest{Name: project + "/cmekSettings",
+		CmekSettings: &loggingpb.CmekSettings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("UpdateCmekSettings with a key = %v; want UNIMPLEMENTED", err)
+	}
+	// Since #1395 the local organization's settings are served
+	// (TestLoggingFolderOrganizationAndBillingParents); another is NOT_FOUND.
+	if _, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: "organizations/1/settings"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetSettings of an organization that does not exist = %v; want NOT_FOUND", err)
+	}
+}
+
+// covers: google.logging.v2.ConfigServiceV2/CreateLink
+// covers: google.logging.v2.ConfigServiceV2/GetLink
+// covers: google.logging.v2.ConfigServiceV2/ListLinks
+// covers: google.logging.v2.ConfigServiceV2/DeleteLink
+//
+// TestLoggingLinksToBigQuery (#1292), through the official ConfigClient: a
+// link on a bucket without Log Analytics is FAILED_PRECONDITION, and on one
+// with it is created, read, listed and deleted, each through its
+// operation. A link makes a BigQuery dataset, so the test asks for
+// BigQuery before it starts, and runs beside it under SINK_LOGGING in the
+// emulators shard (#1304).
+func TestLoggingLinksToBigQuery(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	logging := runShardEndpoint(h, envSinkLogging, EnvLogging)
+	// The bucket's project must be the one the instance's BigQuery serves
+	// (#1423).
+	_, bqProject := bigqueryClient(t, h)
+	c, err := vlogging.NewConfigClient(ctx, option.WithEndpoint(logging), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	project := "projects/" + bqProject
+	global := project + "/locations/global"
+	id := fmt.Sprintf("links-%d", time.Now().UnixNano())
+	b, err := c.CreateBucket(ctx, &loggingpb.CreateBucketRequest{Parent: global, BucketId: id,
+		Bucket: &loggingpb.LogBucket{Description: "links", RetentionDays: 7}})
+	if err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	t.Cleanup(func() { _ = c.DeleteBucket(ctx, &loggingpb.DeleteBucketRequest{Name: b.GetName()}) })
+
+	if _, err := c.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: b.GetName(), LinkId: "early"}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("CreateLink without Log Analytics = %v; want FAILED_PRECONDITION", err)
+	}
+	if _, err := c.UpdateBucket(ctx, &loggingpb.UpdateBucketRequest{Name: b.GetName(),
+		Bucket: &loggingpb.LogBucket{AnalyticsEnabled: true}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"analytics_enabled"}}}); err != nil {
+		t.Fatalf("UpdateBucket: %v", err)
 	}
 
 	lop, err := c.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: b.GetName(), LinkId: "my-link", Link: &loggingpb.Link{Description: "to BigQuery"}})
@@ -113,38 +185,4 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 		t.Errorf("GetLink after DeleteLink = %v; want NOT_FOUND", err)
 	}
 
-	st, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: project + "/settings"})
-	if err != nil || st.GetName() != project+"/settings" || st.GetKmsServiceAccountId() == "" {
-		t.Fatalf("GetSettings = %v, %v", st, err)
-	}
-	t.Cleanup(func() {
-		_, _ = c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings", Settings: st,
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"storage_location", "disable_default_sink"}}})
-	})
-	up, err := c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings",
-		Settings:   &loggingpb.Settings{StorageLocation: "europe-west1", DisableDefaultSink: true},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"storage_location", "disable_default_sink"}}})
-	if err != nil || up.GetStorageLocation() != "europe-west1" || !up.GetDisableDefaultSink() {
-		t.Fatalf("UpdateSettings = %v, %v", up, err)
-	}
-	if got, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: project + "/settings"}); err != nil || got.GetStorageLocation() != "europe-west1" || !got.GetDisableDefaultSink() {
-		t.Errorf("GetSettings after UpdateSettings = %v, %v", got, err)
-	}
-	if _, err := c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings",
-		Settings: &loggingpb.Settings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateSettings with a KMS key = %v; want UNIMPLEMENTED", err)
-	}
-	cmek, err := c.GetCmekSettings(ctx, &loggingpb.GetCmekSettingsRequest{Name: project + "/cmekSettings"})
-	if err != nil || cmek.GetKmsKeyName() != "" || cmek.GetServiceAccountId() == "" {
-		t.Errorf("GetCmekSettings = %v, %v", cmek, err)
-	}
-	if _, err := c.UpdateCmekSettings(ctx, &loggingpb.UpdateCmekSettingsRequest{Name: project + "/cmekSettings",
-		CmekSettings: &loggingpb.CmekSettings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateCmekSettings with a key = %v; want UNIMPLEMENTED", err)
-	}
-	// Since #1395 the local organization's settings are served
-	// (TestLoggingFolderOrganizationAndBillingParents); another is NOT_FOUND.
-	if _, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: "organizations/1/settings"}); status.Code(err) != codes.NotFound {
-		t.Errorf("GetSettings of an organization that does not exist = %v; want NOT_FOUND", err)
-	}
 }

@@ -5,7 +5,8 @@ package main
 // projects directly under it, its organization policies with Set and Clear
 // organization policy (#1534), and its Permissions tab
 // (consolehierarchypermissions.go), as Google's console offers them once the
-// organization is picked in the resource selector.
+// organization is picked in the resource selector, and its Log router tab
+// (#1572).
 
 import (
 	"context"
@@ -60,13 +61,17 @@ func (p hierarchyProvider) organizationDetail(ctx context.Context) console.Detai
 		}
 	}
 	projects.Total = len(projects.Items)
+	sections := []console.Section{
+		{ID: "folders", Label: "Folders", Listing: folders},
+		{ID: "projects", Label: "Projects", Listing: projects},
+		{ID: "org-policies", Label: "Organization policies", Listing: orgPolicyListing(p.registry, resourcemanager.OrganizationName)},
+	}
+	// Its log sinks (#1572).
+	props, sections = p.logRouter(ctx, resourcemanager.OrganizationName, props, sections)
 	return console.Detail{
 		Summary: props[:2],
-		Sections: []console.Section{
+		Sections: append([]console.Section{
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Organization", Properties: props}}},
-			{ID: "folders", Label: "Folders", Listing: folders},
-			{ID: "projects", Label: "Projects", Listing: projects},
-			{ID: "org-policies", Label: "Organization policies", Listing: orgPolicyListing(p.registry, resourcemanager.OrganizationName)},
-		},
+		}, sections...),
 	}
 }

@@ -353,7 +353,14 @@ type tab struct {
 func open(t *testing.T) *tab {
 	t.Helper()
 	refuseCloudCredentials(t)
-	consoleAddr := endpoint(t, envConsole)
+	return openAt(t, endpoint(t, envConsole))
+}
+
+// openAt is open on the console at consoleAddr, a loopback host:port: a
+// console the test serves itself, in process (#1576).
+func openAt(t *testing.T, consoleAddr string) *tab {
+	t.Helper()
+	refuseCloudCredentials(t)
 	p := &tab{t: t, origin: "http://" + consoleAddr}
 
 	// The proxy for everything that is not loopback: it records the request

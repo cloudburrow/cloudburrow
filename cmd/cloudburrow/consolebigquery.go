@@ -314,6 +314,14 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
 	}
 
+	groups := []console.PropertyGroup{{Heading: "Table", Properties: props}}
+	if !strings.Contains(tableID, "$") {
+		// Its analysis rules (#1580, consolebigqueryprivacy.go).
+		if g, ok := p.analysisRulesGroup(ctx, c, datasetID, tableID, md.Type == bigquery.ViewTable); ok {
+			groups = append(groups, g)
+		}
+	}
+
 	detail := console.Detail{
 		Summary: []console.Property{
 			{Label: "Dataset", Value: datasetID},
@@ -325,7 +333,7 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			{ID: "schema", Label: "Schema", Listing: schema},
 			{
 				ID: "details", Label: "Details", Kind: console.KindProperties,
-				Groups: []console.PropertyGroup{{Heading: "Table", Properties: props}},
+				Groups: groups,
 			},
 			p.previewSection(ctx, t, md.Schema),
 		},

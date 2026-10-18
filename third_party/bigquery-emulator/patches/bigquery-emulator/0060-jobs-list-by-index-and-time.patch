@@ -1,0 +1,404 @@
+CloudBurrow patch 60 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1564).
+
+The bug: a jobs.list of the jobs after one (patch 0064) still cost what
+every job of the project did. It read cloudburrow_job_order as GoogleSQL,
+whose WHERE comparisons googlesqlite compiles to function calls, which
+SQLite cannot answer from an index (patch 0019's QueryRawContext says
+so), so the lookup of the cursor job and the list of the jobs after it
+each visited every row; and the jobs named that were added before the
+cursor were read with findJobsMetadata, as GoogleSQL too, which visited
+every row of the jobs table. And before any of it, jobsListHandler read
+every job (Project.Jobs), as when every job is asked for, and dropped
+them. Measured on one instance with 5,000 jobs (the kind node at two
+CPUs), a list of one job took 70 ms, 138 ms with 10,000 and 274 ms with
+20,000.
+
+And jobs.list read no minCreationTime or maxCreationTime, so a client
+asking for the last minute's jobs, or a query of INFORMATION_SCHEMA.JOBS
+with a bound of creation_time, was answered every job (1.0 s at 10,000
+jobs, measured the same way), and the front cut them.
+
+The patch reads every job only when every job is asked for, and reads
+cloudburrow_job_order as SQLite SQL: the cursor job by
+its primary key, and the jobs after it by an index of the project and
+sequence number, which it makes (CREATE INDEX IF NOT EXISTS) the first
+time; and it reads the named jobs by the jobs table's primary key, as it
+reads those after the cursor (findJobRowsByID). jobs.list leaves out a
+job whose creation time, in milliseconds, is outside minCreationTime and
+maxCreationTime ("after or at", "before or at"); a job with no such time
+(none, or seconds, kept by an engine before patch 0013) is listed, and
+the front, which times the jobs it sends on, cuts the list again.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -2021,6 +2021,10 @@
+ 		after: r.URL.Query().Get("cloudburrowAfterJobId"),
+ 		ids:   splitJobIDs(r.URL.Query().Get("cloudburrowJobIds")),
+ 		some:  r.URL.Query().Has("cloudburrowAfterJobId") || r.URL.Query().Has("cloudburrowJobIds"),
++		// CloudBurrow patch (cloudburrow/cloudburrow#1564): the bounds of
++		// creation time.
++		minCreation: creationBound(r.URL.Query().Get("minCreationTime")),
++		maxCreation: creationBound(r.URL.Query().Get("maxCreationTime")),
+ 	})
+ 	if err != nil {
+ 		errorResponse(ctx, w, errJobInternalError(err.Error()))
+@@ -2036,8 +2040,44 @@
+ 	after   string
+ 	ids     []string
+ 	some    bool
++	// minCreation and maxCreation are jobs.list's minCreationTime and
++	// maxCreationTime, in milliseconds since the epoch, or -1. CloudBurrow
++	// patch (cloudburrow/cloudburrow#1564).
++	minCreation int64
++	maxCreation int64
+ }
+ 
++// creationBound reads a jobs.list bound of creation time, milliseconds
++// since the epoch: -1 when there is none or it is not a number of them.
++// CloudBurrow patch (cloudburrow/cloudburrow#1564).
++func creationBound(s string) int64 {
++	n, err := strconv.ParseInt(s, 10, 64)
++	if s == "" || err != nil || n < 0 {
++		return -1
++	}
++	return n
++}
++
++// msSince is the least creation time in milliseconds a job of this engine
++// has (2001-09-09): one below it was kept in seconds by an engine before
++// patch 0013, or is none. CloudBurrow patch (cloudburrow/cloudburrow#1564).
++const msSince = 1_000_000_000_000
++
++// outOfBounds reports whether the job's creation time, in milliseconds,
++// is outside the request's bounds of creation time (minCreationTime and
++// maxCreationTime, "after or at" and "before or at", as BigQuery reads
++// them). A job with no such time is never out: the front, which times
++// the jobs it sends on, reads the bounds again. CloudBurrow patch
++// (cloudburrow/cloudburrow#1564): jobs.list read every job whatever was
++// asked, so a client, or the front's INFORMATION_SCHEMA.JOBS, asking for
++// the last minute's jobs was answered every one.
++func (r *jobsListRequest) outOfBounds(stats *bigqueryv2.JobStatistics) bool {
++	if stats == nil || stats.CreationTime < msSince {
++		return false
++	}
++	return r.minCreation >= 0 && stats.CreationTime < r.minCreation || r.maxCreation >= 0 && stats.CreationTime > r.maxCreation
++}
++
+ // splitJobIDs reads a comma-separated list of job IDs. CloudBurrow patch
+ // (cloudburrow/cloudburrow#1528).
+ func splitJobIDs(s string) []string {
+@@ -2054,16 +2094,25 @@
+ 	jobs := []*bigqueryv2.JobListJobs{}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1086): their metadata is
+ 	// read here, not with the project.
+-	all, err := r.project.Jobs(ctx)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1564): every job is read
++	// only when every job is asked for; patch 0064 read them first, and
++	// then the ones asked for.
++	var all []*metadata.Job
++	var err error
+ 	if r.some {
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1528).
+ 		all, err = r.project.JobsAfter(ctx, r.after, r.ids)
++	} else {
++		all, err = r.project.Jobs(ctx)
+ 	}
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	for _, job := range all {
+ 		content := job.Content()
++		if r.outOfBounds(content.Statistics) { // CloudBurrow patch (cloudburrow/cloudburrow#1564)
++			continue
++		}
+ 		listed := &bigqueryv2.JobListJobs{
+ 			Id:           content.Id,
+ 			JobReference: content.JobReference,
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -99,6 +99,10 @@
+ 	// (cloudburrow/cloudburrow#1103).
+ 	jobKeysMu sync.Mutex
+ 	jobKeys   map[jobKey]struct{}
++	// jobOrderIndexed is whether jobOrderIndex is made. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1564).
++	jobOrderIndexMu sync.Mutex
++	jobOrderIndexed bool
+ }
+ 
+ type jobKey struct{ projectID, jobID string }
+@@ -764,43 +768,18 @@
+ 	for _, id := range ids {
+ 		named[id] = true
+ 	}
+-	tx, err := conn.BeginTx(ctx, nil)
+-	if err != nil {
+-		return nil, err
+-	}
+-	defer tx.Commit()
+-	seq := int64(-1) // every job is after none
+-	if after != "" {
+-		if err := tx.QueryRowContext(ctx,
+-			"SELECT seq FROM cloudburrow_job_order WHERE projectID = @projectID AND id = @id",
+-			sql.Named("projectID", projectID), sql.Named("id", after)).Scan(&seq); err != nil && !errors.Is(err, sql.ErrNoRows) {
+-			return nil, err
+-		}
+-	}
+-	rows, err := tx.QueryContext(ctx,
+-		"SELECT id FROM cloudburrow_job_order WHERE projectID = @projectID AND seq > @seq ORDER BY seq",
+-		sql.Named("projectID", projectID), sql.Named("seq", seq))
++	// CloudBurrow patch (cloudburrow/cloudburrow#1564): the job order is
++	// read as SQLite SQL, by its primary key and an index of its sequence
++	// numbers (jobOrderIndex): as GoogleSQL, each WHERE visited every row,
++	// so a list of the jobs after one cost what every job of the project
++	// did (70 ms at 5,000 jobs, measured).
++	order, err := r.jobOrderAfter(ctx, conn, projectID, after)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	var order []string
+-	for rows.Next() {
+-		var id string
+-		if err := rows.Scan(&id); err != nil {
+-			rows.Close()
+-			return nil, err
+-		}
+-		order = append(order, id)
++	for _, id := range order {
+ 		delete(named, id)
+ 	}
+-	if err := rows.Err(); err != nil {
+-		rows.Close()
+-		return nil, err
+-	}
+-	rows.Close()
+-	if err := tx.Commit(); err != nil {
+-		return nil, err
+-	}
+ 	if len(named) > 0 {
+ 		// The jobs named before after, in the order they were added.
+ 		var earlier []string
+@@ -810,7 +789,9 @@
+ 				delete(named, id)
+ 			}
+ 		}
+-		older, err := r.findJobsMetadata(ctx, projectID, earlier)
++		// By their primary key (#1564): findJobsMetadata reads more than
++		// one job as GoogleSQL, visiting every job of the project.
++		older, err := r.findJobRowsByID(ctx, conn, projectID, earlier)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -821,6 +802,99 @@
+ 		return append(older, newer...), nil
+ 	}
+ 	return r.findJobRowsByID(ctx, conn, projectID, order)
++}
++
++// jobOrderAfter returns the IDs of the jobs of projectID added after the
++// job after (every job when after is "" or no job of the project), in the
++// order they were added, reading cloudburrow_job_order as SQLite SQL: by
++// its primary key, and by jobOrderIndex, which it makes first. CloudBurrow
++// patch (cloudburrow/cloudburrow#1564).
++func (r *Repository) jobOrderAfter(ctx context.Context, conn *sql.Conn, projectID, after string) ([]string, error) {
++	var order []string
++	err := conn.Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		if err := r.indexJobOrder(ctx, gsqlConn); err != nil {
++			return err
++		}
++		encProject, err := googlesqlite.EncodeString(projectID)
++		if err != nil {
++			return err
++		}
++		seq := int64(-1) // every job is after none
++		if after != "" {
++			encID, err := googlesqlite.EncodeString(after)
++			if err != nil {
++				return err
++			}
++			rows, err := gsqlConn.QueryRawContext(ctx,
++				"SELECT `seq` FROM `cloudburrow_job_order` WHERE `projectID` = ? AND `id` = ?", encProject, encID)
++			if err != nil {
++				return fmt.Errorf("failed to read the job order: %w", err)
++			}
++			if rows.Next() {
++				if err := rows.Scan(&seq); err != nil {
++					rows.Close()
++					return err
++				}
++			}
++			err = rows.Err()
++			rows.Close()
++			if err != nil {
++				return err
++			}
++		}
++		rows, err := gsqlConn.QueryRawContext(ctx,
++			"SELECT `id` FROM `cloudburrow_job_order` WHERE `projectID` = ? AND `seq` > ? ORDER BY `seq`", encProject, seq)
++		if err != nil {
++			return fmt.Errorf("failed to read the job order: %w", err)
++		}
++		defer rows.Close()
++		for rows.Next() {
++			var v any
++			if err := rows.Scan(&v); err != nil {
++				return err
++			}
++			id, _, err := googlesqlite.DecodeString(v)
++			if err != nil {
++				return fmt.Errorf("failed to decode a job ID of %s: %w", projectID, err)
++			}
++			order = append(order, id)
++		}
++		return rows.Err()
++	})
++	return order, err
++}
++
++// jobOrderIndex is an index of cloudburrow_job_order by project and
++// sequence number, which jobOrderAfter reads the jobs after one by.
++// GoogleSQL makes no index, so it is made as SQLite SQL. CloudBurrow patch
++// (cloudburrow/cloudburrow#1564).
++const jobOrderIndex = "CREATE INDEX IF NOT EXISTS `cloudburrow_job_order_seq` ON `cloudburrow_job_order` (`projectID`, `seq`)"
++
++// indexJobOrder makes jobOrderIndex once. CloudBurrow patch
++// (cloudburrow/cloudburrow#1564).
++func (r *Repository) indexJobOrder(ctx context.Context, c *googlesqlite.Conn) error {
++	r.jobOrderIndexMu.Lock()
++	defer r.jobOrderIndexMu.Unlock()
++	if r.jobOrderIndexed {
++		return nil
++	}
++	rows, err := c.QueryRawContext(ctx, jobOrderIndex)
++	if err != nil {
++		return fmt.Errorf("failed to index the job order: %w", err)
++	}
++	for rows.Next() {
++	}
++	err = rows.Err()
++	rows.Close()
++	if err != nil {
++		return fmt.Errorf("failed to index the job order: %w", err)
++	}
++	r.jobOrderIndexed = true
++	return nil
+ }
+ 
+ // findJobRowsByID reads the jobs of ids, in their order, with their
+--- /dev/null
++++ b/server/jobs_list_bounds_test.go
+@@ -0,0 +1,35 @@
++package server
++
++import (
++	"testing"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// CloudBurrow regression test (cloudburrow/cloudburrow#1564): jobs.list
++// leaves out a job created outside minCreationTime and maxCreationTime
++// (both inclusive), and lists one with no time in milliseconds.
++func TestJobsListCreationBounds(t *testing.T) {
++	const ms = 1_790_000_000_000
++	r := &jobsListRequest{minCreation: creationBound("1790000000000"), maxCreation: creationBound("1790000000100")}
++	for _, c := range []struct {
++		stats *bigqueryv2.JobStatistics
++		out   bool
++	}{
++		{&bigqueryv2.JobStatistics{CreationTime: ms - 1}, true},
++		{&bigqueryv2.JobStatistics{CreationTime: ms}, false},
++		{&bigqueryv2.JobStatistics{CreationTime: ms + 100}, false},
++		{&bigqueryv2.JobStatistics{CreationTime: ms + 101}, true},
++		{&bigqueryv2.JobStatistics{CreationTime: 1_700_000_000}, false}, // seconds
++		{&bigqueryv2.JobStatistics{}, false},
++		{nil, false},
++	} {
++		if got := r.outOfBounds(c.stats); got != c.out {
++			t.Errorf("outOfBounds(%+v) = %v, want %v", c.stats, got, c.out)
++		}
++	}
++	none := &jobsListRequest{minCreation: creationBound(""), maxCreation: creationBound("x")}
++	if none.outOfBounds(&bigqueryv2.JobStatistics{CreationTime: ms}) {
++		t.Error("a job is out of no bounds")
++	}
++}
+--- /dev/null
++++ b/internal/metadata/job_order_test.go
+@@ -0,0 +1,65 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"reflect"
++	"testing"
++)
++
++// CloudBurrow regression test (cloudburrow/cloudburrow#1564): the jobs
++// after one, and the jobs named, are read by the job order's keys, as
++// SQLite SQL, and listed as before: in the order they were added, the
++// named ones added before the cursor first, only of their own project,
++// and not once deleted.
++func TestJobsAfterByIndex(t *testing.T) {
++	r, _ := testRepository(t)
++	ctx := context.Background()
++	addJobs(t, r, queryJob(r, "a", 1), queryJob(r, "b", 1), queryJob(r, "c 'quoted\"", 1), queryJob(r, "d", 1))
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		other := NewProject(r, "q", nil, nil)
++		if err := other.Insert(ctx, tx); err != nil {
++			return err
++		}
++		j := queryJob(r, "e", 1)
++		j.ProjectID = "q"
++		return other.AddJob(ctx, tx, j)
++	})
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	ids := func(after string, named ...string) []string {
++		t.Helper()
++		jobs, err := project.JobsAfter(ctx, after, named)
++		if err != nil {
++			t.Fatalf("JobsAfter(%q, %q): %v", after, named, err)
++		}
++		var out []string
++		for _, j := range jobs {
++			out = append(out, j.ID)
++		}
++		return out
++	}
++	for _, c := range []struct {
++		after string
++		named []string
++		want  []string
++	}{
++		{"", nil, []string{"a", "b", "c 'quoted\"", "d"}},
++		{"b", nil, []string{"c 'quoted\"", "d"}},
++		{"d", nil, nil},
++		{"missing", nil, []string{"a", "b", "c 'quoted\"", "d"}},
++		{"b", []string{"b", "a", "d", "missing"}, []string{"b", "a", "c 'quoted\"", "d"}},
++		{"d", []string{"a"}, []string{"a"}},
++		{"e", nil, []string{"a", "b", "c 'quoted\"", "d"}}, // project q's
++	} {
++		if got := ids(c.after, c.named...); !reflect.DeepEqual(got, c.want) {
++			t.Errorf("JobsAfter(%q, %q) = %q, want %q", c.after, c.named, got, c.want)
++		}
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error { return project.DeleteJob(ctx, tx, "c 'quoted\"") })
++	if got, want := ids("a", "c 'quoted\""), []string{"b", "d"}; !reflect.DeepEqual(got, want) {
++		t.Errorf("JobsAfter(a) after a deletion = %q, want %q", got, want)
++	}
++}

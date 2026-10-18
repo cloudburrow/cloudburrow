@@ -126,12 +126,18 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		{Label: "UID", Value: db.Uid},
 		{Label: "Created", Value: db.CreateTime.AsTime().Format("2006-01-02 15:04:05 MST")},
 	}
-	return console.Detail{Summary: summary, Sections: []console.Section{
+	sections := []console.Section{
 		{ID: "indexes", Label: "Indexes", Listing: p.indexes(ctx, c, name, path[0])},
 		{ID: "fields", Label: "Field overrides", Listing: p.fields(ctx, c, name, path[0])},
 		{ID: "schedules", Label: "Backup schedules", Listing: p.schedules(ctx, c, name, path[0])},
 		{ID: "backups", Label: "Backups", Listing: p.backups(ctx, c, name, path[0])},
-	}}, nil
+	}
+	// User credentials and pipelines are Enterprise edition features
+	// (#1500, consolefirestorepipeline.go).
+	if db.DatabaseEdition == adminpb.Database_ENTERPRISE {
+		sections = append(sections, console.Section{ID: "usercreds", Label: "User credentials", Listing: p.userCreds(ctx, c, name, path[0])})
+	}
+	return console.Detail{Summary: summary, Sections: sections}, nil
 }
 
 // indexes is a database's Indexes tab: its composite indexes, in every
@@ -249,6 +255,8 @@ func (firestoreDatabasesProvider) CreateForm() (string, []console.Field) {
 			Help: "A Firestore location, such as nam5, eur3 or us-east1."},
 		{Name: "concurrency", Label: "Concurrency mode", Type: "select", Default: "PESSIMISTIC",
 			Options: []string{"PESSIMISTIC", "OPTIMISTIC"}},
+		{Name: "edition", Label: "Edition", Type: "select", Default: "STANDARD", Options: []string{"STANDARD", "ENTERPRISE"},
+			Help: "Enterprise runs pipelines (Run pipeline) and keeps user credentials; it cannot be changed later."},
 	}
 }
 
@@ -265,10 +273,18 @@ func (p firestoreDatabasesProvider) Create(ctx context.Context, project string, 
 	}
 	defer c.Close()
 	mode := adminpb.Database_ConcurrencyMode(adminpb.Database_ConcurrencyMode_value[values["concurrency"]])
+	edition := adminpb.Database_STANDARD
+	switch values["edition"] {
+	case "", "STANDARD":
+	case "ENTERPRISE":
+		edition = adminpb.Database_ENTERPRISE
+	default:
+		return "", fmt.Errorf("edition %q is not STANDARD or ENTERPRISE", values["edition"])
+	}
 	op, err := c.CreateDatabase(ctx, &adminpb.CreateDatabaseRequest{Parent: "projects/" + project,
 		DatabaseId: strings.TrimSpace(values["database"]),
 		Database: &adminpb.Database{LocationId: strings.TrimSpace(values["location"]),
-			Type: adminpb.Database_FIRESTORE_NATIVE, ConcurrencyMode: mode}})
+			Type: adminpb.Database_FIRESTORE_NATIVE, ConcurrencyMode: mode, DatabaseEdition: edition}})
 	if err != nil {
 		return "", fmt.Errorf("creating the database: %w", err)
 	}

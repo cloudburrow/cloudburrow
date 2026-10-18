@@ -976,6 +976,9 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 			return copyTable{}, code, "notImplemented", msg
 		}
 		live.from = sub
+		if m.ingestion() { // #1458: each row keeps its _PARTITIONTIME of then (timetravel.go)
+			live.partitionTime = m.TimePartitioning
+		}
 		return live, 0, "", ""
 	}
 	if f.dropped == nil {

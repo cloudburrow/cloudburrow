@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"sort"
-	"strings"
 	"testing"
 
 	sp "cloud.google.com/go/spanner/apiv1"
@@ -333,20 +332,51 @@ func TestSpannerBatchWrite(t *testing.T) {
 	}
 }
 
-// TestSpannerFetchCacheUpdateIsRefused records what is answered for
-// FetchCacheUpdate, the location-aware routing stream: UNIMPLEMENTED on the
-// first receive. The emulator says nothing; the call front names why
-// (#1498): the emulator is one server, with nowhere to route a client.
+// TestSpannerFetchCacheUpdate (#1523): FetchCacheUpdate, the stream that
+// warms a client's location-aware routing cache with "key recipes and
+// server information for a given database". Measured first: the emulator
+// answers it UNIMPLEMENTED with an empty message. The emulator is one
+// server, with no splits or replicas to route a key to, so the call front
+// answers one CacheUpdate with the database's ID and nothing to cache, and
+// the stream ends; the same ID again for the same database; NOT_FOUND for
+// a database that does not exist, INVALID_ARGUMENT for a malformed name.
 //
-// covers: google.spanner.v1.Spanner/FetchCacheUpdate (unimplemented)
-func TestSpannerFetchCacheUpdateIsRefused(t *testing.T) {
+// covers: google.spanner.v1.Spanner/FetchCacheUpdate
+func TestSpannerFetchCacheUpdate(t *testing.T) {
 	ctx, c, db := spannerDataClient(t, "cb-fcu", "fcudb")
-	stream, err := c.FetchCacheUpdate(ctx, &spannerpb.FetchCacheUpdateRequest{Database: db})
-	if err == nil {
-		_, err = stream.Recv()
+	fetch := func(database string) ([]*spannerpb.CacheUpdate, error) {
+		stream, err := c.FetchCacheUpdate(ctx, &spannerpb.FetchCacheUpdateRequest{Database: database, MaxRecipeCount: 10})
+		if err != nil {
+			return nil, err
+		}
+		var out []*spannerpb.CacheUpdate
+		for {
+			u, err := stream.Recv()
+			if errors.Is(err, io.EOF) {
+				return out, nil
+			}
+			if err != nil {
+				return out, err
+			}
+			out = append(out, u)
+		}
 	}
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "routing") {
-		t.Fatalf("FetchCacheUpdate = %v, want Unimplemented naming why", err)
+	got, err := fetch(db)
+	if err != nil {
+		t.Fatalf("FetchCacheUpdate: %v", err)
 	}
-	t.Logf("FetchCacheUpdate: %v", err)
+	if len(got) != 1 || got[0].GetDatabaseId() == 0 || len(got[0].GetRange()) != 0 || len(got[0].GetGroup()) != 0 || len(got[0].GetKeyRecipes().GetRecipe()) != 0 {
+		t.Fatalf("FetchCacheUpdate = %v, want one update with a database ID and nothing to cache", got)
+	}
+	again, err := fetch(db)
+	if err != nil || len(again) != 1 || again[0].GetDatabaseId() != got[0].GetDatabaseId() {
+		t.Errorf("FetchCacheUpdate again = %v, %v, want the same database ID %d", again, err, got[0].GetDatabaseId())
+	}
+	if _, err := fetch(db + "-missing"); status.Code(err) != codes.NotFound {
+		t.Errorf("FetchCacheUpdate of a missing database = %v, want NotFound", err)
+	}
+	if _, err := fetch("projects/p/databases/d"); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("FetchCacheUpdate of a malformed name = %v, want InvalidArgument", err)
+	}
+	t.Logf("FetchCacheUpdate: %v", got)
 }

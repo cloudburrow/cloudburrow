@@ -43,6 +43,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -122,7 +123,9 @@ func (s *Server) Start(context.Context) error {
 		return fmt.Errorf("serviceusage: listen on %s: %w", s.addr, err)
 	}
 	s.ln = ln
-	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	// Loopback-only, but a rebound or cross-site page reaches
+	// loopback too (#676, #1586).
+	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

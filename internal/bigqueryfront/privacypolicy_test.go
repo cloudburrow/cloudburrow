@@ -35,9 +35,12 @@ func TestPrivacyViewOfPolicyView(t *testing.T) {
 		value: `{"aggregation_threshold_policy": {"threshold": 2, "privacy_unit_column": "u"}}`})
 	f := front{next: privacyEmulator(), base: "/bigquery/v2/projects/p", tables: s}
 	for sql, code := range map[string]int{
-		"SELECT * FROM `ds.around`": http.StatusNotImplemented,
-		"SELECT * FROM ds.p":        http.StatusBadRequest,
-		"SELECT * FROM ds.t":        0,
+		// #1517: with no clause, BigQuery's "You must use ..." 400; with
+		// one, still 501.
+		"SELECT * FROM `ds.around`":                                   http.StatusBadRequest,
+		"SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM `ds.around`": http.StatusNotImplemented,
+		"SELECT * FROM ds.p":                                          http.StatusBadRequest,
+		"SELECT * FROM ds.t":                                          0,
 	} {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/bigquery/v2/projects/p/queries", nil)
@@ -81,11 +84,24 @@ func TestPrivacySubqueries(t *testing.T) {
 		{"WITH c AS (SELECT 1 AS k) SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p AS e",
 			"WITH c AS (SELECT 1 AS k) SELECT COUNT(*) FROM ds.p AS e GROUP BY CAST(NULL AS BOOL)  HAVING COUNT(DISTINCT `e`.`u`) >= 2", 0},
 		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD OPTIONS(threshold=1) COUNT(*) FROM ds.p AS e)", "", http.StatusBadRequest},
-		{"SELECT * FROM (SELECT * FROM ds.p)", "", http.StatusNotImplemented},
+		// #1517: no clause anywhere, BigQuery's 400 "You must use ...".
+		{"SELECT * FROM (SELECT * FROM ds.p)", "", http.StatusBadRequest},
+		{"WITH c AS (SELECT * FROM ds.p) SELECT COUNT(*) FROM c", "", http.StatusBadRequest},
 		{"WITH c AS (SELECT * FROM ds.p) SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM c", "", http.StatusNotImplemented},
 		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM (SELECT * FROM ds.p))", "", http.StatusNotImplemented},
-		{"SELECT (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p e), (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p e)",
-			"", http.StatusNotImplemented},
+		// #1517: two clauses, each rewritten in its place; one in another
+		// is a multi-level aggregation.
+		{"SELECT (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p e), (SELECT WITH AGGREGATION_THRESHOLD SUM(x) FROM ds.p)",
+			"SELECT (SELECT COUNT(*) FROM ds.p e GROUP BY CAST(NULL AS BOOL)  HAVING COUNT(DISTINCT `e`.`u`) >= 2), " +
+				"(SELECT SUM(x) FROM ds.p AS `p` GROUP BY CAST(NULL AS BOOL)  HAVING COUNT(DISTINCT `p`.`u`) >= 2)", 0},
+		{"WITH a AS (SELECT WITH AGGREGATION_THRESHOLD x, COUNT(*) n FROM ds.p GROUP BY x), " +
+			"b AS (SELECT WITH AGGREGATION_THRESHOLD OPTIONS(threshold=3) x, SUM(x) s FROM ds.p e GROUP BY x) SELECT * FROM a JOIN b USING (x)",
+			"WITH a AS (SELECT x, COUNT(*) n FROM ds.p AS `p` GROUP BY x HAVING COUNT(DISTINCT `p`.`u`) >= 2), " +
+				"b AS (SELECT x, SUM(x) s FROM ds.p e GROUP BY x HAVING COUNT(DISTINCT `e`.`u`) >= 3) SELECT * FROM a JOIN b USING (x)", 0},
+		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) n FROM (SELECT WITH AGGREGATION_THRESHOLD x, COUNT(*) FROM ds.p GROUP BY x))",
+			"", http.StatusBadRequest},
+		{"SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM (SELECT WITH AGGREGATION_THRESHOLD x, COUNT(*) FROM ds.p GROUP BY x)",
+			"", http.StatusBadRequest},
 	} {
 		sent = nil
 		w := httptest.NewRecorder()
@@ -199,19 +215,18 @@ func TestCheckJoinRestriction(t *testing.T) {
 			"JOIN_ANY", []string{"a"}, ""},
 		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD a, COUNT(*) FROM ds.v GROUP BY a) JOIN ds.o USING (a)",
 			"JOIN_ANY", []string{"a"}, "Joining must occur on at least one"},
+		// #1517: JOIN_ANY's "must be joined upon" names no kind of join;
+		// JOIN_ALL met allows other joins; NATURAL is a syntax error.
+		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_ANY", []string{"a"}, ""},
+		{"SELECT * FROM ds.v x FULL JOIN ds.o ON x.a = o.a CROSS JOIN ds.q", "JOIN_ANY", []string{"a"}, ""},
+		{"SELECT * FROM ds.v JOIN ds.o USING (a) LEFT JOIN ds.q USING (a)", "JOIN_ALL", []string{"a"}, ""},
+		{"SELECT * FROM ds.v JOIN ds.o USING (a) LEFT JOIN ds.q USING (c)", "JOIN_ALL", []string{"a"}, "Join occurring on a restricted column."},
+		{"SELECT * FROM ds.v NATURAL JOIN ds.o", "JOIN_ANY", []string{"a"}, "Syntax error: Unexpected keyword NATURAL"},
+		{"SELECT * FROM ds.v NATURAL JOIN ds.o", "JOIN_BLOCKED", nil, "Syntax error: Unexpected keyword NATURAL"},
 	} {
 		msg, uns := check(c.sql, c.cond, c.allowed...)
 		if uns || c.want == "" && msg != "" || c.want != "" && !strings.HasPrefix(msg, c.want) {
 			t.Errorf("%s %s %v: %q (unsupported %v), want %q", c.sql, c.cond, c.allowed, msg, uns, c.want)
-		}
-	}
-	for _, c := range []struct{ sql, cond string }{
-		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_ANY"},
-		{"SELECT * FROM ds.v JOIN ds.o USING (a) LEFT JOIN ds.q USING (a)", "JOIN_ALL"},
-		{"SELECT * FROM ds.v NATURAL JOIN ds.o", "JOIN_ANY"},
-	} {
-		if _, uns := check(c.sql, c.cond, "a"); !uns {
-			t.Errorf("%s %s: not refused 501", c.sql, c.cond)
 		}
 	}
 }

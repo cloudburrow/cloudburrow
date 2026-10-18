@@ -53,7 +53,9 @@ import (
 //
 // 501, nothing done: OR REPLACE (not in the
 // documented syntax), a table of another project, a dry run, legacy SQL,
-// any of these statements inside a multi-statement script (checkDDL), and
+// any of these statements inside a multi-statement script with a TEMP table
+// or function (checkDDL; another script is carried out a statement at a
+// time since #1459, scriptflow.go), and
 // DROP SNAPSHOT TABLE of a table that is not a snapshot (BigQuery's
 // documentation does not say what it does).
 
@@ -316,6 +318,9 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 				return
 			}
 			s.from = sub
+			if m.ingestion() { // #1458: each row keeps its _PARTITIONTIME of then (timetravel.go)
+				s.partitionTime = m.TimePartitioning
+			}
 			asOf = time.UnixMicro(past).UTC()
 		}
 	}
@@ -345,7 +350,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	case s.snapshot == nil:
 		extra = map[string]any{"cloneDefinition": map[string]any{"baseTableReference": base, "cloneTime": start}}
 	}
-	if msg := f.makeTableWith(r, dest, s.schema, extra); msg != "" {
+	if msg := f.makeTableWith(r, dest, s.schema, partitionExtra([]copyTable{s}, extra)); msg != "" {
 		failed(http.StatusBadRequest, "invalidQuery", msg)
 		return
 	}

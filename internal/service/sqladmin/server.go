@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // Region is the region every instance reports. CloudBurrow has no regions;
@@ -156,7 +158,9 @@ func (s *Server) Start(context.Context) error {
 		s.stopAuto = make(chan struct{})
 		go s.automate(s.stopAuto)
 	}
-	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	// Loopback-only, but a rebound or cross-site page reaches
+	// loopback too (#676, #1586).
+	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -287,11 +291,6 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // The reasons the instance methods CloudBurrow cannot serve faithfully are
 // refused (#1462): each names what is missing.
 const (
-	externalPrimaryWhy = "demoting makes a Cloud SQL instance a replica of an external primary, a server outside Cloud SQL, which a migration back out of Cloud SQL " +
-		"replicates to; CloudBurrow serves the other direction, a replica of a source representation instance (ON_PREMISES_INSTANCE) " +
-		"synced with startExternalSync (or seeded from dumpFilePath) and promoted with promoteReplica, but does not turn a primary into a replica: " +
-		"Google's custom import demotes a promoted instance and then sets its replication up with Cloud SQL's mysql.* stored procedures, " +
-		"which a MySQL server's own mysql schema does not take (docs/cloudsql.md)"
 	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
 	BlueGreenWhy = "a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, " +
 		"which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector. " +
@@ -303,8 +302,6 @@ const (
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "demoteMaster", "demote":
-		return externalPrimaryWhy
 	case "switchover":
 		return "switchover swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster, " +
 			"which needs a second region, and CloudBurrow has one (" + Region + "); promote a read replica with promoteReplica, " +
@@ -409,7 +406,8 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.connect.generateEphemeral", out, err
 	}
 	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
-		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica" || rest[2] == "failover") {
+		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica" || rest[2] == "failover" ||
+		rest[2] == "demoteMaster" || rest[2] == "demote") {
 		verb = rest[2]
 	}
 	if len(rest) == 3 && rest[2] == "getLatestRecoveryTime" && r.Method == http.MethodGet {
@@ -422,6 +420,12 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			break
 		}
 		out, err := s.replicaVerb(base, project, name, verb)
+		return "sql.instances." + verb, out, err
+	case "demoteMaster", "demote":
+		if r.Method != http.MethodPost {
+			break
+		}
+		out, err := s.demoteInstance(r, base, project, name, verb)
 		return "sql.instances." + verb, out, err
 	case "failover":
 		out, err := s.failover(r, base, project, name)

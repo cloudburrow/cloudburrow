@@ -7,6 +7,11 @@ $col1 and the STRUCT or ARRAY built over it, also $col1, were taken for
 one column: a call failed "no such column: $col1" where the same
 expression outside a function worked. Write the body by column ID too.
 
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
 --- a/internal/spec.go
 +++ b/internal/spec.go
 @@ -624,7 +624,11 @@
