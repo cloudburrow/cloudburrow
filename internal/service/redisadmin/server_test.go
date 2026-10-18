@@ -63,8 +63,8 @@ func TestRefusals(t *testing.T) {
 	if _, err := s.ListInstances(ctx, &redispb.ListInstancesRequest{Parent: "projects/my-proj"}); code(err) != codes.InvalidArgument {
 		t.Errorf("bad parent: %v", err)
 	}
-	if _, err := s.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: newTestServer(nil).inst.Name()}); code(err) != codes.FailedPrecondition {
-		t.Errorf("auth string with AUTH off: %v", err)
+	if auth, err := s.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: newTestServer(nil).inst.Name()}); err != nil || auth.GetAuthString() != "" {
+		t.Errorf("auth string with AUTH off = %q, %v; want empty", auth.GetAuthString(), err)
 	}
 	if _, err := s.CreateInstance(ctx, &redispb.CreateInstanceRequest{}); code(err) != codes.Unimplemented {
 		t.Errorf("CreateInstance: %v", err)

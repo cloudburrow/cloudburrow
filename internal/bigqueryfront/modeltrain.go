@@ -3,7 +3,6 @@ package bigqueryfront
 import (
 	"fmt"
 	"math"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,9 +34,11 @@ import (
 // the mean log loss (logistic) plus l2_reg·‖w‖² and l1_reg·‖w‖₁, the
 // intercept unregularized; the stddev is the sample one; the line search
 // halves the rate until the loss falls and doubles it after a step that
-// needed no halving; L1 is a proximal (soft-threshold) step; a RANDOM
-// split is drawn with a fixed seed, so it is the same each run but not
-// Google's rows; a one-hot column set that is collinear with the intercept
+// needed no halving; L1 is a proximal (soft-threshold) step; the text
+// whose FARM_FINGERPRINT places a row in a RANDOM split (BigQuery says
+// only that it is "based on the FARM_FINGERPRINT of the data (including
+// the column name and schema)", rowText, fingerprinted by the engine), so the split is
+// deterministic, as documented, but not Google's rows; a one-hot column set that is collinear with the intercept
 // is solved for the minimum-norm weights. The weights so differ from
 // Google's in their last digits, and more where the problem is
 // ill-conditioned or gradient descent stops early.
@@ -59,6 +60,10 @@ type mlOptions struct {
 	SplitMethod    string   `json:"dataSplitMethod"`
 	SplitEvalFrac  float64  `json:"dataSplitEvalFraction"`
 	SplitCol       string   `json:"dataSplitCol,omitempty"`
+	// CategoryEncoding is category_encoding_method as given ("" when not
+	// given: a boosted tree's default, LABEL_ENCODING, and the other
+	// models' ONE_HOT_ENCODING).
+	CategoryEncoding string `json:"categoryEncodingMethod,omitempty"`
 	// KMEANS (modelcluster.go): NumClusters 0 is the documented default,
 	// log10 of the training rows.
 	NumClusters   int    `json:"numClusters,omitempty"`
@@ -145,6 +150,9 @@ type mlFeature struct {
 	Categories []string `json:"categories,omitempty"`
 	NullSeen   bool     `json:"nullSeen,omitempty"`
 	NullCount  int64    `json:"nullCount"`
+	// LabelEncoded is a categorical feature of a tree model label encoded
+	// (LABEL_ENCODING, labelEncode): one column, the category's index.
+	LabelEncoded bool `json:"labelEncoded,omitempty"`
 	// Weight is a numeric feature's weight on its standardized value;
 	// CategoryWeights a categorical one's, by category, the NULL
 	// category's last when NullSeen.
@@ -162,7 +170,7 @@ func (ft mlFeature) numeric() bool {
 
 // dims is how many encoded columns the feature has.
 func (ft mlFeature) dims() int {
-	if ft.numeric() {
+	if ft.numeric() || ft.LabelEncoded {
 		return 1
 	}
 	n := len(ft.Categories)
@@ -279,8 +287,9 @@ func mlUnimplemented(format string, a ...any) *mlFail {
 }
 
 // trainModel trains a model of opts on rows, whose columns are cols, each
-// value a string or nil as the REST API gives it.
-func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
+// value a string or nil as the REST API gives it; fp fingerprints the rows
+// of a RANDOM split.
+func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprinter) (mlTrained, *mlFail) {
 	switch opts.ModelType {
 	case "KMEANS":
 		return trainKMeans(opts, cols, rows)
@@ -332,7 +341,9 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			return t, mlUnimplemented("a feature column (%s) of type %s: CloudBurrow trains on INT64, FLOAT64, NUMERIC, BIGNUMERIC, "+
 				"STRING and BOOL features only", c.Name, c.Type)
 		}
-		t.Features = append(t.Features, mlFeature{Name: c.Name, Type: ty})
+		ft := mlFeature{Name: c.Name, Type: ty}
+		ft.LabelEncoded = !ft.numeric() && isTreeModel(opts.ModelType) && opts.CategoryEncoding != "ONE_HOT_ENCODING"
+		t.Features = append(t.Features, ft)
 		fidx = append(fidx, i)
 	}
 	if len(t.Features) == 0 {
@@ -397,12 +408,11 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 	}
 	switch method {
 	case "RANDOM":
-		rng := rand.New(rand.NewSource(1465))
-		perm := rng.Perm(len(kept))
-		n := int(math.Round(frac * float64(len(kept))))
-		for _, p := range perm[:n] {
-			isEval[p] = true
+		split, fe := randomSplit(cols, kept, frac, opts.SplitMethod == "AUTO_SPLIT" && len(kept) > 50000, fp)
+		if fe != nil {
+			return t, fe
 		}
+		copy(isEval, split)
 	case "CUSTOM":
 		if si < 0 {
 			return t, mlInvalid("data_split_col must be specified when data_split_method is CUSTOM")
@@ -863,6 +873,9 @@ func encodeFeatureMode(ft mlFeature, v *string, scaling string) []float64 {
 		}
 		return []float64{(x - ft.Mean) / ft.Stddev}
 	}
+	if ft.LabelEncoded {
+		return []float64{float64(labelEncode(ft, v))}
+	}
 	out := make([]float64, ft.dims())
 	if v == nil {
 		if ft.NullSeen {
@@ -874,6 +887,96 @@ func encodeFeatureMode(ft mlFeature, v *string, scaling string) []float64 {
 		out[i] = 1
 	}
 	return out
+}
+
+// fingerprinter gives FARM_FINGERPRINT of each text, in order: the
+// front's asks the engine (engineFingerprints), whose FARM_FINGERPRINT is
+// FarmHash Fingerprint64, as BigQuery's hash functions page documents it.
+type fingerprinter func(texts []string) ([]int64, *mlFail)
+
+// rowText is the text a RANDOM split fingerprints for a row: each
+// column's name, GoogleSQL type and quoted value (NULL unquoted), as
+// `x INT64="3",s STRING=NULL`, so a split depends on the column names and
+// schema as BigQuery says its split does.
+func rowText(cols []mlColumn, row []*string) string {
+	var b strings.Builder
+	for i, c := range cols {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		ty := mlTypeOf(c.Type)
+		if ty == "" {
+			ty = strings.ToUpper(c.Type)
+		}
+		b.WriteString(c.Name + " " + ty + "=")
+		if row[i] == nil {
+			b.WriteString("NULL")
+		} else {
+			b.WriteString(strconv.Quote(*row[i]))
+		}
+	}
+	return b.String()
+}
+
+// randomSplit is which rows a RANDOM split makes evaluation rows: a row
+// is one when ABS(FARM_FINGERPRINT(row)) % 100 is below frac, rounded to
+// two decimal places ("The service maintains the accuracy of the input
+// value to two decimal places"), times 100, so the split is the same each
+// run and its size approximate, as BigQuery documents it; count (AUTO_SPLIT
+// of more than 50,000 rows, "10,000 rows are used as evaluation data")
+// takes the round(frac · rows) rows of the smallest ABS(FARM_FINGERPRINT)
+// instead.
+func randomSplit(cols []mlColumn, rows [][]*string, frac float64, count bool, fp fingerprinter) ([]bool, *mlFail) {
+	eval := make([]bool, len(rows))
+	texts := make([]string, len(rows))
+	for i, row := range rows {
+		texts[i] = rowText(cols, row)
+	}
+	fps, fe := fp(texts)
+	if fe != nil {
+		return nil, fe
+	}
+	if len(fps) != len(rows) {
+		return nil, &mlFail{code: 500, msg: fmt.Sprintf("FARM_FINGERPRINT of the split: %d values for %d rows", len(fps), len(rows))}
+	}
+	key := make([]uint64, len(rows))
+	for i, f := range fps {
+		key[i] = uint64(f)
+		if f < 0 {
+			key[i] = uint64(-f) // ABS; -2^63 stays 2^63
+		}
+	}
+	if count {
+		order := make([]int, len(rows))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool { return key[order[a]] < key[order[b]] })
+		for _, i := range order[:int(math.Round(frac*float64(len(rows))))] {
+			eval[i] = true
+		}
+		return eval, nil
+	}
+	pct := uint64(math.Round(frac * 100))
+	for i := range rows {
+		eval[i] = key[i]%100 < pct
+	}
+	return eval, nil
+}
+
+// labelEncode is BigQuery's label encoding of v
+// (https://docs.cloud.google.com/bigquery/docs/auto-preprocessing): "an
+// INT64 value in [0, <number of categories>]", the vocabulary "sorted
+// alphabetically" from 1, and "NULL values and categories that aren't in
+// the vocabulary are encoded to 0".
+func labelEncode(ft mlFeature, v *string) int {
+	if v == nil {
+		return 0
+	}
+	if i := sort.SearchStrings(ft.Categories, *v); i < len(ft.Categories) && ft.Categories[i] == *v {
+		return i + 1
+	}
+	return 0
 }
 
 // stats are vals' mean, sample stddev, min, max and median.

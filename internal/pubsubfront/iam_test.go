@@ -159,6 +159,11 @@ func TestIAMPolicyOnASnapshotAndASchema(t *testing.T) {
 	if _, err := ta.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + project + "/schemas/none"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetIamPolicy on a missing schema: %v, want NOT_FOUND", err)
 	}
+	for _, name := range []string{"projects/" + project + "/schemas/none", "projects/" + project + "/topics/none", "projects/" + project + "/subscriptions/none", "projects/" + project + "/snapshots/none"} {
+		if tp, err := ta.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name, Permissions: []string{"pubsub.topics.get", "pubsub.schemas.get"}}); err != nil || len(tp.GetPermissions()) != 0 {
+			t.Errorf("TestIamPermissions on missing %s = %v, %v; want no permissions and no error", name, tp.GetPermissions(), err)
+		}
+	}
 	if _, err := ta.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + project + "/buckets/b"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("GetIamPolicy on a name that is not Pub/Sub's: %v, want INVALID_ARGUMENT", err)
 	}
@@ -189,6 +194,9 @@ func TestRESTIAMPolicy(t *testing.T) {
 	}
 	if code, got := fx.rest(t, "GET", "/v1/projects/"+project+"/subscriptions/none:getIamPolicy", ""); code != 404 {
 		t.Errorf("a missing subscription = %d %v; want 404", code, got)
+	}
+	if code, got := fx.rest(t, "POST", "/v1/projects/"+project+"/subscriptions/none:testIamPermissions", `{"permissions":["pubsub.subscriptions.get"]}`); code != 200 || got["permissions"] != nil {
+		t.Errorf(":testIamPermissions on a missing subscription = %d %v; want 200 with none", code, got)
 	}
 	if code, _ := fx.rest(t, "DELETE", "/v1/"+topic, ""); code != 200 {
 		t.Fatalf("DELETE the topic = %d", code)

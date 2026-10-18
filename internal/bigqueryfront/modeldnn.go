@@ -771,10 +771,14 @@ func (d *dnnTrained) latentLayer() int { return (len(d.Layers) - 1) / 2 }
 // no data split. ML.PREDICT gives the middle hidden layer's units as
 // latent_col_1, ..., then the input columns; ML.EVALUATE and
 // ML.RECONSTRUCTION_LOSS the errors of the encoded columns' reconstruction.
-// UNVERIFIED: BigQuery documents latent_col_<index> as INT64, which cannot
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-predict
-// hold a unit's value, so CloudBurrow gives FLOAT64; the errors are of the
-// preprocessed columns (BigQuery does not say which).
+// BigQuery documents latent_col_<index> as "an INT64 value that represents
+// the dimensions of the latent space", so CloudBurrow gives INT64.
+// UNVERIFIED (docs re-read 2026-10-17, they still say INT64 and not how a
+// unit's value becomes one:
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-predict):
+// the unit's value is CAST to INT64, which rounds to the nearest integer,
+// halfway cases away from zero; the errors are of the preprocessed columns
+// (BigQuery does not say which).
 func trainAutoencoder(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
 	var t mlTrained
 	if len(opts.LabelCols) > 0 {
@@ -819,7 +823,7 @@ func (md bqModel) autoencoderResource(res map[string]any) (map[string]any, map[s
 			hidden = append(hidden, ms(int64(len(ly.B))))
 		}
 		for j := range t.DNN.Layers[t.DNN.latentLayer()].B {
-			latent = append(latent, map[string]any{"name": fmt.Sprintf("latent_col_%d", j+1), "type": map[string]string{"typeKind": "FLOAT64"}})
+			latent = append(latent, map[string]any{"name": fmt.Sprintf("latent_col_%d", j+1), "type": map[string]string{"typeKind": "INT64"}})
 		}
 	}
 	res["labelColumns"] = latent
@@ -874,7 +878,7 @@ func (f front) autoencoderSubquery(r *http.Request, q queryOptions, md bqModel, 
 		if c.fn == "PREDICT" {
 			var latent []string
 			for j := range t.DNN.Layers[t.DNN.latentLayer()].B {
-				latent = append(latent, fmt.Sprintf("_cbml_h%d_%d AS latent_col_%d", t.DNN.latentLayer(), j, j+1))
+				latent = append(latent, fmt.Sprintf("CAST(_cbml_h%d_%d AS INT64) AS latent_col_%d", t.DNN.latentLayer(), j, j+1))
 			}
 			return "(SELECT " + strings.Join(latent, ", ") + ", " + hidden + " FROM " + from + ")", 0, ""
 		}

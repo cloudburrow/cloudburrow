@@ -242,3 +242,56 @@ func TestBigQueryMLArimaPlusPipeline(t *testing.T) {
 		"forecast_limit_lower_bound=5, forecast_limit_upper_bound=1) AS SELECT d, v FROM `%s.s`", name, name)).Read(ctx)
 	wantHTTPStatus(t, "forecast_limit_lower_bound above the upper bound", err, http.StatusBadRequest)
 }
+
+// TestBigQueryMLArimaPlusSTL: ARIMA_PLUS finds seasonality by "Seasonal
+// and Trend decomposition using Loess (STL)" (bigqueryml-syntax-create-time-series),
+// and ML.EXPLAIN_FORECAST gives its seasonal component. A level plus an
+// exact weekly pattern summing to zero is decomposed exactly (each
+// cycle-subseries is constant, so is its loess, and the low-pass filter
+// of the pattern is 0); a pattern whose amplitude grows is followed as it
+// grows, as STL's loess of each cycle-subseries does and a fixed
+// per-position mean would not.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryMLArimaPlusSTL(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	weekly := []float64{3, -1, -2, 0, 1, -4, 3}
+	name := mlDataset(t, h, c, map[string]string{
+		"flat": "SELECT DATE_ADD(DATE '2024-01-01', INTERVAL i DAY) AS d, 10 + [3.0, -1, -2, 0, 1, -4, 3][OFFSET(MOD(i, 7))] AS v " +
+			"FROM UNNEST(GENERATE_ARRAY(0, 27)) AS i",
+		"grow": "SELECT DATE_ADD(DATE '2024-01-01', INTERVAL i DAY) AS d, 10 + (1 + i / 14) * [3.0, -1, -2, 0, 1, -4, 3][OFFSET(MOD(i, 7))] AS v " +
+			"FROM UNNEST(GENERATE_ARRAY(0, 41)) AS i",
+	})
+	for _, tbl := range []string{"flat", "grow"} {
+		if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.%s` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', "+
+			"seasonalities=['WEEKLY'], clean_spikes_and_dips=FALSE, adjust_step_changes=FALSE) AS SELECT d, v FROM `%s.%s`", name, tbl, name, tbl)); err != nil {
+			t.Fatalf("CREATE MODEL %s: %v", tbl, err)
+		}
+	}
+	hist := func(m string) []map[string]bigquery.Value {
+		return mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.EXPLAIN_FORECAST(MODEL `%s.%s`, STRUCT(1 AS horizon)) "+
+			"WHERE time_series_type = 'history' ORDER BY time_series_timestamp", name, m))
+	}
+	ex := hist("flat")
+	if len(ex) != 28 {
+		t.Fatalf("ML.EXPLAIN_FORECAST flat: %d history rows; want 28", len(ex))
+	}
+	for k, r := range ex {
+		if !near(r["seasonal_period_weekly"], weekly[k%7], 1e-9) {
+			t.Errorf("flat day %d: seasonal %v; want %v exactly", k, r["seasonal_period_weekly"], weekly[k%7])
+		}
+	}
+	ex = hist("grow")
+	if len(ex) != 42 {
+		t.Fatalf("ML.EXPLAIN_FORECAST grow: %d history rows; want 42", len(ex))
+	}
+	// Monday's +3 is 3·1 in the first week and 3·(1 + 35/14) = 10.5 in the
+	// last: the seasonal component grows with it (loess of span 7 over the
+	// six Mondays smooths it, so less than the data does; a per-position
+	// mean would not grow at all).
+	first, last := ex[0]["seasonal_period_weekly"].(float64), ex[35]["seasonal_period_weekly"].(float64)
+	if first < 2 || first > 6 || last < 7 || last > 11.5 || last-first < 2 {
+		t.Errorf("grow: Monday's seasonal %v in the first week and %v in the last; want it to grow from about 3 toward 10.5", first, last)
+	}
+}

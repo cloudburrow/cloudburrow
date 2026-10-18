@@ -205,8 +205,9 @@ func jobStateOf(job map[string]any) string {
 	return str(job, "state")
 }
 
-// jobRow is one JOBS row of a Job resource jobs.list gave.
-func jobRow(project string, job map[string]any) []string {
+// jobRow is one JOBS row of a Job resource jobs.list gave. settings are
+// the project and organization configurations (projectoptions.go), or nil.
+func jobRow(project string, job map[string]any, settings *projectOptions) []string {
 	ref, _ := job["jobReference"].(map[string]any)
 	conf, _ := job["configuration"].(map[string]any)
 	stats, _ := job["statistics"].(map[string]any)
@@ -255,7 +256,14 @@ func jobRow(project string, job map[string]any) []string {
 		case bool:
 			dialect = sqlString(map[bool]string{true: "LEGACY_SQL", false: "GOOGLE_SQL"}[v])
 		default:
+			// No dialect asked: the default was the region's
+			// default_sql_dialect_option when the job was made, legacy
+			// SQL unless set (information-schema-jobs, read 2026-10-17;
+			// #1595).
 			dialect = sqlString("DEFAULT_LEGACY_SQL")
+			if id, _ := ref["jobId"].(string); settings.googleDefaulted(project, id) {
+				dialect = sqlString("DEFAULT_GOOGLE_SQL")
+			}
 		}
 	}
 	tx := "NULL"
@@ -356,7 +364,7 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 	jobs = kept
 	rows := make([][]string, len(jobs))
 	for i, job := range jobs {
-		rows[i] = jobRow(project, job)
+		rows[i] = jobRow(project, job, f.settings)
 	}
 	return rowsSubquery(jobsColumns, rows), 0, ""
 }

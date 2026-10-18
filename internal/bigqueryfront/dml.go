@@ -172,6 +172,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.refuseLinkedQuery(w, r, q, insert) { // #1423, loglinks.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && f.dryRunUntilStop(w, r, q, insert) { // #1456, scriptdrystop.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, #1417, projectoptions.go
 		return
 	}
@@ -181,6 +184,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if q.UseLegacySQL != nil && *q.UseLegacySQL && f.onlyGoogleSQL(r, insert) { // #1417, projectoptions.go
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
 			Message: "Legacy SQL is not allowed: the project's default_sql_dialect_option is only_google_sql"})
+		return
+	}
+	if q.UseLegacySQL != nil && *q.UseLegacySQL && f.refuseLegacyAlterTable(w, r, q, insert) { // #1456, legacyddl.go
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.withDefaultTimeZone(w, r, q, insert) { // #1417, timezone.go

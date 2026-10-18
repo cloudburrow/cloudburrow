@@ -282,7 +282,7 @@ func (w *storageWrite) writableFields(ctx context.Context, t readTable) ([]field
 		return nil, status.Errorf(codes.Internal, "read the table %s: %v", t.path(), err)
 	}
 	if meta.Type == "SNAPSHOT" || snapshotDefinitionOf(body) != nil {
-		return nil, status.Error(codes.InvalidArgument, snapshotWriteMessage(t.project, t.dataset, t.table, "the Storage Write API"))
+		return nil, status.Error(codes.PermissionDenied, snapshotWriteMessage(t.project, t.dataset, t.table, "the Storage Write API"))
 	}
 	return meta.Schema.Fields, nil
 }

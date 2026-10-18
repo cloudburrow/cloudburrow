@@ -11,7 +11,9 @@ import (
 // spikes-and-dips cleaning and step-change adjustment. What is left, the
 // adjusted, deseasonalized series, is the trend the ARIMA is fitted to; a
 // forecast is that trend's forecast plus each seasonal component
-// continued by its last cycle. For every point
+// continued by its last cycle (BigQuery says it extrapolates seasonality
+// "by using double exponential smoothing (ETS)", with no parameters;
+// CloudBurrow does not, #1600). For every point
 //
 //	y = trend + Σ seasonal_period_* + spikes_and_dips + step_changes + residual
 //
@@ -19,12 +21,12 @@ import (
 //
 // Google publishes the stages, not their algorithms. UNVERIFIED, chosen
 // here, all deterministic:
-//   - seasonal decomposition: MSTL-style iterated classical decomposition
-//     (two passes over the periods, shortest first; each period's
-//     component the cycle-position means, centred to sum to zero, of the
-//     series less the other components and a centred moving average of
-//     the period's length); the robust first pass, used to find spikes
-//     and steps, takes cycle-position medians;
+//   - seasonal decomposition: STL, as BigQuery documents ("Seasonal and
+//     Trend decomposition using Loess (STL)"), for several periods as
+//     MSTL does (mstl, modelstl.go), with the netlib STL's parameters as
+//     R's stl() defaults them, which Google does not give; the first pass,
+//     used to find spikes and steps, is STL's robust fit, and the seasonal
+//     strength below is of the plain fit;
 //   - the candidate periods by data frequency (arimaSeasonCands), each
 //     rounded to whole points; a period given in seasonalities is used if
 //     the series spans two full cycles of it; with seasonalities AUTO, a
@@ -104,12 +106,14 @@ func decomposeSeries(y []float64, freq string, ts tsOptions) arimaDecomp {
 			}
 		}
 	}
-	// The robust first pass: which periods, and the series without them.
+	// The first pass: which periods, and the series without them (robustly).
 	var periods []arimaSeason
 	if auto {
 		for _, c := range cands {
 			try := append(append([]arimaSeason(nil), periods...), c)
-			trend, seas := mstl(y, try, true)
+			// The strength is of the plain (not robust) fit, whose
+			// remainder an outlier does not dominate.
+			trend, seas := mstl(y, try, false)
 			if seasonalStrength(y, trend, seas, len(try)-1) >= arimaStrength {
 				periods = try
 			}
@@ -160,91 +164,36 @@ func splitSeasonalities(s string) []string {
 	return out
 }
 
-// movingAverage is x's centred moving average over p points (a 2×p
-// average for an even p), its window shrunk at the ends.
-func movingAverage(x []float64, p int) []float64 {
-	n := len(x)
-	out := make([]float64, n)
-	h := p / 2
-	for i := range x {
-		var s, w float64
-		for j := i - h; j <= i+h; j++ {
-			if j < 0 || j >= n {
-				continue
-			}
-			wt := 1.0
-			if p%2 == 0 && (j == i-h || j == i+h) {
-				wt = 0.5
-			}
-			s += wt * x[j]
-			w += wt
-		}
-		out[i] = s / w
-	}
-	return out
-}
-
-// mstl decomposes x into a trend and one seasonal component per period.
+// mstl decomposes x into a trend and one seasonal component per period,
+// shortest first, as MSTL does (Bandara, Hyndman and Bergmeir 2021): two
+// passes over the periods, each period's component the STL seasonal
+// (modelstl.go, s.window 7 + 4·i) of the series less the other periods'
+// components; the trend is the last STL's. robust uses STL's robust
+// (outer) iterations.
 func mstl(x []float64, periods []arimaSeason, robust bool) ([]float64, [][]float64) {
 	n := len(x)
 	seas := make([][]float64, len(periods))
 	for i := range seas {
 		seas[i] = make([]float64, n)
 	}
-	rest := func(skip int) []float64 {
-		r := append([]float64(nil), x...)
-		for i, s := range seas {
-			if i == skip {
-				continue
-			}
-			for k := range r {
-				r[k] -= s[k]
-			}
-		}
-		return r
+	if len(periods) == 0 {
+		return x, seas
 	}
+	des := append([]float64(nil), x...)
+	var trend []float64
 	for pass := 0; pass < 2; pass++ {
 		for i, p := range periods {
-			r := rest(i)
-			tr := movingAverage(r, p.Period)
-			seas[i] = cycleMeans(r, tr, p.Period, robust)
-		}
-	}
-	maxP := 1
-	for _, p := range periods {
-		maxP = max(maxP, p.Period)
-	}
-	trend := x
-	if len(periods) > 0 {
-		trend = movingAverage(rest(-1), maxP)
-	}
-	return trend, seas
-}
-
-// cycleMeans is the seasonal component of r − tr of period p: each cycle
-// position's mean (or median), centred to sum to zero over a cycle.
-func cycleMeans(r, tr []float64, p int, robust bool) []float64 {
-	pos := make([][]float64, p)
-	for k := range r {
-		pos[k%p] = append(pos[k%p], r[k]-tr[k])
-	}
-	val := make([]float64, p)
-	var mean float64
-	for j, v := range pos {
-		if robust {
-			val[j] = median(v)
-		} else {
-			for _, x := range v {
-				val[j] += x / float64(len(v))
+			for k := range des {
+				des[k] += seas[i][k]
+			}
+			fit := stl(des, p.Period, 7+4*i, robust)
+			seas[i], trend = fit.Seasonal, fit.Trend
+			for k := range des {
+				des[k] -= seas[i][k]
 			}
 		}
-		mean += val[j] / float64(p)
 	}
-	out := make([]float64, len(r))
-	for k := range out {
-		out[k] = val[k%p] - mean
-	}
-	return out
+	return trend, seas
 }
 
 // seasonalStrength is 1 − Var(R)/Var(S_i + R) of x's decomposition.

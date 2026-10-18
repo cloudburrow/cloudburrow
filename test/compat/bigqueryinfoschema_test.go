@@ -195,7 +195,8 @@ func TestBigQueryInformationSchemaDatasetViews(t *testing.T) {
 			"parameter_mode STRING, is_result STRING, parameter_name STRING, data_type STRING, parameter_default STRING, "+
 			"is_aggregate STRING")
 		if len(rows) != 2 || rows[0][3] != int64(0) || rows[0][5] != "YES" || rows[0][6] != nil || rows[0][7] != "INT64" ||
-			rows[1][3] != int64(1) || rows[1][5] != "NO" || rows[1][6] != "x" || rows[1][7] != "INT64" {
+			rows[1][3] != int64(1) || rows[1][5] != "NO" || rows[1][6] != "x" || rows[1][7] != "INT64" ||
+			rows[0][4] != nil || rows[1][4] != nil { // a function's parameter_mode is NULL (#1595)
 			t.Errorf("insert=%v: PARAMETERS rows %v", insert, rows)
 		}
 

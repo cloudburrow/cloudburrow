@@ -749,13 +749,13 @@ func withDefaultAccess(body []byte) ([]byte, bool) {
 	return b, err == nil
 }
 
-// insertTable checks tables.insert's body, or with update, tables.update's
+// insertTableChecked checks tables.insert's body, or with update, tables.update's
 // and tables.patch's, whose table ID is in the path. A table made with a
 // FLOAT field is made through createTable (#1000, floattype.go).
 //
 // A tables.update or tables.patch of table is then carried out through
 // updateTable (#1009, #1010, #1054, tablepatch.go).
-func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
+func (f front) insertTableChecked(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
 	var body struct {
 		TableReference *struct {
 			TableID string `json:"tableId"`

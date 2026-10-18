@@ -309,7 +309,8 @@ serves no IAM (over REST its answer was a plain-text 404), so CloudBurrow's Pub/
 and `TestIamPermissions` on `projects/*/topics/*`, `projects/*/subscriptions/*`,
 `projects/*/snapshots/*` and `projects/*/schemas/*`, over gRPC and REST, through the shared
 `internal/iampolicy`, with Secret Manager's etag, version and condition handling (rules 1-3). On
-a resource the emulator does not have, the three methods are NOT_FOUND. `TestIamPermissions`
+a resource the emulator does not have, `GetIamPolicy` and `SetIamPolicy` are NOT_FOUND and
+`TestIamPermissions` returns no permissions, as iam_policy.proto documents (#1595). It
 returns, of the permissions asked, those Pub/Sub defines on that kind of resource; nothing is
 denied, and a permission Pub/Sub does not define there is not one a caller could hold on it.
 A policy is kept in the front's state file, and goes with its resource: a delete, an expiry or a

@@ -167,15 +167,16 @@ func (s *Server) GetInstance(ctx context.Context, req *redispb.GetInstanceReques
 
 // GetInstanceAuthString returns a created instance's AUTH string. The
 // instance `up` runs has no AUTH (docs/memorystore.md), and neither has a
-// created instance without auth_enabled: Google then returns an empty
-// string, which this does too.
+// created instance without auth_enabled: cloud_redis.proto says "If AUTH is
+// not enabled for the instance the response will be empty", so both answer
+// an empty InstanceAuthString (#1595).
 func (s *Server) GetInstanceAuthString(ctx context.Context, req *redispb.GetInstanceAuthStringRequest) (*redispb.InstanceAuthString, error) {
 	isDefault, err := s.find(req.GetName())
 	if err != nil {
 		return nil, err
 	}
 	if isDefault {
-		return nil, apierror.FailedPrecondition("AUTH is not enabled for instance %s", req.GetName())
+		return &redispb.InstanceAuthString{}, nil
 	}
 	return s.created.authString(req.GetName())
 }

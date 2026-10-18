@@ -37,9 +37,7 @@ import (
 //   - a change table made before patch 0041, which has no row identities;
 //   - an ingestion-time partitioned table whose change table was made
 //     before googlesqlite patch 0050, which keeps each change's
-//     _PARTITIONTIME (#1458);
-//   - a query that reads _PARTITIONTIME or _PARTITIONDATE of a past time,
-//     has a * and names the time by a query parameter (below).
+//     _PARTITIONTIME (#1458).
 //
 // An ingestion-time partitioned table's past rows have their
 // _PARTITIONTIME (and, by day, _PARTITIONDATE) when the query names them
@@ -48,7 +46,10 @@ import (
 // them first, partitioned as the table is, each row in its partition of
 // then, so that * gives the table's columns and not the pseudo-columns,
 // as of the table itself; the scratch table is deleted once the query is
-// answered. A snapshot, clone or copy of a past time of such a table
+// answered. A past time named by a query parameter is read so too: its
+// value is the time the scratch table is filled at, and the query is sent
+// without the parameters only FOR SYSTEM_TIME AS OF named
+// (paramsWhere). A snapshot, clone or copy of a past time of such a table
 // (CREATE SNAPSHOT TABLE, CREATE TABLE ... CLONE, a copy job of
 // table@time) is made partitioned as the table is, with each row's
 // _PARTITIONTIME of then (#1458): its subquery gives each row's
@@ -74,10 +75,6 @@ const pastPartitionTime = "_cb_pt"
 // delete.
 func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref string, past int64, expr string,
 	scratches *[]string) (string, int, string) {
-	notBuilt := func(why string) (string, int, string) {
-		return "", http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a past time of " + ref + ": " + why +
-			" (docs/compatibility.md). Nothing was run."
-	}
 	where := ""
 	if tr.decorator != "" {
 		var code int
@@ -90,10 +87,6 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 	if m.ingestion() {
 		for _, t := range tr.stmt {
 			pseudo = pseudo || t.is("_PARTITIONTIME") || t.is("_PARTITIONDATE")
-		}
-		if pseudo && hasSelectStar(tr.stmt) && strings.Contains(expr, "@") {
-			return notBuilt("CloudBurrow does not read _PARTITIONTIME or _PARTITIONDATE of a past time named by a query " +
-				"parameter in a query whose select list has a *")
 		}
 	}
 	var text string
@@ -238,4 +231,52 @@ func (f front) pastRows(r *http.Request, dataset, table string, m partitionMeta,
 		"FROM %s WHERE _CHANGE_TYPE != 'START' AND googlesqlite_change_micros <= %d AND (%s) IS NOT NULL) "+
 		"WHERE _cloudburrow_last = 1 AND _cloudburrow_change NOT IN ('DELETE', '"+changeEnd+"')%s)", out, inner, changes, past, expr, where)
 	return text, 0, ""
+}
+
+// paramsWhere returns those of q's query parameters that q.Query names at
+// a position keep holds of: a positional parameter by its ?, a named one
+// by any @name (names are not case-sensitive). The engine fails a query
+// sent with a parameter it does not use, so a statement the front sends
+// with part of the query (systemTime's) or without part of it (a past
+// time read from a scratch table, #1458) carries only those it names.
+func paramsWhere(q queryOptions, keep func(pos int) bool) json.RawMessage {
+	var params []json.RawMessage
+	if len(q.QueryParameters) == 0 || json.Unmarshal(q.QueryParameters, &params) != nil {
+		return q.QueryParameters
+	}
+	toks, ok := lex(q.Query)
+	if !ok {
+		return q.QueryParameters
+	}
+	named := map[string]bool{}
+	var positional []bool
+	for i, t := range toks {
+		switch {
+		case t.punct("?"):
+			positional = append(positional, keep(t.pos))
+		case t.punct("@") && i+1 < len(toks) && (toks[i+1].kind == tokWord || toks[i+1].kind == tokQuoted) &&
+			toks[i+1].pos == t.end && (i == 0 || !toks[i-1].punct("@") || toks[i-1].end != t.pos):
+			if keep(t.pos) {
+				named[strings.ToLower(toks[i+1].text)] = true
+			}
+		}
+	}
+	var out []json.RawMessage
+	for i, p := range params {
+		var head struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(p, &head)
+		if head.Name == "" && (i >= len(positional) || positional[i]) || head.Name != "" && named[strings.ToLower(head.Name)] {
+			out = append(out, p)
+		}
+	}
+	if out == nil {
+		out = []json.RawMessage{}
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return q.QueryParameters
+	}
+	return b
 }

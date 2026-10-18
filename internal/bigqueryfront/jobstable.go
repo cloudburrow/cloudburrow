@@ -484,7 +484,7 @@ func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]
 		if _, dup := rows[id]; id == "" || dup {
 			return ""
 		}
-		rows[id] = "(" + strings.Join(jobRow(project, job), ", ") + ")"
+		rows[id] = "(" + strings.Join(jobRow(project, job, f.settings), ", ") + ")"
 		ids = append(ids, id)
 		if jobStateOf(job) != "DONE" {
 			open[id] = true

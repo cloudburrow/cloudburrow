@@ -28,7 +28,7 @@ func TestTrainBoostedTree(t *testing.T) {
 		t.Fatalf("defaults: %+v", o)
 	}
 	cols, rows := stepRows()
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -51,7 +51,7 @@ func TestTrainBoostedTree(t *testing.T) {
 	o.ModelType = "BOOSTED_TREE_CLASSIFIER"
 	o.EarlyStop = false
 	cols[1].Type = "INTEGER"
-	tr, fe = trainModel(o, cols, rows)
+	tr, fe = trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -87,7 +87,7 @@ func TestTrainBoostedTree(t *testing.T) {
 		mrows = append(mrows, []*string{&xs, &ls})
 	}
 	o.LabelCols, o.MaxIterations = nil, 1
-	tr, fe = trainModel(o, mcols, mrows)
+	tr, fe = trainModelT(o, mcols, mrows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -118,7 +118,7 @@ func TestTrainRandomForest(t *testing.T) {
 		t.Fatalf("options %+v: %s", o, m)
 	}
 	cols, rows := stepRows()
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -132,9 +132,57 @@ func TestTrainRandomForest(t *testing.T) {
 	if d.NumParallelTree != 100 || d.Subsample != 0.8 || d.ColsampleNode != 0.8 {
 		t.Fatalf("defaults %+v", d)
 	}
-	a, _ := trainModel(d, cols, rows)
-	b, _ := trainModel(d, cols, rows)
+	a, _ := trainModelT(d, cols, rows)
+	b, _ := trainModelT(d, cols, rows)
 	if len(a.Trees) != 100 || a.treeMargin([]float64{1, 0.3}) != b.treeMargin([]float64{1, 0.3}) {
 		t.Fatalf("forest: %d trees, %v vs %v", len(a.Trees), a.treeMargin([]float64{1, 0.3}), b.treeMargin([]float64{1, 0.3}))
+	}
+}
+
+// TestBoostedTreeLabelEncoding: a boosted tree's STRING feature is label
+// encoded by default, as BigQuery documents (auto-preprocessing): one
+// column, the vocabulary sorted alphabetically from 1, NULL and an unseen
+// category 0.
+func TestBoostedTreeLabelEncoding(t *testing.T) {
+	cols := []mlColumn{{"c", "STRING"}, {"y", "FLOAT"}}
+	var rows [][]*string
+	for _, r := range [][2]string{{"b", "0"}, {"a", "0"}, {"c", "10"}, {"b", "0"}, {"a", "0"}, {"c", "10"}} {
+		rows = append(rows, []*string{sp(r[0]), sp(r[1])})
+	}
+	o := defaultMLOptions()
+	o.ModelType, o.LabelCols, o.MaxIterations = "BOOSTED_TREE_REGRESSOR", []string{"y"}, 1
+	applyTreeDefaults(&o)
+	tr, fe := trainModelT(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	ft := tr.Features[0]
+	if !ft.LabelEncoded || ft.dims() != 1 {
+		t.Fatalf("feature: %+v; want label encoded, one column", ft)
+	}
+	for v, want := range map[string]float64{"a": 1, "b": 2, "c": 3, "z": 0} {
+		if got := encodeFeature(ft, sp(v)); len(got) != 1 || got[0] != want {
+			t.Errorf("encode(%q) = %v; want [%v]", v, got, want)
+		}
+	}
+	if got := encodeFeature(ft, nil); got[0] != 0 {
+		t.Errorf("encode(NULL) = %v; want [0]", got)
+	}
+	// By hand: c (3) apart from a and b (1, 2): the one split is at 2.5.
+	if root := tr.Trees[0][0]; root.Feat != 0 || root.Thr != 2.5 || len(tr.Trees[0]) != 3 {
+		t.Fatalf("tree: %+v; want a split of column 0 at 2.5", tr.Trees[0])
+	}
+	a, z := tr.predictRow(map[string]*string{"c": sp("a")}), tr.predictRow(map[string]*string{"c": sp("z")})
+	if n := tr.predictRow(map[string]*string{"c": nil}); a != z || a != n {
+		t.Errorf("predict a %v, unseen %v, NULL %v; want the same leaf (0 encodes below 2.5)", a, z, n)
+	}
+	sql := tr.encodedSQL(func(s string) string { return s })
+	if len(sql) != 1 || sql[0] != "(CASE CAST(c AS STRING) WHEN 'a' THEN 1.0 WHEN 'b' THEN 2.0 WHEN 'c' THEN 3.0 ELSE 0.0 END)" {
+		t.Errorf("encodedSQL: %q", sql)
+	}
+	// ONE_HOT_ENCODING, given, keeps a column per category.
+	o.CategoryEncoding = "ONE_HOT_ENCODING"
+	if tr, fe = trainModelT(o, cols, rows); fe != nil || tr.Features[0].LabelEncoded || tr.Features[0].dims() != 3 {
+		t.Errorf("one-hot: %+v, %v", tr.Features, fe)
 	}
 }

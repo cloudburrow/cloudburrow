@@ -22,7 +22,8 @@ import (
 // (https://cloud.google.com/bigquery/docs/querying-partitioned-tables:
 // the pseudo-columns are not in SELECT *). Times are the instance clock.
 // Measured first: each of these was 501 ("keeps no _PARTITIONTIME", "a
-// query whose select list has a *").
+// query whose select list has a *"); the same named by a query parameter
+// stayed 501 after the literal was served.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get
 func TestBigQueryPastIngestionTimeCopies(t *testing.T) {
@@ -79,6 +80,59 @@ func TestBigQueryPastIngestionTimeCopies(t *testing.T) {
 		}
 		if g := read("SELECT t.*, t._PARTITIONTIME FROM "+p+" AS t"+asOf+" WHERE t.n = 1", insert); strings.Join(g, ",") != "1 a 2024-01-01" {
 			t.Errorf("insert=%v: SELECT t.*, t._PARTITIONTIME of then: %v, want 1 a 2024-01-01", insert, g)
+		}
+	}
+
+	// The same with the past time named by a query parameter, named and
+	// positional, beside another parameter the query uses: the past rows
+	// are written to the scratch table at the parameter's value.
+	readParams := func(sql string, insert bool, params ...bigquery.QueryParameter) []string {
+		t.Helper()
+		q := c.Query(sql)
+		q.Parameters = params
+		var it *bigquery.RowIterator
+		var err error
+		if insert {
+			var job *bigquery.Job
+			if job, err = q.Run(ctx); err == nil {
+				it, err = job.Read(ctx)
+			}
+		} else {
+			it, err = q.Read(ctx)
+		}
+		if err != nil {
+			t.Fatalf("insert=%v: %s: %v", insert, sql, err)
+		}
+		var out []string
+		for {
+			var row []bigquery.Value
+			if err := it.Next(&row); err != nil {
+				break
+			}
+			var cells []string
+			for _, v := range row {
+				if x, ok := v.(time.Time); ok {
+					v = x.UTC().Format("2006-01-02")
+				}
+				cells = append(cells, fmt.Sprint(v))
+			}
+			out = append(out, strings.Join(cells, " "))
+		}
+		return out
+	}
+	for _, insert := range []bool{false, true} {
+		if g := readParams("SELECT *, _PARTITIONDATE AS pd FROM "+p+" FOR SYSTEM_TIME AS OF @at ORDER BY n", insert,
+			bigquery.QueryParameter{Name: "at", Value: mid}); strings.Join(g, ",") != "1 a 2024-01-01,2 b 2024-01-02" {
+			t.Errorf("insert=%v: SELECT *, _PARTITIONDATE AS OF @at: %v, want 1 a 2024-01-01, 2 b 2024-01-02", insert, g)
+		}
+		if g := readParams("SELECT * FROM "+p+" FOR SYSTEM_TIME AS OF @at WHERE _PARTITIONTIME = @pt", insert,
+			bigquery.QueryParameter{Name: "at", Value: mid},
+			bigquery.QueryParameter{Name: "pt", Value: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)}); strings.Join(g, ",") != "2 b" {
+			t.Errorf("insert=%v: SELECT * WHERE _PARTITIONTIME = @pt AS OF @at: %v, want 2 b", insert, g)
+		}
+		if g := readParams("SELECT t.*, t._PARTITIONTIME FROM "+p+" AS t FOR SYSTEM_TIME AS OF ? WHERE t.n = ?", insert,
+			bigquery.QueryParameter{Value: mid}, bigquery.QueryParameter{Value: 1}); strings.Join(g, ",") != "1 a 2024-01-01" {
+			t.Errorf("insert=%v: SELECT t.*, t._PARTITIONTIME AS OF ?: %v, want 1 a 2024-01-01", insert, g)
 		}
 	}
 

@@ -630,7 +630,11 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 		delete(meta, "encryptionConfiguration")
 	}
 	if d.connection != "" { // #1427, iceberg.go
-		moreOption{key: "biglakeConfiguration", value: map[string]any{"connectionId": d.connection}}.put(meta)
+		conn := d.connection
+		if conn == "DEFAULT" { // #1456, defaultConnection
+			conn = f.defaultConnection(r, dataset)
+		}
+		moreOption{key: "biglakeConfiguration", value: map[string]any{"connectionId": conn}}.put(meta)
 	}
 	for _, o := range d.more { // #1390, tableoptions.go
 		o.put(meta)
@@ -669,6 +673,9 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 		if o.setting {
 			f.tables.set(streamKey(projectOf(f.base), dataset, table), created.CreationTime, o)
 		}
+	}
+	if tags, _, _ := governanceTagsOf(meta["schema"]); tags != nil { // #1456, governancetags.go
+		f.tables.setGovernanceTags(streamKey(projectOf(f.base), dataset, table), created.CreationTime, tags, false, nil)
 	}
 	if uri, ok, _ := icebergConfig(meta["biglakeConfiguration"]); ok && f.icebergs != nil { // #1427
 		f.icebergs.add(f, dataset, table, uri, created.CreationTime)

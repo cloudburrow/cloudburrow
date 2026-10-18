@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +129,14 @@ func TestBigQueryUndeleteAndRestore(t *testing.T) {
 	run("INSERT INTO " + q("live") + " VALUES (2, 'b')")
 	if err := copyAt("live", "live_t4", t4.UnixMilli()); err != nil {
 		t.Fatalf("copy live@t4: %v", err)
+	}
+	// Before its creation, or a deleted one's: bq cp's message on
+	// restore-deleted-tables (#1595).
+	for _, src := range []string{"live", "gone"} {
+		err := copyAt(src, src+"_early", t1.Add(-time.Hour).UnixMilli())
+		if err == nil || !strings.Contains(err.Error(), "Invalid time travel timestamp") || !strings.Contains(err.Error(), "Cannot read before") {
+			t.Errorf("copy of %s before its creation: %v, want Invalid time travel timestamp … Cannot read before", src, err)
+		}
 	}
 	if got := read("SELECT n, s FROM " + q("live_t4")); !reflect.DeepEqual(got, []string{"1|a"}) {
 		t.Errorf("live@t4: %v, want [1|a]", got)

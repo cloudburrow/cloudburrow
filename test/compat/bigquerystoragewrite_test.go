@@ -601,8 +601,8 @@ func TestBigQueryStorageWriteRefusesSnapshots(t *testing.T) {
 		if err == nil {
 			_ = ms.Close()
 		}
-		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "read-only") {
-			t.Errorf("a %s stream of the snapshot: %v, want INVALID_ARGUMENT read-only", typ, err)
+		if status.Code(err) != codes.PermissionDenied || !strings.Contains(err.Error(), "read-only") {
+			t.Errorf("a %s stream of the snapshot: %v, want PERMISSION_DENIED read-only", typ, err)
 		}
 	}
 	ms, err := mw.NewManagedStream(ctx, managedwriter.WithDestinationTable(writeTablePath(snap)),
@@ -611,8 +611,8 @@ func TestBigQueryStorageWriteRefusesSnapshots(t *testing.T) {
 		_, err = appendResult(t, h, ms, [][]byte{idRow(t, m, 1)})
 		_ = ms.Close()
 	}
-	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "read-only") {
-		t.Errorf("an append to the snapshot's default stream: %v, want INVALID_ARGUMENT read-only", err)
+	if status.Code(err) != codes.PermissionDenied || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("an append to the snapshot's default stream: %v, want PERMISSION_DENIED read-only", err)
 	}
 	if rows := readRowsSorted(t, ctx, snap); len(rows) != 0 {
 		t.Errorf("the snapshot holds %q, want no rows", rows)

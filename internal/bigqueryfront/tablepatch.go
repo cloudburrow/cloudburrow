@@ -85,7 +85,7 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 	}
 	if schema != nil && snapshotDefinitionOf(got) != nil && (!sameSchema(meta.Schema.Fields, schema.Fields) || defaults || refused != "") {
 		// A snapshot's metadata only is updated (#1002, snapshots.go).
-		writeError(w, http.StatusBadRequest, "invalid", snapshotWriteMessage(projectOf(f.base), dataset, table,
+		writeError(w, http.StatusForbidden, "accessDenied", snapshotWriteMessage(projectOf(f.base), dataset, table,
 			"a change of its schema"))
 		return
 	}

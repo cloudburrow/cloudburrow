@@ -174,9 +174,9 @@ func (f front) withInformationSchemaViews(w http.ResponseWriter, r *http.Request
 			// when x is not a dataset of the project: another project's,
 			// which an instance does not answer (unqualifiedSchemataLinks
 			// answers the project's own).
-			if ref.view == "SCHEMATA_LINKS" && !ref.project {
+			if (ref.view == "SCHEMATA_LINKS" || ref.view == "SCHEMATA_OPTIONS") && !ref.project {
 				if st, _ := f.get(r, "/datasets/"+url.PathEscape(ref.dataset)); st == http.StatusNotFound {
-					writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA.SCHEMATA_LINKS "+
+					writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA."+ref.view+" "+
 						"of project "+ref.dataset+", which is not this instance's project, so nothing was run.")
 					return
 				}

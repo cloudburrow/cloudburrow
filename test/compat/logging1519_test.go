@@ -55,7 +55,8 @@ func loggingView(t *testing.T, h *Harness, id string) string {
 // policy is set, read back with its etag, tested (every permission, as
 // nothing is enforced) and goes with the view; a missing view's is
 // NOT_FOUND. A saved query is created (with and without an ID), read,
-// listed, updated by mask, refused without exactly one query and with an
+// listed (by the documented type and visibility filter too), updated by
+// mask, refused without exactly one query and with an
 // unknown visibility, and deleted. A log scope is created in global (not
 // another location), read, listed, updated, refused without resources, and
 // deleted.
@@ -127,6 +128,28 @@ func TestLoggingViewIAMSavedQueriesAndLogScopes(t *testing.T) {
 	sort.Strings(names)
 	if err != nil || len(names) != 2 {
 		t.Errorf("List = %v, %v; want both", names, err)
+	}
+	// The filter savedQueries.list documents: a type() call, a visibility
+	// token, or both, in either order, with or without AND (#1595).
+	for filter, want := range map[string]string{
+		`type("Logging")`:                               q.Name,
+		`visibility = SHARED type("OpsAnalytics")`:      sql.Name,
+		`type("Logging") AND visibility = SHARED`:       q.Name,
+		`type("OpsAnalytics") AND visibility = PRIVATE`: "",
+	} {
+		l, err := sq.List(parent).Filter(filter).Context(ctx).Do()
+		var got []string
+		if err == nil {
+			for _, s := range l.SavedQueries {
+				got = append(got, s.Name)
+			}
+		}
+		if err != nil || strings.Join(got, ",") != want {
+			t.Errorf("List(filter %s) = %v, %v; want [%s]", filter, got, err, want)
+		}
+	}
+	if _, err := sq.List(parent).Filter(`displayName = "Errors"`).Context(ctx).Do(); httpCode(err) != http.StatusBadRequest {
+		t.Errorf("an undocumented filter = %v; want 400", err)
 	}
 	for _, n := range []string{q.Name, sql.Name} {
 		if _, err := sq.Delete(n).Context(ctx).Do(); err != nil {

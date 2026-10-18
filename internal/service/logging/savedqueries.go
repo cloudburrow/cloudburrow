@@ -29,10 +29,12 @@ import (
 // is the generated google.golang.org/api/logging/v2. Over gRPC they answer
 // UNIMPLEMENTED, as no published proto names them.
 //
-// Choices Google documents only in part (UNVERIFIED): a list's filter is
-// refused as UNIMPLEMENTED rather than ignored; a create with an ID that is
-// taken is ALREADY_EXISTS; an update's mask may name only the fields listed
-// in savedQueryMutable and logScopeMutable.
+// A savedQueries.list filter is the documented type and visibility terms
+// (savedQueryFilter, #1595); a logScopes.list filter is refused as
+// UNIMPLEMENTED rather than ignored. Choices Google documents only in part
+// (UNVERIFIED): a create with an ID that is taken is ALREADY_EXISTS; an
+// update's mask may name only the fields listed in savedQueryMutable and
+// logScopeMutable.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/projects.locations.savedQueries/list
 
 // savedQuery is a SavedQuery resource.
@@ -353,10 +355,54 @@ func (a *Admin) patchExtra(w http.ResponseWriter, r *http.Request, c extraCollec
 	return a.putExtra(w, c, p, loc, id, cur)
 }
 
+// savedQueryTerm is one term of a savedQueries.list filter: the type
+// function or the visibility token the list reference documents.
+var savedQueryTerm = regexp.MustCompile(`^(?:type\("(Logging|OpsAnalytics)"\)|visibility\s*=\s*(PRIVATE|SHARED))`)
+
+// savedQueryFilter compiles a savedQueries.list filter, which the reference
+// documents as `type("Logging")` or `type("OpsAnalytics")`, `visibility =
+// PRIVATE` or `visibility = SHARED`, or one of each, in either order, joined
+// by AND or by nothing (#1595). Anything else is INVALID_ARGUMENT.
+func savedQueryFilter(f string) (func(*savedQuery) bool, error) {
+	var typ, vis string
+	rest := strings.TrimSpace(f)
+	for n := 0; rest != ""; n++ {
+		if n > 0 {
+			if r, ok := strings.CutPrefix(rest, "AND"); ok && (r == "" || r[0] == ' ' || r[0] == '\t') {
+				rest = strings.TrimSpace(r)
+			}
+		}
+		m := savedQueryTerm.FindStringSubmatch(rest)
+		if m == nil || n > 1 || (m[1] != "" && typ != "") || (m[2] != "" && vis != "") {
+			return nil, apierror.InvalidArgument("filter %q is not a type(\"Logging\") or type(\"OpsAnalytics\") call and a visibility = PRIVATE or SHARED token, at most one of each", f)
+		}
+		if m[1] != "" {
+			typ = m[1]
+		} else {
+			vis = m[2]
+		}
+		rest = strings.TrimSpace(rest[len(m[0]):])
+	}
+	return func(q *savedQuery) bool {
+		switch {
+		case typ == "Logging" && q.LoggingQuery == nil, typ == "OpsAnalytics" && q.OpsAnalyticsQuery == nil:
+			return false
+		}
+		return vis == "" || q.Visibility == vis
+	}, nil
+}
+
 func (a *Admin) listExtra(w http.ResponseWriter, r *http.Request, c extraCollection, p parent, loc string) error {
 	q := r.URL.Query()
-	if q.Get("filter") != "" {
-		return apierror.Unimplemented("filtering a %s list is not implemented", c.name)
+	var keep func(*savedQuery) bool
+	if f := q.Get("filter"); f != "" {
+		if c.name != "savedQueries" {
+			return apierror.Unimplemented("filtering a %s list is not implemented", c.name)
+		}
+		var err error
+		if keep, err = savedQueryFilter(f); err != nil {
+			return err
+		}
 	}
 	size := 0
 	if s := q.Get("pageSize"); s != "" {
@@ -387,7 +433,9 @@ func (a *Admin) listExtra(w http.ResponseWriter, r *http.Request, c extraCollect
 		}
 		switch x := v.(type) {
 		case *savedQuery:
-			values[x.Name] = raw
+			if keep == nil || keep(x) {
+				values[x.Name] = raw
+			}
 		case *logScope:
 			values[x.Name] = raw
 		}
@@ -397,7 +445,7 @@ func (a *Admin) listExtra(w http.ResponseWriter, r *http.Request, c extraCollect
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	page, next, err := paging.Page("logging-"+c.name+"|"+p.String()+"|"+loc, names, q.Get("pageToken"), size)
+	page, next, err := paging.Page("logging-"+c.name+"|"+p.String()+"|"+loc+"|"+q.Get("filter"), names, q.Get("pageToken"), size)
 	if err != nil {
 		return apierror.InvalidArgument("pageToken: %v", err)
 	}

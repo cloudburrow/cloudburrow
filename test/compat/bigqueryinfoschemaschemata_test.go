@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -10,8 +11,11 @@ import (
 )
 
 // TestBigQueryInformationSchemaSchemataOptions (#1351): a dataset's
-// options read back through INFORMATION_SCHEMA.SCHEMATA_OPTIONS, dataset-
-// and region-qualified, with BigQuery's documented columns, and
+// options read back through INFORMATION_SCHEMA.SCHEMATA_OPTIONS, region-
+// qualified and unqualified (the US region's), with BigQuery's documented
+// columns; dataset-qualified it is 400 invalidQuery, since its page says
+// "Queries against this view must include a region qualifier" and lists
+// the project and region scopes only (#1595, read 2026-10-17); and
 // MATERIALIZED_VIEWS is empty for a dataset with no materialized view
 // (TestBigQueryMaterializedViews lists one, #1390).
 // Measured first: each was 400 "Table not found", refused 501 by the front.
@@ -35,7 +39,11 @@ func TestBigQueryInformationSchemaSchemataOptions(t *testing.T) {
 		{"labels", "ARRAY<STRUCT<STRING, STRING>>", `[STRUCT("team", "data")]`},
 	}
 	for _, insert := range []bool{false, true} {
-		for _, from := range []string{ds.DatasetID + ".INFORMATION_SCHEMA.SCHEMATA_OPTIONS",
+		_, _, err := infoSchemaRead(ctx, c, "SELECT * FROM "+ds.DatasetID+".INFORMATION_SCHEMA.SCHEMATA_OPTIONS", insert)
+		if errReason(err) != "invalidQuery" || !strings.Contains(err.Error(), "region qualifier") {
+			t.Errorf("insert=%v: dataset-qualified SCHEMATA_OPTIONS: %v, want invalidQuery region qualifier", insert, err)
+		}
+		for _, from := range []string{"INFORMATION_SCHEMA.SCHEMATA_OPTIONS", "`" + project + "`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS",
 			"`" + project + "`.`region-us`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS"} {
 			schema, rows, err := infoSchemaRead(ctx, c, "SELECT * FROM "+from+
 				" WHERE schema_name = '"+ds.DatasetID+"' ORDER BY option_name", insert)

@@ -25,11 +25,13 @@ import (
 //     a load or copy job into it, a query job with it as destinationTable,
 //     a DML statement (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE),
 //     ALTER TABLE or CREATE OR REPLACE TABLE of it in a query, and a
-//     tables.patch or tables.update that changes its schema. BigQuery's
-//     documentation gives neither the status nor the message of these
-//     refusals; the front answers 400 invalid (invalidQuery for a query,
-//     a failed job for a query job), UNVERIFIED. The Storage Write API
-//     refuses a stream of it (storageWrite.writableFields).
+//     tables.patch or tables.update that changes its schema. The front
+//     answers 403 accessDenied (a failed job for a query job; the Storage
+//     Write API's PERMISSION_DENIED, storageWrite.writableFields), as
+//     BigQuery's error-messages page gives accessDenied for "when you try
+//     to modify a read-only object" (https://docs.cloud.google.com/bigquery/docs/error-messages,
+//     read 2026-10-17; #1595); the message is CloudBurrow's
+//     (snapshotWriteMessage).
 //     tables.delete of it is left to the emulator, and DROP TABLE too:
 //     BigQuery's DDL reference gives DROP SNAPSHOT TABLE for snapshots
 //     (carried out since #1002, cloneddl.go) but does not say DROP TABLE
@@ -63,15 +65,14 @@ func (f front) isSnapshot(r *http.Request, dataset, table string) bool {
 }
 
 // snapshotWriteMessage is the message a write to a snapshot is refused
-// with (BigQuery's wording UNVERIFIED).
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro
+// with: BigQuery's wording is UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro>).
 func snapshotWriteMessage(project, dataset, table, what string) string {
 	return fmt.Sprintf("%s is a table snapshot, which is read-only: %s cannot write to it. Restore it to a "+
 		"standard table (a copy job with operationType RESTORE) to change its data.",
 		tableName(project, tableRef{DatasetID: dataset, TableID: table}), what)
 }
 
-// refuseSnapshotWrite answers 400 invalid when dataset.table is a snapshot,
+// refuseSnapshotWrite answers 403 accessDenied when dataset.table is a snapshot,
 // and reports whether it did.
 func (f front) refuseSnapshotWrite(w http.ResponseWriter, r *http.Request, dataset, table, what string) bool {
 	if f.refuseLinkedWrite(w, r, dataset, what) { // #1423, loglinks.go
@@ -80,7 +81,7 @@ func (f front) refuseSnapshotWrite(w http.ResponseWriter, r *http.Request, datas
 	if dataset == "" || table == "" || !f.isSnapshot(r, dataset, table) {
 		return false
 	}
-	writeError(w, http.StatusBadRequest, "invalid", snapshotWriteMessage(projectOf(f.base), dataset, table, what))
+	writeError(w, http.StatusForbidden, "accessDenied", snapshotWriteMessage(projectOf(f.base), dataset, table, what))
 	return true
 }
 
@@ -204,7 +205,7 @@ func (f front) queryWritesSnapshot(r *http.Request, q queryOptions) (dataset, ta
 }
 
 // refuseSnapshotQuery refuses a query, before anything of it runs, that
-// writes a snapshot, and reports whether it did: 400 invalidQuery through
+// writes a snapshot, and reports whether it did: 403 accessDenied through
 // jobs.query, a failed job for a query job (insert).
 func (f front) refuseSnapshotQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
 	upper, writes := strings.ToUpper(q.Query), false
@@ -218,7 +219,7 @@ func (f front) refuseSnapshotQuery(w http.ResponseWriter, r *http.Request, q que
 	if table == "" {
 		return false
 	}
-	f.failBeforeRun(w, r, q, insert, dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery",
+	f.failBeforeRun(w, r, q, insert, dataset, http.StatusForbidden, rowError{Reason: "accessDenied",
 		Message: snapshotWriteMessage(projectOf(f.base), dataset, table, "the statement "+stmt)})
 	return true
 }
