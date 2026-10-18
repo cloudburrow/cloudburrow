@@ -206,20 +206,24 @@ func TestARunningClusterKeepsKnativesPods(t *testing.T) {
 	}
 }
 
-// A Service network that never answers fails the start with its reason.
-func TestAWarmStartReportsADeadNetwork(t *testing.T) {
+// A Service network that is never confirmed is no reason to fail the
+// start: nothing is restarted, and Knative is waited for as before.
+func TestAWarmStartWithoutANetworkWaitsAsBefore(t *testing.T) {
 	t.Parallel()
 	w := newWarmCluster(func(string) bool { return true })
 	r := &recordingRunner{respond: w.respond}
 	c := warmComponent(r)
-	dead := errors.New("the kubernetes Service is not answering")
-	c.SetNodeRestart(func() bool { return true }, func(context.Context) error { return dead })
-	err := c.ensureKnative(context.Background())
-	if !errors.Is(err, dead) || !errors.Is(err, ErrInstallFailed) {
-		t.Fatalf("ensureKnative = %v, want the network's error as an install failure", err)
+	c.SetNodeRestart(func() bool { return true }, func(context.Context) error {
+		return errors.New("the kubernetes Service is not answering")
+	})
+	if err := c.ensureKnative(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	if p := w.patched(); len(p) > 0 {
 		t.Errorf("restarted Knative with no network: %v", p)
+	}
+	if r.find("wait --for=condition=Available deployment --all") == "" {
+		t.Errorf("did not wait for Knative: %v", r.calls)
 	}
 }
 

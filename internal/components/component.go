@@ -400,7 +400,14 @@ func (c *LifecycleComponent) waitKnativeWarm(ctx context.Context) error {
 	if c.serviceNetwork != nil {
 		fmt.Fprintln(c.out, "  waiting for the cluster's Service network...")
 		if err := c.serviceNetwork(ctx); err != nil {
-			return fmt.Errorf("%w: %w", ErrInstallFailed, err)
+			if ctx.Err() != nil {
+				return err
+			}
+			// A probe that cannot run (a node image without curl) is no
+			// reason to fail the start: Knative comes back as it did
+			// before, late.
+			fmt.Fprintf(c.out, "  the Service network was not confirmed (%v); waiting for knative as it restarts itself\n", err)
+			return c.installer.WaitKnative(ctx, c.timeout)
 		}
 	}
 	return c.installer.RestartKnative(ctx, c.timeout)
