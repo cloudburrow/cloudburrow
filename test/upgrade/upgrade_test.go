@@ -4,7 +4,6 @@ package upgrade
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"google.golang.org/api/iterator"
 )
 
 // OlderRelease is the release whose state this one must load. It is the
@@ -59,7 +56,8 @@ func ports(base int) []string {
 //
 //	CLOUDBURROW_UPGRADE_BIN=$PWD/bin/cloudburrow go test -tags upgrade -timeout 90m ./test/upgrade/
 //
-// CLOUDBURROW_UPGRADE_PORT_BASE picks the ports (default 29300).
+// CLOUDBURROW_UPGRADE_PORT_BASE picks the ports (default 29300; this release
+// also takes the hundred after them).
 func TestUpgradeFromOlderRelease(t *testing.T) {
 	newBin := os.Getenv("CLOUDBURROW_UPGRADE_BIN")
 	if newBin == "" {
@@ -80,6 +78,13 @@ func TestUpgradeFromOlderRelease(t *testing.T) {
 	name := "upgrade-" + strings.ReplaceAll(strings.TrimPrefix(OlderRelease, "v"), ".", "-")
 	common := append([]string{"--name", name, "--state-dir", stateDir, "--services", services}, ports(base)...)
 	t.Cleanup(func() {
+		// CLOUDBURROW_UPGRADE_LOGS keeps the instance's up.log, which names
+		// the images up built, for removing them afterwards.
+		if dir := os.Getenv("CLOUDBURROW_UPGRADE_LOGS"); dir != "" {
+			if b, err := os.ReadFile(filepath.Join(stateDir, name, "up.log")); err == nil {
+				_ = os.WriteFile(filepath.Join(dir, name+"-up.log"), b, 0o600)
+			}
+		}
 		_ = exec.Command(newBin, "stop", "--name", name, "--state-dir", stateDir).Run()
 		_ = exec.Command(newBin, "delete", "--name", name, "--state-dir", stateDir).Run()
 	})
@@ -89,10 +94,6 @@ func TestUpgradeFromOlderRelease(t *testing.T) {
 	seeded := seed(ctx, t, old)
 	archive := filepath.Join(tmp, "older.tar.gz")
 	cli(t, oldBin, append([]string{"state", "save", archive}, common...)...)
-	// This release refuses to start over the buckets of the server the
-	// older one ran (#780), and does not yet migrate them (#1606): they are
-	// in the archive, and go from the volume before the upgrade.
-	clearOlderStorage(ctx, t, old)
 	cli(t, oldBin, "stop", "--name", name, "--state-dir", stateDir)
 
 	// The same state directory under this release. Its other surfaces
@@ -100,37 +101,13 @@ func TestUpgradeFromOlderRelease(t *testing.T) {
 	current := append([]string{"--port-base", fmt.Sprint(base + 100)}, common...)
 	up(t, newBin, append([]string{"--mode", "persistent"}, current...))
 	cur := connect(t, newBin, name, stateDir, current)
-	fromDir := expected(seeded, keptByOlderRelease)
-	delete(fromDir, "storage") // #1606
-	report(t, "state directory", verify(ctx, t, cur, fromDir))
+	// Cloud Storage is migrated from the volume the older server kept it
+	// on into the builtin server (#1606), with what that server still had.
+	report(t, "state directory", verify(ctx, t, cur, bytesOnly(expected(seeded, keptByOlderRelease))))
 
 	// The older archive, loaded into this release.
 	cli(t, newBin, append([]string{"state", "load", archive}, current...)...)
 	report(t, "state load", verify(ctx, t, cur, expected(seeded, inOlderArchive)))
-}
-
-// clearOlderStorage deletes the seeded bucket through the older release.
-func clearOlderStorage(ctx context.Context, t *testing.T, in instance) {
-	t.Helper()
-	c := in.storage(ctx, t)
-	defer c.Close()
-	b := c.Bucket(bucketName)
-	it := b.Objects(ctx, nil)
-	for {
-		o, err := it.Next()
-		if errors.Is(err, iterator.Done) {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := b.Object(o.Name).Delete(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := b.Delete(ctx); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // expected is the services that were seeded and that kept their state.
@@ -142,6 +119,17 @@ func expected(seeded map[string]error, kept map[string]bool) map[string]bool {
 		}
 	}
 	return out
+}
+
+// bytesOnly checks Cloud Storage's buckets and bytes, not its objects'
+// content type and metadata, which v0.1.0's server forgot itself across a
+// restart of its cluster (seen with v0.1.0 alone), so its volume does not hold them.
+func bytesOnly(want map[string]bool) map[string]bool {
+	if want["storage"] {
+		delete(want, "storage")
+		want["storage-bytes"] = true
+	}
+	return want
 }
 
 func report(t *testing.T, what string, rs map[string]error) {
@@ -230,6 +218,8 @@ func TestVerifyRunning(t *testing.T) {
 	}
 	if os.Getenv("CLOUDBURROW_UPGRADE_EXPECT") == "archive" {
 		want = inOlderArchive
+	} else {
+		want = bytesOnly(want)
 	}
 	report(t, "verify", verify(context.Background(), t, in, want))
 }

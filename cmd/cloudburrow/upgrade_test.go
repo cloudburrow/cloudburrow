@@ -193,3 +193,37 @@ func TestStateArchiveFromV010Loads(t *testing.T) {
 		t.Errorf("a bucket made before the load is still there: %d", code)
 	}
 }
+
+// TestEarlierStorageSpoolLoads is the migration of a pre-#519 volume (#1606)
+// without the cluster: the spool is read through a Cloud Storage JSON API
+// and loaded into another builtin server, metadata and bytes intact.
+func TestEarlierStorageSpoolLoads(t *testing.T) {
+	src, call := builtinAt(t)
+	call("POST", "/storage/v1/b?project=p", strings.NewReader(`{"name":"earlier","labels":{"k":"v"}}`))
+	call("POST", "/upload/storage/v1/b/earlier/o?uploadType=media&name=dir%2Fone.txt", strings.NewReader("one"))
+	call("PATCH", "/storage/v1/b/earlier/o/dir%2Fone.txt", strings.NewReader(`{"metadata":{"m":"1"},"cacheControl":"no-store"}`))
+	e := &earlierStorage{instance: t.TempDir(), project: "p"}
+	dir := e.spool()
+	if err := os.MkdirAll(filepath.Join(dir, "objects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	n, err := e.download(context.Background(), src.URL, dir)
+	if err != nil || n != 1 {
+		t.Fatalf("download = %d, %v", n, err)
+	}
+	dst, dcall := builtinAt(t)
+	s := &builtinStorageSnapshotter{tunnel: forwarderAt(t, dst.Listener.Addr().String()), project: "p"}
+	if err := s.importLegacy(context.Background(), dirEntries(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := dcall("GET", "/download/storage/v1/b/earlier/o/dir%2Fone.txt?alt=media", nil); code != 200 || body != "one" {
+		t.Errorf("migrated object = %d %q", code, body)
+	}
+	if _, body := dcall("GET", "/storage/v1/b/earlier/o/dir%2Fone.txt", nil); !strings.Contains(body, `"m": "1"`) ||
+		!strings.Contains(body, `"cacheControl": "no-store"`) {
+		t.Errorf("migrated metadata = %s", body)
+	}
+	if _, body := dcall("GET", "/storage/v1/b/earlier", nil); !strings.Contains(body, `"k": "v"`) {
+		t.Errorf("migrated bucket = %s", body)
+	}
+}

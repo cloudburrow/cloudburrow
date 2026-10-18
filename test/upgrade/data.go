@@ -431,38 +431,14 @@ func verify(ctx context.Context, t *testing.T, in instance, want map[string]bool
 			check(ctx, &rs, service, f)
 		}
 	}
-	run("storage", func(ctx context.Context) error {
-		c := in.storage(ctx, t)
-		defer c.Close()
-		attrs, err := c.Bucket(bucketName).Attrs(ctx)
-		if err != nil {
-			return err
-		}
-		_ = attrs // the older release's server did not keep bucket labels
-		for name, body := range objects {
-			o := c.Bucket(bucketName).Object(name)
-			r, err := o.NewReader(ctx)
-			if err != nil {
-				return fmt.Errorf("%s: %w", name, err)
-			}
-			got, err := io.ReadAll(r)
-			_ = r.Close()
-			if err != nil {
-				return err
-			}
-			if string(got) != body {
-				return fmt.Errorf("%s: %q, want %q", name, got, body)
-			}
-			a, err := o.Attrs(ctx)
-			if err != nil {
-				return err
-			}
-			if a.ContentType != "text/plain" || a.Metadata["seeded"] != "yes" {
-				return fmt.Errorf("%s: content type %q metadata %v", name, a.ContentType, a.Metadata)
-			}
-		}
-		return nil
-	})
+	// "storage-bytes" checks buckets and bytes alone: v0.1.0's server
+	// itself forgot an object's content type and metadata across a restart
+	// of its cluster, so a volume it kept holds no more to migrate.
+	storageCheck := func(withAttrs bool) func(ctx context.Context) error {
+		return func(ctx context.Context) error { return verifyStorage(ctx, t, in, withAttrs) }
+	}
+	run("storage", storageCheck(true))
+	run("storage-bytes", storageCheck(false))
 	run("pubsub", func(ctx context.Context) error {
 		c, err := pubsub.NewClient(ctx, p, grpcOpts(t, in.env.need(t, "PUBSUB_EMULATOR_HOST"))...)
 		if err != nil {
@@ -818,4 +794,38 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// verifyStorage reads the bucket and its objects back; withAttrs checks
+// their content type and metadata too.
+func verifyStorage(ctx context.Context, t *testing.T, in instance, withAttrs bool) error {
+	c := in.storage(ctx, t)
+	defer c.Close()
+	// The older release's server did not keep bucket labels.
+	if _, err := c.Bucket(bucketName).Attrs(ctx); err != nil {
+		return err
+	}
+	for name, body := range objects {
+		o := c.Bucket(bucketName).Object(name)
+		r, err := o.NewReader(ctx)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		got, err := io.ReadAll(r)
+		_ = r.Close()
+		if err != nil {
+			return err
+		}
+		if string(got) != body {
+			return fmt.Errorf("%s: %q, want %q", name, got, body)
+		}
+		a, err := o.Attrs(ctx)
+		if err != nil {
+			return err
+		}
+		if withAttrs && (a.ContentType != "text/plain" || a.Metadata["seeded"] != "yes") {
+			return fmt.Errorf("%s: content type %q metadata %v", name, a.ContentType, a.Metadata)
+		}
+	}
+	return nil
 }

@@ -621,13 +621,15 @@ archive, loaded with the new `cloudburrow state load`. What that release kept is
 was written, with these exceptions:
 
 - **What the older release never kept.** In `v0.1.0`, Pub/Sub, Firestore, Bigtable, Spanner,
-  BigQuery and Cloud Logging ran in memory, so their state is not there to upgrade; Cloud Run
-  services are Knative objects in the cluster and come through with it.
-- **Cloud Storage on the volume, from before the builtin server (#519).** `v0.1.0`'s buckets are on
-  the `storage-data` volume in the layout of the server it ran then, which the builtin server
-  cannot read and refuses to start over (see below), so `up` fails until the volume is cleared.
-  Before upgrading, `cloudburrow state save` with the older release: the archive's buckets and
-  objects load into this release (#1605). Migrating that volume in place is #1606.
+  BigQuery and Cloud Logging ran in memory, so their state is not there to upgrade. Cloud Run
+  services are Knative objects in the cluster, which `up` keeps; the upgrade test deploys none.
+- **Cloud Storage on the volume, from before the builtin server (#519)** is migrated by `up`
+  (#1606, below): `v0.1.0` kept its buckets in the layout of the server it ran then, which the
+  builtin server cannot read. Every bucket keeps its location and storage class and every object
+  its bytes, with whatever else that server still reports for it. `v0.1.0`'s own server forgets
+  an object's content type and custom metadata once its cluster has been stopped (seen with
+  `v0.1.0` alone), and never kept bucket labels, so after a `stop` there are none to migrate. A
+  `state save` archive taken while the older instance still runs keeps the objects' metadata.
 - **What an archive never held.** The archive captures what the older release's `state save`
   listed as captured (`v0.1.0`: Cloud Storage, Cloud Tasks, Secret Manager, projects and Cloud SQL
   for PostgreSQL); its manifest names the rest and why.
@@ -635,9 +637,10 @@ was written, with these exceptions:
 Checked against real instances by `test/upgrade` (`go test -tags upgrade ./test/upgrade/`, which
 builds `v0.1.0`, seeds every service through the official clients, stops it, and reads everything
 back with this release, from the state directory and from the archive), and in every CI run by
-`TestStateDirFromV010Loads` and `TestStateArchiveFromV010Loads` against what `v0.1.0` wrote, kept in
-`cmd/cloudburrow/testdata/state-v0.1.0`. A release that changes a stored layout reads the earlier one;
-the release after this moves the promise to the then-latest tag.
+`TestStateDirFromV010Loads`, `TestStateArchiveFromV010Loads` and `TestEarlierStorageSpoolLoads`
+against what `v0.1.0` wrote, kept in `cmd/cloudburrow/testdata/state-v0.1.0`. A release that
+changes a stored layout reads the earlier one; the release after this moves the promise to the
+then-latest tag.
 
 Before 1.0 the promise covers one release back: upgrading across several releases goes through
 each, or through `state save` and `state load`.
@@ -690,9 +693,18 @@ before the storage server starts. Left running, it wrote root-owned files into t
 store until the server could not open its own metadata log.
 
 In persistent mode the volume may still hold buckets the earlier server wrote, each a directory
-beside a `<bucket>.bucketMetadata` file. The storage server cannot read them and **refuses to start
-over them**, naming them; `up` then fails with the server's message in its output, not only
-"storage did not become ready". They are not migrated in place. Either:
+beside a `<bucket>.bucketMetadata` file. **`up` migrates them (#1606).** Before it replaces the
+earlier server, while that server still runs on the volume, `up` reads every bucket and object
+through its JSON API into `storage-before-519/` in the instance directory, and moves the earlier
+server's files aside on the volume, into `earlier-storage-519/`, where they stay until `cloudburrow
+delete`. Once the storage server is ready, `up` loads them into it, with the notification
+configurations the earlier release kept in `<instance>/storage-notify`, checking each object's
+CRC32C, and removes the copy in the instance directory. `up` says so as it goes
+(`storage: migrating the buckets of ...`). An `up` interrupted after the copy loads it on the next.
+
+The storage server itself still **refuses to start over** buckets in the earlier layout, naming
+them, as it did before the migration; `up` then fails with the server's message in its output.
+That happens only when the earlier server's files reach the volume some other way. Either:
 
 - start with empty storage, which **deletes the cluster and every piece of state in it**, those
   buckets included:
@@ -703,9 +715,9 @@ over them**, naming them; `up` then fails with the server's message in its outpu
   ```
 
 - or keep the objects: with the release that wrote them, `cloudburrow state save <file>`; then
-  upgrade, `cloudburrow delete`, `cloudburrow up` and `cloudburrow state load <file>`. `delete`
-  also removes the volumes of Datastore, Cloud SQL and Memorystore, which the archive of `v0.1.0`
-  does not hold except PostgreSQL's databases: dump those first with their own tools. An archive
+  `cloudburrow delete`, `cloudburrow up` and `cloudburrow state load <file>`. `delete` also
+  removes the volumes of Datastore, Cloud SQL and Memorystore, which the archive of `v0.1.0` does
+  not hold except PostgreSQL's databases: dump those first with their own tools. An archive
   from before the builtin server holds its buckets, objects with their metadata, and notification
   configurations as that release wrote them, and this release loads that layout (#1605). Or copy
   them out with a Cloud Storage client and back in.

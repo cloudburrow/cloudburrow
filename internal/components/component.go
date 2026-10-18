@@ -45,7 +45,24 @@ type LifecycleComponent struct {
 	// from (#1392), and the storage server a project's and a folder's
 	// parents (#1532), or "".
 	resourceManager string
+	// earlierStorage migrates what an earlier release's Cloud Storage
+	// server left on the volume (#1606), or nil.
+	earlierStorage EarlierStorage
 }
+
+// EarlierStorage moves the buckets a Cloud Storage server from before the
+// builtin one (#519) left on a persistent instance's volume into the
+// builtin server (#1606). Export runs before the backends are applied, while
+// the earlier server still runs, and reports whether there is anything for
+// Import, which runs once they are ready.
+type EarlierStorage interface {
+	Export(ctx context.Context) (bool, error)
+	Import(ctx context.Context) error
+}
+
+// SetEarlierStorage records the migration of an earlier release's Cloud
+// Storage (#1606). It runs only in persistent mode, with storage enabled.
+func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStorage = m }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
@@ -200,9 +217,21 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	if _, err := c.installer.RemoveRetired(ctx, c.timeout); err != nil {
 		return err
 	}
+	migrate := false
+	if c.earlierStorage != nil && c.mode == config.ModePersistent && c.enabled(config.ServiceStorage) {
+		var err error
+		if migrate, err = c.earlierStorage.Export(ctx); err != nil {
+			return fmt.Errorf("%w: %w", ErrInstallFailed, err)
+		}
+	}
 	if backends := c.Backends(); len(backends) > 0 {
 		if err := c.installer.InstallBackends(ctx, backends, c.timeout); err != nil {
 			return err
+		}
+	}
+	if migrate {
+		if err := c.earlierStorage.Import(ctx); err != nil {
+			return fmt.Errorf("%w: %w", ErrInstallFailed, err)
 		}
 	}
 	if c.NeedsKnative() {
