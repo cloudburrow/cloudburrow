@@ -69,7 +69,7 @@ var Methods = []Method{
 	{"sql.instances.rotateServerCa", "POST", "v1/projects/{project}/instances/{instance}/rotateServerCa", true},
 	{"sql.instances.startReplica", "POST", "v1/projects/{project}/instances/{instance}/startReplica", true},
 	{"sql.instances.stopReplica", "POST", "v1/projects/{project}/instances/{instance}/stopReplica", true},
-	{"sql.instances.switchover", "POST", "v1/projects/{project}/instances/{instance}/switchover", false},
+	{"sql.instances.switchover", "POST", "v1/projects/{project}/instances/{instance}/switchover", true},
 	{"sql.instances.truncateLog", "POST", "v1/projects/{project}/instances/{instance}/truncateLog", true},
 	{"sql.instances.update", "PUT", "v1/projects/{project}/instances/{instance}", true},
 	{"sql.operations.cancel", "POST", "v1/projects/{project}/operations/{operation}/cancel", true},

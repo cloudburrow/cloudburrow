@@ -437,6 +437,9 @@ func (s *Server) replicaVerb(base, project, name, verb string) (any, error) {
 	s.emu.Lock()
 	switch verb {
 	case "promoteReplica":
+		// A promoted DR replica is no longer one (#1614).
+		s.dropDRLocked(c.spec)
+		c.spec.Seeded = false
 		// MasterUp stays: it says whose users the data has.
 		c.spec.MasterInstanceName, c.spec.ReplicationPassword, c.spec.ReplicationStopped = "", "", false
 		c.spec.External, c.spec.ExternalSyncStarted = nil, false

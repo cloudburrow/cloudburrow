@@ -302,11 +302,6 @@ const (
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "switchover":
-		return "switchover swaps the primary with the disaster recovery replica of an Enterprise Plus replication cluster, " +
-			"which is not built: replicationCluster.failoverDrReplicaName is refused 501, and the old primary would have to become a replica of the new one, " +
-			"which needs a rebuild of a PostgreSQL server that demote does not do (demote of a PostgreSQL instance is 501); promote a read replica with promoteReplica, " +
-			"or fail over a REGIONAL instance with instances.failover (docs/cloudsql.md)"
 	case "acquireSsrsLease", "releaseSsrsLease":
 		return "SQL Server Reporting Services leases: " + sqlServerWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
@@ -405,7 +400,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	}
 	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
 		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica" || rest[2] == "failover" ||
-		rest[2] == "demoteMaster" || rest[2] == "demote") {
+		rest[2] == "demoteMaster" || rest[2] == "demote" || rest[2] == "switchover") {
 		verb = rest[2]
 	}
 	if len(rest) == 3 && rest[2] == "getLatestRecoveryTime" && r.Method == http.MethodGet {
@@ -425,6 +420,9 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		}
 		out, err := s.demoteInstance(r, base, project, name, verb)
 		return "sql.instances." + verb, out, err
+	case "switchover":
+		out, err := s.switchover(r, base, project, name)
+		return "sql.instances.switchover", out, err
 	case "failover":
 		out, err := s.failover(r, base, project, name)
 		return "sql.instances.failover", out, err
