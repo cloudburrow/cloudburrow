@@ -130,14 +130,19 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 // 503 with Retry-After when its port refuses connections: it is
 // restarting (engine.go, #1091).
 func Proxy(upstream string, logf func(string, ...any)) http.Handler {
+	return proxyThrough(upstream, logf, engineTransport(idleConnTimeout, nil))
+}
+
+// proxyThrough is Proxy through transport (tests).
+func proxyThrough(upstream string, logf func(string, ...any), transport http.RoundTripper) http.Handler {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme = "http"
 			pr.Out.URL.Host = upstream
 			pr.Out.Host = pr.In.Host
 		},
-		// The emulator's bodies pass through as it wrote them.
-		Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 32, IdleConnTimeout: 90 * time.Second},
+		// Idle connections close before the engine closes them (#1626).
+		Transport: transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, context.Canceled) {
 				return
