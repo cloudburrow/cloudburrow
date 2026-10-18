@@ -65,6 +65,16 @@ import (
 //     and MOD "division by zero: DIV(1, 0)", UNVERIFIED), in place of
 //     the engine's "zero divided error ( 1.000000 / 0 )". The operators
 //     reference says only "Divide by zero operations return an error."
+//   - an INT64 overflow: "int64 overflow: ABS(-9223372036854775808)"
+//     (googlesqlite patch 0075; BigQuery's ABS "returns an error if the
+//     argument is an integer and the output value can't be represented
+//     as the same type", its message UNVERIFIED (docs re-read 2026-10-17:
+//     https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/mathematical_functions)),
+//     of unary minus, "int64 overflow: -(-9223372036854775808)" (patch
+//     0005), or of +, - and *, "int64 overflow: 9223372036854775807 + 1"
+//     (patch 0075; "All operators will throw an error if the computation
+//     result overflows", the operators reference, its text UNVERIFIED (docs re-read 2026-10-17:
+//     https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/operators)).
 //   - ERROR(message): its message, as the debugging functions reference
 //     shows ("Found unexpected value: baz"); patch 0072 starts it with
 //     "ERROR function: " so that it is told from the engine's own errors,
@@ -169,6 +179,9 @@ func (c *engineContext) runtimeError(msg string) (string, bool) {
 		return plain, true
 	}
 	if i := strings.Index(msg, "division by zero: "); i >= 0 {
+		return msg[i:], true
+	}
+	if i := strings.Index(msg, "int64 overflow: "); i >= 0 {
 		return msg[i:], true
 	}
 	if strings.HasSuffix(msg, "not enough query arguments") {
