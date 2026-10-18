@@ -400,8 +400,8 @@ type cirSource struct {
 
 // sourceOf is where a secondary replicates p (#1614): with a RoleRouter
 // and a replica, p's primary Service (base+"-primary"), which selects
-// whichever node is p's primary, so the secondary follows p's automatic
-// failover (valkeyfailover.go) and needs no relinking; with a RoleRouter
+// whichever node is p's primary (a failover of p then re-points the
+// secondary at the promoted node's own Service, followersOf); with a RoleRouter
 // alone, the primary node's own Service, which follows its pod; else its
 // pod's IP. The nodes' certificates cover each of these Services' names.
 // Call with mu held.
