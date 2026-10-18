@@ -127,6 +127,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
 | `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |
 | `internal/console/` | The local web console: a view over the same surfaces an SDK uses, never a store of its own. |
+| `internal/debugpprof/` | Serves the Go runtime's profiles on a loopback address when `CLOUDBURROW_DEBUG_PPROF` names one, for a soak or a leak hunt ([soak.md](soak.md)); off by default. |
 | `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
 | `internal/embedding/` | Runs the community ONNX int8 conversion of EmbeddingGemma for the Vertex-style `:predict` embedding endpoint (#41), labelled as NOT an official Google artifact; the ONNX Runtime and tokenizer need cgo and the `onnx` build tag, and the default build answers 501. |
 | `internal/frontready/` | The readiness path a front serves for the backend beside it (#1114): the BigQuery and Pub/Sub emulators listen on their pod's loopback alone, so no other pod reaches them past their fronts, and Kubernetes, which probes at the pod's IP, asks their readiness of the front, which dials them on loopback. |
