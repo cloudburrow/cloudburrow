@@ -1,0 +1,426 @@
+CloudBurrow patch 80 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1623). Needs googlesqlite patch 0080.
+
+The bug: every request finds its project (withProjectMiddleware), and
+FindProject read the rows of the project's datasets, and of their tables,
+models and routines, as GoogleSQL. googlesqlite compiles a WHERE
+comparison to a Go function call per row, and `datasetID IN
+UNNEST(@datasetIDs)` decoded the whole array of the project's dataset IDs
+again for each row it visited, so each request cost the number of tables
+times the number of datasets: a SELECT 1 took 41 ms (from 5 ms) in a
+project of 150 datasets of three tables each, as a run of the compat
+suite leaves one, and a streamed insert, which the CloudBurrow front turns
+into seven engine requests, 370 ms.
+
+The patch reads the same rows, and the project's, as SQLite SQL
+(googlesqlite patch 0019's QueryRawContext, and 0080's DecodeStringArray
+for the project's dataset IDs) in FindProject's transaction,
+FindAllProjects' and FindDataset's: every row of each table, in its
+stored order, the order the GoogleSQL scan visited them in, keeping the
+projects' and the datasets' asked for. FindProjectWithConn, which has
+only a transaction, reads as before. The regression test holds the two reads to the same
+result.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/metadata/cloudburrow_project_raw.go b/internal/metadata/cloudburrow_project_raw.go
+new file mode 100644
+index 0000000..ba0eaf6
+--- /dev/null
++++ b/internal/metadata/cloudburrow_project_raw.go
+@@ -0,0 +1,212 @@
++package metadata
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1623): every request finds its
++// project (withProjectMiddleware), which read the rows of its datasets and
++// of their tables, models and routines as GoogleSQL. GoogleSQL compiles a
++// WHERE comparison to a Go function call per row, and `IN UNNEST(@ids)`
++// decoded the whole array of dataset IDs again for each row it visited: a
++// SELECT 1 took 40 ms in a project of 150 datasets of three tables, and
++// grew with the square of the project's size. The same rows are read here
++// as SQLite SQL (googlesqlite patches 0019 and 0080), every row of each
++// table in its stored order, which is the order the GoogleSQL scan visited
++// them in, and those of the projects and datasets asked for are kept.
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++
++	"github.com/goccy/go-json"
++	"github.com/goccy/googlesqlite"
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// rawRows runs query, which selects n TEXT columns, as SQLite SQL on conn,
++// in its transaction if it has one, and calls each with every row's
++// columns as stored (encoded). A NULL column is "".
++func rawRows(ctx context.Context, conn *sql.Conn, query string, n int, each func(cols []string) error) error {
++	return conn.Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		rows, err := gsqlConn.QueryRawContext(ctx, query)
++		if err != nil {
++			return err
++		}
++		defer rows.Close()
++		vals := make([]sql.NullString, n)
++		ptrs := make([]any, n)
++		for i := range vals {
++			ptrs[i] = &vals[i]
++		}
++		cols := make([]string, n)
++		for rows.Next() {
++			if err := rows.Scan(ptrs...); err != nil {
++				return err
++			}
++			for i, v := range vals {
++				cols[i] = v.String
++			}
++			if err := each(cols); err != nil {
++				return err
++			}
++		}
++		return rows.Err()
++	})
++}
++
++// decodeRawStrings decodes the STRING columns given of a rawRows row.
++func decodeRawStrings(cols []string) ([]string, error) {
++	out := make([]string, len(cols))
++	for i, v := range cols {
++		if v == "" {
++			continue
++		}
++		s, _, err := googlesqlite.DecodeString(v)
++		if err != nil {
++			return nil, err
++		}
++		out[i] = s
++	}
++	return out, nil
++}
++
++// findProjectsRaw is findProjects, reading the rows as SQLite SQL on conn.
++func (r *Repository) findProjectsRaw(ctx context.Context, conn *sql.Conn, ids []string) ([]*Project, error) {
++	want := make(map[string]struct{}, len(ids))
++	for _, id := range ids {
++		enc, err := googlesqlite.EncodeString(id)
++		if err != nil {
++			return nil, err
++		}
++		want[enc] = struct{}{}
++	}
++	type projectRow struct {
++		id         string
++		datasetIDs []string
++	}
++	var found []projectRow
++	err := rawRows(ctx, conn, "SELECT `id`, `datasetIDs` FROM `projects`", 2, func(cols []string) error {
++		if _, ok := want[cols[0]]; !ok {
++			return nil
++		}
++		id, _, err := googlesqlite.DecodeString(cols[0])
++		if err != nil {
++			return err
++		}
++		var datasetIDs []string
++		if cols[1] != "" {
++			if datasetIDs, _, err = googlesqlite.DecodeStringArray(cols[1]); err != nil {
++				return err
++			}
++		}
++		found = append(found, projectRow{id: id, datasetIDs: datasetIDs})
++		return nil
++	})
++	if err != nil {
++		return nil, err
++	}
++	projects := []*Project{}
++	for _, p := range found {
++		datasets, err := r.findDatasetsRaw(ctx, conn, p.id, p.datasetIDs)
++		if err != nil {
++			return nil, err
++		}
++		// No jobs, as findProjects (CloudBurrow patch, #1086).
++		projects = append(projects, NewProject(r, p.id, datasets, nil))
++	}
++	return projects, nil
++}
++
++// findDatasetsRaw is findDatasets, reading the rows as SQLite SQL on conn.
++func (r *Repository) findDatasetsRaw(ctx context.Context, conn *sql.Conn, projectID string, datasetIDs []string) ([]*Dataset, error) {
++	encProject, err := googlesqlite.EncodeString(projectID)
++	if err != nil {
++		return nil, err
++	}
++	want := make(map[string]struct{}, len(datasetIDs))
++	for _, id := range datasetIDs {
++		want[id] = struct{}{}
++	}
++	var order []string
++	contentByID := map[string]*bigqueryv2.Dataset{}
++	err = rawRows(ctx, conn, "SELECT `projectID`, `id`, `metadata` FROM `datasets`", 3, func(cols []string) error {
++		if cols[0] != encProject {
++			return nil
++		}
++		dec, err := decodeRawStrings(cols[1:])
++		if err != nil {
++			return err
++		}
++		datasetID, metadata := dec[0], dec[1]
++		if _, ok := want[datasetID]; !ok {
++			return nil
++		}
++		var content bigqueryv2.Dataset
++		if err := json.Unmarshal([]byte(metadata), &content); err != nil {
++			return err
++		}
++		order = append(order, datasetID)
++		contentByID[datasetID] = &content
++		return nil
++	})
++	if err != nil {
++		return nil, err
++	}
++	if len(order) == 0 {
++		return []*Dataset{}, nil
++	}
++	inOrder := make(map[string]struct{}, len(order))
++	for _, id := range order {
++		inOrder[id] = struct{}{}
++	}
++	// The tables, models and routines of those datasets, each kind with
++	// one read, by dataset.
++	children := func(table string, add func(datasetID, id string, content map[string]interface{})) error {
++		return rawRows(ctx, conn, "SELECT `projectID`, `datasetID`, `id`, `metadata` FROM `"+table+"`", 4, func(cols []string) error {
++			if cols[0] != encProject {
++				return nil
++			}
++			dec, err := decodeRawStrings(cols[1:])
++			if err != nil {
++				return err
++			}
++			if _, ok := inOrder[dec[0]]; !ok {
++				return nil
++			}
++			var content map[string]interface{}
++			if err := json.Unmarshal([]byte(dec[2]), &content); err != nil {
++				return err
++			}
++			add(dec[0], dec[1], content)
++			return nil
++		})
++	}
++	tablesByDataset := map[string][]*Table{}
++	if err := children("tables", func(datasetID, id string, content map[string]interface{}) {
++		tablesByDataset[datasetID] = append(tablesByDataset[datasetID], NewTable(r, projectID, datasetID, id, content))
++	}); err != nil {
++		return nil, err
++	}
++	modelsByDataset := map[string][]*Model{}
++	if err := children("models", func(datasetID, id string, content map[string]interface{}) {
++		modelsByDataset[datasetID] = append(modelsByDataset[datasetID], NewModel(r, projectID, datasetID, id, content))
++	}); err != nil {
++		return nil, err
++	}
++	routinesByDataset := map[string][]*Routine{}
++	if err := children("routines", func(datasetID, id string, content map[string]interface{}) {
++		routinesByDataset[datasetID] = append(routinesByDataset[datasetID], NewRoutine(r, projectID, datasetID, id, content))
++	}); err != nil {
++		return nil, err
++	}
++	datasets := make([]*Dataset, 0, len(order))
++	for _, datasetID := range order {
++		datasets = append(datasets, NewDataset(
++			r, projectID, datasetID, contentByID[datasetID],
++			tablesByDataset[datasetID], modelsByDataset[datasetID], routinesByDataset[datasetID],
++		))
++	}
++	return datasets, nil
++}
+diff --git a/internal/metadata/project_raw_test.go b/internal/metadata/project_raw_test.go
+new file mode 100644
+index 0000000..c706df3
+--- /dev/null
++++ b/internal/metadata/project_raw_test.go
+@@ -0,0 +1,98 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"reflect"
++	"testing"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// CloudBurrow regression test (cloudburrow/cloudburrow#1623): FindProject
++// reads its datasets, tables, models and routines as SQLite SQL, and finds
++// them as the GoogleSQL read does (FindProjectWithConn): the same
++// datasets, in the same order, each with the same tables, models and
++// routines in the order they were added and the same metadata, and none
++// of another project's.
++func TestFindProjectReadsAsGoogleSQLDoes(t *testing.T) {
++	r, _ := testRepository(t)
++	ctx := context.Background()
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		for _, projectID := range []string{"p", "q"} {
++			p := NewProject(r, projectID, nil, nil)
++			if err := p.Insert(ctx, tx); err != nil {
++				return err
++			}
++			for _, datasetID := range []string{"zeta", "a 'quoted\" one", "mid"} {
++				d := NewDataset(r, projectID, datasetID, &bigqueryv2.Dataset{FriendlyName: projectID + "." + datasetID, Labels: map[string]string{"k": datasetID}}, nil, nil, nil)
++				if err := p.AddDataset(ctx, tx, d); err != nil {
++					return err
++				}
++				for _, tableID := range []string{"t9", "t1", "ä"} {
++					table := NewTable(r, projectID, datasetID, tableID, map[string]interface{}{"id": tableID, "n": 1.5, "nested": map[string]interface{}{"of": projectID}})
++					if err := d.AddTable(ctx, tx, table); err != nil {
++						return err
++					}
++				}
++				if projectID == "q" {
++					continue
++				}
++				if err := NewModel(r, projectID, datasetID, "m", map[string]interface{}{"modelType": "LINEAR_REG"}).Insert(ctx, tx); err != nil {
++					return err
++				}
++				if err := r.AddRoutine(ctx, tx, NewRoutine(r, projectID, datasetID, "f", map[string]interface{}{"routineType": "SCALAR_FUNCTION"})); err != nil {
++					return err
++				}
++			}
++		}
++		return nil
++	})
++
++	for _, projectID := range []string{"p", "q"} {
++		raw, err := r.FindProject(ctx, projectID)
++		if err != nil || raw == nil {
++			t.Fatalf("FindProject(%s) = %v, %v", projectID, raw, err)
++		}
++		var want *Project
++		inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++			want, err = r.FindProjectWithConn(ctx, tx, projectID)
++			return err
++		})
++		if want == nil {
++			t.Fatalf("FindProjectWithConn(%s) found none", projectID)
++		}
++		if got, wantN := len(raw.Datasets()), 3; got != wantN {
++			t.Fatalf("project %s: %d datasets, want %d", projectID, got, wantN)
++		}
++		if !reflect.DeepEqual(datasetsView(raw), datasetsView(want)) {
++			t.Errorf("project %s read as SQLite SQL:\n%v\nas GoogleSQL:\n%v", projectID, datasetsView(raw), datasetsView(want))
++		}
++	}
++	if p, err := r.FindProject(ctx, "missing"); err != nil || p != nil {
++		t.Errorf("FindProject(missing) = %v, %v; want none", p, err)
++	}
++	d, err := r.FindDataset(ctx, "q", "mid")
++	if err != nil || d == nil || d.Content().FriendlyName != "q.mid" || !reflect.DeepEqual(d.TableIDs(), []string{"t9", "t1", "ä"}) {
++		t.Errorf("FindDataset(q, mid) = %v, %v; want q's, of tables t9, t1, ä", d, err)
++	}
++}
++
++// datasetsView is what a project's datasets hold, in order.
++func datasetsView(p *Project) []any {
++	var out []any
++	for _, d := range p.Datasets() {
++		var tables, models, routines []any
++		for _, t := range d.Tables() {
++			tables = append(tables, []any{t.ProjectID, t.DatasetID, t.ID, t.metadata})
++		}
++		for _, m := range d.Models() {
++			models = append(models, []any{m.ID, m.metadata})
++		}
++		for _, f := range d.Routines() {
++			routines = append(routines, []any{f.ID, f.metadata})
++		}
++		out = append(out, []any{d.ProjectID, d.ID, d.Content(), tables, models, routines})
++	}
++	return out
++}
+diff --git a/internal/metadata/repository.go b/internal/metadata/repository.go
+index 7f6e02d..7ad4eea 100644
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -196,7 +196,7 @@ func (r *Repository) RoutineFromData(projectID, datasetID string, data *types.Ro
+ }
+ 
+ func (r *Repository) FindProjectWithConn(ctx context.Context, tx *sql.Tx, id string) (*Project, error) {
+-	projects, err := r.findProjects(ctx, tx, []string{id})
++	projects, err := r.findProjects(ctx, tx, nil, []string{id})
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -220,7 +220,9 @@ func (r *Repository) FindProject(ctx context.Context, id string) (*Project, erro
+ 		return nil, err
+ 	}
+ 	defer tx.Commit()
+-	projects, err := r.findProjects(ctx, tx, []string{id})
++	// CloudBurrow patch (cloudburrow/cloudburrow#1623): conn, for the
++	// datasets' and their tables' rows read as SQLite SQL.
++	projects, err := r.findProjects(ctx, tx, conn, []string{id})
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -233,7 +235,10 @@ func (r *Repository) FindProject(ctx context.Context, id string) (*Project, erro
+ 	return projects[0], nil
+ }
+ 
+-func (r *Repository) findProjects(ctx context.Context, tx *sql.Tx, ids []string) ([]*Project, error) {
++func (r *Repository) findProjects(ctx context.Context, tx *sql.Tx, conn *sql.Conn, ids []string) ([]*Project, error) {
++	if conn != nil {
++		return r.findProjectsRaw(ctx, conn, ids)
++	}
+ 	rows, err := tx.QueryContext(ctx, "SELECT id, datasetIDs FROM projects WHERE id IN UNNEST(@ids)", ids)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to get projects: %w", err)
+@@ -249,7 +254,7 @@ func (r *Repository) findProjects(ctx context.Context, tx *sql.Tx, ids []string)
+ 		if err := rows.Scan(&projectID, &datasetIDs); err != nil {
+ 			return nil, err
+ 		}
+-		datasets, err := r.findDatasets(ctx, tx, projectID, r.convertToStrings(datasetIDs))
++		datasets, err := r.findDatasets(ctx, tx, conn, projectID, r.convertToStrings(datasetIDs))
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -291,7 +296,7 @@ func (r *Repository) FindAllProjects(ctx context.Context) ([]*Project, error) {
+ 		if err := rows.Scan(&projectID, &datasetIDs); err != nil {
+ 			return nil, err
+ 		}
+-		datasets, err := r.findDatasets(ctx, tx, projectID, r.convertToStrings(datasetIDs))
++		datasets, err := r.findDatasets(ctx, tx, conn, projectID, r.convertToStrings(datasetIDs))
+ 		if err != nil {
+ 			return nil, err
+ 		}
+@@ -1179,7 +1184,7 @@ func (r *Repository) FindDataset(ctx context.Context, projectID, datasetID strin
+ 		return nil, err
+ 	}
+ 	defer tx.Commit()
+-	datasets, err := r.findDatasets(ctx, tx, projectID, []string{datasetID})
++	datasets, err := r.findDatasets(ctx, tx, conn, projectID, []string{datasetID})
+ 	if err != nil {
+ 		return nil, err
+ 	}
+@@ -1192,7 +1197,10 @@ func (r *Repository) FindDataset(ctx context.Context, projectID, datasetID strin
+ 	return datasets[0], nil
+ }
+ 
+-func (r *Repository) findDatasets(ctx context.Context, tx *sql.Tx, projectID string, datasetIDs []string) ([]*Dataset, error) {
++func (r *Repository) findDatasets(ctx context.Context, tx *sql.Tx, conn *sql.Conn, projectID string, datasetIDs []string) ([]*Dataset, error) {
++	if conn != nil {
++		return r.findDatasetsRaw(ctx, conn, projectID, datasetIDs)
++	}
+ 	rows, err := tx.QueryContext(ctx,
+ 		"SELECT id, projectID, metadata FROM datasets WHERE projectID = @projectID AND id IN UNNEST(@datasetIDs)",
+ 		sql.Named("projectID", projectID),

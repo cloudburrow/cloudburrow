@@ -2,9 +2,13 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -110,5 +114,67 @@ func TestColumnStreamingBuffer(t *testing.T) {
 	}
 	if w := (streamWindow{Column: true}); w.cond() != "_PARTITION_BUFFERED IS NOT NULL" {
 		t.Errorf("cond = %s", w.cond())
+	}
+}
+
+// TestBufferedMarksMatchTheSQL (#1624): the marks the front gives the rows
+// of a table partitioned by a column are bufferedMark's, read in Go; a
+// value it cannot read sends the rows through a scratch table.
+func TestBufferedMarksMatchTheSQL(t *testing.T) {
+	now := time.Date(2026, 10, 15, 13, 45, 0, 0, time.UTC)
+	var m partitionMeta
+	m.TimePartitioning = &struct {
+		Type  string `json:"type"`
+		Field string `json:"field"`
+	}{Type: "DAY", Field: "d"}
+	out := `{"rows":[{"json":{"d":"2026-10-08"}},{"json":{"d":"2026-10-07T23:59:59Z"}},{"json":{"d":"2026-10-18 23:59:59"}},` +
+		`{"json":{"d":"2026-10-19"}},{"json":{}},{"json":{"D":1792071900}},{"json":{"d":"2001-01-01"}}]}`
+	got, ok := bufferedMarks(m, []byte(out), now)
+	want := []bool{false, true, false, true, true, false, true}
+	if !ok || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("bufferedMarks = %v, %v, want %v", got, ok, want)
+	}
+	if _, ok := bufferedMarks(m, []byte(`{"rows":[{"json":{"d":"next week"}}]}`), now); ok {
+		t.Error("a value bufferedMarks cannot read was read")
+	}
+	m.TimePartitioning.Type = "HOUR"
+	if got, ok := bufferedMarks(m, []byte(`{"rows":[{"json":{"d":"2026-10-15"}}]}`), now); !ok || fmt.Sprint(got) != "[true]" {
+		t.Errorf("hourly bufferedMarks = %v, %v, want [true]", got, ok)
+	}
+}
+
+// TestStreamSendsTheColumns (#1624): a streamed insert into a table is one
+// tabledata.insertAll of the table that names the rows' pseudo-columns,
+// with no scratch table; a client's own header is not forwarded.
+func TestStreamSendsTheColumns(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	emu := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.URL.Path+" "+r.Header.Get(streamColumnsHeader))
+		mu.Unlock()
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"type":"TABLE","schema":{"fields":[{"name":"n","type":"INTEGER"}]}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"kind":"bigquery#tableDataInsertAllResponse"}`)
+	})
+	h := Wrap(emu, func(o *options) { o.streamTimes = true })
+	r := httptest.NewRequest(http.MethodPost, base+"/datasets/d/tables/t/insertAll", strings.NewReader(`{"rows":[{"json":{"n":1}}]}`))
+	r.Header.Set(streamColumnsHeader, `{"_PARTITIONTIME":null}`)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("insertAll: %d %s", w.Code, w.Body)
+	}
+	var posts []string
+	for _, s := range seen {
+		if !strings.HasPrefix(s, "GET ") {
+			posts = append(posts, s)
+		}
+	}
+	if len(posts) != 1 || !strings.Contains(posts[0], "/tables/t/insertAll {\"_PARTITION_STREAMED\":") ||
+		strings.Contains(posts[0], "_PARTITIONTIME") {
+		t.Errorf("sent %q, want one insertAll of t naming _PARTITION_STREAMED alone", seen)
 	}
 }
