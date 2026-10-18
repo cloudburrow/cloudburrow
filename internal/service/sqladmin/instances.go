@@ -85,6 +85,13 @@ type Spec struct {
 	KMSKey        string `json:"kmsKey,omitempty"`
 	KMSKeyVersion string `json:"kmsKeyVersion,omitempty"`
 	WrappedKey    []byte `json:"wrappedKey,omitempty"`
+	// FailoverDR is a primary's disaster recovery replica (#1614),
+	// replicationCluster.failoverDrReplicaName: one of its replicas, which
+	// instances.switchover makes the primary.
+	FailoverDR string `json:"failoverDrReplica,omitempty"`
+	// Seeded is set on a former primary a switchover made a replica
+	// (#1614): it has its data, and replicates by GTID auto-positioning.
+	Seeded bool `json:"seeded,omitempty"`
 }
 
 // Regional reports whether the instance has a standby (#1408).
@@ -336,7 +343,14 @@ type instanceBody struct {
 	// source representation instance: a record of a server outside Cloud
 	// SQL (#1304), Terraform's google_sql_source_representation_instance.
 	OnPremisesConfiguration *json.RawMessage `json:"onPremisesConfiguration"`
-	Settings                *struct {
+	// ReplicationCluster designates a primary's DR replica (#1614).
+	ReplicationCluster *struct {
+		FailoverDrReplicaName *string `json:"failoverDrReplicaName"`
+	} `json:"replicationCluster"`
+	// clusterCleared is replicationCluster sent null, as gcloud's
+	// --clear-failover-dr-replica-name sends it.
+	clusterCleared bool
+	Settings       *struct {
 		Tier                      string             `json:"tier"`
 		UserLabels                *map[string]string `json:"userLabels"`
 		DatabaseFlags             *[]Flag            `json:"databaseFlags"`
@@ -460,6 +474,12 @@ func decodeInstance(r *http.Request) (instanceBody, error) {
 	}
 	_ = json.Unmarshal(body, &raw)
 	b.raw = raw.Settings
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) == nil {
+		if v, ok := top["replicationCluster"]; ok && strings.TrimSpace(string(v)) == "null" {
+			b.clusterCleared = true
+		}
+	}
 	return b, nil
 }
 
@@ -516,6 +536,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	}
 	if err := b.unsupported(); err != nil {
 		return nil, err
+	}
+	if rc := b.ReplicationCluster; rc != nil && rc.FailoverDrReplicaName != nil && *rc.FailoverDrReplicaName != "" {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: a new instance has no read replicas to be its DR replica; "+
+			"create the replica, then set replicationCluster.failoverDrReplicaName with instances.patch.")
 	}
 	spec := Spec{Name: b.Name, Project: project, DatabaseVersion: b.DatabaseVersion, RootPassword: b.RootPassword,
 		CreateTime: time.Now().UTC().Format(time.RFC3339Nano), SettingsVersion: 1, AvailabilityType: "ZONAL"}
@@ -737,6 +761,14 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}
+	// A DR replica's designation, and what a DR replica cannot be (#1614).
+	if next.FailoverDR, err = s.drDesignationLocked(b, project, next); err == nil {
+		err = s.checkDRReplicaPatchLocked(next, b.raw)
+	}
+	if err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	if next.Regional() && next.MasterInstanceName != "" {
 		s.emu.Unlock()
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
@@ -821,6 +853,7 @@ func (s *Server) deleteInstance(r *http.Request, base, project, name string) (an
 		return nil, Errorf(http.StatusBadRequest, "The instance has read replicas (%s). Delete or promote the replicas first.", strings.Join(rs, ", "))
 	}
 	c.state = "PENDING_DELETE"
+	s.dropDRLocked(c.spec)
 	s.emu.Unlock()
 	op := s.pending(base, project, name, "DELETE")
 	id := op["name"].(string)
@@ -991,6 +1024,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	}
 	st["backupConfiguration"] = bc
 	s.diskEncryptionJSON(in, spec)
+	s.replicationClusterJSON(in, spec)
 	return in, nil
 }
 

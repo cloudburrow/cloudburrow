@@ -147,8 +147,8 @@ var instanceFields = map[string]fieldRule{
 	"geminiConfig":                     refused501("Gemini in Databases is not served"),
 	"maintenanceVersion":               refused501(maintenanceWhy),
 	"nodeCount":                        refused501(readPoolWhy),
-	"replicationCluster": refused501("an Enterprise Plus replication cluster's disaster recovery replica is switched over to with " +
-		"instances.switchover, which needs Google-managed write endpoints and is not served"),
+	// A MySQL primary's DR replica (#1614): switchover.go.
+	"replicationCluster": kept,
 	"switchTransactionLogsToCloudStorageEnabled": refused501("point-in-time recovery logs are kept with the instance's backups, " +
 		"not on its data disk, so there is nothing to switch"),
 	"tags": refused501("tag bindings are not made for Cloud SQL instances"),

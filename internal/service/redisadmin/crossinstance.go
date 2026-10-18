@@ -537,6 +537,15 @@ func (s *Server) sourceAddr(ip string, port int) (string, int) {
 		}
 		c.mu.Lock()
 		for _, r := range c.byName {
+			if r.primaryAddr == addr {
+				// A CLUSTER_DISABLED instance's primary endpoint
+				// (valkeyfailover.go): its primary now.
+				if p := r.firstPrimary(); p != nil && p.podIP != "" {
+					h, pt := c.nodeHost(p), p.port
+					c.mu.Unlock()
+					return h, pt
+				}
+			}
 			for _, n := range r.Nodes {
 				if n.addr == addr && n.podIP != "" {
 					h, p := n.podIP, n.port

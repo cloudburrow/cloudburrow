@@ -179,6 +179,9 @@ type clusterRecord struct {
 	message         string
 	pendingShards   int32
 	pendingReplicas int32
+	// primaryAddr and readerAddr are a CLUSTER_DISABLED instance's
+	// primary and reader endpoints' host addresses (valkeyfailover.go).
+	primaryAddr, readerAddr string
 }
 
 // clusters are the clusters CreateCluster made.
@@ -204,6 +207,9 @@ type clusters struct {
 	// policies are the ACL policies (aclpolicy.go), read once.
 	aclOnce  sync.Once
 	policies *aclPolicies
+	// eps are the CLUSTER_DISABLED instances' endpoints, by name
+	// (valkeyfailover.go).
+	eps map[string]*roleEndpoints
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -246,6 +252,7 @@ func (c *clusters) prefix() string {
 // output is r as its API returns it. Call with mu held.
 func (c *clusters) output(r *clusterRecord) proto.Message {
 	if c.valkey {
+		c.openEndpoints(r)
 		return renderValkey(r)
 	}
 	return c.render(r)
@@ -644,7 +651,7 @@ func (r *clusterRecord) spec(server string) Spec {
 		cfg[kv[0]] = kv[1]
 	}
 	if r.standalone() {
-		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion(), Dir: dataDir(r.DataGen)})
+		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion(), Dir: dataDir(r.DataGen), PortName: ValkeyPortName})
 	}
 	if r.TransitCA != "" {
 		// The cluster bus, and MIGRATE between nodes, over TLS too.
@@ -1128,7 +1135,8 @@ func (c *clusters) replicate(ctx context.Context, r *clusterRecord, these, all [
 			return fmt.Errorf("shard %d has no primary", n.Shard)
 		}
 		if r.standalone() {
-			if err := c.do(ctx, r, n, "REPLICAOF", p.podIP, p.port); err != nil {
+			// At its Service, which follows its pod (valkeyfailover.go).
+			if err := c.do(ctx, r, n, "REPLICAOF", c.nodeHost(p), p.port); err != nil {
 				return err
 			}
 			continue

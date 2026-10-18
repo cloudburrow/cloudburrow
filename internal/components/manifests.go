@@ -71,6 +71,10 @@ type Backend struct {
 	Image string
 	// Port is the backend's API port, and the one its readiness is probed on.
 	Port int
+	// PortName, when set, names Port in the pod, for a Service that
+	// selects pods serving on ports of their own by its name: a
+	// Memorystore for Valkey instance's role Services (#1614).
+	PortName string
 	// ExtraPorts are further ports the same container serves, published on
 	// the Service beside Port. BigQuery is the case: REST and the gRPC
 	// Storage Read API are one process on two ports.
@@ -585,6 +589,9 @@ spec:
 		fmt.Fprintf(&sb, "          securityContext:\n            runAsUser: %d\n            runAsGroup: %d\n", b.RunAsUser, b.RunAsUser)
 	}
 	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", containerPort)
+	if b.PortName != "" {
+		fmt.Fprintf(&sb, "              name: %s\n", b.PortName)
+	}
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "            - containerPort: %d\n", b.upstreamOf(p.Port))
 	}

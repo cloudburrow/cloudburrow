@@ -302,13 +302,6 @@ const (
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "switchover":
-		return "switchover swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster, " +
-			"which needs a second region, and CloudBurrow has one (" + Region + "); promote a read replica with promoteReplica, " +
-			"or fail over a REGIONAL instance with instances.failover (docs/cloudsql.md)"
-	case "reencrypt":
-		return "an instance's data is not encrypted with a customer-managed Cloud KMS key (diskEncryptionConfiguration is not applied to its server's volume), " +
-			"so there is no key version to re-encrypt it with"
 	case "acquireSsrsLease", "releaseSsrsLease":
 		return "SQL Server Reporting Services leases: " + sqlServerWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
@@ -407,7 +400,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	}
 	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
 		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica" || rest[2] == "failover" ||
-		rest[2] == "demoteMaster" || rest[2] == "demote") {
+		rest[2] == "demoteMaster" || rest[2] == "demote" || rest[2] == "switchover") {
 		verb = rest[2]
 	}
 	if len(rest) == 3 && rest[2] == "getLatestRecoveryTime" && r.Method == http.MethodGet {
@@ -427,6 +420,9 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		}
 		out, err := s.demoteInstance(r, base, project, name, verb)
 		return "sql.instances." + verb, out, err
+	case "switchover":
+		out, err := s.switchover(r, base, project, name)
+		return "sql.instances.switchover", out, err
 	case "failover":
 		out, err := s.failover(r, base, project, name)
 		return "sql.instances.failover", out, err
@@ -518,6 +514,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.executeSQL(r, project, e)
 			return "sql.instances.executeSql", out, err
+		}
+	case "reencrypt":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.reencrypt(r, base, project, e)
+			return "sql.instances.reencrypt", out, err
 		}
 	case "truncateLog":
 		if len(rest) == 3 && r.Method == http.MethodPost {
