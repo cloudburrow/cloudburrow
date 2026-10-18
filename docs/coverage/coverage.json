@@ -4662,7 +4662,7 @@
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
-          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -4716,7 +4716,7 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -4789,7 +4789,7 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
-          "test/compat/logging1451_test.go:236 TestTerraformLoggingBigQuerySinkExportErrors",
+          "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
