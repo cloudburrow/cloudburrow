@@ -429,14 +429,15 @@ func (c *engineContext) mapJobs(rec *recorder) bool {
 		return false
 	}
 	changed := false
+	var keep []jobErrorsMapping
 	mapJob := func(v any) {
 		job, _ := v.(map[string]any)
 		status, _ := job["status"].(map[string]any)
 		if status == nil {
 			return
 		}
-		key := c.mapped.key(job, status)
-		if key != "" {
+		key, memo := c.mapped.key(job, status)
+		if memo {
 			if kept, ch := c.mapped.apply(key, status); kept {
 				changed = changed || ch
 				return
@@ -452,8 +453,10 @@ func (c *engineContext) mapJobs(rec *recorder) bool {
 			mapped = true
 		}
 		c.datasets = jc.datasets
-		if key != "" {
-			c.mapped.put(key, status, mapped)
+		if memo {
+			if e, ok := c.mapped.mapping(key, status, mapped); ok {
+				keep = append(keep, e)
+			}
 		}
 		changed = changed || mapped
 	}
@@ -463,6 +466,7 @@ func (c *engineContext) mapJobs(rec *recorder) bool {
 			mapJob(j)
 		}
 	}
+	c.mapped.put(keep)
 	return changed && rewrite(rec, body)
 }
 

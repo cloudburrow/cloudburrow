@@ -259,6 +259,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		functions.keep(functionsStateFile(o.stateDir), o.logf)     // functionstate.go
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
 		jobRows.keep(jobsTableStateFile(o.stateDir), o.logf)       // jobstablestate.go, #1632
+		failed.mapped.keep(jobErrorsStateFile(o.stateDir), o.logf) // joberrorsmemo.go, #1628
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
 		numbers.keep(projectNumbersStateFile(o.stateDir), o.logf)  // projectnumbers.go, #1551
