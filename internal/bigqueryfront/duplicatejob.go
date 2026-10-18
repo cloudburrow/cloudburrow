@@ -26,10 +26,11 @@ import (
 //
 // So, before anything else, a client's insert that names its job ID is
 // answered 409 duplicate when the project has that job: one the front
-// carried out itself (frontJobs) or one the emulator has (jobs.get). The
-// emulator's patch 0076 answers the same for an insert that reaches it,
-// as two inserts of one ID at once do. The front's own inserts name IDs
-// it has just made, and are not looked up.
+// carried out itself (frontJobs), or one the front has answered an insert
+// of (jobRecords) that the emulator has (jobs.get). The emulator's patch
+// 0076 answers the same for an insert that reaches it: two inserts of one
+// ID at once, and an ID from before the front restarted. The front's own
+// inserts name IDs it has just made, and are not looked up.
 
 // duplicateJob answers r, a jobs.insert of the job id (as the client gave
 // it), with 409 duplicate when the project already has the job, and
@@ -55,12 +56,22 @@ func (f front) existingJob(r *http.Request, project, id string) (string, bool) {
 		job, _ = f.jobs.get(project, id)
 	}
 	if job == nil {
+		// Only an ID the front has timed (jobRecords, every insert it
+		// answered) is asked of the emulator, so a new job costs no
+		// request; one inserted before the front last restarted reaches
+		// the emulator, whose patch 0076 answers it the same way.
+		if _, seen := f.records.time(project, id); !seen {
+			return "", false
+		}
 		status, body := f.get(r, "/jobs/"+url.PathEscape(id))
 		if status != http.StatusOK || json.Unmarshal(body, &job) != nil {
 			return "", false
 		}
 	}
 	ref, _ := job["jobReference"].(map[string]any)
+	if got, _ := ref["jobId"].(string); got != id {
+		return "", false // not an answer naming the job
+	}
 	location, _ := ref["location"].(string)
 	if location == "" {
 		location, _ = job["location"].(string)

@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,24 +31,40 @@ func (e *takenJobsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs") {
 		e.inserts++
+		var job struct {
+			JobReference struct {
+				JobID    string `json:"jobId"`
+				Location string `json:"location"`
+			} `json:"jobReference"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&job)
+		e.jobs[job.JobReference.JobID] = job.JobReference.Location
+		writeJSON(w, http.StatusOK, map[string]any{"jobReference": map[string]any{"projectId": "p", "jobId": job.JobReference.JobID}, "status": map[string]any{"state": "DONE"}})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": map[string]any{"state": "DONE"}})
 }
 
-// TestInsertOfAnExistingJobIs409 (#1622): a client's jobs.insert of a job
-// ID the project has is 409 duplicate, BigQuery's "Already Exists: Job
-// project:LOCATION.id", and nothing is sent to the emulator; an insert
-// with no job ID, or of an ID not taken, is sent on.
+// TestInsertOfAnExistingJobIs409 (#1622): a client's second jobs.insert
+// of a job ID is 409 duplicate, BigQuery's "Already Exists: Job
+// project:LOCATION.id", and is not sent to the emulator; an insert with no
+// job ID, or of a new ID, is sent on.
 func TestInsertOfAnExistingJobIs409(t *testing.T) {
-	emu := &takenJobsEmulator{jobs: map[string]string{"taken": "EU", "nowhere": ""}}
+	emu := &takenJobsEmulator{jobs: map[string]string{}}
 	h := Wrap(emu)
 	insert := func(ref string) (int, map[string]any) {
 		return do(t, h, "POST", base+"/jobs", `{`+ref+`"configuration":{"query":{"query":"SELECT 1","useLegacySql":false}}}`)
 	}
+	for _, ref := range []string{`"jobReference":{"projectId":"p","jobId":"taken","location":"EU"},`, `"jobReference":{"jobId":"nowhere"},`} {
+		if code, got := insert(ref); code != http.StatusOK {
+			t.Fatalf("first insert %s: %d %v", ref, code, got)
+		}
+	}
+	emu.inserts = 0
 	for _, c := range []struct {
 		ref, want string
 	}{
-		{`"jobReference":{"projectId":"p","jobId":"taken"},`, "Already Exists: Job p:EU.taken"},
+		{`"jobReference":{"projectId":"p","jobId":"taken","location":"EU"},`, "Already Exists: Job p:EU.taken"},
 		{`"jobReference":{"jobId":"nowhere"},`, "Already Exists: Job p:US.nowhere"},
 	} {
 		code, got := insert(c.ref)
