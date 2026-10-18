@@ -57,6 +57,15 @@ COMPAT_SHARDS="storage served run emulators memorystore sql acceptance"
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
 # (#868) and PostgreSQL (#995), only by the sql shard's (#1472). The tests
 # these name run there and the rest in storage.
+# The accessibility audit (#1604) follows the same split: its Cloud Storage,
+# Pub/Sub and Logs Explorer pages run in storage, and
+# TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
+# console's screens are TestCloudRunAndCICDScreensMeetWCAG (run),
+# TestCloudSQLAndBackupDRScreensMeetWCAG (sql),
+# TestSpannerAndTheEmulatorScreensMeetWCAG (emulators),
+# TestMemorystoreScreensMeetWCAG (memorystore) and
+# TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG (storage, which
+# serves Secret Manager, Cloud Scheduler and Cloud Tasks).
 COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'

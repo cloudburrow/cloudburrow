@@ -873,13 +873,24 @@ function initPanel(buttonId, panelId, opts = {}) {
     if (opts.onOpen) opts.onOpen();
     // Focus moves into the dialog, and Escape returns it: a dialog that
     // traps neither is one a keyboard user cannot leave.
-    const first = panel.querySelector("input, button, a, select");
+    // A panel with nothing to operate (Account), or whose contents are
+    // redrawn as it opens (Notifications, which refreshes its list and so
+    // removed the link focus had just moved to), takes focus itself, so it
+    // is read out and Escape reaches it (#1604).
+    const first = opts.focusPanel ? null : panel.querySelector("input, button, a[href], select, textarea");
     if (first) first.focus();
+    else { panel.tabIndex = -1; panel.focus(); }
   };
 
   button.addEventListener("click", () => (overlayOpen(panel) ? (close(), button.focus()) : open()));
-  panel.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { close(); button.focus(); }
+  // Escape closes it from inside it, from its button, and from wherever
+  // focus fell to when what it was on was redrawn away. Open is read from
+  // the button, which says so at once, rather than from is-open, which the
+  // entrance transition sets a frame later.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || button.getAttribute("aria-expanded") !== "true") return;
+    const at = document.activeElement;
+    if (panel.contains(at) || at === button || !at || at === document.body) { close(); button.focus(); }
   });
   document.addEventListener("click", (e) => {
     if (overlayOpen(panel) && !panel.contains(e.target) && !button.contains(e.target)) close();
@@ -1306,9 +1317,18 @@ function buildNav(services) {
 
   // A revealed row deep in the catalogue is no use below the fold.
   const current = list.querySelector('a[aria-current="page"]');
-  if (current && revealed) {
-    current.scrollIntoView({ block: "nearest" });
-  }
+  if (current && revealed) revealInside(list, current);
+}
+
+// revealInside scrolls container until node is inside it, as
+// scrollIntoView({ block: "nearest" }) would, without scrollIntoView: in
+// Chrome that also moves the sequential focus starting point to the node, so
+// on every page but the dashboard the first Tab skipped the skip link and the
+// toolbar and landed in the drawer beside the current product (#1604).
+function revealInside(container, node) {
+  const c = container.getBoundingClientRect(), r = node.getBoundingClientRect();
+  if (r.top < c.top) container.scrollTop -= c.top - r.top;
+  else if (r.bottom > c.bottom) container.scrollTop += Math.min(r.bottom - c.bottom, r.top - c.top);
 }
 
 function markCurrent() {
@@ -4373,7 +4393,9 @@ function buildCreateForm(spec) {
       ? el("textarea", { id, name: f.name, rows: isMap ? "4" : "5", required: f.required })
       : isSelect
       ? el("select", { id, name: f.name, required: f.required },
-          ...(f.options || []).map((o) => el("option", { value: o, text: o })))
+          // An empty option (an optional choice left unset) is named, so
+          // it is not read as a blank item (#1604).
+          ...(f.options || []).map((o) => el("option", { value: o, text: o || "None" })))
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
@@ -6540,6 +6562,7 @@ async function main() {
   // Opening the bell is what "seen" means, and it is also when the panel is
   // worth the round trip.
   initPanel("notifications", "notifications-panel", {
+    focusPanel: true,
     onOpen: () => { refreshOperations().then(markOperationsSeen); },
   });
   initNavToggle();
@@ -8650,11 +8673,13 @@ async function renderLocalModels(view) {
   setChildren(view, header(),
     el("div", { class: "card" }, el("p", { class: "unavailable", text: status.note })),
     message,
-    el("table", { id: "local-models" },
+    // In a region of its own that scrolls, so at 320px it is the table that
+    // scrolls sideways rather than the page (#1604).
+    el("div", { class: "table-wrap" }, el("table", { id: "local-models" },
       el("thead", {}, el("tr", {},
         el("th", { text: "Model" }), el("th", { text: "Modality" }), el("th", { text: "Size" }),
         el("th", { text: "Download state" }), el("th", { text: "Runtime" }), el("th", { text: "Actions" }))),
-      el("tbody", {}, ...rows)));
+      el("tbody", {}, ...rows))));
 
   if (status.models.some((m) => m.state === "downloading")) {
     LOCAL_MODELS_POLL = setTimeout(() => {
@@ -9028,7 +9053,7 @@ async function renderRequests(view) {
   const body = el("tbody", { id: "req-rows" });
   const table = el("table", { class: "table", id: "req-table" },
     el("thead", {}, el("tr", {},
-      ...["Time", "Service", "Method", "Resource", "Code", "Duration"].map((h) => el("th", { text: h })))),
+      ...["Time", "Service", "Method", "Resource", "Code", "Duration"].map((h) => el("th", { scope: "col", text: h })))),
     body);
   const notice = el("div", { class: "notice", id: "req-unobserved" });
   const empty = el("p", { class: "muted", id: "req-empty", text: "No requests yet. Calls to Cloud Tasks, Secret Manager and Cloud Run appear here as they are served." });
@@ -9043,7 +9068,9 @@ async function renderRequests(view) {
 
   setChildren(view, header(),
     el("div", { class: "actions" }, service, code, project, status),
-    notice, empty, table);
+    // In its own scrolling region, as every other table is, so a narrow
+    // window scrolls the table rather than the page (#1604).
+    notice, empty, el("div", { class: "table-wrap" }, table));
 
   const load = async () => {
     stopStream();
