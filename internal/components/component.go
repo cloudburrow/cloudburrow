@@ -53,7 +53,24 @@ type LifecycleComponent struct {
 	// emulatorHeapMiB bounds the Java emulators' heaps and sizes their
 	// containers' memory (#1603); 0 bounds neither.
 	emulatorHeapMiB int
+	// earlierStorage migrates what an earlier release's Cloud Storage
+	// server left on the volume (#1606), or nil.
+	earlierStorage EarlierStorage
 }
+
+// EarlierStorage moves the buckets a Cloud Storage server from before the
+// builtin one (#519) left on a persistent instance's volume into the
+// builtin server (#1606). Export runs before the backends are applied, while
+// the earlier server still runs, and reports whether there is anything for
+// Import, which runs once they are ready.
+type EarlierStorage interface {
+	Export(ctx context.Context) (bool, error)
+	Import(ctx context.Context) error
+}
+
+// SetEarlierStorage records the migration of an earlier release's Cloud
+// Storage (#1606). It runs only in persistent mode, with storage enabled.
+func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStorage = m }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
@@ -215,6 +232,15 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	if _, err := c.installer.RemoveRetired(ctx, c.timeout); err != nil {
 		return err
 	}
+	// An earlier release's Cloud Storage files are copied out through its
+	// own server before the new one replaces it (#1606).
+	migrate := false
+	if c.earlierStorage != nil && c.mode == config.ModePersistent && c.enabled(config.ServiceStorage) {
+		var err error
+		if migrate, err = c.earlierStorage.Export(ctx); err != nil {
+			return fmt.Errorf("%w: %w", ErrInstallFailed, err)
+		}
+	}
 	// The backends and Knative share nothing but the node, so they are
 	// installed at the same time (#1588). With KnativeStart registered,
 	// Knative began right after the cluster and KnativeReady joins it;
@@ -227,6 +253,11 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	var err error
 	if backends := c.Backends(); len(backends) > 0 {
 		err = c.installer.InstallBackends(ctx, backends, c.timeout)
+	}
+	if err == nil && migrate {
+		if ierr := c.earlierStorage.Import(ctx); ierr != nil {
+			err = fmt.Errorf("%w: %w", ErrInstallFailed, ierr)
+		}
 	}
 	if c.NeedsKnative() && !c.knativeJoined {
 		if err != nil {

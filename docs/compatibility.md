@@ -1287,6 +1287,13 @@ is touched:** an archive whose manifest version is unknown (`TestARefusedArchive
 one in another format, one that is not an archive, and one holding a service this instance does
 not run.
 
+**An archive from the latest release loads (#1605).** One `v0.1.0` saved loads here, its Cloud
+Storage included: that release wrote buckets, objects and notification configurations in the layout
+of the server it ran before the builtin one (#519), and a load of that layout creates each through
+the builtin server's JSON API and checks every object's CRC32C (`TestStateArchiveFromV010Loads`, on
+the archive `v0.1.0` wrote; `test/upgrade` against real instances). See
+[install.md](install.md#upgrading) for the upgrade promise.
+
 **From the console** (#801): the **Instance** page's **Save state** downloads the archive `state
 save` writes, through the same code (`exportStateArchive`), and **Load state** uploads one through
 `state load`'s (`importStateArchive`), streamed into the restore without being held in memory. It

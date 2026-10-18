@@ -155,6 +155,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	comps.SetStorageSigningKeys(signingKeys)
+	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
+		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
 	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
