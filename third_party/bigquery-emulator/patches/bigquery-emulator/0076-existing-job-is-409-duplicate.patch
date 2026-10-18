@@ -1,0 +1,239 @@
+CloudBurrow patch 76 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1622).
+
+The bug: a jobs.insert naming a job ID the project already has ran the
+job's query again, and only then, adding the job, failed with 400
+jobInternalError "failed to add job: job <id> is already created". The
+official Go client retries a jobs.insert with a jobReference after a
+transient failure, when the first attempt may have made the job; its
+retry then failed, and a DML statement ran a second time before the
+error rolled it back. BigQuery answers such an insert 409 with reason
+"duplicate" ("This error returns when trying to create a job, dataset,
+or table that already exists",
+https://cloud.google.com/bigquery/docs/error-messages) and runs nothing.
+
+The patch looks the job up before jobs.insert runs anything and answers
+409 duplicate, "Already Exists: Job project:LOCATION.id" (the location
+the insert names, else US); AddJob's error is now a typed
+DuplicatedJobError, which jobs.insert (two inserts of one ID at once) and
+the upload handlers (a load's media, 500 internalError before) answer
+the same way.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/metadata/project.go b/internal/metadata/project.go
+--- a/internal/metadata/project.go
++++ b/internal/metadata/project.go
+@@ -134,6 +134,16 @@
+ 	return nil
+ }
+ 
++// DuplicatedJobError is AddJob's error for a job ID the project has.
++// CloudBurrow patch (cloudburrow/cloudburrow#1622).
++type DuplicatedJobError struct {
++	ID string
++}
++
++func (e *DuplicatedJobError) Error() string {
++	return fmt.Sprintf("job %s is already created", e.ID)
++}
++
+ func (p *Project) AddJob(ctx context.Context, tx *sql.Tx, job *Job) error {
+ 	p.mu.Lock()
+ 	defer p.mu.Unlock()
+@@ -149,7 +159,9 @@
+ 		}
+ 	}
+ 	if exists {
+-		return fmt.Errorf("job %s is already created", job.ID)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1622): a typed error,
++		// which the server answers 409 duplicate, as BigQuery does.
++		return &DuplicatedJobError{ID: job.ID}
+ 	}
+ 	if err := job.Insert(ctx, tx); err != nil {
+ 		return err
+diff --git a/server/duplicate_job_test.go b/server/duplicate_job_test.go
+new file mode 100644
+--- /dev/null
++++ b/server/duplicate_job_test.go
+@@ -0,0 +1,92 @@
++package server_test
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"net/http"
++	"testing"
++	"time"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestInsertOfAnExistingJobIs409 is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1622): a jobs.insert of a job ID the project
++// has ran the query again and then failed 400 jobInternalError "failed to
++// add job: job ... is already created", so a client's retry of an insert
++// whose answer it missed failed, and a DML statement ran twice before the
++// rollback. BigQuery answers 409 duplicate and runs nothing.
++func TestInsertOfAnExistingJobIs409(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	project := types.NewProject("test", types.NewDataset("ds", types.NewTable("t", []*types.Column{types.NewColumn("a", types.INT64)}, nil)))
++	if err := bqServer.Load(server.StructSource(project)); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	base := testServer.URL + "/bigquery/v2/projects/test"
++	insert := func(sql string) (int, string, string) {
++		t.Helper()
++		b, _ := json.Marshal(map[string]any{
++			"jobReference":  map[string]any{"projectId": "test", "jobId": "retried", "location": "EU"},
++			"configuration": map[string]any{"query": map[string]any{"query": sql, "useLegacySql": false}},
++		})
++		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/jobs", bytes.NewReader(b))
++		req.Header.Set("Content-Type", "application/json")
++		resp, err := http.DefaultClient.Do(req)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer resp.Body.Close()
++		var got struct {
++			Error struct {
++				Message string `json:"message"`
++				Errors  []struct {
++					Reason string `json:"reason"`
++				} `json:"errors"`
++			} `json:"error"`
++		}
++		_ = json.NewDecoder(resp.Body).Decode(&got)
++		reason := ""
++		if len(got.Error.Errors) > 0 {
++			reason = got.Error.Errors[0].Reason
++		}
++		return resp.StatusCode, reason, got.Error.Message
++	}
++	if status, _, msg := insert("INSERT INTO ds.t (a) VALUES (1)"); status != http.StatusOK {
++		t.Fatalf("first insert: %d %s", status, msg)
++	}
++	status, reason, msg := insert("INSERT INTO ds.t (a) VALUES (1)")
++	if want := "Already Exists: Job test:EU.retried"; status != http.StatusConflict || reason != "duplicate" || msg != want {
++		t.Errorf("second insert of the job: %d %s %q, want 409 duplicate %q", status, reason, msg, want)
++	}
++	// The second insert ran nothing: the table has the one row.
++	b, _ := json.Marshal(map[string]any{"query": "SELECT COUNT(*) AS n FROM ds.t", "useLegacySql": false})
++	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/queries", bytes.NewReader(b))
++	req.Header.Set("Content-Type", "application/json")
++	resp, err := http.DefaultClient.Do(req)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer resp.Body.Close()
++	var rows struct {
++		Rows []struct {
++			F []struct {
++				V any `json:"v"`
++			} `json:"f"`
++		} `json:"rows"`
++	}
++	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil || len(rows.Rows) != 1 || rows.Rows[0].F[0].V != "1" {
++		t.Errorf("rows of ds.t after the second insert: %+v (%v), want 1", rows, err)
++	}
++}
+diff --git a/server/handler.go b/server/handler.go
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -258,7 +258,7 @@
+ 		job:     &job,
+ 	})
+ 	if err != nil {
+-		errorResponse(ctx, w, errInternalError(err.Error()))
++		errorResponse(ctx, w, duplicateJobOr(err, project.ID, job.JobReference.Location, errInternalError)) // CloudBurrow patch (#1622)
+ 		return
+ 	}
+ 
+@@ -300,7 +300,7 @@
+ 		job:     &job,
+ 	})
+ 	if err != nil {
+-		errorResponse(ctx, w, errInternalError(err.Error()))
++		errorResponse(ctx, w, duplicateJobOr(err, project.ID, job.JobReference.Location, errInternalError)) // CloudBurrow patch (#1622)
+ 		return
+ 	}
+ 	addr := server.httpServer.Addr
+@@ -1293,7 +1293,23 @@
+ 		}
+ 		if err := json.Unmarshal(body, &rawReq); err == nil {
+ 			applyNullQueryParameters(rawReq.Configuration.Query.QueryParameters, job.Configuration.Query.QueryParameters)
++		}
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1622): an insert of a
++	// job ID the project has is 409 duplicate, as in BigQuery, before
++	// anything runs. The job was run again, and only adding it failed,
++	// 400 jobInternalError "failed to add job: job ... is already
++	// created": a retried DML statement ran twice before the rollback.
++	if ref := job.JobReference; ref != nil && ref.JobId != "" {
++		existing, err := project.Job(ctx, ref.JobId)
++		if err != nil {
++			errorResponse(ctx, w, errInternalError(err.Error()))
++			return
+ 		}
++		if existing != nil {
++			errorResponse(ctx, w, duplicateJob(project.ID, ref.Location, ref.JobId))
++			return
++		}
+ 	}
+ 	res, err := h.Handle(ctx, &jobsInsertRequest{
+ 		server:  server,
+@@ -1301,6 +1317,11 @@
+ 		job:     &job,
+ 	})
+ 	if err != nil {
++		var dup *metadata.DuplicatedJobError
++		if errors.As(err, &dup) { // CloudBurrow patch (#1622): two inserts of one ID at once
++			errorResponse(ctx, w, duplicateJob(project.ID, job.JobReference.Location, dup.ID))
++			return
++		}
+ 		// Preserve typed *ServerError (e.g. a 404 notFound for a missing
+ 		// destination table under CREATE_NEVER) so the client sees the
+ 		// real HTTP status rather than a blanket 400 jobInternalError.
+@@ -1313,6 +1334,26 @@
+ 		return
+ 	}
+ 	encodeResponse(ctx, w, res)
++}
++
++// duplicateJob is BigQuery's answer to an insert of a job ID the project
++// has: 409 duplicate, "Already Exists: Job project:LOCATION.id".
++// CloudBurrow patch (cloudburrow/cloudburrow#1622).
++func duplicateJob(projectID, location, jobID string) *ServerError {
++	if location == "" {
++		location = "US"
++	}
++	return errDuplicate(fmt.Sprintf("Already Exists: Job %s:%s.%s", projectID, location, jobID))
++}
++
++// duplicateJobOr is duplicateJob when err is AddJob's for a job the
++// project has, else orElse of err. CloudBurrow patch (#1622).
++func duplicateJobOr(err error, projectID, location string, orElse func(string) *ServerError) *ServerError {
++	var dup *metadata.DuplicatedJobError
++	if errors.As(err, &dup) {
++		return duplicateJob(projectID, location, dup.ID)
++	}
++	return orElse(err.Error())
+ }
+ 
+ type jobsInsertRequest struct {

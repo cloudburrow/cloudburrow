@@ -52,7 +52,8 @@
         "patches/bigquery-emulator/0065-create-in-a-missing-dataset.patch",
         "patches/bigquery-emulator/0075-missing-dataset-check-in-the-transaction.patch",
         "patches/bigquery-emulator/0080-find-project-as-sqlite-sql.patch",
-        "patches/bigquery-emulator/0081-insert-all-stream-columns.patch"
+        "patches/bigquery-emulator/0081-insert-all-stream-columns.patch",
+        "patches/bigquery-emulator/0076-existing-job-is-409-duplicate.patch"
       ]
     },
     {

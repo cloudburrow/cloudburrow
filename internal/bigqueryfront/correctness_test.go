@@ -280,12 +280,14 @@ func TestFailedJobsReadBackFailed(t *testing.T) {
 			t.Errorf("%s: jobs.list: %s", c.name, b)
 		}
 
-		// The same ID answered without an error, as a retried insert can
-		// be, is no longer failed.
+		// The same ID inserted again, as a retried insert is, is 409
+		// duplicate and the job stays failed, as in BigQuery (#1622).
 		emu.status, emu.answer = 200, `{"jobReference":{"projectId":"p","jobId":"j1"},"status":{"state":"DONE"}}`
-		do(t, h, "POST", base+"/jobs", `{"jobReference":{"jobId":"j1"},"configuration":{"query":{"query":"SELECT 1"}}}`)
-		if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["status"].(map[string]any)["errorResult"] != nil {
-			t.Errorf("%s: jobs.get after a success: %v", c.name, job)
+		if code, got := do(t, h, "POST", base+"/jobs", `{"jobReference":{"jobId":"j1"},"configuration":{"query":{"query":"SELECT 1"}}}`); code != http.StatusConflict {
+			t.Errorf("%s: a second insert of the job: %d %v, want 409", c.name, code, got)
+		}
+		if _, job := do(t, h, "GET", base+"/jobs/j1", ""); job["status"].(map[string]any)["errorResult"] == nil {
+			t.Errorf("%s: jobs.get after a second insert: %v, want it still failed", c.name, job)
 		}
 	}
 
