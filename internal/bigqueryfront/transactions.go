@@ -159,6 +159,9 @@ func unsupportedInTxn(n scriptNode) string {
 	if _, _, ok := dropsTable(t); ok {
 		return ""
 	}
+	if schemaDDLInTxn(t) {
+		return "" // fails in its turn (sendInTxn), #1562
+	}
 	switch {
 	case t[0].is("CREATE"):
 		for _, x := range t[1:min(len(t), 6)] {
@@ -411,6 +414,19 @@ func (s *scriptRun) sendInTxn(text string) (*recorder, *scriptFlow) {
 	if namesTemp(toks, txn.temps, false) {
 		return refuse("a statement that names a TEMP table the transaction dropped. CloudBurrow drops it only at the transaction's end.")
 	}
+	if schemaDDLInTxn(toks) {
+		// #1562: BigQuery's transactions take only queries, DML and DDL of
+		// TEMP entities; this statement fails the script there, as an
+		// error inside the transaction (an exception handler sees it, and
+		// with none the transaction is rolled back). UNVERIFIED: the
+		// message, which BigQuery's documentation does not give. Docs
+		// re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/transactions
+		msg := strings.ToUpper(toks[0].text) + " SCHEMA is not supported inside a transaction: a transaction takes " +
+			"queries, DML, and CREATE or DROP of TEMP tables and functions."
+		flow := txnFail(msg, text, 0)
+		flow.hasPos = false
+		return nil, flow
+	}
 	name, temp := createsTemp(toks)
 	kind := txnStatementKind(toks)
 	switch {
@@ -467,4 +483,12 @@ func (s *scriptRun) sendTxn(text string) (*recorder, *scriptFlow) {
 	s.r = s.r.WithContext(context.WithValue(s.r.Context(), txnKey{}, true))
 	defer func() { s.r = prev }()
 	return s.send(text)
+}
+
+// schemaDDLInTxn reports whether t is an UNDROP SCHEMA or an ALTER SCHEMA,
+// which a transaction does not take (#1562,
+// https://cloud.google.com/bigquery/docs/transactions: its statements are
+// queries, DML, and DDL of temporary entities).
+func schemaDDLInTxn(t []token) bool {
+	return len(t) > 2 && (t[0].is("UNDROP") || t[0].is("ALTER")) && t[1].is("SCHEMA")
 }

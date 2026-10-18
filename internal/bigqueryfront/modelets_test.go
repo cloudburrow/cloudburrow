@@ -110,7 +110,7 @@ func TestArimaSeasonalETS(t *testing.T) {
 	cols, rows := arimaRows(y)
 	o := arimaOpts("seasonalities", "clean_spikes_and_dips", "adjust_step_changes")
 	o.TS.Seasonalities, o.TS.CleanSpikes, o.TS.AdjustSteps = "WEEKLY", false, false
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}

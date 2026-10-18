@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1354,6 +1355,10 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			if !b {
 				continue
 			}
+			if name == "auto_class_weights" {
+				o.AutoClassWeights = true // a DNN_CLASSIFIER's (#1562); 501 for others in checkModelOptions
+				continue
+			}
 			return 501, "Not implemented here: CREATE MODEL option " + name + " = " + val[0].text + ". Nothing was run."
 		default:
 			return 501, "Not implemented here: CREATE MODEL option " + name + "; CloudBurrow carries out model_type, input_label_cols, " +
@@ -1400,6 +1405,9 @@ var modelTypeOptions = map[string][]string{
 // checkModelOptions refuses an option the model type does not take, and
 // a combination BigQuery documents as invalid.
 func checkModelOptions(o mlOptions) (int, string) {
+	if o.AutoClassWeights && o.ModelType != "DNN_CLASSIFIER" {
+		return 501, "Not implemented here: CREATE MODEL option auto_class_weights = TRUE. Nothing was run."
+	}
 	allowed, ok := modelTypeOptions[o.ModelType]
 	if o.ModelType == "LOGISTIC_REG" {
 		allowed, ok = append(append([]string(nil), modelTypeOptions["LINEAR_REG"]...), "auto_class_weights"), true
@@ -1596,7 +1604,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			fail(c, m)
 			return true
 		}
-		trained, fe := trainModel(d.opts, cols, rows)
+		trained, fe := trainModel(d.opts, cols, rows, f.engineFingerprints(r, q))
 		if fe != nil {
 			msg := fe.msg
 			if fe.code == 501 {
@@ -1625,6 +1633,52 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	f.serveQuery(rec, r, q, insert)
 	f.clientText(w, rec, client)
 	return true
+}
+
+// engineFingerprints is a fingerprinter that asks the engine for
+// FARM_FINGERPRINT of each text, a query of at most about a MiB at a time:
+// SELECT FARM_FINGERPRINT(FROM_HEX(s)) FROM UNNEST(['<hex>', ...]) AS s
+// WITH OFFSET o ORDER BY o (the hex keeps any text a plain literal, and
+// FARM_FINGERPRINT of the BYTES is that of the STRING).
+func (f front) engineFingerprints(r *http.Request, q queryOptions) fingerprinter {
+	q.QueryParameters, q.ParameterMode = nil, ""
+	return func(texts []string) ([]int64, *mlFail) {
+		out := make([]int64, 0, len(texts))
+		for start := 0; start < len(texts); {
+			var b strings.Builder
+			b.WriteString("SELECT FARM_FINGERPRINT(FROM_HEX(s)) AS f FROM UNNEST([")
+			end := start
+			for ; end < len(texts) && (end == start || b.Len()+2*len(texts[end]) < 1<<20); end++ {
+				if end > start {
+					b.WriteByte(',')
+				}
+				b.WriteString("'" + hex.EncodeToString([]byte(texts[end])) + "'")
+			}
+			b.WriteString("]) AS s WITH OFFSET o ORDER BY o")
+			_, rows, c, m := f.queryAllRows(r, q, b.String())
+			if c != 0 {
+				return nil, &mlFail{code: c, msg: "FARM_FINGERPRINT of the split's rows: " + m}
+			}
+			if len(rows) != end-start {
+				return nil, &mlFail{code: 500, msg: fmt.Sprintf("FARM_FINGERPRINT of the split's rows: %d values for %d rows", len(rows), end-start)}
+			}
+			for _, row := range rows {
+				var v int64
+				var err error
+				if len(row) == 1 && row[0] != nil {
+					v, err = strconv.ParseInt(*row[0], 10, 64)
+				} else {
+					err = errors.New("no value")
+				}
+				if err != nil {
+					return nil, &mlFail{code: 500, msg: "FARM_FINGERPRINT of the split's rows: " + err.Error()}
+				}
+				out = append(out, v)
+			}
+			start = end
+		}
+		return out, nil
+	}
 }
 
 // queryAllRows runs sql, a query, with q's default dataset and

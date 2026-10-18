@@ -715,8 +715,9 @@ func pseudoColumn(name string) bool {
 //
 // A multi-statement query is carried out a statement at a time (#1548,
 // runScript), so each UNDROP SCHEMA runs in its turn, alone, as BigQuery
-// runs it. Only a script that cannot be run so (one with a TEMP table or
-// function, which lasts only for its request, or a transaction's) keeps
+// runs it, and so is a script with a TEMP table or function, in its
+// session (#1562, tempsession.go). Only a script that cannot be run so (a
+// TEMP script tempSessionScript does not read, or a transaction's) keeps
 // #1483's way: each UNDROP SCHEMA carried out before the query runs, and
 // sent to the engine as a statement that does nothing. That is BigQuery's
 // order only when no other statement can see the dataset, so it is 501,
@@ -785,6 +786,11 @@ func (f front) undropSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 		// would run it: after the statements before it, whatever control
 		// flow or other statement names the dataset.
 		f.runScript(w, r, q, insert)
+		return true
+	}
+	if n > 1 && !txnRequest(r) && f.runTempScript(w, r, q, insert) {
+		// #1562: a script with a TEMP table or function is carried out a
+		// statement at a time too, in its session (tempsession.go).
 		return true
 	}
 	if n > 1 {

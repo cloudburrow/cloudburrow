@@ -28,7 +28,7 @@ func TestTrainBoostedTree(t *testing.T) {
 		t.Fatalf("defaults: %+v", o)
 	}
 	cols, rows := stepRows()
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -51,7 +51,7 @@ func TestTrainBoostedTree(t *testing.T) {
 	o.ModelType = "BOOSTED_TREE_CLASSIFIER"
 	o.EarlyStop = false
 	cols[1].Type = "INTEGER"
-	tr, fe = trainModel(o, cols, rows)
+	tr, fe = trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -87,7 +87,7 @@ func TestTrainBoostedTree(t *testing.T) {
 		mrows = append(mrows, []*string{&xs, &ls})
 	}
 	o.LabelCols, o.MaxIterations = nil, 1
-	tr, fe = trainModel(o, mcols, mrows)
+	tr, fe = trainModelT(o, mcols, mrows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -118,7 +118,7 @@ func TestTrainRandomForest(t *testing.T) {
 		t.Fatalf("options %+v: %s", o, m)
 	}
 	cols, rows := stepRows()
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -132,8 +132,8 @@ func TestTrainRandomForest(t *testing.T) {
 	if d.NumParallelTree != 100 || d.Subsample != 0.8 || d.ColsampleNode != 0.8 {
 		t.Fatalf("defaults %+v", d)
 	}
-	a, _ := trainModel(d, cols, rows)
-	b, _ := trainModel(d, cols, rows)
+	a, _ := trainModelT(d, cols, rows)
+	b, _ := trainModelT(d, cols, rows)
 	if len(a.Trees) != 100 || a.treeMargin([]float64{1, 0.3}) != b.treeMargin([]float64{1, 0.3}) {
 		t.Fatalf("forest: %d trees, %v vs %v", len(a.Trees), a.treeMargin([]float64{1, 0.3}), b.treeMargin([]float64{1, 0.3}))
 	}
@@ -152,7 +152,7 @@ func TestBoostedTreeLabelEncoding(t *testing.T) {
 	o := defaultMLOptions()
 	o.ModelType, o.LabelCols, o.MaxIterations = "BOOSTED_TREE_REGRESSOR", []string{"y"}, 1
 	applyTreeDefaults(&o)
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -182,7 +182,7 @@ func TestBoostedTreeLabelEncoding(t *testing.T) {
 	}
 	// ONE_HOT_ENCODING, given, keeps a column per category.
 	o.CategoryEncoding = "ONE_HOT_ENCODING"
-	if tr, fe = trainModel(o, cols, rows); fe != nil || tr.Features[0].LabelEncoded || tr.Features[0].dims() != 3 {
+	if tr, fe = trainModelT(o, cols, rows); fe != nil || tr.Features[0].LabelEncoded || tr.Features[0].dims() != 3 {
 		t.Errorf("one-hot: %+v, %v", tr.Features, fe)
 	}
 }

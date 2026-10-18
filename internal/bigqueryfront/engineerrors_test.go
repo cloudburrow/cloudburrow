@@ -153,3 +153,46 @@ func TestJobErrorsEngineReasons(t *testing.T) {
 		t.Errorf("jobs.list: %v", got)
 	}
 }
+
+// TestEngineRuntimeErrors (#1585): the engine's errors of a query it ran
+// get reason invalidQuery and BigQuery's message; a table's storage name
+// is written as the client names it.
+func TestEngineRuntimeErrors(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range []struct {
+		msg, query string
+		params     []string
+		want       string
+	}{
+		{"division by zero: 1 / 0", "SELECT 1/0", nil, "division by zero: 1 / 0"},
+		{"failed to exec query: division by zero: DIV(1, 0)", "SELECT DIV(1, 0)", nil, "division by zero: DIV(1, 0)"},
+		{"failed to exec query: int64 overflow: ABS(-9223372036854775808)", "SELECT ABS(x)", nil, "int64 overflow: ABS(-9223372036854775808)"},
+		{"ERROR function: boom", `SELECT ERROR("boom")`, nil, "boom"},
+		{"not enough query arguments", "SELECT @p", nil, "Query parameter 'p' not found at [1:8]"},
+		{"not enough query arguments", "SELECT @@error.message, @q, -- @x\n @Rr", []string{"Q"}, "Query parameter 'Rr' not found at [2:2]"},
+		{"not enough query arguments", "SELECT ?", nil, "not enough query arguments"},
+		{"failed to analyze: Column nosuch is not present in table p_ds_t [at 1:23]", "", nil,
+			"Column nosuch is not present in table ds.t at [1:23]"},
+		{"failed to analyze: Column nosuch is not present in table p_ds_my_t [at 1:23]", "", nil,
+			"Column nosuch is not present in table ds.my_t at [1:23]"},
+		{"failed to analyze: Column nosuch is not present in table p_nods_t [at 1:23]", "", nil,
+			"Column nosuch is not present in table p_nods_t at [1:23]"},
+		{"failed to analyze: Column nosuch is not present in table xp_ds_t [at 1:23]", "", nil,
+			"Column nosuch is not present in table xp_ds_t at [1:23]"},
+	} {
+		ec := &engineContext{r: r, engine: fakeEngine(), prefix: "/bigquery/v2", project: "p", location: "EU"}
+		params := []any{}
+		for _, p := range c.params {
+			params = append(params, map[string]any{"name": p})
+		}
+		ec.fromQueryConf(map[string]any{"query": c.query, "queryParameters": params})
+		got, ok := ec.mapError(rowError{Reason: "jobInternalError", Message: c.msg})
+		if !ok || got.Reason != "invalidQuery" || got.Message != c.want {
+			t.Errorf("%q: got %v %s %q, want invalidQuery %q", c.msg, ok, got.Reason, got.Message, c.want)
+		}
+	}
+	ec := &engineContext{r: r, engine: fakeEngine(), project: "p"}
+	if got, ok := ec.mapError(rowError{Reason: "jobInternalError", Message: "boom"}); ok {
+		t.Errorf("an error of the engine's own: mapped to %v", got)
+	}
+}

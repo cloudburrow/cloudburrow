@@ -145,7 +145,6 @@ func TestBigQueryMLDNN(t *testing.T) {
 	wantHTTPStatus(t, "ML.WEIGHTS of a DNN", err, http.StatusBadRequest)
 	for what, sql := range map[string]string{
 		"ML.EXPLAIN_PREDICT of a DNN":   "SELECT * FROM ML.EXPLAIN_PREDICT(MODEL `%s.dnn`, (SELECT 1.0 AS x))",
-		"optimizer FTRL":                "CREATE MODEL `%s.no` OPTIONS(model_type='dnn_regressor', input_label_cols=['y'], optimizer='ftrl') AS SELECT x, y FROM `%[1]s.two`",
 		"DNN_LINEAR_COMBINED_REGRESSOR": "CREATE MODEL `%s.no` OPTIONS(model_type='dnn_linear_combined_regressor', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`",
 		"an imported ONNX model":        "CREATE MODEL `%s.no` OPTIONS(model_type='onnx', model_path='gs://bucket/model.onnx')",
 	} {

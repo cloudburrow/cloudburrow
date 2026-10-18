@@ -3,7 +3,6 @@ package bigqueryfront
 import (
 	"net/http"
 	"regexp"
-	"strings"
 )
 
 // The REST methods the emulator behind CloudBurrow does not carry out, which
@@ -57,34 +56,3 @@ func serveUnserved(w http.ResponseWriter, r *http.Request) bool {
 // undropWhy is why datasets.undelete was 501 before #1460, which the
 // front serves before serveUnserved (dropped.go).
 const undropWhy = "the emulator deletes a dataset's tables, their rows and their change history with it (docs/compatibility.md)."
-
-// refuseUndrop answers 501 a dry run of a query with UNDROP SCHEMA
-// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#undrop_schema_statement)
-// among other statements, and reports whether it did. The front carries
-// out UNDROP SCHEMA, alone (#1460) and in a script (#1483), when it is
-// run (undropSchema, dropped.go).
-func refuseUndrop(w http.ResponseWriter, q queryOptions) bool {
-	if !strings.Contains(strings.ToUpper(q.Query), "UNDROP") {
-		return false
-	}
-	toks, ok := lex(q.Query)
-	if !ok {
-		return false
-	}
-	stmts := splitStatements(toks)
-	n := 0
-	for _, stmt := range stmts {
-		if len(stmt) > 0 {
-			n++
-		}
-	}
-	for _, stmt := range stmts {
-		if len(stmt) > 1 && stmt[0].is("UNDROP") && stmt[1].is("SCHEMA") && n > 1 {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of UNDROP SCHEMA in a "+
-				"multi-statement query. CloudBurrow carries out UNDROP SCHEMA when the query runs (docs/compatibility.md). "+
-				"Nothing was run.")
-			return true
-		}
-	}
-	return false
-}

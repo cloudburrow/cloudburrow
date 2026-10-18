@@ -543,6 +543,7 @@ func (g *GRPCServer) CreateTask(ctx context.Context, req *taskspb.CreateTaskRequ
 	}
 	if t.Name == "" {
 		t.Name = generateTaskName(parent)
+		t.NamedByServer = true
 	}
 	// A span is in the context only when tracing is on: its stats handler
 	// put it there. Recording it lets the dispatch, later and elsewhere,

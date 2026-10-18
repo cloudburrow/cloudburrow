@@ -256,7 +256,6 @@ func TestBigQueryMLRefusals(t *testing.T) {
 	for _, sql := range []string{
 		"CREATE MODEL `%s.km` OPTIONS(model_type='dnn_linear_combined_regressor', input_label_cols=['amount']) AS SELECT id, amount FROM `%s.orders`",
 		"CREATE MODEL `%s.km` OPTIONS(model_type='automl_regressor', input_label_cols=['amount']) AS SELECT id, amount FROM `%s.orders`",
-		"CREATE MODEL `%s.km` TRANSFORM(ML.HASH_BUCKETIZE(CAST(id AS STRING), 10) AS id, amount) OPTIONS(model_type='linear_reg', input_label_cols=['amount']) AS SELECT id, amount FROM `%s.orders`",
 		"CREATE MODEL `%s.km` OPTIONS(model_type='pca', num_principal_components=1, pca_solver='randomized') AS SELECT id, amount FROM `%s.orders`",
 		"CREATE MODEL `%s.km` REMOTE WITH CONNECTION `us.conn` OPTIONS(endpoint='gemini-2.0-flash') -- %s",
 	} {
@@ -294,10 +293,10 @@ func TestBigQueryMLRandomSplit(t *testing.T) {
 			t.Fatalf("CREATE MODEL %s: %v", m, err)
 		}
 	}
-	// ABS(f) % 100 as ABS(f − DIV(f, 100)·100): the engine's ABS and MOD
-	// of an INT64 this large lose its low digits (#1599), its DIV does not.
+	// ABS(FARM_FINGERPRINT) % 100, exact since googlesqlite patches 0067
+	// and 0075 (#1599).
 	fp := "FARM_FINGERPRINT(CONCAT('x INT64=\"', CAST(x AS STRING), '\",y INT64=\"', CAST(y AS STRING), '\"'))"
-	evalRows := fmt.Sprintf("SELECT x, y FROM `%s.noisy` WHERE ABS(%s - DIV(%s, 100) * 100) < 30", name, fp, fp)
+	evalRows := fmt.Sprintf("SELECT x, y FROM `%s.noisy` WHERE MOD(ABS(%s), 100) < 30", name, fp)
 	n := mlQuery(t, h, c, "SELECT COUNT(*) AS n FROM ("+evalRows+")")
 	if len(n) != 1 || n[0]["n"].(int64) < 120 || n[0]["n"].(int64) > 240 {
 		t.Fatalf("evaluation rows: %v; want about 30%% of 600", n)

@@ -26,8 +26,11 @@ import (
 // changehistoryretention.go), and then sends the query on as a statement
 // that does nothing, so the job is the emulator's as any other. One in a
 // multi-statement query is carried out so in its turn, the script run a
-// statement at a time (#1548, runScript); 501 only in a script with a TEMP
-// table or function, or a transaction's, which cannot be run so. Other
+// statement at a time (#1548, runScript), and so is one in a script with
+// a TEMP table or function, in the script's session (#1562,
+// tempsession.go); inside a transaction it fails the script as BigQuery's
+// transactions do not take it (transactions.go). 501 only where the TEMP
+// script cannot be read so. Other
 // forms of ALTER SCHEMA (SET DEFAULT COLLATE, ADD or DROP REPLICA) are left
 // to the emulator.
 func (f front) alterSchema(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
@@ -67,6 +70,12 @@ func (f front) alterSchema(w http.ResponseWriter, r *http.Request, q queryOption
 			// #1548: carried out a statement at a time (runScript), each
 			// ALTER SCHEMA alone, in its turn, as below.
 			f.runScript(w, r, q, insert)
+			return true
+		}
+		if !txnRequest(r) && f.runTempScript(w, r, q, insert) {
+			// #1562: a script with a TEMP table or function, a statement
+			// at a time too, its TEMP tables and functions hidden ones of
+			// the script's session (tempsession.go).
 			return true
 		}
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ALTER SCHEMA … SET OPTIONS in a "+
@@ -202,4 +211,19 @@ func alterPatch(t []token, d newDataset, labels map[string]string) (map[string]a
 		}
 	}
 	return patch, true
+}
+
+// runTempScript carries out q, a script with a TEMP table or function, a
+// statement at a time in a session of its own (tempsession.go, #1562), and
+// reports whether it did.
+func (f front) runTempScript(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
+	if sessionOf(r) != nil {
+		return false
+	}
+	s, ok := tempSessionScript(q.Query)
+	if !ok {
+		return false
+	}
+	f.runTempSession(w, r, q, insert, s)
+	return true
 }

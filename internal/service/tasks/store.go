@@ -174,6 +174,12 @@ type Task struct {
 	// with one is due whatever its schedule_time, its queue's state or its
 	// rate limits, as RunTask documents.
 	RunRequested time.Time `json:"runRequested,omitempty"`
+	// NamedByServer is set when CreateTask generated the name because the
+	// caller gave none. Such a name is not tombstoned when the task goes
+	// (#1594): no caller chose it to de-duplicate an enqueue, and a
+	// tombstone for every unnamed task kept the store growing for as long
+	// as tasks were created.
+	NamedByServer bool `json:"namedByServer,omitempty"`
 }
 
 // Store holds queues and tasks.
@@ -187,6 +193,8 @@ type Store struct {
 	// now is the clock tombstones are dated and expired by; injected in
 	// tests.
 	now func() time.Time
+	// swept is when DeleteTask last removed the expired tombstones.
+	swept time.Time
 }
 
 // NewStore wraps a metadata store.
@@ -516,22 +524,58 @@ func (s *Store) ListTasks(queue string) ([]Task, error) {
 }
 
 // DeleteTask removes a task, whether it was deleted, executed or dropped
-// after its last attempt, and tombstones its name for TombstoneTTL (#579).
+// after its last attempt, and tombstones its name for TombstoneTTL (#579),
+// unless the name was the server's (#1594).
+//
+// It also removes, at most once every tombstoneSweep, every tombstone whose
+// time is past. Before, a tombstone went only when its name was created
+// again, so they piled up: a soak of 20 unnamed tasks a second left 5,000
+// in 4 minutes, and the store, which writes all its keys at each change,
+// wrote them all again at each create, attempt and delete (#1594).
 func (s *Store) DeleteTask(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.db.Get(taskKey(name)); err != nil {
+	var t Task
+	if err := s.get(taskKey(name), &t); err != nil {
 		return apierror.NotFound("task %s not found", name)
 	}
-	until, err := json.Marshal(s.now().Add(TombstoneTTL))
-	if err != nil {
-		return apierror.Internal(err, "encode tombstone")
+	ops := []store.Op{{Kind: store.OpDelete, Key: taskKey(name)}}
+	now := s.now()
+	if !t.NamedByServer {
+		until, err := json.Marshal(now.Add(TombstoneTTL))
+		if err != nil {
+			return apierror.Internal(err, "encode tombstone")
+		}
+		ops = append(ops, store.Op{Kind: store.OpPut, Key: tombstoneKey(name), Value: until})
 	}
-	if err := s.db.Commit([]store.Op{{Kind: store.OpDelete, Key: taskKey(name)},
-		{Kind: store.OpPut, Key: tombstoneKey(name), Value: until}}); err != nil {
+	if now.Sub(s.swept) >= tombstoneSweep {
+		ops = append(ops, s.expiredTombstones(now)...)
+		s.swept = now
+	}
+	if err := s.db.Commit(ops); err != nil {
 		return apierror.From(err)
 	}
 	return nil
+}
+
+// tombstoneSweep is how often DeleteTask removes expired tombstones.
+const tombstoneSweep = time.Minute
+
+// expiredTombstones are the deletions of every tombstone whose time is past
+// at now. The caller holds s.mu.
+func (s *Store) expiredTombstones(now time.Time) []store.Op {
+	keys, err := s.db.List("tasks/tombstones/")
+	if err != nil {
+		return nil
+	}
+	var ops []store.Op
+	for _, k := range keys {
+		var until time.Time
+		if s.get(k, &until) == nil && !now.Before(until) {
+			ops = append(ops, store.Op{Kind: store.OpDelete, Key: k})
+		}
+	}
+	return ops
 }
 
 // UpdateTask replaces a stored task, used to record dispatch outcomes.
