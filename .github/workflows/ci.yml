@@ -816,7 +816,10 @@ jobs:
             probe present
             probe absent --mode ephemeral
             for t in $PROBE_TESTS; do
-              grep -c -- "--- PASS: $t" restart.log | grep -qx 2 ||
+              # The test's own PASS line, not its subtests' indented ones
+              # (TestMemorystoreClustersAcrossRestart has five, so an
+              # unanchored count gave 12).
+              grep -c -- "^--- PASS: $t " restart.log | grep -qx 2 ||
                 { echo "the $t restart probe did not pass twice"; exit 1; }
             done
             # Storage's probe is its own setup too: at setup, after the
