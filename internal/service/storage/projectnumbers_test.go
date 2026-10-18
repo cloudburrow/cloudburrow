@@ -14,7 +14,8 @@ import (
 // is the one its buckets and service agent report; a project not sent keeps
 // the derived number; the set survives being read from the store again.
 func TestProjectNumbersPushed(t *testing.T) {
-	s, err := NewServer(Options{Hosts: []string{"storage.localhost"}})
+	meta := NewMemMetaStore()
+	s, err := NewServer(Options{Hosts: []string{"storage.localhost"}, Meta: meta})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,9 +44,13 @@ func TestProjectNumbersPushed(t *testing.T) {
 	if want := "service-" + strconv.FormatInt(fresh, 10) + "@"; !strings.Contains(body, want) {
 		t.Fatalf("service agent %s, want %s", body, want)
 	}
-	// Read again from the store, as after a restart.
-	s.numbers.loaded = false
-	if n, ok := s.ProjectNumberOf("recreated-proj"); !ok || n != fresh {
+	// Read again from the store, by a server started on it, as after a
+	// restart.
+	again, err := NewServer(Options{Hosts: []string{"storage.localhost"}, Meta: meta})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := again.ProjectNumberOf("recreated-proj"); !ok || n != fresh {
 		t.Fatalf("after reload %d %v", n, ok)
 	}
 }

@@ -131,6 +131,9 @@ func NewServer(o Options) (*Server, error) {
 	if s.now == nil {
 		s.now = time.Now
 	}
+	// Before any request, so no lookup made in a transaction reads the
+	// store (#1630).
+	s.loadProjectNumbers()
 	s.handlers["storage.buckets.insert"] = s.bucketsInsert
 	s.handlers["storage.buckets.get"] = s.bucketsGet
 	s.handlers["storage.buckets.list"] = s.bucketsList
