@@ -237,6 +237,12 @@ A test skips when its service endpoint is not exported — the service may legit
 deployed. That is not the same as a blanket skip: each service asks for **its own** endpoint,
 so an unimplemented operation can never pass by being skipped wholesale.
 
+A test asks for each endpoint (`h.Endpoint`, or a helper that does) before it uses it, and
+never reads a `CLOUDBURROW_TEST_*` endpoint with `os.Getenv` without skipping when it is
+empty. A subtest asks through a harness of its own, `h := h.For(t)`: the parent's skip, called
+from the subtest, fails it instead (#1625). test/repo's
+`TestCompatTestsSkipWhereTheirEndpointsAreNotServed` finds each of these.
+
 ## Unverified error codes
 
 Some errors are not documented by Google: for example, the code Cloud KMS returns when a
