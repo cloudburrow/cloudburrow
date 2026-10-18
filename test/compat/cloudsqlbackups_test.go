@@ -130,6 +130,7 @@ func TestCloudSQLBackups(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			h := h.For(t)
 			if c.created {
 				op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: c.instance, DatabaseVersion: c.version,
 					RootPassword: "Root-pass1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840",

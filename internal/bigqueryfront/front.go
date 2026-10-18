@@ -199,6 +199,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// A client request's repeated reads of a dataset or table are the
+	// engine's first answer (readmemo.go, #1623).
+	next = memoReads(next)
 	storage := newStorageReader(o.storage)
 	storageHost := strings.TrimPrefix(o.storage, "http://")
 	failed := &jobFailures{}
@@ -511,7 +514,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	return withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -535,7 +538,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed)
+	}), next, settings, failed))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -638,7 +641,7 @@ type options struct {
 	stateDir string
 	logf     func(string, ...any)
 	// streamTimes is whether a table that is not partitioned streams
-	// through a scratch table, keeping its rows' stream time for DML
+	// as a partitioned one does, keeping its rows' stream time for DML
 	// (streamingbuffer.go, #1370): the engine behind the front has the
 	// column (bigquery-emulator patch 0018).
 	streamTimes bool
@@ -879,6 +882,9 @@ type insertResponse struct {
 }
 
 func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table string) {
+	// The pseudo-columns of streamed rows are the front's to name
+	// (streamingbuffer.go, #1624), never a client's.
+	r.Header.Del(streamColumnsHeader)
 	// The whole request is decoded to find its rows, and re-encoded with
 	// the rest of its fields (templateSuffix, traceId) as they came.
 	var raw map[string]json.RawMessage
@@ -931,11 +937,12 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	} else if ok := json.Unmarshal(got, &pm) == nil; ok && pm.TimePartitioning == nil && pm.RangePartitioning == nil &&
 		f.buffers != nil && f.buffers.stamp && !decorated && len(raw["templateSuffix"]) == 0 && plainTable(got) &&
 		!hasRangeField(pm.Schema.Fields) {
-		// Any other table streams through a scratch table too, so its
-		// rows keep their stream time, which DML reads (#1370,
+		// Any other table streams as a partitioned one does, so its rows
+		// keep their stream time, which DML reads (#1370,
 		// streamingbuffer.go). Not one with a RANGE column, which the
-		// emulator's tables.insert cannot make a scratch copy of: its rows
-		// stream straight in, held from DML only while in the buffer.
+		// emulator's tables.insert cannot make a scratch copy of, should a
+		// stream need one: its rows stream straight in, held from DML only
+		// while in the buffer.
 		streamed = true
 	}
 	if decorated && !pm.ingestion() {
@@ -1056,6 +1063,11 @@ func (f front) get(r *http.Request, path string) (int, []byte) {
 // a query that reads a result's columns, or the removal of a table a
 // refused load made.
 func (f front) send(r *http.Request, method, path string, body []byte) (int, []byte) {
+	return f.sendHeader(r, method, path, body, nil)
+}
+
+// sendHeader is send with header's fields too.
+func (f front) sendHeader(r *http.Request, method, path string, body []byte, header http.Header) (int, []byte) {
 	u := *r.URL
 	u.Path, u.RawPath = "", ""
 	p := f.base + path
@@ -1087,11 +1099,17 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	for k, v := range header {
+		req.Header[k] = v
+	}
 	req.Host = r.Host
 	req.RemoteAddr = r.RemoteAddr
 	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/1.1", 1, 1
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, req)
+	if method == http.MethodPost && path == "/queries" && rec.status == http.StatusOK {
+		f.forgetInternalJob(r, rec.body.Bytes())
+	}
 	return rec.status, rec.body.Bytes()
 }
 

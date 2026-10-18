@@ -182,7 +182,7 @@ var instanceSamples = map[string][2]string{
 	"geminiConfig":                               {`{"entitled":true}`, "refuse"},
 	"maintenanceVersion":                         {`"POSTGRES_17_11.R20260101.00_00"`, "refuse"},
 	"nodeCount":                                  {`2`, "refuse"},
-	"replicationCluster":                         {`{"failoverDrReplicaName":"dr"}`, "refuse"},
+	"replicationCluster":                         {"", "elsewhere"},
 	"switchTransactionLogsToCloudStorageEnabled": {`true`, "refuse"},
 	"tags": {`{"tagKeys/1":"tagValues/2"}`, "refuse"},
 }

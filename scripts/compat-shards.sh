@@ -212,8 +212,8 @@ compat_shard() {
       # or Cloud Storage (the copies) read SINK_LOGGING and SINK_STORAGE, and
       # the copies from a folder LOGGING_RESOURCEMANAGER (#1568).
       TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
-      PROBE_TESTS="TestDatastoreAcrossRestart"
-      PROBE_VARS=DATASTORE ;;
+      PROBE_TESTS="TestDatastoreAcrossRestart TestFirestoreAcrossRestart"
+      PROBE_VARS=DATASTORE,FIRESTORE ;;
     memorystore)
       # Memorystore for Redis (#296), Redis Cluster and Valkey, split from
       # the emulators shard (#1568). Cloud Storage for the exports and
@@ -286,7 +286,7 @@ compat_setup_exports() {
 # fixture in <dir>.
 compat_probe_expect() {
   local v
-  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE KMS SECRETS TASKS SCHEDULER; do
+  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE FIRESTORE KMS SECRETS TASKS SCHEDULER; do
     echo "CLOUDBURROW_TEST_${v}_EXPECT=$1"
   done
   echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$2/storage-restart-probe.json"

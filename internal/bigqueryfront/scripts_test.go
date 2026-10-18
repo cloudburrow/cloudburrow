@@ -30,6 +30,9 @@ type jobsEmulator struct {
 	// prefix is the request's job ID prefix, which the engine begins the
 	// IDs it makes with (bigquery-emulator patch 0057, #1555).
 	prefix string
+	// deleted are the jobs.delete requests' job IDs, in order. The jobs
+	// stay in jobs and order, as an engine's would if its delete failed.
+	deleted []string
 }
 
 func (e *jobsEmulator) record(job map[string]any) map[string]any {
@@ -72,6 +75,10 @@ func (e *jobsEmulator) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = io.WriteString(w, t)
+	case r.Method == http.MethodDelete && strings.Contains(path, "/jobs/") && strings.HasSuffix(path, "/delete"):
+		id := strings.TrimSuffix(path[strings.Index(path, "/jobs/")+len("/jobs/"):], "/delete")
+		e.deleted = append(e.deleted, id)
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodDelete:
 		delete(e.tables, path)
 		w.WriteHeader(http.StatusNoContent)

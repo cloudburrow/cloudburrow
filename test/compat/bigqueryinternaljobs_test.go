@@ -35,7 +35,10 @@ func TestBigQueryFrontsOwnJobsStayUnlisted(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
 	ds := validationDataset(t, h, c)
-	start := time.Now().Add(-2 * time.Second)
+	// Since the test began on the instance's clock, which a test before it
+	// may have moved on (advanceBigQueryClock), and with it the creation
+	// times of that test's jobs (#1629).
+	start := advanceBigQueryClock(t, h, 0).Add(-2 * time.Second)
 	mine := map[string]bool{}
 	run := func(sql string) {
 		t.Helper()

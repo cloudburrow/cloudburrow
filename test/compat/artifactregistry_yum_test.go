@@ -197,7 +197,10 @@ func TestArtifactRegistryYumRepodata(t *testing.T) {
 		t.Errorf("%s is not the imported package", p.Location.Href)
 	}
 
-	t.Run("dnf", func(t *testing.T) { yumInstall(t, h, path) })
+	t.Run("dnf", func(t *testing.T) {
+		h := h.For(t)
+		yumInstall(t, h, path)
+	})
 
 	// Deleting cbhello-data's version makes the metadata again.
 	dop, err := ar.DeleteVersion(ctx, &arpb.DeleteVersionRequest{Name: yum.GetName() + "/packages/cbhello-data/versions/1.0-1"})

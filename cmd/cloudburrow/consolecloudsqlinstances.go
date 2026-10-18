@@ -309,6 +309,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Earliest recovery time", Value: earliest}, {Label: "Latest recovery time", Value: latest},
 		{Label: "Instance type", Value: in.InstanceType}, {Label: "Primary instance", Value: in.MasterInstanceName},
 		{Label: "Read replicas", Value: strings.Join(in.ReplicaNames, ", ")},
+		{Label: "DR replica", Value: drReplicaOf(in)}, {Label: "Disaster recovery role", Value: drRole(in)},
 		{Label: "Encryption key (CMEK)", Value: cmekKey(in)}, {Label: "Encryption key version", Value: cmekVersion(in)},
 		{Label: "Suspension reason", Value: strings.Join(in.SuspensionReason, ", ")},
 	} {
@@ -368,6 +369,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
+	d.Actions = append(d.Actions, drActions(in)...)
+	d.Actions = append(d.Actions, reencryptActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
@@ -659,6 +662,64 @@ func failoverActions(in *sqladminapi.DatabaseInstance) []console.Action {
 			"and the old primary is rebuilt as the new standby."}}
 }
 
+// drReplicaOf is a primary's designated DR replica (#1614).
+func drReplicaOf(in *sqladminapi.DatabaseInstance) string {
+	if rc := in.ReplicationCluster; rc != nil {
+		return rc.FailoverDrReplicaName
+	}
+	return ""
+}
+
+// drRole says a DR replica is one.
+func drRole(in *sqladminapi.DatabaseInstance) string {
+	if rc := in.ReplicationCluster; rc != nil && rc.DrReplica {
+		return "DR replica of " + in.MasterInstanceName
+	}
+	return ""
+}
+
+// drActions are, on a MySQL primary with read replicas, Designate DR
+// replica (and Remove DR replica once one is), and, on its DR replica,
+// Switchover (#1614): the replica becomes the primary, and the primary its
+// replica, with no data lost.
+func drActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		return nil
+	}
+	if rc := in.ReplicationCluster; rc != nil && rc.DrReplica {
+		_, primary, _ := strings.Cut(in.MasterInstanceName, ":")
+		return []console.Action{{ID: "switchover", Label: "Switchover", Destructive: true,
+			Confirm: "This DR replica becomes the primary and " + primary + " its read replica: the primary stops taking writes " +
+				"until this replica has applied every transaction it has.",
+			Fields: []console.Field{{Name: "primary", Label: "Primary instance ID", Type: "text", Required: true,
+				Help: "Type the primary's instance ID, " + primary + ", to confirm."},
+				{Name: "dbTimeout", Label: "Timeout (seconds)", Type: "text", Default: "600", Pattern: "^[0-9]+$",
+					Help: "How long the replica may take to apply the primary's transactions (dbTimeout), at most 24 hours."}}}}
+	}
+	if in.MasterInstanceName != "" || len(in.ReplicaNames) == 0 {
+		return nil
+	}
+	acts := []console.Action{{ID: "designate-dr-replica", Label: "Designate DR replica", Fields: []console.Field{{Name: "replica",
+		Label: "Read replica", Type: "select", Required: true, Options: in.ReplicaNames,
+		Help: "An Enterprise Plus replica in another region; Switchover on its page makes it the primary."}}}}
+	if drReplicaOf(in) != "" {
+		acts = append(acts, console.Action{ID: "clear-dr-replica", Label: "Remove DR replica",
+			Confirm: "The replica stays a read replica; without a DR replica there is no switchover."})
+	}
+	return acts
+}
+
+// reencryptActions is Re-encrypt on a CMEK instance (#1614): its data key
+// is wrapped again by its key's primary version (instances.reencrypt).
+func reencryptActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if cmekKey(in) == "" {
+		return nil
+	}
+	return []console.Action{{ID: "reencrypt", Label: "Re-encrypt",
+		Confirm: "The instance is re-encrypted with the primary version of " + cmekKey(in) +
+			"; afterwards the version that encrypted it before can be disabled."}}
+}
+
 func availabilityOr(a string) string {
 	if a == "" {
 		return "ZONAL"
@@ -898,6 +959,28 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 				Username: u, Password: v["password"]}}
 		}
 		_, err = svc.Instances.DemoteMaster(project, name, &sqladminapi.InstancesDemoteMasterRequest{DemoteMasterContext: dc}).Context(ctx).Do()
+	case "reencrypt":
+		_, err = svc.Instances.Reencrypt(project, name, &sqladminapi.InstancesReencryptRequest{}).Context(ctx).Do()
+	case "designate-dr-replica", "clear-dr-replica":
+		dr := ""
+		if action == "designate-dr-replica" {
+			dr = strings.TrimSpace(v["replica"])
+		}
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{ReplicationCluster: &sqladminapi.ReplicationCluster{
+			FailoverDrReplicaName: dr, ForceSendFields: []string{"FailoverDrReplicaName"}}}).Context(ctx).Do()
+	case "switchover":
+		var in *sqladminapi.DatabaseInstance
+		if in, err = svc.Instances.Get(project, name).Context(ctx).Do(); err != nil {
+			break
+		}
+		if _, primary, _ := strings.Cut(in.MasterInstanceName, ":"); strings.TrimSpace(v["primary"]) != primary {
+			return fmt.Errorf("type the primary's instance ID, %s, to confirm the switchover", primary)
+		}
+		call := svc.Instances.Switchover(project, name)
+		if t := strings.TrimSpace(v["dbTimeout"]); t != "" {
+			call = call.DbTimeout(t + "s")
+		}
+		_, err = call.Context(ctx).Do()
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":

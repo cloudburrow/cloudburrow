@@ -630,3 +630,56 @@ func TestEmulatorHeap(t *testing.T) {
 		})
 	}
 }
+
+// TestBigQueryHeap: the BigQuery emulator's GOMEMLIMIT (#1618) defaults to
+// DefaultBigQueryHeapMiB, is set by flag, environment or file, 0 turns it
+// off, and a value out of range is refused.
+func TestBigQueryHeap(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		file    string
+		want    int
+		wantErr string
+	}{
+		{name: "default", want: DefaultBigQueryHeapMiB},
+		{name: "flag", args: []string{"--bigquery-heap-mib", "1536"}, want: 1536},
+		{name: "env", env: map[string]string{EnvPrefix + "BIGQUERY_HEAP_MIB": "768"}, want: 768},
+		{name: "file", file: `{"bigQueryHeapMiB":256}`, want: 256},
+		{name: "flag beats env", args: []string{"--bigquery-heap-mib=300"},
+			env: map[string]string{EnvPrefix + "BIGQUERY_HEAP_MIB": "768"}, want: 300},
+		{name: "0 is none", env: map[string]string{EnvPrefix + "BIGQUERY_HEAP_MIB": "0"}, want: 0},
+		{name: "bad env", env: map[string]string{EnvPrefix + "BIGQUERY_HEAP_MIB": "512MiB"}, wantErr: "must be an integer number of MiB"},
+		{name: "too small", args: []string{"--bigquery-heap-mib", "64"}, wantErr: "bigQueryHeapMiB"},
+		{name: "too large", file: `{"bigQueryHeapMiB":32768}`, wantErr: "bigQueryHeapMiB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if tc.file != "" {
+				writeFile(t, dir, DefaultFileName, tc.file)
+			}
+			cfg, err := Load(Options{Args: tc.args, Getenv: envMap(tc.env), WorkDir: dir})
+			if err == nil && tc.wantErr != "" {
+				err = cfg.Validate()
+			}
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load = %v; want an error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate = %v", err)
+			}
+			if cfg.BigQueryHeapMiB != tc.want {
+				t.Errorf("BigQueryHeapMiB = %d, want %d", cfg.BigQueryHeapMiB, tc.want)
+			}
+		})
+	}
+}

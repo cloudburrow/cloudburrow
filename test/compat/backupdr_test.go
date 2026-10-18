@@ -165,6 +165,7 @@ func TestBackupDRCloudSQLRestore(t *testing.T) {
 	}
 	for _, rc := range cases {
 		t.Run(rc.c.name, func(t *testing.T) {
+			h := h.For(t)
 			backupDRRestoreCase(t, h, bdr, svc, loc, vaultName, planName, rc.c, rc.bc)
 		})
 	}

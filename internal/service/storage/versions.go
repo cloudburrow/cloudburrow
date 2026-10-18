@@ -15,8 +15,9 @@ import (
 // versioning stops new ones and keeps those that exist. A delete that names
 // a generation removes that version permanently.
 //
-// An object's noncurrent versions are one record under noncurrentPrefix,
-// oldest first; the live version stays at objectKey.
+// An object's noncurrent versions are one record under noncurrentPrefix, a
+// JSON array retireLive appends to (read oldest first); the live version
+// stays at objectKey.
 
 const noncurrentPrefix = "noncurrent/"
 
@@ -28,7 +29,11 @@ func getNoncurrent(tx Tx, bucket, name string) ([]objectRecord, error) {
 		return nil, nil
 	}
 	var vs []objectRecord
-	return vs, json.Unmarshal(raw, &vs)
+	if err := json.Unmarshal(raw, &vs); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(vs, func(i, j int) bool { return vs[i].Generation < vs[j].Generation })
+	return vs, nil
 }
 
 func putNoncurrent(tx Tx, bucket, name string, vs []objectRecord) error {
@@ -70,14 +75,14 @@ func retireLive(tx Tx, b bucketRecord, name string, now time.Time, by int64) err
 	if !versioningEnabled(b) {
 		return removed(tx, b, cur, now, by)
 	}
-	vs, err := getNoncurrent(tx, b.Name, name)
+	cur.Deleted = now
+	raw, err := json.Marshal(cur)
 	if err != nil {
 		return err
 	}
-	cur.Deleted = now
-	if err := putNoncurrent(tx, b.Name, name, append(vs, cur)); err != nil {
-		return err
-	}
+	// Appended, as soft-deleted versions are (#1609): a version kept costs
+	// what it adds, not every version kept before it again.
+	tx.Append(noncurrentKey(b.Name, name), raw)
 	return emit(tx, objectEvent{Type: EventArchive, Object: cur, OverwrittenBy: by, Time: now})
 }
 

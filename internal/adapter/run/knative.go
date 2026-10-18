@@ -97,6 +97,41 @@ type ksvcCondition struct {
 	LastTransitionTime time.Time `json:"lastTransitionTime"`
 }
 
+// configurationMissing is the reason Knative's Route gives when the
+// Configuration its traffic names is not in its cache yet.
+const configurationMissing = "ConfigurationMissing"
+
+// UnmarshalJSON decodes a Knative Service and settles its conditions
+// (settleConditions).
+func (k *ksvc) UnmarshalJSON(b []byte) error {
+	type plain ksvc // without this method
+	if err := json.Unmarshal(b, (*plain)(k)); err != nil {
+		return err
+	}
+	settleConditions(k.Status.Conditions)
+	return nil
+}
+
+// settleConditions reports as Unknown, still reconciling, a False that
+// Knative takes back on its own: a Route's "Configuration ... referenced in
+// traffic not found" (ConfigurationMissing).
+//
+// A Knative Service creates its Configuration and its Route together, and
+// the Route reconciler can run before its informer has seen that
+// Configuration. It then marks the Route, and through RoutesReady the
+// Service's Ready, False until the Configuration's event requeues it, a
+// fraction of a second later. The Service's own Configuration always comes,
+// so for a Service this is never final. Cloud Run reports Ready Unknown
+// while it reconciles, and its clients stop at the first False: Terraform's
+// google_cloud_run_service failed its create on this (#1631).
+func settleConditions(cs []ksvcCondition) {
+	for i, c := range cs {
+		if c.Status == "False" && c.Reason == configurationMissing {
+			cs[i].Status = "Unknown"
+		}
+	}
+}
+
 // lastTransition is the most recent condition change, or since when there
 // is none: Knative keeps no update time, and a condition changes whenever a
 // new spec is reconciled.

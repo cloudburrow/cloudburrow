@@ -43,6 +43,9 @@ type Replication struct {
 	Offset int64
 	// LinkUp is a replica's master_link_status:up.
 	LinkUp bool
+	// ReplID is master_replid: the replication ID, which a server that
+	// starts again or is promoted takes anew.
+	ReplID string
 }
 
 // Replicator is a server that replicates: a DataPlane of a Standard tier
@@ -508,28 +511,11 @@ func (c *instances) failover(ctx context.Context, rs ReplicaSet, from *record, a
 	if limited && !primaryUp {
 		return apierror.FailedPrecondition("failover aborted: the primary does not answer, so its offset delta to the replicas cannot be checked; use FORCE_DATA_LOSS")
 	}
-	best, bestOffset, worst := -1, int64(-1), int64(0)
-	for _, n := range from.replicas() {
-		rp, err := c.replicator(addrs[n], from.AuthString, from.caPEM())
-		if err != nil {
-			return err
-		}
-		st, err := rp.Replication(ctx)
-		if err != nil || (limited && !st.LinkUp) {
-			if limited {
-				return apierror.FailedPrecondition("failover aborted: node-%d is not replicating from the primary, so its offset delta cannot be checked; use FORCE_DATA_LOSS", n)
-			}
-			continue
-		}
-		if d := primaryOffset - st.Offset; d > worst {
-			worst = d
-		}
-		if st.Offset > bestOffset {
-			best, bestOffset = n, st.Offset
-		}
-	}
-	if best < 0 {
-		return apierror.FailedPrecondition("failover aborted: no replica answers")
+	best, worst, err := bestReplica(ctx, from.replicas(), func(n int) (Replicator, error) {
+		return c.replicator(addrs[n], from.AuthString, from.caPEM())
+	}, primaryOffset, limited)
+	if err != nil {
+		return err
 	}
 	if limited && worst >= limitedDataLoss {
 		return apierror.FailedPrecondition("failover aborted: the greatest offset delta between the primary and a replica is %d bytes, 30 MB or more (LIMITED_DATA_LOSS); use FORCE_DATA_LOSS to fail over anyway", worst)
@@ -548,6 +534,40 @@ func (c *instances) failover(ctx context.Context, rs ReplicaSet, from *record, a
 		return apierror.Internal(err, "keep instance %s", r.Name)
 	}
 	return c.points(r, true)
+}
+
+// bestReplica is the replica of replicas, in order, with the most of the
+// primary's data (the greatest offset), and the greatest offset delta
+// between primaryOffset and a replica. With limited, a replica that does
+// not answer or is not linked to the primary aborts; without, it is
+// passed over. A Standard tier instance's failover and a Memorystore for
+// Valkey instance's in CLUSTER_DISABLED mode (valkeyfailover.go) choose
+// with it.
+func bestReplica(ctx context.Context, replicas []int, replicator func(int) (Replicator, error), primaryOffset int64, limited bool) (int, int64, error) {
+	best, bestOffset, worst := -1, int64(-1), int64(0)
+	for _, n := range replicas {
+		rp, err := replicator(n)
+		if err != nil {
+			return -1, 0, err
+		}
+		st, err := rp.Replication(ctx)
+		if err != nil || (limited && !st.LinkUp) {
+			if limited {
+				return -1, 0, apierror.FailedPrecondition("failover aborted: node-%d is not replicating from the primary, so its offset delta cannot be checked; use FORCE_DATA_LOSS", n)
+			}
+			continue
+		}
+		if d := primaryOffset - st.Offset; d > worst {
+			worst = d
+		}
+		if st.Offset > bestOffset {
+			best, bestOffset = n, st.Offset
+		}
+	}
+	if best < 0 {
+		return -1, 0, apierror.FailedPrecondition("failover aborted: no replica answers")
+	}
+	return best, worst, nil
 }
 
 // scale runs the nodes r's replica_count adds, as replicas of its

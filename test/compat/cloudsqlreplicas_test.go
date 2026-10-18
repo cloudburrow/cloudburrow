@@ -56,6 +56,7 @@ func TestCloudSQLReadReplicas(t *testing.T) {
 	}
 	for _, e := range engines {
 		t.Run(e.version, func(t *testing.T) {
+			h := h.For(t)
 			short := strings.ToLower(strings.SplitN(e.version, "_", 2)[0])
 			primary, replica := short+"-p-"+suffix, short+"-r-"+suffix
 			table := "t"
@@ -217,6 +218,7 @@ func TestCloudSQLReplicaOfUpsServer(t *testing.T) {
 	}
 	for _, up := range ups {
 		t.Run(up, func(t *testing.T) {
+			h := h.For(t)
 			name := up + "-upr-" + suffix
 			op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, MasterInstanceName: up}).Do()
 			if err != nil {

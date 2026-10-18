@@ -61,6 +61,9 @@ type LifecycleComponent struct {
 	// Service network. Nil when unset, as in prefetch.
 	restarted      func() bool
 	serviceNetwork func(context.Context) error
+	// bigQueryHeapMiB is the BigQuery emulator's GOMEMLIMIT (#1618); 0
+	// sets none.
+	bigQueryHeapMiB int
 }
 
 // SetNodeRestart gives Knative's warm path the cluster's word on whether
@@ -122,6 +125,7 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 		out:         out,
 
 		emulatorHeapMiB: cfg.EmulatorHeapMiB,
+		bigQueryHeapMiB: cfg.BigQueryHeapMiB,
 	}
 }
 
@@ -208,6 +212,15 @@ func (c *LifecycleComponent) Backends() []Backend {
 	for i := range out {
 		if out[i].JVM {
 			out[i] = out[i].WithJVMHeap(c.emulatorHeapMiB)
+		}
+		// Every Go process in these pods gets a GOMEMLIMIT (#1618): the
+		// fronts, the storage server and the BigQuery emulator.
+		out[i] = out[i].withFrontGoMemLimit()
+		switch out[i].Name {
+		case "storage":
+			out[i] = out[i].WithGoMemLimit(StorageGoMemLimitMiB, "64Mi")
+		case "bigquery":
+			out[i] = out[i].WithGoMemLimit(c.bigQueryHeapMiB, fmt.Sprintf("%dMi", c.bigQueryHeapMiB/2))
 		}
 	}
 	return out

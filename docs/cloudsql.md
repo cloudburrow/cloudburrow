@@ -155,8 +155,7 @@ Refused with 501, each naming what is missing:
 | `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
 | `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
-| `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
+| `instances.switchover` of a PostgreSQL instance | the old primary would have to become the new one's standby, which a PostgreSQL server becomes only by a rebuild of its data directory (`pg_rewind` or a new base backup); MySQL's is served (DR replicas and switchover, below) |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)
@@ -272,7 +271,8 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
 | `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
 | `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
-| `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `replicationCluster`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
+| `replicationCluster.failoverDrReplicaName` | Applied on a MySQL primary: see DR replicas and switchover. 501 on a PostgreSQL one; `drReplica` and `psaWriteEndpoint` are output fields. |
+| `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
 | `connectionName`, `ipAddresses`, `state`, `gceZone`, `serverCaCert`, `selfLink` and the other output fields | Ignored, as Cloud SQL ignores them. |
 | `users`: `databaseRoles`, `passwordPolicy`, `dualPasswordType` (other than `NO_DUAL_PASSWORD`), `iamEmail` | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). |
 | `databases`: `sqlserverDatabaseDetails` | 400 (SQL Server). |
@@ -302,6 +302,15 @@ a clone keeps its source's key.
 volume of the cluster, and a server already running keeps answering direct connections through its
 host tunnel while its key is disabled. What the key controls is whether the instance can be started
 and reached through the API and the connectors.
+
+**Re-encryption (#1614).** `instances.reencrypt` (`gcloud sql instances reencrypt`, the console's
+**Re-encrypt**) unwraps the instance's data key and wraps it again with the CryptoKey's current
+primary version, which `diskEncryptionStatus.kmsKeyVersionName` then names, so the version that
+wrapped it before can be disabled or destroyed without suspending the instance. It is a `REENCRYPT`
+operation, and the server keeps running. An instance without a key is 400, and a data key whose
+wrapping version is disabled cannot be unwrapped, so it is refused naming the key. Its
+`backupReencryptionConfig` is 501: a backup here is a dump of the server's databases and records no
+key version, so there is no backup to re-encrypt.
 
 ### Read replicas (#1330)
 
@@ -449,6 +458,47 @@ own, GTIDs on, read-only); the source is verified first, as for `startExternalSy
 
 `promoteReplica` makes it a primary again. In the console, a standalone MySQL instance's page has
 **Demote** (either method); gcloud and Terraform have no demote command or resource.
+
+**DR replicas and switchover** (#1614), for MySQL, as Cloud SQL documents advanced disaster
+recovery for an Enterprise Plus primary:
+
+- **Designating a DR replica**: `instances.patch` of the primary with
+  `replicationCluster.failoverDrReplicaName` (the replica's name, or `PROJECT:NAME`), as
+  `gcloud sql instances patch --failover-dr-replica-name` and Terraform's `replication_cluster`
+  send it. Both instances must be Enterprise Plus (`settings.edition`; Cloud SQL's default is
+  Enterprise Plus for MySQL 8.4, Enterprise for 8.0), and the replica a direct (not cascading),
+  non-external read replica of the primary in another region, with none of the `replicate_*`
+  flags; otherwise 400. A designation on a replica, or on a new instance, is 400. The primary then
+  answers `replicationCluster.failoverDrReplicaName` as `PROJECT:NAME`, and the replica
+  `replicationCluster.drReplica` true. Designating another replica moves it; `""`, or
+  `replicationCluster` sent null (`--clear-failover-dr-replica-name`), removes it, and so do
+  deleting or promoting the replica. While designated, the replica's binary logging cannot be
+  turned off (`backupConfiguration.binaryLogEnabled` false, `skip_log_bin`), 400.
+- **`instances.switchover`** (`SWITCHOVER`), called on the DR replica, with `dbTimeout` (default
+  10 minutes, at most 24 hours), reverses the roles with no data lost: the primary is made
+  read-only, the replica waits for every transaction the primary has executed
+  (`WAIT_FOR_EXECUTED_GTID_SET`, bounded by `dbTimeout`) and is promoted, and the old primary then
+  replicates from it by GTID auto-positioning, keeping its data, as `demoteMaster`'s replica does.
+  Both servers are changed online, without a restart. Afterwards the new primary is
+  `CLOUD_SQL_INSTANCE` with the old one in `replicaNames` and as its DR replica
+  (`failoverDrReplicaName`), and the old primary is `READ_REPLICA_INSTANCE` with
+  `masterInstanceName` the new primary, `drReplica` true and automated backups off. A switchover
+  back reverses it again. If the replica does not catch up within `dbTimeout`, the primary takes
+  writes again and the operation fails.
+- **Refused**: switchover of an instance that is not its primary's DR replica (400, also when no
+  DR replica is designated), of a primary (400), while either instance is not `RUNNABLE` (409), or
+  while the replica's replication is stopped (400); a REGIONAL primary's DR replica and switchover
+  are 501 (the old primary would be a read replica, which here is one server); a PostgreSQL
+  primary's DR replica and switchover are 501 (the old primary would need a rebuild to become a
+  standby).
+- **Not as Google**: there is no write endpoint (`psaWriteEndpoint`, a DNS name that follows the
+  primary): clients connect to the new primary by its own connection name. No backup is taken
+  of the new primary after the switchover. The old primary's other read replicas stay its
+  replicas, so they are cascading replicas of the new primary.
+- **gcloud**: `gcloud sql instances patch --failover-dr-replica-name` and
+  `--clear-failover-dr-replica-name`, and `gcloud sql instances switchover --db-timeout`. In the
+  console, a MySQL primary with replicas has **Designate DR replica** and **Remove DR replica**,
+  and its DR replica's page **Switchover**, confirmed by typing the primary's instance ID.
 
 **A physical sync** (#1570), for MySQL: `startExternalSync` with `migrationType` `PHYSICAL`
 gives the replica a Percona XtraBackup backup of the source instead of a dump, and then

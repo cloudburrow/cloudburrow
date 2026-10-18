@@ -45,6 +45,9 @@ const (
 	envPID      = "CLOUDBURROW_SOAK_PID"      // the `up` process to sample
 	envNode     = "CLOUDBURROW_SOAK_NODE"     // the kind node container to sample
 	envStateDir = "CLOUDBURROW_SOAK_STATE_DIR"
+	// name=address pairs, comma-separated, of processes serving pprof
+	// (CLOUDBURROW_DEBUG_PPROF, #1609), whose goroutines are sampled.
+	envPprof = "CLOUDBURROW_SOAK_PPROF"
 )
 
 // maxClients bounds the concurrent clients a run opens, so a soak keeps the
@@ -133,7 +136,8 @@ func TestSoak(t *testing.T) {
 		t.Skip("no group's endpoint is set; export the instance's (see docs/soak.md)")
 	}
 
-	smp := &sampler{hostPID: os.Getenv(envPID), node: os.Getenv(envNode), stateDir: os.Getenv(envStateDir)}
+	smp := &sampler{hostPID: os.Getenv(envPID), node: os.Getenv(envNode), stateDir: os.Getenv(envStateDir),
+		pprof: pprofTargets(t, os.Getenv(envPprof))}
 	sctx, scancel := context.WithCancel(context.Background())
 	sdone := make(chan struct{})
 	go func() { smp.run(sctx, e.rec.start, 30*time.Second); close(sdone) }()
@@ -169,6 +173,9 @@ func TestSoak(t *testing.T) {
 			if c.Restarts > f.Restarts {
 				t.Errorf("%s restarted %d times during the soak", k, c.Restarts-f.Restarts)
 			}
+		}
+		for k, n := range last.Goroutines {
+			t.Logf("%-22s goroutines %d -> %d", k, first.Goroutines[k], n)
 		}
 	}
 	if path := os.Getenv(envReport); path != "" {
@@ -208,6 +215,24 @@ func endpoint(t *testing.T, name string) string {
 		t.Fatalf("%s=%q is not loopback; the soak only talks to local instances", name, addr)
 	}
 	return addr
+}
+
+// pprofTargets parses envPprof's name=address pairs, refusing an address
+// that is not loopback.
+func pprofTargets(t *testing.T, v string) map[string]string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, pair := range strings.Split(v, ",") {
+		name, addr, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		host, _, err := net.SplitHostPort(addr)
+		if ip := net.ParseIP(host); !ok || name == "" || err != nil || ip == nil || !ip.IsLoopback() {
+			t.Fatalf("%s: %q is not name=<loopback ip>:<port>", envPprof, pair)
+		}
+		out[name] = addr
+	}
+	return out
 }
 
 // every calls fn rate times a second, scaled by the run's multiplier, until

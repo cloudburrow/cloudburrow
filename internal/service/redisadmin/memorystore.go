@@ -37,9 +37,11 @@ import (
 // Shards are added and removed with their slots and keys moved, replicas
 // started or removed. endpoints and the deprecated psc_auto_connections and
 // discovery_endpoints report the nodes' host addresses: the discovery
-// endpoint (the first primary) in CLUSTER mode, the primary and a reader
-// (the first replica) in CLUSTER_DISABLED mode, as endpoints when they
-// were asked as endpoints, as psc_auto_connections when asked so.
+// endpoint (the first primary) in CLUSTER mode, the primary and reader
+// endpoints in CLUSTER_DISABLED mode (valkeyfailover.go: host addresses
+// that follow the roles, a replica promoted when the primary fails), as
+// endpoints when they were asked as endpoints, as psc_auto_connections
+// when asked so.
 //
 // In-transit encryption (SERVER_AUTHENTICATION, #1549) is a Redis
 // cluster's (cluster.go): a CA of the instance's own, which
@@ -197,6 +199,7 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.valkey.autoBackups(ctx)
+	go s.valkey.watchStandalone(ctx, healthEvery)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
@@ -314,16 +317,33 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 	}
 	type conn struct {
 		kind memorystorepb.ConnectionType
-		node *clusterNode
+		addr string
+	}
+	addrOf := func(n *clusterNode) string {
+		if n == nil {
+			return ""
+		}
+		return n.addr
 	}
 	var conns []conn
 	if mode == memorystorepb.Instance_CLUSTER {
-		conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_DISCOVERY, r.firstPrimary()})
+		conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_DISCOVERY, addrOf(r.firstPrimary())})
 	} else {
-		conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY, r.firstPrimary()})
+		// The primary and reader endpoints (valkeyfailover.go), which
+		// outlive a node; a node's own address until they are open; none
+		// while the nodes do not serve (a suspended instance's, cmek).
+		addr := addrOf(r.firstPrimary())
+		if addr != "" && r.primaryAddr != "" {
+			addr = r.primaryAddr
+		}
+		conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY, addr})
 		for _, n := range r.Nodes {
 			if !n.Primary {
-				conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_READER, n})
+				addr := n.addr
+				if addr != "" && r.readerAddr != "" {
+					addr = r.readerAddr
+				}
+				conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_READER, addr})
 				break
 			}
 		}
@@ -339,10 +359,10 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 	for i, net := range v.Networks {
 		ie := &memorystorepb.Instance_InstanceEndpoint{}
 		for j, cn := range conns {
-			if cn.node == nil || cn.node.addr == "" {
+			if cn.addr == "" {
 				continue
 			}
-			host, port := splitAddr(cn.node.addr, "", 0)
+			host, port := splitAddr(cn.addr, "", 0)
 			id := fmt.Sprintf("%s-psc-%d-%d", r.UID[:8], i, j)
 			pac := &memorystorepb.PscAutoConnection{
 				Ports:               &memorystorepb.PscAutoConnection_Port{Port: port},

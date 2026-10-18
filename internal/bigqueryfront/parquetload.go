@@ -507,12 +507,7 @@ func (f front) startParquetJob(w http.ResponseWriter, r *http.Request, format st
 		id = newJobID()
 	}
 	job.JobReference["projectId"], job.JobReference["jobId"] = project, id
-	if _, ok := f.jobs.get(project, id); ok {
-		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
-		return nil, false
-	}
-	if status, _ := f.get(r, "/jobs/"+url.PathEscape(id)); status == http.StatusOK {
-		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
+	if f.duplicateJob(w, r, project, id) { // duplicatejob.go, #1622
 		return nil, false
 	}
 	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: f.now()}, true

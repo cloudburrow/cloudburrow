@@ -42,7 +42,7 @@ func enterpriseDatabase(t *testing.T, h *Harness, id string) string {
 // database, through the official Go client's pipeline API: the front reads
 // the emulator's documents and evaluates the stages itself. A Standard
 // database (`(default)`) refuses them INVALID_ARGUMENT with Google's
-// message, and a stage that is not served is refused naming it.
+// message, and the subcollection stage outside a subquery is refused.
 //
 // covers: google.firestore.v1.Firestore/ExecutePipeline
 func TestFirestorePipelines(t *testing.T) {
@@ -130,8 +130,8 @@ func TestFirestorePipelines(t *testing.T) {
 	}
 
 	_, err = c.Pipeline().Collection("books").RawStage("subcollection", []any{"x"}).Execute(ctx).Results().GetAll()
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"subcollection"`) {
-		t.Errorf("a subcollection stage = %v, want UNIMPLEMENTED naming it", err)
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "within a subquery") {
+		t.Errorf("a subcollection stage = %v, want INVALID_ARGUMENT: within a subquery", err)
 	}
 
 	// Over REST, the stream is a JSON array of the responses.

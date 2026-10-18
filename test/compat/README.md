@@ -131,7 +131,7 @@ neither list.
 | Variable | Needed by |
 | --- | --- |
 | `CLOUDBURROW_TEST_KMS_PROBE`, `CLOUDBURROW_TEST_SECRETS_PROBE`, `CLOUDBURROW_TEST_TASKS_PROBE`, `CLOUDBURROW_TEST_SCHEDULER_PROBE` | the restart probes' setup: the file each writes its fixture to |
-| `CLOUDBURROW_TEST_KMS_EXPECT`, `CLOUDBURROW_TEST_SECRETS_EXPECT`, `CLOUDBURROW_TEST_TASKS_EXPECT`, `CLOUDBURROW_TEST_SCHEDULER_EXPECT`, `CLOUDBURROW_TEST_DATASTORE_EXPECT`, `CLOUDBURROW_TEST_MEMORYSTORE_EXPECT`, `CLOUDBURROW_TEST_MYSQL_EXPECT`, `CLOUDBURROW_TEST_CLOUDSQL_EXPECT` | the restart probes: `present` after a persistent restart, `absent` after an ephemeral one |
+| `CLOUDBURROW_TEST_KMS_EXPECT`, `CLOUDBURROW_TEST_SECRETS_EXPECT`, `CLOUDBURROW_TEST_TASKS_EXPECT`, `CLOUDBURROW_TEST_SCHEDULER_EXPECT`, `CLOUDBURROW_TEST_DATASTORE_EXPECT`, `CLOUDBURROW_TEST_FIRESTORE_EXPECT`, `CLOUDBURROW_TEST_MEMORYSTORE_EXPECT`, `CLOUDBURROW_TEST_MYSQL_EXPECT`, `CLOUDBURROW_TEST_CLOUDSQL_EXPECT` | the restart probes: `present` after a persistent restart, `absent` after an ephemeral one |
 | `CLOUDBURROW_TEST_CLOUDSQL_SETUP` | `TestCloudSQLRestartSetup` |
 | `CLOUDBURROW_TEST_STORAGE_RESTART_PROBE` | `TestStorageAcrossRestart`: `<mode>:<file>` |
 | `CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE` | `TestStorageVersioningPersistentMode`, against the builtin `storage-server` |
@@ -236,6 +236,12 @@ stalling the suite.
 A test skips when its service endpoint is not exported — the service may legitimately not be
 deployed. That is not the same as a blanket skip: each service asks for **its own** endpoint,
 so an unimplemented operation can never pass by being skipped wholesale.
+
+A test asks for each endpoint (`h.Endpoint`, or a helper that does) before it uses it, and
+never reads a `CLOUDBURROW_TEST_*` endpoint with `os.Getenv` without skipping when it is
+empty. A subtest asks through a harness of its own, `h := h.For(t)`: the parent's skip, called
+from the subtest, fails it instead (#1625). test/repo's
+`TestCompatTestsSkipWhereTheirEndpointsAreNotServed` finds each of these.
 
 ## Unverified error codes
 

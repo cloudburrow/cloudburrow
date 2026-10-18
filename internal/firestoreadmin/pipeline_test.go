@@ -167,10 +167,10 @@ func TestPipelineStages(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "requires the Database Edition to be `enterprise`") {
 		t.Errorf("pipeline on (default) = %v, want INVALID_ARGUMENT", err)
 	}
-	// A stage that is not served is refused naming it.
+	// The subcollection stage stands in a subquery alone.
 	_, err = c.Pipeline().Collection("books").RawStage("subcollection", []any{"x"}).Execute(ctx).Results().GetAll()
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"subcollection"`) {
-		t.Errorf("subcollection stage = %v, want UNIMPLEMENTED naming it", err)
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "within a subquery") {
+		t.Errorf("subcollection stage = %v, want INVALID_ARGUMENT: within a subquery", err)
 	}
 	// Full-text search stays refused, saying why.
 	_, err = c.Pipeline().Collection("books").Search(firestore.WithSearchQuery("alpha")).Execute(ctx).Results().GetAll()

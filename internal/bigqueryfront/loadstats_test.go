@@ -184,12 +184,19 @@ func TestCSVLoadFromCloudStorageReportsBadRecords(t *testing.T) {
 
 // TestCSVLoadReportForgotten (#960): a load of the same job ID that the
 // front does not count, and a failed one, are not given another load's
-// counts.
+// counts. Since #1622 a second insert of the ID through the same front is
+// 409 duplicate, as in BigQuery, so the plain load is sent to an emulator
+// that has the first job, by a front that has not seen it (one restarted).
 func TestCSVLoadReportForgotten(t *testing.T) {
-	h := Wrap(loadJobsEmulator(&csvEmulator{}))
+	emu := loadJobsEmulator(&csvEmulator{})
+	h := Wrap(emu)
 	if w := upload(t, h, loadJob(`,"maxBadRecords":1`), "1,x\n2\n"); w.Code != 200 {
 		t.Fatalf("load: %d %s", w.Code, w.Body)
 	}
+	if w := upload(t, h, loadJob(`,"maxBadRecords":1`), "1,x\n"); w.Code != http.StatusConflict {
+		t.Fatalf("a second load of the job ID: %d %s, want 409", w.Code, w.Body)
+	}
+	h = Wrap(emu)
 	// Plain: allowQuotedNewlines and preserveAsciiControlCharacters, no
 	// other option, so the front passes the records on unread.
 	if w := upload(t, h, loadJob(`,"allowQuotedNewlines":true,"preserveAsciiControlCharacters":true`), "1,x\n"); w.Code != 200 {

@@ -117,10 +117,8 @@ var pipelineStages = map[string]bool{
 	"sort": true, "limit": true, "offset": true, "aggregate": true, "distinct": true,
 	"find_nearest": true, "sample": true, "union": true, "unnest": true, "replace_with": true,
 	"literals": true, "let": true, "update": true, "delete": true, "search": true,
-
-	// Not served: a subcollection pipeline is a subquery, and subqueries
-	// (the scalar and array functions over a pipeline) are not evaluated.
-	"subcollection": false,
+	// subcollection is a subquery's input stage alone (pipeline_sub.go).
+	"subcollection": true,
 }
 
 func (a *Admin) executePipeline(ctx context.Context, req *firestorepb.ExecutePipelineRequest) ([]*firestorepb.ExecutePipelineResponse, error) {
@@ -284,6 +282,13 @@ func docRow(d *firestorepb.Document) row {
 
 // run evaluates the stages of pl in order.
 func (p *pipelineRun) run(pl *firestorepb.Pipeline) ([]row, error) {
+	return p.runIn(pl, nil)
+}
+
+// runIn evaluates the stages of pl in order, as a subquery of the row
+// outer when it is not nil: its input rows see outer's variables, and its
+// subcollection stage reads under outer's document.
+func (p *pipelineRun) runIn(pl *firestorepb.Pipeline, outer *row) ([]row, error) {
 	var rows []row
 	for i, st := range pl.GetStages() {
 		name := st.GetName()
@@ -294,20 +299,30 @@ func (p *pipelineRun) run(pl *firestorepb.Pipeline) ([]row, error) {
 		if !served {
 			return nil, status.Errorf(codes.Unimplemented, "the pipeline stage %q is not served here: CloudBurrow evaluates pipelines itself, and does not have it", name)
 		}
-		input := name == "collection" || name == "collection_group" || name == "database" || name == "documents" || name == "literals"
+		input := name == "collection" || name == "collection_group" || name == "database" || name == "documents" || name == "literals" || name == "subcollection"
+		if err := checkSubquery(name, outer); err != nil {
+			return nil, err
+		}
 		if input != (i == 0) {
 			if input {
 				return nil, status.Errorf(codes.InvalidArgument, "the input stage %q must be the pipeline's first stage.", name)
 			}
-			return nil, status.Errorf(codes.InvalidArgument, "a pipeline must start with an input stage (collection, collection_group, database, documents or literals), not %q.", name)
+			return nil, status.Errorf(codes.InvalidArgument, "a pipeline must start with an input stage (collection, collection_group, database, documents or literals, or subcollection in a subquery), not %q.", name)
 		}
 		if err := checkStagePlace(pl.GetStages(), i); err != nil {
 			return nil, err
 		}
 		var err error
-		rows, err = p.stage(st, rows)
+		if name == "subcollection" {
+			rows, err = p.subcollection(st, outer)
+		} else {
+			rows, err = p.stage(st, rows)
+		}
 		if err != nil {
 			return nil, err
+		}
+		if i == 0 && outer != nil {
+			rows = withOuterVars(rows, outer)
 		}
 		p.stats = append(p.stats, fmt.Sprintf("%s: %d", name, len(rows)))
 	}
@@ -1006,7 +1021,6 @@ var pipelineUnserved = map[string]string{
 	"score":              "full-text search scores need a search index",
 	"document_matches":   "full-text search needs a search index",
 	"geo_distance":       "geographic distance is not evaluated here",
-	"storage_size":       "the emulator does not report a document's storage size",
 	"array_filter":       "lambda expressions are not evaluated here",
 	"array_transform":    "lambda expressions are not evaluated here",
 	"switch_on":          "switch_on is not evaluated here",
@@ -1017,7 +1031,6 @@ var pipelineUnserved = map[string]string{
 	"timestamp_extract":  "timestamp_extract is not evaluated here",
 	"regex_find":         "regex_find is not evaluated here",
 	"regex_find_all":     "regex_find_all is not evaluated here",
-	"reference_slice":    "reference_slice is not evaluated here",
 	"minimum_n":          "minimum_n is not evaluated here",
 	"maximum_n":          "maximum_n is not evaluated here",
 	"array_first_n":      "array_first_n is not evaluated here",

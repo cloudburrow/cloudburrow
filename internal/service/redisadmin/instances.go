@@ -61,6 +61,10 @@ type Spec struct {
 	// formed again never loads what a previous formation left. "" is the
 	// mode's own.
 	Dir string
+	// PortName names the server's port in its pod: a Memorystore for
+	// Valkey node in CLUSTER_DISABLED mode's, which the instance's role
+	// Services select by name (valkeyfailover.go). "" for none.
+	PortName string
 }
 
 // Provisioner runs the server of an instance CreateInstance made.

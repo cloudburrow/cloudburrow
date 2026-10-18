@@ -201,3 +201,33 @@ func TestPodMountsReadsABackendWithoutAFront(t *testing.T) {
 		t.Errorf("volumes = %v, want %v", volumes, want)
 	}
 }
+
+// TestFirestoreSharesItsStateVolumeWithTheEmulator (#1615): the front's
+// state directory, where the emulator exports its documents, is mounted
+// in both containers; it is the Firestore claim in persistent mode and
+// the pod's emptyDir in ephemeral mode. The emulator runs as the front's
+// user.
+func TestFirestoreSharesItsStateVolumeWithTheEmulator(t *testing.T) {
+	for _, persistent := range []bool{true, false} {
+		b, ok := OptionalBackend(config.ServiceFirestore, "cloudburrow", persistent)
+		if !ok {
+			t.Fatal("no Firestore backend")
+		}
+		m := b.Manifest("cloudburrow", "test")
+		mounts, volumes := podMounts(t, m)
+		want := []string{"front-state:" + FrontStateDir}
+		if !reflect.DeepEqual(mounts["firestore"], want) || !reflect.DeepEqual(mounts["front"], want) {
+			t.Errorf("persistent %v: mounts %v; want %v in both containers", persistent, mounts, want)
+		}
+		claim := volumes["front-state"] == "persistentVolumeClaim:firestore-data"
+		if claim != persistent || !strings.Contains(m, "name: firestore-data") != !persistent {
+			t.Errorf("persistent %v: front-state is %q (volumes %v)", persistent, volumes["front-state"], volumes)
+		}
+		if _, ok := volumes["data"]; ok {
+			t.Errorf("persistent %v: a data volume too: %v", persistent, volumes)
+		}
+		if !strings.Contains(m, "runAsUser: 65532") || !strings.Contains(m, "--firestore-documents") {
+			t.Errorf("persistent %v: the emulator does not run as the front's user, or the front keeps no documents:\n%s", persistent, m)
+		}
+	}
+}
