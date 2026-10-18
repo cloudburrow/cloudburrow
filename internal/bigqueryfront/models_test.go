@@ -150,9 +150,7 @@ func TestParseModelDDL(t *testing.T) {
 	}
 	for _, bad := range []string{
 		"CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor') AS SELECT 1",
-		"CREATE MODEL ds.m OPTIONS(model_type='dnn_classifier', optimizer='ftrl') AS SELECT 1",
-		"CREATE MODEL ds.m OPTIONS(model_type='dnn_regressor', activation_fn='crelu') AS SELECT 1",
-		"CREATE MODEL ds.m OPTIONS(model_type='autoencoder', l1_reg_activation=0.1) AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='logistic_reg', auto_class_weights=true) AS SELECT 1",
 		"CREATE MODEL ds.m OPTIONS(model_type='onnx', model_path='gs://b/m.onnx')",
 		"CREATE MODEL ds.m OPTIONS(model_type='pca', num_principal_components=2, pca_solver='randomized') AS SELECT 1",
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `us.c` OPTIONS(endpoint='gemini')",
@@ -161,6 +159,27 @@ func TestParseModelDDL(t *testing.T) {
 		toks, _ := lex(bad)
 		if _, is, code, _ := parseModelDDL(toks, bad); !is || code != 501 {
 			t.Errorf("%s: %v %d", bad, is, code)
+		}
+	}
+	// #1562: a DNN's FTRL, CRELU, class weights and an autoencoder's
+	// l1_reg_activation are read.
+	for sql, want := range map[string]int{
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_classifier', optimizer='ftrl', l1_reg=0.1) AS SELECT 1":                        0,
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_regressor', activation_fn='crelu') AS SELECT 1":                                0,
+		"CREATE MODEL ds.m OPTIONS(model_type='autoencoder', l1_reg_activation=0.1) AS SELECT 1":                                  0,
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_regressor', l1_reg_activation=0.1) AS SELECT 1":                                400,
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_classifier', class_weights=[STRUCT('a', .2), STRUCT('b', 0.8)]) AS SELECT 1":   0,
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_classifier', auto_class_weights=true) AS SELECT 1":                             0,
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_classifier', auto_class_weights=true, class_weights=[('a', 1.0)]) AS SELECT 1": 400,
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_classifier', class_weights=['a']) AS SELECT 1":                                 400,
+	} {
+		toks, _ := lex(sql)
+		d, is, code, msg := parseModelDDL(toks, sql)
+		if !is || code != want {
+			t.Errorf("%s: %v %d %s; want %d", sql, is, code, msg, want)
+		}
+		if strings.Contains(sql, "STRUCT('a', .2)") && (d.opts.ClassWeights["a"] != 0.2 || d.opts.ClassWeights["b"] != 0.8) {
+			t.Errorf("class_weights: %v", d.opts.ClassWeights)
 		}
 	}
 	toks, _ = lex("DROP MODEL IF EXISTS ds.m")

@@ -115,9 +115,11 @@ func (p backupDRProvider) ActAtResult(ctx context.Context, project string, path 
 		if err != nil {
 			return nil, err
 		}
-		return &console.Listing{Columns: []string{"Started", "Ends", "End reason"}, NameColumn: "Trial", Noun: "trials", Total: 1,
+		// The state is a column too: an action's result table shows the
+		// columns, not a row's status (#1592).
+		return &console.Listing{Columns: []string{"State", "Started", "Ends", "End reason"}, NameColumn: "Trial", Noun: "trials", Total: 1,
 			Items: []console.Resource{{Name: str(out, "name"), Status: str(out, "state"), Fields: map[string]string{
-				"Started": str(out, "startTime"), "Ends": str(out, "endTime"), "End reason": str(out, "endReason")}}}}, nil
+				"State": str(out, "state"), "Started": str(out, "startTime"), "Ends": str(out, "endTime"), "End reason": str(out, "endReason")}}}}, nil
 	case "compliance":
 		out, err := p.call(ctx, p.bdr, http.MethodPost, loc+"/managementServers:msComplianceMetadata", map[string]any{"projectId": project})
 		if err != nil {

@@ -44,8 +44,8 @@ func TestBigQueryScriptRuntimeErrorBeforeLast(t *testing.T) {
 	for _, insert := range []bool{false, true} {
 		before := count()
 		err := bqRun(ctx, c, "INSERT INTO "+d+".t VALUES (5); SELECT 1/0; INSERT INTO "+d+".t VALUES (6)", insert)
-		if err == nil || !strings.Contains(err.Error(), "zero divided") {
-			t.Errorf("insert=%v: a SELECT 1/0 before the last statement: %v, want the zero divided error", insert, err)
+		if err == nil || !strings.Contains(err.Error(), "division by zero: 1 / 0") {
+			t.Errorf("insert=%v: a SELECT 1/0 before the last statement: %v, want division by zero: 1 / 0", insert, err)
 		}
 		// The INSERT before it is kept, the one after it never ran.
 		if got := count(); got != before+1 {
@@ -60,8 +60,8 @@ func TestBigQueryScriptRuntimeErrorBeforeLast(t *testing.T) {
 	// (tempsession.go): the query's error fails it, the INSERT before it
 	// kept.
 	err := bqRun(ctx, c, "CREATE TEMP TABLE tt AS SELECT 0 AS a; INSERT INTO "+d+".t VALUES (7); SELECT 1/a FROM tt; INSERT INTO "+d+".t VALUES (8)", false)
-	if err == nil || !strings.Contains(err.Error(), "zero divided") {
-		t.Errorf("a TEMP table and a failing query before the last statement: %v, want the zero divided error", err)
+	if err == nil || !strings.Contains(err.Error(), "division by zero: 1 / 0") {
+		t.Errorf("a TEMP table and a failing query before the last statement: %v, want division by zero: 1 / 0", err)
 	}
 	if got := count(); got != before+1 {
 		t.Errorf("%d rows after the failed script, want %d", got, before+1)
@@ -94,7 +94,7 @@ func TestBigQueryAssert(t *testing.T) {
 			"ASSERT 1 > 2 AS 'one must be greater'":                 "Assertion failed: one must be greater",
 			"ASSERT CAST(NULL AS BOOL) AS 'null fails'":             "Assertion failed: null fails",
 			"ASSERT FALSE; SELECT 1":                                "Assertion failed: FALSE",
-			"ASSERT (SELECT SUM(x) FROM (SELECT 1/0 AS x)) IS NULL": "zero divided",
+			"ASSERT (SELECT SUM(x) FROM (SELECT 1/0 AS x)) IS NULL": "division by zero: 1 / 0",
 			"IF TRUE THEN ASSERT (SELECT COUNT(*) > 10 FROM UNNEST([1, 2, 3])) AS 'Table must contain more than 10 rows.'; END IF": "Assertion failed: Table must contain more than 10 rows.",
 		} {
 			err := bqRun(ctx, c, sql, insert)

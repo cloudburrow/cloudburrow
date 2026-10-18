@@ -1,0 +1,186 @@
+CloudBurrow patch 65 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1584).
+
+The bug: a CREATE TABLE (or CREATE VIEW, or a CREATE TABLE AS SELECT) in
+a dataset that does not exist made the engine's table, committed it, and
+only then failed, when syncCatalog's addTableMetadata found the dataset
+missing ("dataset nods is not found"). The table stayed: the same
+statement run again failed "failed to exec CREATE TABLE nods.x (a
+INT64): sqlite3: SQL logic error: table `p_nods_x` already exists". And
+through jobs.insert the error was answered with no job, where BigQuery
+makes the job and fails it.
+
+The patch looks for the datasets of the tables a query added before it
+commits: each table whose dataset does not exist is dropped in the
+query's transaction and taken out of the changed catalog. jobs.query
+then fails with the same error as before ("dataset %s is not found",
+which CloudBurrow's front answers 404 notFound), and jobs.insert records
+the job, failed with it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/server/handler.go b/server/handler.go
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1721,6 +1721,18 @@
+ 		job.Configuration.Query.Query,
+ 		job.Configuration.Query.QueryParameters,
+ 	)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1584): a CREATE of a
++	// table in a dataset that does not exist fails the job, and leaves no
++	// table behind.
++	if jobErr == nil && response != nil && response.ChangedCatalog.Changed() {
++		if err := dropTablesOfMissingDatasets(ctx, r.server, tx, response.ChangedCatalog); err != nil {
++			var missing *datasetOfCreateMissing
++			if !errors.As(err, &missing) {
++				return nil, err
++			}
++			jobErr, response = err, nil
++		}
++	}
+ 	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	if job.JobReference.JobId == "" {
+ 		job.JobReference.JobId = newJobID(ctx) // generate job id; CloudBurrow patch (#1555): with the request's prefix
+@@ -1851,6 +1863,51 @@
+ 	return nil
+ }
+ 
++// datasetOfCreateMissing is the error of a CREATE of a table in a
++// dataset that does not exist, addTableMetadata's (CloudBurrow patch,
++// cloudburrow/cloudburrow#1584).
++type datasetOfCreateMissing struct{ dataset string }
++
++func (e *datasetOfCreateMissing) Error() string {
++	return fmt.Sprintf("dataset %s is not found", e.dataset)
++}
++
++// dropTablesOfMissingDatasets drops, in tx, each table cat adds whose
++// dataset does not exist, and takes it out of cat, so that a CREATE
++// that fails leaves nothing: the engine makes the table before
++// syncCatalog finds its dataset missing, and the table, committed,
++// failed the same statement run again ("table `p_nods_x` already
++// exists"). It returns a *datasetOfCreateMissing when it dropped any
++// (CloudBurrow patch, cloudburrow/cloudburrow#1584).
++func dropTablesOfMissingDatasets(ctx context.Context, server *Server, tx *connection.Tx, cat *googlesqlite.ChangedCatalog) error {
++	var (
++		missing string
++		kept    []*googlesqlite.TableSpec
++	)
++	for _, spec := range cat.Table.Added {
++		if spec.IsTemp || len(spec.NamePath) != 3 {
++			kept = append(kept, spec)
++			continue
++		}
++		project, err := server.metaRepo.FindProject(ctx, spec.NamePath[0])
++		if err != nil || project == nil || project.Dataset(spec.NamePath[1]) != nil {
++			kept = append(kept, spec)
++			continue
++		}
++		if err := server.contentRepo.DeleteTables(ctx, tx, spec.NamePath[0], spec.NamePath[1], []contentdata.TableDeletion{{ID: spec.NamePath[2], IsView: spec.IsView}}); err != nil {
++			return err
++		}
++		if missing == "" {
++			missing = spec.NamePath[1]
++		}
++	}
++	if missing == "" {
++		return nil
++	}
++	cat.Table.Added = kept
++	return &datasetOfCreateMissing{dataset: missing}
++}
++
+ func addTableMetadata(ctx context.Context, server *Server, spec *googlesqlite.TableSpec) error {
+ 	if len(spec.NamePath) != 3 {
+ 		return fmt.Errorf("unexpected table name path: %v", spec.NamePath)
+@@ -2202,6 +2259,12 @@
+ 	if queryErr != nil {
+ 		return nil, queryErr
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1584): as jobs.insert.
++	if response != nil && response.ChangedCatalog.Changed() {
++		if err := dropTablesOfMissingDatasets(ctx, r.server, tx, response.ChangedCatalog); err != nil {
++			return nil, err
++		}
++	}
+ 	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	// jobs.query allocates jobIDs server-side (real BigQuery does the
+ 	// same). queryRequest.RequestId is the *idempotency* key — same
+diff --git a/server/create_in_missing_dataset_test.go b/server/create_in_missing_dataset_test.go
+new file mode 100644
+--- /dev/null
++++ b/server/create_in_missing_dataset_test.go
+@@ -0,0 +1,69 @@
++package server_test
++
++import (
++	"context"
++	"strings"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestCreateTableInMissingDatasetLeavesNothing is a CloudBurrow
++// regression test (cloudburrow/cloudburrow#1584): a CREATE TABLE in a
++// dataset that does not exist made the table before it found the dataset
++// missing, so the same statement run again failed "table `test_nods_x`
++// already exists"; and through jobs.insert the error was answered with
++// no job, where BigQuery's job fails.
++func TestCreateTableInMissingDatasetLeavesNothing(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	const sql = "CREATE TABLE nods.x (a INT64)"
++	for i := 0; i < 2; i++ {
++		_, err := client.Query(sql).Read(ctx)
++		if err == nil || !strings.Contains(err.Error(), "dataset nods is not found") {
++			t.Fatalf("jobs.query %d: %v, want dataset nods is not found", i, err)
++		}
++	}
++	for i := 0; i < 2; i++ {
++		job, err := client.Query(sql).Run(ctx)
++		if err != nil {
++			t.Fatalf("jobs.insert %d: %v, want a job that fails", i, err)
++		}
++		// The engine's jobs.get answers DONE with no status of its own
++		// (CloudBurrow's front keeps the failure); jobs.insert's answer
++		// has it.
++		status := job.LastStatus()
++		if status == nil || status.Err() == nil || !strings.Contains(status.Err().Error(), "dataset nods is not found") {
++			t.Fatalf("job %d: %v, want dataset nods is not found", i, status.Err())
++		}
++	}
++	// A table in a dataset that exists is still made.
++	if _, err := client.Query("CREATE TABLE ds.y (a INT64)").Read(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := client.Dataset("ds").Table("y").Metadata(ctx); err != nil {
++		t.Fatal(err)
++	}
++}

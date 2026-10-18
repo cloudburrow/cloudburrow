@@ -61,7 +61,6 @@ func TestBigQueryMLPreprocessFunctions(t *testing.T) {
 		}
 	}
 	for _, sql := range []string{
-		"SELECT ML.HASH_BUCKETIZE(v, 2) FROM UNNEST(['a', 'b']) AS v",
 		"SELECT ML.IMPUTER(v, 'median') OVER () FROM UNNEST([1.0, 2.0]) AS v",
 	} {
 		_, err := c.Query(sql).Read(ctx)
@@ -131,8 +130,9 @@ func TestBigQueryMLTransformPreprocess(t *testing.T) {
 // examples (https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-quantile-bucketize,
 // .../bigqueryml-syntax-robust-scaler, .../bigqueryml-syntax-ngrams), in a
 // query and in a TRANSFORM, whose quantiles are learned over the training
-// rows and kept. ML.HASH_BUCKETIZE stays 501 (the vocabulary functions are
-// TestBigQueryMLVocabularyPreprocess's).
+// rows and kept (the vocabulary functions are
+// TestBigQueryMLVocabularyPreprocess's, ML.HASH_BUCKETIZE
+// TestBigQueryMLHashBucketize's).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryMLQuantilePreprocess(t *testing.T) {

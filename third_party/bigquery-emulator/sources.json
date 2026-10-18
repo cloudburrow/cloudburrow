@@ -48,7 +48,8 @@
         "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch",
         "patches/bigquery-emulator/0057-job-id-prefix.patch",
         "patches/bigquery-emulator/0060-jobs-list-by-index-and-time.patch",
-        "patches/bigquery-emulator/0062-geography-column-values.patch"
+        "patches/bigquery-emulator/0062-geography-column-values.patch",
+        "patches/bigquery-emulator/0065-create-in-a-missing-dataset.patch"
       ]
     },
     {
@@ -108,7 +109,9 @@
         "patches/googlesqlite/0061-nested-collation.patch",
         "patches/googlesqlite/0065-change-update-flag-name.patch",
         "patches/googlesqlite/0066-function-body-column-ids.patch",
-        "patches/googlesqlite/0071-syntax-error-position.patch"
+        "patches/googlesqlite/0071-syntax-error-position.patch",
+        "patches/googlesqlite/0072-runtime-error-messages.patch",
+        "patches/googlesqlite/0067-integer-mod.patch"
       ]
     },
     {

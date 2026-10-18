@@ -104,6 +104,11 @@ type mlOptions struct {
 	Dropout     float64 `json:"dropout,omitempty"`
 	BatchSize   int     `json:"batchSize,omitempty"`
 	Optimizer   string  `json:"optimizer,omitempty"`
+	// #1562: class_weights by label, auto_class_weights, and an
+	// AUTOENCODER's l1_reg_activation (modeldnn.go).
+	ClassWeights     map[string]float64 `json:"classWeights,omitempty"`
+	AutoClassWeights bool               `json:"autoClassWeights,omitempty"`
+	L1Activation     float64            `json:"l1RegActivation,omitempty"`
 	// GlobalExplain is enable_global_explain (modelexplain.go).
 	GlobalExplain bool `json:"enableGlobalExplain,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
@@ -464,7 +469,9 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		if len(t.Classes) > 2 {
 			K = len(t.Classes)
 		}
-		t.trainDNN(opts, X, Y, EX, EY, logistic, K)
+		if fe := t.trainDNN(opts, X, Y, EX, EY, logistic, K); fe != nil {
+			return t, fe
+		}
 		return t, nil
 	}
 	dim := len(X[0])

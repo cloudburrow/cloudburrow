@@ -121,7 +121,9 @@ func componentsOf(s config.Service) []string {
 	case config.ServiceTasks, config.ServiceSecrets:
 		return []string{string(s)}
 	case config.ServiceRun:
-		return []string{"components", "run"}
+		// Knative installs in the background beside the backends, and the
+		// knative component is when it is ready (#1588).
+		return []string{"components", "knative", "run"}
 	case config.ServiceBigQuery:
 		return []string{"components", "forward:bigquery", "forward:bigquery-storage"}
 	case config.ServiceSpanner:
@@ -219,7 +221,9 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 			svc.Reason = "the instance is starting; readiness is not answering yet"
 		default:
 			var waiting []string
-			for _, c := range append([]string{"cluster"}, componentsOf(s)...) {
+			// cluster-nodes: a created cluster's nodes Ready, which `kind
+			// create --wait` covered when it was part of cluster (#1588).
+			for _, c := range append([]string{"cluster", "cluster-nodes"}, componentsOf(s)...) {
 				if ok, known := ready[c]; known && !ok {
 					waiting = append(waiting, c)
 				}

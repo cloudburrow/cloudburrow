@@ -1354,6 +1354,10 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			if !b {
 				continue
 			}
+			if name == "auto_class_weights" {
+				o.AutoClassWeights = true // a DNN_CLASSIFIER's (#1562); 501 for others in checkModelOptions
+				continue
+			}
 			return 501, "Not implemented here: CREATE MODEL option " + name + " = " + val[0].text + ". Nothing was run."
 		default:
 			return 501, "Not implemented here: CREATE MODEL option " + name + "; CloudBurrow carries out model_type, input_label_cols, " +
@@ -1400,6 +1404,9 @@ var modelTypeOptions = map[string][]string{
 // checkModelOptions refuses an option the model type does not take, and
 // a combination BigQuery documents as invalid.
 func checkModelOptions(o mlOptions) (int, string) {
+	if o.AutoClassWeights && o.ModelType != "DNN_CLASSIFIER" {
+		return 501, "Not implemented here: CREATE MODEL option auto_class_weights = TRUE. Nothing was run."
+	}
 	allowed, ok := modelTypeOptions[o.ModelType]
 	if o.ModelType == "LOGISTIC_REG" {
 		allowed, ok = append(append([]string(nil), modelTypeOptions["LINEAR_REG"]...), "auto_class_weights"), true

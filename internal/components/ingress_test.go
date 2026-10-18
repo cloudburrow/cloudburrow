@@ -6,12 +6,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // recordingRunner captures the commands an installer would run, so the
 // patches can be asserted without a cluster.
 type recordingRunner struct {
+	// mu guards calls and stdins: Knative installs beside the backends
+	// (#1588), so calls arrive from two goroutines.
+	mu    sync.Mutex
 	calls []string
 	// stdins is what each call was given on stdin: the manifests.
 	stdins []string
@@ -22,8 +26,10 @@ type recordingRunner struct {
 
 func (r *recordingRunner) Run(_ context.Context, stdin string, name string, args ...string) (string, error) {
 	call := name + " " + strings.Join(args, " ")
+	r.mu.Lock()
 	r.calls = append(r.calls, call)
 	r.stdins = append(r.stdins, stdin)
+	r.mu.Unlock()
 	if r.respond != nil {
 		return r.respond(call)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -55,8 +56,30 @@ import (
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/error-messages
 //     BigQuery's analyzer is GoogleSQL too.
 //
-// The engine's errors of a query it runs (division by zero, ERROR()) are
-// left as they are. jobErrors (errorcodes.go) maps the errors of every
+// The engine's errors of a query it runs (#1585) are 400 jobInternalError
+// too. BigQuery gives them reason invalidQuery, the error table's for a
+// query that cannot run; their messages are GoogleSQL's:
+//
+//   - a division by zero: googlesqlite patch 0072 writes GoogleSQL's
+//     message, "division by zero: 1 / 0" (BigQuery's / is FLOAT64's; DIV
+//     and MOD "division by zero: DIV(1, 0)", UNVERIFIED), in place of
+//     the engine's "zero divided error ( 1.000000 / 0 )". The operators
+//     reference says only "Divide by zero operations return an error."
+//   - ERROR(message): its message, as the debugging functions reference
+//     shows ("Found unexpected value: baz"); patch 0072 starts it with
+//     "ERROR function: " so that it is told from the engine's own errors,
+//     and the front takes that off.
+//   - a named query parameter the request does not give: "Query
+//     parameter 'p' not found at [1:8]", the position the @'s, where the
+//     engine fails "not enough query arguments" (UNVERIFIED: no BigQuery
+//     document or client test gives the message; it is the form the
+//     analyzer's other errors take). A positional parameter's is the
+//     engine's text with reason invalidQuery.
+//
+// The analyzer names a table by its storage name in some messages (a dry
+// run of INSERT INTO ds.t (nosuch): "Column nosuch is not present in
+// table p_ds_t"); storageNames writes a table of the job's project ds.t,
+// as dmlNames does for DML. jobErrors (errorcodes.go) maps the errors of every
 // answer of jobs.query, jobs.insert, jobs.get, jobs.list and
 // jobs.getQueryResults, so the front's own code, which reads the engine's
 // text, is unchanged.
@@ -73,7 +96,15 @@ type engineContext struct {
 	defaultProject, defaultDataset string
 	settings                       *projectOptions
 	datasets                       map[string]bool
+	// query and params are the query's text and the names of its named
+	// parameters, lower-cased, where the request or the job gives them.
+	query  string
+	params map[string]bool
 }
+
+// errorFunctionPrefix starts the message of ERROR()'s error (googlesqlite
+// patch 0072).
+const errorFunctionPrefix = "ERROR function: "
 
 // enginePosition is the position the engine ends an error with.
 var enginePosition = regexp.MustCompile(` \[at ([0-9]+):([0-9]+)\]$`)
@@ -105,6 +136,12 @@ func (c *engineContext) mapError(e rowError) (rowError, bool) {
 		e.Reason, e.Message = "notFound", "Not found: Dataset "+c.project+":"+m[1]+" was not found in location "+c.jobLocation()
 		return e, true
 	}
+	if e.Reason == "jobInternalError" {
+		if msg, ok := c.runtimeError(e.Message); ok {
+			e.Reason, e.Message = "invalidQuery", msg
+			return e, true
+		}
+	}
 	text, ok := engineText(e.Message)
 	if !ok {
 		return e, false
@@ -121,8 +158,96 @@ func (c *engineContext) mapError(e rowError) (rowError, bool) {
 			return e, true
 		}
 	}
-	e.Reason, e.Message = "invalidQuery", text+at
+	e.Reason, e.Message = "invalidQuery", c.storageNames(text)+at
 	return e, true
+}
+
+// runtimeError is BigQuery's message of msg, the engine's error of a query
+// it ran, when it is one of those above.
+func (c *engineContext) runtimeError(msg string) (string, bool) {
+	if plain := errorFunctionMessage(msg); plain != msg {
+		return plain, true
+	}
+	if i := strings.Index(msg, "division by zero: "); i >= 0 {
+		return msg[i:], true
+	}
+	if strings.HasSuffix(msg, "not enough query arguments") {
+		if name, at, ok := c.missingParameter(); ok {
+			return "Query parameter '" + name + "' not found" + at, true
+		}
+		return msg, true
+	}
+	return "", false
+}
+
+// missingParameter is the first named parameter of the query that the
+// request does not give, and its position as " at [line:column]".
+func (c *engineContext) missingParameter() (name, at string, ok bool) {
+	toks, lexed := lex(c.query)
+	if !lexed {
+		return "", "", false
+	}
+	for i := 0; i+1 < len(toks); i++ {
+		t, next := toks[i], toks[i+1]
+		if !t.punct("@") || next.kind != tokWord || next.pos != t.end {
+			continue
+		}
+		if i > 0 && toks[i-1].punct("@") && toks[i-1].end == t.pos {
+			continue // @@system_variable
+		}
+		if c.params[strings.ToLower(next.text)] {
+			continue
+		}
+		line, col := lineColumn(c.query, t.pos)
+		return next.text, " at [" + strconv.Itoa(line) + ":" + strconv.Itoa(col) + "]", true
+	}
+	return "", "", false
+}
+
+// storageNames writes each storage name of a table of the job's project
+// in text, <project>_<dataset>_<table>, as dataset.table: the dataset is
+// the longest prefix of the rest, at an underscore, that the engine has.
+func (c *engineContext) storageNames(text string) string {
+	if c.project == "" || !strings.Contains(text, c.project+"_") {
+		return text
+	}
+	word := func(b byte) bool {
+		return b == '_' || b == '-' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
+	}
+	var out strings.Builder
+	rest := text
+	for {
+		i := strings.Index(rest, c.project+"_")
+		if i < 0 {
+			out.WriteString(rest)
+			return out.String()
+		}
+		if i > 0 && word(rest[i-1]) {
+			out.WriteString(rest[:i+1])
+			rest = rest[i+1:]
+			continue
+		}
+		start := i + len(c.project) + 1
+		end := start
+		for end < len(rest) && (word(rest[end]) && rest[end] != '-') {
+			end++
+		}
+		name := rest[start:end]
+		replaced := ""
+		for k := strings.LastIndex(name, "_"); k > 0; k = strings.LastIndex(name[:k], "_") {
+			if k+1 < len(name) && c.datasetExists(c.project, name[:k]) {
+				replaced = name[:k] + "." + name[k+1:]
+				break
+			}
+		}
+		out.WriteString(rest[:i])
+		if replaced == "" {
+			out.WriteString(rest[i:end])
+		} else {
+			out.WriteString(replaced)
+		}
+		rest = rest[end:]
+	}
 }
 
 // tableNotFound is BigQuery's message of name, a table the engine did not
@@ -219,6 +344,17 @@ func (c *engineContext) fromJob(job map[string]any) {
 }
 
 func (c *engineContext) fromQueryConf(q map[string]any) {
+	if query, _ := q["query"].(string); query != "" {
+		c.query = query
+		c.params = map[string]bool{}
+		params, _ := q["queryParameters"].([]any)
+		for _, v := range params {
+			p, _ := v.(map[string]any)
+			if name, _ := p["name"].(string); name != "" {
+				c.params[strings.ToLower(name)] = true
+			}
+		}
+	}
 	dd, _ := q["defaultDataset"].(map[string]any)
 	if ds, _ := dd["datasetId"].(string); ds != "" {
 		c.defaultDataset = ds
@@ -335,7 +471,7 @@ func rewrite(rec *recorder, body any) bool {
 
 // needsJob reports whether rec, an error answer of jobs.getQueryResults,
 // is an engine error whose message names the job's location or default
-// dataset, which only the job gives.
+// dataset, or a parameter of its query, which only the job gives.
 func needsJob(rec *recorder) bool {
 	var e struct {
 		Error struct {
@@ -347,7 +483,8 @@ func needsJob(rec *recorder) bool {
 	}
 	first := e.Error.Errors[0]
 	return first.Reason == "jobInternalError" &&
-		(strings.Contains(first.Message, "Table not found: ") || engineDatasetMissing.MatchString(first.Message))
+		(strings.Contains(first.Message, "Table not found: ") || engineDatasetMissing.MatchString(first.Message) ||
+			strings.HasSuffix(first.Message, "not enough query arguments"))
 }
 
 // fromJobOf reads the location and default dataset of the job of m, a
