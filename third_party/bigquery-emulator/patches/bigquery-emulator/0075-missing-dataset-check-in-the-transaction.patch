@@ -44,7 +44,7 @@ diff --git a/server/create_as_select_lock_test.go b/server/create_as_select_lock
 new file mode 100644
 --- /dev/null
 +++ b/server/create_as_select_lock_test.go
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,71 @@
 +package server_test
 +
 +import (
@@ -85,9 +85,10 @@ new file mode 100644
 +		t.Fatal(err)
 +	}
 +	defer client.Close()
++	// The first through jobs.query, the second through jobs.insert.
 +	for i, sql := range []string{
-+		"CREATE TABLE ds.big AS SELECT x FROM UNNEST(GENERATE_ARRAY(1, 20000)) AS x", // jobs.query
-+		"CREATE TABLE ds.big2 AS SELECT x FROM UNNEST(GENERATE_ARRAY(1, 20000)) AS x", // jobs.insert
++		"CREATE TABLE ds.big AS SELECT x FROM UNNEST(GENERATE_ARRAY(1, 20000)) AS x",
++		"CREATE TABLE ds.big2 AS SELECT x FROM UNNEST(GENERATE_ARRAY(1, 20000)) AS x",
 +	} {
 +		began := time.Now()
 +		q := client.Query(sql)
