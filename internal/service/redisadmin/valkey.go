@@ -259,6 +259,7 @@ func parseReplication(raw string) Replication {
 		st.LinkUp = f["master_link_status"] == "up"
 	}
 	st.Offset, _ = strconv.ParseInt(f[key], 10, 64)
+	st.ReplID = f["master_replid"]
 	return st
 }
 

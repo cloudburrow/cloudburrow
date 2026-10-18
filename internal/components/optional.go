@@ -725,6 +725,46 @@ spec:
 `, name, namespace, instance, node, node, port, port)
 }
 
+// MemorystoreRoleServices are a Memorystore for Valkey instance's
+// Services in CLUSTER_DISABLED mode (#1614), base+"-primary" and
+// base+"-reader", selecting its pods by the role label each node's pod
+// carries (MemorystoreRoleLabel: primary or replica), on the port each
+// pod names portName: every node serves on a port of its own.
+func MemorystoreRoleServices(base, namespace, instance, portName string, port int) string {
+	var sb strings.Builder
+	for i, ep := range [][2]string{{"primary", "primary"}, {"reader", "replica"}} {
+		if i > 0 {
+			sb.WriteString("---\n")
+		}
+		fmt.Fprintf(&sb, `apiVersion: v1
+kind: Service
+metadata:
+  name: %s-%s
+  namespace: %s
+  labels:
+    cloudburrow.dev/owned: "true"
+    cloudburrow.dev/instance: %q
+spec:
+  selector:
+    %s: %s
+    %s: %s
+  ports:
+    - name: api
+      port: %d
+      targetPort: %s
+`, base, ep[0], namespace, instance, MemorystoreOfLabel, base, MemorystoreRoleLabel, ep[1], port, portName)
+	}
+	return sb.String()
+}
+
+// MemorystoreOfLabel names the instance a Memorystore for Valkey node's
+// pod is of, and MemorystoreRoleLabel its role, primary or replica
+// (#1614): the role Services select by both.
+const (
+	MemorystoreOfLabel   = "cloudburrow.dev/memorystore-of"
+	MemorystoreRoleLabel = "cloudburrow.dev/memorystore-role"
+)
+
 // MySQLCredentials are an instance's generated MySQL passwords.
 type MySQLCredentials struct {
 	Password     string `json:"password"`
