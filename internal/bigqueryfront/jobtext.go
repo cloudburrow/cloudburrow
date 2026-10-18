@@ -137,9 +137,11 @@ type jobTexts struct {
 	mu    sync.Mutex
 	texts map[string]jobText
 	order []string
-	// path is the file they are kept in (keep, jobtextstate.go), or "".
-	path string
-	logf func(string, ...any)
+	// path is the file they are kept in (keep, jobtextstate.go), or "";
+	// lines is how many lines it has.
+	path  string
+	lines int
+	logf  func(string, ...any)
 	// made is told of each job whose text is added (jobstable.go's
 	// noteMade): the front adds it once the engine has the job, which a
 	// background sync of the table of JOBS rows may have listed and
@@ -147,7 +149,14 @@ type jobTexts struct {
 	made func(project, id string)
 }
 
-const maxJobTexts = 1000
+// maxJobTexts is how many are kept. Every DML job of a client's has one
+// (its counts), so at 1,000 a client's earlier job lost its text, its
+// jobs.get and jobs.list then showing the statement the front ran in its
+// place (#1629: the BigQuery compat suite makes 7,700 jobs, and a
+// time-travel query's showed the front's rewrite of its FOR SYSTEM_TIME
+// AS OF). Each is appended to the file (jobtextstate.go), so a job costs
+// one line however many are kept.
+const maxJobTexts = 20000
 
 func (j *jobTexts) add(project, id string, t jobText) {
 	if id == "" || t.empty() {
@@ -170,7 +179,7 @@ func (j *jobTexts) add(project, id string, t jobText) {
 		delete(j.texts, j.order[0])
 		j.order = j.order[1:]
 	}
-	j.saveLocked()
+	j.appendLocked(key, t)
 }
 
 func (j *jobTexts) get(project, id string) (jobText, bool) {
