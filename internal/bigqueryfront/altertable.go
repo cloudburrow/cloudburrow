@@ -248,10 +248,12 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				}
 				for _, o := range opts {
 					switch {
-					case o.name == "data_governance_tags":
-						return st, "ALTER COLUMN SET OPTIONS (data_governance_tags), which the engine's table schema does not keep " +
-							"(it has no dataGovernanceTagsInfo field)", ""
-					case o.name != "description" && o.name != "rounding_mode" && o.name != "data_policies": // rounding_mode: #1416, data_policies: #1456
+					case o.name == "data_governance_tags" && !o.add: // #1456, governancetags.go
+						if _, msg := governanceTagsOption(o.val); msg != "" {
+							return st, "", msg
+						}
+						continue
+					case o.name != "description" && o.name != "rounding_mode" && o.name != "data_policies" && o.name != "data_governance_tags": // rounding_mode: #1416, data_policies: #1456
 						return st, "ALTER COLUMN SET OPTIONS (" + o.name + ")", ""
 					case o.add && o.name != "data_policies":
 						return st, "", "Syntax error: the operator += is supported only for the column option data_policies"
@@ -825,6 +827,11 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 			for _, o := range a.options {
 				if o.name == "data_policies" { // #1456, datapolicies.go
 					setDataPolicies(f, o)
+					schemaChanged = true
+					continue
+				}
+				if o.name == "data_governance_tags" { // #1456, governancetags.go: {} clears them
+					f[governanceTagsKey], _ = governanceTagsOption(o.val)
 					schemaChanged = true
 					continue
 				}

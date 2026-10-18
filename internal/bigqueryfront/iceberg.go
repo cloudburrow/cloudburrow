@@ -705,3 +705,27 @@ func ctasQuery(sql string) string {
 	}
 	return ""
 }
+
+// defaultConnectionID is the connection BigQuery makes when a project has
+// no default connection and a statement names DEFAULT: "When the default
+// connection is missing, BigQuery creates a new connection with the
+// following properties: Region: The same region as the dataset. Name:
+// __default_cloudresource_connection__" (Default connection overview,
+// https://docs.cloud.google.com/bigquery/docs/default-connections, read
+// 2026-10-17).
+const defaultConnectionID = "__default_cloudresource_connection__"
+
+// defaultConnection is the connection WITH CONNECTION DEFAULT names for a
+// table of dataset (#1456): the project's
+// `region-REGION.default_cloud_resource_connection_id` in the dataset's
+// region (ALTER PROJECT SET OPTIONS; "Only specify the connection's ID"),
+// its organization's, else the one BigQuery makes, as
+// PROJECT.REGION.CONNECTION_ID, the form WITH CONNECTION takes. The
+// instance serves no BigQuery Connection API, so nothing is made: the name
+// is kept as the table's biglakeConfiguration.connectionId.
+func (f front) defaultConnection(r *http.Request, dataset string) string {
+	project := projectOf(f.base)
+	loc := strings.ToLower(cmp.Or(f.datasetLocation(r, dataset), "us"))
+	id := cmp.Or(f.settings.effective(project, loc, "default_cloud_resource_connection_id"), defaultConnectionID)
+	return project + "." + loc + "." + id
+}

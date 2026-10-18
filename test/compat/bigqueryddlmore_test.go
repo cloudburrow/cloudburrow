@@ -32,7 +32,7 @@ func httpStatus(err error) int {
 // it; a column's data_policies, by CREATE TABLE and by ALTER COLUMN SET OPTIONS (ARRAY<STRING> of
 // "{'name':'project.region-us.policy'}", with = and +=) read back as the
 // field's dataPolicies through tables.get, NULL clearing them, and a name
-// not of that form is 400; data_governance_tags stays 501. And an ALTER
+// not of that form is 400 (data_governance_tags: TestBigQueryDataGovernanceTags). And an ALTER
 // TABLE of several actions that go different ways (ADD COLUMN through
 // tables.patch, SET DATA TYPE and DROP COLUMN by making the table again)
 // whose later action is refused leaves the table as it was, as BigQuery's
@@ -109,9 +109,6 @@ func TestBigQueryDDLMoreOptionsAndWholeAlter(t *testing.T) {
 		}
 		if err := bqRun(ctx, c, "ALTER TABLE "+ref+" ALTER COLUMN a SET OPTIONS (data_policies = ['p1'])", insert); httpStatus(err) != http.StatusBadRequest {
 			t.Errorf("insert %v: data_policies of a bare name: %v, want 400", insert, err)
-		}
-		if err := bqRun(ctx, c, "ALTER TABLE "+ref+" ALTER COLUMN a SET OPTIONS (data_governance_tags = [('"+project+"/k', 'v')])", insert); httpStatus(err) != http.StatusNotImplemented {
-			t.Errorf("insert %v: data_governance_tags: %v, want 501", insert, err)
 		}
 
 		// Whole or nothing: the refused SET DATA TYPE (STRING is not
