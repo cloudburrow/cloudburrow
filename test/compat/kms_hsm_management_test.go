@@ -80,6 +80,7 @@ func TestKMSSingleTenantHsm(t *testing.T) {
 	loc := "projects/" + h.Project() + "/locations/us-east1"
 	for _, variant := range []string{"grpc", "rest"} {
 		t.Run(variant, func(t *testing.T) {
+			h := h.For(t)
 			var hc *kms.HsmManagementClient
 			var err error
 			if variant == "rest" {

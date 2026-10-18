@@ -64,6 +64,18 @@ func projectSuffix() int64 {
 	}
 }
 
+// For returns this harness bound to t, a subtest of its test, with the
+// same project. A subtest asks it for its endpoints: a Skip or Fatal on the
+// parent's T from the subtest's goroutine fails the subtest instead ("subtest
+// may have called FailNow on a parent test", #1625), so with the parent's
+// harness a subtest whose endpoint is not served fails where it should skip.
+// test/repo's TestCompatTestsSkipWhereTheirEndpointsAreNotServed holds every
+// subtest to it.
+func (h *Harness) For(t *testing.T) *Harness {
+	t.Helper()
+	return &Harness{t: t, project: h.project}
+}
+
 // Project returns this test's unique project ID.
 func (h *Harness) Project() string { return h.project }
 

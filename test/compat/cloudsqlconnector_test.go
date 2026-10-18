@@ -94,6 +94,7 @@ func TestCloudSQLConnectorDialsBothServers(t *testing.T) {
 	}
 	if os.Getenv(EnvCloudSQL) != "" {
 		t.Run("postgres", func(t *testing.T) {
+			h := h.For(t)
 			cleanup, err := pgxv5.RegisterDriver("cloudsql-postgres", connectorOptions(h)...)
 			if err != nil {
 				t.Fatal(err)
@@ -110,6 +111,7 @@ func TestCloudSQLConnectorDialsBothServers(t *testing.T) {
 	}
 	if os.Getenv(EnvMySQL) != "" {
 		t.Run("mysql", func(t *testing.T) {
+			h := h.For(t)
 			cleanup, err := cloudsqlmysql.RegisterDriver("cloudsql-mysql", connectorOptions(h)...)
 			if err != nil {
 				t.Fatal(err)

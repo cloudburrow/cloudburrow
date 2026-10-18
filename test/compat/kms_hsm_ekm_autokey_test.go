@@ -179,6 +179,7 @@ func TestKMSEkmConnectionsAreStored(t *testing.T) {
 	der := ekmCertificate(t)
 	for _, variant := range []string{"grpc", "rest"} {
 		t.Run(variant, func(t *testing.T) {
+			h := h.For(t)
 			newClient := kms.NewEkmClient
 			if variant == "rest" {
 				newClient = kms.NewEkmRESTClient
@@ -285,6 +286,7 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 	})
 	for _, variant := range []string{"grpc", "rest"} {
 		t.Run(variant, func(t *testing.T) {
+			h := h.For(t)
 			newAdmin, newAutokey := kms.NewAutokeyAdminClient, kms.NewAutokeyClient
 			if variant == "rest" {
 				newAdmin, newAutokey = kms.NewAutokeyAdminRESTClient, kms.NewAutokeyRESTClient

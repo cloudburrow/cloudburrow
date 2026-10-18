@@ -82,6 +82,7 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 	}
 	for _, e := range engines {
 		t.Run(e.version, func(t *testing.T) {
+			h := h.For(t)
 			name := strings.ToLower(strings.ReplaceAll(e.version, "_", "-")) + "-" + suffix
 			op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{
 				Name: name, DatabaseVersion: e.version, Region: "us-central1", RootPassword: "Root-pass1",
