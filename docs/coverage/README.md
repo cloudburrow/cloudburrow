@@ -36,7 +36,7 @@ Do not edit these files by hand.
 | [Bigtable](bigtable.md) | 84 | 83 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 64 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 64 | 0 | 16 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 65 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 

@@ -347,7 +347,10 @@ type instanceBody struct {
 	ReplicationCluster *struct {
 		FailoverDrReplicaName *string `json:"failoverDrReplicaName"`
 	} `json:"replicationCluster"`
-	Settings *struct {
+	// clusterCleared is replicationCluster sent null, as gcloud's
+	// --clear-failover-dr-replica-name sends it.
+	clusterCleared bool
+	Settings       *struct {
 		Tier                      string             `json:"tier"`
 		UserLabels                *map[string]string `json:"userLabels"`
 		DatabaseFlags             *[]Flag            `json:"databaseFlags"`
@@ -471,6 +474,12 @@ func decodeInstance(r *http.Request) (instanceBody, error) {
 	}
 	_ = json.Unmarshal(body, &raw)
 	b.raw = raw.Settings
+	var top map[string]json.RawMessage
+	if json.Unmarshal(body, &top) == nil {
+		if v, ok := top["replicationCluster"]; ok && strings.TrimSpace(string(v)) == "null" {
+			b.clusterCleared = true
+		}
+	}
 	return b, nil
 }
 

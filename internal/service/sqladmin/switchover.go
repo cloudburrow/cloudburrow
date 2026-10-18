@@ -58,6 +58,9 @@ func editionOf(spec Spec) string {
 // requirements for a DR replica, or its current one when the patch does
 // not send it. next is the primary as patched. Called with emu held.
 func (s *Server) drDesignationLocked(b instanceBody, project string, next Spec) (string, error) {
+	if b.clusterCleared {
+		return "", nil
+	}
 	if b.ReplicationCluster == nil || b.ReplicationCluster.FailoverDrReplicaName == nil {
 		return next.FailoverDR, nil
 	}
