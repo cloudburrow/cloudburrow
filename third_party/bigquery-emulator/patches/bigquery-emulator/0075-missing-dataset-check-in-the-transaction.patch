@@ -1,0 +1,118 @@
+CloudBurrow patch 75 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1601).
+
+The bug: patch 0065 (#1584) looks up the dataset of each table a query
+added before the query's transaction commits, through
+metaRepo.FindProject, which takes a new connection of its own. Once the
+transaction had written rows (a CREATE TABLE AS SELECT of a few thousand
+rows, the CloudBurrow front's copy of a table that datasets.delete or
+tables.delete keeps for time travel), that connection waited for the
+transaction's lock until the request's deadline: every such query took
+a minute, and a datasets.delete of a dataset with a loaded table
+outlasted the client's context.
+
+The patch reads the project in the query's own transaction
+(FindProjectWithConn on tx.Tx(), in metadata mode), as the loader does.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/server/handler.go b/server/handler.go
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1889,7 +1889,15 @@ func dropTablesOfMissingDatasets(ctx context.Context, server *Server, tx *connec
+ 			kept = append(kept, spec)
+ 			continue
+ 		}
+-		project, err := server.metaRepo.FindProject(ctx, spec.NamePath[0])
++		// CloudBurrow patch (cloudburrow/cloudburrow#1601): read in the
++		// query's own transaction. FindProject took a new connection,
++		// which waited, until the request's deadline, for the lock the
++		// transaction holds once it has written rows (a CREATE TABLE AS
++		// SELECT, the front's copy of a table it drops).
++		if err := tx.MetadataRepoMode(); err != nil {
++			return err
++		}
++		project, err := server.metaRepo.FindProjectWithConn(ctx, tx.Tx(), spec.NamePath[0])
+ 		if err != nil || project == nil || project.Dataset(spec.NamePath[1]) != nil {
+ 			kept = append(kept, spec)
+ 			continue
+diff --git a/server/create_as_select_lock_test.go b/server/create_as_select_lock_test.go
+new file mode 100644
+--- /dev/null
++++ b/server/create_as_select_lock_test.go
+@@ -0,0 +1,71 @@
++package server_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestCreateTableAsSelectDoesNotWaitOnItsOwnTransaction is a CloudBurrow
++// regression test (cloudburrow/cloudburrow#1601): patch 0065 looked up
++// the dataset of each table a query added through a new connection while
++// the query's transaction, which had written the table's rows, was still
++// open; that lookup waited about a minute for the transaction's lock, so
++// a CREATE TABLE AS SELECT of a few thousand rows took a minute.
++func TestCreateTableAsSelectDoesNotWaitOnItsOwnTransaction(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	// The first through jobs.query, the second through jobs.insert.
++	for i, sql := range []string{
++		"CREATE TABLE ds.big AS SELECT x FROM UNNEST(GENERATE_ARRAY(1, 20000)) AS x",
++		"CREATE TABLE ds.big2 AS SELECT x FROM UNNEST(GENERATE_ARRAY(1, 20000)) AS x",
++	} {
++		began := time.Now()
++		q := client.Query(sql)
++		if i == 0 {
++			_, err = q.Read(ctx)
++		} else {
++			var job *bigquery.Job
++			if job, err = q.Run(ctx); err == nil {
++				_, err = job.Wait(ctx)
++			}
++		}
++		if err != nil {
++			t.Fatalf("%s: %v", sql, err)
++		}
++		if took := time.Since(began); took > 15*time.Second {
++			t.Errorf("%s took %v, want well under 15s", sql, took)
++		}
++	}
++	it, err := client.Query("SELECT COUNT(*) FROM ds.big").Read(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var row []bigquery.Value
++	if err := it.Next(&row); err != nil || row[0] != int64(20000) {
++		t.Fatalf("ds.big holds %v (%v), want 20000 rows", row, err)
++	}
++}
