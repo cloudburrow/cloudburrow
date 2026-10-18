@@ -642,7 +642,7 @@ type options struct {
 	stateDir string
 	logf     func(string, ...any)
 	// streamTimes is whether a table that is not partitioned streams
-	// through a scratch table, keeping its rows' stream time for DML
+	// as a partitioned one does, keeping its rows' stream time for DML
 	// (streamingbuffer.go, #1370): the engine behind the front has the
 	// column (bigquery-emulator patch 0018).
 	streamTimes bool
@@ -874,6 +874,9 @@ type insertResponse struct {
 }
 
 func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table string) {
+	// The pseudo-columns of streamed rows are the front's to name
+	// (streamingbuffer.go, #1624), never a client's.
+	r.Header.Del(streamColumnsHeader)
 	// The whole request is decoded to find its rows, and re-encoded with
 	// the rest of its fields (templateSuffix, traceId) as they came.
 	var raw map[string]json.RawMessage
@@ -926,11 +929,12 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	} else if ok := json.Unmarshal(got, &pm) == nil; ok && pm.TimePartitioning == nil && pm.RangePartitioning == nil &&
 		f.buffers != nil && f.buffers.stamp && !decorated && len(raw["templateSuffix"]) == 0 && plainTable(got) &&
 		!hasRangeField(pm.Schema.Fields) {
-		// Any other table streams through a scratch table too, so its
-		// rows keep their stream time, which DML reads (#1370,
+		// Any other table streams as a partitioned one does, so its rows
+		// keep their stream time, which DML reads (#1370,
 		// streamingbuffer.go). Not one with a RANGE column, which the
-		// emulator's tables.insert cannot make a scratch copy of: its rows
-		// stream straight in, held from DML only while in the buffer.
+		// emulator's tables.insert cannot make a scratch copy of, should a
+		// stream need one: its rows stream straight in, held from DML only
+		// while in the buffer.
 		streamed = true
 	}
 	if decorated && !pm.ingestion() {
@@ -1051,6 +1055,11 @@ func (f front) get(r *http.Request, path string) (int, []byte) {
 // a query that reads a result's columns, or the removal of a table a
 // refused load made.
 func (f front) send(r *http.Request, method, path string, body []byte) (int, []byte) {
+	return f.sendHeader(r, method, path, body, nil)
+}
+
+// sendHeader is send with header's fields too.
+func (f front) sendHeader(r *http.Request, method, path string, body []byte, header http.Header) (int, []byte) {
 	u := *r.URL
 	u.Path, u.RawPath = "", ""
 	p := f.base + path
@@ -1081,6 +1090,9 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range header {
+		req.Header[k] = v
 	}
 	req.Host = r.Host
 	req.RemoteAddr = r.RemoteAddr

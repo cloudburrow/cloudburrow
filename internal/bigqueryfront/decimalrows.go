@@ -20,9 +20,11 @@ import (
 // invalid row is ("reason": "invalid", the column its location; the
 // message, which BigQuery does not document, is the engine's: UNVERIFIED).
 //
-// A table streamed through a scratch table (streamingbuffer.go, #1370)
-// makes it with no precision or scale (scratchSchema), so the rows are
-// rounded once, by the table's own triggers, with its own modes.
+// A streamed row goes into the table, rounded once by its triggers
+// (streamingbuffer.go, #1624); one streamed through a scratch table
+// (streamThroughScratch, #1370) makes it with no precision or scale
+// (scratchSchema), so the rows are rounded once, by the table's own
+// triggers, with its own modes.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-types
 
 // decimalOverflow is the errors of the parameterized NUMERIC and BIGNUMERIC

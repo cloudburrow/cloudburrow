@@ -1,0 +1,503 @@
+CloudBurrow patch 81 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1624). Needs patches 0018 (_PARTITION_STREAMED),
+0016 (_PARTITION_BUFFERED) and 0014's AddTableData (#1340 defaults).
+
+The CloudBurrow front gives each streamed row its stream time
+(_PARTITION_STREAMED), which DML reads, and a row of a partitioned table
+its place in the streaming buffer (_PARTITIONTIME and _PARTITIONDATE NULL,
+or _PARTITION_BUFFERED). tabledata.insertAll could not give a row a
+pseudo-column, so the front streamed every insert into a scratch table,
+moved the rows with INSERT ... SELECT, and deleted the scratch table; that
+DROP rebuilt googlesqlite's whole catalog (resetCatalog), which grows with
+every table the engine holds: through the official Go client, a 10-row
+insert took 42 ms p50 in an empty project and 115 ms (p99 289 ms) in a
+project of 150 datasets of three tables.
+
+tabledata.insertAll now reads the request header
+X-Cloudburrow-Stream-Columns, a JSON object of pseudo-column names
+(_PARTITION_STREAMED, _PARTITIONTIME, _PARTITIONDATE, _PARTITION_BUFFERED)
+to a value for every row, or to a list of one value per row of the
+request, and the rows' INSERT gives each its literal; rows that give the
+same values go in by one statement, in their order, as rows that give the
+same columns do. A header it cannot read is 400 invalid, and nothing is
+inserted. Without the header nothing changes. The regression test
+(server/cloudburrow_stream_columns_test.go) fails without the patch.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/contentdata/cloudburrow_stream_columns.go b/internal/contentdata/cloudburrow_stream_columns.go
+new file mode 100644
+index 0000000..fb41b36
+--- /dev/null
++++ b/internal/contentdata/cloudburrow_stream_columns.go
+@@ -0,0 +1,159 @@
++package contentdata
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1624): tabledata.insertAll
++// writes the pseudo-columns of a streamed row itself.
++//
++// The CloudBurrow front gives each streamed row its stream time
++// (_PARTITION_STREAMED), and a row of a partitioned table its place in the
++// streaming buffer (_PARTITIONTIME and _PARTITIONDATE NULL, or
++// _PARTITION_BUFFERED). It streamed the rows into a scratch table and
++// moved them with INSERT ... SELECT, and the DROP of the scratch table
++// rebuilt the engine's whole catalog, which grows with every table: a
++// 10-row insert took 110 ms in a project of 150 datasets of three tables.
++// The front now names the values in the request's X-Cloudburrow-Stream-Columns
++// header, and the rows' INSERT gives them.
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"sort"
++	"strings"
++	"time"
++)
++
++// StreamColumnsHeader is the request header of tabledata.insertAll that
++// names the pseudo-columns of its rows: a JSON object of each name to its
++// value, or to an array of one value per row of the request.
++const StreamColumnsHeader = "X-Cloudburrow-Stream-Columns"
++
++// streamColumnTypes are the pseudo-columns the header may name, and their
++// types.
++var streamColumnTypes = map[string]string{
++	"_PARTITION_STREAMED": "TIMESTAMP",
++	"_PARTITIONTIME":      "TIMESTAMP",
++	"_PARTITIONDATE":      "DATE",
++	"_PARTITION_BUFFERED": "BOOL",
++}
++
++// StreamColumns are the pseudo-columns AddTableData gives each row: their
++// names, and for each row the SQL literal of each.
++type StreamColumns struct {
++	Names  []string
++	Values [][]string
++}
++
++// ParseStreamColumns reads the header's value for a request of rows rows.
++func ParseStreamColumns(header string, rows int) (*StreamColumns, error) {
++	var raw map[string]json.RawMessage
++	if err := json.Unmarshal([]byte(header), &raw); err != nil {
++		return nil, fmt.Errorf("%s: %w", StreamColumnsHeader, err)
++	}
++	sc := &StreamColumns{Values: make([][]string, rows)}
++	for name := range raw {
++		if _, ok := streamColumnTypes[name]; !ok {
++			return nil, fmt.Errorf("%s: %q is not a pseudo-column it gives", StreamColumnsHeader, name)
++		}
++		sc.Names = append(sc.Names, name)
++	}
++	sort.Strings(sc.Names)
++	for _, name := range sc.Names {
++		typ := streamColumnTypes[name]
++		v := raw[name]
++		var each []json.RawMessage
++		if strings.HasPrefix(strings.TrimSpace(string(v)), "[") {
++			if err := json.Unmarshal(v, &each); err != nil {
++				return nil, fmt.Errorf("%s: %s: %w", StreamColumnsHeader, name, err)
++			}
++			if len(each) != rows {
++				return nil, fmt.Errorf("%s: %s has %d values for %d rows", StreamColumnsHeader, name, len(each), rows)
++			}
++		}
++		one := ""
++		if each == nil {
++			lit, err := streamLiteral(typ, v)
++			if err != nil {
++				return nil, fmt.Errorf("%s: %s: %w", StreamColumnsHeader, name, err)
++			}
++			one = lit
++		}
++		for i := range sc.Values {
++			lit := one
++			if each != nil {
++				var err error
++				if lit, err = streamLiteral(typ, each[i]); err != nil {
++					return nil, fmt.Errorf("%s: %s: %w", StreamColumnsHeader, name, err)
++				}
++			}
++			sc.Values[i] = append(sc.Values[i], lit)
++		}
++	}
++	return sc, nil
++}
++
++// streamLiteral is the SQL literal of v, a JSON value of type typ.
++func streamLiteral(typ string, v json.RawMessage) (string, error) {
++	if s := strings.TrimSpace(string(v)); s == "null" || s == "" {
++		return "CAST(NULL AS " + typ + ")", nil
++	}
++	switch typ {
++	case "BOOL":
++		var b bool
++		if err := json.Unmarshal(v, &b); err != nil {
++			return "", err
++		}
++		if b {
++			return "TRUE", nil
++		}
++		return "FALSE", nil
++	case "TIMESTAMP":
++		var s string
++		if err := json.Unmarshal(v, &s); err != nil {
++			return "", err
++		}
++		t, err := time.Parse(time.RFC3339Nano, s)
++		if err != nil {
++			return "", err
++		}
++		return "TIMESTAMP '" + t.UTC().Format("2006-01-02 15:04:05.000000") + "+00'", nil
++	case "DATE":
++		var s string
++		if err := json.Unmarshal(v, &s); err != nil {
++			return "", err
++		}
++		d, err := time.Parse("2006-01-02", s)
++		if err != nil {
++			return "", err
++		}
++		return "DATE '" + d.Format("2006-01-02") + "'", nil
++	}
++	return "", fmt.Errorf("type %s", typ)
++}
++
++// Keep returns the columns of the rows kept, by their indexes.
++func (sc *StreamColumns) Keep(kept []int) *StreamColumns {
++	if sc == nil {
++		return nil
++	}
++	out := &StreamColumns{Names: sc.Names, Values: make([][]string, len(kept))}
++	for i, k := range kept {
++		out.Values[i] = sc.Values[k]
++	}
++	return out
++}
++
++type streamColumnsKey struct{}
++
++// WithStreamColumns returns ctx with the columns AddTableData gives its
++// rows, one set of values per row of the table it is given.
++func WithStreamColumns(ctx context.Context, sc *StreamColumns) context.Context {
++	if sc == nil || len(sc.Names) == 0 {
++		return ctx
++	}
++	return context.WithValue(ctx, streamColumnsKey{}, sc)
++}
++
++func streamColumnsFrom(ctx context.Context) *StreamColumns {
++	sc, _ := ctx.Value(streamColumnsKey{}).(*StreamColumns)
++	return sc
++}
+diff --git a/internal/contentdata/repository.go b/internal/contentdata/repository.go
+index fbeab0c..10598d5 100644
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -669,23 +669,42 @@ func (r *Repository) AddTableData(ctx context.Context, tx *connection.Tx, projec
+ 			hasDefault = true
+ 		}
+ 	}
+-	if !hasDefault {
+-		return r.addTableRows(ctx, tx, projectID, datasetID, table.ID, allColumns, table.Data)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1624): the pseudo-columns
++	// of streamed rows (cloudburrow_stream_columns.go), one set of values
++	// per row; consecutive rows with the same values go in by one
++	// statement too.
++	sc := streamColumnsFrom(ctx)
++	if sc != nil && len(sc.Values) != len(table.Data) {
++		return fmt.Errorf("%d rows, and stream columns for %d", len(table.Data), len(sc.Values))
++	}
++	pseudo := func(i int) []string {
++		if sc == nil {
++			return nil
++		}
++		return sc.Values[i]
++	}
++	if !hasDefault && sc == nil {
++		return r.addTableRows(ctx, tx, projectID, datasetID, table.ID, allColumns, table.Data, nil, nil)
++	}
++	var pseudoNames []string
++	if sc != nil {
++		pseudoNames = sc.Names
+ 	}
+ 	// Consecutive rows that give the same columns go in by one
+ 	// statement, in their order.
+ 	var runKey string
+ 	var runColumns []*types.Column
++	var runPseudo []string
+ 	var run types.Data
+ 	flush := func() error {
+ 		if len(run) == 0 {
+ 			return nil
+ 		}
+-		err := r.addTableRows(ctx, tx, projectID, datasetID, table.ID, runColumns, run)
++		err := r.addTableRows(ctx, tx, projectID, datasetID, table.ID, runColumns, run, pseudoNames, runPseudo)
+ 		run = nil
+ 		return err
+ 	}
+-	for _, data := range table.Data {
++	for rowIndex, data := range table.Data {
+ 		var key strings.Builder
+ 		var cols []*types.Column
+ 		for i, col := range allColumns {
+@@ -695,11 +714,13 @@ func (r *Repository) AddTableData(ctx context.Context, tx *connection.Tx, projec
+ 			fmt.Fprintf(&key, "%d,", i)
+ 			cols = append(cols, col)
+ 		}
++		vals := pseudo(rowIndex)
++		key.WriteString("|" + strings.Join(vals, ","))
+ 		if key.String() != runKey || len(cols) == 0 {
+ 			if err := flush(); err != nil {
+ 				return err
+ 			}
+-			runKey, runColumns = key.String(), cols
++			runKey, runColumns, runPseudo = key.String(), cols, vals
+ 		}
+ 		if len(cols) == 0 {
+ 			// A row that gives no column, of a table whose every column
+@@ -708,8 +729,12 @@ func (r *Repository) AddTableData(ctx context.Context, tx *connection.Tx, projec
+ 			if err != nil {
+ 				return err
+ 			}
+-			if _, err := tx.Tx().ExecContext(ctx, fmt.Sprintf("INSERT `%s` (`%s`) VALUES (DEFAULT)",
+-				tablePath, escapeIdent(allColumns[0].Name))); err != nil {
++			names, values := []string{"`" + escapeIdent(allColumns[0].Name) + "`"}, []string{"DEFAULT"}
++			for i, name := range pseudoNames {
++				names, values = append(names, "`"+escapeIdent(name)+"`"), append(values, vals[i])
++			}
++			if _, err := tx.Tx().ExecContext(ctx, fmt.Sprintf("INSERT `%s` (%s) VALUES (%s)",
++				tablePath, strings.Join(names, ","), strings.Join(values, ","))); err != nil {
+ 				return err
+ 			}
+ 			continue
+@@ -719,8 +744,10 @@ func (r *Repository) AddTableData(ctx context.Context, tx *connection.Tx, projec
+ 	return flush()
+ }
+ 
+-// addTableRows inserts rows, giving each of columns (AddTableData).
+-func (r *Repository) addTableRows(ctx context.Context, tx *connection.Tx, projectID, datasetID, tableID string, columns []*types.Column, rows types.Data) error {
++// addTableRows inserts rows, giving each of columns (AddTableData), and
++// each of the pseudo-columns pseudoNames its SQL literal in pseudoValues
++// (CloudBurrow patch, #1624).
++func (r *Repository) addTableRows(ctx context.Context, tx *connection.Tx, projectID, datasetID, tableID string, columns []*types.Column, rows types.Data, pseudoNames, pseudoValues []string) error {
+ 	placeholders := make([]string, 0, len(columns))
+ 	columnsWithEscape := make([]string, 0, len(columns))
+ 	for _, col := range columns {
+@@ -750,6 +777,10 @@ func (r *Repository) addTableRows(ctx context.Context, tx *connection.Tx, projec
+ 		}
+ 		columnsWithEscape = append(columnsWithEscape, fmt.Sprintf("`%s`", escapeIdent(col.Name)))
+ 	}
++	for i, name := range pseudoNames {
++		columnsWithEscape = append(columnsWithEscape, fmt.Sprintf("`%s`", escapeIdent(name)))
++		placeholders = append(placeholders, pseudoValues[i])
++	}
+ 
+ 	tablePath, err := r.tablePath(projectID, datasetID, tableID)
+ 	if err != nil {
+diff --git a/server/cloudburrow_stream_columns_test.go b/server/cloudburrow_stream_columns_test.go
+new file mode 100644
+index 0000000..d907c0b
+--- /dev/null
++++ b/server/cloudburrow_stream_columns_test.go
+@@ -0,0 +1,140 @@
++package server_test
++
++import (
++	"context"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/iterator"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestInsertAllGivesStreamColumns is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1624): tabledata.insertAll gives each row the
++// pseudo-columns its X-Cloudburrow-Stream-Columns header names, one value
++// for every row or one per row, so the CloudBurrow front streams into a
++// table with no scratch table. Without the patch the rows' columns stay
++// NULL.
++func TestInsertAllGivesStreamColumns(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	schema := bigquery.Schema{
++		{Name: "id", Type: bigquery.IntegerFieldType},
++		{Name: "d", Type: bigquery.DateFieldType},
++		{Name: "s", Type: bigquery.StringFieldType, DefaultValueExpression: "'dflt'"},
++	}
++	for name, md := range map[string]*bigquery.TableMetadata{
++		"plain":     {Schema: schema},
++		"ingestion": {Schema: schema, TimePartitioning: &bigquery.TimePartitioning{Type: bigquery.DayPartitioningType}},
++		"column":    {Schema: schema, TimePartitioning: &bigquery.TimePartitioning{Type: bigquery.DayPartitioningType, Field: "d"}},
++	} {
++		if err := client.Dataset("ds").Table(name).Create(ctx, md); err != nil {
++			t.Fatal(name, err)
++		}
++	}
++	insert := func(table, header, rows string) (int, string) {
++		t.Helper()
++		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
++			testServer.URL+"/bigquery/v2/projects/test/datasets/ds/tables/"+table+"/insertAll",
++			strings.NewReader(`{"rows":[`+rows+`]}`))
++		if err != nil {
++			t.Fatal(err)
++		}
++		req.Header.Set("Content-Type", "application/json")
++		if header != "" {
++			req.Header.Set("X-Cloudburrow-Stream-Columns", header)
++		}
++		res, err := http.DefaultClient.Do(req)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer res.Body.Close()
++		b, _ := io.ReadAll(res.Body)
++		return res.StatusCode, string(b)
++	}
++	read := func(q string) []string {
++		t.Helper()
++		it, err := client.Query(q).Read(ctx)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		var out []string
++		for {
++			var row []bigquery.Value
++			if err := it.Next(&row); err == iterator.Done {
++				return out
++			} else if err != nil {
++				t.Fatal(err)
++			}
++			out = append(out, fmt.Sprint(row))
++		}
++	}
++	rows := `{"json":{"id":1,"d":"2026-10-18"}},{"json":{"id":2,"d":"2026-10-18","s":"x"}},{"json":{"id":3,"nope":1}},{"json":{"id":4,"d":"2001-01-01"}}`
++
++	if code, body := insert("plain", `{"_PARTITION_STREAMED":"2026-10-18T05:06:07.123456Z"}`, rows); code != http.StatusOK || !strings.Contains(body, "nope") {
++		t.Fatalf("plain: %d %s", code, body)
++	}
++	if got, want := strings.Join(read("SELECT id, s, FORMAT_TIMESTAMP('%FT%H:%M:%E6S', _PARTITION_STREAMED) FROM ds.plain ORDER BY id"), " "),
++		"[1 dflt 2026-10-18T05:06:07.123456] [2 x 2026-10-18T05:06:07.123456] [4 dflt 2026-10-18T05:06:07.123456]"; got != want {
++		t.Errorf("plain: %s, want %s", got, want)
++	}
++
++	if code, body := insert("ingestion", `{"_PARTITION_STREAMED":"2026-10-18T05:06:07Z","_PARTITIONTIME":null,"_PARTITIONDATE":null}`, rows); code != http.StatusOK {
++		t.Fatalf("ingestion: %d %s", code, body)
++	}
++	if got, want := strings.Join(read("SELECT id, _PARTITIONTIME IS NULL, _PARTITIONDATE IS NULL, _PARTITION_STREAMED IS NOT NULL FROM ds.ingestion ORDER BY id"), " "),
++		"[1 true true true] [2 true true true] [4 true true true]"; got != want {
++		t.Errorf("ingestion: %s, want %s", got, want)
++	}
++
++	// One value per row of the request, the refused row's too.
++	if code, body := insert("column", `{"_PARTITION_STREAMED":"2026-10-18T05:06:07Z","_PARTITION_BUFFERED":[false,false,false,true]}`, rows); code != http.StatusOK {
++		t.Fatalf("column: %d %s", code, body)
++	}
++	if got, want := strings.Join(read("SELECT id, s, _PARTITION_BUFFERED FROM ds.column ORDER BY id"), " "),
++		"[1 dflt false] [2 x false] [4 dflt true]"; got != want {
++		t.Errorf("column: %s, want %s", got, want)
++	}
++
++	// Without the header, nothing is given.
++	if code, body := insert("plain", "", `{"json":{"id":5}}`); code != http.StatusOK {
++		t.Fatalf("plain without the header: %d %s", code, body)
++	}
++	if got := read("SELECT _PARTITION_STREAMED IS NULL FROM ds.plain WHERE id = 5"); len(got) != 1 || got[0] != "[true]" {
++		t.Errorf("plain without the header: %v", got)
++	}
++
++	for _, bad := range []string{`{"_PARTITION_STREAMED":"yesterday"}`, `{"id":1}`, `{"_PARTITION_BUFFERED":[true]}`, `not json`} {
++		if code, body := insert("plain", bad, `{"json":{"id":6}},{"json":{"id":7}}`); code != http.StatusBadRequest {
++			t.Errorf("header %s: %d %s, want 400", bad, code, body)
++		}
++	}
++	if got := read("SELECT COUNT(*) FROM ds.plain WHERE id > 5"); len(got) != 1 || got[0] != "[0]" {
++		t.Errorf("rows of refused requests: %v", got)
++	}
++}
+diff --git a/server/handler.go b/server/handler.go
+index b13f2aa..d89f320 100644
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -2868,12 +2868,24 @@ func (h *tabledataInsertAllHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
+ 		errorResponse(ctx, w, errInvalid(err.Error()))
+ 		return
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1624): the pseudo-columns
++	// the CloudBurrow front gives the streamed rows
++	// (contentdata/cloudburrow_stream_columns.go).
++	var stream *contentdata.StreamColumns
++	if v := r.Header.Get(contentdata.StreamColumnsHeader); v != "" {
++		var err error
++		if stream, err = contentdata.ParseStreamColumns(v, len(req.Rows)); err != nil {
++			errorResponse(ctx, w, errInvalid(err.Error()))
++			return
++		}
++	}
+ 	res, err := h.Handle(ctx, &tabledataInsertAllRequest{
+ 		server:  server,
+ 		project: project,
+ 		dataset: dataset,
+ 		table:   table,
+ 		req:     &req,
++		stream:  stream,
+ 	})
+ 	if err != nil {
+ 		errorResponse(ctx, w, errInternalError(err.Error()))
+@@ -2888,6 +2900,7 @@ type tabledataInsertAllRequest struct {
+ 	dataset *metadata.Dataset
+ 	table   *metadata.Table
+ 	req     *bigqueryv2.TableDataInsertAllRequest
++	stream  *contentdata.StreamColumns // CloudBurrow patch (#1624)
+ }
+ 
+ func normalizeInsertValue(v interface{}, field *bigqueryv2.TableFieldSchema) (interface{}, error) {
+@@ -2946,6 +2959,7 @@ func (h *tabledataInsertAllHandler) Handle(ctx context.Context, r *tabledataInse
+ 	}
+ 	var insertErrors []*bigqueryv2.TableDataInsertAllResponseInsertErrors
+ 	data := types.Data{}
++	var kept []int // CloudBurrow patch (#1624): the rows inserted
+ 	for i, row := range r.req.Rows {
+ 		// A row that carries fields absent from the table schema is rejected
+ 		// unless ignoreUnknownValues is set; it is reported per-row and not
+@@ -2972,8 +2986,10 @@ func (h *tabledataInsertAllHandler) Handle(ctx context.Context, r *tabledataInse
+ 			rowData[k] = v
+ 		}
+ 		data = append(data, rowData)
++		kept = append(kept, i)
+ 	}
+ 	if len(data) > 0 {
++		ctx := contentdata.WithStreamColumns(ctx, r.stream.Keep(kept))
+ 		tableDef, err := types.NewTableWithSchema(content, data)
+ 		if err != nil {
+ 			return nil, err
