@@ -46,6 +46,11 @@ func runStop(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Firestore's documents are exported first, through `up`'s tunnel
+	// (#1615).
+	if info, ok := running(cfg); ok {
+		exportFirestoreDocuments(info.Endpoints[string(config.ServiceFirestore)], time.Duration(cfg.ShutdownTimeout), stdout)
+	}
 	// The `up` serving this instance goes first. Stopping the cluster under
 	// it left a process holding ports and tunnels to nothing (#278).
 	if err := stopRunning(cfg, stdout); err != nil {

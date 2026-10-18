@@ -1047,15 +1047,26 @@ pod and its emptyDir, so a starting front discards the exports of the one before
 the periodic export is the same, and costs nothing while nothing writes. **Cost:** an export
 writes every document of every database, at most once each 30 seconds and only while calls write,
 so an idle emulator costs nothing; a handful of databases with a few documents each exported in
-well under a second (measured, #1615). Its time at 100,000 documents is not measured yet; a
-stopping pod's export is bounded at 8 seconds, past which what was written since the last
-periodic export is lost, as on a crash. `TestFirestoreSurvivesAPodRestart` writes to `(default)` and to a named database, deletes the
+well under a second, and 100,000 documents of about 1 KB in one database in 1.35 seconds, 105 MB
+on the volume, with their import on start 2.1 seconds (measured, #1615, `--emulator-heap-mib`
+1024, which holds about 300,000 such documents). **A clean `stop`** first asks the front to
+export what was written since its last export, through `up`'s tunnel, bounded by
+`--shutdown-timeout` alone (2.1 seconds at 100,000 documents, and `stop` says so: "exported the
+Firestore documents in …"), so every write that reached Firestore before `stop` is kept, whatever
+the number of documents. The pod's own export as it stops, which also covers a deleted pod, is
+bounded at 8 seconds (1.4 seconds at 100,000 documents; about 600,000 such documents fit in it),
+and the kind node's stop gives its containers 10 seconds: a pod in the cluster that writes after
+`stop`'s export, with more documents than fit in 8 seconds (a heap well over 2 GiB), loses what
+it wrote since the last export, as on a crash; when `stop`'s export fails, `stop` prints a warning
+naming that. `TestFirestoreSurvivesAPodRestart` writes to `(default)` and to a named database, deletes the
 pod and reads every document back, twice over, and in ephemeral mode finds the last write gone;
 CI's restart probe reads a probe document in each database, and the named database through the
 Admin API, after `stop` and `up` in persistent mode, and finds none after `up --mode ephemeral`
 (`TestFirestoreAcrossRestart`). A call that may write (every Firestore call but the reads, and
 every Admin API call but `Get` and `List`) is counted when it starts and when it ends, so one
-still running during an export is exported by the next; a `Write` stream is counted only then.
+still running during an export is exported by the next; a gRPC call is counted at each response
+message too, which the emulator sends once the write it answers is committed, so a write in the
+middle of a long `Write` stream is exported within the interval, not only when the stream ends.
 
 **What a Firestore or Datastore emulator's exit loses (#1611).** Since #1603 each Java emulator's
 heap is bounded (`--emulator-heap-mib`, 1024 MiB by default, [configuration.md](configuration.md#settings))

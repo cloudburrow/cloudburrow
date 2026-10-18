@@ -73,9 +73,18 @@ const (
 	// gateWait bounds how long a call waits for the documents to be
 	// imported; past it the call goes through.
 	gateWait = 2 * time.Minute
-	// stopExport bounds the export a stopping front makes.
+	// stopExport bounds the export a stopping front makes. 100,000
+	// documents of 1 KB export in 1.4 seconds (#1615, measured), so it
+	// holds about 600,000 of them; `cloudburrow stop` exports first,
+	// through ExportPath, bounded by the instance's shutdown timeout
+	// alone, so a clean stop's own export finds nothing left to write.
 	stopExport = 8 * time.Second
 )
+
+// ExportPath, POSTed to the front, exports what was written since the last
+// export at once, and answers once it is on the volume: `cloudburrow stop`
+// calls it before it stops the cluster (#1615).
+const ExportPath = "/cloudburrow/firestore/documents:export"
 
 // manifest is the current generation's exports.
 type manifest struct {
@@ -429,6 +438,10 @@ func writeFileAtomic(path string, b []byte) error {
 // is exported within the interval, not only once the stream ends.
 func (d *Documents) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == ExportPath && r.Method == http.MethodPost {
+			d.serveExport(w, r)
+			return
+		}
 		if mayWrite(r) {
 			d.wait(r.Context())
 			d.writes.Add(1)
@@ -441,6 +454,29 @@ func (d *Documents) Wrap(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// serveExport exports the documents now, when anything was written since
+// the last export (ExportPath).
+func (d *Documents) serveExport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if !d.dirty() {
+		_, _ = io.WriteString(w, `{"exported":false}`)
+		return
+	}
+	if !d.isRestored() {
+		http.Error(w, `{"error":"the emulator does not hold the documents yet"}`, http.StatusServiceUnavailable)
+		return
+	}
+	start := time.Now()
+	if err := d.Export(r.Context()); err != nil {
+		d.logf("firestore documents: export on request: %v", err)
+		b, _ := json.Marshal(map[string]string{"error": err.Error()})
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(b)
+		return
+	}
+	_, _ = fmt.Fprintf(w, `{"exported":true,"seconds":%.3f}`, time.Since(start).Seconds())
 }
 
 // markingWriter counts each response body write of a call that may
