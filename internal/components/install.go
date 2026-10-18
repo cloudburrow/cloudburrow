@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -248,6 +250,175 @@ func (i *Installer) WaitKnative(ctx context.Context, timeout time.Duration) erro
 		}
 	}
 	return nil
+}
+
+// restartTarget is a Deployment, or with no name every Deployment of a
+// namespace, that RestartKnative replaces.
+type restartTarget struct {
+	namespace string
+	name      string
+}
+
+// warmRestarts are what a warm start replaces (#1610), in two stages.
+//
+// First CoreDNS and Knative Serving's own pods, which need only the API.
+// CoreDNS fails as Knative does: its first list of the API, made before
+// the Service network worked, failed, and its informers' retry backoff
+// kept it unready for some 40 s.
+//
+// Then Kourier's gateway, once warmGate is Ready: it finds its
+// configuration server, net-kourier-controller, by name. Started beside
+// CoreDNS, its first lookups failed, its xDS stream's retry backoff held
+// it unready, and the kubelet killed it for failing its liveness probe;
+// up then took up to 58 s. Its readiness probe waits 10 s before its first
+// try, so it starts as soon as what it needs is there, not after the
+// activator.
+var (
+	warmRestarts = [][]restartTarget{
+		{{namespace: "kube-system", name: "coredns"}, {namespace: "knative-serving"}},
+		{{namespace: "kourier-system"}},
+	}
+	warmGate = []restartTarget{
+		{namespace: "kube-system", name: "coredns"},
+		{namespace: "knative-serving", name: "net-kourier-controller"},
+	}
+)
+
+// RestartedAtAnnotation marks the pod template of a Deployment
+// RestartKnative replaced, with the time it did (#1610).
+const RestartedAtAnnotation = "cloudburrow.dev/restarted-at"
+
+// knativeRestartEvery spaces RestartKnative's polls of the new pods.
+var knativeRestartEvery = 250 * time.Millisecond
+
+// RestartKnative replaces the pods of CoreDNS and of every Deployment of
+// Knative Serving and its ingress (warmRestarts), and waits until each
+// Deployment has as many Ready pods of its new template as it asks for
+// (#1610).
+//
+// It is for a warm start, once the kubernetes Service answers: the pods the
+// kubelet restarted with the node started before it did, and either exited
+// and wait out a restart backoff (Knative) or wait out a retry backoff of
+// their own (CoreDNS); and their Deployments' status predates the stop.
+// The new pods start on a working network, and their readiness is this
+// boot's. A rolling restart, not a delete, so a Deployment keeps the pods
+// it has until the new ones are Ready; and the wait is for the new pods,
+// not for the rollout, whose end waits for the old pods to terminate (the
+// activator's grace period is 600 s).
+func (i *Installer) RestartKnative(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	want := map[restartTarget]int{}
+	for n, stage := range warmRestarts {
+		if n > 0 {
+			if err := i.waitRestarted(ctx, warmGate, want, stamp, deadline, timeout); err != nil {
+				return err
+			}
+		}
+		var restarted []string
+		for _, t := range stage {
+			names, err := i.restartTargets(ctx, t, stamp, want)
+			if err != nil {
+				return err
+			}
+			restarted = append(restarted, names...)
+		}
+		i.logf("  restarted %s on the running network\n", strings.Join(restarted, ", "))
+	}
+	all := make([]restartTarget, 0, len(want))
+	for t := range want {
+		all = append(all, t)
+	}
+	slices.SortFunc(all, func(a, b restartTarget) int {
+		return strings.Compare(a.namespace+"/"+a.name, b.namespace+"/"+b.name)
+	})
+	i.logf("  waiting for the restarted pods...\n")
+	return i.waitRestarted(ctx, all, want, stamp, deadline, timeout)
+}
+
+// restartTargets stamps the pod template of t's Deployments with stamp,
+// records in want how many replicas each asks for, and returns their
+// namespace/name.
+func (i *Installer) restartTargets(ctx context.Context, t restartTarget, stamp string, want map[restartTarget]int) ([]string, error) {
+	patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`, RestartedAtAnnotation, stamp)
+	out, err := i.kubectl(ctx, "", "-n", t.namespace, "get", "deployment",
+		"-o", `jsonpath={range .items[*]}{.metadata.name}={.spec.replicas}{"\n"}{end}`)
+	if err != nil {
+		return nil, fmt.Errorf("%w: list %s's deployments: %w", ErrInstallFailed, t.namespace, err)
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		name, replicas, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || name == "" || (t.name != "" && name != t.name) {
+			continue
+		}
+		n, err := strconv.Atoi(replicas)
+		if err != nil {
+			n = 1
+		}
+		if _, err := i.kubectl(ctx, "", "-n", t.namespace, "patch", "deployment", name,
+			"--type", "merge", "-p", patch); err != nil {
+			return nil, fmt.Errorf("%w: restart %s/%s: %w", ErrInstallFailed, t.namespace, name, err)
+		}
+		want[restartTarget{namespace: t.namespace, name: name}] = n
+		names = append(names, t.namespace+"/"+name)
+	}
+	return names, nil
+}
+
+// waitRestarted waits until each of targets, a Deployment restartTargets
+// stamped, has the Ready pods want says. A target it did not find is
+// not waited for.
+func (i *Installer) waitRestarted(ctx context.Context, targets []restartTarget, want map[restartTarget]int,
+	stamp string, deadline time.Time, timeout time.Duration) error {
+	for _, t := range targets {
+		n, ok := want[t]
+		if !ok {
+			continue
+		}
+		for {
+			ready, err := i.restartedReady(ctx, t, stamp)
+			if err == nil && ready >= n {
+				break
+			}
+			if time.Now().After(deadline) {
+				if err == nil {
+					err = fmt.Errorf("%d of %d new pods Ready", ready, n)
+				}
+				return fmt.Errorf("%w: %s/%s did not become ready within %s: %w", ErrInstallFailed, t.namespace, t.name, timeout, err)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(knativeRestartEvery):
+			}
+		}
+	}
+	return nil
+}
+
+// restartedReady counts the pods of Deployment t from the template
+// restartTargets stamped that are Ready and not being deleted. A
+// Deployment's pods are named after it.
+func (i *Installer) restartedReady(ctx context.Context, t restartTarget, stamp string) (int, error) {
+	out, err := i.kubectl(ctx, "", "-n", t.namespace, "get", "pods", "-o",
+		`jsonpath={range .items[*]}{.metadata.name}|{.metadata.annotations.cloudburrow\.dev/restarted-at}|`+
+			`{.status.conditions[?(@.type=="Ready")].status}|{.metadata.deletionTimestamp}{"\n"}{end}`)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		parts := append(strings.Split(strings.TrimSpace(line), "|"), "")
+		rest, ok := strings.CutPrefix(parts[0], t.name+"-")
+		// <deployment>-<template hash>-<suffix>: not another
+		// Deployment's whose name extends this one's.
+		if ok && strings.Count(rest, "-") == 1 && len(parts) == 5 &&
+			parts[1] == stamp && parts[2] == "True" && parts[3] == "" {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // RevisionProgressDeadline is how long a new Cloud Run revision has to become

@@ -50,6 +50,18 @@ type LifecycleComponent struct {
 	// rather than Start (#1588).
 	knative       *knativeRun
 	knativeJoined bool
+	// restarted and serviceNetwork come from the cluster (#1610):
+	// whether this up started stopped nodes, and a wait for their
+	// Service network. Nil when unset, as in prefetch.
+	restarted      func() bool
+	serviceNetwork func(context.Context) error
+}
+
+// SetNodeRestart gives Knative's warm path the cluster's word on whether
+// this up started stopped nodes, and a wait for their Service network
+// (#1610).
+func (c *LifecycleComponent) SetNodeRestart(restarted func() bool, serviceNetwork func(context.Context) error) {
+	c.restarted, c.serviceNetwork = restarted, serviceNetwork
 }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
@@ -342,7 +354,7 @@ func (c *LifecycleComponent) ensureKnative(ctx context.Context) error {
 		// installed before they existed (#568). After stop and up the
 		// webhook that validates them is still coming back, so wait for
 		// Knative as an install does.
-		if err := c.installer.WaitKnative(ctx, c.timeout); err != nil {
+		if err := c.waitKnativeWarm(ctx); err != nil {
 			return err
 		}
 		return c.installer.ConfigureDeployment(ctx)
@@ -368,6 +380,30 @@ func (c *LifecycleComponent) ensureKnative(ctx context.Context) error {
 		return err
 	}
 	return cluster.WriteStamp(ctx, kubectl, cluster.Stamp{KnativeVersion: KnativeVersion})
+}
+
+// waitKnativeWarm waits for an installed Knative to serve.
+//
+// When this up started the cluster's stopped nodes, Knative's pods were
+// started with the node, before its Service network worked: they exit on
+// the kubernetes Service they cannot reach, and the kubelet's restart
+// backoff then held them back, so a warm start took 23 to 55 s (#1610).
+// Their Deployments' status is also the one from before the stop, so
+// "Available" answered at once while the webhook still refused calls.
+// Here the network is waited for, then Knative's pods are replaced by ones
+// started on it, and up waits for those: fresh pods with no backoff, and a
+// readiness that is this boot's.
+func (c *LifecycleComponent) waitKnativeWarm(ctx context.Context) error {
+	if c.restarted == nil || !c.restarted() {
+		return c.installer.WaitKnative(ctx, c.timeout)
+	}
+	if c.serviceNetwork != nil {
+		fmt.Fprintln(c.out, "  waiting for the cluster's Service network...")
+		if err := c.serviceNetwork(ctx); err != nil {
+			return fmt.Errorf("%w: %w", ErrInstallFailed, err)
+		}
+	}
+	return c.installer.RestartKnative(ctx, c.timeout)
 }
 
 // Installer exposes the underlying installer.
