@@ -30,7 +30,9 @@ import (
 // "ALTER_TABLE"), the rest UNVERIFIED. The schema checks the tables.patch
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 // path makes when it is sent (updateTable) are not made in a dry run. A
-// script with an ALTER TABLE in a dry run stays 501 (checkDDL).
+// script's dry run that stops at an ALTER TABLE checks it so too
+// (scriptdrystop.go, #1456); one reaching it in a block CloudBurrow does
+// not read for the stop stays 501 (checkDDL).
 
 // loneAlterTable returns the tokens of sql when it is one ALTER TABLE
 // statement, with no other statement or control flow.

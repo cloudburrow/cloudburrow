@@ -61,7 +61,8 @@ import (
 // starts, and the emulator runs a statement that does nothing in its
 // place; one inside a block, IF or loop is carried out in its turn, as a
 // statement of its own, by the front's run of the script (#1459), as are
-// the script's others then; in a dry run it is 501.
+// the script's others then; a dry run stops before an IF, FOR or WHILE
+// (scriptdrystop.go, #1456), and one in a block it reaches is 501.
 //
 // `region-REGION`.INFORMATION_SCHEMA.PROJECT_OPTIONS has a row per option
 // set on the project ("that differs from the default value"): the global

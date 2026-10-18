@@ -147,7 +147,12 @@ func icebergConfig(raw json.RawMessage) (uri string, ok bool, msg string) {
 		c.TableFormat = cmp.Or(c.TableFormat, "ICEBERG")
 	}
 	if c.TableFormat == "" && c.FileFormat == "" {
-		return "", false, "" // storage_uri alone, with no connection: kept (tableoptions.go)
+		// storage_uri alone, with no connection: kept (tableoptions.go).
+		// Google says "you must" give WITH CONNECTION and documents no
+		// answer without one: keeping it is the front's choice,
+		// UNVERIFIED, docs re-read 2026-10-17:
+		// https://docs.cloud.google.com/bigquery/docs/iceberg-tables
+		return "", false, ""
 	}
 	switch {
 	case !strings.EqualFold(c.TableFormat, "ICEBERG"):
