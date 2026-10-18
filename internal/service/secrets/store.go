@@ -767,6 +767,13 @@ func (s *Store) DeleteSecret(project, id string) error {
 
 // deleteSecret removes a secret and its versions. The caller holds s.mu.
 func (s *Store) deleteSecret(project, id string) error {
+	if bd, ok := s.db.(secretDeleter); ok {
+		// One request, however many versions the secret has (#1596).
+		if err := bd.DeleteSecretRecords(project, id); err != nil {
+			return apierror.Internal(err, "delete secret")
+		}
+		return s.deleteMounts(project, id)
+	}
 	keys, err := s.db.List(fmt.Sprintf("version/%s/%s/", project, id))
 	if err != nil {
 		return apierror.Internal(err, "list versions")
@@ -1082,6 +1089,12 @@ func (s *Store) scan(prefix string) (map[string][]byte, error) {
 	return out, nil
 }
 
+// secretDeleter is a store that removes a secret and its versions with one
+// request; KubeStore does, with one DeleteCollection.
+type secretDeleter interface {
+	DeleteSecretRecords(project, id string) error
+}
+
 // bulkDeleter is a store that removes every record with one request;
 // KubeStore does, with one DeleteCollection.
 type bulkDeleter interface{ DeleteAll() error }
@@ -1180,5 +1193,6 @@ func (s *Store) ResolveSecretRef(project, secret, version string) (secretName, d
 		defer s.mu.Unlock()
 		return s.resolveEncrypted(project, id, v)
 	}
-	return KubernetesSecretName(project, id), VersionKey(number), nil
+	// Each version is a Kubernetes Secret of its own (#1596).
+	return VersionSecretName(project, id, number), VersionKey(number), nil
 }
