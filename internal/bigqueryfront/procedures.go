@@ -40,7 +40,9 @@ package bigqueryfront
 // definitionBody, BEGIN ... END as written.
 //
 // Not carried out (501): a TEMP procedure, a procedure in another language
-// (WITH CONNECTION, LANGUAGE), and CALL in a query sent as a dry run.
+// (WITH CONNECTION, LANGUAGE), and CALL in a query sent as a dry run,
+// but for a script's that stops at the CALL before an ALTER TABLE, which
+// is checked as BigQuery's dry run checks it (#1612, scriptdrycall.go).
 
 import (
 	"encoding/json"

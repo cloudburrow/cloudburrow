@@ -24,50 +24,89 @@ import (
 // (the emulator's, scriptdryrun.go), and, when the stop is an ALTER TABLE,
 // that statement as a lone one's dry run checks it (altertabledry.go).
 // What follows the stop is not read. The job's statementType is SCRIPT,
-// as scriptdryrun.go answers a script's. The cases the docs leave out
-// (LOOP, REPEAT, CASE, a BEGIN block, CALL, EXECUTE IMMEDIATE, a labelled
-// statement, and CREATE TEMP TABLE, whose dry run "isn't supported") are
-// served as before.
+// as scriptdryrun.go answers a script's.
+//
+// The same section documents two more stops (#1612): "CALL statements:
+// the dry run validates that the called procedure exists and has a
+// signature matching the arguments provided. The content of the called
+// procedure and all statements after the CALL statement are not
+// validated", and "EXECUTE IMMEDIATE statements: the dry run validates the
+// query expression, but does not evaluate the dynamic query itself. All
+// statements following the EXECUTE IMMEDIATE statement are skipped". So a
+// script reaching an ALTER TABLE after a CALL of a procedure the front
+// keeps (procedures.go) stops at the CALL: the procedure must exist (404
+// notFound), be given as many arguments as it has (400), an OUT or INOUT
+// one a variable, and each argument must be of a type the argument's
+// coerces to, which the emulator's dry run checks, with the statements
+// before the CALL in scope, as IF(FALSE, CAST(NULL AS type), (argument))
+// (no common type fails it). One after an EXECUTE IMMEDIATE stops there:
+// its SQL expression, before INTO and USING, is checked so, as a STRING.
+// The messages of those refusals are CloudBurrow's own, UNVERIFIED: the
+// page gives none (docs re-read 2026-10-17,
+// https://docs.cloud.google.com/bigquery/docs/multi-statement-queries).
+// A CALL of a system procedure (BQ.*) is served as before.
+//
+// The cases the docs leave out (LOOP, REPEAT, CASE, a BEGIN block, a
+// labelled statement, and CREATE TEMP TABLE, whose dry run "isn't
+// supported") are served as before.
+
+// dryStop is where dryRunStop found a script's dry run stops.
+type dryStop struct {
+	prefix string  // the text validated before the stop
+	alter  []token // the ALTER TABLE the dry run stops at, validated
+	call   []token // the CALL it stops at (#1612)
+	exec   []token // the EXECUTE IMMEDIATE it stops at (#1612)
+}
 
 // dryRunStop reads sql, a script, up to where its dry run stops: prefix is
 // the text validated before the stop, alter the ALTER TABLE the dry run
 // stops at (nil when it stops at a control statement or at another DDL
-// statement, which prefix then ends with). ok is false when the script is
-// not one this answers (above), or nothing after the stop needs it: only
-// a script that reaches an ALTER TABLE or a nested ALTER PROJECT is.
-func dryRunStop(sql string) (prefix string, alter []token, ok bool) {
+// statement, which prefix then ends with), call or exec the CALL or
+// EXECUTE IMMEDIATE it stops at. ok is false when the script is not one
+// this answers (above), or nothing after the stop needs it: only a script
+// that reaches an ALTER TABLE or a nested ALTER PROJECT is.
+func dryRunStop(sql string) (stop dryStop, ok bool) {
 	toks, lexed := lex(sql)
 	if !lexed {
-		return "", nil, false
+		return dryStop{}, false
 	}
 	p := &scriptParser{toks: toks}
 	nodes := p.block()
 	if p.err != "" || len(nodes) < 2 {
-		return "", nil, false
+		return dryStop{}, false
 	}
+	var alter []token
 	end := 0 // the end of the last statement validated
 	rest := -1
 	for _, n := range nodes {
 		if n.label != "" {
-			return "", nil, false
+			return dryStop{}, false
 		}
 		switch n.kind {
 		case nodeIf, nodeWhile, nodeFor:
 			rest = end
+		case nodeCall:
+			if len(n.toks) < 2 || n.toks[1].is("BQ") {
+				return dryStop{}, false // a system procedure: as before
+			}
+			stop.call, rest = n.toks, n.toks[len(n.toks)-1].end
 		case nodeStmt, nodeDeclare, nodeSet:
 			if len(n.toks) == 0 {
-				return "", nil, false
+				return dryStop{}, false
 			}
 			first := n.toks[0]
 			switch {
 			case first.is("EXECUTE"):
-				return "", nil, false
+				if len(n.toks) < 3 || !n.toks[1].is("IMMEDIATE") {
+					return dryStop{}, false
+				}
+				stop.exec, rest = n.toks, n.toks[len(n.toks)-1].end
 			case isAlterTable(n.toks):
 				alter, rest = n.toks, n.toks[len(n.toks)-1].end
 			case first.is("CREATE") || first.is("DROP") || first.is("ALTER") || first.is("UNDROP") ||
 				first.is("TRUNCATE"):
 				if _, temp := createsTemp(n.toks); temp {
-					return "", nil, false
+					return dryStop{}, false
 				}
 				end = n.toks[len(n.toks)-1].end
 				rest = end
@@ -75,19 +114,20 @@ func dryRunStop(sql string) (prefix string, alter []token, ok bool) {
 				end = n.toks[len(n.toks)-1].end
 			}
 		default:
-			return "", nil, false
+			return dryStop{}, false
 		}
 		if rest >= 0 {
 			break
 		}
 	}
 	if rest < 0 {
-		return "", nil, false
+		return dryStop{}, false
 	}
 	if alter == nil && !altersAfter(sql[rest:]) {
-		return "", nil, false
+		return dryStop{}, false
 	}
-	return strings.TrimSpace(sql[:end]), alter, true
+	stop.prefix, stop.alter = strings.TrimSpace(sql[:end]), alter
+	return stop, true
 }
 
 // altersAfter reports whether text has an ALTER TABLE, ALTER PROJECT or
@@ -108,11 +148,17 @@ func altersAfter(text string) bool {
 // dryRunUntilStop answers q, a dry run, when dryRunStop reads it, and
 // reports whether it did.
 func (f front) dryRunUntilStop(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
-	prefix, alter, ok := dryRunStop(q.Query)
+	stop, ok := dryRunStop(q.Query)
 	if !ok {
 		return false
 	}
+	prefix, alter := stop.prefix, stop.alter
 	client := jobText{query: q.Query}
+	orig, err := readBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", err.Error())
+		return true
+	}
 	text := prefix
 	if text == "" {
 		text = "SELECT 1" // nothing before the ALTER TABLE: a statement that reads nothing
@@ -136,6 +182,10 @@ func (f front) dryRunUntilStop(w http.ResponseWriter, r *http.Request, q queryOp
 	}
 	if msg, failed := queryFailure(rec, resp); failed {
 		writeError(w, http.StatusBadRequest, "invalidQuery", msg)
+		return true
+	}
+	if code, reason, msg := f.dryCallOrExecute(r, q, insert, orig, stop); code != 0 { // #1612, scriptdrycall.go
+		writeError(w, code, reason, msg)
 		return true
 	}
 	if alter != nil {
