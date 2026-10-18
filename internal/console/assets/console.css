@@ -739,7 +739,12 @@ td a { color: var(--accent); }
   border: 1px solid var(--field-border); border-radius: var(--radius);
 }
 .form-row textarea { resize: vertical; min-height: 96px; }
-.form-help { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--text-muted); }
+/* A resource-name pattern in a hint (projects/PROJECT/locations/...) is one
+   unbreakable word, which ran 176px past a 320px window (#1604). */
+.form-help { margin: 4px 0 0; font-size: var(--text-caption-size); color: var(--text-muted); overflow-wrap: anywhere; }
+/* A scope picker's options are full resource names; a select is as wide as
+   its longest, so it shrinks to the card instead (#1604). */
+.scope-picker select { max-width: 100%; min-width: 0; }
 .form-error {
   margin: 0 0 16px; padding: 10px 12px;
   background: color-mix(in srgb, var(--error) 12%, transparent);
@@ -1334,7 +1339,9 @@ thead th {
 /* Drawn as inline SVG rather than with a library: the assets ship as they are
    written, which is what makes "no external CDN after installation" true by
    construction rather than by a bundler nobody checks. */
-.charts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+/* min(): a 320px column is wider than the content box of a 320px window, so
+   at that width (WCAG 1.4.10) each chart ran 41px past it (#1604). */
+.charts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 .chart-card {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 16px 20px 12px;

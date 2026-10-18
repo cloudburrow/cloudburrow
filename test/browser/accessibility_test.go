@@ -34,7 +34,8 @@ import (
 //   - pages reflow at 320 CSS pixels, which is also 1280px at 400% zoom, and
 //     at 200% zoom of a 1280px window (TestReflowAt320pxAnd200PercentZoom).
 //
-// The BigQuery screens are served only by the emulators shard's instance, so
+// The other products' screens are accessibility_services_test.go's. The
+// BigQuery screens are served only by the emulators shard's instance, so
 // their names and contrast are TestBigQueryScreensAreNamedAndLegible.
 
 // a11yFixture is one project holding a bucket with an object, a topic with
@@ -562,8 +563,18 @@ func TestReducedMotionStopsMotion(t *testing.T) {
 	p.run(reducedMotion())
 	for _, pg := range f.pages() {
 		p.show(pg)
-		var moving []string
-		p.eval(`(() => {
+		for _, m := range p.motionFailures() {
+			t.Errorf("%s: under reduced motion, %s", pg.name, m)
+		}
+	}
+}
+
+// motionFailures describes every element of the page as it is that runs an
+// animation or a transition longer than a frame.
+func (p *tab) motionFailures() []string {
+	p.t.Helper()
+	var moving []string
+	p.eval(`(() => {
 			const long = (v) => v.split(",").some((d) => parseFloat(d) * (d.trim().endsWith("ms") ? 1 : 1000) > 20);
 			const out = new Set();
 			for (const el of document.querySelectorAll("*")) {
@@ -576,10 +587,7 @@ func TestReducedMotionStopsMotion(t *testing.T) {
 			}
 			return [...out].slice(0, 20);
 		})()`, &moving)
-		for _, m := range moving {
-			t.Errorf("%s: under reduced motion, %s", pg.name, m)
-		}
-	}
+	return moving
 }
 
 // TestReflowAt320pxAnd200PercentZoom: at 320 CSS pixels wide (WCAG 1.4.10:
@@ -594,41 +602,80 @@ func TestReflowAt320pxAnd200PercentZoom(t *testing.T) {
 			p.run(chromedp.EmulateViewport(width, 720), reducedMotion())
 			for _, pg := range f.pages() {
 				p.show(pg)
-				var r struct {
-					Scroll, Client float64
-					Wide           []string
-				}
-				p.eval(`(() => {
-					const doc = document.scrollingElement, vw = document.documentElement.clientWidth;
-					const wide = new Set();
-					for (const el of document.querySelectorAll("#view *, .toolbar *, .modal *, .panel *")) {
-						if (el.closest(".table-wrap, [hidden], pre, .code, .terminal-drawer, .sr-only")) continue;
-						const s = getComputedStyle(el);
-						if (s.display === "none" || s.visibility !== "visible" || s.position === "fixed" && el.closest(".nav-scrim")) continue;
-						const b = el.getBoundingClientRect();
-						if (b.width === 0 || b.height === 0) continue;
-						if (b.right > vw + 1 || b.left < -1) {
-							let clipped = false;
-							for (let a = el.parentElement; a; a = a.parentElement) {
-								const o = getComputedStyle(a).overflowX;
-								if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") { clipped = true; break; }
-							}
-							if (!clipped) wide.add(el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") +
-								(typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\s+/).join(".") : "") +
-								" " + Math.round(b.left) + ".." + Math.round(b.right));
-						}
-					}
-					return { Scroll: doc.scrollWidth, Client: doc.clientWidth, Wide: [...wide].slice(0, 10) };
-				})()`, &r)
-				if r.Scroll > r.Client {
-					t.Errorf("%s at %dpx: the page scrolls sideways (%v wide in %v)", pg.name, width, r.Scroll, r.Client)
-				}
-				for _, w := range r.Wide {
-					t.Errorf("%s at %dpx: past the viewport: %s", pg.name, width, w)
+				for _, fl := range p.reflowFailures() {
+					t.Errorf("%s at %dpx: %s", pg.name, width, fl)
 				}
 			}
 		})
 	}
+}
+
+// reflowFailures says whether the page as it is scrolls sideways, and names
+// what but a table's own region is wider than the viewport.
+func (p *tab) reflowFailures() []string {
+	p.t.Helper()
+	var r struct {
+		Scroll, Client float64
+		Wide           []string
+	}
+	p.eval(`(() => {
+		const doc = document.scrollingElement, vw = document.documentElement.clientWidth;
+		const wide = new Set();
+		for (const el of document.querySelectorAll("#view *, .toolbar *, .modal *, .panel *")) {
+			if (el.closest(".table-wrap, [hidden], pre, .code, .terminal-drawer, .sr-only")) continue;
+			const s = getComputedStyle(el);
+			if (s.display === "none" || s.visibility !== "visible" || s.position === "fixed" && el.closest(".nav-scrim")) continue;
+			const b = el.getBoundingClientRect();
+			if (b.width === 0 || b.height === 0) continue;
+			if (b.right > vw + 1 || b.left < -1) {
+				let clipped = false;
+				for (let a = el.parentElement; a; a = a.parentElement) {
+					const o = getComputedStyle(a).overflowX;
+					if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") { clipped = true; break; }
+				}
+				if (!clipped) wide.add(el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") +
+					(typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\s+/).join(".") : "") +
+					" " + Math.round(b.left) + ".." + Math.round(b.right));
+			}
+		}
+		// What widens a page that scrolls sideways when none of the above
+		// does: the outermost element past the viewport, wherever it is.
+		if (doc.scrollWidth > doc.clientWidth && wide.size === 0) {
+			for (const el of document.querySelectorAll("body *")) {
+				const b = el.getBoundingClientRect();
+				if (b.right <= vw + 1 || el.closest("[hidden]")) continue;
+				let clipped = false;
+				for (let a = el.parentElement; a; a = a.parentElement) {
+					const o = getComputedStyle(a).overflowX;
+					if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") { clipped = true; break; }
+				}
+				if (clipped) continue;
+				wide.add(el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") +
+					(typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\s+/).join(".") : "") +
+					" " + Math.round(b.left) + ".." + Math.round(b.right));
+				if (wide.size >= 3) break;
+			}
+			// Or text running out of a box that itself fits.
+			const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+			for (let t = walker.nextNode(); t && wide.size < 3; t = walker.nextNode()) {
+				if (!t.textContent.trim() || !t.parentElement || t.parentElement.closest("[hidden]")) continue;
+				const range = document.createRange(); range.selectNodeContents(t);
+				const b = range.getBoundingClientRect();
+				if (b.right > vw + 1) wide.add("text " + JSON.stringify(t.textContent.trim().slice(0, 40)) + " in " +
+					t.parentElement.tagName.toLowerCase() + (t.parentElement.className ? "." + String(t.parentElement.className).trim().split(/\s+/).join(".") : "") +
+					" " + Math.round(b.left) + ".." + Math.round(b.right));
+			}
+		}
+		return { Scroll: doc.scrollWidth, Client: doc.clientWidth, Wide: [...wide].slice(0, 10) };
+	})()`, &r)
+	var out []string
+	if r.Scroll > r.Client {
+		out = append(out, fmt.Sprintf("the page scrolls sideways (%v wide in %v)", r.Scroll, r.Client))
+	}
+	for _, w := range r.Wide {
+		out = append(out, "past the viewport: "+w)
+	}
+	return out
 }
 
 // TestBigQueryScreensAreNamedAndLegible: the BigQuery datasets list, a

@@ -429,7 +429,27 @@ measures rendered pages in headless Chrome: the Cloud Storage, Pub/Sub, Logs
 Explorer, Activity, Request Log and Connect screens with their create forms,
 delete dialog, row menu, info panel, search and toolbar panels in the storage
 shard, and the BigQuery datasets, dataset, query editor, Create table and Job
-history screens in the emulators shard.
+history screens in the emulators shard. The rest of the console is audited by
+`test/browser/accessibility_services_test.go`, which runs every check below
+(names and table headers, contrast in both themes, a Tab walk of each page and
+the dialog of each page that opens one, reduced motion, and reflow at 320 and
+640px) over every list screen and its create form, in the shard whose
+instance serves it: `TestCloudRunAndCICDScreensMeetWCAG` (run: Cloud Run's
+services, jobs, worker pools, instances and builds, Cloud Functions, Artifact
+Registry, Cloud Build, Secure Source Manager, whose pages carry Developer
+Connect, Cloud KMS and Cloud Logging's admin screens),
+`TestCloudSQLAndBackupDRScreensMeetWCAG` (sql), `TestSpannerAndTheEmulatorScreensMeetWCAG`
+(emulators: Spanner, Bigtable, Firestore, Datastore, Memorystore) and
+`TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG` (storage, whose
+instance serves Secret Manager, Cloud Scheduler and Cloud Tasks: also
+Resource Manager, IAM, APIs & Services, Kubernetes Engine, the Vertex AI and
+local AI pages, Monitoring, Fault injection, Instance and Cloud Storage's
+other pages). It found, and these were fixed: a create form's unset optional
+choice was an unnamed blank option (now "None"); a resource-name pattern in a
+field's hint (`projects/PROJECT/locations/…`) ran 176px past a 320px window, as
+did the Log router's and Logs Storage's scope picker (106px) and every
+Monitoring chart (41px, a 320px minimum column); and the Local models table
+had no scrolling region of its own, so the page scrolled at 640px.
 
 - [x] Every control reachable by keyboard, in a sensible order. Table rows are inspectable with Enter or Space, which was mouse-only. `TestKeyboardAloneWalksAPageAndCreatesATopic` tags every visible, enabled control on the Pub/Sub topics list, presses Tab until focus comes back round, and fails on any control never reached, any stop with no focus indicator drawn or off screen, and a trap; then it creates a topic with the keyboard alone. It found the first Tab on every page but the dashboard skipping the skip link and the whole toolbar: the drawer revealed the current product with `scrollIntoView`, which in Chrome also moves the sequential focus starting point. The drawer now scrolls its own list instead.
 - [x] A visible focus indicator on every focusable element. The global `:focus-visible` rule draws a 2px accent ring, and `TestOutlineSuppressionHasAFocusVisibleRule` enumerates every selector that sets `outline: none` and fails unless a later `:focus-visible` rule for the same selector draws one back. The sweep found three that did not: the toolbar search field (whose `:focus` rule outranked the global ring, so it had none), `main` and the info panel. The ring's contrast against every surface it sits on is in `TestTokensMeetContrast`. This is a rule-level check; the browser suite (#594, part 1) is what will see the rendered ring.

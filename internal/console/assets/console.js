@@ -4372,7 +4372,9 @@ function buildCreateForm(spec) {
       ? el("textarea", { id, name: f.name, rows: isMap ? "4" : "5", required: f.required })
       : isSelect
       ? el("select", { id, name: f.name, required: f.required },
-          ...(f.options || []).map((o) => el("option", { value: o, text: o })))
+          // An empty option (an optional choice left unset) is named, so
+          // it is not read as a blank item (#1604).
+          ...(f.options || []).map((o) => el("option", { value: o, text: o || "None" })))
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
@@ -8631,11 +8633,13 @@ async function renderLocalModels(view) {
   setChildren(view, header(),
     el("div", { class: "card" }, el("p", { class: "unavailable", text: status.note })),
     message,
-    el("table", { id: "local-models" },
+    // In a region of its own that scrolls, so at 320px it is the table that
+    // scrolls sideways rather than the page (#1604).
+    el("div", { class: "table-wrap" }, el("table", { id: "local-models" },
       el("thead", {}, el("tr", {},
         el("th", { text: "Model" }), el("th", { text: "Modality" }), el("th", { text: "Size" }),
         el("th", { text: "Download state" }), el("th", { text: "Runtime" }), el("th", { text: "Actions" }))),
-      el("tbody", {}, ...rows)));
+      el("tbody", {}, ...rows))));
 
   if (status.models.some((m) => m.state === "downloading")) {
     LOCAL_MODELS_POLL = setTimeout(() => {
