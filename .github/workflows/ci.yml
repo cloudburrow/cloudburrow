@@ -800,7 +800,6 @@ jobs:
                 for line in "${PENV[@]}"; do export "${line?}"; done
               }
               ( probe_vars; go test -tags=compat -count=1 -v -run "$PROBE_RUN" ./test/compat/ ) | tee probe.log || true
-              cat probe.log >> restart.log
               # A flaky restart probe is re-run once with the same environment
               # (#566); a pass then counts, and the retry is named in the log.
               if grep -q -- '^--- FAIL: ' probe.log; then
@@ -811,19 +810,26 @@ jobs:
                   probe_vars
                   retry_flaky probe.log go test -tags=compat -count=1 -v ./test/compat/
                 ) || true
-                grep -- '^RETRIED:\|^--- ' probe.log | tail -n +1 >> restart.log
               fi
+              # Once per run, the retry's lines with it: appended both before
+              # and after the retry, a test that passed counted twice, and
+              # the count below named it instead of the one that failed (#1636).
+              cat probe.log >> restart.log
               ./bin/cloudburrow stop "${CB[@]}" "$@"
             }
             probe present
             probe absent --mode ephemeral
+            # Each probe passes once per restart, exactly: every test that
+            # did not is named, with its count.
+            bad=
             for t in $PROBE_TESTS; do
               # The test's own PASS line, not its subtests' indented ones
               # (TestMemorystoreClustersAcrossRestart has five, so an
               # unanchored count gave 12).
-              grep -c -- "^--- PASS: $t " restart.log | grep -qx 2 ||
-                { echo "the $t restart probe did not pass twice"; exit 1; }
+              n=$(grep -c -- "^--- PASS: $t " restart.log || true)
+              [ "$n" = 2 ] || bad+=" $t (passed $n times)"
             done
+            [ -z "$bad" ] || { echo "restart probes that did not pass once after each restart:$bad"; exit 1; }
             # Storage's probe is its own setup too: at setup, after the
             # persistent restart and after the ephemeral one.
             if [ "$SHARD" = storage ]; then

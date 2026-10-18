@@ -257,9 +257,18 @@ func (a *Admin) save() error {
 
 // ResetState forgets every database, index, field override, schedule,
 // operation, backup and user's credentials, and clears the state directory
-// (`cloudburrow reset`, #1514). The emulator's documents are not touched.
+// (`cloudburrow reset`, #1514). The emulator's documents are not touched,
+// so the databases that hold them stay seen (#1636): the documents' export
+// (documents.go) and a project's purge (purge.go) still reach them. A
+// database the reset forgets would otherwise have its documents left out
+// of every later export, and lost at the next `stop` and `up`.
 func (a *Admin) ResetState() error {
 	a.mu.Lock()
+	for n := range a.databases {
+		if db := databaseOf(n); db == n {
+			a.seen[db] = true
+		}
+	}
 	a.databases = map[string]*adminpb.Database{}
 	a.seeded = map[string]bool{}
 	a.indexes = map[string]*adminpb.Index{}
@@ -269,7 +278,6 @@ func (a *Admin) ResetState() error {
 	a.opOrder = nil
 	a.backups = map[string]*backup{}
 	a.lastBackup = map[string]time.Time{}
-	a.seen = map[string]bool{}
 	a.userCreds = map[string]*creds{}
 	st := a.state
 	a.mu.Unlock()
