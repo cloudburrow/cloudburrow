@@ -436,7 +436,7 @@ jobs:
         run: |
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
 
-  # The compatibility suite runs as five shards and an acceptance shard,
+  # The compatibility suite runs as six shards and an acceptance shard,
   # each an instance with only its services and only their CLOUDBURROW_TEST_*
   # variables exported (#565). What each shard starts and runs is in
   # scripts/compat-shards.sh, sourced here and by scripts/verify-local.sh,
@@ -459,7 +459,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, emulators, sql, acceptance]
+        shard: [storage, served, run, emulators, memorystore, sql, acceptance]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -484,7 +484,7 @@ jobs:
       # given credentials. 88 MB and a few seconds to unpack, so it is not
       # cached: restoring the unpacked 460 MB would take longer.
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'sql'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -680,7 +680,11 @@ jobs:
             set +e
             # 60m: the emulators shard passed 25m in main run 38910752877 and 45m
             # in 38946612957 (about 490 tests; Cloud SQL and Backup and DR took the
-            # most), before they moved to the sql shard (#1472).
+            # most), before they moved to the sql shard (#1472), and outgrew 60m
+            # again in 39068203270 (3,593 s, half of it Memorystore's), before
+            # Memorystore moved to the memorystore shard (#1568): each is now
+            # about 30 minutes. The job's timeout-minutes, 90, leaves the build,
+            # the probes and the browser suite their half hour beside it.
             go test -tags=compat -timeout 60m -v ./test/compat/... | tee compat.log
             rc=$?
             set -e
@@ -711,10 +715,11 @@ jobs:
 
           # The flags naming this instance, one per line, for the console
           # browser step below, which brings it up again (#594): in the
-          # storage shard, and in the run, emulators and sql shards for the
-          # screens only their instances serve (#700, #854, #1472).
+          # storage shard, and in the run, emulators, memorystore and sql
+          # shards for the screens only their instances serve (#700, #854,
+          # #1472, #1568).
           case "$SHARD" in
-            storage|run|emulators|sql) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|run|emulators|memorystore|sql) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -833,11 +838,12 @@ jobs:
       # BigQuery, Firestore, Datastore, Spanner and Bigtable screens only by
       # the emulators shard's, so TestBigQuery*, TestFirestore*,
       # TestDatastore*, TestSpanner* and TestBigtable* run there (#854,
-      # #1198); and the Cloud SQL screens only by the sql shard's, so
+      # #1198); the Memorystore screens only by the memorystore shard's, so
+      # TestMemorystore* run there (#1568); and the Cloud SQL screens only by the sql shard's, so
       # TestCloudSQL* run there (#868, #995, #1472). Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'sql'
+        if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -871,7 +877,9 @@ jobs:
           # #1198); the
           # other shards run neither.
           BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
-          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+          # The memorystore shard's read back through the Memorystore admin API.
+          if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
           if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
@@ -883,20 +891,22 @@ jobs:
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
-          # The run, emulators and sql shards' tests, and the rest for the
+          # The run, emulators, memorystore and sql shards' tests, and the rest for the
           # storage shard, from the file scripts/verify-local.sh reads too
           # (#705).
           # shellcheck source=scripts/compat-shards.sh
           . scripts/compat-shards.sh
           RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
           EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
+          MEMORYSTORE_SHARD_TESTS=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS
           SQL_SHARD_TESTS=$COMPAT_BROWSER_SQL_SHARD_TESTS
           NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
           case "$SHARD" in
             run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
             emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
+            memorystore) SELECT=(-run "$MEMORYSTORE_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$MEMORYSTORE_SHARD_TESTS") ;;
             sql) SELECT=(-run "$SQL_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SQL_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$SQL_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$SQL_SHARD_TESTS") ;;
+            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS") ;;
           esac
           rc=0
           go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
@@ -909,7 +919,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'sql')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
@@ -980,7 +990,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run emulators sql; do
+          for shard in storage served run emulators memorystore sql; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.

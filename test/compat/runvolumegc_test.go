@@ -124,6 +124,7 @@ func deleteService(t *testing.T, ctx context.Context, c *run.ServicesClient, nam
 // names, and deleting that one removes it.
 func TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	h.Endpoint(EnvRun)
 	sc := storageClient(t, h)
 	kubectl := volumeKubectl(t)

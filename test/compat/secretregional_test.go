@@ -37,6 +37,7 @@ func regionalParent(h *Harness) string { return "projects/" + h.Project() + "/lo
 // is deleted.
 func TestSecretManagerRegionalSecrets(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	ctx := h.Context()
 	clients := map[string]*secretmanager.Client{"grpc": secretsClient(t, h), "rest": secretsRESTClient(t, h)}
 	kc := kmsClients(t, h)["grpc"]
@@ -179,6 +180,7 @@ func TestSecretManagerRegionalSecrets(t *testing.T) {
 // deletes it.
 func TestGcloudRegionalSecrets(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	h.Endpoint(EnvSecrets)
 	keys := cmekKeys(t, h, kmsClients(t, h)["grpc"], "us-central1")
 	g := newGcloudSession(t, h)
@@ -216,6 +218,7 @@ func TestGcloudRegionalSecrets(t *testing.T) {
 // member's role) and plan clean, and destroy.
 func TestTerraformRegionalSecret(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	sm := secretsClient(t, h)
 	keys := cmekKeys(t, h, kmsClients(t, h)["grpc"], "us-central1")
 	m := newTFModule(t)

@@ -1053,11 +1053,19 @@ func (c *clusters) do(ctx context.Context, r *clusterRecord, n *clusterNode, arg
 }
 
 // meet introduces every node of others to via, then waits until every one
-// knows them all.
+// knows them all by their IDs. cluster_known_nodes alone is not enough: it
+// counts a node still in its handshake, under a random ID, so a CLUSTER
+// REPLICATE sent then fails "ERR Unknown node" (#1568).
 func (c *clusters) meet(ctx context.Context, r *clusterRecord, via *clusterNode, others []*clusterNode) error {
 	for _, n := range others {
 		if err := c.do(ctx, r, via, "CLUSTER", "MEET", n.podIP, n.port, clusterBusPort); err != nil {
 			return err
+		}
+	}
+	ids := make([]string, 0, len(r.Nodes))
+	for _, n := range r.Nodes {
+		if n.id != "" {
+			ids = append(ids, n.id)
 		}
 	}
 	return c.until(ctx, "every node to know the others", func() bool {
@@ -1065,13 +1073,41 @@ func (c *clusters) meet(ctx context.Context, r *clusterRecord, via *clusterNode,
 		for _, n := range r.Nodes {
 			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			got := known(ctx, cl, "cluster_known_nodes")
+			ok := got == strconv.Itoa(want)
+			if ok {
+				v, err := cl.Do(ctx, "CLUSTER", "NODES")
+				ok = err == nil && knowsAll(fmt.Sprint(v), ids)
+			}
 			cl.Close()
-			if got != strconv.Itoa(want) {
+			if !ok {
 				return false
 			}
 		}
 		return true
 	})
+}
+
+// knowsAll reports whether a CLUSTER NODES reply lists every one of ids
+// with its handshake done: a line of its own whose flags name neither
+// handshake nor noaddr.
+func knowsAll(nodes string, ids []string) bool {
+	done := map[string]bool{}
+	for _, line := range strings.Split(nodes, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		flags := "," + f[2] + ","
+		if !strings.Contains(flags, ",handshake,") && !strings.Contains(flags, ",noaddr,") {
+			done[f[0]] = true
+		}
+	}
+	for _, id := range ids {
+		if !done[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // replicate makes each replica of these a replica of its shard's primary,
@@ -1104,16 +1140,31 @@ func (c *clusters) replicate(ctx context.Context, r *clusterRecord, these, all [
 	return nil
 }
 
-// settle waits until every node says the cluster is ok, and every replica
-// is linked to its primary.
+// settle waits until every node says the cluster is ok, every replica is
+// linked to its primary, and every primary counts its shard's replicas
+// online: a primary that does not yet answers a slot move's CLUSTER SETSLOT
+// with NOREPLICAS (Valkey 8 replicates it and waits for the replicas, #1568).
 func (c *clusters) settle(ctx context.Context, r *clusterRecord, nodes []*clusterNode) error {
+	replicas := map[int]int{}
+	for _, n := range r.Nodes {
+		if !n.Primary {
+			replicas[n.Shard]++
+		}
+	}
 	return c.until(ctx, "cluster_state:ok on every node", func() bool {
 		for _, n := range r.Nodes {
 			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			ok := r.standalone() || known(ctx, cl, "cluster_state") == "ok"
-			if ok && !n.Primary {
+			if ok && (!n.Primary || replicas[n.Shard] > 0) {
 				info, err := cl.Do(ctx, "INFO", "replication")
-				ok = err == nil && clusterInfoField(fmt.Sprint(info), "master_link_status") == "up"
+				switch {
+				case err != nil:
+					ok = false
+				case n.Primary:
+					ok = onlineReplicas(fmt.Sprint(info)) >= replicas[n.Shard]
+				default:
+					ok = clusterInfoField(fmt.Sprint(info), "master_link_status") == "up"
+				}
 			}
 			cl.Close()
 			if !ok {
@@ -1122,6 +1173,19 @@ func (c *clusters) settle(ctx context.Context, r *clusterRecord, nodes []*cluste
 		}
 		return true
 	})
+}
+
+// onlineReplicas counts a primary's INFO replication slaveN lines in state
+// online.
+func onlineReplicas(info string) int {
+	n := 0
+	for _, line := range strings.Split(info, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && strings.HasPrefix(k, "slave") && strings.Contains(","+v+",", ",state=online,") {
+			n++
+		}
+	}
+	return n
 }
 
 // known is a CLUSTER INFO field.
@@ -1160,11 +1224,16 @@ func (c *clusters) until(ctx context.Context, what string, cond func() bool) err
 // moveSlots moves slots, keys and all, from src to dst: IMPORTING on dst,
 // MIGRATING on src, MIGRATE of every key, then NODE on both, as
 // redis-cli --cluster reshard does, each step pipelined over the slots.
+//
+// Valkey 8 replicates each CLUSTER SETSLOT to the node's replicas and
+// holds the client until they acknowledge it, so one connection's pipeline
+// of thousands of SETSLOTs is one replica round trip per slot: more than a
+// minute on a loaded CI runner (run 39038657629). The SETSLOT steps are
+// spread over setslotConns connections instead, whose blocked commands one
+// acknowledgement releases together.
 func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *clusterNode, slots []int) error {
 	s := c.dial(src.addr, r.password(), r.TransitCA)
 	defer s.Close()
-	d := c.dial(dst.addr, r.password(), r.TransitCA)
-	defer d.Close()
 	each := func(f func(slot int) []any) [][]any {
 		out := make([][]any, len(slots))
 		for i, slot := range slots {
@@ -1172,10 +1241,10 @@ func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *cl
 		}
 		return out
 	}
-	if _, err := d.Pipe(ctx, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "IMPORTING", src.id} })); err != nil {
+	if err := c.setslots(ctx, r, dst, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "IMPORTING", src.id} })); err != nil {
 		return fmt.Errorf("importing on %s: %w", dst.Server, err)
 	}
-	if _, err := s.Pipe(ctx, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "MIGRATING", dst.id} })); err != nil {
+	if err := c.setslots(ctx, r, src, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "MIGRATING", dst.id} })); err != nil {
 		return fmt.Errorf("migrating on %s: %w", src.Server, err)
 	}
 	counts, err := s.Pipe(ctx, each(func(slot int) []any { return []any{"CLUSTER", "COUNTKEYSINSLOT", slot} }))
@@ -1207,13 +1276,51 @@ func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *cl
 		}
 	}
 	node := each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "NODE", dst.id} })
-	if _, err := d.Pipe(ctx, node); err != nil {
+	if err := c.setslots(ctx, r, dst, node); err != nil {
 		return fmt.Errorf("slots to %s: %w", dst.Server, err)
 	}
-	if _, err := s.Pipe(ctx, node); err != nil {
+	if err := c.setslots(ctx, r, src, node); err != nil {
 		return fmt.Errorf("slots off %s: %w", src.Server, err)
 	}
 	return nil
+}
+
+// setslotConns is how many connections setslots spreads its commands over.
+const setslotConns = 32
+
+// setslots runs cmds, CLUSTER SETSLOTs of distinct slots, on n, pipelined
+// over up to setslotConns connections at once (see moveSlots); their
+// order across slots does not matter.
+func (c *clusters) setslots(ctx context.Context, r *clusterRecord, n *clusterNode, cmds [][]any) error {
+	conns := min(setslotConns, len(cmds))
+	errs := make([]error, conns)
+	var wg sync.WaitGroup
+	for i := range conns {
+		lo, hi := i*len(cmds)/conns, (i+1)*len(cmds)/conns
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cl := c.dial(n.addr, r.password(), r.TransitCA)
+			defer cl.Close()
+			// NOREPLICAS: Valkey 8 replicates a SETSLOT and waits for the
+			// node's replicas, briefly; on a loaded machine they can miss
+			// that wait. A SETSLOT is idempotent, so the batch runs again
+			// until the move's deadline (#1568).
+			for {
+				_, errs[i] = cl.Pipe(ctx, cmds[lo:hi])
+				if errs[i] == nil || !strings.Contains(errs[i].Error(), "NOREPLICAS") || ctx.Err() != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(500 * time.Millisecond):
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // ownedSlots reads which primary serves each slot, by node ID, from via.

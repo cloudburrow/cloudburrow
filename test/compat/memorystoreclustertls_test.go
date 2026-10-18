@@ -71,11 +71,7 @@ func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 			_ = op.Wait(wctx)
 		}
 	})
-	// A CI runner takes longer than h.Context()'s minute to start a
-	// TLS cluster (main's run 39049056201), so the wait has its own.
-	wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	cl, err := op.Wait(wctx)
+	cl, err := op.Wait(memorystoreWait(t))
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -151,11 +147,7 @@ func TestMemorystoreValkeyInTransitEncryption(t *testing.T) {
 				_ = op.Wait(wctx)
 			}
 		})
-		// Longer than h.Context()'s minute on a CI runner (main's run
-		// 39049056201), so the wait has its own.
-		wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		inst, err := op.Wait(wctx)
+		inst, err := op.Wait(memorystoreWait(t))
 		if err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", id, err)
 		}

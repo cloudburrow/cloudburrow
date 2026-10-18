@@ -229,6 +229,7 @@ output "ca" {
 // key, the second plan is empty, and destroy removes it.
 func TestTerraformRedisCustomerManagedKey(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	c, _ := memorystoreAdminClient(t, h)
 	m := newTFModule(t)
 	ctx := h.Context()

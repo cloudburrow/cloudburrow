@@ -27,6 +27,7 @@ import (
 // the job runs again.
 func TestRunMountsASecretUnderACustomerManagedKey(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	kc := kmsClients(t, h)["grpc"]
 	sc := secretsClient(t, h)
 	jc, _ := runJobClients(t, h)

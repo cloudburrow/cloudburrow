@@ -81,7 +81,10 @@ type Admin struct {
 	h   Hierarchy // folders and the organization, or nil (#1395)
 	db  store.Store
 	now func() time.Time
-	ops int // operations answered, for unique names (#1292)
+	// clock is the Logging clock (Server.clock), nil for now; guarded by
+	// copies.mu (analytics.go logNow, #1602).
+	clock func() time.Time
+	ops   int // operations answered, for unique names (#1292)
 	// copies are the CopyLogEntries operations (copy.go, #1394).
 	copies copies
 	// linked makes and fills links' BigQuery datasets (analytics.go,

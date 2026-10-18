@@ -59,10 +59,29 @@ func (n fakeValkeyNode) Do(_ context.Context, args ...any) (any, error) {
 		n.f.mu.Lock()
 		defer n.f.mu.Unlock()
 		return fmt.Sprintf("cluster_state:ok\r\ncluster_known_nodes:%d\r\n", len(n.f.running)), nil
+	case strings.HasPrefix(cmd, "CLUSTERNODES"):
+		// Every running node, its ID its address (CLUSTER MYID), its
+		// handshake done (#1568).
+		n.f.mu.Lock()
+		defer n.f.mu.Unlock()
+		var b strings.Builder
+		for _, addr := range n.f.running {
+			fmt.Fprintf(&b, "%s %s@16379 master - 0 0 1 connected\n", addr, addr)
+		}
+		return b.String(), nil
 	case strings.HasPrefix(cmd, "INFOPERSISTENCE"):
 		return "rdb_bgsave_in_progress:0\r\nrdb_last_bgsave_status:ok\r\n", nil
 	case strings.HasPrefix(cmd, "INFO"):
-		return "role:slave\r\nmaster_link_status:up\r\n", nil
+		// A replica's link up, and as a primary every running node a
+		// replica online, as many as any shard has (#1568).
+		n.f.mu.Lock()
+		defer n.f.mu.Unlock()
+		var b strings.Builder
+		b.WriteString("role:slave\r\nmaster_link_status:up\r\n")
+		for i := range len(n.f.running) {
+			fmt.Fprintf(&b, "slave%d:ip=10.0.0.1,port=6379,state=online,offset=0,lag=0\r\n", i)
+		}
+		return b.String(), nil
 	case strings.HasPrefix(cmd, "CLUSTERSHARDS"):
 		return []any{}, nil
 	}

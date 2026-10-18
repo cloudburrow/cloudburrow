@@ -244,6 +244,8 @@ func TestKMSEkmConnectionsAreStored(t *testing.T) {
 // covers: google.cloud.kms.v1.Autokey/CreateKeyHandle, google.cloud.kms.v1.Autokey/GetKeyHandle, google.cloud.kms.v1.Autokey/ListKeyHandles
 func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 	h := New(t)
+	h.Endpoint(EnvKMS)
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	// KMS first: without it the test skips before it makes a folder.
 	cleanupAdmin := kmsAdminClient(t, h)
