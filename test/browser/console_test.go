@@ -491,12 +491,35 @@ func (p *tab) eval(js string, out any, opts ...chromedp.EvaluateOption) {
 }
 
 // waitFor polls a JavaScript expression until it is true.
+//
+// A poll started just after a navigation can be handed the document's
+// previous execution context, which Chrome has already replaced: it then
+// fails at once with "Cannot find context with specified id" (#1607), a
+// race in the harness rather than an answer from the page. The poll is
+// started again in the new context, within the same 30 seconds.
 func (p *tab) waitFor(expr string) {
 	p.t.Helper()
-	var ok bool
-	if err := chromedp.Run(p.ctx, chromedp.Poll(expr, &ok, chromedp.WithPollingTimeout(30*time.Second))); err != nil || !ok {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var ok bool
+		err := chromedp.Run(p.ctx, chromedp.Poll(expr, &ok, chromedp.WithPollingTimeout(time.Until(deadline))))
+		if err == nil && ok {
+			return
+		}
+		if err != nil && contextReplaced(err) && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
 		p.t.Fatalf("waiting for %s: %v", strings.Join(strings.Fields(expr), " "), err)
 	}
+}
+
+// contextReplaced reports whether err is Chrome refusing an evaluation in an
+// execution context a navigation has just replaced.
+func contextReplaced(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "Cannot find context with specified id") ||
+		strings.Contains(msg, "Execution context was destroyed")
 }
 
 // tabTo presses Tab until the focused element, bound to a, satisfies pred.
