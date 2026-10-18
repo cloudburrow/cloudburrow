@@ -485,6 +485,7 @@ func TestConsoleCloudSQLUsersMatchTheAdminAPI(t *testing.T) {
 	}
 	for _, pg := range pages {
 		t.Run(pg.instance, func(t *testing.T) {
+			h := h.For(t)
 			act := func(action string, values map[string]string) {
 				t.Helper()
 				body, _ := json.Marshal(map[string]any{"Path": []string{"cloudburrow"}, "Action": action, "Values": values})

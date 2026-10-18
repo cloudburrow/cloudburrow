@@ -103,6 +103,7 @@ func TestCloudSQLPointInTimeRecovery(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			h := h.For(t)
 			bc := &sqladmin.BackupConfiguration{Enabled: true, StartTime: "03:00"}
 			if c.version == "POSTGRES_17" {
 				bc.PointInTimeRecoveryEnabled = true
@@ -273,6 +274,7 @@ func TestCloudSQLPointInTimeRetention(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			h := h.For(t)
 			bc := &sqladmin.BackupConfiguration{Enabled: true, StartTime: "03:00", TransactionLogRetentionDays: 1,
 				BackupRetentionSettings: &sqladmin.BackupRetentionSettings{RetentionUnit: "COUNT", RetainedBackups: 2}}
 			if c.version == "POSTGRES_17" {

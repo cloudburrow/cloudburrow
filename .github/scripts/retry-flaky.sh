@@ -20,7 +20,7 @@ retry_flaky() {  # <log> <command...>: re-runs the allow-listed failures in <log
   # entry is taken off once 20 consecutive CI runs on main have passed with
   # no retry of it, counted from the ::warning:: annotations; a test is never
   # added without an entry in that doc section.
-  local allow='^Test(MemorystoreAcrossRestart|SpannerStateDoesNotSurviveARestart|HostEndpointSurvivesABackendRestart|DatastoreSurvivesAPodRestart|DatastoreAcrossRestart)$'
+  local allow='^Test(MemorystoreAcrossRestart|SpannerStateDoesNotSurviveARestart|HostEndpointSurvivesABackendRestart|DatastoreSurvivesAPodRestart|DatastoreAcrossRestart|FirestoreSurvivesAPodRestart|FirestoreAfterTheEmulatorIsKilled)$'
   local failed retry
   failed=$(grep -- '^--- FAIL: ' "$log" | awk '{print $3}' | sort -u)
   if [ -z "$failed" ]; then

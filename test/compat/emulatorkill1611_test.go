@@ -91,10 +91,15 @@ func killEmulator(t *testing.T, kc func(context.Context, ...string) ([]byte, err
 	}
 }
 
+// firestoreExportWait is longer than the Firestore front's export
+// interval (components.FirestoreExportInterval, #1615).
+const firestoreExportWait = 35 * time.Second
+
 // TestFirestoreAfterTheEmulatorIsKilled (#1611): when the Firestore
 // emulator's JVM ends as it does on OutOfMemoryError, its container
-// restarts empty, in either --mode, since the emulator keeps documents in
-// memory alone: every document is gone. What the Firestore Admin API
+// restarts empty, in either --mode, and the front imports the documents
+// it last exported (#1615): what was written an export interval before
+// the kill is back, and only what came after may be lost. What the Firestore Admin API
 // keeps is the front's, on the pod's emptyDir, and survives: a named
 // database, its composite index, its backup schedule and the backup it
 // took, which restores the documents into a new database. A listener the
@@ -173,21 +178,35 @@ func TestFirestoreAfterTheEmulatorIsKilled(t *testing.T) {
 		}
 	}()
 
+	// The front exports the documents every 30 seconds while calls write
+	// (#1615): what was written before the last export is kept, and only
+	// what came after it may be lost.
+	time.Sleep(firestoreExportWait)
+	late := fc.Collection("killed1611").Doc("late")
+	if _, err := late.Set(ctx, map[string]any{"v": "after the last export"}); err != nil {
+		t.Fatal(err)
+	}
+
 	killEmulator(t, kc, "firestore")
 
-	// The documents were the emulator's memory: gone, in every database.
+	var got *firestore.DocumentSnapshot
 	var gerr error
 	for deadline := time.Now().Add(time.Minute); ; time.Sleep(time.Second) {
-		_, gerr = doc.Get(ctx)
+		got, gerr = doc.Get(ctx)
 		if status.Code(gerr) != codes.Unavailable || time.Now().After(deadline) {
 			break
 		}
 	}
-	if status.Code(gerr) != codes.NotFound {
-		t.Errorf("a document written before the emulator was killed: Get = %v; want NOT_FOUND (the emulator keeps documents in memory)", gerr)
+	if gerr != nil || got.Data()["v"] != "before" {
+		t.Errorf("a document written an export interval before the emulator was killed: Get = %v, %v; want it kept (#1615)", got, gerr)
 	}
-	if docs, err := dc.Collection("kept").Documents(ctx).GetAll(); err != nil || len(docs) != 0 {
-		t.Errorf("the named database after the kill holds %d documents, %v; want none", len(docs), err)
+	if docs, err := dc.Collection("kept").Documents(ctx).GetAll(); err != nil || len(docs) != 3 {
+		t.Errorf("the named database after the kill holds %d documents, %v; want its 3", len(docs), err)
+	}
+	if _, err := late.Get(ctx); status.Code(err) == codes.NotFound {
+		t.Logf("the document written after the last export was lost, as documented")
+	} else {
+		t.Logf("the document written after the last export: %v (kept when an export ran before the kill)", err)
 	}
 
 	// What the front keeps is still there.

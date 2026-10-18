@@ -344,6 +344,9 @@ func replicaSetup(spec sqladmin.Spec) string {
 	case ext != nil && ext.Physical:
 		// Restored from an XtraBackup backup (#1570, sqlphysical.go).
 		return mysqlPhysicalSetup
+	case spec.Seeded:
+		// A former primary a switchover made a replica (#1614) has its data.
+		return "export CLOUDSQL_SEEDED=1\n" + mysqlReplicaSetup
 	case ext != nil && (ext.DumpFile != "" || ext.Demoted):
 		return "export CLOUDSQL_SEEDED=1\n" + mysqlReplicaSetup
 	}

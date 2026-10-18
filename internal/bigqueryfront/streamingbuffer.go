@@ -37,10 +37,11 @@ import (
 // Measured first, after the engine kept each row's ingestion time (#1277):
 // a streamed row read its partition's _PARTITIONTIME at once.
 //
-// So the front streams a row of an ingestion-time partitioned table into a
-// scratch table of the table's schema (the emulator's insertAll, with its
-// checks and insertErrors), then moves it into the table with
-// _PARTITIONTIME NULL, and keeps a buffer window per table: the partition
+// So the front streams a row of an ingestion-time partitioned table into
+// the table with _PARTITIONTIME NULL (the emulator's insertAll, with its
+// checks and insertErrors, given the pseudo-columns by
+// streamColumnsHeader, #1624; through a scratch table before), and keeps a
+// buffer window per table: the partition
 // its rows go to (the decorator's, or the time of the first row truncated
 // to the table's unit), the time of its oldest row and how many it holds.
 // The window flushes streamBufferFor after its oldest row, before the
@@ -91,8 +92,8 @@ import (
 // flush. So every table made by tables.insert has the engine pseudo-column
 // _PARTITION_STREAMED TIMESTAMP (googlesqlite patch 0030, bigquery-emulator
 // patch 0018), NULL on every row but a streamed one, whose time the front
-// gives it: every insertAll of a table goes through a scratch table as an
-// ingestion-time partitioned table's does (streamIngestion). The front
+// gives it: every insertAll of a table gives it, as an ingestion-time
+// partitioned table's gives _PARTITIONTIME (streamIngestion). The front
 // keeps each table's last stream time (recent), so DML of a table not
 // streamed to in 30 minutes reads nothing more, and bufferedChange counts
 // the rows the statement would change among those streamed within
@@ -450,11 +451,214 @@ func streamTarget(m partitionMeta, dec, name string, now time.Time) (time.Time, 
 }
 
 // streamIngestion carries out tabledata.insertAll of out, the request's
-// body as it is to be forwarded, into the ingestion-time partitioned
-// table base (with m) of dataset, partition dec ("" for now's), and
-// answers rec as the emulator would have (above). It reports false when
-// it answered w with a refusal.
+// body as it is to be forwarded, into the table base (with m) of dataset,
+// partition dec ("" for now's), and answers rec as the emulator would have
+// (above). It reports false when it answered w with a refusal.
+//
+// The engine's insertAll gives the rows their stream time and their place
+// in the streaming buffer itself, as the request's StreamColumnsHeader
+// names them (bigquery-emulator patch 0081, #1624). The front streamed
+// every row through a scratch table, whose DROP rebuilt the engine's whole
+// catalog: a 10-row insert took 115 ms p50 in a project of 150 datasets of
+// three tables, and 42 ms in an empty one. A row of a table partitioned
+// by a column whose value the front cannot read as a time still goes
+// through a scratch table (streamThroughScratch), whose INSERT ... SELECT
+// reads it as the engine does.
 func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, base, dec string, m partitionMeta,
+	out []byte, rec *recorder) bool {
+	project := projectOf(f.base)
+	name := project + ":" + dataset + "." + base
+	if dec != "" {
+		name += "$" + dec
+	}
+	now := f.buffers.clock()
+	plain := m.TimePartitioning == nil && m.RangePartitioning == nil
+	column := !m.ingestion()
+	var target time.Time
+	if !column && !plain {
+		var code int
+		var msg string
+		if target, code, msg = streamTarget(m, dec, name, now); code != 0 {
+			writeError(w, code, reasonOf(code, "invalid"), msg)
+			return false
+		}
+	}
+	cols := map[string]any{streamedAt: now.Format(time.RFC3339Nano)}
+	unit := ""
+	switch {
+	case plain:
+	case !column:
+		unit = m.ingestionUnit()
+		cols["_PARTITIONTIME"] = nil
+		if unit == "DAY" {
+			cols["_PARTITIONDATE"] = nil
+		}
+	default:
+		marks, ok := bufferedMarks(m, out, now)
+		if !ok {
+			return f.streamThroughScratch(w, r, dataset, base, dec, m, out, rec)
+		}
+		cols[bufferedRows] = marks
+	}
+	// A window for another partition flushes first (above).
+	key := streamKey(project, dataset, base)
+	f.buffers.mu.Lock()
+	old, had := f.buffers.wins[key]
+	var flush *streamWindow
+	if !plain && had && !old.Target.Equal(target) {
+		flush = old
+		delete(f.buffers.wins, key)
+	}
+	f.buffers.mu.Unlock()
+	if flush != nil {
+		if why := f.flushWindow(r, *flush); why != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not flush the streaming buffer: "+why)
+			return false
+		}
+	}
+	path := tablePath(dataset, base) + "/insertAll"
+	status, got := f.sendStreamed(r, path, out, cols)
+	stamped := true
+	if status != http.StatusOK && bytes.Contains(got, []byte(streamedAt)) {
+		// A table with no stream time (above): its rows are held only
+		// while in the buffer.
+		delete(cols, streamedAt)
+		stamped = false
+		status, got = f.sendStreamed(r, path, out, cols)
+	}
+	if status != http.StatusOK && column && !plain && bytes.Contains(got, []byte(bufferedRows)) {
+		// A table made before the engine marked the buffer (above): its
+		// rows are partitioned at once, as they were.
+		status, got = f.sendStreamed(r, path, out, nil)
+		rec.status = status
+		rec.body.Reset()
+		rec.body.Write(got)
+		rec.Header().Set("Content-Type", "application/json")
+		return true
+	}
+	if status != http.StatusOK && bytes.Contains(got, []byte("OUT_OF_RANGE")) {
+		// A value the table's NUMERIC or BIGNUMERIC column refuses
+		// (#1401): the client's error, not one to retry.
+		writeError(w, http.StatusBadRequest, "invalid", engineMessage(got))
+		return false
+	}
+	rec.status = status
+	rec.body.Reset()
+	rec.body.Write(got)
+	rec.Header().Set("Content-Type", "application/json")
+	if status != http.StatusOK {
+		return true
+	}
+	var sent struct {
+		Rows []json.RawMessage `json:"rows"`
+	}
+	var answer insertResponse
+	if json.Unmarshal(out, &sent) != nil || json.Unmarshal(got, &answer) != nil {
+		return true
+	}
+	n := int64(len(sent.Rows) - len(answer.InsertErrors))
+	if n <= 0 {
+		return true
+	}
+	if stamped {
+		f.buffers.streamed(project, dataset, base, now)
+	}
+	if plain {
+		return true
+	}
+	f.buffers.mu.Lock()
+	if f.buffers.wins == nil {
+		f.buffers.wins = map[string]*streamWindow{}
+	}
+	if cur, ok := f.buffers.wins[key]; ok && cur.Target.Equal(target) {
+		cur.Rows += n
+	} else {
+		f.buffers.wins[key] = &streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: unit,
+			Target: target, Oldest: now, Rows: n, Column: column}
+	}
+	f.buffers.saveLocked()
+	f.buffers.mu.Unlock()
+	return true
+}
+
+// streamColumnsHeader is the header of the engine's tabledata.insertAll
+// that names the pseudo-columns it gives the rows (bigquery-emulator patch
+// 0081): a JSON object of each name to its value, or to a list of one per
+// row.
+const streamColumnsHeader = "X-Cloudburrow-Stream-Columns"
+
+// sendStreamed sends tabledata.insertAll of body to path on the engine,
+// its rows given cols (streamColumnsHeader), none when nil.
+func (f front) sendStreamed(r *http.Request, path string, body []byte, cols map[string]any) (int, []byte) {
+	var header http.Header
+	if len(cols) > 0 {
+		b, err := json.Marshal(cols)
+		if err != nil {
+			return http.StatusInternalServerError, []byte(err.Error())
+		}
+		header = http.Header{streamColumnsHeader: {string(b)}}
+	}
+	return f.sendHeader(r, http.MethodPost, path, body, header)
+}
+
+// engineMessage is the message of got, the engine's error answer, or got.
+func engineMessage(got []byte) string {
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(got, &e) == nil && e.Error.Message != "" {
+		return e.Error.Message
+	}
+	return strings.TrimSpace(string(got))
+}
+
+// bufferedMarks is the value of _PARTITION_BUFFERED of each row of out,
+// the body of a tabledata.insertAll into m, partitioned by a column,
+// streamed now: bufferedMark, read in Go. It reports false when it cannot
+// read a row's value of the column as a time.
+func bufferedMarks(m partitionMeta, out []byte, now time.Time) ([]bool, bool) {
+	var body struct {
+		Rows []struct {
+			JSON map[string]any `json:"json"`
+		} `json:"rows"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	dec.UseNumber()
+	if dec.Decode(&body) != nil {
+		return nil, false
+	}
+	marks := make([]bool, len(body.Rows))
+	tp := m.TimePartitioning
+	for i, row := range body.Rows {
+		marks[i] = true
+		if tp == nil || tp.Field == "" || tp.Type != "" && !strings.EqualFold(tp.Type, "DAY") {
+			continue
+		}
+		var v any
+		for k, x := range row.JSON {
+			if strings.EqualFold(k, tp.Field) {
+				v = x
+			}
+		}
+		if v == nil {
+			continue // IF(NULL >= ...) is the else branch, TRUE
+		}
+		t, ok := streamTime(v)
+		if !ok {
+			return nil, false
+		}
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		marks[i] = t.Before(today.AddDate(0, 0, -7)) || !t.Before(today.AddDate(0, 0, 4))
+	}
+	return marks, true
+}
+
+// streamThroughScratch is streamIngestion through a scratch table of the
+// table's schema: the rows go into it, then into the table by INSERT ...
+// SELECT, which gives them their pseudo-columns (above).
+func (f front) streamThroughScratch(w http.ResponseWriter, r *http.Request, dataset, base, dec string, m partitionMeta,
 	out []byte, rec *recorder) bool {
 	project := projectOf(f.base)
 	name := project + ":" + dataset + "." + base
@@ -641,27 +845,8 @@ func streamBounds(m partitionMeta, v any, now time.Time) string {
 	if tp == nil || tp.Field == "" {
 		return ""
 	}
-	var t time.Time
-	switch x := v.(type) {
-	case string:
-		ok := false
-		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999",
-			"2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999 MST", "2006-01-02"} {
-			if p, err := time.Parse(layout, x); err == nil {
-				t, ok = p, true
-				break
-			}
-		}
-		if !ok {
-			return ""
-		}
-	case json.Number:
-		sec, err := x.Float64()
-		if err != nil {
-			return ""
-		}
-		t = time.Unix(0, int64(sec*1e9))
-	default:
+	t, ok := streamTime(v)
+	if !ok {
 		return ""
 	}
 	if t.Before(now.AddDate(-10, 0, 0)) || t.After(now.AddDate(1, 0, 0)) {
@@ -670,6 +855,30 @@ func streamBounds(m partitionMeta, v any, now time.Time) string {
 		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
 	}
 	return ""
+}
+
+// streamTime reads v, a streamed row's value of a DATE, DATETIME or
+// TIMESTAMP column, as a time, one with no zone in UTC, as TIMESTAMP() of
+// it reads it; it reports false for a value it does not read.
+func streamTime(v any) (time.Time, bool) {
+	switch x := v.(type) {
+	case string:
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999",
+			"2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999 MST", "2006-01-02"} {
+			if p, err := time.Parse(layout, x); err == nil {
+				return p, true
+			}
+		}
+	case json.Number:
+		sec, err := x.Float64()
+		if err != nil {
+			return time.Time{}, false
+		}
+		return time.Unix(0, int64(sec*1e9)), true
+	case float64:
+		return time.Unix(0, int64(x*1e9)), true
+	}
+	return time.Time{}, false
 }
 
 // plainTable is whether got, a table's tables.get answer, is a table (not

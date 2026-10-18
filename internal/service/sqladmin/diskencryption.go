@@ -192,3 +192,70 @@ func (s *Server) keyBlocksConnections(name string) error {
 	}
 	return nil
 }
+
+// backupReencryptionWhy is why reencrypt's backupReencryptionConfig is
+// refused.
+const backupReencryptionWhy = "an instance's backups here are not encrypted with its customer-managed key (a backup records no kmsKeyVersion), " +
+	"so there is no backup to re-encrypt; send no backupReencryptionConfig and the instance itself is re-encrypted (docs/cloudsql.md)"
+
+// reencrypt is instances.reencrypt (#1614), gcloud sql instances
+// reencrypt: "Reencrypt CMEK instance with latest key version". The
+// instance's data key is unwrapped and wrapped again by its CryptoKey's
+// primary version, which becomes diskEncryptionStatus.kmsKeyVersionName, so
+// the version that wrapped it before can be disabled or destroyed without
+// suspending the instance. The server keeps running: only the key's wrapping
+// changes.
+func (s *Server) reencrypt(r *http.Request, base, project string, e Engine) (any, error) {
+	name := e.Instance()
+	c, err := s.createdFor(project, name, "instances.reencrypt")
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		BackupReencryptionConfig *json.RawMessage `json:"backupReencryptionConfig"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if body.BackupReencryptionConfig != nil && string(*body.BackupReencryptionConfig) != "null" &&
+		string(*body.BackupReencryptionConfig) != "{}" {
+		return nil, unimplemented("reencrypt's backupReencryptionConfig", backupReencryptionWhy)
+	}
+	s.emu.RLock()
+	spec, state, k := c.spec, c.state, s.kms
+	s.emu.RUnlock()
+	if spec.KMSKey == "" {
+		// UNVERIFIED (docs re-read 2026-10-18: <https://docs.cloud.google.com/sql/docs/mysql/admin-api/rest/v1/instances/reencrypt>):
+		// Google documents no error for an instance without a key; this 400 and its message are CloudBurrow's.
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance %s is not encrypted with a customer-managed encryption key "+
+			"(it has no diskEncryptionConfiguration.kmsKeyName), so it cannot be re-encrypted.", name)
+	}
+	if state != "RUNNABLE" {
+		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", state)
+	}
+	if k == nil {
+		return nil, s.keyUsableWith(nil, spec)
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	dek, err := k.Decrypt(ctx, spec.KMSKey, spec.WrappedKey)
+	if err != nil {
+		return nil, keyError(spec.KMSKey, fmt.Errorf("instance %s: %w", name, err))
+	}
+	wrapped, version, err := k.Encrypt(ctx, spec.KMSKey, dek)
+	if err != nil {
+		return nil, keyError(spec.KMSKey, err)
+	}
+	s.emu.Lock()
+	if c.spec.KMSKey != spec.KMSKey || string(c.spec.WrappedKey) != string(spec.WrappedKey) {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress on instance %s.", name)
+	}
+	c.spec.KMSKeyVersion, c.spec.WrappedKey = version, wrapped
+	err = s.saveLocked()
+	s.emu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return s.done(base, project, e, "REENCRYPT", name), nil
+}

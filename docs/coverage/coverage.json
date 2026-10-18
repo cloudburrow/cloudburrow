@@ -2714,21 +2714,21 @@
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:257 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:257 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:257 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
       },
@@ -2736,7 +2736,7 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:257 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2744,14 +2744,14 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:257 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:257 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2979,6 +2979,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
@@ -3572,6 +3573,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_test.go:328 TestKMSPrimaryMustBeEnabled",
           "test/compat/kms_test.go:47 TestKMSResources"
@@ -5208,6 +5210,8 @@
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
+          "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
+          "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystoreclustertls_test.go:131 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
@@ -5310,6 +5314,7 @@
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
+          "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
@@ -5392,6 +5397,7 @@
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
+          "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
@@ -7592,7 +7598,9 @@
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorepersist1615_test.go:147 TestFirestoreAcrossRestart",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -7616,6 +7624,7 @@
         "tests": [
           "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -7638,7 +7647,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestorepipeline_test.go:48 TestFirestorePipelines",
-          "test/compat/firestorepipelinemore_test.go:28 TestFirestorePipelinesMore"
+          "test/compat/firestorepipelinemore_test.go:28 TestFirestorePipelinesMore",
+          "test/compat/firestorepipelinesub_test.go:25 TestFirestorePipelineSubqueries"
         ]
       },
       {
@@ -7667,7 +7677,7 @@
         "method": "google.firestore.v1.Firestore/Listen",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoremethods_test.go:247 TestFirestoreSnapshotListener"
         ]
       },
@@ -7752,7 +7762,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart"
         ]
       },
       {
@@ -7840,7 +7851,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminBackupSchedules",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
@@ -7851,8 +7862,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorepersist1615_test.go:147 TestFirestoreAcrossRestart",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
@@ -7868,7 +7881,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
@@ -7900,7 +7913,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
@@ -7947,7 +7960,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
@@ -8002,7 +8015,7 @@
         "method": "google.datastore.v1.Datastore/Commit",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:262 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
@@ -8012,7 +8025,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
-          "test/compat/emulatorkill1611_test.go:262 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
@@ -10323,8 +10336,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 17,
-      "Verified": 63
+      "Unimplemented": 15,
+      "Verified": 65
     },
     "rows": [
       {
@@ -10374,7 +10387,7 @@
         "method": "sql.backupRuns.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups"
         ]
       },
@@ -10382,7 +10395,7 @@
         "method": "sql.backupRuns.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups"
         ]
       },
@@ -10390,10 +10403,10 @@
         "method": "sql.backupRuns.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
+          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention"
         ]
       },
       {
@@ -10401,9 +10414,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
       },
@@ -10462,6 +10475,7 @@
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
@@ -10482,6 +10496,7 @@
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
@@ -10498,7 +10513,7 @@
         "method": "sql.databases.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
@@ -10508,7 +10523,7 @@
         "method": "sql.databases.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
@@ -10519,7 +10534,7 @@
         "method": "sql.databases.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
@@ -10630,8 +10645,8 @@
         "tests": [
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
-          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary"
         ]
@@ -10651,19 +10666,22 @@
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
-          "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:231 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
-          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
+          "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
+          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
@@ -10720,7 +10738,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
@@ -10731,23 +10749,26 @@
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
-          "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:231 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlpitrrestore_test.go:33 TestCloudSQLPointInTimeRestoreFromBackupDR",
           "test/compat/cloudsqlpitrrestore_test.go:74 TestGcloudSQLPointInTimeRestoreRefused",
-          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
-          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
+          "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
+          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -10786,21 +10807,24 @@
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
-          "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:231 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
-          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
-          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
+          "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
+          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -10818,7 +10842,7 @@
         "tests": [
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
-          "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:231 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
@@ -10841,11 +10865,13 @@
           "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
@@ -10881,18 +10907,18 @@
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
-          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
         "method": "sql.instances.reencrypt",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:306 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): an instance's data is not encrypted with a customer-managed Cloud KMS key (diskEncryptionConfiguration is not applied to its server's volume), so there is no key version to re-encrypt it with"
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt"
+        ]
       },
       {
         "method": "sql.instances.releaseSsrsLease",
@@ -10914,7 +10940,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
-          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt"
         ]
       },
       {
@@ -10923,7 +10950,7 @@
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
         ]
@@ -10951,11 +10978,11 @@
       },
       {
         "method": "sql.instances.switchover",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:306 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): switchover swaps the primary with the cross-region disaster recovery replica of an Enterprise Plus replication cluster, which needs a second region, and CloudBurrow serves one; promoteReplica and a REGIONAL instance's failover are served instead"
+          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover"
+        ]
       },
       {
         "method": "sql.instances.truncateLog",
@@ -10986,7 +11013,7 @@
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
-          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
@@ -10996,16 +11023,18 @@
           "test/compat/cloudsqlfields_test.go:148 TestTerraformSQLDatabaseInstanceEncryptionKey",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
-          "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:231 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:258 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",
@@ -11034,7 +11063,7 @@
         "method": "sql.projects.instances.getLatestRecoveryTime",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/terraform_batch12_sql_test.go:426 TestTerraformSQLLatestRecoveryTime"
         ]

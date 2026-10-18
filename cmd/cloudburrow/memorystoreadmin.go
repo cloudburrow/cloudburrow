@@ -224,11 +224,15 @@ type memorystoreProvisioner struct {
 
 	mu      sync.Mutex
 	tunnels map[string]*netfwd.Forwarder
+	// roleServices are the role Services applied, by base, and their port
+	// (#1614).
+	roleServices map[string]int
 }
 
 func newMemorystoreProvisioner(cfg config.Config, bg context.Context) *memorystoreProvisioner {
 	return &memorystoreProvisioner{cfg: cfg, bg: bg, ready: make(chan struct{}), tunnels: map[string]*netfwd.Forwarder{},
-		installer: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
+		roleServices: map[string]int{},
+		installer:    &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
 }
 
 // waitCluster returns once the server `up` runs is reachable through its
@@ -332,7 +336,18 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		// with a certificate of the cluster's CA for the host's address,
 		// where clients reach the node, and the node's Service.
 		ns := p.cfg.Cluster.Namespace
-		names := []string{p.cfg.BindAddress, spec.Server + "." + ns, spec.Server + "." + ns + ".svc", spec.Server + "." + ns + ".svc.cluster.local"}
+		services := []string{spec.Server}
+		if spec.PortName == redisadmin.ValkeyPortName {
+			// A CLUSTER_DISABLED node is also reached at its instance's
+			// role Services (#1614): a secondary of cross-instance
+			// replication replicates the primary Service.
+			base := memorystoreNodeNumber.ReplaceAllString(spec.Server, "")
+			services = append(services, base+"-primary", base+"-reader")
+		}
+		names := []string{p.cfg.BindAddress}
+		for _, n := range services {
+			names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
+		}
 		files, err := redisadmin.ServerTLS(spec, time.Now(), names...)
 		if err != nil {
 			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
@@ -341,7 +356,7 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		settings.TLSCert, settings.TLSKey, settings.TLSCA, settings.TLSPort = files.Cert, files.Key, files.CA, port
 	}
 	b := components.MemorystoreServerOf(settings)
-	b.Port = port
+	b.Port, b.PortName = port, spec.PortName
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", "", 0, err
 	}
@@ -365,6 +380,10 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	return f.HostAddr(), strings.TrimSpace(ip), port, nil
 }
 
+// memorystoreNodeNumber ends a Memorystore for Valkey node's server name
+// (redisadmin.ValkeyServerBase).
+var memorystoreNodeNumber = regexp.MustCompile(`-[0-9]+$`)
+
 // memorystoreNodeSuffix ends a Standard tier node's server name.
 var memorystoreNodeSuffix = regexp.MustCompile(`-n[0-9]+$`)
 
@@ -384,6 +403,63 @@ func (p *memorystoreProvisioner) Route(ctx context.Context, service, node string
 		return ctx.Err()
 	}
 	return p.installer.Apply(ctx, components.MemorystorePrimaryService(service, node, p.cfg.Cluster.Namespace, p.cfg.Name, port))
+}
+
+var _ redisadmin.RoleRouter = (*memorystoreProvisioner)(nil)
+
+// NodeHost is where the other nodes of a Memorystore for Valkey instance
+// reach server in the cluster: its Service, which follows its pod
+// (#1614).
+func (p *memorystoreProvisioner) NodeHost(server string) string {
+	return server + "." + p.cfg.Cluster.Namespace + ".svc.cluster.local"
+}
+
+// Roles labels each node's pod of a CLUSTER_DISABLED Memorystore for
+// Valkey instance with its role, and applies the instance's primary and
+// reader Services, which select by it (#1614). A pod started again has
+// no role until it is labelled again.
+func (p *memorystoreProvisioner) Roles(ctx context.Context, base string, roles map[string]string, port int) error {
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	ns := p.cfg.Cluster.Namespace
+	for server, role := range roles {
+		if _, err := p.installer.Kubectl(ctx, "-n", ns, "label", "pods", "-l", "app="+server, "--overwrite",
+			components.MemorystoreOfLabel+"="+base, components.MemorystoreRoleLabel+"="+role); err != nil {
+			return fmt.Errorf("label %s %s: %w", server, role, err)
+		}
+	}
+	p.mu.Lock()
+	applied := p.roleServices[base] == port
+	p.mu.Unlock()
+	if applied {
+		return nil
+	}
+	if err := p.installer.Apply(ctx, components.MemorystoreRoleServices(base, ns, p.cfg.Name, redisadmin.ValkeyPortName, port)); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.roleServices[base] = port
+	p.mu.Unlock()
+	return nil
+}
+
+// RemoveRoles deletes a Memorystore for Valkey instance's primary and
+// reader Services (#1614).
+func (p *memorystoreProvisioner) RemoveRoles(ctx context.Context, base string) error {
+	p.mu.Lock()
+	delete(p.roleServices, base)
+	p.mu.Unlock()
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	_, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "delete", "service/"+base+"-primary", "service/"+base+"-reader",
+		"--ignore-not-found", "--wait=false")
+	return err
 }
 
 // Exec runs argv in the server's container, with stdin: the file copies

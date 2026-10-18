@@ -155,7 +155,12 @@ func (s Service) Persistence() Persistence {
 		// Its on-disk store is on a volume in persistent mode, and a pod
 		// restart and a stop/up were measured to keep an entity (#307).
 		return PersistenceVolume
-	case ServiceFirestore, ServiceBigtable, ServiceSpanner, ServiceBigQuery:
+	case ServiceFirestore:
+		// The emulator is in-memory, but its front exports the documents
+		// to a volume in persistent mode and imports them when the
+		// emulator starts (#1615).
+		return PersistenceVolume
+	case ServiceBigtable, ServiceSpanner, ServiceBigQuery:
 		// Every one of these emulators is in-memory. Google documents them as
 		// such, so provisioning a volume would imply durability they do not
 		// have.
@@ -620,6 +625,12 @@ type Config struct {
 	// collects it so lazily that a soak read its growth as a leak.
 	EmulatorHeapMiB int `json:"emulatorHeapMiB"`
 
+	// BigQueryHeapMiB is the BigQuery emulator's GOMEMLIMIT, in MiB, and
+	// sizes its container's memory request (#1618). 0 sets neither: the Go
+	// runtime then lets the heap run to several times its live size between
+	// collections, which a soak read as growth.
+	BigQueryHeapMiB int `json:"bigQueryHeapMiB"`
+
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.
@@ -734,6 +745,7 @@ func Default() Config {
 		HookTimeout:     Duration(5 * time.Minute),
 		LogLevel:        "info",
 		EmulatorHeapMiB: DefaultEmulatorHeapMiB,
+		BigQueryHeapMiB: DefaultBigQueryHeapMiB,
 	}
 }
 
@@ -746,7 +758,18 @@ func Default() Config {
 // twice that.
 const DefaultEmulatorHeapMiB = 1024
 
-// MinEmulatorHeapMiB and MaxEmulatorHeapMiB bound EmulatorHeapMiB when it
+// DefaultBigQueryHeapMiB is the BigQuery emulator's default GOMEMLIMIT
+// (#1618). Measured on a standalone emulator in a loop of jobs.query: with
+// no limit 6,300 queries took it to 2.3 GB, of which an idle collection
+// returned 0.7 GB, and under 300 MiB 4,500 queries held it at 281 MB, so
+// its live heap was under that; the 90-minute soak's container reached
+// 318 MiB unbounded. 512 MiB is about twice the live heap measured, so a
+// larger table does not make it collect continuously, and the limit is
+// soft: past it the runtime collects more often, it never fails.
+const DefaultBigQueryHeapMiB = 512
+
+// MinEmulatorHeapMiB and MaxEmulatorHeapMiB bound EmulatorHeapMiB (and
+// BigQueryHeapMiB) when it
 // is not 0: below 128 MiB the emulators fail under the soak's load, and
 // above 16 GiB it is no longer a bound on a developer's machine.
 const (
@@ -963,6 +986,10 @@ func (c *Config) Validate() error {
 
 	if h := c.EmulatorHeapMiB; h != 0 && (h < MinEmulatorHeapMiB || h > MaxEmulatorHeapMiB) {
 		add("emulatorHeapMiB", strconv.Itoa(h), fmt.Sprintf("must be 0 (unbounded) or between %d and %d", MinEmulatorHeapMiB, MaxEmulatorHeapMiB))
+	}
+
+	if h := c.BigQueryHeapMiB; h != 0 && (h < MinEmulatorHeapMiB || h > MaxEmulatorHeapMiB) {
+		add("bigQueryHeapMiB", strconv.Itoa(h), fmt.Sprintf("must be 0 (no limit) or between %d and %d", MinEmulatorHeapMiB, MaxEmulatorHeapMiB))
 	}
 
 	// Instance name. It becomes a cluster name and a label value, so its

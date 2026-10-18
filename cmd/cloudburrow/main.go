@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
@@ -225,6 +226,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 		if detach {
 			return runDetached(plain, timeout, offline, stdout, stderr)
+		}
+		// Off unless CLOUDBURROW_DEBUG_PPROF names a loopback address
+		// (#1609); the detached parent above never listens. A debug aid
+		// that cannot listen is named, and up goes on without it.
+		if _, err := debugpprof.Start(os.Getenv, stderr); err != nil {
+			fmt.Fprintln(stderr, "cloudburrow: warning:", err)
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
