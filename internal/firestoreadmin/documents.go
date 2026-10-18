@@ -422,19 +422,50 @@ func writeFileAtomic(path string, b []byte) error {
 }
 
 // Wrap holds each call until the emulator holds the documents, and
-// counts each call that may write, when it starts and when it ends.
+// counts each call that may write, when it starts and when it ends, and,
+// over gRPC, at each response message too: a Write stream lasts as long
+// as its client keeps it open, and the emulator answers each of its
+// writes once it is committed, so a write in the middle of a long stream
+// is exported within the interval, not only once the stream ends.
 func (d *Documents) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if mayWrite(r) {
 			d.wait(r.Context())
 			d.writes.Add(1)
 			defer d.writes.Add(1)
+			if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+				w = &markingWriter{ResponseWriter: w, writes: &d.writes}
+			}
 		} else if isDocumentsCall(r) {
 			d.wait(r.Context())
 		}
 		next.ServeHTTP(w, r)
 	})
 }
+
+// markingWriter counts each response body write of a call that may
+// write: a gRPC response message, sent once the write it answers is
+// committed.
+type markingWriter struct {
+	http.ResponseWriter
+	writes *atomic.Int64
+}
+
+func (w *markingWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	if n > 0 {
+		w.writes.Add(1)
+	}
+	return n, err
+}
+
+func (w *markingWriter) Flush() {
+	if fl, ok := w.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+func (w *markingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (d *Documents) wait(ctx context.Context) {
 	d.mu.Lock()

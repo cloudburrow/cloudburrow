@@ -62,7 +62,7 @@ every one passes (#596).
 
 #### Retried once
 
-CI retries five tests once, and no others (#566). When `go test` fails in a compat shard or in
+CI retries seven tests once, and no others (#566). When `go test` fails in a compat shard or in
 the restart probe and every test it names as failed is on this list, those tests are re-run once,
 by name, with the same environment, and the run fails if a retry fails too. A failure of any
 other test fails at once, and so does a package-level failure that names no test (#675). A pass
@@ -76,6 +76,8 @@ job summary with its outcome (#704).
 | `TestMemorystoreAcrossRestart` | Restart probe | Memorystore durability |
 | `TestDatastoreAcrossRestart` | Restart probe | Datastore keeps its data in persistent mode |
 | `TestDatastoreSurvivesAPodRestart` | Compat shard | Datastore keeps its data in persistent mode |
+| `TestFirestoreSurvivesAPodRestart` | Compat shard | Firestore keeps its documents in persistent mode (#1615) |
+| `TestFirestoreAfterTheEmulatorIsKilled` | Compat shard | Firestore keeps its documents across an emulator crash (#1615) |
 | `TestSpannerStateDoesNotSurviveARestart` | Compat shard | Spanner state does not survive a restart |
 
 **Removal rule.** An entry is taken off the list once 20 consecutive CI runs on `main` have
