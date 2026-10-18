@@ -395,9 +395,10 @@ func TestOptionalServicesAreOptIn(t *testing.T) {
 func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	t.Parallel()
 	// Datastore is not here: its emulator has an on-disk store, and a
-	// restart was measured to keep an entity (#307).
+	// restart was measured to keep an entity (#307). Nor is Firestore: its
+	// front exports the documents to a volume (#1615).
 	emulatorBacked := []Service{
-		ServiceFirestore, ServiceBigtable, ServiceSpanner, ServiceBigQuery,
+		ServiceBigtable, ServiceSpanner, ServiceBigQuery,
 	}
 	for _, opt := range emulatorBacked {
 		if opt.Persistence() != PersistenceNone {
@@ -412,6 +413,9 @@ func TestEmulatorBackedOptionalServicesAreNeverPersistent(t *testing.T) {
 	}
 	if got := ServiceDatastore.Persistence(); got != PersistenceVolume {
 		t.Errorf("datastore reports %v; its on-disk store is on a volume in persistent mode", got)
+	}
+	if got := ServiceFirestore.Persistence(); got != PersistenceVolume {
+		t.Errorf("firestore reports %v; its documents are exported to a volume in persistent mode", got)
 	}
 
 	c := valid()

@@ -215,6 +215,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	spannerInstances := fs.Bool("spanner-instances", false, "answer the Spanner instance updates the emulator does not serve")
 	// Where the Firestore Admin API and the Spanner front keep their
 	// records and data copies (#1514): the pod's emptyDir.
+	documentsDir := fs.String("firestore-documents", "", "directory the Firestore emulator's documents are exported to and imported from (#1615), shared with the emulator's container")
+	documentsFresh := fs.Bool("firestore-documents-fresh", false, "discard the exports an earlier front made (ephemeral mode)")
+	exportInterval := fs.Duration("firestore-export-interval", 30*time.Second, "how often the Firestore emulator's documents are exported while calls write")
 	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API or the Spanner front keeps its state in")
 	// The named Datastore databases calls name, which the emulator cannot
 	// list, kept for the project's purge (#1550).
@@ -242,6 +245,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var servers []*http.Server
 	var listeners []net.Listener
 	var icpts Intercepts
+	var docs *firestoreadmin.Documents
+	var err error
 	switch *queries {
 	case "datastore":
 		icpts = append(icpts, queryfront.NewDatastore(*upstream))
@@ -257,6 +262,15 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if *stateDir != "" {
 			if err := fa.KeepState(ctx, *stateDir, logger.Printf); err != nil {
 				return fmt.Errorf("the Firestore Admin API's state: %w", err)
+			}
+		}
+		if *documentsDir != "" {
+			if *exportInterval <= 0 {
+				fmt.Fprintln(stderr, "call-front: --firestore-export-interval must be positive")
+				return ErrUsage
+			}
+			if docs, err = fa.KeepDocuments(ctx, *documentsDir, *exportInterval, *documentsFresh, logger.Printf); err != nil {
+				return fmt.Errorf("the Firestore emulator's documents: %w", err)
 			}
 		}
 		fa.Start(ctx)
@@ -289,7 +303,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		listeners = append(listeners, l)
 		// Both ports carry the intercepts: Spanner's REST port is the
 		// same API as its gRPC one.
-		servers = append(servers, Server(HandlerWith(p[1], ring, logger.Printf, icpt), logger.Printf, *service))
+		var h http.Handler = HandlerWith(p[1], ring, logger.Printf, icpt)
+		if docs != nil {
+			h = docs.Wrap(h)
+		}
+		servers = append(servers, Server(h, logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
 	}
 	go func() {
@@ -313,6 +331,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return err
 		}
+	}
+	// The documents' last export, which the emulator's container waits
+	// for before it stops the emulator (#1615).
+	if docs != nil {
+		<-docs.Done()
 	}
 	return nil
 }

@@ -12,10 +12,11 @@ import (
 // Optional emulator components.
 //
 // Each wraps a Google-published emulator rather than reimplementing a database
-// (ADR-0005). Firestore, Bigtable and Spanner are in-memory by design, which is
-// why none of them is given a volume: provisioning one would imply durability
-// they do not have. Datastore's emulator stores to disk, so in persistent mode
-// it is given one (#307).
+// (ADR-0005). Bigtable and Spanner are in-memory by design, which is why
+// neither is given a volume: provisioning one would imply durability they do
+// not have. Datastore's emulator stores to disk, so in persistent mode it is
+// given one (#307); Firestore's is in-memory too, but exports and imports its
+// documents, which its front does on a volume in persistent mode (#1615).
 const (
 	// SpannerImage is Google's Spanner emulator, pinned by digest. Unlike the
 	// others it ships as its own image rather than inside the Cloud SDK.
@@ -178,7 +179,7 @@ var CloudSQLVersionImages = map[string]string{
 func OptionalBackend(s config.Service, project string, persistent bool) (Backend, bool) {
 	switch s {
 	case config.ServiceFirestore:
-		return firestoreBackend(project), true
+		return firestoreBackend(persistent), true
 	case config.ServiceDatastore:
 		return datastoreBackend(project, persistent), true
 	case config.ServiceBigtable:
@@ -259,16 +260,67 @@ func callFront(service string, port, upstream int) *Front {
 	}
 }
 
-func firestoreBackend(project string) Backend {
-	return Backend{
-		Name:  "firestore",
-		Image: PubSubImage, // the same digest-pinned Cloud SDK emulators image
-		Port:  FirestorePort,
-		Command: []string{"gcloud", "beta", "emulators", "firestore", "start",
-			fmt.Sprintf("--host-port=127.0.0.1:%d", FirestoreEmulatorPort)},
-		JVM:   true,
-		Front: firestoreFront(),
+// FirestoreDocumentsDir is where the Firestore front has the emulator
+// export its documents, and imports them from (#1615): under the front's
+// state directory, on the volume the emulator's container shares.
+const FirestoreDocumentsDir = FrontStateDir + "/documents"
+
+// FirestoreUser is the user both of the Firestore pod's containers run as:
+// the storage image's, which the front runs as, so each can remove what
+// the other wrote in the volume they share.
+const FirestoreUser = 65532
+
+// FirestoreExportInterval is how often the Firestore front exports the
+// emulator's documents while calls write (#1615): the Datastore
+// emulator's own save interval (#1611).
+const FirestoreExportInterval = "30s"
+
+const firestoreEmulator = "/google-cloud-sdk/platform/cloud-firestore-emulator"
+
+// firestoreBackend runs the Firestore emulator, its documents kept by the
+// front (internal/firestoreadmin, documents.go, #1615): exported to the
+// pod's shared volume every FirestoreExportInterval while calls write,
+// and when the pod stops, and imported each time the emulator starts.
+//
+// The volume is a PersistentVolumeClaim in persistent mode, holding the
+// front's Admin API state too, so documents, databases and backups
+// survive `stop` and `up` together; an emptyDir in ephemeral mode, so they
+// survive the emulator's exit (a full heap, #1611) and go with the pod.
+//
+// The JVM is started directly, as gcloud's wrapper and the emulator's
+// script would, with SIGTERM ignored (a JVM keeps an inherited ignore),
+// by a shell that waits on it: a stopping pod's SIGTERM, which reaches the
+// front and the emulator together, and every process at once when the
+// kind node stops, would otherwise end the emulator before the front's
+// last export. The shell, given SIGTERM, waits for the front to write
+// its StoppedFile, named for the pod (at most 10 seconds) and then kills the JVM; the JVM's own
+// exit ends the shell with it, so the kubelet restarts the container as
+// before.
+func firestoreBackend(persistent bool) Backend {
+	stopped := FirestoreDocumentsDir + "/stopped-$HOSTNAME"
+	script := `trap '' TERM; ` +
+		`java -Duser.language=en -cp ` + firestoreEmulator + `/cloud-firestore-emulator.jar com.google.cloud.datastore.emulator.firestore.CloudFirestore start ` +
+		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=standard & pid=$!; `, FirestoreEmulatorPort) +
+		`trap 'i=0; while [ ! -e ` + stopped + ` ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -KILL $pid 2>/dev/null; wait $pid; exit 0' TERM; ` +
+		`wait $pid`
+	b := Backend{
+		Name:      "firestore",
+		Image:     PubSubImage, // the same digest-pinned Cloud SDK emulators image
+		Port:      FirestorePort,
+		Command:   []string{"sh", "-c", script},
+		Env:       map[string]string{"HOME": "/tmp"},
+		JVM:       true,
+		RunAsUser: FirestoreUser,
+		Front:     firestoreFront(),
 	}
+	if persistent {
+		b.Persistent, b.OwnsClaim = true, true
+	} else {
+		// The kind node's restart keeps the pod and its emptyDir: the
+		// documents must not survive `stop` and `up` in ephemeral mode.
+		b.Front.Args = append(b.Front.Args, "--firestore-documents-fresh")
+	}
+	return b
 }
 
 // firestoreFront is the call front, serving the Firestore Admin API itself
@@ -277,8 +329,11 @@ func firestoreBackend(project string) Backend {
 // #1405).
 func firestoreFront() *Front {
 	f := callFront("firestore", FirestorePort, FirestoreEmulatorPort)
-	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore")
-	return withState(f)
+	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore",
+		"--firestore-documents", FirestoreDocumentsDir, "--firestore-export-interval", FirestoreExportInterval)
+	withState(f)
+	f.ShareState = true
+	return f
 }
 
 // datastoreFront is the call front, answering RunAggregationQuery, which
