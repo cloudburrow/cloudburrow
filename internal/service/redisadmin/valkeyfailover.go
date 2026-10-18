@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 )
 
@@ -198,7 +199,8 @@ func (c *clusters) watched(r *clusterRecord) bool {
 	if _, pending := c.busy[r.Name]; pending || !r.standalone() || r.state != clusterpb.Cluster_ACTIVE || r.suspended {
 		return false
 	}
-	if v := r.Valkey; v.Migration != nil || (v.CIR != nil && v.CIR.Role == "SECONDARY") {
+	if v := r.Valkey; (v.Migration.migrating() && v.Migration.State != memorystorepb.MigrationConfig_ROLLED_BACK.String()) ||
+		v.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() {
 		return false
 	}
 	p := r.firstPrimary()
@@ -208,6 +210,7 @@ func (c *clusters) watched(r *clusterRecord) bool {
 // watchStandalone checks every CLUSTER_DISABLED instance's primary until
 // ctx ends.
 func (c *clusters) watchStandalone(ctx context.Context, every time.Duration) {
+	tend := tendEvery
 	failed := map[string]int{}
 	ids := map[string]string{}
 	t := time.NewTicker(every)
@@ -224,7 +227,7 @@ func (c *clusters) watchStandalone(ctx context.Context, every time.Duration) {
 			return
 		case <-t.C:
 		}
-		for _, name := range c.checkStandalone(ctx, failed, ids, every) {
+		for _, name := range c.checkStandalone(ctx, failed, ids, every, tend) {
 			delete(failed, name)
 			delete(ids, name)
 			c.failoverStandalone(ctx, name)
@@ -235,7 +238,7 @@ func (c *clusters) watchStandalone(ctx context.Context, every time.Duration) {
 // checkStandalone closes the endpoints of instances that are gone, counts
 // the failed checks of each watched instance's primary in failed, tends
 // the roles, and returns the instances whose primary failed.
-func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, ids map[string]string, every time.Duration) []string {
+func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, ids map[string]string, every, tend time.Duration) []string {
 	type target struct {
 		name string
 		rec  clusterRecord
@@ -275,7 +278,7 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		case err == nil && st.Primary && (ids[tg.name] == "" || ids[tg.name] == st.ReplID):
 			delete(failed, tg.name)
 			ids[tg.name] = st.ReplID
-			c.tendRoles(ctx, tg.name)
+			c.tendRoles(ctx, tg.name, tend)
 			continue
 		case err == nil && st.Primary:
 			// Started again: its replicas' stream is gone.
@@ -291,10 +294,10 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 	return out
 }
 
-// tendRoles, every tendEvery or when the roles changed, makes each node
+// tendRoles, every tend or when the roles changed, makes each node
 // of name that should be a replica and answers as a primary a replica of
 // the primary, and labels the nodes' pods with their roles.
-func (c *clusters) tendRoles(ctx context.Context, name string) {
+func (c *clusters) tendRoles(ctx context.Context, name string, tend time.Duration) {
 	c.mu.Lock()
 	r, ok := c.byName[name]
 	e := c.eps[name]
@@ -313,7 +316,7 @@ func (c *clusters) tendRoles(ctx context.Context, name string) {
 	}
 	sort.Strings(keys)
 	sig := strings.Join(keys, ",")
-	if sig == e.labelled && time.Since(e.labelledAt) < tendEvery {
+	if sig == e.labelled && time.Since(e.labelledAt) < tend {
 		c.mu.Unlock()
 		return
 	}
