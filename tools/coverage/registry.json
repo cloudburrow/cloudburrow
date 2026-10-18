@@ -92,6 +92,7 @@
   "google.cloud.kms.v1.KeyManagementService/Decrypt": "implemented",
   "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey": "implemented",
   "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion": "implemented",
+  "google.cloud.kms.v1.KeyManagementService/DeleteKeyRing": "implemented",
   "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion": "implemented",
   "google.cloud.kms.v1.KeyManagementService/Encrypt": "implemented",
   "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion": "implemented",

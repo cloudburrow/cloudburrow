@@ -24,9 +24,16 @@ import (
 // read and change every bucket. A request whose Origin is not loopback, not
 // this server's own and not on the configured allowlist is refused: 403
 // with no CORS headers, a preflight included. A request with no Origin (an
-// SDK, curl, gcloud) is not a browser's and is not checked. The Allow-
-// Credentials header the JSON API was once answered with is not sent: no
-// recorded observation of Google shows it, and nothing here reads cookies.
+// SDK, curl, gcloud) is not a browser's and is not checked.
+//
+// Access-Control-Allow-Credentials is the cross-origin page's (read
+// 2026-10-17, #1595): "For simple requests, if the CORS request is
+// approved, the Access-Control-Allow-Credentials header is set to true",
+// and "For preflight requests, if Access-Control-Request-Method is empty,
+// Cloud Storage sets Access-Control-Allow-Credentials to true and rejects
+// the request with 404 - Not Found". #677 had dropped it while any origin
+// was served; only an origin that passes the check above gets it, and
+// nothing here reads cookies, so it grants a page nothing more.
 
 const jsonCORSMethods = "DELETE, GET, HEAD, PATCH, POST, PUT"
 
@@ -111,6 +118,7 @@ func (s *Server) serveCORS(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	preflight := r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != ""
+	emptyPreflight := r.Method == http.MethodOptions && !preflight
 	h := w.Header()
 	h.Add("Vary", "Origin")
 	jsonAPI := isJSONSurface(r.URL.EscapedPath())
@@ -120,7 +128,13 @@ func (s *Server) serveCORS(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if jsonAPI {
 		h.Set("Access-Control-Allow-Origin", s.sessionOrigin(r, origin))
+		if emptyPreflight {
+			h.Set("Access-Control-Allow-Credentials", "true")
+			writeError(w, notFound("Not Found"))
+			return true
+		}
 		if !preflight {
+			h.Set("Access-Control-Allow-Credentials", "true")
 			return false
 		}
 		h.Set("Access-Control-Allow-Methods", jsonCORSMethods)

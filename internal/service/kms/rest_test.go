@@ -40,7 +40,8 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		// absent instance or connection is NOT_FOUND.
 		{"GET", "/v1/projects/demo-project/locations/global/singleTenantHsmInstances/i", 404},
 		{"GET", "/v1/projects/demo-project/locations/global/ekmConnections/c:verifyConnectivity", 404},
-		{"DELETE", kr, 501},
+		// DeleteKeyRing is served (#1595): an absent ring is NOT_FOUND.
+		{"DELETE", "/v1/projects/demo-project/locations/global/keyRings/r", 404},
 		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:decrypt", 404}, // decrypt binds cryptoKeys/* only
 		{"POST", kr + ":getIamPolicy", 404},                             // getIamPolicy is GET only
 		{"GET", "/v2/whatever", 404},

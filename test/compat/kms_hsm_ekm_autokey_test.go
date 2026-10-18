@@ -47,6 +47,7 @@ func kmsOptions(h *Harness, variant string) []option.ClientOption {
 // Encrypt and Decrypt succeed while the policy allows that reason, are
 // FAILED_PRECONDITION when it does not or allows none, and succeed again
 // once it is cleared.
+// Plaintext and AAD together are limited to 8KiB on an HSM key (#1595).
 // EXTERNAL and EXTERNAL_VPC keys are TestKMSExternalKeys' (#1469).
 //
 // covers: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey, google.cloud.kms.v1.KeyManagementService/Encrypt, google.cloud.kms.v1.KeyManagementService/Decrypt, google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions, google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion
@@ -78,6 +79,16 @@ func TestKMSHSMKeysAndKeyAccessJustifications(t *testing.T) {
 			dec, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext()})
 			if err != nil || string(dec.GetPlaintext()) != "hsm" || dec.GetProtectionLevel() != kmspb.ProtectionLevel_HSM {
 				t.Fatalf("Decrypt = %v, %v", dec, err)
+			}
+			// "For HSM keys, the combined length of the plaintext and
+			// additionalAuthenticatedData fields must be no larger than
+			// 8KiB" (the Encrypt reference): 8KiB together is accepted, a
+			// byte more is not.
+			if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: make([]byte, 8*1024-16), AdditionalAuthenticatedData: make([]byte, 16)}); err != nil {
+				t.Errorf("Encrypt of 8KiB of plaintext and AAD under an HSM key: %v", err)
+			}
+			if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: make([]byte, 8*1024-16), AdditionalAuthenticatedData: make([]byte, 17)}); kmsCode(variant, err) != codes.InvalidArgument {
+				t.Errorf("Encrypt of 8KiB+1 of plaintext and AAD under an HSM key = %v; want InvalidArgument", err)
 			}
 			if v, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key.GetName()}); err != nil || v.GetProtectionLevel() != kmspb.ProtectionLevel_HSM {
 				t.Errorf("CreateCryptoKeyVersion = %v, %v", v, err)

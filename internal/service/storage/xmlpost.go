@@ -256,12 +256,22 @@ func formKnown(name string) bool {
 	return formExempt(name) || strings.HasPrefix(name, "x-goog-meta-")
 }
 
-// policyFail is a policy check's failure.
+// policyFail is an expired policy's failure.
 func policyFail(w http.ResponseWriter, msg string, a ...any) {
-	// UNVERIFIED: the AccessDenied code for a failed condition or an
-	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/post-object-forms
-	// expired policy follows the XML API's interoperable behaviour.
+	// UNVERIFIED: the status page has no row for an expired policy, so its
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/reference-status
+	// AccessDenied follows the XML API's interoperable behaviour.
 	writeXMLError(w, http.StatusForbidden, "AccessDenied", "Invalid according to Policy: "+fmt.Sprintf(msg, a...))
+}
+
+// conditionFail is a form that does not meet its policy's conditions, a
+// failed condition or a field the policy does not name: 400
+// InvalidPolicyDocument, "The content of the form does not meet the
+// conditions specified in the policy document" (the XML API's status
+// table, https://docs.cloud.google.com/storage/docs/xml-api/reference-status,
+// read 2026-10-17, #1595).
+func conditionFail(w http.ResponseWriter, msg string, a ...any) {
+	writeXMLError(w, http.StatusBadRequest, "InvalidPolicyDocument", "Invalid according to Policy: "+fmt.Sprintf(msg, a...))
 }
 
 // postPolicy is a decoded policy document.
@@ -471,13 +481,13 @@ func (s *Server) xmlFormPost(w http.ResponseWriter, r *http.Request, bucket stri
 				got = bucket
 			}
 			if op == "eq" && got != want || op == "starts-with" && !strings.HasPrefix(got, want) {
-				policyFail(w, "Policy Condition failed: [%q, \"$%s\", %q]", op, name, want)
+				conditionFail(w, "Policy Condition failed: [%q, \"$%s\", %q]", op, name, want)
 				return
 			}
 		}
 		for _, name := range order {
 			if !formExempt(name) && !pol.named[name] {
-				policyFail(w, "Extra input fields: %s", name)
+				conditionFail(w, "Extra input fields: %s", name)
 				return
 			}
 		}

@@ -64,9 +64,12 @@ func doneOperation(location string, metadata proto.Message) (*longrunningpb.Oper
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	md, err := anypb.New(metadata)
-	if err != nil {
-		return nil, apierror.Wrap(apierror.Internal(err, "encode metadata"))
+	var md *anypb.Any
+	if metadata != nil {
+		var err error
+		if md, err = anypb.New(metadata); err != nil {
+			return nil, apierror.Wrap(apierror.Internal(err, "encode metadata"))
+		}
 	}
 	resp, err := anypb.New(&emptypb.Empty{})
 	if err != nil {
