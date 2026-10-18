@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -178,6 +179,59 @@ func TestV1FunctionFields(t *testing.T) {
 	if _, err := v2Trigger("p", &fv1.EventTrigger{EventType: "providers/cloud.firestore/eventTypes/document.write", Resource: "r"}); apierror.From(err).Code != codes.Unimplemented ||
 		!strings.Contains(err.Error(), "Firestore emulator") {
 		t.Errorf("a Firestore trigger = %v; want UNIMPLEMENTED with the reason", err)
+	}
+}
+
+// TestV1FailedCreateAnswer (#1620): a v1 create whose build fails answers
+// as Google does, the shape google_cloudfunctions_function relies on. The
+// operation is done with the build's error and no response, and the
+// function stays, OFFLINE with what the caller sent, so the provider's
+// read finds it (it is not NOT_FOUND) and its delete removes it.
+func TestV1FailedCreateAnswer(t *testing.T) {
+	s := NewServer(&Knative{}, "t", time.Minute)
+	b := &fakeBuilder{got: make(chan BuildSpec, 1), fail: errors.New("the source is not a zip archive")}
+	v := s.Functions(s.Builds(fakeFetcher{objects: map[string]string{"b/bad.zip": "not a zip"}}, b), func() string { return "" }).V1()
+	const loc = "projects/proj-1620/locations/us-central1"
+	name := loc + "/functions/v1-failed-create"
+	ctx := context.Background()
+	op, err := v.CreateFunction(ctx, &fv1.CreateFunctionRequest{Location: loc, Function: &fv1.CloudFunction{
+		Name: name, Runtime: "go123", EntryPoint: "Hello",
+		SourceCode:           &fv1.CloudFunction_SourceArchiveUrl{SourceArchiveUrl: "gs://b/bad.zip"},
+		Trigger:              &fv1.CloudFunction_HttpsTrigger{HttpsTrigger: &fv1.HttpsTrigger{}},
+		EnvironmentVariables: map[string]string{"MODE": "bad"}}})
+	if err != nil {
+		t.Fatalf("CreateFunction: %v", err)
+	}
+	t.Cleanup(func() {
+		functions.mu.Lock()
+		delete(functions.fns, name)
+		functions.mu.Unlock()
+	})
+	<-b.got
+	waitOp(t, s, op.GetName())
+	done, err := s.Operation(op.GetName())
+	if err != nil {
+		t.Fatalf("Operation: %v", err)
+	}
+	if !done.GetDone() || done.GetError() == nil || done.GetResponse() != nil ||
+		!strings.HasPrefix(done.GetError().GetMessage(), "Build failed: ") || !strings.Contains(done.GetError().GetMessage(), "not a zip") {
+		t.Errorf("the create's operation = %v; want it done with the build's error and no response", done)
+	}
+	fn, err := v.GetFunction(ctx, &fv1.GetFunctionRequest{Name: name})
+	if err != nil {
+		t.Fatalf("GetFunction after the failed create = %v; want the function, OFFLINE", err)
+	}
+	if fn.GetStatus() != fv1.CloudFunctionStatus_OFFLINE || fn.GetHttpsTrigger() == nil || fn.GetSourceArchiveUrl() != "gs://b/bad.zip" ||
+		fn.GetRuntime() != "go123" || fn.GetEnvironmentVariables()["MODE"] != "bad" {
+		t.Errorf("GetFunction after the failed create = %v; want it OFFLINE with what was sent", fn)
+	}
+	del, err := v.DeleteFunction(ctx, &fv1.DeleteFunctionRequest{Name: name})
+	if err != nil {
+		t.Fatalf("DeleteFunction of the failed function: %v", err)
+	}
+	waitOp(t, s, del.GetName())
+	if _, err := v.GetFunction(ctx, &fv1.GetFunctionRequest{Name: name}); apierror.From(err).Code != codes.NotFound {
+		t.Errorf("GetFunction after delete = %v; want NOT_FOUND", err)
 	}
 }
 
