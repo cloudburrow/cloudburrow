@@ -7641,7 +7641,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestorepipeline_test.go:48 TestFirestorePipelines",
-          "test/compat/firestorepipelinemore_test.go:28 TestFirestorePipelinesMore"
+          "test/compat/firestorepipelinemore_test.go:28 TestFirestorePipelinesMore",
+          "test/compat/firestorepipelinesub_test.go:25 TestFirestorePipelineSubqueries"
         ]
       },
       {
