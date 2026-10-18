@@ -266,6 +266,7 @@ func firestoreBackend(project string) Backend {
 		Port:  FirestorePort,
 		Command: []string{"gcloud", "beta", "emulators", "firestore", "start",
 			fmt.Sprintf("--host-port=127.0.0.1:%d", FirestoreEmulatorPort)},
+		JVM:   true,
 		Front: firestoreFront(),
 	}
 }
@@ -305,7 +306,10 @@ const DatastoreLockFile = "/data/datastore.lock"
 // is empty, and the JVM is exec'd so it receives the signal.
 //
 // The emulator loads the store when it starts and saves it when it shuts
-// down, and a deleted pod's replacement, which the ReplicaSet creates at
+// down, and every 30 seconds while it has changes (a fixed delay of its
+// own, measured #1611), so a JVM that exits on a full heap, saving
+// nothing, loses only the writes since its last save. A deleted pod's
+// replacement, which the ReplicaSet creates at
 // once on the same volume, could start before the old pod's JVM had even
 // been sent SIGTERM: it then loaded the store without the last writes, and
 // served and later saved that (#1307, measured with the call front in the
@@ -327,7 +331,7 @@ const DatastoreLockFile = "/data/datastore.lock"
 // measured).
 func datastoreBackend(project string, persistent bool) Backend {
 	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort,
-		Front: datastoreFront()}
+		JVM: true, Front: datastoreFront()}
 	if !persistent {
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,

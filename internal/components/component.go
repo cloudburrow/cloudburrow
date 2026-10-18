@@ -50,6 +50,9 @@ type LifecycleComponent struct {
 	// rather than Start (#1588).
 	knative       *knativeRun
 	knativeJoined bool
+	// emulatorHeapMiB bounds the Java emulators' heaps and sizes their
+	// containers' memory (#1603); 0 bounds neither.
+	emulatorHeapMiB int
 }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
@@ -88,6 +91,8 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 		mode:        cfg.Mode,
 		timeout:     time.Duration(cfg.ReadyTimeout),
 		out:         out,
+
+		emulatorHeapMiB: cfg.EmulatorHeapMiB,
 	}
 }
 
@@ -169,6 +174,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 				}
 			}
 			out = append(out, b)
+		}
+	}
+	for i := range out {
+		if out[i].JVM {
+			out[i] = out[i].WithJVMHeap(c.emulatorHeapMiB)
 		}
 	}
 	return out

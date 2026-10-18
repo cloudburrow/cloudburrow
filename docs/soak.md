@@ -115,7 +115,9 @@ Expected, and not a leak:
 - Logging keeps the last 20,000 entries; at 20 entries a second the store fills in about 17 minutes,
   so `logging.read` (which filters every entry kept) is slower in the last window than in the first.
 - The JVM emulators (Pub/Sub, Firestore) and the BigQuery emulator grow their heaps for the first
-  minutes, then hold.
+  minutes. Firestore's then holds; Pub/Sub's keeps growing by the messages its subscriptions keep
+  until they are deleted, about 2 MiB a minute at the soak's rate (#1603, below), and the heap
+  bound (`--emulator-heap-mib`) is what stops it.
 - Secret Manager keeps each secret in a Kubernetes Secret and reads it with `kubectl`, so its calls
   take a few hundred milliseconds; see [compatibility.md](compatibility.md).
 - Storage keeps every overwritten generation under the bucket's soft delete policy (7 days by
@@ -156,6 +158,59 @@ restarted; each front stayed at 25–35 MiB. BigQuery's queries slow as the tabl
 p50 for the `GROUP BY` over 34,000 rows), and Logging's reads as its store fills, both expected.
 Secret Manager's latency grows with the versions a secret holds, and the JVM emulators' memory
 kept rising slowly; both are followed up in #1596 (Secret Manager also refuses a secret's 905th version).
+
+### The Java emulators' memory (#1603)
+
+A 60-minute run of `pubsub,firestore` on `land/111` found Pub/Sub's container growing about
+4 MiB a minute for the whole hour, with Firestore's levelling off; the emulators then ran with no
+`-Xmx` and no container limit, so the JVM's heap could grow to a quarter of the kind node's memory
+(about 6 GiB). To tell lazy collection from a leak, the same soak ran again for 30 minutes with the
+heap bounded at 256 MiB (`JAVA_TOOL_OPTIONS=-Xmx256m`, with `-Xlog:gc` and a live-object histogram,
+`-XX:+PrintClassHistogram` and SIGQUIT, every 5 minutes, as the image has no `jcmd` or `jmap`).
+It passed: 71,995 messages published, none lost or redelivered on either subscription, no errors,
+no restarts.
+
+Container memory (anonymous, MiB), by minute of the soak:
+
+| Minute | 0 | 5 | 10 | 15 | 20 | 25 | 30 |
+|---|---|---|---|---|---|---|---|
+| Pub/Sub, unbounded (#1603's run) | 200 | 320 | 340 | 355 | 373 | 396 | 411 |
+| Pub/Sub, `-Xmx256m` | 218 | 275 | 279 | 294 | 313 | 332 | 349 |
+| Firestore, unbounded (#1603's run) | 258 | 407 | 420 | 448 | 449 | 451 | 455 |
+| Firestore, `-Xmx256m` | 220 | 363 | 371 | 390 | 393 | 394 | 394 |
+
+Live heap after a full collection (MiB), by minute of the JVM's uptime, which ran a minute and a
+half ahead of the soak; the last column is after the soak deleted its topic and subscriptions:
+
+| Uptime | 3 | 9 | 14 | 19 | 24 | 29 | 34 |
+|---|---|---|---|---|---|---|---|
+| Pub/Sub live heap | 16 | 27 | 37 | 47 | 60 | 69 | 10 |
+| Pub/Sub `PubsubMessage` objects live | 6,189 | 20,699 | 32,909 | 45,119 | 57,330 | 69,542 | 1 |
+| Firestore live heap | 20 | 23 | 24 | 25 | 26 | 27 | |
+
+- **Firestore is lazy collection**: its live heap stays small (20 → 27 MiB over 26 minutes, under
+  0.3 MiB a minute) while its container held 400-470 MiB unbounded, heap the JVM had grown and
+  not given back.
+- **Pub/Sub is a leak in the emulator**, not in how CloudBurrow drives it: its live heap grows
+  2 MiB a minute, and the number of live `PubsubMessage` objects is the number of messages
+  published so far. Every message stays in each subscription's backlog (the emulator's
+  `MessageBacklog`, whose acknowledgement only marks it) until the subscription is deleted; the
+  front holds none of them, as it is another container. See
+  [compatibility.md](compatibility.md#pubsub--googlepubsubv1).
+- **Filled, the bounded emulator stops**: with 256 MiB, 175,000 acknowledged 1 KB messages on one
+  subscription filled the heap, and the emulator answered nothing (every `Publish` timed out, its
+  pod not ready) until deleted. With `-XX:+ExitOnOutOfMemoryError` it exited instead and its
+  container restarted, empty, within seconds.
+
+So `up` now gives each Java emulator (Pub/Sub, Firestore, Datastore) `-Xmx512m
+-XX:+ExitOnOutOfMemoryError`, a memory request of 512 MiB and a limit of 1 GiB
+(`--emulator-heap-mib`, [configuration.md](configuration.md#settings)): enough for about 550,000 of
+the soak's messages on a pair of subscriptions, 3.8 hours at its 40 a second, before Pub/Sub
+restarts. The Pub/Sub and Firestore compatibility tests pass under it.
+
+Since #1611 the default is 1024 MiB (limit 1.5 GiB): 512 MiB held the soak's 200 documents, but
+100,000 documents of about 1 KB held 330 MiB of Firestore's heap and it filled before 200,000 were in, and the
+emulator exited, losing every document. See [configuration.md](configuration.md#settings).
 
 ### 90 minutes (#1609)
 
