@@ -21,6 +21,9 @@ import (
 // covers: google.cloud.run.v2.WorkerPools/CreateWorkerPool, google.cloud.run.v2.WorkerPools/GetWorkerPool
 func TestRunWorkerPoolMountsACloudStorageVolume(t *testing.T) {
 	h := New(t)
+	// The run shard serves Storage as RUN_STORAGE, so Storage's own suite
+	// does not run there twice (#1568); the storage shard has no Run.
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	h.Endpoint(EnvRun)
 	sc := storageClient(t, h)
 	c, err := run.NewWorkerPoolsClient(h.Context(), runClientOptions(h)...)
