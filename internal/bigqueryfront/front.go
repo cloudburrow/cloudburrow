@@ -199,6 +199,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// A client request's repeated reads of a dataset or table are the
+	// engine's first answer (readmemo.go, #1623).
+	next = memoReads(next)
 	storage := newStorageReader(o.storage)
 	storageHost := strings.TrimPrefix(o.storage, "http://")
 	failed := &jobFailures{}
@@ -512,7 +515,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	return withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -536,7 +539,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed)
+	}), next, settings, failed))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow

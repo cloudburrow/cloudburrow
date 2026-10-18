@@ -50,7 +50,8 @@
         "patches/bigquery-emulator/0060-jobs-list-by-index-and-time.patch",
         "patches/bigquery-emulator/0062-geography-column-values.patch",
         "patches/bigquery-emulator/0065-create-in-a-missing-dataset.patch",
-        "patches/bigquery-emulator/0075-missing-dataset-check-in-the-transaction.patch"
+        "patches/bigquery-emulator/0075-missing-dataset-check-in-the-transaction.patch",
+        "patches/bigquery-emulator/0080-find-project-as-sqlite-sql.patch"
       ]
     },
     {
@@ -114,7 +115,8 @@
         "patches/googlesqlite/0072-runtime-error-messages.patch",
         "patches/googlesqlite/0067-integer-mod.patch",
         "patches/googlesqlite/0075-exact-int64-abs-and-safe-arithmetic.patch",
-        "patches/googlesqlite/0074-pending-change-records.patch"
+        "patches/googlesqlite/0074-pending-change-records.patch",
+        "patches/googlesqlite/0080-decode-string-array.patch"
       ]
     },
     {

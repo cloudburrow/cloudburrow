@@ -1,0 +1,99 @@
+CloudBurrow patch 80 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1623).
+
+DecodeStringArray reads an ARRAY<STRING> column QueryRawContext (patch
+0019) returned, as DecodeString reads a STRING one, so that
+bigquery-emulator patch 0080 can read a project's dataset IDs as SQLite
+SQL: every request finds its project, and its GoogleSQL read cost the
+project's size.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/raw_array.go b/raw_array.go
+new file mode 100644
+index 0000000..d6f30bc
+--- /dev/null
++++ b/raw_array.go
+@@ -0,0 +1,39 @@
++package googlesqlite
++
++import (
++	"fmt"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// DecodeStringArray reads an ARRAY<STRING> column QueryRawContext
++// returned: nil and false for NULL. A NULL element is "". CloudBurrow
++// patch (cloudburrow/cloudburrow#1623).
++func DecodeStringArray(v any) ([]string, bool, error) {
++	if v == nil {
++		return nil, false, nil
++	}
++	val, err := value.DecodeValue(v)
++	if err != nil {
++		return nil, false, err
++	}
++	if val == nil {
++		return nil, false, nil
++	}
++	arr, err := val.ToArray()
++	if err != nil {
++		return nil, false, fmt.Errorf("googlesqlite: not an ARRAY: %w", err)
++	}
++	out := make([]string, len(arr.Values))
++	for i, e := range arr.Values {
++		if e == nil {
++			continue
++		}
++		s, err := e.ToString()
++		if err != nil {
++			return nil, false, err
++		}
++		out[i] = s
++	}
++	return out, true, nil
++}
+diff --git a/raw_array_test.go b/raw_array_test.go
+new file mode 100644
+index 0000000..fbf5c1d
+--- /dev/null
++++ b/raw_array_test.go
+@@ -0,0 +1,34 @@
++package googlesqlite
++
++import (
++	"reflect"
++	"testing"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow regression test (cloudburrow/cloudburrow#1623): an
++// ARRAY<STRING> as googlesqlite stores it decodes to its strings, in
++// order, and NULL to none.
++func TestDecodeStringArray(t *testing.T) {
++	for _, want := range [][]string{{}, {"a"}, {"b", "a 'q\"", "ä", ""}} {
++		vals := make([]value.Value, len(want))
++		for i, s := range want {
++			vals[i] = value.StringValue(s)
++		}
++		enc, err := value.EncodeValue(&value.ArrayValue{Values: vals})
++		if err != nil {
++			t.Fatal(err)
++		}
++		got, ok, err := DecodeStringArray(enc)
++		if err != nil || !ok || !reflect.DeepEqual(got, want) {
++			t.Errorf("DecodeStringArray(%v) = %q, %v, %v; want %q", want, got, ok, err, want)
++		}
++	}
++	if got, ok, err := DecodeStringArray(nil); err != nil || ok || got != nil {
++		t.Errorf("DecodeStringArray(nil) = %q, %v, %v; want NULL", got, ok, err)
++	}
++	if _, _, err := DecodeStringArray("not encoded"); err == nil {
++		t.Error("DecodeStringArray of a value not encoded: no error")
++	}
++}
