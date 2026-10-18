@@ -5226,8 +5226,11 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
       onDone();
       // An action performed on click can answer with rows too: Storage
       // shrink config's minimal size (#1592). They were dropped; they are
-      // shown as a form's action shows them.
-      if (res.result) showActionResult(`${action.label}: ${name}`, res.result);
+      // shown as a form's action shows them. A destructive action's answer
+      // is its operation, which the notification and the Operations tab
+      // already say: Google's console opens no dialog after Delete folder
+      // and contents, so only an action whose answer is data opens one.
+      if (res.result && !action.destructive) showActionResult(`${action.label}: ${name}`, res.result);
     } catch (err) {
       op.failed(err.message, err.operation);
       row.end();
