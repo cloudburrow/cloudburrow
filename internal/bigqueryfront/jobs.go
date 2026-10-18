@@ -108,6 +108,7 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	given := job.JobReference.JobID // #1622, duplicatejob.go
 	if !withReference(r, &job, projectOf(f.base)) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not give the job a jobReference")
 		return
@@ -118,6 +119,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	project := job.JobReference.ProjectID
 	if project == "" {
 		project = projectOf(f.base)
+	}
+	if f.duplicateJob(w, r, project, given) { // #1622
+		return
 	}
 	if q := job.Configuration.Query; q != nil && q.UseLegacySQL == nil && f.googleSQLDefault(r, true) {
 		f.settings.markGoogleDefault(project, job.JobReference.JobID) // JOBS' query_dialect, #1595
