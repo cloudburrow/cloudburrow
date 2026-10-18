@@ -212,6 +212,9 @@ compat_shard() {
       # or Cloud Storage (the copies) read SINK_LOGGING and SINK_STORAGE, and
       # the copies from a folder LOGGING_RESOURCEMANAGER (#1568).
       TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
+      # Firestore's probe documents and named database (#1636): written
+      # alone, as a front-state reset in the suite forgets the database.
+      SETUP_TESTS="TestFirestoreRestartSetup"
       PROBE_TESTS="TestDatastoreAcrossRestart TestFirestoreAcrossRestart"
       PROBE_VARS=DATASTORE,FIRESTORE ;;
     memorystore)
@@ -278,6 +281,7 @@ compat_setup_exports() {
                CLOUDBURROW_TEST_SCHEDULER_PROBE="$2/scheduler-probe.json" \
                CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="setup:$2/storage-restart-probe.json" ;;
     sql) export CLOUDBURROW_TEST_CLOUDSQL_SETUP=1 ;;
+    emulators) export CLOUDBURROW_TEST_FIRESTORE_SETUP=1 ;;
   esac
 }
 

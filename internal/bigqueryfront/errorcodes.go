@@ -100,6 +100,9 @@ func jobErrors(next, engine http.Handler, settings *projectOptions, failed *jobF
 		path := r.URL.EscapedPath()
 		project, dry, all := "", false, false
 		ec := &engineContext{r: r, engine: engine, settings: settings, location: r.URL.Query().Get("location")}
+		if failed != nil {
+			ec.mapped = &failed.mapped
+		}
 		var queryResults []string // jobs.getQueryResults: the route's match
 		switch m := jobsRoute.FindStringSubmatch(path); {
 		case m != nil && r.Method == http.MethodPost:

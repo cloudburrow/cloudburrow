@@ -429,22 +429,18 @@ func (f front) upload(ctx context.Context, uri, contentType string, data []byte)
 	if !strings.HasPrefix(uri, "gs://") || !ok || object == "" {
 		return fmt.Errorf("not a gs:// URI of an object")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
 	u := "http://" + f.storageHost + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+	// A media upload names its object, so sending it again writes the same
+	// object (serviceclient.go, #1628).
+	status, b, err := serviceCall(ctx, "Cloud Storage upload of "+uri, http.MethodPost, u, contentType, data)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", contentType)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("Cloud Storage answered %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	if status/100 != 2 {
+		if len(b) > 512 {
+			b = b[:512]
+		}
+		return fmt.Errorf("Cloud Storage answered %d: %s", status, strings.TrimSpace(string(b)))
 	}
 	return nil
 }

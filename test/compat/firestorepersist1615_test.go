@@ -17,7 +17,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const envFirestoreExpect = "CLOUDBURROW_TEST_FIRESTORE_EXPECT"
+const (
+	envFirestoreExpect = "CLOUDBURROW_TEST_FIRESTORE_EXPECT"
+	envFirestoreSetup  = "CLOUDBURROW_TEST_FIRESTORE_SETUP"
+)
 
 // firestoreProbeProject is fixed, not per test: the restart probe reads
 // what an earlier process wrote.
@@ -55,8 +58,7 @@ func getDocWithin(ctx context.Context, ref *firestore.DocumentRef, within time.D
 // document written just before its pod is deleted is read back from the
 // new pod, in the default database and in a named one; in ephemeral mode
 // they are on the pod's emptyDir and go with it. Repeated, as the Datastore
-// test is. It leaves the probe documents TestFirestoreAcrossRestart reads
-// after `stop` and `up`. Through the official clients.
+// test is. Through the official clients.
 //
 // covers: google.firestore.v1.Firestore/Commit, google.firestore.v1.Firestore/BatchGetDocuments, google.firestore.admin.v1.FirestoreAdmin/CreateDatabase, google.firestore.admin.v1.FirestoreAdmin/GetDatabase
 func TestFirestoreSurvivesAPodRestart(t *testing.T) {
@@ -105,8 +107,24 @@ func TestFirestoreSurvivesAPodRestart(t *testing.T) {
 			t.Errorf("GetDatabase after the pod restarts = %v, %v; want uid %s", got, err, db.GetUid())
 		}
 	}
+}
 
-	// Left for TestFirestoreAcrossRestart, which CI runs after stop/up.
+// TestFirestoreRestartSetup leaves the probe documents, in the default
+// database and in a named one the Admin API makes, that
+// TestFirestoreAcrossRestart reads after `stop` and `up`. CI runs it
+// alone, just before `stop`, not in the suite (#1636): a later test's
+// front-state reset (TestResetClearsTheFrontsState) forgets the Admin
+// API's databases, the probe's named one among them.
+//
+// covers: google.firestore.v1.Firestore/Commit, google.firestore.admin.v1.FirestoreAdmin/CreateDatabase
+func TestFirestoreRestartSetup(t *testing.T) {
+	if os.Getenv(envFirestoreSetup) == "" {
+		t.Skipf("%s is not set: CI runs this alone, just before stop", envFirestoreSetup)
+	}
+	h := New(t)
+	ac := firestoreAdmin(t, h) // asks for the Firestore endpoint first
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	pdb := ensureFirestoreDatabase(t, ctx, ac, firestoreProbeProject, firestoreProbeDatabase)
 	for _, c := range []*firestore.Client{
 		firestoreProjectClient(t, h, firestoreProbeProject, "(default)"),
@@ -139,7 +157,7 @@ func ensureFirestoreDatabase(t *testing.T, ctx context.Context, ac *admin.Firest
 }
 
 // TestFirestoreAcrossRestart (#1615): after `stop` and `up` in persistent
-// mode the probe documents are there, in the default database and in the
+// mode the probe documents TestFirestoreRestartSetup wrote are there, in the default database and in the
 // named one, which the Admin API still lists with its uid; after `up
 // --mode ephemeral` they are gone.
 //

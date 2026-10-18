@@ -97,6 +97,8 @@ import (
 // engineContext is what mapping a job's error needs: the engine at the
 // job's project, its location, and its default dataset.
 type engineContext struct {
+	// mapped are the job errors mapped before (joberrorsmemo.go), or nil.
+	mapped   *mappedJobErrors
 	r        *http.Request
 	engine   http.Handler
 	prefix   string // "/bigquery/v2" or ""
@@ -427,21 +429,36 @@ func (c *engineContext) mapJobs(rec *recorder) bool {
 		return false
 	}
 	changed := false
+	var keep []jobErrorsMapping
 	mapJob := func(v any) {
 		job, _ := v.(map[string]any)
 		status, _ := job["status"].(map[string]any)
 		if status == nil {
 			return
 		}
+		key, memo := c.mapped.key(job, status)
+		if memo {
+			if kept, ch := c.mapped.apply(key, status); kept {
+				changed = changed || ch
+				return
+			}
+		}
 		jc := *c
 		jc.fromJob(job)
+		mapped := false
 		if er, _ := status["errorResult"].(map[string]any); er != nil && jc.mapErrorList([]any{er}) {
-			changed = true
+			mapped = true
 		}
 		if errs, _ := status["errors"].([]any); jc.mapErrorList(errs) {
-			changed = true
+			mapped = true
 		}
 		c.datasets = jc.datasets
+		if memo {
+			if e, ok := c.mapped.mapping(key, status, mapped); ok {
+				keep = append(keep, e)
+			}
+		}
+		changed = changed || mapped
 	}
 	mapJob(body)
 	if jobs, _ := body["jobs"].([]any); jobs != nil {
@@ -449,6 +466,7 @@ func (c *engineContext) mapJobs(rec *recorder) bool {
 			mapJob(j)
 		}
 	}
+	c.mapped.put(keep)
 	return changed && rewrite(rec, body)
 }
 
