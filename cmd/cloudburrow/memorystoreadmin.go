@@ -232,7 +232,7 @@ type memorystoreProvisioner struct {
 func newMemorystoreProvisioner(cfg config.Config, bg context.Context) *memorystoreProvisioner {
 	return &memorystoreProvisioner{cfg: cfg, bg: bg, ready: make(chan struct{}), tunnels: map[string]*netfwd.Forwarder{},
 		roleServices: map[string]int{},
-		installer: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
+		installer:    &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
 }
 
 // waitCluster returns once the server `up` runs is reachable through its

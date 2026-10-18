@@ -188,15 +188,19 @@ func TestMemorystoreValkeyReaderAndFailover(t *testing.T) {
 		t.Errorf("state %v after the failover, want ACTIVE", after.GetState())
 	}
 	// In the cluster, the primary Service selects the promoted node's pod.
-	eventuallyTrue(t, "the primary Service selects the new primary's pod", func() bool {
-		apps, err := kubectl("-n", ns, "get", "pods", "-l", sel, "-o", "jsonpath={.items[*].metadata.labels.app}")
-		if err != nil || len(strings.Fields(apps)) != 1 || apps == app {
-			return false
-		}
-		ips, err := kubectl("-n", ns, "get", "endpoints", base+"-primary", "-o", "jsonpath={.subsets[*].addresses[*].ip}")
+	for end := time.Now().Add(time.Minute); ; time.Sleep(time.Second) {
+		apps, aerr := kubectl("-n", ns, "get", "pods", "-l", sel, "-o", "jsonpath={.items[*].metadata.labels.app}")
+		ips, err := kubectl("-n", ns, "get", "endpointslices", "-l", "kubernetes.io/service-name="+base+"-primary",
+			"-o", "jsonpath={.items[*].endpoints[*].addresses[*]}")
 		podIP, perr := kubectl("-n", ns, "get", "pods", "-l", "app="+apps, "-o", "jsonpath={.items[0].status.podIP}")
-		return err == nil && perr == nil && ips != "" && ips == podIP
-	})
+		if aerr == nil && err == nil && perr == nil && len(strings.Fields(apps)) == 1 && apps != app && ips != "" && ips == podIP {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("the primary Service does not select the new primary's pod within a minute: pods %q (%v), endpoints %q (%v), the pod's IP %q (%v)",
+				apps, aerr, ips, err, podIP, perr)
+		}
+	}
 	// The old primary's node comes back a replica of the new primary.
 	eventuallyTrue(t, "the old primary's node replicates the new primary", func() bool {
 		n, err := next.Do(ctx, "WAIT", 2, 1000).Int()

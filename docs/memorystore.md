@@ -429,9 +429,29 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
   primary's host address and port, which `discovery_endpoints[0]` repeats; start a cluster client
   there.
 - **`CLUSTER_DISABLED` mode**: one primary (`shard_count` 1) and `replica_count` replicas, plain
-  Valkey servers kept in step by `REPLICAOF`. The connections are `CONNECTION_TYPE_PRIMARY` (the
-  primary) and `CONNECTION_TYPE_READER`, which here is the first replica's address, not a balancer
-  over all of them. There is no automatic failover (§5's is the Redis instances').
+  Valkey servers kept in step by `REPLICAOF`. The connections are `CONNECTION_TYPE_PRIMARY` and
+  `CONNECTION_TYPE_READER`, two host addresses that outlive any one node (#1614): the primary
+  endpoint carries each connection to the current primary, and the reader endpoint spreads
+  connections over the replicas, one each in turn, as Google's "connect to any of the available
+  replicas". In the cluster each node's pod is labelled with its role
+  (`cloudburrow.dev/memorystore-role` `primary` or `replica`), and Services named after the
+  instance's servers with `-primary` and `-reader` select by it, on port 6379 (6378 with in-transit
+  encryption); replicas replicate the primary at its node's Service, which follows its pod.
+- **Automatic failover** (#1614), as §5's for the Redis instances: the primary is checked every
+  second, INFO replication through its tunnel. Once it has not answered as a primary three checks
+  in a row (its pod is gone or not Ready), or at once when it answers with a replication ID other
+  than the last (its server started again, its replicas' stream gone), the replica with the most
+  of its data is promoted (`REPLICAOF NO ONE`, then every other node `REPLICAOF` it), the roles are
+  labelled again, and the primary endpoint drops its connections, so a client reconnects to the
+  same address and reaches the new primary. Google says "automatic failovers can take time on the
+  order of tens of seconds" and that client connections are likely to be reset; here writes
+  resume in a few seconds (3 to 4 measured). The instance stays `ACTIVE`; writes the replicas had
+  not received are lost, as replication is asynchronous; `up.log` has a line. A node that comes
+  back answering as a primary (its pod started again) is made a replica of the current primary,
+  and a new pod is labelled within five seconds. Google documents no manual failover method for
+  Memorystore for Valkey (`google.cloud.memorystore.v1` has none), so there is none here. A
+  secondary of cross-instance replication, and an instance being migrated into, are not failed
+  over: their primary replicates another server. `CLUSTER` mode is unchanged.
 - Connections come back in the form they were asked in: `endpoints`, or the deprecated
   `psc_auto_connections`; the Terraform provider reads each back as what it was configured with.
 
