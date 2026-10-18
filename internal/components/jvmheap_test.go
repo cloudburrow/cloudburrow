@@ -20,7 +20,7 @@ func TestJavaEmulatorsHaveABoundedHeapAndMemoryLimit(t *testing.T) {
 	t.Parallel()
 	jvms := map[string]bool{"pubsub": true, "firestore": true, "datastore": true}
 	for _, mode := range []config.Mode{config.ModePersistent, config.ModeEphemeral} {
-		for _, heap := range []int{config.DefaultEmulatorHeapMiB, 1024, 0} {
+		for _, heap := range []int{config.DefaultEmulatorHeapMiB, 512, 0} {
 			var cfg config.Config
 			cfg.Services = []config.Service{config.ServiceStorage, config.ServicePubSub, config.ServiceFirestore,
 				config.ServiceDatastore, config.ServiceBigtable, config.ServiceBigQuery}

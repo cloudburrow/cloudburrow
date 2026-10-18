@@ -180,3 +180,7 @@ So `up` now gives each Java emulator (Pub/Sub, Firestore, Datastore) `-Xmx512m
 the soak's messages on a pair of subscriptions, 3.8 hours at its 40 a second, before Pub/Sub
 restarts. The Pub/Sub and Firestore compatibility tests pass under it.
 
+Since #1611 the default is 1024 MiB (limit 1.5 GiB): 512 MiB held the soak's 200 documents, but
+100,000 documents of about 1 KB held 330 MiB of Firestore's heap and 150,000 filled it, and the
+emulator exited, losing every document. See [configuration.md](configuration.md#settings).
+

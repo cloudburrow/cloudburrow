@@ -738,8 +738,13 @@ func Default() Config {
 }
 
 // DefaultEmulatorHeapMiB is the Java emulators' default maximum heap
-// (#1603), sized from the soak in docs/soak.md.
-const DefaultEmulatorHeapMiB = 512
+// (#1603). 512 MiB held the soak in docs/soak.md, but not a realistic
+// document set (#1611, measured): 100,000 documents of about 1 KB held
+// 330 MiB of Firestore's heap, and 150,000 filled 512 MiB, which made it
+// exit and lose every document; Datastore's 100,000 entities held 175 MiB,
+// and 410 MiB while its emulator wrote them to disk. 1024 MiB holds about
+// twice that.
+const DefaultEmulatorHeapMiB = 1024
 
 // MinEmulatorHeapMiB and MaxEmulatorHeapMiB bound EmulatorHeapMiB when it
 // is not 0: below 128 MiB the emulators fail under the soak's load, and

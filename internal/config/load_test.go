@@ -591,7 +591,7 @@ func TestEmulatorHeap(t *testing.T) {
 		wantErr string
 	}{
 		{name: "default", want: DefaultEmulatorHeapMiB},
-		{name: "flag", args: []string{"--emulator-heap-mib", "1024"}, want: 1024},
+		{name: "flag", args: []string{"--emulator-heap-mib", "1536"}, want: 1536},
 		{name: "env", env: map[string]string{EnvPrefix + "EMULATOR_HEAP_MIB": "768"}, want: 768},
 		{name: "file", file: `{"emulatorHeapMiB":256}`, want: 256},
 		{name: "flag beats env", args: []string{"--emulator-heap-mib=300"},

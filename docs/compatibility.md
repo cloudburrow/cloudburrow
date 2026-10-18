@@ -348,8 +348,8 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
   and two attributes, on two subscriptions), and 1.5 KB per 1 KB message on one. Deleting the
   subscription frees it (`DeleteSubscription`, detaching it, or `cloudburrow reset --service
   pubsub`): after the soak deleted its topic and subscriptions the live heap fell from 109 to
-  10 MiB. CloudBurrow bounds the heap (`--emulator-heap-mib`, 512 MiB by default,
-  [configuration.md](configuration.md#settings)), which holds about 350,000 such 1 KB messages, or
+  10 MiB. CloudBurrow bounds the heap (`--emulator-heap-mib`, 1024 MiB by default since #1611,
+  [configuration.md](configuration.md#settings)); 512 MiB held about 350,000 such 1 KB messages, or
   550,000 of the soak's. **When the heap is full the emulator exits and its container restarts,
   empty.** Unbounded, it would instead have grown to a quarter of the cluster node's memory; bounded
   without that exit, it was measured to answer nothing at all (every `Publish` timing out) until its
@@ -993,7 +993,8 @@ not reset, as before.
 
 **Datastore keeps its data in persistent mode, measured (#307).** In persistent mode the
 emulator's on-disk store is on a PersistentVolumeClaim, and the emulator's JVM is the container's
-main process. The Cloud SDK emulator writes its store only when it shuts down cleanly, and both
+main process. The Cloud SDK emulator writes its whole store when it shuts down cleanly, and, while it has
+changes, every 30 seconds (a fixed delay of its own, which no flag sets; measured #1611), and both
 `gcloud beta emulators datastore start` and the `cloud_datastore_emulator` script run the JVM as
 a child that never receives the pod's SIGTERM, so under the wrapper an entity written before a
 pod restart was lost. In ephemeral mode it runs through the wrapper with `--no-store-on-disk`,
@@ -1006,12 +1007,40 @@ lost in three runs of three (#1307). So the running JVM holds an exclusive `floc
 exited; measured, five of nine pod restarts waited, and every one kept its data.
 `TestDatastoreSurvivesAPodRestart` writes an entity with the Go client,
 deletes the pod, and reads every entity written so far back from the new one, three times over.
-A pod that is killed rather than stopped (OOM, node loss) still loses what was written since it
-started. CI's restart probe reads a probe entity after `stop` and `up` in persistent mode, and
+An emulator that is killed rather than stopped (a full heap, node loss) loses what was written
+since its last save, up to about 30 seconds (next paragraph). CI's restart probe reads a probe entity after `stop` and `up` in persistent mode, and
 finds none after `up --mode ephemeral` (`TestDatastoreAcrossRestart`). Both tests are on CI's
 [retry-once list](#retried-once), so this evidence tolerates one retry. `status` reports `volume` for Datastore, and for every
 other service, only in persistent mode. That Firestore and Bigtable lose their data is measured
 above (2026-10-16), not in CI.
+
+**What a Firestore or Datastore emulator's exit loses (#1611).** Since #1603 each Java emulator's
+heap is bounded (`--emulator-heap-mib`, 1024 MiB by default, [configuration.md](configuration.md#settings))
+and the JVM exits at once when it is full (`-XX:+ExitOnOutOfMemoryError`, which runs no shutdown
+hook, so nothing is saved), and the kubelet restarts the emulator's container alone, in seconds;
+the front's container and its emptyDir are not touched. Measured by ending the JVM with `SIGKILL`
+from the kind node, which is what that exit is to the emulator, through the official clients:
+
+| | `--mode persistent` | `--mode ephemeral` |
+|---|---|---|
+| Firestore documents, in every database | **Lost**: the emulator keeps them in memory alone | **Lost** |
+| Firestore databases, indexes, field overrides, backup schedules, backups (with their documents), operations | Kept: the front's, on the pod's emptyDir | Kept |
+| Firestore listeners | The official client's listener reconnects by itself: it may first be told its document no longer exists, then sees later writes | The same |
+| Datastore entities | Kept up to the emulator's last save, about every 30 seconds; what was written since is lost | **Lost**: nothing is on disk |
+
+A Firestore backup is the way back: a schedule's backup outlives the emulator, and
+`RestoreDatabase` makes a database with its documents. Firestore cannot be kept across the exit
+otherwise: the emulator has no persistence of its own (`gcloud`'s `--export-on-exit` needs a clean
+shutdown, which this exit is not), and Firestore does not survive `stop` and `up` in either mode,
+above. So the bound is sized for real data rather than for the soak: 100,000 documents of about
+1 KB held 330 MiB of Firestore's heap, and at 150,000 the 512 MiB of #1603 filled and the emulator
+exited, losing all of them; Datastore's 100,000 entities held 175 MiB, and 410 MiB while it wrote
+its 110 MB store to disk, which needs 2.3 times the live heap. 1024 MiB holds about 300,000 such
+Firestore documents and 240,000 Datastore entities. A persistent Datastore store too large for the
+heap fills it at each save, so the emulator exits, loads the last save, and loses every 30 seconds'
+writes; raise the bound, or set it to `0`. `TestFirestoreAfterTheEmulatorIsKilled` and
+`TestDatastoreAfterTheEmulatorIsKilled` kill each emulator's JVM and read back what is kept, and
+find what is lost gone, in either mode.
 
 ### Generated coverage
 
