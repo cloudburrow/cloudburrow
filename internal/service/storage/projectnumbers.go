@@ -27,35 +27,47 @@ const ProjectNumbersPath = "/_cloudburrow/project-numbers"
 // every reset prefix: a reset drops resources, not the projects' numbers.
 const projectNumbersKey = "projectnumbers"
 
+// projectNumbers is the in-memory copy of the set, which is all
+// ProjectNumberOf reads. It is filled from the metadata store once, when
+// the server is made (loadProjectNumbers), and replaced on each push.
+//
+// ProjectNumberOf never reads the metadata store: it is called from inside
+// metadata transactions (an upload's default object ACL names the project
+// team by number), and the store's lock is not reentrant. When it loaded
+// the set lazily, the first lookup after a restart, if it came from such a
+// transaction, took the store's read lock under its own write lock and
+// held the whole store, readiness included, forever (#1630).
 type projectNumbers struct {
-	mu     sync.RWMutex
-	loaded bool
-	byID   map[string]int64
+	mu   sync.RWMutex
+	byID map[string]int64
+	// push serializes pushes, so the store and the copy end on the same
+	// set. It is never held by a lookup, and mu is never held while the
+	// store's lock is taken.
+	push sync.Mutex
+}
+
+// loadProjectNumbers reads the last set the host sent from the metadata
+// store, as after a restart.
+func (s *Server) loadProjectNumbers() {
+	m := map[string]int64{}
+	_ = s.meta.View(func(tx Tx) error {
+		if raw, ok := tx.Get(projectNumbersKey); ok {
+			_ = json.Unmarshal(raw, &m)
+		}
+		return nil
+	})
+	s.numbers.mu.Lock()
+	s.numbers.byID = m
+	s.numbers.mu.Unlock()
 }
 
 // ProjectNumberOf is the number the host sent for a project, if any. It is
 // what storageserver installs as resource.SetProjectNumberResolver, so
-// every number this server reports is the registry's.
+// every number this server reports is the registry's. It is safe inside a
+// metadata transaction.
 func (s *Server) ProjectNumberOf(id string) (int64, bool) {
 	s.numbers.mu.RLock()
-	if s.numbers.loaded {
-		n, ok := s.numbers.byID[id]
-		s.numbers.mu.RUnlock()
-		return n, ok
-	}
-	s.numbers.mu.RUnlock()
-	s.numbers.mu.Lock()
-	defer s.numbers.mu.Unlock()
-	if !s.numbers.loaded {
-		m := map[string]int64{}
-		_ = s.meta.View(func(tx Tx) error {
-			if raw, ok := tx.Get(projectNumbersKey); ok {
-				_ = json.Unmarshal(raw, &m)
-			}
-			return nil
-		})
-		s.numbers.byID, s.numbers.loaded = m, true
-	}
+	defer s.numbers.mu.RUnlock()
 	n, ok := s.numbers.byID[id]
 	return n, ok
 }
@@ -78,12 +90,14 @@ func (s *Server) serveProjectNumbers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	raw, _ := json.Marshal(m)
-	s.numbers.mu.Lock()
-	defer s.numbers.mu.Unlock()
+	s.numbers.push.Lock()
+	defer s.numbers.push.Unlock()
 	if err := s.meta.Update(func(tx Tx) error { tx.Put(projectNumbersKey, raw); return nil }); err != nil {
 		writeError(w, err)
 		return
 	}
-	s.numbers.byID, s.numbers.loaded = m, true
+	s.numbers.mu.Lock()
+	s.numbers.byID = m
+	s.numbers.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
