@@ -213,6 +213,7 @@ func TestBigQueryNumericRounding(t *testing.T) {
 	})
 
 	t.Run("Storage Write API", func(t *testing.T) {
+		h := h.For(t)
 		tbl, name := table("")
 		m, dp := writerSchema(t, h, tbl)
 		mw := managedWriter(t, h, project)

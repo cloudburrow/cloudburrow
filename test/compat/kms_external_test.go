@@ -43,6 +43,7 @@ func TestKMSExternalKeys(t *testing.T) {
 	clients := kmsClients(t, h)
 	for _, variant := range []string{"grpc", "rest"} {
 		t.Run(variant, func(t *testing.T) {
+			h := h.For(t)
 			c := clients[variant]
 			newEkm := kms.NewEkmClient
 			if variant == "rest" {

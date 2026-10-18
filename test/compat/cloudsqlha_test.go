@@ -44,7 +44,10 @@ func TestCloudSQLHighAvailability(t *testing.T) {
 		engines = append(engines, haMySQL)
 	}
 	for _, e := range engines {
-		t.Run(e.version, func(t *testing.T) { testHighAvailability(t, h, e) })
+		t.Run(e.version, func(t *testing.T) {
+			h := h.For(t)
+			testHighAvailability(t, h, e)
+		})
 	}
 }
 

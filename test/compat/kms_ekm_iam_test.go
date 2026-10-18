@@ -38,6 +38,7 @@ func TestKMSEkmIamPolicyIsStoredNotEnforced(t *testing.T) {
 	const member = "user:ekm-admin@example.com"
 	for _, variant := range []string{"grpc", "rest"} {
 		t.Run(variant, func(t *testing.T) {
+			h := h.For(t)
 			newClient := kms.NewEkmClient
 			if variant == "rest" {
 				newClient = kms.NewEkmRESTClient
