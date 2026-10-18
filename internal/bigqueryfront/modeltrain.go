@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/dgryski/go-farm"
 )
 
 // BigQuery ML training (#1465): LINEAR_REG and binary LOGISTIC_REG models
@@ -39,7 +37,7 @@ import (
 // needed no halving; L1 is a proximal (soft-threshold) step; the text
 // whose FARM_FINGERPRINT places a row in a RANDOM split (BigQuery says
 // only that it is "based on the FARM_FINGERPRINT of the data (including
-// the column name and schema)", rowFingerprint), so the split is
+// the column name and schema)", rowText, fingerprinted by the engine), so the split is
 // deterministic, as documented, but not Google's rows; a one-hot column set that is collinear with the intercept
 // is solved for the minimum-norm weights. The weights so differ from
 // Google's in their last digits, and more where the problem is
@@ -289,8 +287,9 @@ func mlUnimplemented(format string, a ...any) *mlFail {
 }
 
 // trainModel trains a model of opts on rows, whose columns are cols, each
-// value a string or nil as the REST API gives it.
-func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
+// value a string or nil as the REST API gives it; fp fingerprints the rows
+// of a RANDOM split.
+func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprinter) (mlTrained, *mlFail) {
 	switch opts.ModelType {
 	case "KMEANS":
 		return trainKMeans(opts, cols, rows)
@@ -409,9 +408,11 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 	}
 	switch method {
 	case "RANDOM":
-		for i, e := range randomSplit(cols, kept, frac, opts.SplitMethod == "AUTO_SPLIT" && len(kept) > 50000) {
-			isEval[i] = e
+		split, fe := randomSplit(cols, kept, frac, opts.SplitMethod == "AUTO_SPLIT" && len(kept) > 50000, fp)
+		if fe != nil {
+			return t, fe
 		}
+		copy(isEval, split)
 	case "CUSTOM":
 		if si < 0 {
 			return t, mlInvalid("data_split_col must be specified when data_split_method is CUSTOM")
@@ -888,12 +889,16 @@ func encodeFeatureMode(ft mlFeature, v *string, scaling string) []float64 {
 	return out
 }
 
-// rowFingerprint is FARM_FINGERPRINT (FarmHash Fingerprint64, as
-// BigQuery's hash functions page documents it) of a row's text: each
+// fingerprinter gives FARM_FINGERPRINT of each text, in order: the
+// front's asks the engine (engineFingerprints), whose FARM_FINGERPRINT is
+// FarmHash Fingerprint64, as BigQuery's hash functions page documents it.
+type fingerprinter func(texts []string) ([]int64, *mlFail)
+
+// rowText is the text a RANDOM split fingerprints for a row: each
 // column's name, GoogleSQL type and quoted value (NULL unquoted), as
-// `x INT64="3",s STRING=NULL`, so a split depends on the
-// column names and schema as BigQuery says its split does.
-func rowFingerprint(cols []mlColumn, row []*string) int64 {
+// `x INT64="3",s STRING=NULL`, so a split depends on the column names and
+// schema as BigQuery says its split does.
+func rowText(cols []mlColumn, row []*string) string {
 	var b strings.Builder
 	for i, c := range cols {
 		if i > 0 {
@@ -910,12 +915,8 @@ func rowFingerprint(cols []mlColumn, row []*string) int64 {
 			b.WriteString(strconv.Quote(*row[i]))
 		}
 	}
-	return farmFingerprint(b.String())
+	return b.String()
 }
-
-// farmFingerprint is BigQuery's FARM_FINGERPRINT of a STRING: FarmHash
-// Fingerprint64 of its bytes, as a signed INT64.
-func farmFingerprint(s string) int64 { return int64(farm.Fingerprint64([]byte(s))) }
 
 // randomSplit is which rows a RANDOM split makes evaluation rows: a row
 // is one when ABS(FARM_FINGERPRINT(row)) % 100 is below frac, rounded to
@@ -925,11 +926,21 @@ func farmFingerprint(s string) int64 { return int64(farm.Fingerprint64([]byte(s)
 // of more than 50,000 rows, "10,000 rows are used as evaluation data")
 // takes the round(frac · rows) rows of the smallest ABS(FARM_FINGERPRINT)
 // instead.
-func randomSplit(cols []mlColumn, rows [][]*string, frac float64, count bool) []bool {
+func randomSplit(cols []mlColumn, rows [][]*string, frac float64, count bool, fp fingerprinter) ([]bool, *mlFail) {
 	eval := make([]bool, len(rows))
-	key := make([]uint64, len(rows))
+	texts := make([]string, len(rows))
 	for i, row := range rows {
-		f := rowFingerprint(cols, row)
+		texts[i] = rowText(cols, row)
+	}
+	fps, fe := fp(texts)
+	if fe != nil {
+		return nil, fe
+	}
+	if len(fps) != len(rows) {
+		return nil, &mlFail{code: 500, msg: fmt.Sprintf("FARM_FINGERPRINT of the split: %d values for %d rows", len(fps), len(rows))}
+	}
+	key := make([]uint64, len(rows))
+	for i, f := range fps {
 		key[i] = uint64(f)
 		if f < 0 {
 			key[i] = uint64(-f) // ABS; -2^63 stays 2^63
@@ -944,13 +955,13 @@ func randomSplit(cols []mlColumn, rows [][]*string, frac float64, count bool) []
 		for _, i := range order[:int(math.Round(frac*float64(len(rows))))] {
 			eval[i] = true
 		}
-		return eval
+		return eval, nil
 	}
 	pct := uint64(math.Round(frac * 100))
 	for i := range rows {
 		eval[i] = key[i]%100 < pct
 	}
-	return eval
+	return eval, nil
 }
 
 // labelEncode is BigQuery's label encoding of v

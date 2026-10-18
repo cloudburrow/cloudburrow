@@ -51,7 +51,7 @@ func TestTrainArimaAR1(t *testing.T) {
 		t.Fatal(m)
 	}
 	cols, rows := arimaRows(y)
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -105,7 +105,7 @@ func TestTrainArimaDrift(t *testing.T) {
 	o := arimaOpts("auto_arima", "non_seasonal_order", "include_drift")
 	o.TS.AutoArima, o.TS.Order, o.TS.IncludeDrift = false, []int{0, 1, 0}, true
 	cols, rows := arimaRows(y)
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -136,7 +136,7 @@ func TestTrainArimaDrift(t *testing.T) {
 func TestTrainArimaAuto(t *testing.T) {
 	y := ar1Series()
 	cols, rows := arimaRows(y)
-	tr, fe := trainModel(arimaOpts(), cols, rows)
+	tr, fe := trainModelT(arimaOpts(), cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -155,7 +155,7 @@ func TestTrainArimaAuto(t *testing.T) {
 	}
 	cols, rows = arimaRows(trend)
 	rows = append(rows[:5], rows[6:]...)
-	tr, fe = trainModel(arimaOpts(), cols, rows)
+	tr, fe = trainModelT(arimaOpts(), cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -219,7 +219,7 @@ func pipelineSeries() []float64 {
 func TestArimaPipeline(t *testing.T) {
 	y := pipelineSeries()
 	cols, rows := arimaRows(y)
-	tr, fe := trainModel(arimaOpts(), cols, rows)
+	tr, fe := trainModelT(arimaOpts(), cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -278,7 +278,7 @@ func TestArimaPipelineOff(t *testing.T) {
 	cols, rows := arimaRows(y)
 	o := arimaOpts("seasonalities", "clean_spikes_and_dips", "adjust_step_changes")
 	o.TS.Seasonalities, o.TS.CleanSpikes, o.TS.AdjustSteps = "NO_SEASONALITY", false, false
-	tr, fe := trainModel(o, cols, rows)
+	tr, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -298,14 +298,14 @@ func TestArimaPipelineOff(t *testing.T) {
 		flat[k] = 5 + 0.01*float64(k%7)
 	}
 	cols, rows = arimaRows(flat)
-	tr, fe = trainModel(arimaOpts(), cols, rows)
+	tr, fe = trainModelT(arimaOpts(), cols, rows)
 	if fe != nil || len(tr.Arima.Series[0].Seasons) != 1 {
 		t.Fatalf("a small weekly pattern: %v %v", fe, tr.Arima.Series[0].Seasons)
 	}
 	o = arimaOpts("seasonalities")
 	o.TS.Seasonalities = "WEEKLY"
 	cols, rows = arimaRows(ar1Series())
-	tr, fe = trainModel(o, cols, rows)
+	tr, fe = trainModelT(o, cols, rows)
 	if fe != nil || len(tr.Arima.Series[0].Seasons) != 1 {
 		t.Fatalf("seasonalities WEEKLY: %v %v", fe, tr.Arima.Series[0].Seasons)
 	}
@@ -313,7 +313,7 @@ func TestArimaPipelineOff(t *testing.T) {
 	o = arimaOpts("forecast_limit_lower_bound", "forecast_limit_upper_bound")
 	o.TS.LimitLower, o.TS.LimitUpper = &lo, &hi
 	cols, rows = arimaRows(y)
-	tr, fe = trainModel(o, cols, rows)
+	tr, fe = trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}

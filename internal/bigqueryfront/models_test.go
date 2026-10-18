@@ -1,6 +1,8 @@
 package bigqueryfront
 
 import (
+	"fmt"
+	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -30,7 +32,7 @@ func TestTrainLinearNormalEquationRecoversTheWeights(t *testing.T) {
 	cols, rows := linearRows()
 	o := defaultMLOptions()
 	o.ModelType, o.LabelCols = "LINEAR_REG", []string{"y"}
-	m, fail := trainModel(o, cols, rows)
+	m, fail := trainModelT(o, cols, rows)
 	if fail != nil {
 		t.Fatal(fail)
 	}
@@ -65,7 +67,7 @@ func TestTrainLinearGradientDescentConverges(t *testing.T) {
 	cols, rows := linearRows()
 	o := defaultMLOptions()
 	o.ModelType, o.LabelCols, o.Strategy, o.EarlyStop, o.MaxIterations = "LINEAR_REG", []string{"y"}, "BATCH_GRADIENT_DESCENT", false, 200
-	m, fail := trainModel(o, cols, rows)
+	m, fail := trainModelT(o, cols, rows)
 	if fail != nil {
 		t.Fatal(fail)
 	}
@@ -82,7 +84,7 @@ func TestTrainLinearGradientDescentConverges(t *testing.T) {
 	}
 	// Early stop ends sooner.
 	o.EarlyStop = true
-	m2, _ := trainModel(o, cols, rows)
+	m2, _ := trainModelT(o, cols, rows)
 	if len(m2.Iterations) >= 200 {
 		t.Errorf("early stop ran %d iterations", len(m2.Iterations))
 	}
@@ -101,7 +103,7 @@ func TestTrainLogistic(t *testing.T) {
 	}
 	o := defaultMLOptions()
 	o.ModelType = "LOGISTIC_REG"
-	m, fail := trainModel(o, cols, rows)
+	m, fail := trainModelT(o, cols, rows)
 	if fail != nil {
 		t.Fatal(fail)
 	}
@@ -123,16 +125,16 @@ func TestTrainRefusals(t *testing.T) {
 	cols := []mlColumn{{"x", "TIMESTAMP"}, {"label", "FLOAT"}}
 	o := defaultMLOptions()
 	o.ModelType = "LINEAR_REG"
-	if _, f := trainModel(o, cols, [][]*string{{sp("1"), sp("2")}}); f == nil || f.code != 501 {
+	if _, f := trainModelT(o, cols, [][]*string{{sp("1"), sp("2")}}); f == nil || f.code != 501 {
 		t.Errorf("TIMESTAMP feature: %v", f)
 	}
 	cols = []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}
 	o.ModelType = "LOGISTIC_REG"
 	rows := [][]*string{{sp("1"), sp("a")}, {sp("2"), sp("b")}, {sp("3"), sp("c")}}
-	if m, f := trainModel(o, cols, rows); f != nil || len(m.ClassWeights) != 3 {
+	if m, f := trainModelT(o, cols, rows); f != nil || len(m.ClassWeights) != 3 {
 		t.Errorf("multiclass: %v", f)
 	}
-	if _, f := trainModel(o, []mlColumn{{"x", "FLOAT"}}, rows); f == nil || f.code != 400 {
+	if _, f := trainModelT(o, []mlColumn{{"x", "FLOAT"}}, rows); f == nil || f.code != 400 {
 		t.Errorf("no label: %v", f)
 	}
 }
@@ -206,57 +208,85 @@ func TestFindMLCalls(t *testing.T) {
 	}
 }
 
-// TestRandomSplitFingerprint: FARM_FINGERPRINT gives the values of
-// BigQuery's documented example (hash_functions), and a RANDOM split is
-// the rows whose ABS(FARM_FINGERPRINT) % 100 is under the fraction.
+// fixedFingerprints stands in for the engine's FARM_FINGERPRINT in unit
+// tests: FNV-1a of the text, a fixed value per text. The FarmHash values
+// themselves are the engine's, checked by TestBigQueryMLRandomSplit.
+func fixedFingerprints(texts []string) ([]int64, *mlFail) {
+	out := make([]int64, len(texts))
+	for i, s := range texts {
+		h := fnv.New64a()
+		h.Write([]byte(s))
+		out[i] = int64(h.Sum64())
+	}
+	return out, nil
+}
+
+// trainModelT is trainModel with fixedFingerprints.
+func trainModelT(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
+	return trainModel(opts, cols, rows, fixedFingerprints)
+}
+
+// TestRandomSplitFingerprint: a RANDOM split fingerprints each row's text
+// (column name, type and quoted value) and makes evaluation rows those
+// whose ABS(FARM_FINGERPRINT) % 100 is under the fraction · 100, or for a
+// count those of the smallest ABS; the fingerprints here are fixed values.
 func TestRandomSplitFingerprint(t *testing.T) {
-	for s, want := range map[string]int64{"1footrue": -1541654101129638711, "2applefalse": 2794438866806483259, "3true": -4880158226897771312} {
-		if got := farmFingerprint(s); got != want {
-			t.Errorf("FARM_FINGERPRINT(%q) = %d; want %d", s, got, want)
-		}
+	cols := []mlColumn{{"x", "INTEGER"}, {"s", "STRING"}}
+	if got := rowText(cols, []*string{sp("3"), nil}); got != `x INT64="3",s STRING=NULL` {
+		t.Errorf("rowText = %q", got)
 	}
-	cols := []mlColumn{{"x", "INTEGER"}}
+	// Each row's fingerprint, by its text.
+	fps := map[string]int64{}
 	var rows [][]*string
-	for i := 0; i < 1000; i++ {
-		rows = append(rows, []*string{sp(strconv.Itoa(i))})
+	var want []bool
+	add := func(f int64, eval bool) {
+		v := strconv.Itoa(len(rows))
+		rows = append(rows, []*string{sp(v), sp("a")})
+		fps[`x INT64="`+v+`",s STRING="a"`] = f
+		want = append(want, eval)
 	}
-	eval := randomSplit(cols, rows, 0.3, false)
-	n := 0
-	for i, e := range eval {
-		f := farmFingerprint("x INT64=" + strconv.Quote(strconv.Itoa(i)))
-		if f < 0 {
-			f = -f
+	add(29, true)
+	add(30, false)
+	add(-29, true)                  // ABS(-29) % 100 = 29
+	add(-130, false)                // ABS(-130) % 100 = 30
+	add(-6889379130834334227, true) // 27, of the exact ABS (#1599)
+	add(9007199254740993, false)    // 93, above 2^53
+	add(math.MinInt64, true)        // ABS is 2^63: 8
+	add(math.MaxInt64, true)        // 7
+	var asked []string
+	fp := func(texts []string) ([]int64, *mlFail) {
+		asked = texts
+		out := make([]int64, len(texts))
+		for i, s := range texts {
+			out[i] = fps[s]
 		}
-		if e != (f%100 < 30) {
-			t.Fatalf("row %d: eval %v; ABS(FARM_FINGERPRINT) %% 100 = %d", i, e, f%100)
+		return out, nil
+	}
+	eval, fe := randomSplit(cols, rows, 0.3, false, fp)
+	if fe != nil || len(asked) != len(rows) {
+		t.Fatalf("randomSplit: %v, %d texts", fe, len(asked))
+	}
+	for i := range rows {
+		if eval[i] != want[i] {
+			t.Errorf("row %d (fingerprint %d): eval %v; want %v", i, fps[asked[i]], eval[i], want[i])
 		}
+	}
+	// A count: exactly that many rows, those of the smallest ABS (29, -29, 30).
+	c, _ := randomSplit(cols, rows, 3.0/8, true, fp)
+	got := []int{}
+	for i, e := range c {
 		if e {
-			n++
+			got = append(got, i)
 		}
 	}
-	if n < 250 || n > 350 {
-		t.Errorf("%d of 1000 rows in a 0.3 split", n)
+	if fmt.Sprint(got) != "[0 1 2]" {
+		t.Errorf("count split: rows %v; want [0 1 2]", got)
 	}
-	// The same rows split the same way each run; another column name, another way.
-	again := randomSplit(cols, rows, 0.3, false)
-	other := randomSplit([]mlColumn{{"y", "INTEGER"}}, rows, 0.3, false)
-	same, moved := true, false
-	for i := range eval {
-		same = same && eval[i] == again[i]
-		moved = moved || eval[i] != other[i]
+	// The engine's error stops the training.
+	if _, fe := randomSplit(cols, rows, 0.3, false, func([]string) ([]int64, *mlFail) { return nil, mlInvalid("no") }); fe == nil || fe.code != 400 {
+		t.Errorf("a fingerprint error: %v", fe)
 	}
-	if !same || !moved {
-		t.Errorf("deterministic %v, depends on the column name %v", same, moved)
-	}
-	// A count: exactly that many rows, those of the smallest ABS.
-	c := randomSplit(cols, rows, 0.1, true)
-	k := 0
-	for _, e := range c {
-		if e {
-			k++
-		}
-	}
-	if k != 100 {
-		t.Errorf("count split: %d rows; want 100", k)
+	if _, fe := randomSplit(cols, rows, 0.3, false, func([]string) ([]int64, *mlFail) { return []int64{1}, nil }); fe == nil || fe.code != 500 {
+		t.Errorf("too few fingerprints: %v", fe)
 	}
 }
