@@ -50,7 +50,39 @@ type LifecycleComponent struct {
 	// rather than Start (#1588).
 	knative       *knativeRun
 	knativeJoined bool
+	// emulatorHeapMiB bounds the Java emulators' heaps and sizes their
+	// containers' memory (#1603); 0 bounds neither.
+	emulatorHeapMiB int
+	// earlierStorage migrates what an earlier release's Cloud Storage
+	// server left on the volume (#1606), or nil.
+	earlierStorage EarlierStorage
+	// restarted and serviceNetwork come from the cluster (#1610):
+	// whether this up started stopped nodes, and a wait for their
+	// Service network. Nil when unset, as in prefetch.
+	restarted      func() bool
+	serviceNetwork func(context.Context) error
 }
+
+// SetNodeRestart gives Knative's warm path the cluster's word on whether
+// this up started stopped nodes, and a wait for their Service network
+// (#1610).
+func (c *LifecycleComponent) SetNodeRestart(restarted func() bool, serviceNetwork func(context.Context) error) {
+	c.restarted, c.serviceNetwork = restarted, serviceNetwork
+}
+
+// EarlierStorage moves the buckets a Cloud Storage server from before the
+// builtin one (#519) left on a persistent instance's volume into the
+// builtin server (#1606). Export runs before the backends are applied, while
+// the earlier server still runs, and reports whether there is anything for
+// Import, which runs once they are ready.
+type EarlierStorage interface {
+	Export(ctx context.Context) (bool, error)
+	Import(ctx context.Context) error
+}
+
+// SetEarlierStorage records the migration of an earlier release's Cloud
+// Storage (#1606). It runs only in persistent mode, with storage enabled.
+func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStorage = m }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
@@ -88,6 +120,8 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 		mode:        cfg.Mode,
 		timeout:     time.Duration(cfg.ReadyTimeout),
 		out:         out,
+
+		emulatorHeapMiB: cfg.EmulatorHeapMiB,
 	}
 }
 
@@ -171,6 +205,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 			out = append(out, b)
 		}
 	}
+	for i := range out {
+		if out[i].JVM {
+			out[i] = out[i].WithJVMHeap(c.emulatorHeapMiB)
+		}
+	}
 	return out
 }
 
@@ -205,6 +244,15 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	if _, err := c.installer.RemoveRetired(ctx, c.timeout); err != nil {
 		return err
 	}
+	// An earlier release's Cloud Storage files are copied out through its
+	// own server before the new one replaces it (#1606).
+	migrate := false
+	if c.earlierStorage != nil && c.mode == config.ModePersistent && c.enabled(config.ServiceStorage) {
+		var err error
+		if migrate, err = c.earlierStorage.Export(ctx); err != nil {
+			return fmt.Errorf("%w: %w", ErrInstallFailed, err)
+		}
+	}
 	// The backends and Knative share nothing but the node, so they are
 	// installed at the same time (#1588). With KnativeStart registered,
 	// Knative began right after the cluster and KnativeReady joins it;
@@ -212,11 +260,24 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	// only once both are, and the first failure is the one reported.
 	if c.NeedsKnative() && c.knative == nil {
 		c.startKnative(ctx)
-		defer c.stopKnative()
+		// The run is this Start's own: once it returns, a later Start
+		// begins another rather than joining this finished one. A second
+		// Start on the same component, as against a cluster an older
+		// release brought up, otherwise skipped Knative entirely, its
+		// in-place upgrade and its stamp included.
+		defer func() {
+			c.stopKnative()
+			c.knative = nil
+		}()
 	}
 	var err error
 	if backends := c.Backends(); len(backends) > 0 {
 		err = c.installer.InstallBackends(ctx, backends, c.timeout)
+	}
+	if err == nil && migrate {
+		if ierr := c.earlierStorage.Import(ctx); ierr != nil {
+			err = fmt.Errorf("%w: %w", ErrInstallFailed, ierr)
+		}
 	}
 	if c.NeedsKnative() && !c.knativeJoined {
 		if err != nil {
@@ -342,7 +403,7 @@ func (c *LifecycleComponent) ensureKnative(ctx context.Context) error {
 		// installed before they existed (#568). After stop and up the
 		// webhook that validates them is still coming back, so wait for
 		// Knative as an install does.
-		if err := c.installer.WaitKnative(ctx, c.timeout); err != nil {
+		if err := c.waitKnativeWarm(ctx); err != nil {
 			return err
 		}
 		return c.installer.ConfigureDeployment(ctx)
@@ -368,6 +429,37 @@ func (c *LifecycleComponent) ensureKnative(ctx context.Context) error {
 		return err
 	}
 	return cluster.WriteStamp(ctx, kubectl, cluster.Stamp{KnativeVersion: KnativeVersion})
+}
+
+// waitKnativeWarm waits for an installed Knative to serve.
+//
+// When this up started the cluster's stopped nodes, Knative's pods were
+// started with the node, before its Service network worked: they exit on
+// the kubernetes Service they cannot reach, and the kubelet's restart
+// backoff then held them back, so a warm start took 23 to 55 s (#1610).
+// Their Deployments' status is also the one from before the stop, so
+// "Available" answered at once while the webhook still refused calls.
+// Here the network is waited for, then Knative's pods are replaced by ones
+// started on it, and up waits for those: fresh pods with no backoff, and a
+// readiness that is this boot's.
+func (c *LifecycleComponent) waitKnativeWarm(ctx context.Context) error {
+	if c.restarted == nil || !c.restarted() {
+		return c.installer.WaitKnative(ctx, c.timeout)
+	}
+	if c.serviceNetwork != nil {
+		fmt.Fprintln(c.out, "  waiting for the cluster's Service network...")
+		if err := c.serviceNetwork(ctx); err != nil {
+			if ctx.Err() != nil {
+				return err
+			}
+			// A probe that cannot run (a node image without curl) is no
+			// reason to fail the start: Knative comes back as it did
+			// before, late.
+			fmt.Fprintf(c.out, "  the Service network was not confirmed (%v); waiting for knative as it restarts itself\n", err)
+			return c.installer.WaitKnative(ctx, c.timeout)
+		}
+	}
+	return c.installer.RestartKnative(ctx, c.timeout)
 }
 
 // Installer exposes the underlying installer.

@@ -37,7 +37,7 @@ import (
 // v1jobs.go, jobs (list, get, create, delete), and in v1domains.go domain
 // mappings and authorized domains; in v1executions.go replaceJob, run,
 // executions and tasks (#1379); in v1selector.go the list calls'
-// labelSelector and fieldSelector (#1420); and in v1instances.go and
+// labelSelector, and its fieldSelector ignored (#1420, #1595); and in v1instances.go and
 // v1workerpools.go instances and worker pools (#1546). Everything else under /apis/
 // and /v1/ answers 501 UNIMPLEMENTED.
 

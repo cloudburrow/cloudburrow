@@ -213,6 +213,7 @@
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretmanyversions_test.go:26 TestSecretTwoThousandVersions",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
@@ -227,6 +228,7 @@
         "tests": [
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretmanyversions_test.go:26 TestSecretTwoThousandVersions",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
@@ -242,7 +244,7 @@
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -334,7 +336,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -368,7 +370,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secretexpiryfilter_test.go:118 TestSecretManagerListFilters",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
         ]
@@ -377,7 +379,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
+          "test/compat/secretexpiryfilter_test.go:118 TestSecretManagerListFilters",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -422,7 +424,7 @@
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
           "test/compat/secretcmek_test.go:202 TestGcloudSecretsCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
+          "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:219 TestTerraformRegionalSecret",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
@@ -536,6 +538,7 @@
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runsecretcmek_test.go:28 TestRunMountsASecretUnderACustomerManagedKey",
+          "test/compat/runsecretversionsvolume_test.go:19 TestRunJobMountsTwoVersionsInOneVolume",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
@@ -590,6 +593,7 @@
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runsecretcmek_test.go:28 TestRunMountsASecretUnderACustomerManagedKey",
+          "test/compat/runsecretversionsvolume_test.go:19 TestRunJobMountsTwoVersionsInOneVolume",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
@@ -2207,7 +2211,8 @@
         "method": "run.namespaces.executions.list",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks",
+          "test/compat/runv1selectors_test.go:34 TestRunV1SelectorsDelayAndJobIAM"
         ]
       },
       {
@@ -2384,7 +2389,8 @@
         "method": "run.namespaces.services.list",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
+          "test/compat/runv1selectors_test.go:34 TestRunV1SelectorsDelayAndJobIAM"
         ]
       },
       {
@@ -2529,21 +2535,21 @@
         "method": "run.projects.locations.jobs.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1selectors_test.go:33 TestRunV1SelectorsDelayAndJobIAM"
+          "test/compat/runv1selectors_test.go:34 TestRunV1SelectorsDelayAndJobIAM"
         ]
       },
       {
         "method": "run.projects.locations.jobs.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1selectors_test.go:33 TestRunV1SelectorsDelayAndJobIAM"
+          "test/compat/runv1selectors_test.go:34 TestRunV1SelectorsDelayAndJobIAM"
         ]
       },
       {
         "method": "run.projects.locations.jobs.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1selectors_test.go:33 TestRunV1SelectorsDelayAndJobIAM"
+          "test/compat/runv1selectors_test.go:34 TestRunV1SelectorsDelayAndJobIAM"
         ]
       },
       {
@@ -2701,28 +2707,28 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Verified": 62
+      "Verified": 63
     },
     "rows": [
       {
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/GetKeyHandle",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.Autokey/ListKeyHandles",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
       },
@@ -2730,7 +2736,7 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/GetAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2738,14 +2744,14 @@
         "method": "google.cloud.kms.v1.AutokeyAdmin/ShowEffectiveAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand"
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand"
         ]
       },
       {
         "method": "google.cloud.kms.v1.AutokeyAdmin/UpdateAutokeyConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:245 TestKMSAutokeyProvisionsKeysOnDemand",
+          "test/compat/kms_hsm_ekm_autokey_test.go:256 TestKMSAutokeyProvisionsKeysOnDemand",
           "test/compat/terraform_batch10_test.go:39 TestTerraformKMSProjectAutokeyConfig"
         ]
       },
@@ -2755,14 +2761,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/GetEkmConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2770,14 +2776,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/ListEkmConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2786,14 +2792,14 @@
         "tests": [
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2801,7 +2807,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:162 TestKMSEkmConnectionsAreStored"
+          "test/compat/kms_hsm_ekm_autokey_test.go:173 TestKMSEkmConnectionsAreStored"
         ]
       },
       {
@@ -2910,7 +2916,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:47 TestKMSResources",
@@ -2974,7 +2980,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:47 TestKMSResources"
         ],
@@ -3005,6 +3012,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
           "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
@@ -3014,6 +3022,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
@@ -3037,7 +3047,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:630 TestKMSDecrypt",
           "test/compat/kms_test.go:731 TestKMSDecryptFollowsTheVersionLifecycle",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext",
@@ -3080,6 +3090,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
         ],
         "unverified": [
@@ -3102,6 +3113,14 @@
             "case": "a version that is not DESTROYED",
             "test": "test/compat/kms_purposes_test.go:297 TestKMSDeleteCryptoKeyLeavesARetiredResource"
           }
+        ]
+      },
+      {
+        "method": "google.cloud.kms.v1.KeyManagementService/DeleteKeyRing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing"
         ]
       },
       {
@@ -3134,7 +3153,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:509 TestKMSEncrypt",
           "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
@@ -3230,6 +3249,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_test.go:1162 TestKMSGetCryptoKeyVersion",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled"
         ],
@@ -3268,6 +3288,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
+          "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
@@ -3312,6 +3334,7 @@
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM",
           "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
+          "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
@@ -3349,7 +3372,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/kms_test.go:950 TestKMSFullViewAddsNothingForSoftwareKeys",
@@ -3507,7 +3530,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_hsm_ekm_autokey_test.go:53 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:905 TestKMSUpdateCryptoKey",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
@@ -4611,6 +4634,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
@@ -4627,7 +4651,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
@@ -4649,12 +4673,13 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -4666,7 +4691,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateView",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1519_test.go:62 TestLoggingViewIAMSavedQueriesAndLogScopes",
+          "test/compat/logging1519_test.go:63 TestLoggingViewIAMSavedQueriesAndLogScopes",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
@@ -4686,7 +4711,7 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
@@ -4706,7 +4731,7 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
@@ -4721,7 +4746,7 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteView",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1519_test.go:62 TestLoggingViewIAMSavedQueriesAndLogScopes",
+          "test/compat/logging1519_test.go:63 TestLoggingViewIAMSavedQueriesAndLogScopes",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
@@ -4751,7 +4776,7 @@
         "method": "google.logging.v2.ConfigServiceV2/GetExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
@@ -4781,7 +4806,7 @@
         "method": "google.logging.v2.ConfigServiceV2/GetSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/logging1451_test.go:239 TestTerraformLoggingBigQuerySinkExportErrors",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
@@ -4811,7 +4836,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListExclusions",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -4827,7 +4852,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListSinks",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
@@ -4877,7 +4902,7 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/logging1226_test.go:279 TestLoggingExclusions",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
           "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
@@ -4896,7 +4921,7 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1226_test.go:185 TestLoggingSinks",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
@@ -4931,6 +4956,7 @@
           "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
@@ -4973,6 +4999,7 @@
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
+          "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
@@ -5698,13 +5725,6 @@
           "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
-        ],
-        "unverified": [
-          {
-            "code": "FAILED_PRECONDITION",
-            "case": "an instance with AUTH disabled",
-            "test": "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer"
-          }
         ]
       },
       {
@@ -5768,7 +5788,7 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
@@ -5782,7 +5802,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
@@ -5804,10 +5824,11 @@
         "tests": [
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -5845,7 +5866,8 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
-          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic"
+          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart"
         ]
       },
       {
@@ -5877,7 +5899,7 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
@@ -5891,7 +5913,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
@@ -5911,7 +5933,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
@@ -5933,7 +5955,8 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
-          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart"
         ]
       },
       {
@@ -6006,7 +6029,7 @@
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -6039,7 +6062,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
           "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ]
@@ -6049,6 +6072,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:132 TestPubSubUpdateSnapshot",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart",
           "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
@@ -6067,12 +6091,13 @@
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
           "test/compat/pubsubresetseed_test.go:179 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
@@ -6130,7 +6155,8 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery",
-          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart"
         ]
       },
       {
@@ -6192,53 +6218,53 @@
         "method": "pubsub.projects.schemas.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM"
+          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM"
         ]
       },
       {
         "method": "pubsub.projects.schemas.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM"
+          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM"
         ]
       },
       {
         "method": "pubsub.projects.schemas.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.snapshots.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.snapshots.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.snapshots.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.subscriptions.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6246,9 +6272,9 @@
         "method": "pubsub.projects.subscriptions.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6256,7 +6282,7 @@
         "method": "pubsub.projects.subscriptions.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6264,9 +6290,9 @@
         "method": "pubsub.projects.topics.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6274,9 +6300,9 @@
         "method": "pubsub.projects.topics.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6284,7 +6310,7 @@
         "method": "pubsub.projects.topics.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       }
@@ -6457,7 +6483,7 @@
           {
             "code": "409",
             "case": "a bucket that holds a managed folder",
-            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
           },
           {
             "code": "409",
@@ -6819,7 +6845,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6827,7 +6853,7 @@
           {
             "code": "409",
             "case": "a managed folder with objects or managed folders under it, without allowNonEmpty",
-            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
           }
         ]
       },
@@ -6837,7 +6863,7 @@
         "tests": [
           "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
@@ -6847,7 +6873,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM",
+          "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
@@ -6858,7 +6884,7 @@
         "tests": [
           "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6866,7 +6892,12 @@
           {
             "code": "400",
             "case": "a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)",
-            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
+          },
+          {
+            "code": "400",
+            "case": "a name with more than 15 /s, or starting .well-known/acme-challenge/ (the page states the rules, not the status)",
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
           }
         ]
       },
@@ -6876,7 +6907,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
         ]
       },
       {
@@ -6884,7 +6915,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM",
+          "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6892,7 +6923,7 @@
           {
             "code": "412",
             "case": "a stale etag (as for buckets.setIamPolicy)",
-            "test": "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM"
+            "test": "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM"
           }
         ]
       },
@@ -6901,7 +6932,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM"
+          "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM"
         ]
       },
       {
@@ -7006,7 +7037,7 @@
         "method": "storage.objects.bulkRestore",
         "status": "Verified",
         "tests": [
-          "test/compat/storagebulkrestore_test.go:33 TestStorageBulkRestore"
+          "test/compat/storagebulkrestore_test.go:37 TestStorageBulkRestore"
         ]
       },
       {
@@ -7061,7 +7092,7 @@
           {
             "code": "200",
             "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed)",
-            "test": "internal/service/storage/cors_test.go:112 TestStorageJSONAllowsAllowedOriginsInProcess"
+            "test": "internal/service/storage/cors_test.go:113 TestStorageJSONAllowsAllowedOriginsInProcess"
           }
         ]
       },
@@ -7111,7 +7142,7 @@
           {
             "code": "200",
             "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed)",
-            "test": "test/compat/storagecors_test.go:127 TestStorageJSONAlwaysAllowsCORS"
+            "test": "test/compat/storagecors_test.go:131 TestStorageJSONAlwaysAllowsCORS"
           },
           {
             "code": "403",
@@ -7561,6 +7592,7 @@
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -7635,6 +7667,7 @@
         "method": "google.firestore.v1.Firestore/Listen",
         "status": "Verified",
         "tests": [
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoremethods_test.go:247 TestFirestoreSnapshotListener"
         ]
       },
@@ -7807,6 +7840,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
         "status": "Verified",
         "tests": [
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminBackupSchedules",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
@@ -7817,6 +7851,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
@@ -7833,6 +7868,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
         "status": "Verified",
         "tests": [
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
@@ -7864,6 +7900,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
         "status": "Verified",
         "tests": [
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
@@ -7910,6 +7947,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
         "status": "Verified",
         "tests": [
+          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
@@ -7964,6 +8002,7 @@
         "method": "google.datastore.v1.Datastore/Commit",
         "status": "Verified",
         "tests": [
+          "test/compat/emulatorkill1611_test.go:262 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
@@ -7973,6 +8012,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
+          "test/compat/emulatorkill1611_test.go:262 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
@@ -9225,7 +9265,7 @@
           "test/compat/bigqueryhistory1522_test.go:135 TestBigQueryUndeleteKeepsRoutinesTheFrontDidNotSee",
           "test/compat/bigqueryhistory1522_test.go:39 TestBigQueryUndeleteKeepsExternalTables",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
-          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
+          "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
@@ -9241,7 +9281,7 @@
           "test/compat/bigquery1548_test.go:36 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerydefaultkeyloads1576_test.go:102 TestBigQueryAlterSchemaSetsEveryOption",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:114 TestBigQueryAlterSchemaSetsEveryOption",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
           "test/compat/bigqueryfromitems1459_test.go:119 TestBigQueryCreateSchemaOptionsAndCollation",
           "test/compat/bigqueryhistory1522_test.go:335 TestBigQueryAlterSchemaTimeTravelLetsGoFirst",
@@ -9309,7 +9349,7 @@
           "test/compat/bigqueryhistory1522_test.go:39 TestBigQueryUndeleteKeepsExternalTables",
           "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
-          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
+          "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
         ]
       },
@@ -9339,6 +9379,7 @@
         "method": "bigquery.jobs.get",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryalterprojectstatement_test.go:19 TestBigQueryAlterProjectStatementType",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
@@ -9353,6 +9394,7 @@
           "test/compat/bigqueryfailedcodes_test.go:32 TestBigQueryFailedQueryErrorBothPaths",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
+          "test/compat/bigquerygeoparquet_test.go:62 TestBigQueryParquetExtractOfNativeGeography",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryjsonunknown_test.go:34 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
@@ -9365,6 +9407,7 @@
           "test/compat/bigquerypartitionrest_test.go:145 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryprojectlimits_test.go:27 TestBigQueryProjectConfigurationEffects",
+          "test/compat/bigqueryquerydialect_test.go:25 TestBigQueryJobsQueryDialect",
           "test/compat/bigqueryreferencefile_test.go:36 TestBigQueryLoadReferenceFileSchema",
           "test/compat/bigqueryruntimeerrors_test.go:20 TestBigQueryCreateInMissingDataset",
           "test/compat/bigqueryruntimeerrors_test.go:89 TestBigQueryRuntimeErrorReasons",
@@ -9414,10 +9457,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery1548_test.go:36 TestBigQueryScriptsUndropAndAlterSchema",
-          "test/compat/bigquery1562_test.go:175 TestBigQueryMLHashBucketize",
-          "test/compat/bigquery1562_test.go:229 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigquery1562_test.go:181 TestBigQueryMLHashBucketize",
+          "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
+          "test/compat/bigqueryalteratomic1612_test.go:108 TestBigQueryScriptDryRunStopsAtCallAndExecuteImmediate",
+          "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
+          "test/compat/bigqueryalterprojectstatement_test.go:19 TestBigQueryAlterProjectStatementType",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
@@ -9440,22 +9486,23 @@
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
           "test/compat/bigqueryddlleftovers_test.go:199 TestBigQueryAlterTableDryRun",
           "test/compat/bigqueryddlleftovers_test.go:283 TestBigQueryDDLThroughExecuteImmediate",
           "test/compat/bigqueryddlleftovers_test.go:31 TestBigQueryAlterTableSetDataTypeArraysAndKeyedColumns",
           "test/compat/bigqueryddlleftovers_test.go:372 TestBigQueryViewColumnOptionsAndScriptDryRun",
-          "test/compat/bigqueryddlmore_test.go:250 TestBigQueryDefaultKeyOfJobTables",
-          "test/compat/bigqueryddlmore_test.go:345 TestBigQueryDefaultTimeZoneOfCoercedStrings",
-          "test/compat/bigqueryddlmore_test.go:44 TestBigQueryDDLMoreOptionsAndWholeAlter",
+          "test/compat/bigqueryddlmore_test.go:248 TestBigQueryDefaultKeyOfJobTables",
+          "test/compat/bigqueryddlmore_test.go:354 TestBigQueryDefaultTimeZoneOfCoercedStrings",
+          "test/compat/bigqueryddlmore_test.go:45 TestBigQueryDDLMoreOptionsAndWholeAlter",
           "test/compat/bigqueryddlmoreoptions_test.go:120 TestBigQueryDDLOptionsInAScript",
           "test/compat/bigqueryddlmoreoptions_test.go:25 TestBigQueryDDLPartitionExpirationAndKMSKey",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigqueryddlrest_test.go:124 TestBigQueryPartitionFilterThatPrunes",
           "test/compat/bigqueryddlrest_test.go:28 TestBigQueryNestedDefaultsAndTruncateDataDefaults",
-          "test/compat/bigquerydefaultkeyloads1576_test.go:102 TestBigQueryAlterSchemaSetsEveryOption",
-          "test/compat/bigquerydefaultkeyloads1576_test.go:23 TestBigQueryDefaultKeyOfResumableAndCloudStorageLoads",
-          "test/compat/bigquerydefaultkeymore1456_test.go:25 TestBigQueryDefaultKeyOfScriptAndUploadTables",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:114 TestBigQueryAlterSchemaSetsEveryOption",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:24 TestBigQueryDefaultKeyOfResumableAndCloudStorageLoads",
+          "test/compat/bigquerydefaultkeymore1456_test.go:27 TestBigQueryDefaultKeyOfScriptAndUploadTables",
           "test/compat/bigquerydefaultlocation_test.go:111 TestBigQueryRegionViewsListTheRegionsDatasets",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
           "test/compat/bigquerydifferentialprivacy_test.go:213 TestBigQueryDifferentialPrivacyPolicyBudget",
@@ -9475,17 +9522,21 @@
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
           "test/compat/bigqueryfunctionstruct1560_test.go:21 TestBigQueryFunctionStructOverGroupBy",
+          "test/compat/bigquerygeoparquet_test.go:62 TestBigQueryParquetExtractOfNativeGeography",
+          "test/compat/bigquerygovernancetags_test.go:30 TestBigQueryDataGovernanceTags",
           "test/compat/bigqueryhistory1522_test.go:335 TestBigQueryAlterSchemaTimeTravelLetsGoFirst",
           "test/compat/bigqueryhistory1522_test.go:39 TestBigQueryUndeleteKeepsExternalTables",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
+          "test/compat/bigqueryicebergdefaultconnection_test.go:26 TestBigQueryIcebergDefaultConnection",
           "test/compat/bigqueryicebergdefaults1456_test.go:27 TestBigQueryStorageURIMakesIcebergTable",
           "test/compat/bigqueryinfoschema_test.go:30 TestBigQueryInformationSchemaDatasetViews",
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:18 TestBigQueryInformationSchemaRegionViews",
-          "test/compat/bigqueryinfoschemaschemata_test.go:20 TestBigQueryInformationSchemaSchemataOptions",
+          "test/compat/bigqueryinfoschemaschemata_test.go:24 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:28 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
+          "test/compat/bigqueryint64math_test.go:29 TestBigQueryInt64MathExact",
           "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigqueryintervalarith_test.go:35 TestBigQueryIntervalArithmetic",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -9506,9 +9557,12 @@
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigqueryml_test.go:284 TestBigQueryMLRandomSplit",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
+          "test/compat/bigquerymlarima_test.go:256 TestBigQueryMLArimaPlusSTL",
+          "test/compat/bigquerymlarima_test.go:314 TestBigQueryMLArimaPlusETS",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
@@ -9520,6 +9574,7 @@
           "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
+          "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
@@ -9537,7 +9592,7 @@
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionsrest_test.go:32 TestBigQueryIngestionPartitionHistory",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
-          "test/compat/bigquerypastingestion1458_test.go:28 TestBigQueryPastIngestionTimeCopies",
+          "test/compat/bigquerypastingestion1458_test.go:29 TestBigQueryPastIngestionTimeCopies",
           "test/compat/bigqueryprivacypolicy_test.go:190 TestBigQueryPrivacyPolicyJoinRestriction",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigqueryprivacyreads_test.go:33 TestBigQueryPrivacyPolicyReads",
@@ -9545,9 +9600,11 @@
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigqueryprojectlimits_test.go:27 TestBigQueryProjectConfigurationEffects",
           "test/compat/bigquerypseudocolumns_test.go:25 TestBigQueryEnginePseudoColumnsAreUnrecognized",
+          "test/compat/bigqueryquerydialect_test.go:25 TestBigQueryJobsQueryDialect",
           "test/compat/bigqueryreferencefile_test.go:36 TestBigQueryLoadReferenceFileSchema",
           "test/compat/bigqueryruntimeerrors_test.go:20 TestBigQueryCreateInMissingDataset",
           "test/compat/bigqueryruntimeerrors_test.go:89 TestBigQueryRuntimeErrorReasons",
+          "test/compat/bigqueryscriptdrystop1456_test.go:30 TestBigQueryScriptDryRunStops",
           "test/compat/bigqueryscripterrors_test.go:23 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:81 TestBigQueryAssert",
           "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
@@ -9570,7 +9627,7 @@
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bigqueryundelete1483_test.go:204 TestBigQueryTableDecorators",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
-          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
+          "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/bigqueryviewcolumns_test.go:145 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
@@ -9609,10 +9666,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery1548_test.go:36 TestBigQueryScriptsUndropAndAlterSchema",
-          "test/compat/bigquery1562_test.go:175 TestBigQueryMLHashBucketize",
-          "test/compat/bigquery1562_test.go:229 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigquery1562_test.go:181 TestBigQueryMLHashBucketize",
+          "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryalteratomic1612_test.go:108 TestBigQueryScriptDryRunStopsAtCallAndExecuteImmediate",
+          "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
@@ -9641,21 +9700,22 @@
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
           "test/compat/bigqueryddlleftovers_test.go:199 TestBigQueryAlterTableDryRun",
           "test/compat/bigqueryddlleftovers_test.go:283 TestBigQueryDDLThroughExecuteImmediate",
           "test/compat/bigqueryddlleftovers_test.go:31 TestBigQueryAlterTableSetDataTypeArraysAndKeyedColumns",
           "test/compat/bigqueryddlleftovers_test.go:372 TestBigQueryViewColumnOptionsAndScriptDryRun",
-          "test/compat/bigqueryddlmore_test.go:173 TestBigQueryRangeInARecordReadsBack",
-          "test/compat/bigqueryddlmore_test.go:345 TestBigQueryDefaultTimeZoneOfCoercedStrings",
-          "test/compat/bigqueryddlmore_test.go:44 TestBigQueryDDLMoreOptionsAndWholeAlter",
+          "test/compat/bigqueryddlmore_test.go:171 TestBigQueryRangeInARecordReadsBack",
+          "test/compat/bigqueryddlmore_test.go:354 TestBigQueryDefaultTimeZoneOfCoercedStrings",
+          "test/compat/bigqueryddlmore_test.go:45 TestBigQueryDDLMoreOptionsAndWholeAlter",
           "test/compat/bigqueryddlmoreoptions_test.go:120 TestBigQueryDDLOptionsInAScript",
           "test/compat/bigqueryddlmoreoptions_test.go:25 TestBigQueryDDLPartitionExpirationAndKMSKey",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigqueryddlrest_test.go:124 TestBigQueryPartitionFilterThatPrunes",
           "test/compat/bigqueryddlrest_test.go:28 TestBigQueryNestedDefaultsAndTruncateDataDefaults",
-          "test/compat/bigquerydefaultkeyloads1576_test.go:102 TestBigQueryAlterSchemaSetsEveryOption",
-          "test/compat/bigquerydefaultkeymore1456_test.go:25 TestBigQueryDefaultKeyOfScriptAndUploadTables",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:114 TestBigQueryAlterSchemaSetsEveryOption",
+          "test/compat/bigquerydefaultkeymore1456_test.go:27 TestBigQueryDefaultKeyOfScriptAndUploadTables",
           "test/compat/bigquerydefaultlocation_test.go:111 TestBigQueryRegionViewsListTheRegionsDatasets",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
           "test/compat/bigquerydifferentialprivacy_test.go:213 TestBigQueryDifferentialPrivacyPolicyBudget",
@@ -9674,19 +9734,22 @@
           "test/compat/bigqueryfromitems1459_test.go:119 TestBigQueryCreateSchemaOptionsAndCollation",
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
           "test/compat/bigqueryfunctionstruct1560_test.go:21 TestBigQueryFunctionStructOverGroupBy",
+          "test/compat/bigquerygovernancetags_test.go:30 TestBigQueryDataGovernanceTags",
           "test/compat/bigqueryhistory1522_test.go:135 TestBigQueryUndeleteKeepsRoutinesTheFrontDidNotSee",
           "test/compat/bigqueryhistory1522_test.go:276 TestBigQueryChangeHistoryOfChangeNamedColumns",
           "test/compat/bigqueryhistory1522_test.go:335 TestBigQueryAlterSchemaTimeTravelLetsGoFirst",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
+          "test/compat/bigqueryicebergdefaultconnection_test.go:26 TestBigQueryIcebergDefaultConnection",
           "test/compat/bigqueryicebergdefaults1456_test.go:27 TestBigQueryStorageURIMakesIcebergTable",
           "test/compat/bigqueryinfoschema_test.go:30 TestBigQueryInformationSchemaDatasetViews",
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemajobsscale_test.go:32 TestBigQueryInformationSchemaJobsAtScale",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:18 TestBigQueryInformationSchemaRegionViews",
-          "test/compat/bigqueryinfoschemaschemata_test.go:20 TestBigQueryInformationSchemaSchemataOptions",
+          "test/compat/bigqueryinfoschemaschemata_test.go:24 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:28 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
+          "test/compat/bigqueryint64math_test.go:29 TestBigQueryInt64MathExact",
           "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigqueryintervalarith_test.go:35 TestBigQueryIntervalArithmetic",
           "test/compat/bigqueryjobsbyfolder_test.go:29 TestBigQueryJobsByFolderAndOrganization",
@@ -9707,9 +9770,12 @@
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
           "test/compat/bigqueryml_test.go:251 TestBigQueryMLRefusals",
+          "test/compat/bigqueryml_test.go:284 TestBigQueryMLRandomSplit",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
+          "test/compat/bigquerymlarima_test.go:256 TestBigQueryMLArimaPlusSTL",
+          "test/compat/bigquerymlarima_test.go:314 TestBigQueryMLArimaPlusETS",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
@@ -9721,6 +9787,9 @@
           "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
+          "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
+          "test/compat/bigquerymltransformcolumns_test.go:62 TestBigQueryMLPolynomialExpandOrder",
+          "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
@@ -9735,7 +9804,7 @@
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionsrest_test.go:32 TestBigQueryIngestionPartitionHistory",
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
-          "test/compat/bigquerypastingestion1458_test.go:28 TestBigQueryPastIngestionTimeCopies",
+          "test/compat/bigquerypastingestion1458_test.go:29 TestBigQueryPastIngestionTimeCopies",
           "test/compat/bigqueryprivacyoptions_test.go:22 TestBigQueryPrivacyPolicyTableOptions",
           "test/compat/bigqueryprivacypolicy_test.go:190 TestBigQueryPrivacyPolicyJoinRestriction",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
@@ -9744,9 +9813,12 @@
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigqueryprojectlimits_test.go:27 TestBigQueryProjectConfigurationEffects",
           "test/compat/bigquerypseudocolumns_test.go:25 TestBigQueryEnginePseudoColumnsAreUnrecognized",
+          "test/compat/bigqueryquerydialect_test.go:25 TestBigQueryJobsQueryDialect",
+          "test/compat/bigqueryquerydialect_test.go:97 TestBigQueryParametersModeOfAProcedure",
           "test/compat/bigqueryreferencefile_test.go:36 TestBigQueryLoadReferenceFileSchema",
           "test/compat/bigqueryruntimeerrors_test.go:20 TestBigQueryCreateInMissingDataset",
           "test/compat/bigqueryruntimeerrors_test.go:89 TestBigQueryRuntimeErrorReasons",
+          "test/compat/bigqueryscriptdrystop1456_test.go:30 TestBigQueryScriptDryRunStops",
           "test/compat/bigqueryscripterrors_test.go:23 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:81 TestBigQueryAssert",
           "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
@@ -9768,7 +9840,7 @@
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
-          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
+          "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/bigqueryviewcolumns_test.go:145 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
@@ -9792,8 +9864,8 @@
         "method": "bigquery.models.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery1562_test.go:175 TestBigQueryMLHashBucketize",
-          "test/compat/bigquery1562_test.go:229 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigquery1562_test.go:181 TestBigQueryMLHashBucketize",
+          "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
@@ -9805,6 +9877,8 @@
           "test/compat/bigquerymlmore_test.go:185 TestBigQueryMLPCA",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
+          "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
+          "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
         ]
@@ -9877,6 +9951,7 @@
         "tests": [
           "test/compat/bigqueryfloat_test.go:205 TestBigQueryDropSchemaDropsRoutinesInsertFunctions",
           "test/compat/bigqueryhistory1522_test.go:135 TestBigQueryUndeleteKeepsRoutinesTheFrontDidNotSee",
+          "test/compat/bigqueryquerydialect_test.go:97 TestBigQueryParametersModeOfAProcedure",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
@@ -9984,6 +10059,7 @@
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -10002,13 +10078,14 @@
         "method": "bigquery.tabledata.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
-          "test/compat/bigqueryddlmore_test.go:173 TestBigQueryRangeInARecordReadsBack",
+          "test/compat/bigqueryddlmore_test.go:171 TestBigQueryRangeInARecordReadsBack",
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryintervalarith_test.go:119 TestBigQueryStorageWriteArrowIntervalStrings",
@@ -10035,7 +10112,7 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
-          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
+          "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
@@ -10047,6 +10124,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryalteratomic1612_test.go:108 TestBigQueryScriptDryRunStopsAtCallAndExecuteImmediate",
+          "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
@@ -10064,23 +10143,26 @@
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
           "test/compat/bigqueryddlleftovers_test.go:199 TestBigQueryAlterTableDryRun",
           "test/compat/bigqueryddlleftovers_test.go:283 TestBigQueryDDLThroughExecuteImmediate",
           "test/compat/bigqueryddlleftovers_test.go:31 TestBigQueryAlterTableSetDataTypeArraysAndKeyedColumns",
           "test/compat/bigqueryddlleftovers_test.go:372 TestBigQueryViewColumnOptionsAndScriptDryRun",
-          "test/compat/bigqueryddlmore_test.go:250 TestBigQueryDefaultKeyOfJobTables",
-          "test/compat/bigqueryddlmore_test.go:44 TestBigQueryDDLMoreOptionsAndWholeAlter",
+          "test/compat/bigqueryddlmore_test.go:248 TestBigQueryDefaultKeyOfJobTables",
+          "test/compat/bigqueryddlmore_test.go:45 TestBigQueryDDLMoreOptionsAndWholeAlter",
           "test/compat/bigqueryddlmoreoptions_test.go:120 TestBigQueryDDLOptionsInAScript",
           "test/compat/bigqueryddlmoreoptions_test.go:25 TestBigQueryDDLPartitionExpirationAndKMSKey",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
-          "test/compat/bigquerydefaultkeymore1456_test.go:25 TestBigQueryDefaultKeyOfScriptAndUploadTables",
+          "test/compat/bigquerydefaultkeymore1456_test.go:27 TestBigQueryDefaultKeyOfScriptAndUploadTables",
           "test/compat/bigquerydml_test.go:193 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:335 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigqueryfromitems1459_test.go:119 TestBigQueryCreateSchemaOptionsAndCollation",
+          "test/compat/bigquerygovernancetags_test.go:30 TestBigQueryDataGovernanceTags",
           "test/compat/bigqueryhistory1522_test.go:39 TestBigQueryUndeleteKeepsExternalTables",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
+          "test/compat/bigqueryicebergdefaultconnection_test.go:26 TestBigQueryIcebergDefaultConnection",
           "test/compat/bigqueryicebergdefaults1456_test.go:27 TestBigQueryStorageURIMakesIcebergTable",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjsonunknown_test.go:34 TestBigQueryLoadFieldsOutsideTheSchema",
@@ -10107,10 +10189,11 @@
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
-          "test/compat/bigquerypastingestion1458_test.go:28 TestBigQueryPastIngestionTimeCopies",
+          "test/compat/bigquerypastingestion1458_test.go:29 TestBigQueryPastIngestionTimeCopies",
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigqueryprojectlimits_test.go:27 TestBigQueryProjectConfigurationEffects",
           "test/compat/bigqueryreferencefile_test.go:36 TestBigQueryLoadReferenceFileSchema",
+          "test/compat/bigqueryscriptdrystop1456_test.go:30 TestBigQueryScriptDryRunStops",
           "test/compat/bigqueryscriptpartition1512_test.go:29 TestBigQueryScriptCreateTableKeepsPartitioning",
           "test/compat/bigquerytempscriptstatements_test.go:109 TestBigQueryStatementsLaterInAScript",
           "test/compat/bigquerytempscriptstatements_test.go:161 TestBigQueryEveryScriptInTurn",
@@ -10178,6 +10261,7 @@
         "method": "bigquery.tables.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
@@ -10190,10 +10274,12 @@
         "tests": [
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
           "test/compat/bigqueryddlrest_test.go:28 TestBigQueryNestedDefaultsAndTruncateDataDefaults",
           "test/compat/bigquerydml_test.go:193 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:252 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:286 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
+          "test/compat/bigquerygovernancetags_test.go:30 TestBigQueryDataGovernanceTags",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryprivacyoptions_test.go:22 TestBigQueryPrivacyPolicyTableOptions",

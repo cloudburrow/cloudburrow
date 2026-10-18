@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,6 +58,13 @@ type bqModel struct {
 	// Transform is the TRANSFORM clause's items, * expanded
 	// (modeltransform.go).
 	Transform []string `json:"transform,omitempty"`
+	// TransformSQL is the TRANSFORM's items as the statement wrote them,
+	// * expanded, before learnTransform wrote its ML functions out; and
+	// Inputs the training query's columns they read, not the label's
+	// (#1595): the model's transformColumns' transformSql and its
+	// featureColumns. A model made before either was kept has neither.
+	TransformSQL []string   `json:"transformSql,omitempty"`
+	Inputs       []mlColumn `json:"inputs,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -279,6 +287,19 @@ func (md bqModel) resource(full bool) map[string]any {
 	for _, ft := range md.Trained.Features {
 		feats = append(feats, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})
 	}
+	if len(md.Transform) > 0 && len(md.Inputs) > 0 {
+		// "Input feature columns for the model inference" (the REST
+		// reference, read 2026-10-17; #1595): with a TRANSFORM, the
+		// columns it reads, not its outputs.
+		feats = nil
+		for _, c := range md.Inputs {
+			ty := mlTypeOf(c.Type)
+			if ty == "" {
+				ty = c.Type
+			}
+			feats = append(feats, map[string]any{"name": c.Name, "type": map[string]string{"typeKind": bqTypeName(ty)}})
+		}
+	}
 	res["featureColumns"] = feats
 	o := md.Options
 	t := md.Trained
@@ -413,6 +434,13 @@ func (md bqModel) resource(full bool) map[string]any {
 			opts["minSplitLoss"], opts["minTreeChildWeight"], opts["boosterType"], opts["treeMethod"] = o.MinSplitLoss, ms(int64(o.MinChildWeight)), o.BoosterType, o.TreeMethod
 			opts["subsample"], opts["numParallelTree"] = o.Subsample, ms(int64(o.NumParallelTree))
 			opts["colsampleBytree"], opts["colsampleBylevel"], opts["colsampleBynode"] = o.ColsampleTree, o.ColsampleLevel, o.ColsampleNode
+			if isBoostedTree(o.ModelType) {
+				enc := o.CategoryEncoding
+				if enc == "" {
+					enc = "LABEL_ENCODING"
+				}
+				opts["categoryEncodingMethod"] = enc
+			}
 			if isRandomForest(o.ModelType) {
 				delete(opts, "learnRate")
 				delete(opts, "boosterType")
@@ -464,12 +492,22 @@ func (md bqModel) resource(full bool) map[string]any {
 		}
 	}
 	if len(md.Transform) > 0 {
-		// The TRANSFORM's output features (UNVERIFIED: BigQuery's
-		// featureColumns are then the input's, and it gives transformSql).
-		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/models
+		// The TRANSFORM's output features, each with "the SQL expression
+		// used in the column transform" (TransformColumn.transformSql, the
+		// REST reference, read 2026-10-17; #1595): the item as the
+		// statement wrote it, without its AS.
+		exprs := map[string]string{}
+		for _, it := range md.TransformSQL {
+			expr, name := transformItemName(it)
+			exprs[strings.ToLower(name)] = expr
+		}
 		var tc []map[string]any
 		for _, ft := range t.Features {
-			tc = append(tc, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})
+			col := map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}}
+			if e, ok := exprs[strings.ToLower(ft.Name)]; ok {
+				col["transformSql"] = e
+			}
+			tc = append(tc, col)
 		}
 		res["transformColumns"] = tc
 	}
@@ -1287,8 +1325,21 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			}
 			o.SplitCol = s
 		case "category_encoding_method":
-			if s, ok := str(); !ok || !strings.EqualFold(s, "ONE_HOT_ENCODING") {
-				return 501, "Not implemented here: category_encoding_method other than ONE_HOT_ENCODING. Nothing was run."
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			s = strings.ToUpper(s)
+			switch s {
+			case "ONE_HOT_ENCODING", "LABEL_ENCODING":
+				// LABEL_ENCODING is checked against the model type
+				// once every option is read (checkModelOptions).
+				o.CategoryEncoding = s
+			case "DUMMY_ENCODING", "TARGET_ENCODING":
+				return 501, "Not implemented here: category_encoding_method " + s + "; CloudBurrow carries out ONE_HOT_ENCODING, and " +
+					"LABEL_ENCODING for a boosted tree model. Nothing was run."
+			default:
+				return bad()
 			}
 		case "enable_global_explain":
 			b, ok := boolv()
@@ -1384,6 +1435,11 @@ func checkModelOptions(o mlOptions) (int, string) {
 		if !found {
 			return 400, "Option " + s + " is not supported for model type " + o.ModelType
 		}
+	}
+	if o.CategoryEncoding == "LABEL_ENCODING" && !isBoostedTree(o.ModelType) {
+		// "Label encoding is supported by boosted tree models"
+		// (https://docs.cloud.google.com/bigquery/docs/auto-preprocessing).
+		return 400, "category_encoding_method LABEL_ENCODING is not supported for model type " + o.ModelType
 	}
 	switch o.ModelType {
 	case "KMEANS":
@@ -1514,14 +1570,17 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return true
 	default:
 		trainSQL := d.query
+		var transformSQL []string
+		var queryCols []mlColumn
 		if len(d.transform) > 0 {
+			qc, _, c, m := f.queryAllRows(r, q, "SELECT * FROM ("+d.query+") LIMIT 0")
+			if c != 0 {
+				fail(c, m)
+				return true
+			}
+			queryCols = qc
 			for _, it := range d.transform {
 				if strings.HasPrefix(it, "*") {
-					qc, _, c, m := f.queryAllRows(r, q, "SELECT * FROM ("+d.query+") LIMIT 0")
-					if c != 0 {
-						fail(c, m)
-						return true
-					}
 					items, why := expandTransform(d.transform, qc)
 					if why != "" {
 						fail(501, why)
@@ -1531,6 +1590,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 					break
 				}
 			}
+			transformSQL = append([]string(nil), d.transform...)
 			items, c, m := f.learnTransform(r, q, d.transform, d.query)
 			if c != 0 {
 				fail(c, m)
@@ -1544,7 +1604,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			fail(c, m)
 			return true
 		}
-		trained, fe := trainModel(d.opts, cols, rows)
+		trained, fe := trainModel(d.opts, cols, rows, f.engineFingerprints(r, q))
 		if fe != nil {
 			msg := fe.msg
 			if fe.code == 501 {
@@ -1556,7 +1616,8 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if !dry {
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: d.opts.ModelType, Created: now, Modified: now,
-				Location: loc, Options: d.opts, Trained: trained, Query: d.query, Transform: d.transform})
+				Location: loc, Options: d.opts, Trained: trained, Query: d.query, Transform: d.transform,
+				TransformSQL: transformSQL, Inputs: transformInputs(transformSQL, queryCols, trained.Label)})
 		}
 	}
 	// The emulator runs a statement that does nothing in its place, which
@@ -1572,6 +1633,52 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	f.serveQuery(rec, r, q, insert)
 	f.clientText(w, rec, client)
 	return true
+}
+
+// engineFingerprints is a fingerprinter that asks the engine for
+// FARM_FINGERPRINT of each text, a query of at most about a MiB at a time:
+// SELECT FARM_FINGERPRINT(FROM_HEX(s)) FROM UNNEST(['<hex>', ...]) AS s
+// WITH OFFSET o ORDER BY o (the hex keeps any text a plain literal, and
+// FARM_FINGERPRINT of the BYTES is that of the STRING).
+func (f front) engineFingerprints(r *http.Request, q queryOptions) fingerprinter {
+	q.QueryParameters, q.ParameterMode = nil, ""
+	return func(texts []string) ([]int64, *mlFail) {
+		out := make([]int64, 0, len(texts))
+		for start := 0; start < len(texts); {
+			var b strings.Builder
+			b.WriteString("SELECT FARM_FINGERPRINT(FROM_HEX(s)) AS f FROM UNNEST([")
+			end := start
+			for ; end < len(texts) && (end == start || b.Len()+2*len(texts[end]) < 1<<20); end++ {
+				if end > start {
+					b.WriteByte(',')
+				}
+				b.WriteString("'" + hex.EncodeToString([]byte(texts[end])) + "'")
+			}
+			b.WriteString("]) AS s WITH OFFSET o ORDER BY o")
+			_, rows, c, m := f.queryAllRows(r, q, b.String())
+			if c != 0 {
+				return nil, &mlFail{code: c, msg: "FARM_FINGERPRINT of the split's rows: " + m}
+			}
+			if len(rows) != end-start {
+				return nil, &mlFail{code: 500, msg: fmt.Sprintf("FARM_FINGERPRINT of the split's rows: %d values for %d rows", len(rows), end-start)}
+			}
+			for _, row := range rows {
+				var v int64
+				var err error
+				if len(row) == 1 && row[0] != nil {
+					v, err = strconv.ParseInt(*row[0], 10, 64)
+				} else {
+					err = errors.New("no value")
+				}
+				if err != nil {
+					return nil, &mlFail{code: 500, msg: "FARM_FINGERPRINT of the split's rows: " + err.Error()}
+				}
+				out = append(out, v)
+			}
+			start = end
+		}
+		return out, nil
+	}
 }
 
 // queryAllRows runs sql, a query, with q's default dataset and

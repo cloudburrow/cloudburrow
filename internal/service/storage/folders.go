@@ -519,10 +519,24 @@ func operationMetadata(op operationRecord) map[string]any {
 		if op.Restore != nil {
 			n = *op.Restore
 		}
-		// int64 counts are JSON strings, as proto3 JSON writes them.
-		return map[string]any{"@type": "type.googleapis.com/google.storage.v1.BulkRestoreObjectsMetadata",
-			"commonMetadata": common, "successfulObjectCount": strconv.FormatInt(n.Restored, 10),
-			"skippedObjectCount": strconv.FormatInt(n.Skipped, 10), "failedObjectCount": strconv.FormatInt(n.Failed, 10)}
+		// int64 counts are JSON strings, as proto3 JSON writes them. The
+		// names and the echoed request are the bulkRestore reference's.
+		md := map[string]any{"@type": "type.googleapis.com/google.storage.v1.BulkRestoreObjectsMetadata",
+			"commonMetadata": common, "succeededCount": strconv.FormatInt(n.Restored, 10),
+			"skippedCount": strconv.FormatInt(n.Skipped, 10), "failedCount": strconv.FormatInt(n.Failed, 10)}
+		if req := n.Request; req != nil {
+			md["allowOverwrite"], md["copySourceAcl"] = req.AllowOverwrite, req.CopySourceACL
+			if len(req.MatchGlobs) > 0 {
+				md["matchGlobs"] = req.MatchGlobs
+			}
+			for k, v := range map[string]string{"softDeletedAfterTime": req.SoftDeletedAfterTime, "softDeletedBeforeTime": req.SoftDeletedBeforeTime,
+				"createdAfterTime": req.CreatedAfterTime, "createdBeforeTime": req.CreatedBeforeTime} {
+				if v != "" {
+					md[k] = v
+				}
+			}
+		}
+		return md
 	}
 	if op.Type == "RENAME_FOLDER" {
 		return map[string]any{"@type": "type.googleapis.com/google.storage.control.v2.RenameFolderMetadata",

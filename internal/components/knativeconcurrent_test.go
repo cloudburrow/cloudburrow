@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,5 +131,40 @@ func TestKnativePhasesWithoutRun(t *testing.T) {
 	}
 	if len(r.calls) != 0 {
 		t.Fatalf("calls without Cloud Run: %v", r.calls)
+	}
+}
+
+// A second Start on the same component runs Knative again: against a
+// cluster an older release stamped, it upgrades in place and restamps,
+// rather than returning the first Start's finished run (Landing 111's
+// TestUpAgainstAnExistingCluster).
+func TestASecondStartRunsKnativeAgain(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	knative := KnativeVersion
+	stamped := func() func(string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return stampedWith(knative)
+	}
+	r := &recordingRunner{}
+	r.respond = func(call string) (string, error) { return stamped()(call) }
+	c := &LifecycleComponent{installer: newTestInstaller(r),
+		services: []config.Service{config.ServiceRun},
+		timeout:  time.Minute, out: &strings.Builder{}}
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	knative = "knative-v1.22.0"
+	mu.Unlock()
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !r.appliedLocked("serving-core") {
+		t.Errorf("the second Start did not apply Knative in place: %v", r.calls)
+	}
+	if r.find("annotate --overwrite configmap/") == "" {
+		t.Errorf("the second Start did not restamp the cluster: %v", r.calls)
 	}
 }

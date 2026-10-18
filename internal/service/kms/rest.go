@@ -36,10 +36,10 @@ var mixins = func() []*annotations.HttpRule {
 		get("google.cloud.location.Locations.GetLocation", "/v1/{name=projects/*/locations/*}"),
 		get("google.cloud.location.Locations.ListLocations", "/v1/{name=projects/*}/locations"),
 		get("google.longrunning.Operations.GetOperation", "/v1/{name=projects/*/locations/*/operations/*}"),
-		// Not bound by Google's protos, but gcloud's GA `kms keyrings delete`
-		// calls it; 501 rather than 404, which would say no such method
-		// exists. Whether Google serves it is UNVERIFIED.
-		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings/delete
+		// Not bound by Google's protos yet, but documented
+		// (https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings/delete,
+		// read 2026-10-17) and called by gcloud's GA `kms keyrings
+		// delete`; served by DeleteKeyRing (deletering.go, #1595).
 		{Selector: "google.cloud.kms.v1.KeyManagementService.DeleteKeyRing",
 			Pattern: &annotations.HttpRule_Delete{Delete: "/v1/{name=projects/*/locations/*/keyRings/*}"}},
 	}

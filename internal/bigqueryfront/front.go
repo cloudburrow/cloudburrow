@@ -224,8 +224,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
-	// The jobs the table of JOBS rows syncs in the background (#1528).
-	records.made, own.made = jobRows.noteMade, jobRows.noteMade
+	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.stateDir != "" {
 		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
@@ -749,13 +748,22 @@ func withDefaultAccess(body []byte) ([]byte, bool) {
 	return b, err == nil
 }
 
-// insertTable checks tables.insert's body, or with update, tables.update's
+// wireJobsTable tells rows, the table of JOBS rows, of the jobs its background
+// sync lists again (#1528): each job timed, each script's jobs, the
+// front's own, and each job whose text the front changed, which it adds
+// once the engine has the job, so that a sync may have written its row
+// without it (#1617).
+func wireJobsTable(texts *jobTexts, records *jobRecords, own *frontJobs, rows *jobsTable) {
+	records.made, own.made, texts.made = rows.noteMade, rows.noteMade, rows.noteMade
+}
+
+// insertTableChecked checks tables.insert's body, or with update, tables.update's
 // and tables.patch's, whose table ID is in the path. A table made with a
 // FLOAT field is made through createTable (#1000, floattype.go).
 //
 // A tables.update or tables.patch of table is then carried out through
 // updateTable (#1009, #1010, #1054, tablepatch.go).
-func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
+func (f front) insertTableChecked(w http.ResponseWriter, r *http.Request, dataset, table string, update bool) {
 	var body struct {
 		TableReference *struct {
 			TableID string `json:"tableId"`

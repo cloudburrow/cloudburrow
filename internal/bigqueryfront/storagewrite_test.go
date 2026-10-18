@@ -630,13 +630,13 @@ func TestStorageWriteRefusesSnapshots(t *testing.T) {
 	for _, typ := range []storagepb.WriteStream_Type{storagepb.WriteStream_COMMITTED, storagepb.WriteStream_PENDING} {
 		_, err := c.CreateWriteStream(ctx, &storagepb.CreateWriteStreamRequest{Parent: "projects/p-1/datasets/ds/tables/u",
 			WriteStream: &storagepb.WriteStream{Type: typ}})
-		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "snapshot") {
+		if status.Code(err) != codes.PermissionDenied || !strings.Contains(err.Error(), "snapshot") {
 			t.Errorf("CreateWriteStream %s of a snapshot: %v", typ, err)
 		}
 	}
 	conn := openAppend(t, ctx, c)
 	resp, err := conn.send(rowsReq("projects/p-1/datasets/ds/tables/u/streams/_default", true, nil, testRow(t, 1, nil)))
-	if respCode(resp, err) != codes.InvalidArgument {
+	if respCode(resp, err) != codes.PermissionDenied {
 		t.Errorf("append to a snapshot's default stream: %v, %v", resp, err)
 	}
 	tables.mu.Lock()

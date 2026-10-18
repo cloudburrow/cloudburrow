@@ -4140,6 +4140,9 @@ func secretExpireValue(values map[string]string, st *secrets.Store) (time.Time, 
 		if err != nil || d <= 0 {
 			return time.Time{}, fmt.Errorf("TTL %q is not a positive duration such as 3600s or 24h", ttl)
 		}
+		if err := secrets.CheckExpiryBounds("ttl", st.Now().Add(d), st.Now()); err != nil {
+			return time.Time{}, err
+		}
 		return st.Now().Add(d), nil
 	case at != "":
 		t, err := time.Parse(time.RFC3339Nano, at)

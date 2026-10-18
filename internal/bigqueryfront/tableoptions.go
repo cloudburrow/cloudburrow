@@ -215,12 +215,15 @@ type tableSetting struct {
 	// for the longest time travel window, which CHANGES refuses a range
 	// over (changehistory.go, #1503).
 	Transactions []int64 `json:"transactions,omitempty"`
+	// GovernanceTags are each top-level column's data governance tags,
+	// by its name in lower case (governancetags.go, #1456).
+	GovernanceTags map[string]map[string]string `json:"governanceTags,omitempty"`
 }
 
 // zero reports whether t keeps nothing.
 func (t tableSetting) zero() bool {
 	return t.Created == "" && t.ChangeHistory == nil && t.FineGrainedMutations == nil && t.PrivacyPolicy == nil && !t.MVChanged &&
-		len(t.Transactions) == 0
+		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0
 }
 
 // tableSettings are the settings of every table, by project, dataset and

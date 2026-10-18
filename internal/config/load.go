@@ -183,6 +183,7 @@ type rawFlags struct {
 	allowRemote      bool
 	cbHostSteps      bool
 	appEngineURL     string
+	emulatorHeapMiB  int
 	portBase         int
 	control          int
 	storage          int
@@ -309,6 +310,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
+	fs.IntVar(&r.emulatorHeapMiB, "emulator-heap-mib", 0, fmt.Sprintf("maximum Java heap, in MiB, of the Pub/Sub, Firestore and Datastore emulators, which also sizes their containers' memory limit; 0 = unbounded (default %d)", DefaultEmulatorHeapMiB))
 	fs.Var(&r.corsOrigins, "cors-allow-origin", "web origin (scheme://host[:port]) whose browser requests Cloud Storage and every other listener answer, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)")
 
 	return fs, r
@@ -537,6 +539,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 
 	str("LOG_LEVEL", &cfg.LogLevel)
 	str("APPENGINE_URL", &cfg.AppEngineURL)
+	if v := getenv(EnvPrefix + "EMULATOR_HEAP_MIB"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("%sEMULATOR_HEAP_MIB: must be an integer number of MiB, such as 512 (got %q)", EnvPrefix, v)
+		}
+		cfg.EmulatorHeapMiB = n
+	}
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -666,6 +675,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["appengine-url"] {
 		cfg.AppEngineURL = raw.appEngineURL
+	}
+	if set["emulator-heap-mib"] {
+		cfg.EmulatorHeapMiB = raw.emulatorHeapMiB
 	}
 	if set["cors-allow-origin"] {
 		cfg.Storage.CORSAllowOrigins = append([]string(nil), raw.corsOrigins...)

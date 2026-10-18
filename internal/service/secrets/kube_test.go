@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -43,12 +44,30 @@ func (f *fakeCluster) Run(_ context.Context, stdin string, args ...string) (stri
 		f.objects[name] = obj
 		return "secret/" + name + " configured\n", nil
 
+	case contains(args, "delete") && contains(args, "--raw"):
+		// A DeleteCollection: `delete --raw /api/v1/.../secrets?labelSelector=`.
+		raw := args[len(args)-1]
+		_, query, _ := strings.Cut(raw, "?")
+		values, err := url.ParseQuery(query)
+		if err != nil {
+			return "", err
+		}
+		for name, obj := range f.objects {
+			if matchesSelector(obj, values.Get("labelSelector")) {
+				delete(f.objects, name)
+			}
+		}
+		return "", nil
+
 	case contains(args, "delete"):
 		name := args[len(args)-2]
 		delete(f.objects, name)
 		return "", nil
 
 	case contains(args, "get") && contains(args, "-l"):
+		if f.failGet {
+			return "", errors.New("the server could not find the requested resource")
+		}
 		items := make([]any, 0, len(f.objects))
 		for _, o := range f.objects {
 			items = append(items, o)
@@ -77,6 +96,39 @@ func (f *fakeCluster) Run(_ context.Context, stdin string, args ...string) (stri
 	return "", fmt.Errorf("unexpected kubectl invocation: %v", args)
 }
 
+// matchesSelector is whether obj's labels match a selector of `k=v`, `k!=v`
+// and `k` terms, the forms this package sends.
+func matchesSelector(obj map[string]any, selector string) bool {
+	meta, _ := obj["metadata"].(map[string]any)
+	labels := map[string]string{}
+	switch l := meta["labels"].(type) {
+	case map[string]any:
+		for k, v := range l {
+			labels[k], _ = v.(string)
+		}
+	case map[string]string:
+		labels = l
+	}
+	for _, term := range strings.Split(selector, ",") {
+		if k, v, ok := strings.Cut(term, "!="); ok {
+			if have, set := labels[k]; set && have == v {
+				return false
+			}
+			continue
+		}
+		if k, v, ok := strings.Cut(term, "="); ok {
+			if labels[k] != v {
+				return false
+			}
+			continue
+		}
+		if _, set := labels[term]; !set {
+			return false
+		}
+	}
+	return true
+}
+
 func contains(args []string, want string) bool {
 	for _, a := range args {
 		if a == want {
@@ -91,6 +143,16 @@ func (f *fakeCluster) object(t *testing.T, project, id string) map[string]any {
 	obj, ok := f.objects[KubernetesSecretName(project, id)]
 	if !ok {
 		t.Fatalf("no Kubernetes Secret for %s/%s; have %v", project, id, f.names())
+	}
+	return obj
+}
+
+// version is the Kubernetes Secret of one version (#1596).
+func (f *fakeCluster) version(t *testing.T, project, id string, n int) map[string]any {
+	t.Helper()
+	obj, ok := f.objects[VersionSecretName(project, id, n)]
+	if !ok {
+		t.Fatalf("no Kubernetes Secret for version %d of %s/%s; have %v", n, project, id, f.names())
 	}
 	return obj
 }
@@ -122,7 +184,7 @@ func TestPayloadLandsInKubernetesData(t *testing.T) {
 		t.Fatalf("AddVersion: %v", err)
 	}
 
-	obj := fake.object(t, "demo", "api-key")
+	obj := fake.version(t, "demo", "api-key", 1)
 	data, _ := obj["data"].(map[string]any)
 	encoded, ok := data[VersionKey(1)].(string)
 	if !ok {
@@ -144,7 +206,7 @@ func TestPayloadIsNotDuplicatedIntoAnnotations(t *testing.T) {
 	s, fake := newKubeBackedStore(t)
 	seedKube(t, s, "demo", "k", "s3cret")
 
-	obj := fake.object(t, "demo", "k")
+	obj := fake.version(t, "demo", "k", 1)
 	meta, _ := obj["metadata"].(map[string]any)
 	annotations, _ := meta["annotations"].(map[string]any)
 	for name, value := range annotations {
@@ -235,7 +297,7 @@ func TestDestroyRemovesTheDataKey(t *testing.T) {
 	if _, err := s.DestroyVersion("demo", "k", "1"); err != nil {
 		t.Fatalf("DestroyVersion: %v", err)
 	}
-	obj := fake.object(t, "demo", "k")
+	obj := fake.version(t, "demo", "k", 1)
 	data, _ := obj["data"].(map[string]any)
 	if _, present := data[VersionKey(1)]; present {
 		t.Errorf("the data key survived destruction: %v", data)
@@ -381,7 +443,7 @@ func TestResolveSecretRefPointsAtTheKubernetesObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSecretRef: %v", err)
 	}
-	if name != KubernetesSecretName("demo", "api-key") {
+	if name != VersionSecretName("demo", "api-key", 2) {
 		t.Errorf("secret name = %q", name)
 	}
 	// latest must become a concrete key: Kubernetes has no "latest".
@@ -419,7 +481,7 @@ func TestResolveSecretRefAcceptsAFullResourceName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSecretRef: %v", err)
 	}
-	if name != KubernetesSecretName("elsewhere", "k") {
+	if name != VersionSecretName("elsewhere", "k", 1) {
 		t.Errorf("resolved to %q, want the project the reference named", name)
 	}
 }

@@ -136,14 +136,33 @@ func parseLinkName(name string) (parent string, err error) {
 	return parent, nil
 }
 
-// A connection and a link carry no etag (#1304): Terraform's
-// google_developer_connect_connection and _git_repository_link declare etag
-// an optional argument that is not computed, the link's forcing
-// replacement, so an etag in a read is a diff on every plan; the provider's
-// acceptance tests plan clean against Google, which therefore answers none
-// (UNVERIFIED beyond that). An etag a caller sends is accepted and not
-// compared, as there is none to compare it with.
-// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/developerconnect/v1/developer_connect.proto
+// Etags. developer_connect.proto (read 2026-10-17,
+// https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/developerconnect/v1/developer_connect.proto)
+// documents a Connection's and a GitRepositoryLink's etag as "computed by
+// the server based on the value of other fields, and may be sent on update
+// and delete requests", and DeleteConnectionRequest's: "If an etag is
+// provided and does not match the current etag of the Connection, deletion
+// will be blocked and an ABORTED error will be returned" (AIP-154's code).
+// That check is served (#1595): an etag sent on UpdateConnection,
+// DeleteConnection or DeleteGitRepositoryLink that is not the resource's
+// is ABORTED.
+//
+// A read still carries no etag (#1304), a deliberate deviation from the
+// proto: Terraform's google_developer_connect_connection and
+// _git_repository_link (hashicorp/google 8.4.0 and main) declare etag
+// Optional and not Computed, and copy a read's etag into state, the link's
+// forcing replacement, so a served etag is a diff on every plan; the
+// provider's acceptance tests (resource_developer_connect_*_generated_test.go)
+// plan clean against Google with none in their configuration. So the
+// current etag is the empty one, and any etag a caller sends is stale.
+
+// dcEtagMatches applies the proto's etag rule to a request's etag.
+func dcEtagMatches(kind, name, sent, current string) error {
+	if sent != "" && sent != current {
+		return apierror.Aborted("%s %q: etag %q does not match the current etag", kind, name, sent)
+	}
+	return nil
+}
 
 func (d *DeveloperConnectServer) done(parent, target, verb string, resp proto.Message) (*longrunningpb.Operation, error) {
 	// Operations are a location's, a link's too.
@@ -306,6 +325,9 @@ func (d *DeveloperConnectServer) UpdateConnection(_ context.Context, req *dcpb.U
 		}
 		return nil, apierror.NotFound("connection %q not found", in.GetName())
 	}
+	if err := dcEtagMatches("connection", in.GetName(), in.GetEtag(), c.GetEtag()); err != nil {
+		return nil, err
+	}
 	next := proto.Clone(c).(*dcpb.Connection)
 	for _, p := range paths {
 		switch p {
@@ -336,9 +358,12 @@ func (d *DeveloperConnectServer) DeleteConnection(_ context.Context, req *dcpb.D
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
 	loadDCLocked()
-	_, ok := dcState.connections[req.GetName()]
+	c, ok := dcState.connections[req.GetName()]
 	if !ok {
 		return nil, apierror.NotFound("connection %q not found", req.GetName())
+	}
+	if err := dcEtagMatches("connection", req.GetName(), req.GetEtag(), c.GetEtag()); err != nil {
+		return nil, err
 	}
 	for name := range dcState.links {
 		if strings.HasPrefix(name, req.GetName()+"/gitRepositoryLinks/") {
@@ -472,9 +497,12 @@ func (d *DeveloperConnectServer) DeleteGitRepositoryLink(_ context.Context, req 
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
 	loadDCLocked()
-	_, ok := dcState.links[req.GetName()]
+	l, ok := dcState.links[req.GetName()]
 	if !ok {
 		return nil, apierror.NotFound("git repository link %q not found", req.GetName())
+	}
+	if err := dcEtagMatches("git repository link", req.GetName(), req.GetEtag(), l.GetEtag()); err != nil {
+		return nil, err
 	}
 	if !req.GetValidateOnly() {
 		delete(dcState.links, req.GetName())

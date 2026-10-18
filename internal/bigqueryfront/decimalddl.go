@@ -54,7 +54,8 @@ type decimalColumn struct {
 	maxLength                        string // STRING(L), BYTES(L): #1493
 	description                      *string
 	descExpr                         string
-	dataPolicies                     []any // #1456, datapolicies.go
+	dataPolicies                     []any          // #1456, datapolicies.go
+	governanceTags                   map[string]any // #1456, governancetags.go
 	fields                           []decimalColumn
 }
 
@@ -103,6 +104,7 @@ func decimalsOf(sql, name string, f map[string]any) (decimalColumn, bool) {
 		delete(f, descExprKey)
 	}
 	d.dataPolicies, _ = f["dataPolicies"].([]any)
+	d.governanceTags, _ = f[governanceTagsKey].(map[string]any)
 	subs, _ := f["fields"].([]any)
 	for _, sub := range subs {
 		if m, ok := sub.(map[string]any); ok {
@@ -112,7 +114,7 @@ func decimalsOf(sql, name string, f map[string]any) (decimalColumn, bool) {
 		}
 	}
 	return d, d.precision != "" || d.maxLength != "" || d.rounding != "" || d.description != nil || d.descExpr != "" || len(d.fields) > 0 ||
-		len(d.dataPolicies) > 0
+		len(d.dataPolicies) > 0 || d.governanceTags != nil
 }
 
 // readDecimalColumns reads cols, the tokens of sql's CREATE TABLE column
@@ -194,6 +196,17 @@ func readDecimalColumns(sql string, cols []token) (out []decimalColumn, invalid,
 						continue
 					}
 					setDataPolicies(f, o)
+				case "data_governance_tags": // #1456, governancetags.go
+					info, msg := governanceTagsOption(o.val)
+					if msg != "" {
+						if invalid == "" {
+							invalid = msg
+						}
+						continue
+					}
+					if tags, _ := info["dataGovernanceTags"].(map[string]any); len(tags) > 0 {
+						f[governanceTagsKey] = info
+					}
 				default:
 					if unsupported == "" {
 						unsupported = "the column option " + o.name + " (of column " + c[0].text + ")"
@@ -266,6 +279,9 @@ func putDecimalFields(fields []any, cols []decimalColumn) {
 			}
 			if len(c.dataPolicies) > 0 { // #1456
 				m["dataPolicies"] = c.dataPolicies
+			}
+			if c.governanceTags != nil { // #1456, governancetags.go
+				m[governanceTagsKey] = c.governanceTags
 			}
 			if subs, ok := m["fields"].([]any); ok && len(c.fields) > 0 {
 				putDecimalFields(subs, c.fields)

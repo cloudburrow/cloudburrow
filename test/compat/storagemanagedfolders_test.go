@@ -5,6 +5,7 @@ package compat
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"cloud.google.com/go/storage"
@@ -47,7 +48,12 @@ func managedFolderBucket(t *testing.T, h *Harness, c *storage.Client, s *storage
 // prefix and pages; delete with a stale ifMetagenerationMatch is 412, a
 // non-empty one is 409 unless allowNonEmpty, which keeps the objects; a
 // deleted one is 404; and a bucket holding a managed folder cannot be
-// deleted.
+// deleted. A name with 15 "/"s is made, and one with 16, or starting
+// .well-known/acme-challenge/, is 400, as the managed folders page's
+// naming rules say (#1595).
+//
+// unverified: storage.managedFolders.insert 400: a name with more than 15 /s, or starting .well-known/acme-challenge/ (the page states the rules, not the status)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 //
 // unverified: storage.managedFolders.insert 400: a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
@@ -73,6 +79,15 @@ func TestStorageManagedFolderLifecycle(t *testing.T) {
 	}
 	if _, err := s.ManagedFolders.Insert(b, &storagev1.ManagedFolder{Name: "logs/reports/"}).Context(ctx).Do(); httpCode(err) != http.StatusConflict {
 		t.Errorf("a second insert = %v; want 409", err)
+	}
+	deep := strings.Repeat("d/", 15)
+	if _, err := s.ManagedFolders.Insert(b, &storagev1.ManagedFolder{Name: deep}).Context(ctx).Do(); err != nil {
+		t.Errorf("insert of a name with 15 /s: %v", err)
+	}
+	for _, n := range []string{deep + "d/", ".well-known/acme-challenge/x/"} {
+		if _, err := s.ManagedFolders.Insert(b, &storagev1.ManagedFolder{Name: n}).Context(ctx).Do(); httpCode(err) != http.StatusBadRequest {
+			t.Errorf("insert of %q = %v; want 400", n, err)
+		}
 	}
 	got, err := s.ManagedFolders.Get(b, "logs/reports/").Context(ctx).Do()
 	if err != nil || got.Name != "logs/reports/" || got.Metageneration != 1 {

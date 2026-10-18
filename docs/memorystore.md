@@ -73,7 +73,7 @@ it, and `cloudburrow terraform` points `google_redis_instance` at it.
 host and port are `REDIS_HOST:REDIS_PORT`, `redis_version` and `memory_size_gb` are read from the
 server (`REDIS_7_2`, 1 GB: the server runs with `--maxmemory 1gb` and Memorystore's default
 `volatile-lru` eviction), and the state is READY while it answers. It has no AUTH
-(`GetInstanceAuthString` is FAILED_PRECONDITION), and it cannot be updated or deleted:
+(`GetInstanceAuthString` returns an empty string), and it cannot be updated or deleted:
 `UpdateInstance` and `DeleteInstance` on it are FAILED_PRECONDITION. Run `up` without
 `memorystore` in `--services` to have none.
 

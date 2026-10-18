@@ -67,7 +67,7 @@ shard` job, so the gcloud and gsutil tests below, which skip where the tool is a
 | `gcloud pubsub` | **Partial** | `topics list` only, in `test/compat/gcloudsetup_test.go` |
 | Other `gcloud` command families (`run`, `scheduler`, `logging`, ...) | Untested | No test |
 | **gsutil** | **Verified** | `test/compat/gcloudstorage_test.go` (`TestGsutilJSONAndHMACXML`) |
-| **Terraform** (`hashicorp/google` 8.4.0, Terraform 1.16.4) | **Verified** for the resources compatibility.md lists | `test/compat/terraform_test.go`, `terraformstorage_test.go`, `terraform_kms_test.go`, `terraform_run_test.go`, and `resourcemanagerv1_test.go` (`TestTerraformGoogleProject`) |
+| **Terraform** (`hashicorp/google` 8.4.0, Terraform 1.16.6) | **Verified** for the resources compatibility.md lists | `test/compat/terraform_test.go`, `terraformstorage_test.go`, `terraform_kms_test.go`, `terraform_run_test.go`, and `resourcemanagerv1_test.go` (`TestTerraformGoogleProject`) |
 | **OpenTofu** 1.12.6 (`cloudburrow terraform --binary tofu`) | **Verified** for the modules its tests apply | `test/compat/terraform_test.go` (`TestTofuAppliesAndDestroysThroughTheWrapper`) and `terraform_scheduler_test.go` (`TestTofuSchedulerAndSubscription`), in the `storage` shard |
 | **Tink** (`tink-go` with `tink-go-gcpkms`) | **Verified** | `test/compat/kmstink_test.go` (`TestKMSTinkEnvelopeEncryption`), over gRPC and REST |
 | **Node.js** (official Cloud client libraries) | **Verified** for the rows compatibility.md lists | `test/compat-node/storage.test.mjs`, `pubsub.test.mjs`, `tasks.test.mjs`, `secrets.test.mjs`, `firestore.test.mjs` and `examples.test.mjs`, run by `make compat-node` in compat CI's `storage` and `emulators` shards, green since the #759 train (#589) |
@@ -182,7 +182,11 @@ One run, not an average, and not a promise about another machine.
 
 Cold start is `up --detach` for a new instance: creating the cluster and pulling images (the
 second profile ran after the first, so images they share were already pulled). Warm start is
-`up --detach` after `stop`, restarting the existing cluster. Memory is read 30 s after ready. `up` prints the slowest components once it is ready, and `/readyz` reports
+`up --detach` after `stop`, restarting the existing cluster. Since #1610 a warm start waits for the
+cluster's Service network, then replaces CoreDNS's and Knative's pods, which the restarted node had
+started before that network worked, and the controller manager runs without leader election: five
+warm starts of the default profile on macOS/arm64 took 26 to 32 s (mean 29 s), from 23 to 53 s
+(mean 35 s) before. Memory is read 30 s after ready. `up` prints the slowest components once it is ready, and `/readyz` reports
 each one's time (`timing`). Re-run the workflow to measure a change.
 
 ## Platforms

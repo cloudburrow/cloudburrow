@@ -18,29 +18,37 @@ import (
 //   - softDeletedAfterTime / softDeletedBeforeTime: when it was deleted;
 //   - createdAfterTime / createdBeforeTime: when its version was created.
 //
-// A name with several matching soft-deleted versions has its most recently
-// deleted one restored, and the others are left soft-deleted (UNVERIFIED:
-// the reference does not say which). Without allowOverwrite, a name that
-// has a live version is skipped; with it, the live version is retired as
-// any overwrite is. copySourceAcl is objects.restore's. A version the
-// bucket refuses (retention on an object of a bucket without object
-// retention) is counted failed. Each is restored as objects.restore does
-// it: a new generation, metageneration 1.
+// "If multiple generations of an object match the criteria, only the
+// latest generation is restored and the rest are skipped" (the
+// bulkRestore reference, read 2026-10-17): the matching version with the
+// highest generation is restored. Without allowOverwrite, a name that has
+// a live version is skipped; with it, the live version is retired as any
+// overwrite is. copySourceAcl is objects.restore's. A version the bucket
+// refuses (retention on an object of a bucket without object retention)
+// is counted failed. Each is restored as objects.restore does it: a new
+// generation, metageneration 1.
 //
 // The answer is a long-running operation, done when it is returned, kept
 // with the bucket's folder operations for buckets.operations.get and list.
-// Its metadata type, the commonMetadata type BULK_RESTORE_OBJECTS and the
-// counter names are UNVERIFIED: no page shows a bulk restore operation's
-// body.
+// Its BulkRestoreObjectsMetadata is the reference's: the request's
+// allowOverwrite, matchGlobs, the four times and copySourceAcl, echoed,
+// and succeededCount (objects restored), skippedCount ("the number of
+// objects skipped as a result of the specified" filters: every
+// soft-deleted version the time and glob filters leave out, each
+// generation past the latest, and a name with a live version left alone)
+// and failedCount. commonMetadata (type BULK_RESTORE_OBJECTS) is the
+// other bucket operations' and is not on that page (UNVERIFIED).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/objects/bulkRestore
 
 const bulkRestoreType = "BULK_RESTORE_OBJECTS"
 
-// bulkRestoreCounts are what one bulk restore did.
+// bulkRestoreCounts are what one bulk restore did, and the request it
+// echoes.
 type bulkRestoreCounts struct {
-	Restored int64 `json:"restored"`
-	Skipped  int64 `json:"skipped"`
-	Failed   int64 `json:"failed"`
+	Restored int64               `json:"restored"`
+	Skipped  int64               `json:"skipped"`
+	Failed   int64               `json:"failed"`
+	Request  *bulkRestoreRequest `json:"request,omitempty"`
 }
 
 type bulkRestoreRequest struct {
@@ -59,6 +67,8 @@ type bulkRestoreFilter struct {
 	deletedAfter, deletedBefore   time.Time
 	createdAfter, createdBefore   time.Time
 	allowOverwrite, copySourceACL bool
+	// req is the request as sent, for the metadata's echo.
+	req bulkRestoreRequest
 }
 
 func parseBulkRestore(r *http.Request) (bulkRestoreFilter, error) {
@@ -80,7 +90,7 @@ func parseBulkRestore(r *http.Request) (bulkRestoreFilter, error) {
 			return f, badRequest("Invalid argument: %s is not a BulkRestoreObjectsRequest field", k)
 		}
 	}
-	f.allowOverwrite, f.copySourceACL = req.AllowOverwrite, req.CopySourceACL
+	f.allowOverwrite, f.copySourceACL, f.req = req.AllowOverwrite, req.CopySourceACL, req
 	for _, g := range req.MatchGlobs {
 		re, err := globRE(g)
 		if err != nil {
@@ -140,7 +150,7 @@ func (s *Server) objectsBulkRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	now := s.now().UTC()
 	op := operationRecord{Bucket: bucket, ID: newOperationID(), Type: bulkRestoreType, Created: now, Ended: now,
-		Restore: &bulkRestoreCounts{}}
+		Restore: &bulkRestoreCounts{Request: &f.req}}
 	err = s.meta.Update(func(tx Tx) error {
 		b, ok, err := s.getBucket(tx, bucket)
 		if err != nil {
@@ -167,8 +177,10 @@ func (s *Server) objectsBulkRestore(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, r, http.StatusOK, s.operationJSON(r, op))
 }
 
-// bulkRestoreName restores the newest matching soft-deleted version of one
-// name, and counts what it did.
+// bulkRestoreName restores the latest matching soft-deleted generation of
+// one name, and counts what it did: every other soft-deleted version of
+// the name is skipped, whether the filters left it out or a later
+// generation matched.
 func (s *Server) bulkRestoreName(tx Tx, b bucketRecord, name string, f bulkRestoreFilter, n *bulkRestoreCounts, now time.Time) error {
 	vs, err := softVersions(tx, b, name, now)
 	if err != nil {
@@ -176,13 +188,15 @@ func (s *Server) bulkRestoreName(tx Tx, b bucketRecord, name string, f bulkResto
 	}
 	var pick *objectRecord
 	for i := range vs {
-		if f.matches(vs[i]) && (pick == nil || !vs[i].SoftDeleted.Before(pick.SoftDeleted)) {
+		if f.matches(vs[i]) && (pick == nil || vs[i].Generation > pick.Generation) {
 			pick = &vs[i]
 		}
 	}
 	if pick == nil {
+		n.Skipped += int64(len(vs))
 		return nil
 	}
+	n.Skipped += int64(len(vs) - 1)
 	soft := *pick
 	cur, exists, err := getObject(tx, b.Name, name)
 	if err != nil {

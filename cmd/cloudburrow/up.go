@@ -149,12 +149,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)
 	clusterComp := cluster.NewComponent(c, kindConfig, time.Duration(cfg.ReadyTimeout), stdout)
 	comps := components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, stdout)
+	// A warm start replaces Knative's pods once the Service network
+	// answers, rather than waiting out their restart backoff (#1610).
+	comps.SetNodeRestart(c.Restarted, func(ctx context.Context) error {
+		return c.WaitServiceNetwork(ctx, cluster.ServiceNetworkTimeout)
+	})
 	cached.use(comps, cfg)
 	signingKeys, err := storageSigningKeys(cfg, creds)
 	if err != nil {
 		return err
 	}
 	comps.SetStorageSigningKeys(signingKeys)
+	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
+		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
 	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,

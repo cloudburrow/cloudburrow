@@ -166,6 +166,7 @@ func TestEngineRuntimeErrors(t *testing.T) {
 	}{
 		{"division by zero: 1 / 0", "SELECT 1/0", nil, "division by zero: 1 / 0"},
 		{"failed to exec query: division by zero: DIV(1, 0)", "SELECT DIV(1, 0)", nil, "division by zero: DIV(1, 0)"},
+		{"failed to exec query: int64 overflow: ABS(-9223372036854775808)", "SELECT ABS(x)", nil, "int64 overflow: ABS(-9223372036854775808)"},
 		{"ERROR function: boom", `SELECT ERROR("boom")`, nil, "boom"},
 		{"not enough query arguments", "SELECT @p", nil, "Query parameter 'p' not found at [1:8]"},
 		{"not enough query arguments", "SELECT @@error.message, @q, -- @x\n @Rr", []string{"Q"}, "Query parameter 'Rr' not found at [2:2]"},

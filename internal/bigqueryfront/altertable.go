@@ -248,10 +248,12 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				}
 				for _, o := range opts {
 					switch {
-					case o.name == "data_governance_tags":
-						return st, "ALTER COLUMN SET OPTIONS (data_governance_tags), which the engine's table schema does not keep " +
-							"(it has no dataGovernanceTagsInfo field)", ""
-					case o.name != "description" && o.name != "rounding_mode" && o.name != "data_policies": // rounding_mode: #1416, data_policies: #1456
+					case o.name == "data_governance_tags" && !o.add: // #1456, governancetags.go
+						if _, msg := governanceTagsOption(o.val); msg != "" {
+							return st, "", msg
+						}
+						continue
+					case o.name != "description" && o.name != "rounding_mode" && o.name != "data_policies" && o.name != "data_governance_tags": // rounding_mode: #1416, data_policies: #1456
 						return st, "ALTER COLUMN SET OPTIONS (" + o.name + ")", ""
 					case o.add && o.name != "data_policies":
 						return st, "", "Syntax error: the operator += is supported only for the column option data_policies"
@@ -644,10 +646,13 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 	// than the earlier runs done (#1456): BigQuery carries out an ALTER
 	// TABLE whole or not at all. The checks are made on the table as it
 	// is, as the runs before a run do not change what it checks (a column
-	// RENAME TO keeps; ADD COLUMN, which another run cannot name, #1389);
-	// what the tables.patch path refuses only when it is sent (updateTable)
-	// is still met in its turn.
-	if len(groups) > 1 && !s.dry {
+	// RENAME TO keeps; ADD COLUMN, which another run cannot name, #1389).
+	// What the tables.patch path refuses when it is sent (updateTable) is
+	// checked so too, before anything is sent (patchRefusal, #1612), and a
+	// statement of one run is checked first as well, as its options kept
+	// by the front and cleared fields are changed before its tables.patch
+	// is sent.
+	if !s.dry {
 		s.dry = true
 		for i, g := range groups {
 			sub := st
@@ -828,6 +833,11 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 					schemaChanged = true
 					continue
 				}
+				if o.name == "data_governance_tags" { // #1456, governancetags.go: {} clears them
+					f[governanceTagsKey], _ = governanceTagsOption(o.val)
+					schemaChanged = true
+					continue
+				}
 				v, flow := s.stringOption(o, text)
 				if flow != nil {
 					return flow
@@ -964,9 +974,6 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 			}
 		}
 	}
-	if s.dry { // #1416, altertabledry.go
-		return nil
-	}
 	if schemaChanged {
 		patch["schema"] = map[string]any{"fields": fields}
 	}
@@ -976,6 +983,12 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 		} else {
 			patch["tableConstraints"] = cons
 		}
+	}
+	if s.dry { // #1416, altertabledry.go; #1612: what updateTable would refuse
+		if code, msg := s.f.patchRefusal(ds, table, name, got, patch); code != 0 {
+			return s.patchFailed(code, msg, text)
+		}
+		return nil
 	}
 	if len(clears) > 0 {
 		if flow := s.clearTableFields(ds, table, clears, text); flow != nil {
@@ -1086,17 +1099,22 @@ func (s *scriptRun) patchTable(dataset, table string, patch map[string]any, text
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(rec.body.Bytes(), &e)
-	msg := e.Error.Message
+	return s.patchFailed(rec.status, e.Error.Message, text)
+}
+
+// patchFailed is the flow of an ALTER TABLE whose tables.patch is refused
+// with status and msg.
+func (s *scriptRun) patchFailed(status int, msg, text string) *scriptFlow {
 	if msg == "" {
-		msg = "ALTER TABLE failed: " + strconv.Itoa(rec.status)
+		msg = "ALTER TABLE failed: " + strconv.Itoa(status)
 	}
-	if rec.status == http.StatusNotImplemented {
+	if status == http.StatusNotImplemented {
 		s.notImpl = msg
 		return &scriptFlow{}
 	}
 	reason := "invalidQuery"
-	if rec.status == http.StatusNotFound {
+	if status == http.StatusNotFound {
 		reason = "notFound"
 	}
-	return failWith(rec.status, reason, msg, text)
+	return failWith(status, reason, msg, text)
 }

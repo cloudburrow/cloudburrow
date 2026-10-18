@@ -114,11 +114,11 @@ func TestDNNTrains(t *testing.T) {
 	o.Set = []string{"model_type"}
 	applyDNNDefaults(&o)
 	o.LearnRate, o.MaxIterations, o.EarlyStop, o.HiddenUnits = 0.05, 50, false, []int{8}
-	a, fe := trainModel(o, cols, rows)
+	a, fe := trainModelT(o, cols, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
-	b, _ := trainModel(o, cols, rows)
+	b, _ := trainModelT(o, cols, rows)
 	if a.Iterations[0].Loss != b.Iterations[0].Loss {
 		t.Errorf("two runs differ: %v, %v", a.Iterations[0].Loss, b.Iterations[0].Loss)
 	}
@@ -140,7 +140,7 @@ func TestDNNTrains(t *testing.T) {
 		crows = append(crows, []*string{sp(strconv.Itoa(i)), sp(l)})
 	}
 	o.ModelType = "DNN_CLASSIFIER"
-	c, fe := trainModel(o, []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}, crows)
+	c, fe := trainModelT(o, []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}, crows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -149,7 +149,7 @@ func TestDNNTrains(t *testing.T) {
 	}
 	// The documented default hidden layer: min(128, rows / (10 (inputs + outputs))), at least 1.
 	o.HiddenUnits = nil
-	c, _ = trainModel(o, []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}, crows)
+	c, _ = trainModelT(o, []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}, crows)
 	if n := len(c.DNN.Layers[0].B); n != 2 {
 		t.Errorf("default hidden units %d, want 40 / (10 · 2) = 2", n)
 	}
@@ -168,7 +168,7 @@ func TestAutoencoderTrains(t *testing.T) {
 	o.ModelType = "AUTOENCODER"
 	applyDNNDefaults(&o)
 	o.HiddenUnits, o.Activation, o.LearnRate, o.MaxIterations, o.EarlyStop = []int{4, 1, 4}, "TANH", 0.01, 100, false
-	a, fe := trainModel(o, []mlColumn{{"a", "INT64"}, {"b", "INT64"}}, rows)
+	a, fe := trainModelT(o, []mlColumn{{"a", "INT64"}, {"b", "INT64"}}, rows)
 	if fe != nil {
 		t.Fatal(fe)
 	}
@@ -181,7 +181,7 @@ func TestAutoencoderTrains(t *testing.T) {
 	if a.Eval["median_absolute_error"] != nil {
 		t.Errorf("an autoencoder's metrics are its three errors: %v", a.Eval)
 	}
-	if _, fe := trainModel(mlOptions{ModelType: "AUTOENCODER", LabelCols: []string{"a"}}, []mlColumn{{"a", "INT64"}}, rows); fe == nil || fe.code != 400 {
+	if _, fe := trainModelT(mlOptions{ModelType: "AUTOENCODER", LabelCols: []string{"a"}}, []mlColumn{{"a", "INT64"}}, rows); fe == nil || fe.code != 400 {
 		t.Errorf("input_label_cols of an autoencoder: %v, want 400", fe)
 	}
 }

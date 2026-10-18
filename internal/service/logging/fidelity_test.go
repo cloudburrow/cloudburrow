@@ -119,12 +119,17 @@ func TestEntryAndRequestLimits(t *testing.T) {
 	soon.Timestamp = timestamppb.New(fixed.Add(23 * time.Hour))
 	old := textEntry("old")
 	old.Timestamp = timestamppb.New(fixed.Add(-31 * 24 * time.Hour))
+	ancient := textEntry("ancient")
+	ancient.Timestamp = timestamppb.New(fixed.Add(-MaxRetention - 24*time.Hour))
 	st.Reset()
-	if err := write(soon, old); err != nil {
-		t.Fatalf("23h ahead and 31 days old = %v, want both accepted", err)
+	if err := write(soon, old, ancient); err != nil {
+		t.Fatalf("23h ahead, 31 days old and past every retention = %v, want all accepted", err)
 	}
-	if got := strings.Join(texts(st), ","); got != "soon" {
-		t.Errorf("stored %q, want only soon: entries older than retention are accepted but not stored", got)
+	// The oldest a bucket keeps is its own retention (logging/quotas,
+	// #1595): a 31-day-old entry is stored, for a bucket of a longer
+	// retention to show; one older than any bucket's retention is not.
+	if got := strings.Join(texts(st), ","); got != "soon,old" {
+		t.Errorf("stored %q, want soon,old: only an entry older than every retention is not stored", got)
 	}
 
 	for _, name := range []string{"projects/" + project + "/logs/a/b", "projects/" + project + "/logs/a%20b", "unknown/1/logs/a", "folders/x/logs/a"} {

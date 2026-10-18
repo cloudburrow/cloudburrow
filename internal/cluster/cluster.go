@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,6 +117,8 @@ type Cluster struct {
 	opts     Options
 	runner   Runner
 	lookPath func(string) (string, error)
+	// restarted says Ensure started stopped nodes (#1610).
+	restarted bool
 }
 
 // New validates options and returns a Cluster.
@@ -250,6 +253,7 @@ func (c *Cluster) Ensure(ctx context.Context, configPath string) (created bool, 
 		if err := c.Start(ctx); err != nil {
 			return false, err
 		}
+		c.restarted = true
 		return false, c.ExportKubeconfig(ctx)
 	}
 
@@ -455,6 +459,116 @@ func nodesReady(out string) error {
 		return errors.New("no node reported")
 	}
 	return nil
+}
+
+// Restarted reports whether Ensure started the nodes of a stopped cluster:
+// a warm start, whose pods the kubelet restarts before the Service network
+// works (#1610).
+func (c *Cluster) Restarted() bool { return c.restarted }
+
+// ServiceNetworkTimeout bounds WaitServiceNetwork.
+const ServiceNetworkTimeout = 2 * time.Minute
+
+// WaitServiceNetwork polls until, from inside every node, the kubernetes
+// Service's ClusterIP answers /readyz with ok: kube-proxy has written the
+// Service rules again and the API server serves behind them.
+//
+// After a stopped node starts, the kubelet starts every pod at once, while
+// kube-proxy is still writing those rules. Pods that read the API through
+// the kubernetes Service at startup then fail: Knative's exit and wait out
+// the kubelet's restart backoff, up to 45 s, and CoreDNS's informers wait
+// out their own retry backoff, some 40 s (#1610). This is what has to be
+// true before they are started again.
+func (c *Cluster) WaitServiceNetwork(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	last := errors.New("not probed")
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if last = c.serviceNetwork(ctx); last == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("cluster %s: the Service network did not answer within %s: %w", c.opts.Name, timeout, last)
+}
+
+// serviceNetwork is one probe of WaitServiceNetwork.
+func (c *Cluster) serviceNetwork(ctx context.Context) error {
+	out, err := c.runner.Run(ctx, "kubectl", "--kubeconfig", c.opts.Kubeconfig,
+		"-n", "default", "get", "service", "kubernetes", "-o", "jsonpath={.spec.clusterIP}")
+	if err != nil {
+		return err
+	}
+	api := strings.TrimSpace(out)
+	if api == "" {
+		return errors.New("the kubernetes Service has no ClusterIP")
+	}
+	nodes, err := c.nodes(ctx)
+	if err != nil {
+		return err
+	}
+	if len(nodes) == 0 {
+		return errors.New("no node")
+	}
+	for _, n := range nodes {
+		out, err := c.runner.Run(ctx, "docker", "exec", n, "curl", "-sk", "--max-time", "1",
+			"https://"+net.JoinHostPort(api, "443")+"/readyz")
+		if err != nil || strings.TrimSpace(out) != "ok" {
+			return fmt.Errorf("node %s: the kubernetes Service %s is not answering: %q %v", n, api, truncateOut(out), err)
+		}
+	}
+	return nil
+}
+
+// SingleLeader restarts the controller manager and the scheduler of a
+// cluster created before #1610 without leader election, as new clusters
+// are created (kubeadmPatches): their static pod manifests are rewritten in
+// place on each node, and the kubelet restarts them. It reports whether it
+// changed anything, and is a no-op on a cluster that has it already.
+func (c *Cluster) SingleLeader(ctx context.Context) (bool, error) {
+	nodes, err := c.nodes(ctx)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for _, n := range nodes {
+		// Rewritten beside, then renamed over, so the kubelet never reads
+		// half a manifest; and only a file that names the flag.
+		out, err := c.runner.Run(ctx, "docker", "exec", n, "sh", "-c", singleLeaderScript)
+		if err != nil {
+			return changed, fmt.Errorf("node %s: turn leader election off: %w", n, err)
+		}
+		if strings.Contains(out, "changed") {
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
+// singleLeaderScript is what SingleLeader runs on a node.
+const singleLeaderScript = `set -e
+for f in kube-controller-manager kube-scheduler; do
+  m=/etc/kubernetes/manifests/$f.yaml
+  [ -f "$m" ] || continue
+  grep -q -- '--leader-elect=true' "$m" || continue
+  sed 's/--leader-elect=true/--leader-elect=false/' "$m" > /etc/kubernetes/$f.yaml.cloudburrow
+  mv /etc/kubernetes/$f.yaml.cloudburrow "$m"
+  echo changed $f
+done`
+
+// truncateOut shortens command output quoted in an error.
+func truncateOut(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 80 {
+		return s[:80] + "..."
+	}
+	return s
 }
 
 // ServerVersion returns the Kubernetes server version reported by the cluster.

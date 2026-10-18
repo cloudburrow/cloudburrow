@@ -116,3 +116,28 @@ func transformItemName(it string) (expr, name string) {
 	}
 	return it, name
 }
+
+// transformInputs are the columns of cols, the training query's, that the
+// TRANSFORM items read (a word of an item names one), but the label: the
+// model's featureColumns (#1595, models.go).
+func transformInputs(items []string, cols []mlColumn, label string) []mlColumn {
+	read := map[string]bool{}
+	for _, it := range items {
+		toks, ok := lex(it)
+		if !ok {
+			continue
+		}
+		for _, t := range toks {
+			if t.kind == tokWord || t.kind == tokQuoted {
+				read[strings.ToLower(t.text)] = true
+			}
+		}
+	}
+	var out []mlColumn
+	for _, c := range cols {
+		if read[strings.ToLower(c.Name)] && !strings.EqualFold(c.Name, label) {
+			out = append(out, c)
+		}
+	}
+	return out
+}

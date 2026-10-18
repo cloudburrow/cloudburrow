@@ -128,7 +128,7 @@ func BenchmarkJobsRows5000(b *testing.B) {
 				kept := f.apply("p", jobs)
 				rows := make([][]string, len(kept))
 				for j, job := range kept {
-					rows[j] = jobRow("p", job)
+					rows[j] = jobRow("p", job, nil)
 				}
 				size = len(rowsSubquery(jobsColumns, rows))
 			}

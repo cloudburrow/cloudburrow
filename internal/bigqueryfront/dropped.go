@@ -968,8 +968,12 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 		if st, got := f.get(r, tablePath(ref.DatasetID, id)); st == http.StatusOK {
 			_ = json.Unmarshal(got, &m)
 		}
+		oldest := f.oldestOf(r, ref.DatasetID, id, m, now)
 		if ms == 0 {
-			at = f.oldestOf(r, ref.DatasetID, id, m, now)
+			at = oldest
+		}
+		if at < oldest {
+			return copyTable{}, http.StatusBadRequest, "invalid", timeTravelBefore(at, name, oldest)
 		}
 		past, code, msg := f.systemTime(r, queryOptions{}, ref.DatasetID, name, m, fmt.Sprintf("TIMESTAMP_MILLIS(%d)", at))
 		switch {
@@ -999,7 +1003,15 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 		lookup = -1
 	}
 	t, found, deleted := f.dropped.table(project, ref.DatasetID, id, lookup)
+	earliest := now - t.Hours*int64(time.Hour/time.Millisecond)
 	switch {
+	case !found && deleted && ms != 0:
+		if last, ok, _ := f.dropped.table(project, ref.DatasetID, id, -1); ok && at < last.Created {
+			// Before it was made (#1595, timeTravelBefore).
+			return copyTable{}, http.StatusBadRequest, "invalid", timeTravelBefore(at, name,
+				max(now-last.Hours*int64(time.Hour/time.Millisecond), last.Created))
+		}
+		fallthrough
 	case !found && deleted:
 		// UNVERIFIED wording.
 		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/restore-deleted-tables
@@ -1008,14 +1020,11 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 	case !found:
 		return copyTable{ref: ref}, 0, "", ""
 	}
-	earliest := now - t.Hours*int64(time.Hour/time.Millisecond)
 	if ms == 0 {
 		at = max(earliest, t.Created)
 	}
-	if at < earliest {
-		// As https://cloud.google.com/bigquery/docs/time-travel documents it.
-		return copyTable{}, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid snapshot time %d for table %s@%d. "+
-			"Cannot read before %d", at, name, at, earliest)
+	if oldest := max(earliest, t.Created); at < oldest {
+		return copyTable{}, http.StatusBadRequest, "invalid", timeTravelBefore(at, name, oldest)
 	}
 	if t.Copy == "" {
 		kind := "VIEW"
@@ -1032,6 +1041,16 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 	schema, fields := droppedFields(t)
 	return copyTable{ref: ref, exists: true, kind: "TABLE", schema: schema, fields: fields,
 		from: droppedRead(t, fields, at*1000+999)}, 0, "", ""
+}
+
+// timeTravelBefore is the message of a copy of name@at from before oldest,
+// the start of its time travel window or its creation, as
+// restore-deleted-tables gives bq cp's: "Invalid time travel timestamp
+// 1744343690000 for table PROJECT_ID:DATASET_ID.TABLE_ID@1744343690000.
+// Cannot read before 1744843691075" (read 2026-10-17; #1595). A query's
+// FOR SYSTEM_TIME AS OF keeps time travel's "Invalid snapshot time".
+func timeTravelBefore(at int64, name string, oldest int64) string {
+	return fmt.Sprintf("Invalid time travel timestamp %d for table %s@%d. Cannot read before %d", at, name, at, oldest)
 }
 
 // rangeDecorator is @t1-t2 or @t1- (above).

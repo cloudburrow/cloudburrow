@@ -184,7 +184,7 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		api.RegisterSnapshotter(&kvSnapshotter{name: "projects", db: d.projectStore})
 	}
 	if f := forwarderFor(d.forwarders, "storage"); f != nil {
-		api.RegisterSnapshotter(&builtinStorageSnapshotter{tunnel: f})
+		api.RegisterSnapshotter(&builtinStorageSnapshotter{tunnel: f, project: cfg.DefaultProject()})
 	}
 	if f := forwarderFor(d.forwarders, "pubsub"); f != nil {
 		// Resources and expiration clocks, not messages (#880).

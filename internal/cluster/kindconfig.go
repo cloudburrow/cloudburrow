@@ -28,6 +28,28 @@ type PortMapping struct {
 // ConfigFileName is the kind configuration CloudBurrow generates.
 const ConfigFileName = "kind.yaml"
 
+// kubeadmPatches start the controller manager and the scheduler without
+// leader election (#1610). The cluster has one control-plane node, so there
+// is nothing to elect; and a restarted one waited out its own lease from
+// before the stop, about 20 s in which no Deployment made a pod and no pod
+// was scheduled. The controller manager's list is the whole list, since
+// kind replaces it: enable-hostpath-provisioner is the one kind sets.
+const kubeadmPatches = `kubeadmConfigPatches:
+  - |
+    apiVersion: kubeadm.k8s.io/v1beta4
+    kind: ClusterConfiguration
+    controllerManager:
+      extraArgs:
+        - name: enable-hostpath-provisioner
+          value: "true"
+        - name: leader-elect
+          value: "false"
+    scheduler:
+      extraArgs:
+        - name: leader-elect
+          value: "false"
+`
+
 // RenderConfig produces a kind cluster configuration.
 //
 // Only the mappings are configurable. The node image is passed to `kind
@@ -41,6 +63,7 @@ func RenderConfig(mappings []PortMapping) string {
 	b.WriteString("# them requires `cloudburrow delete` followed by `cloudburrow up`.\n")
 	b.WriteString("apiVersion: kind.x-k8s.io/v1alpha4\n")
 	b.WriteString("kind: Cluster\n")
+	b.WriteString(kubeadmPatches)
 	b.WriteString("nodes:\n")
 	b.WriteString("  - role: control-plane\n")
 	if len(mappings) == 0 {

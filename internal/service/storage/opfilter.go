@@ -10,7 +10,7 @@ package storage
 //   - FIELD is a dotted path from the top of the Operation: name, done,
 //     error.code, error.message, or anything under metadata or response
 //     (metadata.@type, metadata.commonMetadata.type,
-//     metadata.commonMetadata.createTime, metadata.successfulObjectCount);
+//     metadata.commonMetadata.createTime, metadata.succeededCount);
 //   - done takes true or false; two RFC 3339 times compare as times, two
 //     numbers as numbers, and anything else as strings;
 //   - restrictions combine with AND (or a space), OR and NOT (or a leading

@@ -89,6 +89,18 @@ func (c *Component) Start(ctx context.Context) error {
 	if note != "" && c.out != nil {
 		fmt.Fprintf(c.out, "cluster %s: %s\n", c.cluster.Name(), note)
 	}
+	// A cluster created before #1610 gets what kubeadmPatches give a new
+	// one: no leader election, so a restarted controller manager makes
+	// pods at once rather than after its old lease runs out.
+	if !created {
+		changed, err := c.cluster.SingleLeader(ctx)
+		if err != nil {
+			return err
+		}
+		if changed && c.out != nil {
+			fmt.Fprintf(c.out, "cluster %s: the controller manager and the scheduler now run without leader election\n", c.cluster.Name())
+		}
+	}
 
 	version, err := c.cluster.ServerVersion(ctx)
 	if err != nil {

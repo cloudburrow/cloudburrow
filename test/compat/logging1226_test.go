@@ -180,7 +180,8 @@ func TestLoggingLogBasedMetrics(t *testing.T) {
 // TestLoggingSinks (#1226): through the official ConfigClient, a sink is
 // stored with its destination, filter and embedded exclusion, listed,
 // updated through an update_mask and deleted; a bad destination or filter is
-// INVALID_ARGUMENT. Nothing is delivered to the destination.
+// INVALID_ARGUMENT. Nothing is delivered to the destination. A sink to a log
+// bucket of its own project has no writer_identity; any other has one.
 func TestLoggingSinks(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -228,6 +229,28 @@ func TestLoggingSinks(t *testing.T) {
 	}
 	if !upd.GetDisabled() || upd.GetFilter() != "severity>=ERROR" || upd.GetDestination() != "pubsub.googleapis.com/projects/"+h.Project()+"/topics/t" {
 		t.Errorf("UpdateSink = %v; want only destination and disabled changed", upd)
+	}
+	if upd.GetWriterIdentity() == "" {
+		t.Errorf("a Pub/Sub sink has no writer_identity")
+	}
+	// configure_export_v2: "All sinks have a writer identity except for sinks
+	// that write to a log bucket in the same Google Cloud project in which the
+	// log entries originate" (#1595).
+	for dest, want := range map[string]bool{
+		"logging.googleapis.com/projects/" + h.Project() + "/locations/global/buckets/_Default":       false,
+		"logging.googleapis.com/projects/other-" + h.Project() + "/locations/global/buckets/_Default": true,
+	} {
+		bid := fmt.Sprint(id, "-b", len(dest))
+		bs, err := c.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: parent, Sink: &loggingpb.LogSink{Name: bid, Destination: dest}})
+		if err != nil {
+			t.Fatalf("CreateSink to %s: %v", dest, err)
+		}
+		if got := bs.GetWriterIdentity() != ""; got != want {
+			t.Errorf("a sink to %s has writer_identity %q; want one: %v", dest, bs.GetWriterIdentity(), want)
+		}
+		if err := c.DeleteSink(ctx, &loggingpb.DeleteSinkRequest{SinkName: parent + "/sinks/" + bid}); err != nil {
+			t.Errorf("DeleteSink %s: %v", bid, err)
+		}
 	}
 	_, err = c.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: parent, Sink: &loggingpb.LogSink{Name: id + "x", Destination: "example.com/x"}})
 	wantLoggingCode(t, "a bad destination", err, codes.InvalidArgument)

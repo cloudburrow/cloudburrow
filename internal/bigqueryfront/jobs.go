@@ -119,6 +119,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	if project == "" {
 		project = projectOf(f.base)
 	}
+	if q := job.Configuration.Query; q != nil && q.UseLegacySQL == nil && f.googleSQLDefault(r, true) {
+		f.settings.markGoogleDefault(project, job.JobReference.JobID) // JOBS' query_dialect, #1595
+	}
 	rec := newRecorder()
 	f.checkJob(rec, r, job, project, created)
 	f.records.timed(w, rec, created, project, job.JobReference.JobID, true)

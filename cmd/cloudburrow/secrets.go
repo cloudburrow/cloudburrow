@@ -90,7 +90,8 @@ func (s *secretsService) register(coord *lifecycle.Coordinator) {
 // secretsForget makes Secret Manager honour --mode (#483). Its Secrets live
 // in the workload namespace, which survives `stop` and an ephemeral `up`, so
 // an ephemeral run deletes what earlier runs left, and a persistent run
-// deletes what an ephemeral run left. Registered after the cluster, which the
+// deletes what an ephemeral run left. Then it reads the rest, migrating the
+// layout before #1596. Registered after the cluster, which the
 // service itself starts before, and before `up` reports ready.
 type secretsForget struct{ svc *secretsService }
 
@@ -100,7 +101,15 @@ func (f secretsForget) Start(ctx context.Context) error {
 	if f.svc.kube == nil {
 		return nil
 	}
-	return f.svc.kube.Forget(ctx)
+	if err := f.svc.kube.Forget(ctx); err != nil {
+		return err
+	}
+	// Read what is left, and move a secret stored before #1596 to a
+	// Kubernetes Secret per version, before `up` reports ready.
+	if err := f.svc.kube.Load(); err != nil {
+		return fmt.Errorf("read Secret Manager state: %w", err)
+	}
+	return nil
 }
 
 func (f secretsForget) Stop(context.Context) error { return nil }

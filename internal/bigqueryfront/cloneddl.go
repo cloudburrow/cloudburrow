@@ -391,7 +391,15 @@ func (d ownDDL) patch(job map[string]any) {
 		st["query"] = q
 	}
 	q["statementType"] = d.statementType
-	q["ddlOperationPerformed"] = d.operation
+	if d.operation == "" { // a statement of no table (ALTER PROJECT, projectoptions.go)
+		delete(q, "ddlOperationPerformed")
+	} else {
+		q["ddlOperationPerformed"] = d.operation
+	}
+	if d.target.TableID == "" {
+		delete(q, "ddlTargetTable")
+		return
+	}
 	q["ddlTargetTable"] = map[string]any{"projectId": d.target.ProjectID, "datasetId": d.target.DatasetID,
 		"tableId": d.target.TableID}
 }

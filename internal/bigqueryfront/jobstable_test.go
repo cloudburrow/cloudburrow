@@ -456,3 +456,25 @@ func TestJobsTableOverflowListsEveryJob(t *testing.T) {
 		t.Fatal("the overflow outlived the query that lists every job")
 	}
 }
+
+// TestJobTextNotesTheJob (#1617): the front adds a job's text (a DML
+// statement's counts, the client's query) once the engine has made the
+// job, which a background sync may already have listed and written with
+// the engine's statementType SELECT and no dmlStats; the job is then
+// pending, so the next sync lists it again and writes its row with the
+// text. Without it the row stayed wrong: the job is DONE, so not open,
+// and the cursor had passed it.
+func TestJobTextNotesTheJob(t *testing.T) {
+	rows := &jobsTable{}
+	rows.setMade("p", true)
+	texts := &jobTexts{}
+	wireJobsTable(texts, &jobRecords{}, &frontJobs{}, rows)
+	texts.add("p", "dml", jobText{query: "INSERT INTO ds.t (a) VALUES (1)", dml: &dmlCounts{statementType: "INSERT", inserted: 1}})
+	if p := rows.takePending("p"); !p["dml"] {
+		t.Errorf("pending after the text was added: %v, want the job", p)
+	}
+	texts.add("p", "", jobText{query: "x"})
+	if p := rows.takePending("p"); len(p) != 0 {
+		t.Errorf("pending after a text of no job: %v", p)
+	}
+}

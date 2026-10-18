@@ -371,3 +371,67 @@ func TestKMSDeleteCryptoKeyLeavesARetiredResource(t *testing.T) {
 		})
 	}
 }
+
+// TestKMSAsymmetricVersionsStartPendingGeneration (#1595): "When a key
+// version for an asymmetric key is created, it starts with a state of
+// pending generation", and Cloud KMS "will automatically change the state
+// to enabled as soon as the version is ready" (key-states). Over gRPC and
+// REST, CreateCryptoKeyVersion on an ASYMMETRIC_SIGN or ASYMMETRIC_DECRYPT
+// key answers PENDING_GENERATION with no generate_time; the version then
+// reads ENABLED, with one, and its public key is served. A symmetric key's
+// new version is ENABLED at once: "only key versions for asymmetric keys
+// start in the pending generation state".
+//
+// covers: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/GetPublicKey
+func TestKMSAsymmetricVersionsStartPendingGeneration(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	for variant, c := range kmsClients(t, h) {
+		t.Run(variant, func(t *testing.T) {
+			ring := kmsRing(t, h, c, "pending-"+variant)
+			for id, p := range map[string]struct {
+				purpose kmspb.CryptoKey_CryptoKeyPurpose
+				alg     kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm
+			}{
+				"sign":    {kmspb.CryptoKey_ASYMMETRIC_SIGN, kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256},
+				"decrypt": {kmspb.CryptoKey_ASYMMETRIC_DECRYPT, kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256},
+			} {
+				v1 := kmsPurposeKey(t, h, c, ring, id, p.purpose, p.alg)
+				key := v1[:len(v1)-len("/cryptoKeyVersions/1")]
+				v, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: key})
+				if err != nil {
+					t.Fatalf("%s CreateCryptoKeyVersion: %v", id, err)
+				}
+				if v.GetState() != kmspb.CryptoKeyVersion_PENDING_GENERATION || v.GetGenerateTime() != nil {
+					t.Errorf("%s CreateCryptoKeyVersion = %v, generate_time %v; want PENDING_GENERATION and none", id, v.GetState(), v.GetGenerateTime())
+				}
+				deadline := time.Now().Add(30 * time.Second)
+				for {
+					got, err := c.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: v.GetName()})
+					if err != nil {
+						t.Fatalf("%s GetCryptoKeyVersion: %v", id, err)
+					}
+					if got.GetState() == kmspb.CryptoKeyVersion_ENABLED {
+						if got.GetGenerateTime() == nil {
+							t.Errorf("%s: an ENABLED version has no generate_time", id)
+						}
+						break
+					}
+					if got.GetState() != kmspb.CryptoKeyVersion_PENDING_GENERATION || time.Now().After(deadline) {
+						t.Fatalf("%s GetCryptoKeyVersion = %v; want ENABLED once generated", id, got.GetState())
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+				kmsPublicKey(t, h, c, v.GetName())
+			}
+			sym, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring, CryptoKeyId: "symmetric",
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v, err := c.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{Parent: sym.GetName()}); err != nil || v.GetState() != kmspb.CryptoKeyVersion_ENABLED {
+				t.Errorf("symmetric CreateCryptoKeyVersion = %v, %v; want ENABLED", v.GetState(), err)
+			}
+		})
+	}
+}

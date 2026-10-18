@@ -26,8 +26,11 @@ func autoReplication() *secretmanagerpb.Replication {
 // TestSecretManagerExpiry (#1225): through the official client over gRPC
 // and REST, a ttl on CreateSecret is answered as the expire_time it gives,
 // an UpdateSecret whose mask names expire_time sets and (with none) clears
-// it, and a secret with a short ttl is gone, NOT_FOUND over both
-// transports, once it passes.
+// it, a secret with a 61-second ttl is gone, NOT_FOUND over both
+// transports, once the service's clock passes it, and an expiry less
+// than 60 seconds or more than 100 years away is INVALID_ARGUMENT
+// ("A secret's expiration cannot be less than 60 seconds away or more
+// than 100 years away", creating-and-managing-expiring-secrets).
 // covers: google.cloud.secretmanager.v1.SecretManagerService/CreateSecret, google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret, google.cloud.secretmanager.v1.SecretManagerService/GetSecret
 func TestSecretManagerExpiry(t *testing.T) {
 	h := New(t)
@@ -65,16 +68,35 @@ func TestSecretManagerExpiry(t *testing.T) {
 			t.Errorf("%s: GetSecret after clearing = %v, %v", transport, got.GetExpireTime(), err)
 		}
 
+		for what, exp := range map[string]*secretmanagerpb.Secret{
+			"a 30s ttl":                   {Replication: autoReplication(), Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(30 * time.Second)}},
+			"an expire_time 101 years on": {Replication: autoReplication(), Expiration: &secretmanagerpb.Secret_ExpireTime{ExpireTime: timestamppb.New(advanceSecretsClock(t, h, 0).AddDate(101, 0, 0))}},
+		} {
+			_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: id + "-bounds", Secret: exp})
+			if status.Code(err) != codes.InvalidArgument {
+				_ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: secretsParent(h) + "/secrets/" + id + "-bounds"})
+				t.Errorf("%s: CreateSecret with %s = %v; want INVALID_ARGUMENT", transport, what, err)
+			}
+		}
+		_, err = c.UpdateSecret(ctx, &secretmanagerpb.UpdateSecretRequest{
+			Secret:     &secretmanagerpb.Secret{Name: name, Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(59 * time.Second)}},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"ttl"}}})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("%s: UpdateSecret with a 59s ttl = %v; want INVALID_ARGUMENT", transport, err)
+		}
+
 		shortID := "expiry-short-" + strings.ToLower(transport)
 		short := secretsParent(h) + "/secrets/" + shortID
 		if _, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: shortID,
-			Secret: &secretmanagerpb.Secret{Replication: autoReplication(), Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(2 * time.Second)}}}); err != nil {
-			t.Fatalf("%s: CreateSecret with a 2s ttl: %v", transport, err)
+			Secret: &secretmanagerpb.Secret{Replication: autoReplication(), Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(61 * time.Second)}}}); err != nil {
+			t.Fatalf("%s: CreateSecret with a 61s ttl: %v", transport, err)
 		}
 		t.Cleanup(func() { _ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: short}) })
 		if _, err := c.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{Parent: short, Payload: &secretmanagerpb.SecretPayload{Data: []byte("x")}}); err != nil {
 			t.Fatalf("%s: AddSecretVersion: %v", transport, err)
 		}
+		// The secret's expiry counts on the service's clock, moved past it.
+		advanceSecretsClock(t, h, 62*time.Second)
 		deadline := time.Now().Add(20 * time.Second)
 		for {
 			_, err := c.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: short})
@@ -82,7 +104,7 @@ func TestSecretManagerExpiry(t *testing.T) {
 				break
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("%s: a secret with a 2s ttl still answers %v after 20s", transport, err)
+				t.Fatalf("%s: a secret with a 61s ttl still answers %v after its expiry", transport, err)
 			}
 			time.Sleep(250 * time.Millisecond)
 		}

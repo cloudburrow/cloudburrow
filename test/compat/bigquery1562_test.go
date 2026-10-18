@@ -92,11 +92,17 @@ func TestBigQueryTempScriptsUndropAndAlterSchema(t *testing.T) {
 
 		// ALTER SCHEMA beside a TEMP table, read by the next statement.
 		// The next statement reads the option from INFORMATION_SCHEMA in
-		// its turn (#1565: it read the view as before the script).
+		// its turn (#1565: it read the view as before the script), the
+		// view region-qualified, as BigQuery requires of SCHEMATA_OPTIONS
+		// (#1595).
+		dmd, mdErr := ds.Metadata(ctx)
+		if mdErr != nil {
+			t.Fatalf("Dataset.Metadata: %v", mdErr)
+		}
 		got := read("CREATE TEMP TABLE tt AS SELECT 'temp' AS x; "+
 			"ALTER SCHEMA `"+ds.DatasetID+"` SET OPTIONS (description = 'beside a temp table'); "+
-			"SELECT CONCAT(x, ':', option_value) FROM tt, `"+ds.DatasetID+"`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS "+
-			"WHERE option_name = 'description'", insert)
+			"SELECT CONCAT(x, ':', option_value) FROM tt, `region-"+strings.ToLower(dmd.Location)+"`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS "+
+			"WHERE schema_name = '"+ds.DatasetID+"' AND option_name = 'description'", insert)
 		if !reflect.DeepEqual(got, []string{`temp:"beside a temp table"`}) {
 			t.Errorf("insert %v: ALTER SCHEMA beside a TEMP table: %v", insert, got)
 		}

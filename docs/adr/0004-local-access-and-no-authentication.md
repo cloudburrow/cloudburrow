@@ -174,6 +174,11 @@ The other service APIs CloudBurrow serves itself send no CORS headers, so a brow
 foreign page read their answers; a simple request a page can still send to them blind is not
 covered by #677, and the upstream emulators behind the tunnels were not examined for it.
 
+*Amended by #1595:* Google's cross-origin page now documents `Access-Control-Allow-Credentials:
+true` on the JSON API's approved simple requests, and with 404 on an `OPTIONS` that names no
+`Access-Control-Request-Method` (read 2026-10-17). The builtin storage server sends it so, to an
+origin that has passed the check above only; it reads no cookies, so the header grants nothing.
+
 *Amended by #1586:* the simple request #677 left open is closed. A review on a running instance
 found a cross-site `text/plain` POST creating a Cloud Tasks queue and a KMS key ring, the Pub/Sub
 and Firestore emulators echoing any `Origin` with `Access-Control-Allow-Credentials`, so any page

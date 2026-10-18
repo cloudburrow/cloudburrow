@@ -271,3 +271,41 @@ func TestBigQueryMLRefusals(t *testing.T) {
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.PREDICT(MODEL `%s.absent`, (SELECT 1 AS id))", ds.DatasetID)).Read(ctx)
 	wantHTTPStatus(t, "ML.PREDICT of a missing model", err, http.StatusNotFound)
 }
+
+// TestBigQueryMLRandomSplit: a RANDOM split "is deterministic" and "based
+// on the FARM_FINGERPRINT of the data (including the column name and
+// schema)" (bigqueryml-syntax-create-glm). CloudBurrow's evaluation rows
+// are those whose ABS(FARM_FINGERPRINT) of the row's text, % 100, is under
+// data_split_eval_fraction · 100, so ML.EVALUATE equals the error of
+// ML.PREDICT over exactly the rows the same SQL picks, and a second model
+// of the same rows evaluates the same.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryMLRandomSplit(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	name := mlDataset(t, h, c, map[string]string{
+		"noisy": "SELECT x, 2 * x + MOD(x * 37, 11) - 5 AS y FROM UNNEST(GENERATE_ARRAY(0, 599)) AS x",
+	})
+	for _, m := range []string{"r1", "r2"} {
+		if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.%s` OPTIONS(model_type='linear_reg', input_label_cols=['y'], "+
+			"data_split_method='random', data_split_eval_fraction=0.3) AS SELECT x, y FROM `%s.noisy`", name, m, name)); err != nil {
+			t.Fatalf("CREATE MODEL %s: %v", m, err)
+		}
+	}
+	// ABS(FARM_FINGERPRINT) % 100, exact since googlesqlite patches 0067
+	// and 0075 (#1599).
+	fp := "FARM_FINGERPRINT(CONCAT('x INT64=\"', CAST(x AS STRING), '\",y INT64=\"', CAST(y AS STRING), '\"'))"
+	evalRows := fmt.Sprintf("SELECT x, y FROM `%s.noisy` WHERE MOD(ABS(%s), 100) < 30", name, fp)
+	n := mlQuery(t, h, c, "SELECT COUNT(*) AS n FROM ("+evalRows+")")
+	if len(n) != 1 || n[0]["n"].(int64) < 120 || n[0]["n"].(int64) > 240 {
+		t.Fatalf("evaluation rows: %v; want about 30%% of 600", n)
+	}
+	want := mlQuery(t, h, c, fmt.Sprintf("SELECT AVG(ABS(predicted_y - y)) AS mae FROM ML.PREDICT(MODEL `%s.r1`, (%s))", name, evalRows))
+	for _, m := range []string{"r1", "r2"} {
+		ev := mlQuery(t, h, c, fmt.Sprintf("SELECT mean_absolute_error FROM ML.EVALUATE(MODEL `%s.%s`)", name, m))
+		if len(ev) != 1 || len(want) != 1 || !near(ev[0]["mean_absolute_error"], want[0]["mae"].(float64), 1e-9) {
+			t.Errorf("ML.EVALUATE(%s): %v; want the error over the FARM_FINGERPRINT rows, %v", m, ev, want)
+		}
+	}
+}

@@ -39,6 +39,9 @@ func runFront(t *testing.T, upstream, statePath string) *frontRun {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An in-process fake's connections outlive its Close, as a process's
+	// do not: the watch dials it again often (restore_test.go).
+	f.watchIdle = 100 * time.Millisecond
 	if err := f.KeepState(statePath); err != nil {
 		t.Fatal(err)
 	}
