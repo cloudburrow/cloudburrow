@@ -224,7 +224,15 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	// only once both are, and the first failure is the one reported.
 	if c.NeedsKnative() && c.knative == nil {
 		c.startKnative(ctx)
-		defer c.stopKnative()
+		// The run is this Start's own: once it returns, a later Start
+		// begins another rather than joining this finished one. A second
+		// Start on the same component, as against a cluster an older
+		// release brought up, otherwise skipped Knative entirely, its
+		// in-place upgrade and its stamp included.
+		defer func() {
+			c.stopKnative()
+			c.knative = nil
+		}()
 	}
 	var err error
 	if backends := c.Backends(); len(backends) > 0 {
