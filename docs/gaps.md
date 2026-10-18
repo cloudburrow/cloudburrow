@@ -32,10 +32,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 2 | 1 | 1 | 1 |
-| Cloud SQL, Memorystore | 8 | 2 | 5 | 1 | 0 |
+| Cloud SQL, Memorystore | 9 | 2 | 6 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **50** | **4** | **18** | **22** | **6** |
+| **Total** | **51** | **4** | **19** | **22** | **6** |
 
 ## Cloud Storage
 
@@ -258,6 +258,7 @@ encryption (#1413), and customer-managed keys and server CA rotation (#1463). IA
 | Cloud SQL: `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files, are 501: their images, `mysql:5.6`, `mysql:5.7` and `mcr.microsoft.com/mssql/server` 2022 and 2025, are linux/amd64 only (checked again with `docker manifest inspect` 2026-10-17); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal` in those versions) and upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions) are 501 naming why (#1462) (#1501) (#1524) | no emulator support (amd64-only images; the engine versions lack the primitives) | M |
 | Memorystore for Redis Cluster and for Valkey: the nodes announce the host's address to clients, so an in-cluster client must use pod addresses. Valkey announces one client address per address family (`cluster-announce-client-ipv4`, `-ipv6`), and both the host's tunnels and the pods reach a node over IPv4 (#1549); serving both needs the kind cluster dual-stack, with in-cluster clients dialing IPv6, which CloudBurrow's cluster is not (reason re-read 2026-10-18, #1614) (#1519) (#1557) (#1614) | no emulator support (one client address per address family) | M |
 | Memorystore for Valkey: a secondary of cross-instance replication replicates its primary instance's primary node at its pod's address, so after that instance fails over on its own (served since #1614: a `CLUSTER_DISABLED` instance's reader endpoint spreads over the replicas, and its primary endpoint follows a promoted replica) the secondary is left replicating the failed pod's address, which no pod has any more, until it is linked again (a switchover or a detach and a new secondary); following the primary instance's `-primary` Service, which selects by role, would keep it (#1614) | not built yet | S |
+| Cloud SQL: `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files, are 501: their images, `mysql:5.6`, `mysql:5.7` and `mcr.microsoft.com/mssql/server` 2022 and 2025, are linux/amd64 only (checked again with `docker manifest inspect` 2026-10-17); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal` in those versions) and upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions) are 501 naming why (#1462) (#1501) (#1524) | no emulator support (amd64-only images; the engine versions lack the primitives) | M |
 
 ## Functions, credentials, tooling
 

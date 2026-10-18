@@ -365,15 +365,17 @@ func (c *clusters) linkSecondary(ctx context.Context, name string) error {
 		c.mu.Unlock()
 		return fmt.Errorf("primary instance %s was not found", r.Valkey.CIR.Primary.Name)
 	}
-	pp := p.firstPrimary()
-	host, port, pw := pp.podIP, pp.port, p.password()
+	src := c.sourceOf(p)
 	snap := *r
 	snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
 	c.mu.Unlock()
-	if host == "" {
+	if src.host == "" {
 		return fmt.Errorf("primary instance %s has no running primary", p.Name)
 	}
-	if err := c.linkTo(ctx, &snap, host, port, pw); err != nil {
+	if err := c.publish(ctx, src); err != nil {
+		return fmt.Errorf("publish primary instance %s's roles: %w", p.Name, err)
+	}
+	if err := c.linkTo(ctx, &snap, src.host, src.port, src.password); err != nil {
 		return fmt.Errorf("replicate primary instance %s: %w", p.Name, err)
 	}
 	c.mu.Lock()
@@ -382,6 +384,54 @@ func (c *clusters) linkSecondary(ctx context.Context, name string) error {
 	}
 	c.mu.Unlock()
 	return nil
+}
+
+// cirSource is where a secondary of cross-instance replication reaches
+// its primary instance's primary in the cluster.
+type cirSource struct {
+	host     string
+	port     int
+	password string
+	// base and roles, with a RoleRouter, are the primary instance's role
+	// Services and its nodes' roles, published before a secondary links.
+	base  string
+	roles map[string]string
+}
+
+// sourceOf is where a secondary replicates p (#1614): with a RoleRouter
+// and a replica, p's primary Service (base+"-primary"), which selects
+// whichever node is p's primary, so the secondary follows p's automatic
+// failover (valkeyfailover.go) and needs no relinking; with a RoleRouter
+// alone, the primary node's own Service, which follows its pod; else its
+// pod's IP. The nodes' certificates cover each of these Services' names.
+// Call with mu held.
+func (c *clusters) sourceOf(p *clusterRecord) cirSource {
+	pp := p.firstPrimary()
+	if pp == nil || pp.podIP == "" {
+		return cirSource{}
+	}
+	src := cirSource{host: pp.podIP, port: pp.port, password: p.password()}
+	rr, ok := c.rt.(RoleRouter)
+	switch {
+	case !ok:
+	case len(p.Nodes) > 1:
+		src.base, src.roles = ValkeyServerBase(p.Name), rolesOf(p)
+		src.host, src.port = rr.NodeHost(src.base+"-primary"), rolePort(p)
+	default:
+		src.host = rr.NodeHost(pp.Server)
+	}
+	return src
+}
+
+// publish labels the source's roles and applies its role Services, so the
+// primary Service selects the primary before a secondary links to it; the
+// health check keeps them (tendRoles).
+func (c *clusters) publish(ctx context.Context, src cirSource) error {
+	rr, ok := c.rt.(RoleRouter)
+	if !ok || src.roles == nil {
+		return nil
+	}
+	return rr.Roles(ctx, src.base, src.roles, src.port)
 }
 
 // updateCIR is an UpdateInstance of cross_instance_replication_config:
@@ -482,8 +532,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		sn.Nodes = append([]*clusterNode(nil), x.Nodes...)
 		snaps[x] = &sn
 	}
-	pp := primary.firstPrimary()
-	host, port, pw := pp.podIP, pp.port, primary.password()
+	src := c.sourceOf(primary)
 	var linked []*clusterRecord
 	for _, x := range st.link {
 		linked = append(linked, snaps[x])
@@ -495,6 +544,10 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		// Over TLS, the members that will replicate the new primary trust
 		// its CA first.
 		err := c.shareTrust(ctx, append([]*clusterRecord{snaps[primary]}, linked...), trust)
+		if err == nil && len(st.link) > 0 {
+			// A former secondary, never watched, has no role Services yet.
+			err = c.publish(ctx, src)
+		}
 		for _, x := range st.unlink {
 			if err != nil {
 				break
@@ -505,7 +558,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 			if err != nil {
 				break
 			}
-			err = c.linkTo(ctx, snaps[x], host, port, pw)
+			err = c.linkTo(ctx, snaps[x], src.host, src.port, src.password)
 		}
 		c.mu.Lock()
 		delete(c.busy, r.Name)

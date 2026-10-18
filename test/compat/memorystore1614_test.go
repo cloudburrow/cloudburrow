@@ -4,6 +4,7 @@ package compat
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,9 +25,9 @@ import (
 const valkeyFailoverWithin = 60 * time.Second
 
 // valkeyRunID is INFO server's run_id and INFO replication's role of the
-// server a new connection to addr reaches.
-func valkeyRunID(ctx context.Context, addr string) (string, string, error) {
-	c := redis.NewClient(&redis.Options{Addr: addr, MaxRetries: -1, DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second, PoolSize: 1})
+// server a new connection to addr reaches, over TLS with tc.
+func valkeyRunID(ctx context.Context, addr string, tc *tls.Config) (string, string, error) {
+	c := redis.NewClient(&redis.Options{Addr: addr, TLSConfig: tc, MaxRetries: -1, DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second, PoolSize: 1})
 	defer c.Close()
 	info, err := c.Info(ctx, "server", "replication").Result()
 	if err != nil {
@@ -110,13 +111,13 @@ func TestMemorystoreValkeyReaderAndFailover(t *testing.T) {
 	if err := reader.Set(ctx, "x", "y", 0).Err(); err == nil || !strings.Contains(err.Error(), "READONLY") {
 		t.Errorf("SET on the reader endpoint = %v, want READONLY", err)
 	}
-	oldPrimary, role, err := valkeyRunID(ctx, primaryAddr)
+	oldPrimary, role, err := valkeyRunID(ctx, primaryAddr, nil)
 	if err != nil || role != "master" {
 		t.Fatalf("the primary endpoint reaches %s (%s), %v", oldPrimary, role, err)
 	}
 	replicas := map[string]bool{}
 	for i := 0; i < 8; i++ {
-		id, role, err := valkeyRunID(ctx, readerAddr)
+		id, role, err := valkeyRunID(ctx, readerAddr, nil)
 		if err != nil || role != "slave" {
 			t.Fatalf("the reader endpoint reaches %s (%s), %v", id, role, err)
 		}
@@ -153,7 +154,7 @@ func TestMemorystoreValkeyReaderAndFailover(t *testing.T) {
 		if time.Since(deleted) > valkeyFailoverWithin {
 			t.Fatalf("writes did not resume on the primary endpoint within %v of deleting the primary's pod", valkeyFailoverWithin)
 		}
-		id, role, err := valkeyRunID(ctx, primaryAddr)
+		id, role, err := valkeyRunID(ctx, primaryAddr, nil)
 		if err == nil && role == "master" && id != oldPrimary {
 			w := redis.NewClient(&redis.Options{Addr: primaryAddr, MaxRetries: -1, DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second})
 			err = w.Set(ctx, "k-after", "after", 0).Err()
@@ -206,4 +207,120 @@ func TestMemorystoreValkeyReaderAndFailover(t *testing.T) {
 		n, err := next.Do(ctx, "WAIT", 2, 1000).Int()
 		return err == nil && n >= 2
 	})
+}
+
+// covers: google.cloud.memorystore.v1.Memorystore/CreateInstance, google.cloud.memorystore.v1.Memorystore/UpdateInstance
+//
+// TestMemorystoreValkeyCrossInstanceFollowsFailover (#1614), with cloud.
+// google.com/go/memorystore/apiv1 and go-redis, without and with in-transit
+// encryption: a secondary of cross-instance replication of a primary
+// instance with a replica keeps replicating it across the primary
+// instance's automatic failover. The primary instance's primary pod is
+// deleted (kubectl, this test's own pod only, found by its role label);
+// once writes resume on its primary endpoint, at a promoted replica, a
+// key written there is read on the secondary, which still refuses writes.
+// A switchover then makes the former primary instance replicate the
+// secondary, and a detach ends the replication.
+func TestMemorystoreValkeyCrossInstanceFollowsFailover(t *testing.T) {
+	h := New(t)
+	c, project := valkeyAdminClient(t, h)
+	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
+	if kubeconfig == "" {
+		t.Skipf("%s is required to delete the primary's pod", envKubeconfig)
+	}
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("kubectl is required to delete the primary's pod")
+	}
+	for _, withTLS := range []bool{false, true} {
+		t.Run(map[bool]string{false: "plain", true: "tls"}[withTLS], func(t *testing.T) {
+			ctx := memorystoreWait(t)
+			sfx := time.Now().UnixNano() % 1e7
+			tlsMode := func(in *memorystorepb.Instance) {
+				if withTLS {
+					in.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
+				}
+			}
+			p := valkeyDisabled(t, ctx, c, project, fmt.Sprintf("cirfo-p-%d", sfx), func(in *memorystorepb.Instance) {
+				in.ReplicaCount = proto.Int32(1)
+				tlsMode(in)
+			})
+			s := valkeyDisabled(t, ctx, c, project, fmt.Sprintf("cirfo-s-%d", sfx), func(in *memorystorepb.Instance) {
+				tlsMode(in)
+				in.CrossInstanceReplicationConfig = &memorystorepb.CrossInstanceReplicationConfig{
+					InstanceRole:    memorystorepb.CrossInstanceReplicationConfig_SECONDARY,
+					PrimaryInstance: &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: p.GetName()}}
+			})
+			var ptc, stc *tls.Config
+			if withTLS {
+				ptc, stc = trustCA(t, valkeyCA(t, ctx, c, p)), trustCA(t, valkeyCA(t, ctx, c, s))
+			}
+			primaryAddr := valkeyEndpoint(t, p, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY)
+			pc := valkeyTLSPrimary(t, p, ptc)
+			sc := valkeyTLSPrimary(t, s, stc)
+			if err := pc.Set(ctx, "before", "1", 0).Err(); err != nil {
+				t.Fatalf("SET on the primary instance: %v", err)
+			}
+			valkeyEventually(t, ctx, sc, "before", "1")
+			oldPrimary, role, err := valkeyRunID(ctx, primaryAddr, ptc)
+			if err != nil || role != "master" {
+				t.Fatalf("the primary endpoint reaches %s (%s), %v", oldPrimary, role, err)
+			}
+
+			// The primary instance's primary pod, by its role label.
+			sel := "cloudburrow.dev/memorystore-of=" + redisadmin.ValkeyServerBase(p.GetName()) + ",cloudburrow.dev/memorystore-role=primary"
+			kubectl := func(args ...string) (string, error) {
+				out, err := exec.CommandContext(ctx, "kubectl", append([]string{"--kubeconfig", kubeconfig}, args...)...).CombinedOutput()
+				return strings.TrimSpace(string(out)), err
+			}
+			var ns, app string
+			eventuallyTrue(t, "the primary's pod is labelled", func() bool {
+				out, err := kubectl("get", "pods", "-A", "-l", sel, "-o", "jsonpath={.items[*].metadata.namespace} {.items[*].metadata.labels.app}")
+				f := strings.Fields(out)
+				if err != nil || len(f) != 2 {
+					return false
+				}
+				ns, app = f[0], f[1]
+				return true
+			})
+			if out, err := kubectl("-n", ns, "delete", "pod", "-l", "app="+app, "--wait=false"); err != nil {
+				t.Fatalf("kubectl delete pod: %v: %s", err, out)
+			}
+			deleted := time.Now()
+			for {
+				if time.Since(deleted) > valkeyFailoverWithin {
+					t.Fatalf("writes did not resume on the primary endpoint within %v of deleting the primary's pod", valkeyFailoverWithin)
+				}
+				id, role, err := valkeyRunID(ctx, primaryAddr, ptc)
+				if err == nil && role == "master" && id != oldPrimary {
+					w := redis.NewClient(&redis.Options{Addr: primaryAddr, TLSConfig: ptc, MaxRetries: -1, DialTimeout: 2 * time.Second, ReadTimeout: 2 * time.Second})
+					err = w.Set(ctx, "after", "2", 0).Err()
+					w.Close()
+					if err == nil {
+						break
+					}
+				}
+				time.Sleep(250 * time.Millisecond)
+			}
+			t.Logf("writes resumed on the primary instance %v after its primary's pod was deleted", time.Since(deleted).Round(100*time.Millisecond))
+			// The secondary follows the promoted replica.
+			valkeyEventually(t, ctx, sc, "after", "2")
+			valkeyEventually(t, ctx, sc, "before", "1")
+			if err := sc.Set(ctx, "x", "y", 0).Err(); err == nil || !strings.Contains(err.Error(), "READONLY") {
+				t.Errorf("SET on the secondary after the failover = %v, want READONLY", err)
+			}
+
+			// Switchover: the former primary instance replicates the
+			// secondary, then a detach.
+			cirUpdate(t, ctx, c, s.GetName(), &memorystorepb.CrossInstanceReplicationConfig{
+				InstanceRole:       memorystorepb.CrossInstanceReplicationConfig_PRIMARY,
+				SecondaryInstances: []*memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{{Instance: p.GetName()}}})
+			if err := sc.Set(ctx, "switched", "3", 0).Err(); err != nil {
+				t.Fatalf("SET on the new primary instance: %v", err)
+			}
+			pc2 := valkeyTLSPrimary(t, p, ptc)
+			valkeyEventually(t, ctx, pc2, "switched", "3")
+			cirUpdate(t, ctx, c, p.GetName(), &memorystorepb.CrossInstanceReplicationConfig{
+				InstanceRole: memorystorepb.CrossInstanceReplicationConfig_NONE})
+		})
+	}
 }
