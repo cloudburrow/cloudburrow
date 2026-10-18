@@ -167,6 +167,10 @@ func (s *Server) Advance(ctx context.Context, d time.Duration) time.Time {
 		s.d.offset.Add(int64(d))
 	}
 	s.flushDue(ctx, s.clock())
+	// A linked dataset's views measure retention by this clock (#1602).
+	if d > 0 && s.admin != nil {
+		s.admin.EnsureLinkedDatasets(context.WithoutCancel(ctx))
+	}
 	return s.clock()
 }
 

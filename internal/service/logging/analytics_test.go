@@ -298,3 +298,113 @@ func TestLinkedDatasetsFollowTheBucket(t *testing.T) {
 		}
 	}
 }
+
+// clockLinked is a fakeLinked with BigQuery's clock, which earlier tests
+// on an instance may have moved ahead of the Logging clock.
+type clockLinked struct {
+	*fakeLinked
+	bqMu sync.Mutex
+	bq   time.Time
+}
+
+func (c *clockLinked) Now(context.Context) (time.Time, error) {
+	c.bqMu.Lock()
+	defer c.bqMu.Unlock()
+	return c.bq, nil
+}
+
+func (c *clockLinked) advance(d time.Duration) {
+	c.bqMu.Lock()
+	c.bq = c.bq.Add(d)
+	c.bqMu.Unlock()
+}
+
+// TestLinkedDatasetsRetentionByTheLoggingClock (#1602): a linked dataset's
+// views keep the bucket's retention by the Logging clock, which a
+// timestamp is measured against, and not by BigQuery's: with BigQuery's
+// clock 49 hours ahead, a 2-day retention still holds the entries just
+// written. When either clock moves, the views are made again.
+func TestLinkedDatasetsRetentionByTheLoggingClock(t *testing.T) {
+	ctx := context.Background()
+	start := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	a := NewAdmin(store.NewMemory())
+	a.now = func() time.Time { return start }
+	srv := NewServer(NewStore(100))
+	srv.now = a.now
+	srv.UseAdmin(a)
+	cfg := a.ConfigServer()
+	fake := &clockLinked{fakeLinked: newFakeLinked(), bq: start.Add(49 * time.Hour)}
+	a.UseLinkedDatasets(fake)
+	global := "projects/proj-1/locations/global"
+	bucket := global + "/buckets/la"
+	if _, err := cfg.CreateBucket(ctx, &loggingpb.CreateBucketRequest{Parent: global, BucketId: "la",
+		Bucket: &loggingpb.LogBucket{AnalyticsEnabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: "projects/proj-1", Sink: &loggingpb.LogSink{
+		Name: "to-la", Destination: "logging.googleapis.com/" + bucket}}); err != nil {
+		t.Fatal(err)
+	}
+	write := func(msg string, at time.Time) {
+		t.Helper()
+		js, _ := structpb.NewStruct(map[string]any{"msg": msg})
+		e := &loggingpb.LogEntry{Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: js}}
+		if !at.IsZero() {
+			e.Timestamp = timestamppb.New(at)
+		}
+		if _, err := srv.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{LogName: "projects/proj-1/logs/app",
+			Resource: &mrpb.MonitoredResource{Type: "global"}, Entries: []*loggingpb.LogEntry{e}}); err != nil {
+			t.Fatal(err)
+		}
+		srv.waitDelivery()
+	}
+	write("old", start.Add(-3*24*time.Hour))
+	write("e1", time.Time{})
+	if _, err := cfg.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: bucket, LinkId: "la_link"}); err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+	key := "proj-1:la_link"
+	query := func() string {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return fake.views[key][0].Query
+	}
+	// The Logging clock, CURRENT_TIMESTAMP() less BigQuery's 49 hours.
+	logNow := "TIMESTAMP_SUB(TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 176400 SECOND), INTERVAL "
+	if q := query(); !strings.Contains(q, logNow+"30 DAY)") {
+		t.Errorf("_AllLogs = %s; want its retention by the Logging clock", q)
+	}
+	if _, err := cfg.UpdateBucket(ctx, &loggingpb.UpdateBucketRequest{Name: bucket, Bucket: &loggingpb.LogBucket{RetentionDays: 2},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"retention_days"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if q := query(); !strings.Contains(q, logNow+"2 DAY)") {
+		t.Errorf("_AllLogs after a 2-day retention = %s", q)
+	}
+	rows, _ := fake.rows(key)
+	if got := strings.Join(inView(rows, "_AllLogs"), ","); got != "e1" {
+		t.Errorf("after a 2-day retention, _AllLogs holds %q; want e1", got)
+	}
+	if n := a.EnsureLinkedDatasets(ctx); n != 0 {
+		t.Errorf("EnsureLinkedDatasets with neither clock moved made %d; want 0", n)
+	}
+
+	// BigQuery's clock moves an hour: the views follow.
+	fake.advance(time.Hour)
+	if n := a.EnsureLinkedDatasets(ctx); n != 1 {
+		t.Errorf("EnsureLinkedDatasets after BigQuery's clock moved made %d; want 1", n)
+	}
+	if q := query(); !strings.Contains(q, "INTERVAL 180000 SECOND") {
+		t.Errorf("_AllLogs after BigQuery's clock moved = %s", q)
+	}
+	// The Logging clock moves 3 days: e1 is past the retention, and the
+	// views measure from the moved clock.
+	srv.Advance(ctx, 3*24*time.Hour)
+	if q := query(); !strings.Contains(q, "INTERVAL -79200 SECOND") {
+		t.Errorf("_AllLogs after the Logging clock moved = %s", q)
+	}
+	rows, _ = fake.rows(key)
+	if got := strings.Join(inView(rows, "_AllLogs"), ","); got != "" {
+		t.Errorf("after the Logging clock moved past the retention, _AllLogs holds %q; want none", got)
+	}
+}

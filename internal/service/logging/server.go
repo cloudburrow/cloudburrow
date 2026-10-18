@@ -209,7 +209,15 @@ type Server struct {
 // entry an enabled exclusion matches is accepted and not stored, as Google's
 // _Default sink drops it.
 // It also gives CopyLogEntries (copy.go) the entries it copies.
-func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.bucketEntries) }
+// And it gives the admin the Logging clock, which retention is measured
+// by in a linked dataset (#1602).
+func (s *Server) UseAdmin(a *Admin) {
+	s.admin = a
+	a.useEntries(s.store.bucketEntries)
+	a.copies.mu.Lock()
+	a.clock = s.clock
+	a.copies.mu.Unlock()
+}
 
 // CountMatching counts project's stored entries that filter matches with a
 // timestamp at or after since, for a log-based metric's console page. The
