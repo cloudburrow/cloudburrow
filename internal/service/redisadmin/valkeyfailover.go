@@ -47,7 +47,12 @@ import (
 //     then every other node, the old primary among them, REPLICAOF it at
 //     its Service; the roles are labelled again and the primary
 //     endpoint's connections are dropped, so a client reconnects to the
-//     same address and reaches the new primary. Acknowledged writes the
+//     same address and reaches the new primary. From the first failed
+//     check until the primary answers again as the primary it was, or a
+//     replica is promoted, the primary endpoint carries no connections
+//     (fence): a pod started again, empty, comes back faster than three
+//     checks, and a write to it would be lost (measured in
+//     TestMemorystoreValkeyReaderAndFailover). Acknowledged writes the
 //     replicas had not received are lost, as replication is asynchronous.
 //
 // The same check, every tendEvery, makes a node that should be a replica
@@ -88,6 +93,11 @@ type roleEndpoints struct {
 	primary, reader *endpoint
 	primaryUp       string
 	readerUps       string
+	// fenced is whether the primary endpoint carries no connections: the
+	// primary failed a check, and until it answers again as the primary
+	// it was, or a replica is promoted, a client must not reach it (a pod
+	// started again serves empty, as a primary).
+	fenced bool
 	// labelled is the roles last labelled, and when.
 	labelled   string
 	labelledAt time.Time
@@ -140,8 +150,12 @@ func (c *clusters) openEndpoints(r *clusterRecord) {
 		}
 		c.eps[r.Name] = e
 	}
-	if e.primaryUp != p.addr {
-		e.primary.set([]string{p.addr}, e.primaryUp != "")
+	switch {
+	case e.fenced && e.primaryUp != "":
+		e.primary.set(nil, true)
+		e.primaryUp = ""
+	case !e.fenced && e.primaryUp != p.addr:
+		e.primary.set([]string{p.addr}, true)
 		e.primaryUp = p.addr
 	}
 	var ups []string
@@ -278,6 +292,7 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		case err == nil && st.Primary && (ids[tg.name] == "" || ids[tg.name] == st.ReplID):
 			delete(failed, tg.name)
 			ids[tg.name] = st.ReplID
+			c.fence(tg.name, false)
 			c.tendRoles(ctx, tg.name, tend)
 			continue
 		case err == nil && st.Primary:
@@ -287,11 +302,28 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		default:
 			failed[tg.name]++
 		}
+		c.fence(tg.name, true)
 		if failed[tg.name] >= failAfter {
 			out = append(out, tg.name)
 		}
 	}
 	return out
+}
+
+// fence stops (on) or resumes name's primary endpoint's connections to
+// its primary.
+func (c *clusters) fence(name string, on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, r := c.eps[name], c.byName[name]
+	if e == nil || r == nil || e.fenced == on {
+		return
+	}
+	if on {
+		log.Printf("memorystore: %s: the primary failed a health check; its primary endpoint carries no connections until it answers again or a replica is promoted", name)
+	}
+	e.fenced = on
+	c.openEndpoints(r)
 }
 
 // tendRoles, every tend or when the roles changed, makes each node
@@ -305,14 +337,10 @@ func (c *clusters) tendRoles(ctx context.Context, name string, tend time.Duratio
 		c.mu.Unlock()
 		return
 	}
-	roles := map[string]string{}
+	roles := rolesOf(r)
 	var keys []string
-	for _, n := range r.Nodes {
-		roles[n.Server] = roleReplica
-		if n.Primary {
-			roles[n.Server] = rolePrimary
-		}
-		keys = append(keys, n.Server+"="+roles[n.Server])
+	for server, role := range roles {
+		keys = append(keys, server+"="+role)
 	}
 	sort.Strings(keys)
 	sig := strings.Join(keys, ",")
@@ -349,6 +377,18 @@ func (c *clusters) tendRoles(ctx context.Context, name string, tend time.Duratio
 			c.mu.Unlock()
 		}
 	}
+}
+
+// rolesOf is each of r's nodes' role, by its server. Call with mu held.
+func rolesOf(r *clusterRecord) map[string]string {
+	roles := map[string]string{}
+	for _, n := range r.Nodes {
+		roles[n.Server] = roleReplica
+		if n.Primary {
+			roles[n.Server] = rolePrimary
+		}
+	}
+	return roles
 }
 
 // rolePort is the port of r's role Services: 6378 with in-transit
@@ -422,10 +462,10 @@ func (c *clusters) failoverStandalone(ctx context.Context, name string) {
 		if err := c.save(r); err != nil {
 			log.Printf("memorystore: %s: keep the instance: %v", name, err)
 		}
-		c.openEndpoints(r)
 		if e := c.eps[name]; e != nil {
-			e.labelled = ""
+			e.labelled, e.fenced = "", false
 		}
+		c.openEndpoints(r)
 	}
 	c.mu.Unlock()
 	log.Printf("memorystore: %s: automatic failover promoted %s", name, nodes[best].Server)

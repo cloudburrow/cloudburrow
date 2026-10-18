@@ -336,7 +336,18 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		// with a certificate of the cluster's CA for the host's address,
 		// where clients reach the node, and the node's Service.
 		ns := p.cfg.Cluster.Namespace
-		names := []string{p.cfg.BindAddress, spec.Server + "." + ns, spec.Server + "." + ns + ".svc", spec.Server + "." + ns + ".svc.cluster.local"}
+		services := []string{spec.Server}
+		if spec.PortName == redisadmin.ValkeyPortName {
+			// A CLUSTER_DISABLED node is also reached at its instance's
+			// role Services (#1614): a secondary of cross-instance
+			// replication replicates the primary Service.
+			base := memorystoreNodeNumber.ReplaceAllString(spec.Server, "")
+			services = append(services, base+"-primary", base+"-reader")
+		}
+		names := []string{p.cfg.BindAddress}
+		for _, n := range services {
+			names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
+		}
 		files, err := redisadmin.ServerTLS(spec, time.Now(), names...)
 		if err != nil {
 			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
@@ -368,6 +379,10 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	}
 	return f.HostAddr(), strings.TrimSpace(ip), port, nil
 }
+
+// memorystoreNodeNumber ends a Memorystore for Valkey node's server name
+// (redisadmin.ValkeyServerBase).
+var memorystoreNodeNumber = regexp.MustCompile(`-[0-9]+$`)
 
 // memorystoreNodeSuffix ends a Standard tier node's server name.
 var memorystoreNodeSuffix = regexp.MustCompile(`-n[0-9]+$`)

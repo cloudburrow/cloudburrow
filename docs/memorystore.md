@@ -443,7 +443,9 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
   than the last (its server started again, its replicas' stream gone), the replica with the most
   of its data is promoted (`REPLICAOF NO ONE`, then every other node `REPLICAOF` it), the roles are
   labelled again, and the primary endpoint drops its connections, so a client reconnects to the
-  same address and reaches the new primary. Google says "automatic failovers can take time on the
+  same address and reaches the new primary. From the primary's first failed check until it answers
+  again as the same primary, or a replica is promoted, the primary endpoint carries no
+  connections, so a write never reaches a pod that started again empty. Google says "automatic failovers can take time on the
   order of tens of seconds" and that client connections are likely to be reset; here writes
   resume in a few seconds (3 to 4 measured). The instance stays `ACTIVE`; writes the replicas had
   not received are lost, as replication is asynchronous; `up.log` has a line. A node that comes
@@ -491,7 +493,14 @@ primary with secondaries is not deleted (FAILED_PRECONDITION). With in-transit e
 each member keeps its own CA, which its clients trust, and its nodes trust every member's CA
 (given to a node when it starts, and to the running nodes by `CONFIG SET tls-ca-cert-file`
 before a switchover), so they replicate over TLS (`tls-replication`) whichever member is the
-primary (`TestMemorystoreValkeyCrossInstanceReplicationTLS`). In `CLUSTER` mode it is 501, as a
+primary (`TestMemorystoreValkeyCrossInstanceReplicationTLS`). A secondary replicates its primary
+instance at that instance's in-cluster primary Service (#1614), which selects whichever node is
+its primary, and every node's certificate covers that Service's name, so the secondary keeps
+replicating, over TLS too, across the primary instance's automatic failover, with no relinking
+(`TestMemorystoreValkeyCrossInstanceFollowsFailover`: the primary instance's primary pod deleted,
+a key written at its promoted replica is read on the secondary; a switchover after it); a primary
+instance without a replica, which does not fail over, is replicated at its node's own Service.
+In `CLUSTER` mode it is 501, as a
 Redis cluster's (§8): Google documents it with the same shards and slots on both, but a
 cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF not allowed in cluster mode", measured
 in `TestMemorystoreValkeyClusterUpgradeKeepsWrites` on 8.1) and its replicas follow only primaries
