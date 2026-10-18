@@ -613,6 +613,13 @@ type Config struct {
 	// app that does not exist.
 	AppEngineURL string `json:"appEngineUrl,omitempty"`
 
+	// EmulatorHeapMiB is the maximum Java heap, in MiB, of each of Google's
+	// Java emulators (Pub/Sub, Firestore, Datastore), and sizes their
+	// containers' memory request and limit (#1603). 0 bounds neither: the
+	// JVM then sizes its heap at a quarter of the node's memory, and
+	// collects it so lazily that a soak read its growth as a leak.
+	EmulatorHeapMiB int `json:"emulatorHeapMiB"`
+
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.
@@ -726,8 +733,26 @@ func Default() Config {
 		HooksDir:        filepath.Join(".cloudburrow", "hooks"),
 		HookTimeout:     Duration(5 * time.Minute),
 		LogLevel:        "info",
+		EmulatorHeapMiB: DefaultEmulatorHeapMiB,
 	}
 }
+
+// DefaultEmulatorHeapMiB is the Java emulators' default maximum heap
+// (#1603). 512 MiB held the soak in docs/soak.md, but not a realistic
+// document set (#1611, measured): 100,000 documents of about 1 KB held
+// 330 MiB of Firestore's heap, and 512 MiB filled before 200,000, which made it
+// exit and lose every document; Datastore's 100,000 entities held 175 MiB,
+// and 410 MiB while its emulator wrote them to disk. 1024 MiB holds about
+// twice that.
+const DefaultEmulatorHeapMiB = 1024
+
+// MinEmulatorHeapMiB and MaxEmulatorHeapMiB bound EmulatorHeapMiB when it
+// is not 0: below 128 MiB the emulators fail under the soak's load, and
+// above 16 GiB it is no longer a bound on a developer's machine.
+const (
+	MinEmulatorHeapMiB = 128
+	MaxEmulatorHeapMiB = 16384
+)
 
 func defaultStateDir() string {
 	home, err := os.UserHomeDir()
@@ -934,6 +959,10 @@ func (c *Config) Validate() error {
 		if u, err := url.Parse(c.AppEngineURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			add("appEngineUrl", c.AppEngineURL, "must be an http:// or https:// URL, such as http://localhost:8080")
 		}
+	}
+
+	if h := c.EmulatorHeapMiB; h != 0 && (h < MinEmulatorHeapMiB || h > MaxEmulatorHeapMiB) {
+		add("emulatorHeapMiB", strconv.Itoa(h), fmt.Sprintf("must be 0 (unbounded) or between %d and %d", MinEmulatorHeapMiB, MaxEmulatorHeapMiB))
 	}
 
 	// Instance name. It becomes a cluster name and a label value, so its

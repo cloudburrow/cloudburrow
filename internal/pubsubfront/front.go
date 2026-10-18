@@ -46,7 +46,10 @@
 //     StreamingPull keeps it active for as long as it is open;
 //   - a subscription idle for its ttl is deleted;
 //   - every call, gRPC and REST, is kept in a call log the CLI reads into
-//     its metrics, request log and traces (calls.go, #1266).
+//     its metrics, request log and traces (calls.go, #1266);
+//   - the topics, subscriptions, schemas and snapshots the emulator holds
+//     are kept in the state file, and created again when the emulator
+//     restarts empty, every call waiting meanwhile (restore.go, #1608).
 //
 // Google's rules, from the API reference (google/pubsub/v1/pubsub.proto,
 // Subscription.expiration_policy) and the subscription properties page
@@ -239,6 +242,23 @@ type Front struct {
 
 	// calls is the call log the CLI reads (calls.go, #1266).
 	calls calllog.Ring
+
+	// defs are the topics, subscriptions, snapshots and AVRO schemas the
+	// emulator holds, kept to create them again when it restarts empty
+	// (restore.go, #1608); they are guarded by mu, and their reads of the
+	// emulator ordered by defsMu.
+	defs   definitions
+	defsMu sync.Mutex
+	// gen counts the emulator's ends; restoring, while set, holds calls
+	// until the definitions are created again, and is closed then.
+	gen       uint64
+	restoring chan struct{}
+	// watchDial, when set, replaces the dial of the emulator's port the
+	// watch makes (tests).
+	watchDial func() (net.Conn, error)
+	// watchIdle, when set, replaces how long the watch holds a connection
+	// before it dials again (tests).
+	watchIdle time.Duration
 }
 
 // subscriptionAdmin is the part of the emulator's Subscriber service a sweep
@@ -266,7 +286,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{},
 		iam: map[string]iampolicy.Stored{}, detached: map[string]*pubsubpb.Subscription{},
 		snapshots: map[string]keptSnapshot{}, protoSchemas: map[string]*protoSchema{},
-		topicSchemas: map[string]*pubsubpb.SchemaSettings{}}, nil
+		topicSchemas: map[string]*pubsubpb.SchemaSettings{}, defs: newDefinitions()}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -338,6 +358,18 @@ func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duratio
 	errc := make(chan error, 2)
 	go func() { errc <- grpcSrv.Serve(grpcL) }()
 	go func() { errc <- srv.Serve(httpL) }()
+	// Calls wait until the watch has seen the emulator, and created again
+	// what it lost, if it is a new one (restore.go, #1608).
+	f.holdCalls()
+	dial := f.watchDial
+	if dial == nil {
+		dial = func() (net.Conn, error) { return net.DialTimeout("tcp", f.rest, time.Second) }
+	}
+	idle := f.watchIdle
+	if idle == 0 {
+		idle = 10 * time.Second
+	}
+	go f.watchEmulator(ctx, dial, idle, 100*time.Millisecond)
 	go func() {
 		t := time.NewTicker(interval)
 		defer t.Stop()
@@ -347,6 +379,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duratio
 				return
 			case <-t.C:
 				f.Sweep(ctx)
+				f.reconcileAll(ctx, false)
 			}
 		}
 	}()
@@ -623,7 +656,7 @@ func checkPolicy(p *pubsubpb.ExpirationPolicy, retention *durationpb.Duration) e
 }
 
 // handle forwards one call of any method to the emulator.
-func (f *Front) handle(_ any, ss grpc.ServerStream) error {
+func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 	method, ok := grpc.MethodFromServerStream(ss)
 	if !ok {
 		return status.Error(codes.Internal, "no method on the stream")
@@ -637,6 +670,21 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		return f.handleActivityImport(ss)
 	case ProjectsMethod:
 		return f.handleProjects(ss)
+	}
+	if err := f.waitServing(ss.Context()); err != nil {
+		return err
+	}
+	if kind, _ := mutationTarget(method, nil); kind != "" {
+		// A call that changes a definition: the front keeps it as the
+		// emulator then holds it (restore.go, #1608).
+		rec := &firstFrame{ServerStream: ss}
+		ss = rec
+		defer func() {
+			if err == nil {
+				_, name := mutationTarget(method, rec.first)
+				f.refresh(rec.Context(), kind, name)
+			}
+		}()
 	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
