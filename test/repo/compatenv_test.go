@@ -41,6 +41,7 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE": "builtin storage-server restart probe mode and file",
 	"CLOUDBURROW_TEST_CLOUDSQL_SETUP":           "restart probe setup switch",
 	"CLOUDBURROW_TEST_DATASTORE_EXPECT":         "restart probe expectation (present or absent)",
+	"CLOUDBURROW_TEST_FIRESTORE_EXPECT":         "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_KMS_EXPECT":               "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_MEMORYSTORE_EXPECT":       "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_MYSQL_EXPECT":             "restart probe expectation (present or absent)",

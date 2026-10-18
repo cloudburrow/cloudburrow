@@ -54,7 +54,7 @@ every one passes (#596).
 
 | Tests | Why they skip in the main compat run |
 |---|---|
-| `TestDatastoreAcrossRestart`, `TestMemorystoreAcrossRestart`, `TestCloudSQLMySQLAcrossRestart`, `TestCloudSQLAcrossRestart`, `TestKMSAcrossRestart`, `TestSecretManagerAcrossRestart`, `TestTasksAcrossRestart`, `TestSchedulerAcrossRestart`, `TestStorageAcrossRestart` | They read what an earlier process wrote. They run, and must pass twice each, in CI's restart probe after `stop`/`up` (persistent mode) and `up --mode ephemeral`, each in the shard that serves it; `TestStorageAcrossRestart` is its own setup too, against the in-cluster server through the instance's tunnel, so it must pass three times (#596), and at setup it also creates a notificationConfig the later runs require present, then absent (#701). `TestCloudSQLAcrossRestart` reads a row `TestCloudSQLRestartSetup` writes alone just before `stop` (#701). |
+| `TestDatastoreAcrossRestart`, `TestFirestoreAcrossRestart`, `TestMemorystoreAcrossRestart`, `TestCloudSQLMySQLAcrossRestart`, `TestCloudSQLAcrossRestart`, `TestKMSAcrossRestart`, `TestSecretManagerAcrossRestart`, `TestTasksAcrossRestart`, `TestSchedulerAcrossRestart`, `TestStorageAcrossRestart` | They read what an earlier process wrote. They run, and must pass twice each, in CI's restart probe after `stop`/`up` (persistent mode) and `up --mode ephemeral`, each in the shard that serves it; `TestStorageAcrossRestart` is its own setup too, against the in-cluster server through the instance's tunnel, so it must pass three times (#596), and at setup it also creates a notificationConfig the later runs require present, then absent (#701). `TestCloudSQLAcrossRestart` reads a row `TestCloudSQLRestartSetup` writes alone just before `stop` (#701). |
 | `TestGenerateContentThroughTheOfficialSDK`, `TestStreamGenerateContentThroughTheOfficialSDK`, `TestGenerationNeverUsesApplicationDefaultCredentials`, `TestStreamGenerateContentThroughThePredictionClient` | Local AI needs a 2.59 GB model download and minutes of CPU inference. The decision is that it does not run in per-PR CI. The Local AI and Vertex AI generation rows come from runs on a developer machine, dated in [generation.md](generation.md) (2026-09-21) and [local-ai.md](local-ai.md). They and the Functions and source-build rows backed by the tests below (`TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers`, `TestFunctionsBuildBrokenModulePathFails` and the six language tests) are the only Verified rows whose evidence is not re-run on every merge. |
 | `TestFunctionsFrameworkBuiltWithBuildpacks` | It pulls Google's builder and run images and runs two Buildpacks builds, which take minutes, so it is too slow for every merge while runners are the bottleneck; it is in no CI shard and does not run on merges. It runs only with `CLOUDBURROW_TEST_FUNCTIONS=1` against an instance whose cluster nodes are amd64 (the builder's only platform), and needs `pack` and Docker. It runs on demand in [`functions.yml`](../.github/workflows/functions.yml) (Functions build, `workflow_dispatch` only), on an amd64 runner with the run shard's instance and the pinned `pack`, and fails if any selected test skips. **Dated run: passed on 2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of `functions.yml` on main, `ubuntu-latest` amd64 runner, pack 0.40.9** (136s; it built `Hello` (`http`) in 58s and `Event` (`cloudevent`) in 39s). That run is the evidence for the Verified Functions Framework and source-build rows; the workflow is dispatch-only, so nothing re-runs it on merge. |
 | `TestFunctionsRebuildReusesLayers`, `TestFunctionsBuildBrokenModulePathFails` | Same reason: they pull Google's builder and run Buildpacks builds (the first builds the fixture twice), which take minutes; they are in no CI shard and do not run on merges. `functions.yml` runs them on demand with the test above. They run only with `CLOUDBURROW_TEST_FUNCTIONS=1` and need `pack` and Docker, but no cluster: they build into a local registry and run nothing. **Dated run: both passed on 2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9** (first build 1m48s, rebuild 1m32s reusing 6 layers; the broken-module test 50s). **Both passed again on 2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of `functions.yml` on main, `ubuntu-latest` amd64 runner, pack 0.40.9**, natively (the rebuild test 74s: first build 38s, rebuild 35s reusing 6 layers; the broken-module test 17s). Those two runs are the evidence for the Verified cache-reuse and failed-build rows; the workflow is dispatch-only, so nothing re-runs them on merge. |
@@ -948,11 +948,11 @@ Bigtable pod now runs `cloudburrow-storage bigtable-front` (`internal/bigtablefr
 emulator, which listens on the pod's loopback alone: it serves those fifteen and
 passes every other call through, each message undecoded but the writes to a table with a change stream, which it decodes to log them.
 
-**Firestore, Bigtable and Spanner are in-memory; Datastore keeps its data in persistent mode.**
-CloudBurrow provisions no volume for the three, and `status` lists them as never surviving a
-restart, whatever `--mode` says. Datastore has a volume in persistent mode, and `status` says it
-survives a restart then (how, below). Measured 2026-10-16 across a whole-instance
-restart: on `up --mode persistent --services datastore,firestore,bigtable`, an entity, a Firestore
+**Bigtable and Spanner are in-memory; Datastore and Firestore keep their data in persistent mode.**
+CloudBurrow provisions no volume for the two, and `status` lists them as never surviving a
+restart, whatever `--mode` says. Datastore and Firestore have a volume in persistent mode, and
+`status` says they survive a restart then (how, below). Measured 2026-10-16 across a whole-instance
+restart, before Firestore kept its documents (#1615): on `up --mode persistent --services datastore,firestore,bigtable`, an entity, a Firestore
 document and a Bigtable table were written with the official Go clients; after `cloudburrow stop`
 and the same `up`, the entity read back, the document was `NOT_FOUND` and the table list was empty.
 
@@ -980,7 +980,10 @@ front's memory alone: it is in a state directory on an **emptyDir of the pod, li
 its own, written as the call that made it returns. So a restart of the front's container alone,
 the emulator still running, loses none of it, and a restart of the pod loses it together with the
 emulator's data, as the Pub/Sub (#898) and BigQuery (#1115) fronts' state does: none of it
-survives `stop` and `up`, and none of it is in a `state save` archive. A pod whose copies grow past
+survives `stop` and `up`, and none of it is in a `state save` archive. Firestore's is the
+exception since #1615: its directory is the pod's PersistentVolumeClaim in persistent mode, with
+the emulator's exported documents beside it, so its databases, indexes, schedules and backups
+survive `stop` and `up` with the documents (next paragraphs but one). A pod whose copies grow past
 the limit is evicted by the kubelet, and starts empty. `TestSpannerFrontRestartKeepsItsState`,
 `TestBigtableFrontRestartKeepsItsState` and `TestFirestoreFrontRestartKeepsItsState` make each kind
 of resource with the official clients, restart the front's container alone, and read them back:
@@ -1010,9 +1013,47 @@ deletes the pod, and reads every entity written so far back from the new one, th
 An emulator that is killed rather than stopped (a full heap, node loss) loses what was written
 since its last save, up to about 30 seconds (next paragraph). CI's restart probe reads a probe entity after `stop` and `up` in persistent mode, and
 finds none after `up --mode ephemeral` (`TestDatastoreAcrossRestart`). Both tests are on CI's
-[retry-once list](#retried-once), so this evidence tolerates one retry. `status` reports `volume` for Datastore, and for every
-other service, only in persistent mode. That Firestore and Bigtable lose their data is measured
+[retry-once list](#retried-once), so this evidence tolerates one retry. `status` reports `volume` for Datastore and Firestore, and for every
+other service, only in persistent mode. That Bigtable loses its data is measured
 above (2026-10-16), not in CI.
+
+**Firestore keeps its documents in persistent mode, measured (#1615).** The emulator holds
+documents in memory alone, but exports a database's documents to a directory of its own
+(`POST /emulator/v1/projects/{p}:export`, one database a call) and imports such an export into a
+running emulator (`:import`, given the export's `overall_export_metadata` file); this emulator
+(`cloud-firestore-emulator` of the pinned Cloud SDK image) also takes `--import-data` and
+`--export-on-exit`, but those name one database's export, and the exit export needs a clean
+shutdown. So the call front in the Firestore pod, which sees every call, keeps them
+(`internal/firestoreadmin/documents.go`): every **30 seconds** in which a call that may write went
+through it (Datastore's save interval), it exports every database it knows of (every database a
+call named, and the Admin API's) into a new generation directory, then replaces a manifest naming
+each export whole and removes the older generation, so a crash during an export leaves the last
+one. When the pod stops it exports what was written since, and the emulator's container, whose
+JVM ignores `SIGTERM`, waits for it (at most 10 seconds) before it kills the JVM; when the kind
+node stops (`cloudburrow stop`), every process gets `SIGTERM` at once, and the same wait holds the
+JVM. Each time the emulator starts (the pod's start, and every restart of its container, which
+the front notices by a sentinel document of its own, in a project no call names, going missing)
+the front imports the manifest's exports before it lets any documents or Admin API call through.
+The directory is on the pod's volume, shared by both containers, which run as the same user: a
+PersistentVolumeClaim in persistent mode, holding the Admin API's state beside it, so documents,
+databases and backups survive `stop` and `up` together; a deleted pod's replacement waits on a
+`flock` the old front holds until its last export, as Datastore's does (#1307). In **ephemeral
+mode** the directory is the pod's emptyDir: the documents survive an exit of the emulator alone
+(the table below), and go with the pod; `stop` and `up` restart the kind node, which keeps the
+pod and its emptyDir, so a starting front discards the exports of the one before it
+(`--firestore-documents-fresh`), and they live for the instance's life only, as before;
+the periodic export is the same, and costs nothing while nothing writes. **Cost:** an export
+writes every document of every database, at most once each 30 seconds and only while calls write,
+so an idle emulator costs nothing; a handful of databases with a few documents each exported in
+well under a second (measured, #1615). Its time at 100,000 documents is not measured yet; a
+stopping pod's export is bounded at 8 seconds, past which what was written since the last
+periodic export is lost, as on a crash. `TestFirestoreSurvivesAPodRestart` writes to `(default)` and to a named database, deletes the
+pod and reads every document back, twice over, and in ephemeral mode finds the last write gone;
+CI's restart probe reads a probe document in each database, and the named database through the
+Admin API, after `stop` and `up` in persistent mode, and finds none after `up --mode ephemeral`
+(`TestFirestoreAcrossRestart`). A call that may write (every Firestore call but the reads, and
+every Admin API call but `Get` and `List`) is counted when it starts and when it ends, so one
+still running during an export is exported by the next; a `Write` stream is counted only then.
 
 **What a Firestore or Datastore emulator's exit loses (#1611).** Since #1603 each Java emulator's
 heap is bounded (`--emulator-heap-mib`, 1024 MiB by default, [configuration.md](configuration.md#settings))
@@ -1023,16 +1064,15 @@ from the kind node, which is what that exit is to the emulator, through the offi
 
 | | `--mode persistent` | `--mode ephemeral` |
 |---|---|---|
-| Firestore documents, in every database | **Lost**: the emulator keeps them in memory alone | **Lost** |
+| Firestore documents, in every database | Kept up to the front's last export, every 30 seconds while calls write; what was written since is lost (#1615) | The same: the export is on the pod's emptyDir |
 | Firestore databases, indexes, field overrides, backup schedules, backups (with their documents), operations | Kept: the front's, on the pod's emptyDir | Kept |
 | Firestore listeners | The official client's listener reconnects by itself: it may first be told its document no longer exists, then sees later writes | The same |
 | Datastore entities | Kept up to the emulator's last save, about every 30 seconds; what was written since is lost | **Lost**: nothing is on disk |
 
-A Firestore backup is the way back: a schedule's backup outlives the emulator, and
-`RestoreDatabase` makes a database with its documents. Firestore cannot be kept across the exit
-otherwise: the emulator has no persistence of its own (`gcloud`'s `--export-on-exit` needs a clean
-shutdown, which this exit is not), and Firestore does not survive `stop` and `up` in either mode,
-above. So the bound is sized for real data rather than for the soak: 100,000 documents of about
+A Firestore backup is still a way back: a schedule's backup outlives the emulator, and
+`RestoreDatabase` makes a database with its documents. The emulator has no persistence of its own
+(`gcloud`'s `--export-on-exit` needs a clean shutdown, which this exit is not); the front's
+exports (#1615, above) are what bring the documents back. The bound is sized for real data rather than for the soak: 100,000 documents of about
 1 KB held 330 MiB of Firestore's heap, and the 512 MiB of #1603 filled before a second 100,000 were in,
 and the emulator exited, losing all of them; Datastore's 100,000 entities held 175 MiB, and 410 MiB while it wrote
 its 110 MB store to disk, which needs 2.3 times the live heap. 1024 MiB holds about 300,000 such
@@ -1040,7 +1080,8 @@ Firestore documents and 240,000 Datastore entities. A persistent Datastore store
 heap fills it at each save, so the emulator exits, loads the last save, and loses every 30 seconds'
 writes; raise the bound, or set it to `0`. `TestFirestoreAfterTheEmulatorIsKilled` and
 `TestDatastoreAfterTheEmulatorIsKilled` kill each emulator's JVM and read back what is kept, and
-find what is lost gone, in either mode.
+find what is lost gone, in either mode; Firestore's waits out an export interval first, and
+logs whether a document written just before the kill came back.
 
 ### Generated coverage
 
@@ -1394,7 +1435,7 @@ that service.
 | Capability | Status | Notes |
 |---|---|---|
 | A real SQL server, locally | **Verified** | PostgreSQL in the cluster, digest-pinned (17.11 by the pinned image; the version is not asserted), reached with an ordinary driver (`pgx`), which created a table and inserted rows with nothing of CloudBurrow's involved; a plain `psql` client is the same wire protocol, which no test runs. Tests: `TestCloudSQLFromTheExportedPGVariables`, `TestCloudSQLRestartSetup`. |
-| Durability | **Verified, measured** | A real database, so it has a volume in persistent mode, as Datastore's emulator and Memorystore's Valkey do; Firestore, Bigtable, Spanner and BigQuery are in-memory. CI's restart probe (#701): `TestCloudSQLRestartSetup` runs alone just before `stop` and leaves a table with a row. After `stop` and `up` in persistent mode, `TestCloudSQLAcrossRestart` reads the row back; brought up again with `--mode ephemeral`, the server has no volume and the table does not exist (`42P01`). |
+| Durability | **Verified, measured** | A real database, so it has a volume in persistent mode, as Datastore's emulator and Memorystore's Valkey do (and Firestore's exports, #1615); Bigtable, Spanner and BigQuery are in-memory. CI's restart probe (#701): `TestCloudSQLRestartSetup` runs alone just before `stop` and leaves a table with a row. After `stop` and `up` in persistent mode, `TestCloudSQLAcrossRestart` reads the row back; brought up again with `--mode ephemeral`, the server has no volume and the table does not exist (`42P01`). |
 | Connecting from `cloudburrow env` alone | **Verified** | `TestCloudSQLFromTheExportedPGVariables` (#584): pgx, given only the `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` and `PGSSLMODE` that `env` exported (every other `PG*` variable cleared), and again given `CLOUDBURROW_CLOUDSQL_URL`, connects and runs `SELECT 1`. The host port is fixed at `9019` (`--port-cloudsql`, moved by `--port-base`). |
 | MySQL, locally (`cloudsql-mysql`) | **Verified** | `TestCloudSQLMySQLDataPlane` (#297): MySQL 8.4.11, digest-pinned, reached with `go-sql-driver/mysql` from the host and with the `mysql` client from a pod through `cloudsql-mysql.cloudburrow.svc.cluster.local:3306`; `cloudburrow reset` drops every non-system database. A generated per-instance password, exported by `env` and never printed by `status`. |
 | MySQL durability | **Verified, measured** | CI reads back a row written before `stop` after `up` in persistent mode, and finds none after `up --mode ephemeral`. Tests: `TestCloudSQLMySQLAcrossRestart`, `TestCloudSQLMySQLDataPlane`. |

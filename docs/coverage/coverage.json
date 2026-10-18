@@ -7567,7 +7567,9 @@
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorepersist1615_test.go:147 TestFirestoreAcrossRestart",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -7591,6 +7593,7 @@
         "tests": [
           "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -7642,7 +7645,7 @@
         "method": "google.firestore.v1.Firestore/Listen",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoremethods_test.go:247 TestFirestoreSnapshotListener"
         ]
       },
@@ -7727,7 +7730,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart"
         ]
       },
       {
@@ -7815,7 +7819,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminBackupSchedules",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
@@ -7826,8 +7830,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorepersist1615_test.go:147 TestFirestoreAcrossRestart",
+          "test/compat/firestorepersist1615_test.go:62 TestFirestoreSurvivesAPodRestart",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
@@ -7843,7 +7849,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
@@ -7875,7 +7881,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
@@ -7922,7 +7928,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:106 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
@@ -7977,7 +7983,7 @@
         "method": "google.datastore.v1.Datastore/Commit",
         "status": "Verified",
         "tests": [
-          "test/compat/emulatorkill1611_test.go:262 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
@@ -7987,7 +7993,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
-          "test/compat/emulatorkill1611_test.go:262 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },

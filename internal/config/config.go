@@ -155,7 +155,12 @@ func (s Service) Persistence() Persistence {
 		// Its on-disk store is on a volume in persistent mode, and a pod
 		// restart and a stop/up were measured to keep an entity (#307).
 		return PersistenceVolume
-	case ServiceFirestore, ServiceBigtable, ServiceSpanner, ServiceBigQuery:
+	case ServiceFirestore:
+		// The emulator is in-memory, but its front exports the documents
+		// to a volume in persistent mode and imports them when the
+		// emulator starts (#1615).
+		return PersistenceVolume
+	case ServiceBigtable, ServiceSpanner, ServiceBigQuery:
 		// Every one of these emulators is in-memory. Google documents them as
 		// such, so provisioning a volume would imply durability they do not
 		// have.

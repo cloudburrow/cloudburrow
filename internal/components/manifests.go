@@ -120,6 +120,11 @@ type Backend struct {
 	// memory request and limit, Kubernetes quantities such as "512Mi".
 	// Empty leaves the request at 64Mi and sets no limit.
 	MemoryRequest, MemoryLimit string
+	// RunAsUser, when not 0, is the user and group the backend's
+	// container runs as: Firestore's emulator runs as the front's user,
+	// so each can remove the other's files in the volume they share
+	// (#1615).
+	RunAsUser int
 }
 
 // Front is a container that stands in front of a backend in its pod.
@@ -143,6 +148,12 @@ type Front struct {
 	// kubelet evicts a pod whose emptyDir grows past it, so a front that
 	// keeps data copies there cannot fill the node's disk.
 	StateSizeLimit string
+	// ShareState mounts the StateDir volume in the backend's container
+	// too, at the same path, and, for a Persistent backend, makes it the
+	// backend's PersistentVolumeClaim rather than an emptyDir (#1615):
+	// the Firestore emulator writes its exports there for the front, which
+	// keeps its own state beside them, so both last as long as each other.
+	ShareState bool
 	// BackendLivenessPath, when set, is a path on the front's port that the
 	// front fails (503) when it has seen the backend fail for good (#989).
 	// Without SuperviseBackend it is the backend container's liveness
@@ -167,6 +178,17 @@ const (
 	supervisorDir  = "/cloudburrow-supervisor"
 	supervisorPath = supervisorDir + "/cloudburrow-storage"
 )
+
+// dataMount reports whether the backend's container mounts its claim at
+// MountPath; a backend that shares the front's state has its claim there
+// instead.
+func (b Backend) dataMount() bool { return b.Persistent && !b.sharesState() }
+
+// sharesState reports whether the front's state volume is the backend's
+// too (Front.ShareState).
+func (b Backend) sharesState() bool {
+	return b.Front != nil && b.Front.ShareState && b.Front.StateDir != ""
+}
 
 // supervised reports whether b's process runs under the supervisor.
 func (b Backend) supervised() bool {
@@ -502,6 +524,9 @@ spec:
 		}
 	}
 
+	if b.RunAsUser != 0 {
+		fmt.Fprintf(&sb, "          securityContext:\n            runAsUser: %d\n            runAsGroup: %d\n", b.RunAsUser, b.RunAsUser)
+	}
 	fmt.Fprintf(&sb, "          ports:\n            - containerPort: %d\n", containerPort)
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "            - containerPort: %d\n", b.upstreamOf(p.Port))
@@ -555,11 +580,15 @@ spec:
 	// The data volume is the backend's alone: its mount is written before
 	// the front's container starts, so it can never land under the front
 	// (#915, TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer).
-	if b.Persistent || b.supervised() {
+	shared := b.sharesState()
+	if b.dataMount() || b.supervised() || shared {
 		sb.WriteString("          volumeMounts:\n")
 	}
-	if b.Persistent {
+	if b.dataMount() {
 		fmt.Fprintf(&sb, "            - name: data\n              mountPath: %s\n", b.MountPath)
+	}
+	if shared {
+		fmt.Fprintf(&sb, "            - name: front-state\n              mountPath: %s\n", b.Front.StateDir)
 	}
 	if b.supervised() {
 		fmt.Fprintf(&sb, "            - name: supervisor\n              mountPath: %s\n              readOnly: true\n", supervisorDir)
@@ -594,10 +623,12 @@ spec:
 	if b.Persistent || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
 		sb.WriteString("      volumes:\n")
 	}
-	if b.Persistent {
+	if b.dataMount() {
 		fmt.Fprintf(&sb, "        - name: data\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())
 	}
-	if b.Front != nil && b.Front.StateDir != "" {
+	if shared && b.Persistent {
+		fmt.Fprintf(&sb, "        - name: front-state\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())
+	} else if b.Front != nil && b.Front.StateDir != "" {
 		if b.Front.StateSizeLimit != "" {
 			fmt.Fprintf(&sb, "        - name: front-state\n          emptyDir:\n            sizeLimit: %s\n", b.Front.StateSizeLimit)
 		} else {

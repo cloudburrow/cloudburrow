@@ -183,8 +183,8 @@ compat_shard() {
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).
-      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestMemorystoreClustersAcrossRestart TestDatastoreAcrossRestart"
-      PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,DATASTORE ;;
+      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestMemorystoreClustersAcrossRestart TestDatastoreAcrossRestart TestFirestoreAcrossRestart"
+      PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,DATASTORE,FIRESTORE ;;
     sql)
       # Cloud SQL for PostgreSQL (#311, #584) and for MySQL with its
       # generated password (#297), the Cloud SQL Admin API over both
@@ -235,7 +235,7 @@ compat_setup_exports() {
 # fixture in <dir>.
 compat_probe_expect() {
   local v
-  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE KMS SECRETS TASKS SCHEDULER; do
+  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE FIRESTORE KMS SECRETS TASKS SCHEDULER; do
     echo "CLOUDBURROW_TEST_${v}_EXPECT=$1"
   done
   echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$2/storage-restart-probe.json"
