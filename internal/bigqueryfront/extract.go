@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // extractConfig is the part of an extract job's configuration the front
@@ -477,18 +476,9 @@ func nestedField(fields []field) string {
 // that cannot be looked up is taken to exist: the emulator's own answer
 // then stands.
 func (f front) bucketExists(ctx context.Context, bucket string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+f.storageHost+"/storage/v1/b/"+url.PathEscape(bucket), nil)
-	if err != nil {
-		return true
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return true
-	}
-	_ = resp.Body.Close()
-	return resp.StatusCode != http.StatusNotFound
+	status, _, err := serviceCall(ctx, "Cloud Storage buckets.get of "+bucket, http.MethodGet, // serviceclient.go, #1628
+		"http://"+f.storageHost+"/storage/v1/b/"+url.PathEscape(bucket), "", nil)
+	return err != nil || status != http.StatusNotFound
 }
 
 // setExtract changes an extract job's configuration in r's body: CSV as

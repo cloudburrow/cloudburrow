@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // Region INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION
@@ -52,29 +50,23 @@ func (f front) ancestry(ctx context.Context, project string) ([]ancestor, int, s
 		return nil, http.StatusNotImplemented, "Not implemented here: this view reads the project's folders and organization " +
 			"from Resource Manager, which the BigQuery front was not given, so nothing was run."
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	u := strings.TrimRight(f.resourceManager, "/") + "/v1/projects/" + url.PathEscape(project) + ":getAncestry"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader("{}"))
-	if err != nil {
-		return nil, http.StatusInternalServerError, "cloudburrow: " + err.Error()
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	// Bounded, sent again when it fails, logged when slow (serviceclient.go,
+	// #1628).
+	status, body, err := serviceCall(ctx, "Resource Manager projects.getAncestry of "+project, http.MethodPost, u,
+		"application/json", []byte("{}"))
 	if err != nil {
 		return nil, http.StatusInternalServerError, "cloudburrow: could not read the project's ancestry from Resource Manager: " + err.Error()
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+	if status == http.StatusNotFound || status == http.StatusForbidden {
 		return nil, 0, ""
 	}
 	var out struct {
 		Ancestor []ancestor `json:"ancestor"`
 	}
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &out) != nil {
+	if status != http.StatusOK || json.Unmarshal(body, &out) != nil {
 		return nil, http.StatusInternalServerError, "cloudburrow: could not read the project's ancestry from Resource Manager: " +
-			errorMessage(body, resp.StatusCode)
+			errorMessage(body, status)
 	}
 	return out.Ancestor, 0, ""
 }

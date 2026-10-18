@@ -226,6 +226,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	models := &bqModels{}                           // models.go, #1465
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
+	if o.logf != nil {
+		frontLogf.Store(&o.logf) // serviceclient.go, #1628
+	}
 	if o.stateDir != "" {
 		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
 	}
