@@ -113,7 +113,8 @@
         "patches/googlesqlite/0071-syntax-error-position.patch",
         "patches/googlesqlite/0072-runtime-error-messages.patch",
         "patches/googlesqlite/0067-integer-mod.patch",
-        "patches/googlesqlite/0075-exact-int64-abs-and-safe-arithmetic.patch"
+        "patches/googlesqlite/0075-exact-int64-abs-and-safe-arithmetic.patch",
+        "patches/googlesqlite/0074-pending-change-records.patch"
       ]
     },
     {
