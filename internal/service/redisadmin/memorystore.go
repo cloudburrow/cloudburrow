@@ -330,17 +330,18 @@ func renderValkey(r *clusterRecord) *memorystorepb.Instance {
 		conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_DISCOVERY, addrOf(r.firstPrimary())})
 	} else {
 		// The primary and reader endpoints (valkeyfailover.go), which
-		// outlive a node; a node's own address until they are open.
-		addr := r.primaryAddr
-		if addr == "" {
-			addr = addrOf(r.firstPrimary())
+		// outlive a node; a node's own address until they are open; none
+		// while the nodes do not serve (a suspended instance's, cmek).
+		addr := addrOf(r.firstPrimary())
+		if addr != "" && r.primaryAddr != "" {
+			addr = r.primaryAddr
 		}
 		conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY, addr})
 		for _, n := range r.Nodes {
 			if !n.Primary {
-				addr := r.readerAddr
-				if addr == "" {
-					addr = n.addr
+				addr := n.addr
+				if addr != "" && r.readerAddr != "" {
+					addr = r.readerAddr
 				}
 				conns = append(conns, conn{memorystorepb.ConnectionType_CONNECTION_TYPE_READER, addr})
 				break

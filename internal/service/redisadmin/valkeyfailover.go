@@ -206,11 +206,15 @@ func (c *clusters) nodeHost(n *clusterNode) string {
 
 // watched is whether the health check looks after r: a CLUSTER_DISABLED
 // instance that is ACTIVE, with a replica, no operation of its own
-// running, and its primary its own (not a secondary of cross-instance
-// replication or a migration's target, whose primary replicates another
-// server). Call with mu held.
+// running, its customer-managed key usable (a suspended instance's nodes
+// are stopped on purpose, clustercmek.go: promoting a replica, or
+// fencing and relabelling, would fight the suspension), and its primary
+// its own (not a secondary of cross-instance replication or a
+// migration's target, whose primary replicates another server). Call
+// with mu held.
 func (c *clusters) watched(r *clusterRecord) bool {
-	if _, pending := c.busy[r.Name]; pending || !r.standalone() || r.state != clusterpb.Cluster_ACTIVE || r.suspended {
+	if _, pending := c.busy[r.Name]; pending || !r.standalone() || r.state != clusterpb.Cluster_ACTIVE ||
+		r.suspended || r.KeyState != "" {
 		return false
 	}
 	if v := r.Valkey; (v.Migration.migrating() && v.Migration.State != memorystorepb.MigrationConfig_ROLLED_BACK.String()) ||
@@ -277,6 +281,9 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		if !c.watched(r) {
 			delete(failed, name)
 			delete(ids, name)
+			if r.suspended {
+				c.quiesce(name)
+			}
 			continue
 		}
 		c.openEndpoints(r)
@@ -308,6 +315,22 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		}
 	}
 	return out
+}
+
+// quiesce points a suspended instance's endpoints at no node, dropping
+// their connections, and forgets its roles' labels and fence, so that
+// once it resumes, on new nodes, openEndpoints points them at the new
+// primary and replicas and tendRoles labels the new pods. The endpoints
+// stay open: their addresses outlive the suspension, as they outlive a
+// node. Call with mu held.
+func (c *clusters) quiesce(name string) {
+	e := c.eps[name]
+	if e == nil || (e.primaryUp == "" && e.readerUps == "" && !e.fenced && e.labelled == "") {
+		return
+	}
+	e.primary.set(nil, true)
+	e.reader.set(nil, true)
+	e.primaryUp, e.readerUps, e.fenced, e.labelled = "", "", false, ""
 }
 
 // fence stops (on) or resumes name's primary endpoint's connections to

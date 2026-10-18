@@ -311,6 +311,12 @@ func (c *clusters) resumeCluster(r *clusterRecord) {
 		}
 		live.Nodes, live.NextNode, live.SuspendedData, live.suspended = snap.Nodes, snap.NextNode, nil, false
 		live.state, live.message = clusterpb.Cluster_ACTIVE, ""
+		// A CLUSTER_DISABLED instance's endpoints, at its new nodes, and
+		// its new pods labelled with their roles at the next check.
+		if e := c.eps[name]; e != nil {
+			e.labelled = ""
+		}
+		c.openEndpoints(live)
 		_ = c.save(live)
 	}()
 }

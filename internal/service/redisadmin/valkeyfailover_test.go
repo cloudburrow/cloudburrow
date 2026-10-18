@@ -12,6 +12,7 @@ import (
 	"time"
 
 	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
+	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -291,4 +292,127 @@ func greetOrEmpty(host string, port int32) string {
 	b := make([]byte, 256)
 	n, _ := c.Read(b)
 	return strings.TrimSpace(string(b[:n]))
+}
+
+// TestValkeySuspendedIsNotFailedOver (#1614, CMEK): a CLUSTER_DISABLED
+// instance whose customer-managed key cannot be used is not failed over:
+// while its key is unusable its primary failing promotes no replica, and
+// once it is suspended (its nodes stopped) it reports no endpoints and
+// its primary endpoint carries nothing. Resumed, on the same endpoint
+// addresses, the endpoints reach the primary and replicas again and the
+// roles are labelled again.
+func TestValkeySuspendedIsNotFailedOver(t *testing.T) {
+	oldEvery, oldTend := healthEvery, tendEvery
+	healthEvery, tendEvery = 10*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { healthEvery, tendEvery = oldEvery, oldTend })
+	s, _ := newHA(t)
+	f := &vkNodes{t: t, nodes: map[string]*vkNode{}, byAddr: map[string]*vkNode{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.EnableValkey(ctx, f, func(addr, _, _ string) ClusterNode { return vkConn{f, addr} }, nil)
+	ms := NewMemorystoreServer(s)
+	name := haParent + "/instances/vk-cmek"
+	if _, err := ms.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: haParent, InstanceId: "vk-cmek", Instance: &memorystorepb.Instance{
+		Mode: memorystorepb.Instance_CLUSTER_DISABLED, ReplicaCount: proto.Int32(1), NodeType: memorystorepb.Instance_SHARED_CORE_NANO,
+		PscAutoConnections: []*memorystorepb.PscAutoConnection{{ProjectId: "test-project", Network: "projects/test-project/global/networks/default"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	base := ValkeyServerBase(name)
+	n0, n1 := base+"-0", base+"-1"
+	rolesAre := func(want map[string]string) bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return fmt.Sprint(f.roles) == fmt.Sprint(want)
+	}
+	initial := map[string]string{n0: rolePrimary, n1: roleReplica}
+	for i := 0; i < 500 && !rolesAre(initial); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	inst, _ := ms.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: name})
+	ph, pp := vkEndpoint(t, inst, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY)
+	if got := greet(t, ph, pp); got != n0 {
+		t.Fatalf("the primary endpoint reaches %s, want %s", got, n0)
+	}
+	c := s.valkey
+	noFailover := func(what string) {
+		t.Helper()
+		time.Sleep(20 * healthEvery * time.Duration(failAfter))
+		c.mu.Lock()
+		r := c.byName[name]
+		promoted := r.Nodes[1].Primary
+		_, busy := c.busy[name]
+		c.mu.Unlock()
+		f.mu.Lock()
+		follows := f.nodes[n1].primary
+		f.mu.Unlock()
+		if promoted || busy || follows == "" {
+			t.Fatalf("%s: the replica was promoted (record %v, busy %v, replicates %q)", what, promoted, busy, follows)
+		}
+	}
+
+	// The key cannot be used, the suspension not begun: the primary
+	// failing promotes no replica.
+	c.mu.Lock()
+	c.byName[name].KeyState = "DISABLED"
+	c.mu.Unlock()
+	f.mu.Lock()
+	f.nodes[n0].down = true
+	f.mu.Unlock()
+	noFailover("key unusable")
+
+	// Suspended, its nodes stopped (clustercmek.go suspendCluster).
+	c.mu.Lock()
+	r := c.byName[name]
+	r.suspended, r.state = true, 0
+	addrs := map[string]string{}
+	for _, n := range r.Nodes {
+		addrs[n.Server] = n.addr
+		n.addr, n.podIP, n.port = "", "", 0
+	}
+	c.mu.Unlock()
+	noFailover("suspended")
+	got, _ := ms.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: name})
+	if len(got.GetPscAutoConnections()) != 0 {
+		t.Fatalf("a suspended instance reports %v", got.GetPscAutoConnections())
+	}
+	if g := greetOrEmpty(ph, pp); g != "" {
+		t.Fatalf("a suspended instance's primary endpoint reaches %q", g)
+	}
+
+	// Resumed (resumeCluster): its endpoints, at the same addresses,
+	// reach its nodes, its roles labelled again.
+	f.mu.Lock()
+	f.nodes[n0].down = false
+	f.roles = nil
+	f.mu.Unlock()
+	c.mu.Lock()
+	r.suspended, r.KeyState, r.state = false, "", clusterpb.Cluster_ACTIVE
+	for _, n := range r.Nodes {
+		n.addr = addrs[n.Server]
+		_, p, _ := net.SplitHostPort(n.addr)
+		n.port, _ = strconv.Atoi(p)
+	}
+	if e := c.eps[name]; e != nil {
+		e.labelled = ""
+	}
+	c.openEndpoints(r)
+	c.mu.Unlock()
+	got, _ = ms.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: name})
+	if h, p := vkEndpoint(t, got, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY); h != ph || p != pp {
+		t.Fatalf("resumed: the primary endpoint moved to %s:%d, was %s:%d", h, p, ph, pp)
+	}
+	if g := greet(t, ph, pp); g != n0 {
+		t.Fatalf("resumed: the primary endpoint reaches %q, want %s", g, n0)
+	}
+	rh, rp := vkEndpoint(t, got, memorystorepb.ConnectionType_CONNECTION_TYPE_READER)
+	if g := greet(t, rh, rp); g != n1 {
+		t.Fatalf("resumed: the reader endpoint reaches %q, want %s", g, n1)
+	}
+	for i := 0; i < 500 && !rolesAre(initial); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !rolesAre(initial) {
+		t.Fatalf("resumed: roles %v, want %v", f.roles, initial)
+	}
 }
