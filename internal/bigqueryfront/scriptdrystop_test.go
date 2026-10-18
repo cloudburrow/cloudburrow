@@ -20,9 +20,26 @@ func TestDryRunStop(t *testing.T) {
 		{"BEGIN ALTER TABLE d.t ADD COLUMN c INT64; END; SELECT 1", "", false, false},           // a block: as before
 		{"ALTER TABLE d.t ADD COLUMN c INT64", "", false, false},                                // lone: altertabledry.go
 	} {
-		prefix, alter, ok := dryRunStop(c.sql)
-		if ok != c.ok || ok && (prefix != c.prefix || (alter != nil) != c.alter) {
-			t.Errorf("%q: %q %v %v, want %q %v %v", c.sql, prefix, alter != nil, ok, c.prefix, c.alter, c.ok)
+		stop, ok := dryRunStop(c.sql)
+		if ok != c.ok || ok && (stop.prefix != c.prefix || (stop.alter != nil) != c.alter) {
+			t.Errorf("%q: %q %v %v, want %q %v %v", c.sql, stop.prefix, stop.alter != nil, ok, c.prefix, c.alter, c.ok)
+		}
+	}
+	// A CALL and an EXECUTE IMMEDIATE stop it too (#1612).
+	for _, c := range []struct {
+		sql, prefix string
+		call, exec  bool
+		ok          bool
+	}{
+		{"SELECT 1; CALL d.p(1); ALTER TABLE d.t ADD COLUMN c INT64", "SELECT 1", true, false, true},
+		{"DECLARE s STRING DEFAULT 'SELECT 1'; EXECUTE IMMEDIATE s; ALTER TABLE d.t ADD COLUMN c INT64",
+			"DECLARE s STRING DEFAULT 'SELECT 1'", false, true, true},
+		{"CALL d.p(); SELECT 1", "", false, false, false},                                                          // no ALTER after it
+		{"CALL BQ.REFRESH_MATERIALIZED_VIEW('d.mv'); ALTER TABLE d.t ADD COLUMN c INT64", "", false, false, false}, // a system procedure
+	} {
+		stop, ok := dryRunStop(c.sql)
+		if ok != c.ok || ok && (stop.prefix != c.prefix || (stop.call != nil) != c.call || (stop.exec != nil) != c.exec) {
+			t.Errorf("%q: %+v %v", c.sql, stop, ok)
 		}
 	}
 	if !legacyAlterTable("SELECT 1; ALTER TABLE [d.t] ADD COLUMN c INT64") || legacyAlterTable("SELECT * FROM [d.alter]") {

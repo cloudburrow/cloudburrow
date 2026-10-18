@@ -315,8 +315,8 @@ func checkDDL(sql string) ddlVerdict {
 				"(measured), so nothing was run. A BEGIN ... END block, and statements outside any block, are run.", flow)}
 	case alter != "":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE in a dry run of " +
-			"a script that reaches it inside a BEGIN block, LOOP, REPEAT or CASE, or after a CALL or EXECUTE IMMEDIATE (a dry " +
-			"run that stops at it, or before it at an IF, FOR or WHILE, is answered, #1456). CloudBurrow carries out ALTER TABLE itself " +
+			"a script that reaches it inside a BEGIN block, LOOP, REPEAT or CASE (a dry run that stops at it, or before it at " +
+			"an IF, FOR, WHILE, CALL or EXECUTE IMMEDIATE, is answered, #1456, #1612). CloudBurrow carries out ALTER TABLE itself " +
 			"in a GoogleSQL query (#1227), since the emulator behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET " +
 			"OPTIONS as done and leaves the table unchanged (measured), and checks a lone one in a dry run (#1416), a " +
 			"statement at a time, which a TEMP table, lasting only for the request that made it, does not survive, so " +
