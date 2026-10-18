@@ -22,20 +22,20 @@ import (
 // CLOUDBURROW_DEBUG_PPROF=127.0.0.1:6060.
 const EnvVar = "CLOUDBURROW_DEBUG_PPROF"
 
-// Handler serves the profiles under /debug/pprof/, behind the Host check
-// every other listener has.
-func Handler() http.Handler {
+// profiles serves the profiles under /debug/pprof/.
+func profiles() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	return hostguard.Wrap(mux)
+	return mux
 }
 
-// Start listens on the address getenv(EnvVar) names and serves Handler
-// there in the background. It returns "" and nil when the variable is unset,
+// Start listens on the address getenv(EnvVar) names and serves the
+// profiles there in the background, behind the Host check every other
+// listener has. It returns "" and nil when the variable is unset,
 // and an error when the address is not loopback or cannot be listened on.
 func Start(getenv func(string) string, log io.Writer) (string, error) {
 	addr := getenv(EnvVar)
@@ -53,7 +53,7 @@ func Start(getenv func(string) string, log io.Writer) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", EnvVar, err)
 	}
-	srv := &http.Server{Handler: Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: hostguard.Wrap(profiles()), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
 	if log != nil {
 		fmt.Fprintf(log, "debug: serving pprof on http://%s/debug/pprof/ (%s)\n", ln.Addr(), EnvVar)

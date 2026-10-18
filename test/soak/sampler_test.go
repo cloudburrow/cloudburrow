@@ -3,9 +3,11 @@
 package soak
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io/fs"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -26,6 +28,8 @@ type sample struct {
 	Containers map[string]containerSample `json:"containers,omitempty"`
 	// The state directory's size on disk.
 	StateBytes int64 `json:"state_bytes,omitempty"`
+	// Each pprof target's goroutines (CLOUDBURROW_SOAK_PPROF).
+	Goroutines map[string]int `json:"goroutines,omitempty"`
 }
 
 type containerSample struct {
@@ -40,14 +44,16 @@ type containerSample struct {
 // crictl and the container's cgroup on the kind node, so no metrics-server is needed), the
 // containers' restart counts and the state directory's size.
 //
-// The Go runtime's goroutine count is not exposed by the instance: neither
-// the front nor the pods serve pprof. Threads stand in for it: a goroutine
-// leak that blocks in syscalls shows as threads, and one that holds memory
-// shows as RSS.
+// Goroutines are counted where a process serves pprof, which `up` and the
+// pods' Go processes do when started with CLOUDBURROW_DEBUG_PPROF (#1609):
+// the harness reads each address CLOUDBURROW_SOAK_PPROF names. Elsewhere
+// threads stand in for them: a goroutine leak that blocks in syscalls
+// shows as threads, and one that holds memory shows as RSS.
 type sampler struct {
 	hostPID  string
 	node     string // the kind node container, cloudburrow-<name>-control-plane
 	stateDir string
+	pprof    map[string]string // name: loopback address serving /debug/pprof/
 
 	mu      sync.Mutex
 	samples []sample
@@ -84,6 +90,14 @@ func (s *sampler) take(at time.Duration) {
 	}
 	if s.node != "" {
 		sm.Containers = s.containers(ctx)
+	}
+	for name, addr := range s.pprof {
+		if n, ok := goroutines(ctx, addr); ok {
+			if sm.Goroutines == nil {
+				sm.Goroutines = map[string]int{}
+			}
+			sm.Goroutines[name] = n
+		}
 	}
 	if s.stateDir != "" {
 		_ = filepath.WalkDir(s.stateDir, func(_ string, d fs.DirEntry, err error) error {
@@ -163,6 +177,23 @@ func (s *sampler) containers(ctx context.Context) map[string]containerSample {
 		res[key] = cs
 	}
 	return res
+}
+
+// goroutines reads the total of a pprof goroutine profile's text form,
+// "goroutine profile: total N".
+func goroutines(ctx context.Context, addr string) (int, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/debug/pprof/goroutine?debug=1", nil)
+	if err != nil {
+		return 0, false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	line, _ := bufio.NewReader(resp.Body).ReadString('\n')
+	n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "goroutine profile: total")))
+	return n, err == nil && resp.StatusCode == http.StatusOK
 }
 
 func (s *sampler) all() []sample {

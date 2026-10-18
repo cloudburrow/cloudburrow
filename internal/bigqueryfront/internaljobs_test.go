@@ -103,3 +103,47 @@ func TestJobIDPrefixHeader(t *testing.T) {
 		t.Error("jobIDFor: the front's job IDs are its own, a client's not")
 	}
 }
+
+// TestTheFrontDeletesItsOwnFinishedJobs (#1609): the engine kept every job
+// of the front's own, eight for each of a client's in the soak (every
+// streamed insertAll is two), though no client can read one. Each that is
+// complete and fully read is deleted on the engine; a client's job, and one
+// whose rows are paged, are kept.
+func TestTheFrontDeletesItsOwnFinishedJobs(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		answer string
+		kept   bool
+	}{
+		{"complete", `{"jobComplete":true,"schema":{"fields":[{"name":"a","type":"INTEGER"}]}}`, false},
+		{"paged", `{"jobComplete":true,"pageToken":"next","schema":{"fields":[{"name":"a","type":"INTEGER"}]}}`, true},
+		{"running", `{"jobComplete":false}`, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			emu := &jobsEmulator{run: func(q string) (int, string) { return 200, c.answer }}
+			h := Wrap(emu)
+			do(t, h, "POST", base+"/jobs", `{"jobReference":{"jobId":"ctas"},"configuration":{"query":{"query":"CREATE TABLE ds.x AS SELECT 1 AS a","useLegacySql":false}}}`)
+			var own []string
+			for _, id := range emu.order {
+				if isInternalJobID(id) {
+					own = append(own, id)
+				}
+			}
+			if len(own) == 0 {
+				t.Fatalf("the front ran no query of its own: %v", emu.log)
+			}
+			deleted := map[string]bool{}
+			for _, id := range emu.deleted {
+				deleted[id] = true
+			}
+			if deleted["ctas"] {
+				t.Error("the client's job was deleted")
+			}
+			for _, id := range own {
+				if deleted[id] == c.kept {
+					t.Errorf("the front's own job %s: deleted %v, want %v (deleted: %v)", id, deleted[id], !c.kept, emu.deleted)
+				}
+			}
+		})
+	}
+}
