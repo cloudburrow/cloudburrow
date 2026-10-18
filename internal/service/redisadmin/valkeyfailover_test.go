@@ -103,7 +103,9 @@ func (c vkConn) Do(_ context.Context, args ...any) (any, error) {
 		if n.primary == "" {
 			return fmt.Sprintf("role:master\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\nslave0:ip=x,port=1,state=online\r\nslave1:ip=x,port=1,state=online\r\n", n.replID, n.offset), nil
 		}
-		return fmt.Sprintf("role:slave\r\nmaster_link_status:up\r\nslave_repl_offset:%d\r\nmaster_replid:%s\r\n", n.offset, n.replID), nil
+		host, port, _ := net.SplitHostPort(n.primary)
+		return fmt.Sprintf("role:slave\r\nmaster_host:%s\r\nmaster_port:%s\r\nmaster_link_status:up\r\nslave_repl_offset:%d\r\nmaster_replid:%s\r\n",
+			host, port, n.offset, n.replID), nil
 	}
 	return "OK", nil
 }
@@ -280,6 +282,74 @@ func TestValkeyPrimaryStartedAgainFailsOver(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("no failover after the primary started again: %v", f.roles)
+}
+
+// TestValkeySecondaryFollowsFailover (#1641): a secondary of cross-
+// instance replication, linked to its primary instance's primary Service,
+// is re-pointed at the promoted node's own Service when the primary
+// instance fails over, since its link to the primary Service can hang on
+// the failed pod for repl-timeout; and one a failover could not re-point
+// is re-pointed by the next tending of the roles.
+func TestValkeySecondaryFollowsFailover(t *testing.T) {
+	oldEvery, oldTend := healthEvery, tendEvery
+	healthEvery, tendEvery = 10*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { healthEvery, tendEvery = oldEvery, oldTend })
+	s, _ := newHA(t)
+	f := &vkNodes{t: t, nodes: map[string]*vkNode{}, byAddr: map[string]*vkNode{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.EnableValkey(ctx, f, func(addr, _, _ string) ClusterNode { return vkConn{f, addr} }, nil)
+	ms := NewMemorystoreServer(s)
+	psc := []*memorystorepb.PscAutoConnection{{ProjectId: "test-project", Network: "projects/test-project/global/networks/default"}}
+	create := func(id string, in *memorystorepb.Instance) string {
+		t.Helper()
+		in.Mode, in.NodeType, in.PscAutoConnections = memorystorepb.Instance_CLUSTER_DISABLED, memorystorepb.Instance_SHARED_CORE_NANO, psc
+		if _, err := ms.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: haParent, InstanceId: id, Instance: in}); err != nil {
+			t.Fatal(err)
+		}
+		name := haParent + "/instances/" + id
+		for i := 0; i < 500; i++ {
+			if inst, _ := ms.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: name}); inst.GetState() == memorystorepb.Instance_ACTIVE {
+				return name
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("instance %s is not ACTIVE", id)
+		return ""
+	}
+	pname := create("vk-cirp", &memorystorepb.Instance{ReplicaCount: proto.Int32(1)})
+	sname := create("vk-cirs", &memorystorepb.Instance{CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+		InstanceRole:    memorystorepb.CrossInstanceReplicationConfig_SECONDARY,
+		PrimaryInstance: &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: pname}}})
+	pbase, sn := ValkeyServerBase(pname), ValkeyServerBase(sname)+"-0"
+	follows := func() string {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.nodes[sn].primary
+	}
+	waitFollows := func(what, want string) {
+		t.Helper()
+		for i := 0; i < 500 && follows() != want; i++ {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := follows(); got != want {
+			t.Fatalf("%s: the secondary replicates %q, want %q", what, got, want)
+		}
+	}
+	waitFollows("linked", pbase+"-primary.svc:6379")
+
+	f.mu.Lock()
+	f.nodes[pbase+"-0"].down = true
+	promoted := pbase + "-1.svc:" + strconv.Itoa(f.nodes[pbase+"-1"].port)
+	f.mu.Unlock()
+	waitFollows("after the failover", promoted)
+
+	// A secondary the failover could not reach is re-pointed once it
+	// answers.
+	f.mu.Lock()
+	f.nodes[sn].primary = pbase + "-0.svc:" + strconv.Itoa(f.nodes[pbase+"-0"].port)
+	f.mu.Unlock()
+	waitFollows("tended", promoted)
 }
 
 func greetOrEmpty(host string, port int32) string {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,10 +56,15 @@ import (
 //     TestMemorystoreValkeyReaderAndFailover). Acknowledged writes the
 //     replicas had not received are lost, as replication is asynchronous.
 //
+// A secondary of cross-instance replication of the instance is then
+// made a replica of the promoted node at its own Service (followersOf
+// says why not through the primary Service).
+//
 // The same check, every tendEvery, makes a node that should be a replica
 // and answers as a primary (its pod started again) a replica of the
-// primary, and labels each pod with its role again, a new pod having
-// none. CLUSTER mode is unchanged: its nodes fail over among themselves.
+// primary, re-points a secondary that replicates neither the primary
+// Service nor the primary's own, and labels each pod with its role again,
+// a new pod having none. CLUSTER mode is unchanged: its nodes fail over among themselves.
 
 // RoleRouter is a ClusterRuntime that publishes a CLUSTER_DISABLED
 // instance's roles in the cluster.
@@ -392,6 +398,15 @@ func (c *clusters) tendRoles(ctx context.Context, name string, tend time.Duratio
 			}
 		}
 	}
+	// A secondary of cross-instance replication that a failover could not
+	// re-point (its node did not answer) is re-pointed now.
+	c.mu.Lock()
+	fs := c.followersOf(name)
+	src := c.sourceOf(r)
+	c.mu.Unlock()
+	c.follow(ctx, name, fs, c.nodeHost(&p), p.port, map[string]bool{
+		net.JoinHostPort(c.nodeHost(&p), strconv.Itoa(p.port)): true,
+		net.JoinHostPort(src.host, strconv.Itoa(src.port)):     true})
 	if rr, ok := c.rt.(RoleRouter); ok {
 		if err := rr.Roles(ctx, e.base, roles, rolePort(&rec)); err != nil {
 			log.Printf("memorystore: %s: label the roles: %v", name, err)
@@ -490,6 +505,72 @@ func (c *clusters) failoverStandalone(ctx context.Context, name string) {
 		}
 		c.openEndpoints(r)
 	}
+	fs := c.followersOf(name)
 	c.mu.Unlock()
 	log.Printf("memorystore: %s: automatic failover promoted %s", name, nodes[best].Server)
+	// The secondaries of cross-instance replication replicate the promoted
+	// node at its own Service (#1641): their link to the primary Service
+	// can hang on a connection to the failed pod (see followersOf).
+	c.follow(fctx, name, fs, host, port, nil)
+}
+
+// cirFollower is a secondary of cross-instance replication and its
+// primary node, which replicates the primary instance's primary.
+type cirFollower struct {
+	rec clusterRecord
+	n   clusterNode
+}
+
+// followersOf are the ACTIVE, idle secondaries of cross-instance
+// replication of name, which follow its automatic failover (#1641).
+//
+// A secondary first replicates name's primary Service, which selects
+// whichever node is the primary (sourceOf), but it cannot be left to find
+// the promoted node through it: once the primary's pod is gone, and until
+// the promoted node's pod is labelled, the Service has no ready endpoint,
+// and kube-proxy then sends a connection to the terminating pod's
+// endpoint, whose address no longer answers. The secondary's connection
+// to it hangs for repl-timeout (60s) before it tries again (measured:
+// "Timeout connecting to the PRIMARY" a minute after the failover), and a
+// REPLICAOF of the same host and port does not abandon it ("Already
+// connected to specified master"). So a failover re-points each secondary
+// at the promoted node's own Service, which follows that node's pod, and
+// tendRoles re-points one that a failover could not reach. Call with mu
+// held.
+func (c *clusters) followersOf(name string) []cirFollower {
+	var out []cirFollower
+	for _, s := range c.secondariesOf(name) {
+		if _, pending := c.busy[s.Name]; pending || s.state != clusterpb.Cluster_ACTIVE {
+			continue
+		}
+		if n := s.firstPrimary(); n != nil && n.addr != "" {
+			out = append(out, cirFollower{*s, *n})
+		}
+	}
+	return out
+}
+
+// follow makes each follower's primary node a replica of host:port,
+// unless it replicates one of keep already.
+func (c *clusters) follow(ctx context.Context, name string, fs []cirFollower, host string, port int, keep map[string]bool) {
+	for _, f := range fs {
+		if keep != nil {
+			cl := c.dial(f.n.addr, f.rec.password(), f.rec.TransitCA)
+			info, err := cl.Do(ctx, "INFO", "replication")
+			cl.Close()
+			if err != nil {
+				continue
+			}
+			i := fmt.Sprint(info)
+			if clusterInfoField(i, "role") != "slave" ||
+				keep[net.JoinHostPort(clusterInfoField(i, "master_host"), clusterInfoField(i, "master_port"))] {
+				continue
+			}
+		}
+		if err := c.do(ctx, &f.rec, &f.n, "REPLICAOF", host, port); err != nil {
+			log.Printf("memorystore: %s: secondary %s: REPLICAOF: %v", name, f.rec.Name, err)
+			continue
+		}
+		log.Printf("memorystore: %s: secondary %s replicates %s", name, f.rec.Name, net.JoinHostPort(host, strconv.Itoa(port)))
+	}
 }
