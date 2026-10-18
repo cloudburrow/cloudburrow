@@ -23,8 +23,11 @@ import (
 // UNVERIFIED for Google (council §6).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/Encrypt FAILED_PRECONDITION: a DISABLED primary, a DISABLED named version, or a key with no primary
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 // unverified: google.cloud.kms.v1.KeyManagementService/Decrypt FAILED_PRECONDITION: a DISABLED or DESTROY_SCHEDULED version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 // unverified: google.cloud.kms.v1.KeyManagementService/Decrypt INVALID_ARGUMENT: a wrong AAD, a tampered ciphertext, or another key's ciphertext
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/decrypt
 func TestGcloudKMSEncryptDecrypt(t *testing.T) {
 	h := New(t)
 	run, project := gcloudKMS(t, h)

@@ -25,6 +25,7 @@ package logging
 // cmek_settings stays UNIMPLEMENTED. Where
 // Google documents no code for a refusal it is FAILED_PRECONDITION
 // (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/logging/v2/logging_config.proto
 
 import (
 	"context"
@@ -724,6 +725,7 @@ func (a *Admin) Buckets(project string) ([]*loggingpb.LogBucket, error) {
 // project's: Google upgrades only a bucket "created at the Google Cloud
 // project level" (docs.cloud.google.com/logging/docs/buckets, "Upgrade a
 // bucket to use Observability Analytics"; #1435). Code UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/buckets
 func checkAnalyticsParent(ref bucketRef, b *loggingpb.LogBucket) error {
 	if b.GetAnalyticsEnabled() && !ref.parent.isProject() {
 		return apierror.FailedPrecondition("bucket %s: only a bucket of a project can be upgraded to Log Analytics (analytics_enabled)", ref.name())

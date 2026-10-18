@@ -190,6 +190,7 @@ func parseViewColumnList(sql string) (viewColumnList, bool) {
 					// requirements as for a table, but with a different
 					// list of NAME and VALUE fields": description alone
 					// (#1416; the wording is CloudBurrow's, UNVERIFIED).
+					// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 					if v.refused == "" {
 						v.refused = "The column option " + o.name + " is not supported for a column of a view: " +
 							"description is the one column option of a view."
@@ -291,6 +292,7 @@ var constantFunctions = map[string]bool{"ARRAY_TO_STRING": true, "REPLACE": true
 // constantFunctions, or "" (#1416). The engine refuses the rest (a column
 // or a table it cannot resolve) when it evaluates it. The wording is
 // CloudBurrow's, UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 func constantOptionRefused(expr string) string {
 	t, ok := lex(expr)
 	if !ok {

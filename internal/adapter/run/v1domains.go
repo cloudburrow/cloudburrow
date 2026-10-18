@@ -47,6 +47,7 @@ import (
 //     AUTOMATIC, as no certificate authority is reached locally;
 //   - Ready is True when both are, so a NONE mapping becomes Ready and an
 //     AUTOMATIC one ends False rather than waiting for ever.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/run/docs/mapping-custom-domains
 
 const (
 	resKDomain      = "domainmappings.serving.knative.dev"

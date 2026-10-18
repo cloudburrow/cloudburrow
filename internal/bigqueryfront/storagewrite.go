@@ -268,6 +268,7 @@ func (w *storageWrite) tableFields(ctx context.Context, t readTable) ([]field, e
 // _default stream, before any row is taken (INVALID_ARGUMENT; BigQuery's
 // code and wording UNVERIFIED). Its rows would otherwise be refused only
 // when written, which for a PENDING stream is at the commit.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/bigquery/storage/v1/storage.proto
 func (w *storageWrite) writableFields(ctx context.Context, t readTable) ([]field, error) {
 	code, body := w.call(ctx, http.MethodGet, t, "", nil)
 	if code != http.StatusOK {

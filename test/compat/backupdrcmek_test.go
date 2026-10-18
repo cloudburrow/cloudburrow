@@ -25,6 +25,7 @@ import (
 // covers: backupdr.projects.locations.backupVaults.create, backupdr.projects.locations.backupVaults.get, backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.resourceBackupConfigs.list, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
 func TestBackupDRVaultEncryptionConfig(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	bdr := backupDRService(t, h)
 	kc := kmsClients(t, h)["grpc"]
 	if os.Getenv(EnvBackupDR) == "" || os.Getenv(EnvKMS) == "" {

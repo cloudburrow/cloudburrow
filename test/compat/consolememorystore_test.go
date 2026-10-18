@@ -429,6 +429,7 @@ func TestConsoleMemorystoreInTransitEncryption(t *testing.T) {
 // suspension reason CUSTOMER_MANAGED_KEY_ISSUE.
 func TestConsoleMemorystoreCustomerManagedKey(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	addr := consoleAddr(t, h)
 	c, project := memorystoreAdminClient(t, h)
 	kc := kmsClients(t, h)["grpc"]

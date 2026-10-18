@@ -21,6 +21,7 @@ import (
 // ring is listed too, and GetLocation finds it. Which fields Google sets on
 // each Location (here name, location_id, display_name and a LocationMetadata)
 // is UNVERIFIED: no response was observed.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/locations
 var Locations = []string{
 	"global",
 	"asia", "europe", "us",

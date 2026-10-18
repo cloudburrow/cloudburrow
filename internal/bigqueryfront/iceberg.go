@@ -487,13 +487,13 @@ func (f front) serveExportMetadata(w http.ResponseWriter, r *http.Request, q que
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
-	// statementType: the REST reference's JobStatistics2.statementType
-	// (checked 2026-10-16) names no value for EXPORT TABLE METADATA, nor
-	// do the EXPORT TABLE METADATA and INFORMATION_SCHEMA.JOBS pages; the
-	// front answers EXPORT_DATA, the documented value of the nearest
-	// statement, as BigQuery's own is UNVERIFIED (docs/compatibility.md).
+	// statementType: EXPORT_METADATA, "EXPORT TABLE METADATA statement,
+	// for BigLake Iceberg tables", as the REST reference's
+	// JobStatistics2.statementType lists it
+	// (https://cloud.google.com/bigquery/docs/reference/rest/v2/Job, read
+	// 2026-10-17).
 	f.forward(w, r, jobText{query: q.Query, ddl: &ownDDL{target: tableRef{ProjectID: project, DatasetID: ds, TableID: table},
-		statementType: "EXPORT_DATA"}})
+		statementType: "EXPORT_METADATA"}})
 }
 
 // withIcebergDefaults sets tables.insert's body, b, as r's with its

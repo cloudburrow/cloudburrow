@@ -160,6 +160,7 @@ func TestPubSubSubscriptionExpiresWhenIdle(t *testing.T) {
 // retention is created and reads back as given.
 // covers: google.pubsub.v1.Subscriber/CreateSubscription
 // unverified: google.pubsub.v1.Subscriber/CreateSubscription INVALID_ARGUMENT: an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/pubsub/v1/pubsub.proto
 func TestPubSubRefusesAnExpirationGoogleRefuses(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)

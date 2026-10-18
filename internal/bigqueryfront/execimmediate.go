@@ -239,6 +239,7 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 				if cols, known := selectItemCount(out); known && cols != len(intoVars) {
 					// The columns are assigned "by position", one per
 					// variable (scriptRun.setColumns; wording UNVERIFIED).
+					// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language
 					return sql, false, http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE ... INTO has %d variables, "+
 						"but the query returns %d columns", len(intoVars), cols)
 				}
@@ -314,6 +315,7 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 //
 // inner must be a query (SELECT or WITH); it returns why it cannot be run
 // so, or "".
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language
 func immediateInto(inner string, vars []string, guard bool, n int) (string, string) {
 	toks, ok := lex(inner)
 	if !ok || len(toks) == 0 {
@@ -757,6 +759,7 @@ var unstableFunctions = map[string]bool{
 // fails there in BigQuery too, before the statement runs. When the probe
 // left out DML or DDL, a failure could be the probe's own (a function it
 // did not create), so it is 501.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language
 func evalImmediate(sql string, stmts [][]token, si int, text string, expr []token, eval immediateEval) (string, int, string) {
 	typ, value, null, code, msg := runProbe(sql, stmts, si, text, expr, eval)
 	switch {
@@ -1070,6 +1073,7 @@ func isRowCount(toks []token, i int) bool {
 // (https://cloud.google.com/bigquery/docs/reference/system-variables). It
 // is NULL before any DML statement, and after a statement of another kind
 // (UNVERIFIED against BigQuery, which documents only the DML case).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/system-variables
 func (s *scriptRun) rowCountEdits(toks []token) []varEdit {
 	var edits []varEdit
 	for i := range toks {
@@ -1147,6 +1151,7 @@ func (s *scriptRun) noteRowCount(text string, rec *recorder) {
 // frames are where the script is (place): a statement EXECUTE IMMEDIATE
 // ran is at that EXECUTE IMMEDIATE, with its text (BigQuery's frame of
 // such a statement UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 func (s *scriptRun) child(project, id, text string) scriptChild {
 	kind := "STATEMENT"
 	if s.expr > 0 && !s.intoQuery {
@@ -1172,6 +1177,7 @@ func (s *scriptRun) child(project, id, text string) scriptChild {
 // BigQuery's wording of the error is UNVERIFIED. toks is the statement,
 // read before it is run, so the check is the same alone, nested, or in a
 // script (#1037).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language
 func restrictedImmediate(toks []token) string {
 	i := 0
 	for i < len(toks) && toks[i].punct("(") {

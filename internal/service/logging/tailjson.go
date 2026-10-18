@@ -12,6 +12,7 @@ package logging
 // usual JSON error before anything is streamed. UNVERIFIED: no official
 // client reads it (the Go apiv2 REST transport says TailLogEntries is "not
 // yet supported for REST clients").
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/entries/tail
 
 import (
 	"context"

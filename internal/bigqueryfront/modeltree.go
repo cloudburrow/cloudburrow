@@ -52,7 +52,9 @@ import (
 // 0.8, colsample_bytree and colsample_bylevel 1, max_tree_depth 15), each
 // leaf's weight divided among the trees, so the forest predicts their mean.
 // UNVERIFIED: the draws come from a fixed seed (1504), so a forest is the
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-random-forest
 // same each run but not Google's draw.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-boosted-tree
 
 // mlNode is one node of a tree: a split (Feat the encoded column, without
 // the intercept, Thr the value, Left and Right the children's indexes) or a

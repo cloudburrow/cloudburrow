@@ -214,6 +214,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.runScript(w, r, q, insert) // #1417, location.go: SCHEMATA read in its turn
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && !txnRequest(r) && schemataInTurnTemp(q.Query) &&
+		f.runTempScript(w, r, q, insert) { // #1562, location.go: in a TEMP script's session
+		return
+	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
 		refs := informationSchemaJobs(q.Query)
 		if links := unqualifiedSchemataLinks(q.Query, projectOf(f.base)); len(links) > 0 { // #1392, infoschemaprivileges.go
@@ -229,7 +233,7 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
-	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && refuseUndrop(w, q) { // #1460, #1483: a dry run, unserved.go
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && f.dryRunSchemaDDL(w, r, q, insert) { // #1562, schemaddldry.go
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.undropSchema(w, r, q, insert) { // #1460, dropped.go
@@ -463,7 +467,7 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		d, base = md, d.asMerge
 	}
 	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" {
-		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
+		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "badRequest", Message: msg})
 		return
 	}
 	text := base
@@ -1189,8 +1193,9 @@ func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, ta
 	if n == 0 {
 		return ""
 	}
-	// BigQuery's message as users have reported it, for UPDATE, DELETE
-	// and MERGE alike.
+	// BigQuery's message and reason, badRequest, as its error-messages page
+	// documents them (https://cloud.google.com/bigquery/docs/error-messages,
+	// read 2026-10-17), for UPDATE, DELETE and MERGE alike.
 	return "UPDATE or DELETE statement over table " + projectOf(f.base) + "." + ds + "." + table +
-		" would affect rows in the streaming buffer, which is not supported" // UNVERIFIED wording
+		" would affect rows in the streaming buffer, which is not supported"
 }

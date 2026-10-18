@@ -327,6 +327,7 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 		return nil, apierror.Wrap(err)
 	}
 	// name compares the full resource name (#409); UNVERIFIED against Google.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/sorting-and-filtering
 	if filter != nil {
 		var matched []string
 		for _, n := range names {
@@ -424,6 +425,7 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 		Labels:     k.Labels,
 		// Echoed even when defaulted; whether Google echoes the default is
 		// UNVERIFIED.
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 		DestroyScheduledDuration: durationpb.New(k.destroyScheduled()),
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
 			ProtectionLevel: k.protectionLevel(),
@@ -459,6 +461,7 @@ func versionName(key string, n int) string { return key + "/cryptoKeyVersions/" 
 func unsupportedKey(k *kmspb.CryptoKey) error {
 	if k.GetPurpose() == kmspb.CryptoKey_CRYPTO_KEY_PURPOSE_UNSPECIFIED {
 		// Required (service.proto); the code is UNVERIFIED.
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 		return apierror.InvalidArgument("crypto_key.purpose is required")
 	}
 	if p := k.GetPurpose(); !purposes[p] {
@@ -483,6 +486,7 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 // destroyScheduledOf validates crypto_key.destroy_scheduled_duration: unset
 // is the 30-day default; otherwise whole seconds from 24h to 120d. The code
 // for a value out of range is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func destroyScheduledOf(k *kmspb.CryptoKey) (time.Duration, error) {
 	d := k.GetDestroyScheduledDuration()
 	if d == nil {
@@ -538,6 +542,7 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	}
 	// Only ENCRYPT_DECRYPT keys rotate automatically (resources.proto
 	// rotation_period); the code for a schedule on another is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 	if (period > 0 || !nextRotation.IsZero()) && in.GetPurpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT {
 		return nil, apierror.Wrap(apierror.InvalidArgument("automatic rotation is only supported for ENCRYPT_DECRYPT keys, not %s", in.GetPurpose()))
 	}
@@ -565,6 +570,7 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	} else if retired {
 		// RetiredResources "prevent the reuse of these resource names after
 		// deletion" (resources.proto); the code is UNVERIFIED.
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 		return nil, apierror.Wrap(apierror.AlreadyExists("CryptoKey %s was deleted, and its name cannot be reused", name))
 	}
 	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter,
@@ -714,6 +720,7 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	// A version starts ENABLED, or DISABLED when asked (resources.proto
 	// state; service.proto CreateCryptoKeyVersion). No other initial state
 	// can be asked for; Google's code for one is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 	initial := kmspb.CryptoKeyVersion_ENABLED
 	switch st := req.GetCryptoKeyVersion().GetState(); st {
 	case kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_STATE_UNSPECIFIED, kmspb.CryptoKeyVersion_ENABLED:
@@ -847,6 +854,7 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	}
 	// service.proto: this "returns an error if called on a key whose purpose
 	// is not ENCRYPT_DECRYPT". The code is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/updatePrimaryVersion
 	if p := k.purpose(); p != kmspb.CryptoKey_ENCRYPT_DECRYPT {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s is %s: only an ENCRYPT_DECRYPT key has a primary version", k.Name, p))
 	}
@@ -857,6 +865,7 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	// Only an ENABLED version can become the primary: Encrypt by key name
 	// would otherwise pick a version it must refuse (#401). The code is
 	// UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/updatePrimaryVersion
 	if st := v.state(); st != kmspb.CryptoKeyVersion_ENABLED {
 		return nil, apierror.Wrap(apierror.FailedPrecondition(
 			"CryptoKeyVersion %s is %s: only an ENABLED version can be made primary", v.Name, st))
@@ -874,6 +883,7 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 // external_protection_level_options: the key URI or key path it names,
 // without rotating the key (update-external-key-path, #1469). The codes for
 // a bad mask, a bad target and a version past disabling are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	in := req.GetCryptoKeyVersion()
 	key, _, err := parseCryptoKeyVersion("crypto_key_version.name", in.GetName())
@@ -964,6 +974,7 @@ func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryp
 // RestoreCryptoKeyVersion can still bring it back; #403 moves it to
 // DESTROYED. The code for a version already scheduled or destroyed is
 // UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func (s *Server) DestroyCryptoKeyVersion(_ context.Context, req *kmspb.DestroyCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	key, _, err := parseCryptoKeyVersion("name", req.GetName())
 	if err != nil {
@@ -983,8 +994,10 @@ func (s *Server) DestroyCryptoKeyVersion(_ context.Context, req *kmspb.DestroyCr
 	if err := s.load(dbKey(keyPrefix, key), &k, "CryptoKey", key); err != nil {
 		return nil, err
 	}
-	// The primary may be destroyed too; whether Google refuses that is
-	// UNVERIFIED, and nothing here refuses without evidence.
+	// The primary may be destroyed too, as Google documents: "an enabled
+	// primary key version can be disabled, scheduled for destruction or
+	// destroyed" (https://cloud.google.com/kms/docs/key-states, read
+	// 2026-10-17).
 	v.State = kmspb.CryptoKeyVersion_DESTROY_SCHEDULED.String()
 	v.DestroyTime = s.now().UTC().Add(k.destroyScheduled())
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
@@ -1187,6 +1200,7 @@ func (s *Server) Run(ctx context.Context) {
 // destroy_time: it becomes DISABLED, with destroy_time cleared and its
 // material untouched (service.proto). A version in any other state, including
 // one whose destroy_time has passed, is FAILED_PRECONDITION (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func (s *Server) RestoreCryptoKeyVersion(_ context.Context, req *kmspb.RestoreCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	if _, _, err := parseCryptoKeyVersion("name", req.GetName()); err != nil {
 		return nil, apierror.Wrap(err)
@@ -1242,6 +1256,7 @@ func validateLabels(labels map[string]string) error {
 // with its field unset clears it.
 // Immutable and output-only fields are refused naming the path; the codes
 // are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
 	in := req.GetCryptoKey()
 	if err := parseCryptoKey("crypto_key.name", in.GetName()); err != nil {
@@ -1322,6 +1337,7 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	}
 	// A key keeps the protection level it was created with: the template
 	// may name it again, not another (the code is UNVERIFIED).
+	// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 	if setLevel && level != k.protectionLevel() {
 		return nil, apierror.Wrap(apierror.InvalidArgument("version_template.protection_level cannot change from %s to %s", k.protectionLevel(), level))
 	}
@@ -1332,6 +1348,7 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 		// A template names an algorithm of the key's own purpose; new
 		// versions get it, existing ones keep theirs (resources.proto
 		// version_template). The codes are UNVERIFIED.
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 		a, err := levelAlgorithm(k.protectionLevel(), k.purpose(), templateAlg)
 		if err != nil {
 			return nil, apierror.Wrap(err)
@@ -1366,6 +1383,7 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 // version here has no attestation to show, since no HSM made it
 // (protection.go, #1452), so both views return the same fields. Another
 // value's code is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func checkView(field string, v kmspb.CryptoKeyVersion_CryptoKeyVersionView) error {
 	switch v {
 	case kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_VIEW_UNSPECIFIED, kmspb.CryptoKeyVersion_FULL:
@@ -1377,6 +1395,7 @@ func checkView(field string, v kmspb.CryptoKeyVersion_CryptoKeyVersionView) erro
 // parseOrderBy accepts the orders the sorting-and-filtering documentation
 // shows for these lists: name ascending (also the default) and "name desc".
 // Anything else is INVALID_ARGUMENT naming it (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func parseOrderBy(orderBy string) (desc bool, err error) {
 	switch strings.Join(strings.Fields(orderBy), " ") {
 	case "", "name", "name asc":

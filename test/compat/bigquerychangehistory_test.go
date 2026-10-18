@@ -222,6 +222,7 @@ func TestBigQueryChangeHistoryWritePaths(t *testing.T) {
 // CHANGES of a table without enable_change_history, a start before the
 // time travel window, a future end, and either function on a view fail
 // 400 (wording UNVERIFIED); APPENDS reads a table without the option; a
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/change-history
 // start before the table was made reads from its creation.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert

@@ -608,7 +608,8 @@ func (f front) undeleteDataset(r *http.Request, dataset string, deleted int64) (
 	project := projectOf(f.base)
 	f.expireDropped(r)
 	if st, _ := f.get(r, "/datasets/"+url.PathEscape(dataset)); st == http.StatusOK {
-		return http.StatusConflict, "duplicate", "Already Exists: Dataset " + project + ":" + dataset // UNVERIFIED wording
+		return http.StatusConflict, "duplicate", "Already Exists: Dataset " + project + ":" + dataset // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets/undelete
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets/undelete
 	}
 	if f.dropped == nil {
 		return http.StatusNotFound, "notFound", "Not found: Dataset " + project + ":" + dataset
@@ -616,6 +617,7 @@ func (f front) undeleteDataset(r *http.Request, dataset string, deleted int64) (
 	d, tables, ok := f.dropped.takeDataset(project, dataset, deleted)
 	if !ok {
 		// UNVERIFIED wording.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/datasets/undelete
 		return http.StatusNotFound, "notFound", "Not found: Dataset " + project + ":" + dataset +
 			" was not deleted within its time travel window"
 	}
@@ -713,8 +715,9 @@ func pseudoColumn(name string) bool {
 //
 // A multi-statement query is carried out a statement at a time (#1548,
 // runScript), so each UNDROP SCHEMA runs in its turn, alone, as BigQuery
-// runs it. Only a script that cannot be run so (one with a TEMP table or
-// function, which lasts only for its request, or a transaction's) keeps
+// runs it, and so is a script with a TEMP table or function, in its
+// session (#1562, tempsession.go). Only a script that cannot be run so (a
+// TEMP script tempSessionScript does not read, or a transaction's) keeps
 // #1483's way: each UNDROP SCHEMA carried out before the query runs, and
 // sent to the engine as a statement that does nothing. That is BigQuery's
 // order only when no other statement can see the dataset, so it is 501,
@@ -783,6 +786,11 @@ func (f front) undropSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 		// would run it: after the statements before it, whatever control
 		// flow or other statement names the dataset.
 		f.runScript(w, r, q, insert)
+		return true
+	}
+	if n > 1 && !txnRequest(r) && f.runTempScript(w, r, q, insert) {
+		// #1562: a script with a TEMP table or function is carried out a
+		// statement at a time too, in its session (tempsession.go).
 		return true
 	}
 	if n > 1 {
@@ -946,6 +954,7 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 	ms, err := strconv.ParseInt(dec, 10, 64)
 	if err != nil {
 		// UNVERIFIED wording.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/table-decorators
 		return copyTable{}, http.StatusBadRequest, "invalid", "Invalid table decorator " + name + "@" + dec +
 			": a time decorator is milliseconds since the epoch, or a negative offset from now"
 	}
@@ -993,6 +1002,7 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 	switch {
 	case !found && deleted:
 		// UNVERIFIED wording.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/restore-deleted-tables
 		return copyTable{}, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid snapshot time %d for table %s@%d: "+
 			"the table did not exist at that time", at, name, at)
 	case !found:
@@ -1077,6 +1087,7 @@ func (f front) copyRange(r *http.Request, ref tableRef, name, dec, from, to stri
 	// "Both values must be within the last seven days."
 	if earliest := now - 7*24*int64(time.Hour/time.Millisecond); t1 < earliest {
 		// UNVERIFIED wording, as the time decorator's.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/table-decorators
 		return copyTable{}, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid range decorator %s@%s. "+
 			"Cannot read before %d", name, dec, earliest)
 	}

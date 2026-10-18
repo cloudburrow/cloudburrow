@@ -36,6 +36,7 @@ import (
 // and the client's text, and jobs.get reports the statementType
 // (CREATE_SNAPSHOT_TABLE and DROP_SNAPSHOT_TABLE, as JobStatistics2 names
 // them; CREATE_TABLE for a clone, UNVERIFIED), ddlOperationPerformed and
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 // ddlTargetTable (jobText.ddl).
 //
 // FOR SYSTEM_TIME AS OF the source is read as a query's is

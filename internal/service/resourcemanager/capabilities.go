@@ -29,8 +29,10 @@ package resourcemanager
 // configuredCapabilities; projects.list and search do not (UNVERIFIED
 // there).
 // UNVERIFIED: the project ID and display name, the statuses and messages of
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects
 // the refusals, and the operation's metadata (UpdateCapabilityConfigMetadata,
 // empty).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects
 
 import (
 	"encoding/json"
@@ -55,6 +57,7 @@ var folderCapabilities = []string{appManagement}
 
 // ManagementProjectID is the project ID of folder's management project
 // (UNVERIFIED: shaped as the discovery document's example).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects
 func ManagementProjectID(folder string) string { return "google-mp-" + folder }
 
 // Capability is cloudresourcemanager v3's Capability.

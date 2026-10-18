@@ -36,6 +36,7 @@ import (
 // training is predicted NULL; factors are numbered from 1; the column
 // order of ML.RECOMMEND. Refused 501: IMPLICIT feedback (its weighting by
 // wals_alpha and ranking metrics), and a data split.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-matrix-factorization
 
 // mfTrained is a matrix factorization model's weights.
 type mfTrained struct {

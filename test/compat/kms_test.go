@@ -43,6 +43,7 @@ const EnvKMS = "CLOUDBURROW_TEST_KMS"
 // key material kept in owned Kubernetes Secrets; /admin/reset clearing it.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a key ring removed by /admin/reset
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSResources(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -195,7 +196,9 @@ func TestKMSResources(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/GetCryptoKey
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKey INVALID_ARGUMENT: a malformed name (wrong collection)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKey NOT_FOUND: a well-formed name that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSNamesAreValidatedBeforeLookup(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -273,7 +276,9 @@ func TestKMSVersionCanStartDisabled(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion INVALID_ARGUMENT: an update_mask without state
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion INVALID_ARGUMENT: a target state of DESTROYED
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSUpdateCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -319,6 +324,7 @@ func TestKMSUpdateCryptoKeyVersion(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion FAILED_PRECONDITION: a DISABLED target version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/updatePrimaryVersion
 func TestKMSPrimaryMustBeEnabled(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -362,7 +368,9 @@ func TestKMSPrimaryMustBeEnabled(t *testing.T) {
 // 30 days and is echoed, 24h reads back as 24h, and purpose is required.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: ASYMMETRIC_SIGN with no version_template.algorithm
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSCreateCryptoKeyFields(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -412,6 +420,7 @@ func TestKMSCreateCryptoKeyFields(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion FAILED_PRECONDITION: a version already DESTROY_SCHEDULED
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func TestKMSDestroyCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -448,6 +457,7 @@ func TestKMSDestroyCryptoKeyVersion(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion FAILED_PRECONDITION: an ENABLED version
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSRestoreCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -489,9 +499,13 @@ func TestKMSRestoreCryptoKeyVersion(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/Encrypt
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/Encrypt INVALID_ARGUMENT: empty plaintext, or plaintext or AAD over 64KiB
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/encrypt
 // unverified: google.cloud.kms.v1.KeyManagementService/Encrypt FAILED_PRECONDITION: a DISABLED primary, a DISABLED named version, or a key with no primary
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 // unverified: google.cloud.kms.v1.KeyManagementService/Encrypt NOT_FOUND: a key that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/Encrypt INVALID_ARGUMENT: a malformed name
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSEncrypt(t *testing.T) {
 	h := New(t)
 	clients := kmsClients(t, h)
@@ -610,7 +624,9 @@ func kmsEncryptCases(t *testing.T, h *Harness, c, cl *kms.KeyManagementClient, v
 // covers: google.cloud.kms.v1.KeyManagementService/Decrypt
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/Decrypt INVALID_ARGUMENT: a wrong AAD, a tampered ciphertext, or another key's ciphertext
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/decrypt
 // unverified: google.cloud.kms.v1.KeyManagementService/Decrypt INVALID_ARGUMENT: a CryptoKeyVersion name, or an empty ciphertext
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/decrypt
 func TestKMSDecrypt(t *testing.T) {
 	h := New(t)
 	clients := kmsClients(t, h)
@@ -709,7 +725,9 @@ func kmsDecryptCases(t *testing.T, h *Harness, c, cl *kms.KeyManagementClient, v
 // covers: google.cloud.kms.v1.KeyManagementService/Decrypt
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/Decrypt FAILED_PRECONDITION: a DISABLED or DESTROY_SCHEDULED version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 // unverified: google.cloud.kms.v1.KeyManagementService/Encrypt FAILED_PRECONDITION: a DESTROY_SCHEDULED named version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func TestKMSDecryptFollowsTheVersionLifecycle(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -883,6 +901,7 @@ func TestKMSDiagnoseCarriesNoKeyMaterial(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey INVALID_ARGUMENT: the immutable destroy_scheduled_duration in the mask
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys
 func TestKMSUpdateCryptoKey(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -1106,6 +1125,7 @@ func TestKMSNameAndLabelFilters(t *testing.T) {
 // project's ring readable (#387).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a key ring removed by a project-scoped /admin/reset
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSProjectResetClearsOnlyThatProject(t *testing.T) {
 	target, bystander := New(t), New(t)
 	if target.Project() == bystander.Project() {
@@ -1138,6 +1158,7 @@ func TestKMSProjectResetClearsOnlyThatProject(t *testing.T) {
 //
 // covers: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion NOT_FOUND: a version number the key does not have
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSGetCryptoKeyVersion(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()

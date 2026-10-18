@@ -50,8 +50,11 @@ func managedFolderBucket(t *testing.T, h *Harness, c *storage.Client, s *storage
 // deleted.
 //
 // unverified: storage.managedFolders.insert 400: a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 // unverified: storage.managedFolders.delete 409: a managed folder with objects or managed folders under it, without allowNonEmpty
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 // unverified: storage.buckets.delete 409: a bucket that holds a managed folder
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/delete
 // covers: storage.managedFolders.insert, storage.managedFolders.get, storage.managedFolders.list, storage.managedFolders.delete
 func TestStorageManagedFolderLifecycle(t *testing.T) {
 	h := New(t)
@@ -138,6 +141,7 @@ func TestStorageManagedFolderLifecycle(t *testing.T) {
 // for, as nothing is enforced (ADR-0006).
 //
 // unverified: storage.managedFolders.setIamPolicy 412: a stale etag (as for buckets.setIamPolicy)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/managedFolder/setIamPolicy
 // covers: storage.managedFolders.getIamPolicy, storage.managedFolders.setIamPolicy, storage.managedFolders.testIamPermissions
 func TestStorageManagedFolderIAM(t *testing.T) {
 	h := New(t)

@@ -23,6 +23,7 @@ import (
 // A table streamed through a scratch table (streamingbuffer.go, #1370)
 // makes it with no precision or scale (scratchSchema), so the rows are
 // rounded once, by the table's own triggers, with its own modes.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-types
 
 // decimalOverflow is the errors of the parameterized NUMERIC and BIGNUMERIC
 // values of obj, a row checkRow passed, that are out of range once
@@ -31,6 +32,7 @@ import (
 // column's value is (#1409): the engine rounds them too (bigquery-emulator
 // patch 0021). A nested value's location is its field's path, a.b
 // (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-types
 func decimalOverflow(fields []field, obj map[string]any, tableMode string) []rowError {
 	var errs []rowError
 	for k, v := range obj {

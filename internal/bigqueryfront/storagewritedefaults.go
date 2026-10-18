@@ -31,6 +31,7 @@ import (
 // googlesqlite 0027, columndefaults.go), as it does for a column the
 // writer schema lacks. An Arrow NULL taken as missing is UNVERIFIED
 // against BigQuery.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/bigquery/storage/v1/storage.proto
 
 // missingValues are the columns, by lower-case name, whose missing values
 // are their defaults; nil: none.

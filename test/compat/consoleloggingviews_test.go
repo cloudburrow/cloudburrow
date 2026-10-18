@@ -176,6 +176,8 @@ func TestConsoleLogsExplorerThroughView(t *testing.T) {
 // covers: google.logging.v2.ConfigServiceV2/CopyLogEntries
 func TestConsoleLoggingCopyFromParents(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
+	shardEndpoint(h, envSinkStorage, EnvStorage)
 	ctx := h.Context()
 	addr := consoleAddr(t, h)
 	sc := storageClient(t, h)

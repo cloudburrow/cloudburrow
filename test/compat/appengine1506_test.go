@@ -155,6 +155,7 @@ func TestTasksAppEngineDelivery(t *testing.T) {
 // User-Agent; Job.status is OK after the app's 200.
 func TestSchedulerAppEngineDelivery(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_SCHEDULER", EnvScheduler)
 	c := schedulerClient(t, h)
 	got := standInApp(t)
 	ctx := h.Context()

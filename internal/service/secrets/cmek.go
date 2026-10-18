@@ -53,6 +53,7 @@ import (
 //     the first AddSecretVersion;
 //   - the Secret Manager service agent's roles/cloudkms.cryptoKeyEncrypterDecrypter
 //     grant is not required: IAM is recorded, never enforced (ADR-0006).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/secret-manager/docs/cmek
 
 // KeyService is the part of Cloud KMS that CMEK uses: Encrypt and Decrypt,
 // as the instance's Cloud KMS serves them. *kms.Server is one.

@@ -64,6 +64,8 @@ func wantSQLRefusal(t *testing.T, what string, err error, field string) {
 func TestCloudSQLFieldsNeverSilentlyDropped(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
+	// Cloud KMS as the sql shard's CMEK_KMS (#1568), so the KMS suite stays in served.
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	kmsClients(t, h)
 	if os.Getenv(EnvCloudSQL) == "" || os.Getenv(EnvKMS) == "" {
 		t.Skip("needs --services cloudsql,kms")
@@ -146,6 +148,8 @@ func TestCloudSQLFieldsNeverSilentlyDropped(t *testing.T) {
 func TestTerraformSQLDatabaseInstanceEncryptionKey(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
+	// Cloud KMS as the sql shard's CMEK_KMS (#1568), so the KMS suite stays in served.
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	kmsClients(t, h)
 	if os.Getenv(EnvCloudSQL) == "" || os.Getenv(EnvKMS) == "" {
 		t.Skip("needs --services cloudsql,kms")

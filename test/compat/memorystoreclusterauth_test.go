@@ -76,7 +76,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 				_ = op.Wait(h.Context())
 			}
 		})
-		cl, err := op.Wait(h.Context())
+		cl, err := op.Wait(memorystoreWait(t))
 		if err != nil {
 			t.Fatalf("CreateCluster %s operation: %v", id, err)
 		}
@@ -102,7 +102,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddTokenAuthUser: %v", err)
 	}
-	if _, err := uop.Wait(h.Context()); err != nil {
+	if _, err := uop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("AddTokenAuthUser operation: %v", err)
 	}
 	user := name + "/tokenAuthUsers/app"
@@ -110,7 +110,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddAuthToken: %v", err)
 	}
-	if u, err := top.Wait(h.Context()); err != nil || u.GetName() != user {
+	if u, err := top.Wait(memorystoreWait(t)); err != nil || u.GetName() != user {
 		t.Fatalf("AddAuthToken operation = %v, %v", u, err)
 	}
 	if u, err := c.GetTokenAuthUser(h.Context(), &clusterpb.GetTokenAuthUserRequest{Name: user}); err != nil || u.GetState() != clusterpb.TokenAuthUser_ACTIVE {
@@ -155,7 +155,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateAclPolicy: %v", err)
 	}
-	if p, err := pop.Wait(h.Context()); err != nil || len(p.GetClusterAclPolicyAttachments()) != 1 {
+	if p, err := pop.Wait(memorystoreWait(t)); err != nil || len(p.GetClusterAclPolicyAttachments()) != 1 {
 		t.Fatalf("UpdateAclPolicy operation = %v, %v", p, err)
 	}
 	if err := reader.Set(h.Context(), "app:other", "x", 0).Err(); err != nil {
@@ -184,7 +184,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BackupCluster: %v", err)
 	}
-	if _, err := bop.Wait(h.Context()); err != nil {
+	if _, err := bop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("BackupCluster operation: %v", err)
 	}
 	col, err := c.GetBackupCollection(h.Context(), &clusterpb.GetBackupCollectionRequest{Name: cl.GetBackupCollection()})
@@ -206,7 +206,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExportBackup: %v", err)
 	}
-	if _, err := eop.Wait(h.Context()); err != nil {
+	if _, err := eop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("ExportBackup operation: %v", err)
 	}
 	for _, f := range b.GetBackupFiles() {
@@ -233,7 +233,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteAuthToken: %v", err)
 	}
-	if err := dop.Wait(h.Context()); err != nil {
+	if err := dop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("DeleteAuthToken operation: %v", err)
 	}
 	gone := redis.NewClient(&redis.Options{Addr: addr, Username: "app", Password: tok.GetToken(), MaxRetries: -1})
@@ -245,14 +245,14 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteTokenAuthUser: %v", err)
 	}
-	if err := duop.Wait(h.Context()); err != nil {
+	if err := duop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("DeleteTokenAuthUser operation: %v", err)
 	}
 	delop, err := c.DeleteBackup(h.Context(), &clusterpb.DeleteBackupRequest{Name: bname})
 	if err != nil {
 		t.Fatalf("DeleteBackup: %v", err)
 	}
-	if err := delop.Wait(h.Context()); err != nil {
+	if err := delop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("DeleteBackup operation: %v", err)
 	}
 	if _, err := c.GetBackup(h.Context(), &clusterpb.GetBackupRequest{Name: bname}); status.Code(err) != codes.NotFound {
@@ -268,7 +268,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateCluster acl_policy: %v", err)
 	}
-	if _, err := upd.Wait(h.Context()); err != nil {
+	if _, err := upd.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("UpdateCluster acl_policy operation: %v", err)
 	}
 	if err := reader.Ping(h.Context()).Err(); err == nil {
@@ -276,7 +276,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	}
 	if op, err := c.DeleteAclPolicy(h.Context(), &clusterpb.DeleteAclPolicyRequest{Name: pol.GetName()}); err != nil {
 		t.Errorf("DeleteAclPolicy: %v", err)
-	} else if err := op.Wait(h.Context()); err != nil {
+	} else if err := op.Wait(memorystoreWait(t)); err != nil {
 		t.Errorf("DeleteAclPolicy operation: %v", err)
 	}
 }
@@ -310,7 +310,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 				_ = op.Wait(h.Context())
 			}
 		})
-		inst, err := op.Wait(h.Context())
+		inst, err := op.Wait(memorystoreWait(t))
 		if err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", id, err)
 		}
@@ -333,7 +333,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddTokenAuthUser: %v", err)
 	}
-	if _, err := uop.Wait(h.Context()); err != nil {
+	if _, err := uop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("AddTokenAuthUser operation: %v", err)
 	}
 	user := name + "/tokenAuthUsers/app"
@@ -341,7 +341,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddAuthToken: %v", err)
 	}
-	if _, err := top.Wait(h.Context()); err != nil {
+	if _, err := top.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("AddAuthToken operation: %v", err)
 	}
 	if u, err := c.GetTokenAuthUser(h.Context(), &memorystorepb.GetTokenAuthUserRequest{Name: user}); err != nil || u.GetState() != memorystorepb.TokenAuthUser_ACTIVE {
@@ -380,7 +380,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BackupInstance: %v", err)
 	}
-	if _, err := bop.Wait(h.Context()); err != nil {
+	if _, err := bop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("BackupInstance operation: %v", err)
 	}
 	if col, err := c.GetBackupCollection(h.Context(), &memorystorepb.GetBackupCollectionRequest{Name: inst.GetBackupCollection()}); err != nil ||
@@ -402,7 +402,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExportBackup: %v", err)
 	}
-	if _, err := eop.Wait(h.Context()); err != nil {
+	if _, err := eop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("ExportBackup operation: %v", err)
 	}
 	restored := create(fmt.Sprintf("compat-vkrst-%d", sfx), &memorystorepb.Instance{ShardCount: 2, NodeType: memorystorepb.Instance_SHARED_CORE_NANO,
@@ -425,7 +425,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteAuthToken: %v", err)
 	}
-	if err := dop.Wait(h.Context()); err != nil {
+	if err := dop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("DeleteAuthToken operation: %v", err)
 	}
 	gone := redis.NewClient(&redis.Options{Addr: paddr, Username: "app", Password: tok.GetToken(), MaxRetries: -1})
@@ -437,14 +437,14 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteTokenAuthUser: %v", err)
 	}
-	if err := duop.Wait(h.Context()); err != nil {
+	if err := duop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("DeleteTokenAuthUser operation: %v", err)
 	}
 	delop, err := c.DeleteBackup(h.Context(), &memorystorepb.DeleteBackupRequest{Name: bname})
 	if err != nil {
 		t.Fatalf("DeleteBackup: %v", err)
 	}
-	if err := delop.Wait(h.Context()); err != nil {
+	if err := delop.Wait(memorystoreWait(t)); err != nil {
 		t.Fatalf("DeleteBackup operation: %v", err)
 	}
 	if _, err := c.CreateInstance(h.Context(), &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: fmt.Sprintf("compat-vkccr-%d", sfx),

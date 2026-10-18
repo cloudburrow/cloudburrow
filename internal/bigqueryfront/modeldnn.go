@@ -39,8 +39,23 @@ import (
 // l1_reg·‖w‖₁ + l2_reg·‖w‖² of the weights, not the biases; inverted
 // dropout of each hidden layer's output in training only; an iteration's
 // loss the training rows' mean loss after the pass, without dropout.
-// Refused 501: optimizer FTRL, activation_fn CRELU, class weights,
-// hyperparameter tuning, and warm_start.
+// #1562 adds, as BigQuery documents them: optimizer FTRL, TensorFlow's
+// FtrlOptimizer (BigQuery's page links it) at its defaults
+// (learning_rate_power -0.5, initial_accumulator_value 0.1, no l1 or l2
+// strength of its own; l1_reg and l2_reg are the loss's, as with ADAGRAD
+// and SGD); activation_fn CRELU, "Concatenated ReLU", a hidden layer's
+// output [RELU(a), RELU(-a)], twice its units wide, as TensorFlow's
+// tf.nn.crelu; class_weights, "a weight must be present for every class
+// label" (400 else), and auto_class_weights, total_input_rows /
+// (input_rows_for_class_n · number_of_unique_classes), each row's loss
+// and gradient multiplied by its label's weight (Keras's sample weights:
+// the batch's sum over its size; evaluation unweighted); and an
+// AUTOENCODER's l1_reg_activation, "a penalty on the activations at the
+// latent space" (the middle hidden layer, hidden_units[len/2]), the loss
+// plus l1_reg_activation · Σ|activation| a row, before dropout.
+// UNVERIFIED: that Google's optimizer, regularization and weighting are
+// these (its network is not the same anyway, above).
+// Refused 501: hyperparameter tuning and warm_start.
 //
 // ML.PREDICT is written into the query as SQL of the network, a layer's
 // units the columns of a subquery of their own; ML.EVALUATE,
@@ -48,6 +63,7 @@ import (
 // serve it as they do the other models. ML.WEIGHTS, ML.FEATURE_IMPORTANCE
 // and the explain functions are not supported for it, as BigQuery's
 // documentation of each lists the model types it takes.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-dnn-models
 
 // dnnTrained is a network's layers, the hidden ones then the output.
 type dnnTrained struct {
@@ -69,7 +85,51 @@ func isDNN(typ string) bool { return typ == "DNN_REGRESSOR" || typ == "DNN_CLASS
 func isNetwork(typ string) bool { return isDNN(typ) || typ == "AUTOENCODER" }
 
 // dnnActivations are the activation_fn values carried out.
-var dnnActivations = map[string]bool{"RELU": true, "RELU6": true, "ELU": true, "SELU": true, "SIGMOID": true, "TANH": true}
+var dnnActivations = map[string]bool{"RELU": true, "RELU6": true, "CRELU": true, "ELU": true, "SELU": true, "SIGMOID": true, "TANH": true}
+
+// dnnActVec is a hidden layer's output of its pre-activations a: fn of
+// each, or, for CRELU, [RELU(a), RELU(-a)] (#1562).
+func dnnActVec(fn string, a []float64) []float64 {
+	if fn == "CRELU" {
+		out := make([]float64, 2*len(a))
+		for j, v := range a {
+			out[j], out[len(a)+j] = math.Max(v, 0), math.Max(-v, 0)
+		}
+		return out
+	}
+	out := make([]float64, len(a))
+	for j, v := range a {
+		out[j] = dnnAct(fn, v)
+	}
+	return out
+}
+
+// dnnActBack is the gradient on a hidden layer's pre-activations a of
+// gout, the gradient on its output (dnnActVec).
+func dnnActBack(fn string, a, gout []float64) []float64 {
+	g := make([]float64, len(a))
+	for j, v := range a {
+		if fn == "CRELU" {
+			switch {
+			case v > 0:
+				g[j] = gout[j]
+			case v < 0:
+				g[j] = -gout[len(a)+j]
+			}
+			continue
+		}
+		g[j] = gout[j] * dnnActGrad(fn, v)
+	}
+	return g
+}
+
+// dnnWidth is the width of a hidden layer of units under fn.
+func dnnWidth(fn string, units int) int {
+	if fn == "CRELU" {
+		return 2 * units
+	}
+	return units
+}
 
 const (
 	seluScale = 1.0507009873554805
@@ -157,19 +217,26 @@ func dnnActSQL(fn, a string) string {
 // forward is the network's output for x (the encoded columns, no
 // intercept): the output layer's values, before sigmoid or softmax.
 func (d *dnnTrained) forward(x []float64) []float64 {
+	out, _ := d.forwardActs(x)
+	return out
+}
+
+// forwardActs is forward, with each hidden layer's output.
+func (d *dnnTrained) forwardActs(x []float64) ([]float64, [][]float64) {
 	h := x
+	var acts [][]float64
 	for l, ly := range d.Layers {
-		out := make([]float64, len(ly.B))
+		a := make([]float64, len(ly.B))
 		for j := range ly.B {
-			a := ly.B[j] + dot(ly.W[j], h)
-			if l < len(d.Layers)-1 {
-				a = dnnAct(d.Activation, a)
-			}
-			out[j] = a
+			a[j] = ly.B[j] + dot(ly.W[j], h)
 		}
-		h = out
+		if l < len(d.Layers)-1 {
+			a = dnnActVec(d.Activation, a)
+			acts = append(acts, a)
+		}
+		h = a
 	}
-	return h
+	return h, acts
 }
 
 // dnnFrom is from with the network's columns added, a subquery a layer:
@@ -190,13 +257,30 @@ func (d *dnnTrained) dnnFrom(from string, enc []string) (string, []string) {
 			}
 			a := "(" + strings.Join(terms, " + ") + ")"
 			name := fmt.Sprintf("_cbml_h%d_%d", l, j)
-			if last {
+			switch {
+			case last:
 				name = fmt.Sprintf("_cbml_o%d", j)
-			} else {
+			case d.Activation == "CRELU":
+				a = "GREATEST(" + a + ", 0.0)"
+			default:
 				a = dnnActSQL(d.Activation, a)
 			}
 			cols = append(cols, a+" AS "+name)
 			names = append(names, name)
+		}
+		if !last && d.Activation == "CRELU" {
+			// The negative half, RELU(-a), after the positive (#1562).
+			for j := range ly.B {
+				terms := []string{sqlF(-ly.B[j])}
+				for i, e := range in {
+					if ly.W[j][i] != 0 {
+						terms = append(terms, sqlF(-ly.W[j][i])+" * "+e)
+					}
+				}
+				name := fmt.Sprintf("_cbml_h%d_%d", l, len(ly.B)+j)
+				cols = append(cols, "GREATEST(("+strings.Join(terms, " + ")+"), 0.0) AS "+name)
+				names = append(names, name)
+			}
 		}
 		from = "(SELECT *, " + strings.Join(cols, ", ") + " FROM " + from + ")"
 		added = append(added, names...)
@@ -227,13 +311,16 @@ func checkDNNOptions(o mlOptions) (int, string) {
 	if (o.L1 != 0 || o.L2 != 0) && o.Optimizer != "ADAGRAD" && o.Optimizer != "SGD" && o.Optimizer != "FTRL" {
 		return 400, "l1_reg and l2_reg are only supported with optimizer ADAGRAD, FTRL or SGD"
 	}
+	if o.AutoClassWeights && o.ClassWeights != nil {
+		return 400, "class_weights cannot be set when auto_class_weights is TRUE"
+	}
 	return 0, ""
 }
 
 // trainDNN fits the network on X (each row's encoded columns, the
 // intercept's 1 first) and Y, and the metrics on EX, EY (or X, Y). K is
 // the classes of a multiclass classifier, else 1.
-func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]float64, EY []float64, classifier bool, K int) {
+func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]float64, EY []float64, classifier bool, K int) *mlFail {
 	t.Strategy = "BATCH_GRADIENT_DESCENT"
 	strip := func(R [][]float64) [][]float64 {
 		out := make([][]float64, len(R))
@@ -258,14 +345,56 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 	if batch == 0 || batch > n {
 		batch = min(32, n)
 	}
+	// Each row's weight, its label's (#1562): nil, all 1.
+	var rw []float64
+	if classifier && (o.ClassWeights != nil || o.AutoClassWeights) {
+		nk := max(K, 2)
+		wk := make([]float64, nk)
+		count := make([]float64, nk)
+		for _, y := range Y {
+			count[int(y)]++
+		}
+		for k := range wk {
+			if o.AutoClassWeights {
+				if count[k] > 0 {
+					wk[k] = float64(n) / (count[k] * float64(len(t.Classes)))
+				}
+				continue
+			}
+			w, ok := o.ClassWeights[t.Classes[k]]
+			if !ok {
+				for c, v := range o.ClassWeights {
+					if strings.EqualFold(c, t.Classes[k]) {
+						w, ok = v, true
+					}
+				}
+			}
+			if !ok {
+				return mlInvalid("class_weights has no weight for the class label %s: a weight must be present for every class label", t.Classes[k])
+			}
+			wk[k] = w
+		}
+		rw = make([]float64, n)
+		for i, y := range Y {
+			rw[i] = wk[int(y)]
+		}
+	}
+	latent := -1
+	if auto && o.L1Activation > 0 {
+		latent = len(units) / 2
+	}
 	rng := rand.New(rand.NewSource(1548))
 	d := &dnnTrained{Activation: o.Activation}
 	sizes := append(append([]int{in}, units...), K)
 	for l := 1; l < len(sizes); l++ {
-		limit := math.Sqrt(6 / float64(sizes[l-1]+sizes[l]))
+		fanIn := sizes[l-1]
+		if l > 1 {
+			fanIn = dnnWidth(o.Activation, sizes[l-1])
+		}
+		limit := math.Sqrt(6 / float64(fanIn+sizes[l]))
 		ly := dnnLayer{W: make([][]float64, sizes[l]), B: make([]float64, sizes[l])}
 		for j := range ly.W {
-			ly.W[j] = make([]float64, sizes[l-1])
+			ly.W[j] = make([]float64, fanIn)
 			for i := range ly.W[j] {
 				ly.W[j][i] = (2*rng.Float64() - 1) * limit
 			}
@@ -289,7 +418,7 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 		return out
 	}
 	acc := 0.0
-	if o.Optimizer == "ADAGRAD" {
+	if o.Optimizer == "ADAGRAD" || o.Optimizer == "FTRL" {
 		acc = 0.1
 	}
 	st := moments{m: zeros(0), v: zeros(acc)}
@@ -310,14 +439,24 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 		}
 		return (z[0] - y) * (z[0] - y)
 	}
-	meanLoss := func(X [][]float64, Y []float64) float64 {
+	meanLoss := func(X [][]float64, Y []float64, rw []float64) float64 {
 		var s float64
 		for i, x := range X {
 			y := 0.0
 			if Y != nil {
 				y = Y[i]
 			}
-			s += lossOf(d.forward(x), y, x)
+			z, acts := d.forwardActs(x)
+			l := lossOf(z, y, x)
+			if rw != nil {
+				l *= rw[i]
+			}
+			if latent >= 0 {
+				for _, a := range acts[latent] {
+					l += o.L1Activation * math.Abs(a)
+				}
+			}
+			s += l
 		}
 		return s / float64(len(X))
 	}
@@ -334,17 +473,18 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 				inputs := make([][]float64, L)
 				pre := make([][]float64, L)
 				masks := make([][]float64, L)
+				acts := make([][]float64, L)
 				h := X[ri]
 				for l, ly := range d.Layers {
 					inputs[l] = h
 					a := make([]float64, len(ly.B))
-					out := make([]float64, len(ly.B))
 					for j := range ly.B {
 						a[j] = ly.B[j] + dot(ly.W[j], h)
-						out[j] = a[j]
-						if l < L-1 {
-							out[j] = dnnAct(d.Activation, a[j])
-						}
+					}
+					out := a
+					if l < L-1 {
+						out = dnnActVec(d.Activation, a)
+						acts[l] = append([]float64(nil), out...)
 					}
 					if l < L-1 && o.Dropout > 0 {
 						masks[l] = make([]float64, len(out))
@@ -378,6 +518,11 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 				default:
 					delta[0] = 2 * (h[0] - Y[ri])
 				}
+				if rw != nil {
+					for k := range delta {
+						delta[k] *= rw[ri]
+					}
+				}
 				for l := L - 1; l >= 0; l-- {
 					ly := d.Layers[l]
 					for j := range ly.B {
@@ -389,19 +534,21 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 					if l == 0 {
 						break
 					}
-					next := make([]float64, len(inputs[l]))
-					for i := range next {
+					gout := make([]float64, len(inputs[l]))
+					for i := range gout {
 						var s float64
 						for j := range ly.B {
 							s += ly.W[j][i] * delta[j]
 						}
-						s *= dnnActGrad(d.Activation, pre[l-1][i])
 						if masks[l-1] != nil {
 							s *= masks[l-1][i]
 						}
-						next[i] = s
+						if l-1 == latent {
+							s += o.L1Activation * sign(acts[l-1][i])
+						}
+						gout[i] = s
 					}
-					delta = next
+					delta = dnnActBack(d.Activation, pre[l-1], gout)
 				}
 			}
 			step++
@@ -424,6 +571,13 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 						case "ADAGRAD":
 							*v += g * g
 							*w -= o.LearnRate * g / (math.Sqrt(*v) + 1e-7)
+						case "FTRL":
+							// TensorFlow's FtrlOptimizer, learning_rate_power
+							// -0.5: m the linear term z, v the accumulator n.
+							nv := *v + g*g
+							*m += g - (math.Sqrt(nv)-math.Sqrt(*v))/o.LearnRate*(*w)
+							*v = nv
+							*w = -(*m) * o.LearnRate / math.Sqrt(nv)
 						case "RMSPROP":
 							*v = 0.9*(*v) + 0.1*g*g
 							*w -= o.LearnRate * g / (math.Sqrt(*v) + 1e-7)
@@ -438,9 +592,9 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 				}
 			}
 		}
-		it := mlIteration{Index: epoch, Loss: meanLoss(X, Y), LearnRate: o.LearnRate, DurationMs: time.Since(start).Milliseconds()}
+		it := mlIteration{Index: epoch, Loss: meanLoss(X, Y, rw), LearnRate: o.LearnRate, DurationMs: time.Since(start).Milliseconds()}
 		if len(EX) > 0 {
-			e := meanLoss(EX, EY)
+			e := meanLoss(EX, EY, nil)
 			it.EvalLoss = &e
 		}
 		t.Iterations = append(t.Iterations, it)
@@ -460,7 +614,7 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 	}
 	if auto {
 		t.Eval = d.reconstructionMetrics(evX)
-		return
+		return nil
 	}
 	if K > 1 {
 		probs := make([][]float64, len(evX))
@@ -472,7 +626,7 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 		for _, p := range probs {
 			t.EvalScore = append(t.EvalScore, float64(argmax(p)))
 		}
-		return
+		return nil
 	}
 	pred := make([]float64, len(evX))
 	for i, x := range evX {
@@ -487,6 +641,7 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 	} else {
 		t.Eval = regressionMetrics(evY, pred)
 	}
+	return nil
 }
 
 func sign(v float64) float64 {
@@ -539,9 +694,6 @@ func parseDNNOption(name string, val []token, o *mlOptions) (code int, msg strin
 			return bad()
 		}
 		s = strings.ToUpper(s)
-		if s == "CRELU" {
-			return 501, "Not implemented here: activation_fn CRELU. CloudBurrow carries out RELU, RELU6, ELU, SELU, SIGMOID and TANH. Nothing was run.", true
-		}
 		if !dnnActivations[s] {
 			return bad()
 		}
@@ -553,10 +705,8 @@ func parseDNNOption(name string, val []token, o *mlOptions) (code int, msg strin
 		}
 		s = strings.ToUpper(s)
 		switch s {
-		case "ADAM", "ADAGRAD", "RMSPROP", "SGD":
+		case "ADAM", "ADAGRAD", "FTRL", "RMSPROP", "SGD":
 			o.Optimizer = s
-		case "FTRL":
-			return 501, "Not implemented here: optimizer FTRL. CloudBurrow trains DNNs with ADAM, ADAGRAD, RMSPROP and SGD. Nothing was run.", true
 		default:
 			return bad()
 		}
@@ -577,11 +727,13 @@ func parseDNNOption(name string, val []token, o *mlOptions) (code int, msg strin
 		if !okv || v < 0 {
 			return bad()
 		}
-		if v > 0 {
-			return 501, "Not implemented here: l1_reg_activation other than 0 (its activity regularization is not carried out). Nothing was run.", true
-		}
+		o.L1Activation = v
 	case "class_weights":
-		return 501, "Not implemented here: CREATE MODEL option class_weights. Nothing was run.", true
+		w, okv := parseClassWeights(val)
+		if !okv {
+			return 400, "Invalid value for option class_weights: an ARRAY of STRUCT(label STRING, weight FLOAT64)", true
+		}
+		o.ClassWeights = w
 	default:
 		return 0, "", false
 	}
@@ -620,6 +772,7 @@ func (d *dnnTrained) latentLayer() int { return (len(d.Layers) - 1) / 2 }
 // latent_col_1, ..., then the input columns; ML.EVALUATE and
 // ML.RECONSTRUCTION_LOSS the errors of the encoded columns' reconstruction.
 // UNVERIFIED: BigQuery documents latent_col_<index> as INT64, which cannot
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-predict
 // hold a unit's value, so CloudBurrow gives FLOAT64; the errors are of the
 // preprocessed columns (BigQuery does not say which).
 func trainAutoencoder(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
@@ -740,4 +893,34 @@ func (f front) autoencoderSubquery(r *http.Request, q queryOptions, md bqModel, 
 			hidden + " FROM " + from + ")", 0, ""
 	}
 	return "", 400, "ML." + c.fn + " is not supported for model type AUTOENCODER"
+}
+
+// parseClassWeights reads class_weights' [STRUCT('label', weight), ...]
+// (or ('label', weight) tuples), each weight a number of at least 0.
+func parseClassWeights(val []token) (map[string]float64, bool) {
+	if len(val) < 2 || !val[0].punct("[") || !val[len(val)-1].punct("]") {
+		return nil, false
+	}
+	out := map[string]float64{}
+	for i := 1; i < len(val)-1; i++ {
+		if val[i].kind != tokString {
+			continue
+		}
+		label, ok := unquoteString(val[i].text)
+		if !ok || i+1 >= len(val) || !val[i+1].punct(",") {
+			return nil, false
+		}
+		num := ""
+		j := i + 2
+		for ; j < len(val)-1 && !val[j].punct(")") && !val[j].punct(","); j++ {
+			num += val[j].text
+		}
+		w, err := strconv.ParseFloat(num, 64)
+		if err != nil || w < 0 {
+			return nil, false
+		}
+		out[label] = w
+		i = j
+	}
+	return out, len(out) > 0
 }

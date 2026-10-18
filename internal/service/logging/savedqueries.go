@@ -33,6 +33,7 @@ import (
 // refused as UNIMPLEMENTED rather than ignored; a create with an ID that is
 // taken is ALREADY_EXISTS; an update's mask may name only the fields listed
 // in savedQueryMutable and logScopeMutable.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/projects.locations.savedQueries/list
 
 // savedQuery is a SavedQuery resource.
 type savedQuery struct {

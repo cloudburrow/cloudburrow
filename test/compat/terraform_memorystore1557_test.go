@@ -27,6 +27,8 @@ func TestTerraformMemorystore1557(t *testing.T) {
 	h := New(t)
 	rc, _ := redisClusterAdminClient(t, h)
 	vc, _ := valkeyAdminClient(t, h)
+	// Cloud KMS as the shard's CMEK_KMS (#1568), so the KMS suite stays in served.
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	kmsClients(t, h) // skips without Cloud KMS
 	m := newTFModule(t)
 	key := memorystoreKey(t, h, m.project)

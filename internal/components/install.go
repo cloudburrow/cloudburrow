@@ -301,7 +301,7 @@ const KnativeFeatures = `{"data":{"kubernetes.podspec-persistent-volume-claim":"
 // second up (#765).
 var (
 	webhookRetry      = 2 * time.Minute
-	webhookRetryEvery = 2 * time.Second
+	webhookRetryEvery = 500 * time.Millisecond
 )
 
 // patchValidated runs a kubectl patch of a ConfigMap in knative-serving,

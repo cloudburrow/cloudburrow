@@ -49,7 +49,9 @@ import (
 func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
-	h.Endpoint(EnvResourceManager)
+	// Resource Manager as the emulators shard's BIGQUERY_RESOURCEMANAGER
+	// (#1568), so the Resource Manager suite stays in storage.
+	shardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)
 	ctx := h.Context()
 	served := func(env string) bool {
 		if strings.TrimSpace(os.Getenv(env)) == "" {

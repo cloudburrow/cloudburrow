@@ -12,7 +12,9 @@ import (
 // A view outside the defined set is refused (#406).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions INVALID_ARGUMENT: a view that is not a CryptoKeyVersionView
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeys INVALID_ARGUMENT: a version_view that is not a CryptoKeyVersionView
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func TestAnUndefinedViewIsRefused(t *testing.T) {
 	ctx := context.Background()
 	c := client(t)

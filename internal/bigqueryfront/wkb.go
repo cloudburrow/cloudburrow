@@ -21,6 +21,7 @@ import (
 // and has a CRS, OGC:CRS84 (longitude, latitude on WGS84) when not given,
 // which is BigQuery's, and an edge algorithm, which is set to SPHERICAL.
 // UNVERIFIED against a file BigQuery exported: whether it sets the CRS,
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // and the WKB byte order (written little-endian, as is usual; a reader
 // takes either).
 //

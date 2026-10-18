@@ -583,6 +583,7 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 // with a privacy policy (why): with no privacy clause in q, BigQuery's 400
 // for a read of that table without the clause its policy needs (#1517,
 // UNVERIFIED: the analysis rules document no view of such a view, and a
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 // query of it without the clause cannot be one that "can be queried with"
 // it); else the 501, nothing run.
 func (f front) refuseViewRead(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, dataset string, clause bool,
@@ -635,6 +636,7 @@ func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) stri
 // TABLE_OPTIONS' documentation lists no privacy_policy; the DDL documents
 // its value as a "JSON-formatted STRING", so it is a STRING option, its
 // value the quoted JSON (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-table-options
 func privacyPolicyOption(t infoTable, st tableSetting) string {
 	if st.PrivacyPolicy != nil {
 		return *st.PrivacyPolicy

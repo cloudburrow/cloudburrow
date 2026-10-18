@@ -41,6 +41,7 @@ import (
 // is solved for the minimum-norm weights. The weights so differ from
 // Google's in their last digits, and more where the problem is
 // ill-conditioned or gradient descent stops early.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-glm
 
 // mlOptions are a model's training options, as CREATE MODEL gives them.
 type mlOptions struct {
@@ -96,6 +97,11 @@ type mlOptions struct {
 	Dropout     float64 `json:"dropout,omitempty"`
 	BatchSize   int     `json:"batchSize,omitempty"`
 	Optimizer   string  `json:"optimizer,omitempty"`
+	// #1562: class_weights by label, auto_class_weights, and an
+	// AUTOENCODER's l1_reg_activation (modeldnn.go).
+	ClassWeights     map[string]float64 `json:"classWeights,omitempty"`
+	AutoClassWeights bool               `json:"autoClassWeights,omitempty"`
+	L1Activation     float64            `json:"l1RegActivation,omitempty"`
 	// GlobalExplain is enable_global_explain (modelexplain.go).
 	GlobalExplain bool `json:"enableGlobalExplain,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
@@ -454,7 +460,9 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		if len(t.Classes) > 2 {
 			K = len(t.Classes)
 		}
-		t.trainDNN(opts, X, Y, EX, EY, logistic, K)
+		if fe := t.trainDNN(opts, X, Y, EX, EY, logistic, K); fe != nil {
+			return t, fe
+		}
 		return t, nil
 	}
 	dim := len(X[0])
@@ -751,6 +759,7 @@ func softmaxGradient(w []float64, X [][]float64, Y []float64, K int, l2 float64)
 // class one against the rest, and accuracy the fraction predicted right,
 // as BigQuery documents. A class's metric that is undefined (no row
 // predicted or labeled it) is left out of the average (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-evaluate
 func multiclassMetrics(y []float64, probs [][]float64) map[string]*float64 {
 	K := len(probs[0])
 	pred := make([]int, len(y))

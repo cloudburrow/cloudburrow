@@ -409,6 +409,7 @@ func TestStorageChecksums(t *testing.T) {
 // (#490).
 //
 // unverified: storage.buckets.delete 409: no page states the JSON API's status for a non-empty bucket; the XML API documents 409 BucketNotEmpty
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 func TestStorageNonEmptyBucketDelete(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)

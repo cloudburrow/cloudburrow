@@ -5,6 +5,7 @@ package tasks
 // dispatcher applies it to each attempt of each of the queue's tasks, from
 // the queue as it is at that attempt; the task keeps its own httpRequest,
 // which GetTask returns unchanged (UNVERIFIED: no page says whether Google
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/tasks/v2/target.proto
 // rewrites the stored task).
 //
 //   - uri_override replaces the scheme, host, port (0 clears it), path and

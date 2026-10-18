@@ -14,6 +14,7 @@ import (
 // not exist is NOT_FOUND. Formats: resources.proto keyRings, cryptoKeys and
 // cryptoKeyVersions patterns; IDs per service.proto key_ring_id and
 // crypto_key_id. Google's code for a malformed name is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 
 var (
 	// idRE is a key ring or crypto key ID.
@@ -29,6 +30,7 @@ func badName(field, name, kind, why string) error {
 // parseLocation checks projects/{p}/locations/{l}, with the project and
 // location rules every other service uses. A project number is refused, as
 // it is elsewhere; whether Google accepts one here is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/resource-hierarchy
 func parseLocation(field, name string) error {
 	if _, _, err := resource.ParseLocation(name); err != nil {
 		return apierror.InvalidArgument("%s %q is not a valid location name: %v", field, name, err)

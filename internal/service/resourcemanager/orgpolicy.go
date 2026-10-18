@@ -15,6 +15,7 @@ package resourcemanager
 // booleanPolicy, a list constraint listPolicy). A policy that is not set
 // reads back as {constraint, etag}. Which fields Google sets on such a
 // policy, and the code for a stale etag (ABORTED here), are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v1/projects/setOrgPolicy
 //
 // getEffectiveOrgPolicy evaluates the hierarchy as v1 documents it: from
 // the organization down through the folders to the resource, a boolean
@@ -23,6 +24,7 @@ package resourcemanager
 // effective list policy above it. The result carries no etag, as v1
 // documents for a policy computed across resources. How an inheriting list
 // is merged with an allValues above it is UNVERIFIED: here allValues ALLOW
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/resource-manager/reference/rest/v1/Policy
 // above keeps the child's denials (all but those), and DENY above keeps the
 // child's allowed values (only those).
 

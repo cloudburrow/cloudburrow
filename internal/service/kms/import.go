@@ -44,6 +44,7 @@ import (
 // (trusted.go).
 // The HPKE methods are UNIMPLEMENTED: they need ML-KEM or X-Wing.
 // The codes for refused imports are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/importing-a-key
 
 const (
 	importJobPrefix = "kms/importjob/"
@@ -440,11 +441,13 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	// The job's protection level "must match the protection_level of the
 	// version_template on the CryptoKey you attempt to import into"
 	// (resources.proto ImportJob); the code is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 	if j.protectionLevel() != k.protectionLevel() {
 		return nil, apierror.Wrap(apierror.InvalidArgument("ImportJob %s is %s, but CryptoKey %s is %s: the protection levels must match", j.Name, j.protectionLevel(), k.Name, k.protectionLevel()))
 	}
 	// An HSM_SINGLE_TENANT job imports into keys of its own instance; the
 	// code is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 	if j.Backend != k.Backend && k.protectionLevel() == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
 		return nil, apierror.Wrap(apierror.InvalidArgument("ImportJob %s is in the SingleTenantHsmInstance %s, but CryptoKey %s is in %s", j.Name, j.Backend, k.Name, k.Backend))
 	}

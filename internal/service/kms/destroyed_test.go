@@ -24,7 +24,9 @@ import (
 // the sweep has run (#403). The clock is moved; nothing sleeps.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion FAILED_PRECONDITION: a version whose destroy_time has passed
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion FAILED_PRECONDITION: a version whose destroy_time has passed
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func TestAScheduledVersionIsDestroyedAtItsDestroyTime(t *testing.T) {
 	ctx := context.Background()
 	clock := sched.NewFakeClock(time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC))

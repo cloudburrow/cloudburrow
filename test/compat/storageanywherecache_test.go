@@ -84,10 +84,15 @@ func waitOp(t *testing.T, s *storagev1.Service, bucket, id string) *storagev1.Go
 // update cannot. Reading an object is unaffected by its bucket's caches.
 //
 // unverified: storage.anywhereCaches.insert 409: a second cache in the zone (ANYWHERE_CACHE_ALREADY_EXISTS)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.anywhereCaches.insert 400: a zone outside the bucket's location
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.anywhereCaches.update 400: another update while one is pending
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.anywhereCaches.pause 400: a cache that is not running
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.buckets.operations.cancel 400: an Anywhere Cache update's operation, and a done one
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.get, storage.anywhereCaches.list, storage.anywhereCaches.update
 // covers: storage.anywhereCaches.pause, storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
 func TestStorageAnywhereCachesJSON(t *testing.T) {
@@ -286,8 +291,11 @@ func TestStorageAnywhereCachesControl(t *testing.T) {
 // dual-regions of one multi-region finishes by itself.
 //
 // unverified: storage.buckets.relocate 400: the bucket's own location
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/relocate
 // unverified: storage.buckets.relocate 409: a second relocation while one runs
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/relocate
 // unverified: storage.buckets.operations.advanceRelocateBucket 400: a relocation still syncing
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/bucket-relocation/overview
 // covers: storage.buckets.relocate, storage.buckets.operations.advanceRelocateBucket, storage.buckets.operations.cancel
 func TestStorageRelocate(t *testing.T) {
 	h := New(t)
@@ -472,6 +480,7 @@ func TestStorageNotificationsWithoutPubSub(t *testing.T) {
 		t.Skip("the instance serves Pub/Sub; TestNotificationConfigsCRUDThroughTheSDK covers notifications with it")
 	}
 	h := New(t)
+	shardEndpoint(h, envNoPubSubStorage, EnvStorage)
 	s := storageJSON(t, h)
 	b := locatedBucket(t, h, "-nps", "US")
 	_, err := s.Notifications.Insert(b, &storagev1.Notification{Topic: "//pubsub.googleapis.com/projects/" + h.Project() + "/topics/t", PayloadFormat: "JSON_API_V1"}).Do()

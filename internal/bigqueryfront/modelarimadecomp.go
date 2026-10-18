@@ -45,6 +45,7 @@ import (
 //     differences) is above 5; the point is replaced by the linear
 //     interpolation of its nearest clean neighbours, as BigQuery
 //     documents, and spikes_and_dips is the difference.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
 
 // arimaSeason is one seasonal period: its name and its length in points.
 type arimaSeason struct {

@@ -95,11 +95,15 @@ type Coordinator struct {
 
 	mu         sync.Mutex
 	components []Component
-	workers    []Worker
-	started    []Component // successfully started, in start order
-	state      State
-	failure    error
-	ready      map[string]bool
+	// groups[i] is the concurrent group components[i] belongs to, or 0
+	// when it starts on its own (RegisterConcurrent).
+	groups    []int
+	nextGroup int
+	workers   []Worker
+	started   []Component // successfully started, in start order
+	state     State
+	failure   error
+	ready     map[string]bool
 	// timing is when each component started and how long it took (#312).
 	timing map[string]Timing
 	now    func() time.Time
@@ -160,6 +164,23 @@ func (c *Coordinator) TimingOrder() []string {
 func (c *Coordinator) Register(components ...Component) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.components = append(c.components, components...)
+	c.groups = append(c.groups, make([]int, len(components))...)
+}
+
+// RegisterConcurrent adds components that depend on what was registered
+// before them but not on each other, so they start at the same time: the
+// next registration starts once every one of them has. Each still has its
+// own name, readiness and timing, and they stop in reverse registration
+// order like any others. A failure of one cancels the others' starts and
+// unwinds everything that started, as a sequential failure does.
+func (c *Coordinator) RegisterConcurrent(components ...Component) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextGroup++
+	for range components {
+		c.groups = append(c.groups, c.nextGroup)
+	}
 	c.components = append(c.components, components...)
 }
 
@@ -250,30 +271,23 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	}
 	c.state = StateStarting
 	components := append([]Component(nil), c.components...)
+	groups := append([]int(nil), c.groups...)
 	c.mu.Unlock()
 
-	for _, comp := range components {
+	for i := 0; i < len(components); {
 		if err := ctx.Err(); err != nil {
 			c.unwind(err)
 			return err
 		}
-		began := c.now()
-		c.mu.Lock()
-		c.timing[comp.Name()] = Timing{StartedAt: began}
-		c.mu.Unlock()
-		if err := comp.Start(ctx); err != nil {
-			wrapped := fmt.Errorf("start %s: %w", comp.Name(), err)
-			c.mu.Lock()
-			c.ready[comp.Name()] = false
-			c.mu.Unlock()
-			c.unwind(wrapped)
-			return wrapped
+		j := i + 1
+		for groups[i] != 0 && j < len(components) && groups[j] == groups[i] {
+			j++
 		}
-		c.mu.Lock()
-		c.started = append(c.started, comp)
-		c.ready[comp.Name()] = true
-		c.timing[comp.Name()] = Timing{StartedAt: began, ReadyAfter: c.now().Sub(began)}
-		c.mu.Unlock()
+		if err := c.startStep(ctx, components[i:j]); err != nil {
+			c.unwind(err)
+			return err
+		}
+		i = j
 	}
 
 	// Workers start only once every component is up.
@@ -289,6 +303,73 @@ func (c *Coordinator) Start(ctx context.Context) error {
 		c.startWorker(workCtx, w)
 	}
 
+	return nil
+}
+
+// startStep starts one component, or a concurrent group of them, and
+// records each one's readiness and timing. A group's members are recorded
+// as started in registration order, whatever order they finished in, so
+// they stop in reverse registration order.
+func (c *Coordinator) startStep(ctx context.Context, step []Component) error {
+	if len(step) == 1 {
+		err := c.startOne(ctx, step[0])
+		if err == nil {
+			c.mu.Lock()
+			c.started = append(c.started, step[0])
+			c.mu.Unlock()
+		}
+		return err
+	}
+	gctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make([]error, len(step))
+	var wg sync.WaitGroup
+	for k, comp := range step {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if errs[k] = c.startOne(gctx, comp); errs[k] != nil {
+				cancel()
+			}
+		}()
+	}
+	wg.Wait()
+	// The first failure in registration order that is not merely the
+	// cancellation another member's failure caused.
+	var first error
+	for _, err := range errs {
+		if err != nil && (first == nil || errors.Is(first, context.Canceled) && !errors.Is(err, context.Canceled)) {
+			first = err
+		}
+	}
+	// Whatever started is recorded, so the unwind stops it.
+	c.mu.Lock()
+	for k, comp := range step {
+		if errs[k] == nil && c.ready[comp.Name()] {
+			c.started = append(c.started, comp)
+		}
+	}
+	c.mu.Unlock()
+	return first
+}
+
+// startOne starts a component and records its readiness and timing;
+// startStep records it as started.
+func (c *Coordinator) startOne(ctx context.Context, comp Component) error {
+	began := c.now()
+	c.mu.Lock()
+	c.timing[comp.Name()] = Timing{StartedAt: began}
+	c.mu.Unlock()
+	if err := comp.Start(ctx); err != nil {
+		c.mu.Lock()
+		c.ready[comp.Name()] = false
+		c.mu.Unlock()
+		return fmt.Errorf("start %s: %w", comp.Name(), err)
+	}
+	c.mu.Lock()
+	c.ready[comp.Name()] = true
+	c.timing[comp.Name()] = Timing{StartedAt: began, ReadyAfter: c.now().Sub(began)}
+	c.mu.Unlock()
 	return nil
 }
 

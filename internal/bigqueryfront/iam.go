@@ -13,7 +13,7 @@ package bigqueryfront
 //     Conditions and audit configs are 501 naming the field; a version 3
 //     policy without conditions is accepted; testIamPermissions returns
 //     every requested permission on a resource that exists, and an empty
-//     set on one that does not (iam_policy.proto; UNVERIFIED for BigQuery).
+//     set on one that does not (iam_policy.proto and BigQuery's tables.testIamPermissions reference).
 //   - rowAccessPolicies.getIamPolicy and testIamPermissions. The API has no
 //     rowAccessPolicies.setIamPolicy: a row access policy's IAM policy is
 //     its grantees, which RowAccessPolicy.grantees documents as the policy's
@@ -390,8 +390,8 @@ func (f front) serveResourceIAM(w http.ResponseWriter, r *http.Request, iam *iam
 
 // answerPermissions answers testIamPermissions: every requested permission
 // when the resource exists, since nothing is denied (ADR-0006 rule 4), and
-// an empty set when it does not, as iam_policy.proto documents (UNVERIFIED
-// for BigQuery).
+// an empty set when it does not, as iam_policy.proto and BigQuery's
+// tables.testIamPermissions reference document.
 func (f front) answerPermissions(w http.ResponseWriter, r *http.Request, found bool) {
 	var req iampb.TestIamPermissionsRequest
 	if !decodeProto(r, &req) {

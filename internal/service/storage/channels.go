@@ -142,6 +142,7 @@ func queueChannelMessage(tx Tx, c *channelRecord, state string, o *objectRecord,
 // generation no longer live, ahead of the replacing version's exists
 // (UNVERIFIED: Google's watchAll and object change notification pages are
 // withdrawn, and the states for noncurrent versions were never documented).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/object-change-notification
 func emitChannels(tx Tx, ev objectEvent) error {
 	state := "exists"
 	switch ev.Type {

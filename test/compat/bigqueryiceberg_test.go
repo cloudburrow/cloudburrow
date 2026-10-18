@@ -131,7 +131,7 @@ func TestBigQueryIcebergTablesWriteIcebergFiles(t *testing.T) {
 				err = st.Err()
 			}
 			if err == nil {
-				if qs, ok := st.Statistics.Details.(*bigquery.QueryStatistics); !ok || qs.StatementType != "EXPORT_DATA" {
+				if qs, ok := st.Statistics.Details.(*bigquery.QueryStatistics); !ok || qs.StatementType != "EXPORT_METADATA" {
 					t.Errorf("EXPORT TABLE METADATA FROM %s: statistics %+v", tbl, st.Statistics.Details)
 				}
 			}

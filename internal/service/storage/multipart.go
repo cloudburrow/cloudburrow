@@ -191,9 +191,12 @@ func (s *Server) mpuComplete(w http.ResponseWriter, r *http.Request, bucket, nam
 		noSuchUpload(w)
 		return
 	}
-	// UNVERIFIED: the codes for a part out of order, a bad ETag and a small
-	// part are S3's (InvalidPartOrder, InvalidPart, EntityTooSmall); no
-	// Cloud Storage page states them.
+	// The codes for a part out of order (InvalidPartOrder), a bad ETag
+	// (InvalidPart) and a part under 5 MiB that is not the last
+	// (InvalidArgument) are the ones Google documents for completing an
+	// XML multipart upload
+	// (https://cloud.google.com/storage/docs/xml-api/post-object-complete,
+	// read 2026-10-17).
 	readers := make([]io.Reader, 0, len(req.Parts))
 	closers := make([]io.Closer, 0, len(req.Parts))
 	defer func() {
@@ -217,7 +220,7 @@ func (s *Server) mpuComplete(w http.ResponseWriter, r *http.Request, bucket, nam
 			return
 		}
 		if i < len(req.Parts)-1 && p.Size < minPartSize {
-			writeXMLError(w, http.StatusBadRequest, "EntityTooSmall", fmt.Sprintf("Part %d is %d bytes; every part but the last must be at least 5 MiB.", rp.PartNumber, p.Size))
+			writeXMLError(w, http.StatusBadRequest, "InvalidArgument", fmt.Sprintf("Part %d is %d bytes; every part but the last must be at least 5 MiB.", rp.PartNumber, p.Size))
 			return
 		}
 		f, err := s.blobs.Open(p.Blob)
@@ -244,6 +247,7 @@ func (s *Server) mpuComplete(w http.ResponseWriter, r *http.Request, bucket, nam
 	_ = s.meta.Update(func(tx Tx) error { tx.Delete(mpuKey(bucket, id)); return nil })
 	// The ETag is S3's composite form, the MD5 of the parts' MD5s and the
 	// part count (UNVERIFIED for Cloud Storage).
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/post-object-complete
 	etag := fmt.Sprintf(`"%x-%d"`, hashes.Sum(nil), len(req.Parts))
 	w.Header().Set("X-Goog-Generation", strconv.FormatInt(o.Generation, 10))
 	w.Header().Set("X-Goog-Hash", "crc32c="+crcBase64(o.CRC32C))

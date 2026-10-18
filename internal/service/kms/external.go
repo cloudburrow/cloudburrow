@@ -66,6 +66,7 @@ import (
 //     knows, so a rotation schedule on those is UNIMPLEMENTED.
 //
 // Chosen here, and UNVERIFIED: the codes of every refusal; that two versions
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // naming the same URI or path get different key material (each version's
 // key is generated when it is created, and kept when its reference is
 // updated); and the coordinated key path's format.

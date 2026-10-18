@@ -17,6 +17,7 @@ package logging
 //     is refused UNIMPLEMENTED, as a bucket's cmek_settings is: entries are
 //     not encrypted with a customer key here. The service account IDs are
 //     made up from the project ID (UNVERIFIED: Google's use the project
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/export/configure_export_v2
 //     number).
 
 import (
@@ -195,6 +196,7 @@ func (s configServer) CreateLink(ctx context.Context, req *loggingpb.CreateLinkR
 		// use Observability Analytics"; #1435): a folder's, organization's or
 		// billing account's bucket never has it, so its link is refused as
 		// one on a bucket without Log Analytics is (code UNVERIFIED).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/buckets
 		return nil, apierror.Wrap(apierror.FailedPrecondition("bucket %s does not have Log Analytics enabled: only a bucket of a project can be upgraded to Log Analytics, so only a project's bucket can be linked to a BigQuery dataset", strings.TrimSuffix(req.GetParent(), "/")))
 	}
 	id := req.GetLinkId()
@@ -333,6 +335,7 @@ func (a *Admin) parseSettings(field, name, suffix string) (parent, error) {
 func settingsKey(p parent) string { return "logging/settings/" + p.seg() }
 
 // serviceAccount is made up from the parent's ID (UNVERIFIED: Google's names
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/export/configure_export_v2
 // a number).
 func serviceAccount(p parent) string {
 	id := strings.ToLower(p.id)

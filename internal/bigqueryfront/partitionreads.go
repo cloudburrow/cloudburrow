@@ -35,6 +35,7 @@ import (
 // (tables.delete of the decorated name) with a DELETE of its rows. A
 // decorator on a table that is not partitioned is refused 400 (wording
 // UNVERIFIED). tabledata.list and tables.get of a partition, and query,
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 // load and copy jobs into one, are in partitionwrites.go. A partition of
 // an ingestion-time partitioned table is its rows whose _PARTITIONTIME is
 // the partition's start ($__UNPARTITIONED__: NULL; $__NULL__ is refused,
@@ -370,7 +371,7 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 		return 0, http.StatusInternalServerError, "cloudburrow: could not read the time of FOR SYSTEM_TIME AS OF"
 	}
 	if res.Rows[0].F[0].V == nil {
-		return 0, http.StatusBadRequest, "FOR SYSTEM_TIME AS OF expression must not be NULL" // UNVERIFIED wording
+		return 0, http.StatusBadRequest, "FOR SYSTEM_TIME AS OF expression must not be NULL" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/access-historical-data
 	}
 	ts, err1 := strconv.ParseInt(*res.Rows[0].F[0].V, 10, 64)
 	now, err2 := strconv.ParseInt(*res.Rows[0].F[1].V, 10, 64)
@@ -468,7 +469,8 @@ func partitionRows(m partitionMeta, dec, name string) (string, int, string) {
 		}
 		v, err := strconv.ParseInt(dec, 10, 64)
 		if err != nil || v < start || v >= end || (v-start)%step != 0 {
-			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 		hi := v + step
 		if hi > end {
@@ -476,19 +478,22 @@ func partitionRows(m partitionMeta, dec, name string) (string, int, string) {
 		}
 		return fmt.Sprintf("(%s >= %d AND %s < %d)", col, v, col, hi), 0, ""
 	case m.TimePartitioning == nil:
-		return "", http.StatusBadRequest, "Cannot read partition information from a table that is not partitioned: " + name // UNVERIFIED wording
+		return "", http.StatusBadRequest, "Cannot read partition information from a table that is not partitioned: " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 	case m.ingestion():
 		// The engine keeps each row's _PARTITIONTIME, the start of its
 		// partition (#1277).
 		switch dec {
 		case "__NULL__":
-			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		case "__UNPARTITIONED__":
 			return "_PARTITIONTIME IS NULL", 0, ""
 		}
 		from, _, ok := partitionBounds(m.TimePartitioning.Type, dec)
 		if !ok {
-			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 		return "_PARTITIONTIME = TIMESTAMP '" + from.Format(utcTimestamp) + "'", 0, ""
 	}
@@ -506,7 +511,8 @@ func partitionRows(m partitionMeta, dec, name string) (string, int, string) {
 	}
 	from, to, ok := partitionBounds(tp.Type, dec)
 	if !ok {
-		return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+		return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 	}
 	return fmt.Sprintf("(%s >= TIMESTAMP '%s' AND %s < TIMESTAMP '%s')", expr, from.Format(utcTimestamp), expr,
 		to.Format(utcTimestamp)), 0, ""

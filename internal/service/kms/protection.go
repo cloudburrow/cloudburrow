@@ -72,6 +72,7 @@ func (j importJob) protectionLevel() kmspb.ProtectionLevel  { return levelOf(j.P
 // staff and systems carry (GOOGLE_INITIATED_*, THIRD_PARTY_DATA_REQUEST,
 // ...) never reach a local key. The refusal's code and message are
 // UNVERIFIED: FAILED_PRECONDITION, naming the policy. A key with no policy,
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // and the project and organization default policies, which this instance
 // does not serve, allow every call.
 

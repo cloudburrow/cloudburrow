@@ -80,12 +80,14 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 		// "In extract jobs, it's a string by default": tabledata.list's
 		// text ("03:04:05.5"), whose form the documentation does not
 		// give (UNVERIFIED against BigQuery).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		return "string", "string"
 	case "DATETIME":
 		// "a STRING with a custom named logical type datetime" with logical
 		// types; "in extract jobs, it's a string by default". The text is
 		// tabledata.list's ("2020-01-02T03:04:05[.ffffff]"), which the
 		// documentation does not give (UNVERIFIED against BigQuery).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		if logical {
 			return map[string]any{"type": "string", "logicalType": "datetime"}, "string" // goavro names it by its type
 		}
@@ -95,16 +97,19 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 		// sqlType JSON ("Annotate your Avro schema with sqlType set to
 		// JSON", loading-data-cloud-storage-avro); the export section does
 		// not name JSON (UNVERIFIED against BigQuery).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		return map[string]any{"type": "string", "sqlType": "JSON"}, "string"
 	case "GEOGRAPHY":
 		// A WKT string with sqlType GEOGRAPHY, by analogy with JSON: the
 		// export section does not name GEOGRAPHY (UNVERIFIED against BigQuery).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		return map[string]any{"type": "string", "sqlType": "GEOGRAPHY"}, "string"
 	case "INTERVAL":
 		// The Avro export details do not list INTERVAL: a string of its
 		// canonical text, "[sign]Y-M [sign]D [sign]H:M:S[.F]" (data types
 		// reference), with sqlType INTERVAL as JSON and GEOGRAPHY have
 		// (UNVERIFIED against BigQuery).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		return map[string]any{"type": "string", "sqlType": "INTERVAL"}, "string"
 	case "NUMERIC":
 		// (A parameterized one's are its own: avroFields.) The precision
@@ -113,6 +118,7 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 		// precision and scale are passed to the decimal logical type"):
 		// BigQuery's own maximums (38, 9) and (76, 38), as for Parquet,
 		// are used (UNVERIFIED against BigQuery).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 38, "scale": 9}, "bytes.decimal"
 	case "BIGNUMERIC":
 		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 76, "scale": 38}, "bytes.decimal"
@@ -134,6 +140,7 @@ func avroExportType(typ string, logical bool) bool {
 // type avroExportSchema gives, a RECORD as a record of its fields ("Nested data is
 // represented by nested record objects"), named by its path below the
 // root record, which the documentation does not give (UNVERIFIED against
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // BigQuery); a NULLABLE one as a union with "null", a REPEATED one as an
 // array.
 func avroFields(fields []field, logical bool, path string) []any {

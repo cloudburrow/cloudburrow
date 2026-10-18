@@ -30,6 +30,7 @@ import (
 // #1231). BigQuery requires a WHERE clause that names object_name (and
 // object_schema for a table); a query that names no object_name after a
 // WHERE is refused 400 (wording UNVERIFIED), and the rest of the filter is the
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-object-privileges
 // query's own.
 //
 // SCHEMATA_LINKS with no region qualifier is the US region's

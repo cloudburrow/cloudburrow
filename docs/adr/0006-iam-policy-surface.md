@@ -185,7 +185,7 @@ this amends the ADR in place as #421 did.
    - A condition is 501 naming the field, and a version 3 policy without conditions is
      accepted (rule 3, as amended by #365).
    - `testIamPermissions` returns every requested permission on a bucket that exists (rule
-     4). On a missing bucket it is 404, which is UNVERIFIED.
+     4). On a missing bucket it is 404, which is UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/testIamPermissions>).
    - The policy is part of the bucket record, so it has the server's persistence, and reset
      (#510) and state capture (#511) take it with the bucket (rule 5).
 3. **No inheritance.** A policy is the bucket's own; project-level bindings do not exist
@@ -212,7 +212,7 @@ ADR in place, as #421 and #504 did.
    own ACL only, WRITER. A new bucket's ACLs are `projectPrivate`'s, and a new object takes its
    bucket's default object ACL. Under uniform bucket-level access every ACL method fails
    **400**, and a full projection carries empty ACL lists. The 400's message, and the messages
-   of invalid entities and roles, are UNVERIFIED.
+   of invalid entities and roles, are UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/storage/docs/access-control/lists>).
 3. **No identity.** CloudBurrow has no caller, so the "object owner" that Google's predefined
    object ACLs grant OWNER is the bucket's project owners, `project-owners-<number>`.
 4. **Rules 1 and 5 apply.** Nothing reads a stored ACL, and ACLs live on the bucket and object
@@ -273,7 +273,7 @@ it in place, as #421 and #504 did.
    config is 501 naming the field; a version 3 policy without conditions is accepted.
    `testIamPermissions` returns every requested permission on a resource that exists and, as
    KMS does (its rule 4), an empty set on a well-formed name that does not, which
-   `iam_policy.proto` documents (UNVERIFIED, said the same way).
+   `iam_policy.proto` documents, and BigQuery's own `tables.testIamPermissions` reference says the same.
 3. **A row access policy's IAM policy is its grantees.** The API has no
    `rowAccessPolicies.setIamPolicy`: `RowAccessPolicy.grantees` are the policy's members,
    holding `roles/bigquery.filteredDataViewer`, and `rowAccessPolicies.update` changes them.
@@ -391,7 +391,7 @@ them, and so reverses rule 3 for audit configs on the resources Google keeps the
 2. **Rules 1-4 apply.** The shared `internal/iampolicy`: a new etag on every set, a stale one
    ABORTED, conditions UNIMPLEMENTED, version 3 accepted. `TestIamPermissions` answers every
    permission asked on a Spanner or Bigtable resource that exists (NOT_FOUND on one that does not,
-   as Spanner documents), and on a tag the tag permissions alone (UNVERIFIED).
+   as Spanner documents), and on a tag the tag permissions alone (UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/resource-manager/reference/rest/v3/tagValues/testIamPermissions>)).
 3. **Audit configs, rule 3 amended.** On projects, folders and the organization (#1368's
    resources) a policy's `audit_configs` are **stored and returned, not acted on**: no audit log
    is written or withheld because of one. They change only as `update_mask` says

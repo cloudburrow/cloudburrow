@@ -16,6 +16,7 @@ import (
 // name filters on rings and keys, labels filters on keys (#409).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeys INVALID_ARGUMENT: a filter that does not parse
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/sorting-and-filtering
 func TestNameAndLabelFilters(t *testing.T) {
 	ctx := context.Background()
 	s := NewServer(store.NewMemory())

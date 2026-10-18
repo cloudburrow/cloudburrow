@@ -64,6 +64,7 @@ func arrowParquet(t *testing.T, schema *arrow.Schema, build func(*array.RecordBu
 // the V1 and V2 loads was 501.
 //
 // covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.get, bigquery.tabledata.list
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/schemas
 func TestBigQueryParquetColumnNameCharacterMap(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)

@@ -27,10 +27,6 @@ var compatEnvExceptions = map[string]string{
 	// fetches unless asked (`up -local-ai-embeddings`); set it to run
 	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
 	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
-	// The stand-in App Engine app (#1506): the test serves it, so it is the
-	// --appengine-url the instance was started with, chosen by whoever
-	// started it; no instance reports one the test could listen on.
-	"CLOUDBURROW_TEST_APPENGINE_URL": "opt-in: the --appengine-url the instance was started with, which the test listens on",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
@@ -290,7 +286,7 @@ func runCompatEnv(t *testing.T, envFile, statusFile string, extra ...string) (in
 // the source ci.yml's shards used to read it from inline.
 func TestCompatEnvFromARecordedInstance(t *testing.T) {
 	dir, envFile, statusFile := compatEnvFixture(t, nil)
-	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir), "--cors-allow-origin", "https://app.test:8443,https://b.test"}
+	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir), "--cors-allow-origin", "https://app.test:8443,https://b.test", "--appengine-url", "http://127.0.0.1:18506"}
 	code, got, stderr := runCompatEnv(t, envFile, statusFile, append([]string{"--strict"}, flags...)...)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -304,7 +300,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CONSOLE":                  "127.0.0.1:9090",
 		"ADMIN_TOKEN":              "fixture-admin-token",
 		"CLI":                      "/opt/cb/bin/cloudburrow",
-		"CLI_ARGS":                 "--name ct --state-dir " + filepath.Dir(dir) + " --cors-allow-origin https://app.test:8443,https://b.test",
+		"CLI_ARGS":                 "--name ct --state-dir " + filepath.Dir(dir) + " --cors-allow-origin https://app.test:8443,https://b.test --appengine-url http://127.0.0.1:18506",
 		"STORAGE":                  "http://127.0.0.1:50003",
 		"CORS_ORIGIN":              "https://app.test:8443",
 		"PUBSUB":                   "127.0.0.1:50004",
@@ -327,6 +323,8 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"BIGQUERY_RESOURCEMANAGER": "127.0.0.1:9007",
 		"LOGGING_RESOURCEMANAGER":  "127.0.0.1:9007",
 		"RUN_RESOURCEMANAGER":      "127.0.0.1:9007",
+		"SQL_RESOURCEMANAGER":      "127.0.0.1:9007",
+		"RUN_MYSQL":                "127.0.0.1:9017",
 		"RUN_SERVICEUSAGE":         "127.0.0.1:9023",
 		"SPANNER":                  "127.0.0.1:9013",
 		"DATASTORE":                "127.0.0.1:9011",
@@ -353,6 +351,10 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SINK_STORAGE":             "http://127.0.0.1:50003",
 		"SINK_PUBSUB":              "127.0.0.1:50004",
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
+		"CMEK_KMS":                 "127.0.0.1:9018",
+		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
+		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
+		"APPENGINE_URL":            "http://127.0.0.1:18506",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {
@@ -454,7 +456,8 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		// that shard's instance serves, which its browser tests read back
 		// through the official clients: --strict would fail elsewhere (#895).
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
-		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
+		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi`,
+		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi`,
 		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi`,
 		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
@@ -470,7 +473,8 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 	}
 	for _, want := range []string{
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
-		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
+		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi`,
+		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi`,
 		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi`,
 		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,

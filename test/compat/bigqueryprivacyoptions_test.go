@@ -18,6 +18,7 @@ import (
 // keys in snake case; ALTER … SET OPTIONS (privacy_policy = NULL) drops it.
 //
 // covers: bigquery.jobs.query, bigquery.tables.patch
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-table-options
 func TestBigQueryPrivacyPolicyTableOptions(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)

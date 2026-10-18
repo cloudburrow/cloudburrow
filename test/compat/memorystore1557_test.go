@@ -271,6 +271,8 @@ func TestMemorystoreValkeyKmsKey(t *testing.T) {
 	h := New(t)
 	c, project := valkeyAdminClient(t, h)
 	cc, _ := redisClusterAdminClient(t, h)
+	// Cloud KMS as the shard's CMEK_KMS (#1568), so the KMS suite stays in served.
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	kc := kmsClients(t, h)["grpc"]
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()

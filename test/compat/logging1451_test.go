@@ -211,7 +211,10 @@ func TestGcloudLoggingBigQuerySinkExportErrors(t *testing.T) {
 	t.Cleanup(func() { _, _ = g.run(nil, "logging", "sinks", "delete", sink, "--project="+project, "--quiet") })
 	g.must("logging", "write", logID, `{"n": 1}`, "--payload-type=json", "--project="+project)
 	g.must("logging", "write", logID, `{"n": "one`+suffix+`"}`, "--payload-type=json", "--project="+project)
-	day := time.Now().UTC().Format("20060102")
+	// The table's day is the entries' timestamp's, by the Logging clock,
+	// which earlier tests advance: an hour ahead, it was the next day's
+	// table near midnight UTC (#1568).
+	day := advanceLoggingClock(t, h, 0).UTC().Format("20060102")
 	rows := sinkQueryRows(t, h, bq, fmt.Sprintf("SELECT jsonPayload.n AS n FROM `%s.%s.%s_%s`", project, ds, logID, day), 1)
 	if rows[0]["n"] != 1.0 {
 		t.Errorf("the table holds %v", rows)

@@ -4,7 +4,6 @@ package compat
 
 import (
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,8 +25,8 @@ import (
 //   - ALTER SCHEMA … SET OPTIONS in a script whose next statement reads
 //     the option it set (INFORMATION_SCHEMA.SCHEMATA_OPTIONS), and inside
 //     a loop;
-//   - in a script with a TEMP table, which CloudBurrow cannot run a
-//     statement at a time, each stays 501, nothing run.
+//   - in a script with a TEMP table, run so too since #1562
+//     (TestBigQueryTempScriptsUndropAndAlterSchema).
 //
 // Measured first: each script was 501 ("in a script with control flow",
 // "whose other statements name the dataset", "ALTER SCHEMA … SET OPTIONS
@@ -101,10 +100,5 @@ func TestBigQueryScriptsUndropAndAlterSchema(t *testing.T) {
 		if md, err := ds.Metadata(ctx); err != nil || md.Description != "plain" {
 			t.Errorf("insert %v: description after ALTER SCHEMA; SELECT 1: %+v, %v", insert, md, err)
 		}
-
-		// A script with a TEMP table stays 501.
-		wantAPIError(t, "ALTER SCHEMA in a script with a TEMP table",
-			bqRun(ctx, c, "CREATE TEMP TABLE tt AS SELECT 1 AS x; ALTER SCHEMA `"+ds.DatasetID+"` SET OPTIONS (description = 'no'); SELECT * FROM tt", insert),
-			http.StatusNotImplemented, "Not implemented")
 	}
 }

@@ -339,6 +339,14 @@ A tool that creates and deletes clusters can destroy work that is not its own.
 Readiness reflects what actually initialised. A component whose mandatory startup failed is
 never reported ready.
 
+`up` starts what does not depend on each other at the same time (#1588): the storage and
+BigQuery images load together, every tunnel binds at once, and Knative installs in the
+background from the moment the cluster answers, while the backends roll out; the `knative`
+component then waits for it. `kind create` returns once the API server is up, without
+`--wait`: the node becomes Ready while the images load and Knative's manifests apply, and the
+`cluster-nodes` component waits for it, as `--wait` did, before the backends are scheduled.
+`up` is ready, and `wait` returns, only once every one of them is.
+
 ---
 
 ## 7. Support matrix: three separate things

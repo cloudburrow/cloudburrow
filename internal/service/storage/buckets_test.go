@@ -247,6 +247,7 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 // A non-empty bucket delete is 409.
 //
 // unverified: storage.buckets.delete 409: a non-empty bucket (no page states the JSON API's status; the XML API documents 409 BucketNotEmpty)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 func TestStorageNonEmptyBucketDeleteInProcess(t *testing.T) {
 	s, err := NewServer(Options{})
 	if err != nil {

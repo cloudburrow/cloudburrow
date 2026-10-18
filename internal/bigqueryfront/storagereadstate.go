@@ -44,6 +44,7 @@ import (
 // original stream reads on as before. The fraction must be in (0, 1); one
 // outside is INVALID_ARGUMENT (wording UNVERIFIED). The rows are those of
 // the table at the split, in the order a read gives them.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/bigquery/storage/v1/storage.proto
 
 const splitReadStream = readService + "SplitReadStream"
 

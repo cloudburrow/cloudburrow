@@ -41,23 +41,41 @@ func badNames(kind string) []string {
 // is NOT_FOUND. Google documents neither code for KMS.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateKeyRing INVALID_ARGUMENT: a malformed parent
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing INVALID_ARGUMENT: a malformed name
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListKeyRings INVALID_ARGUMENT: a malformed parent
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: a malformed parent
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKey INVALID_ARGUMENT: a malformed name
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeys INVALID_ARGUMENT: a malformed parent
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion INVALID_ARGUMENT: a malformed parent
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion INVALID_ARGUMENT: a malformed name, including version IDs 0, -1, 01 and abc
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions INVALID_ARGUMENT: a malformed parent
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion INVALID_ARGUMENT: a malformed name or crypto_key_version_id
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a well-formed name that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKey NOT_FOUND: a well-formed name that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion NOT_FOUND: a well-formed name that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeys NOT_FOUND: a well-formed parent that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions NOT_FOUND: a well-formed parent that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey NOT_FOUND: a well-formed parent that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion NOT_FOUND: a well-formed parent that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion NOT_FOUND: a well-formed name that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestMalformedNamesAreInvalidArgument(t *testing.T) {
 	c := client(t)
 	ctx := context.Background()

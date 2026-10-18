@@ -58,6 +58,7 @@ import (
 // (UNVERIFIED). Refused 501: holiday_region (Google's holiday calendar),
 // hierarchical_time_series_cols, more than one time_series_id_col, and
 // ARIMA_PLUS_XREG.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
 
 // tsOptions are an ARIMA_PLUS model's options.
 type tsOptions struct {

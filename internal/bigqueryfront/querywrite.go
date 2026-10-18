@@ -94,6 +94,7 @@ import (
 // deleted). The scratch table is deleted after the job. A dry run, a
 // destination in another project and WRITE_APPEND are sent on as they
 // are; so is a destination that does not exist, which the emulator makes.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/writing-results
 
 // queryWrite carries out a query job whose writeDisposition the emulator
 // would not (above), and reports whether it answered w.

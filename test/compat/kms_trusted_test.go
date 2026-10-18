@@ -49,6 +49,8 @@ import (
 //   - refused: an export with a wrapping key not yet trusted, a wrapped key
 //     under another key, trusted_wrapping_enabled on an ENCRYPT_DECRYPT key.
 //
+// The asymmetric encoding: docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
+//
 // covers: google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion
 // covers: google.cloud.kms.v1.KeyManagementService/CreateImportJob, google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion
 // covers: google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstanceProposal, google.cloud.kms.v1.HsmManagement/ApproveSingleTenantHsmInstanceProposal, google.cloud.kms.v1.HsmManagement/ExecuteSingleTenantHsmInstanceProposal

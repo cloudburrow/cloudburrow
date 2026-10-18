@@ -63,9 +63,11 @@ func copyBucketObjects(t *testing.T, ctx context.Context, b *storage.BucketHandl
 // gcloud session there has no logging override (CI run 38910752877).
 func copyClients(t *testing.T, h *Harness) ([]option.ClientOption, *storage.Client) {
 	t.Helper()
-	opts := []option.ClientOption{option.WithEndpoint(runShardEndpoint(h, envSinkLogging, EnvLogging)), option.WithoutAuthentication(),
+	// Under the shared names too, for loggingParentsFixture and the gcloud
+	// session (#1568).
+	opts := []option.ClientOption{option.WithEndpoint(shardEndpoint(h, envSinkLogging, EnvLogging)), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
-	se := runShardEndpoint(h, envSinkStorage, EnvStorage)
+	se := shardEndpoint(h, envSinkStorage, EnvStorage)
 	t.Setenv("STORAGE_EMULATOR_HOST", se)
 	sc, err := storage.NewClient(h.Context(), option.WithoutAuthentication(), option.WithEndpoint(se+"/storage/v1/"))
 	if err != nil {

@@ -13,7 +13,9 @@ import (
 // UpdateCryptoKey's mask handling (#405).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey INVALID_ARGUMENT: an empty mask, an immutable, output-only or unknown path, or an invalid label
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys
 // unverified: google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey NOT_FOUND: a well-formed key that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestUpdateCryptoKeyMask(t *testing.T) {
 	ctx := context.Background()
 	c := client(t)

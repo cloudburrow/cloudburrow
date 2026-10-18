@@ -29,6 +29,7 @@ import (
 // a referenced column its table lacks, DROP PRIMARY KEY of a table with
 // none and DROP CONSTRAINT of a name it lacks (unless IF EXISTS); a
 // referenced table that does not exist is 404 notFound.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 
 // tableConstraints is a Table's tableConstraints, as the REST reference
 // gives it.

@@ -34,6 +34,7 @@ import (
 // tables.get of a field made as INT64 reads INTEGER is UNVERIFIED here:
 // it is inferred from the official client, which could not read it
 // otherwise, and from the emulator's own DDL, which reads so.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/tables
 
 // legacyTypes maps each alias TableFieldSchema.type accepts to the name
 // BigQuery reports.

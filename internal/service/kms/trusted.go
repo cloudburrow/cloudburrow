@@ -31,9 +31,11 @@ import (
 // (importing-a-key): the raw bytes of a symmetric (AES, HMAC) key, and the
 // PKCS #8 DER private key of an asymmetric one. Google does not state the
 // encoding under trusted wrapping, so the asymmetric encoding is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // ML-KEM keys, whose ordinary import is not served either, are refused 501.
 //
 // CloudBurrow's choices where Google documents none, all UNVERIFIED: these
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 // operations, upgrade_key_trust included, need the instance's
 // key_portability_enabled ("Key portability features are disabled by
 // default"), else FAILED_PRECONDITION; the 2FA key upgrade_key_trust names
@@ -46,6 +48,7 @@ import (
 
 // trustedWrappingAllowed refuses trusted_wrapping_enabled on a version of k
 // where the proto does not support it. The code is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func trustedWrappingAllowed(field string, k cryptoKey) error {
 	if k.protectionLevel() != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
 		return apierror.InvalidArgument("%s is only supported for HSM_SINGLE_TENANT keys; CryptoKey %s is %s", field, k.Name, k.protectionLevel())

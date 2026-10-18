@@ -47,6 +47,7 @@ func TestDestroyTimeIsNowPlusTheKeysDuration(t *testing.T) {
 // DESTROY_SCHEDULED one cannot be updated.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion FAILED_PRECONDITION: a DESTROYED version
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 func TestDestroyFromEachState(t *testing.T) {
 	ctx := context.Background()
 	db := store.NewMemory()

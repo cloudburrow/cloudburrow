@@ -78,3 +78,47 @@ func TestStorageXMLMultipartPreconditionRefused(t *testing.T) {
 		t.Errorf("initiate with a precondition = %d %s; want 400 NotImplemented", resp.StatusCode, body)
 	}
 }
+
+// TestStorageXMLMultipartCompleteRefusals: completing an upload whose
+// parts are out of order is 400 InvalidPartOrder, with an ETag that does
+// not match is 400 InvalidPart, and with a part under 5 MiB that is not the
+// last is 400 InvalidArgument, the codes post-object-complete documents
+// (docs.cloud.google.com/storage/docs/xml-api/post-object-complete, read
+// 2026-10-17).
+//
+// covers: storage.objects.insert
+func TestStorageXMLMultipartCompleteRefusals(t *testing.T) {
+	h := New(t)
+	b := xmlBucket(t, h, "mpucomplete")
+	id := mpuStart(t, h, "/"+b+"/c.bin", nil)
+	t.Cleanup(func() {
+		xmlCall(t, h, "DELETE", "/"+b+"/c.bin?uploadId="+id, "", nil)
+		xmlCall(t, h, "DELETE", "/"+b, "", nil)
+	})
+	etags := map[int]string{}
+	for n := 1; n <= 2; n++ {
+		resp, _ := xmlCall(t, h, "PUT", fmt.Sprintf("/%s/c.bin?partNumber=%d&uploadId=%s", b, n, id), fmt.Sprint("part", n), nil)
+		if resp.StatusCode != 200 || resp.Header.Get("ETag") == "" {
+			t.Fatalf("part %d = %d", n, resp.StatusCode)
+		}
+		etags[n] = resp.Header.Get("ETag")
+	}
+	complete := func(parts ...[2]string) string {
+		var s strings.Builder
+		s.WriteString("<CompleteMultipartUpload>")
+		for _, p := range parts {
+			fmt.Fprintf(&s, "<Part><PartNumber>%s</PartNumber><ETag>%s</ETag></Part>", p[0], p[1])
+		}
+		s.WriteString("</CompleteMultipartUpload>")
+		return s.String()
+	}
+	for want, body := range map[string]string{
+		"InvalidPartOrder": complete([2]string{"2", etags[2]}, [2]string{"1", etags[1]}),
+		"InvalidPart":      complete([2]string{"1", `"deadbeef"`}, [2]string{"2", etags[2]}),
+		"InvalidArgument":  complete([2]string{"1", etags[1]}, [2]string{"2", etags[2]}),
+	} {
+		if resp, got := xmlCall(t, h, "POST", "/"+b+"/c.bin?uploadId="+id, body, nil); resp.StatusCode != http.StatusBadRequest || xmlErrorCode(got) != want {
+			t.Errorf("complete, want %s: %d %s", want, resp.StatusCode, got)
+		}
+	}
+}

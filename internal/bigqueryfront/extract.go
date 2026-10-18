@@ -71,6 +71,7 @@ func extractCompressionAllowed(format, compression string) bool {
 // extractFileLimit is the most BigQuery exports to one file: "BigQuery
 // can export up to 1 GB of logical data size to a single file"
 // (exporting-data). GB is taken as 2^30 bytes (UNVERIFIED: the page does
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // not say which). A variable, so a unit test can lower it.
 var extractFileLimit int64 = 1 << 30
 
@@ -116,6 +117,8 @@ const wildcardShard = "000000000000"
 //     shares the rows out between them: the front writes them itself, one
 //     file a URI, the rows shared out in order (shareRows; the split is
 //     UNVERIFIED, as BigQuery does not document it).
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 //   - A table of more than 1 GB, which BigQuery does not export to one
 //     file: the job fails with BigQuery's message with no wildcard, and
 //     the front shards it between a wildcard's files with one
@@ -193,6 +196,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		// and JSON, DEFLATE and SNAPPY for Avro, and SNAPPY, GZIP and
 		// ZSTD for Parquet: any other is refused (#957). BigQuery's own
 		// message is not documented (UNVERIFIED).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 		shown := format
 		if shown == "" {
 			shown = "CSV"

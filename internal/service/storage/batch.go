@@ -24,6 +24,7 @@ import (
 
 // maxBatchCalls is Google's documented limit of 100 calls per batch. How
 // Google refuses a larger batch is not stated, so the 400 here is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/batch
 const maxBatchCalls = 100
 
 func (s *Server) serveBatch(w http.ResponseWriter, r *http.Request) {

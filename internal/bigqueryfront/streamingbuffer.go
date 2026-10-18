@@ -429,11 +429,13 @@ func streamTarget(m partitionMeta, dec, name string, now time.Time) (time.Time, 
 		// "Streaming using a partition decorator is only supported for
 		// daily partitioned tables."
 		return time.Time{}, http.StatusBadRequest, "Streaming to a partition decorator is supported only for daily " +
-			"partitioned tables: " + name // UNVERIFIED wording
+			"partitioned tables: " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
 	}
 	from, _, ok := partitionBounds("DAY", dec)
 	if !ok {
-		return time.Time{}, http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+		return time.Time{}, http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
 	}
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	if from.Before(today.AddDate(0, 0, -31)) || from.After(today.AddDate(0, 0, 16)) {
@@ -441,7 +443,8 @@ func streamTarget(m partitionMeta, dec, name string, now time.Time) (time.Time, 
 		// past and 16 days in the future relative to the current date."
 		return time.Time{}, http.StatusBadRequest, "The partition " + name + " is outside the allowed bounds: " +
 			"you can stream to partitions within the last 31 days in the past and 16 days in the future " +
-			"relative to the current date. Use a load or query job to write to it." // UNVERIFIED wording
+			"relative to the current date. Use a load or query job to write to it." // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
 	}
 	return from, 0, ""
 }
@@ -663,7 +666,8 @@ func streamBounds(m partitionMeta, v any, now time.Time) string {
 	}
 	if t.Before(now.AddDate(-10, 0, 0)) || t.After(now.AddDate(1, 0, 0)) {
 		return "Value " + fmt.Sprint(v) + " for field " + tp.Field + " is outside the allowed bounds: you can stream " +
-			"data between 10 years in the past and 1 year in the future." // UNVERIFIED wording
+			"data between 10 years in the past and 1 year in the future." // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/streaming-data-into-bigquery
 	}
 	return ""
 }

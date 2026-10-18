@@ -22,6 +22,7 @@ import "strings"
 // with no default dataset (qualifyTables's message; BigQuery's own wording
 // for a view is UNVERIFIED). A legacy SQL view is not read (insertTable).
 // A CREATE VIEW statement's query is refused so too (#1049, qualify.go).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/views
 
 // unqualifiedViewTable returns why a view query that names a table
 // without a dataset is refused, or "".

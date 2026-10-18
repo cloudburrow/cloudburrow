@@ -50,6 +50,7 @@ package logging
 //     httpRequest.latency is. A type the instance does not know and Any
 //     fields but serviceData are left out: Google documents no column for
 //     them (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/export/bigquery
 
 import (
 	"context"

@@ -30,6 +30,7 @@ import (
 //
 // A project in no folder (JOBS_BY_FOLDER) or no organization
 // (JOBS_BY_ORGANIZATION) is refused 400 (wording UNVERIFIED); with no
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-jobs-by-organization
 // Resource Manager to ask, the views are 501. Regions are as for JOBS: the
 // instance's jobs are in US.
 

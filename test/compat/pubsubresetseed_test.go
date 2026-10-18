@@ -25,6 +25,7 @@ const resetSeedAvro = `{"type":"record","name":"Order","fields":[{"name":"n","ty
 // ALREADY_EXISTS before; another project's schema is left alone.
 // covers: google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.SchemaService/GetSchema
 // unverified: google.pubsub.v1.SchemaService/GetSchema NOT_FOUND: a schema removed by a project-scoped /admin/reset
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/pubsub/v1/pubsub.proto
 func TestPubSubResetDeletesSchemas(t *testing.T) {
 	h, other := New(t), New(t)
 	control := h.Endpoint(EnvControl)
@@ -174,6 +175,7 @@ func TestPubSubSeedSchemaAndBoundTopic(t *testing.T) {
 // applies its other fields too.
 // covers: google.pubsub.v1.Subscriber/UpdateSubscription, google.pubsub.v1.Subscriber/GetSubscription, google.pubsub.v1.Subscriber/ListSubscriptions
 // unverified: google.pubsub.v1.Subscriber/UpdateSubscription INVALID_ARGUMENT: an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/pubsub/v1/pubsub.proto
 func TestPubSubExpirationCanBeUpdated(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)

@@ -32,6 +32,7 @@ import (
 // Its metadata type, the commonMetadata type BULK_RESTORE_OBJECTS and the
 // counter names are UNVERIFIED: no page shows a bulk restore operation's
 // body.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/objects/bulkRestore
 
 const bulkRestoreType = "BULK_RESTORE_OBJECTS"
 

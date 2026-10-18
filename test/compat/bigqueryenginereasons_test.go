@@ -54,10 +54,6 @@ func TestBigQueryEngineErrorReasons(t *testing.T) {
 		message  string // the whole message, or with prefix, its start
 		prefix   bool
 		dry      bool
-		// refused: jobs.insert answers the error and makes no job (the
-		// engine refuses the job before it records it; BigQuery's job
-		// fails, #1584).
-		refused bool
 	}{
 		{name: "unknown table", sql: func(int) string { return "SELECT * FROM " + d + ".no_such_1582" },
 			code: 404, reason: "notFound", message: "Not found: Table " + p + ":" + d + ".no_such_1582 was not found in location " + loc, dry: true},
@@ -70,7 +66,7 @@ func TestBigQueryEngineErrorReasons(t *testing.T) {
 		{name: "DML of an unknown table", sql: func(int) string { return "DELETE FROM " + d + ".no_such_1582 WHERE TRUE" },
 			code: 404, reason: "notFound", message: "Not found: Table " + p + ":" + d + ".no_such_1582 was not found in location " + loc},
 		{name: "CREATE TABLE in an unknown dataset", sql: func(run int) string { return "CREATE TABLE " + missing + ".x" + string(rune('a'+run)) + " (a INT64)" },
-			code: 404, reason: "notFound", message: "Not found: Dataset " + p + ":" + missing + " was not found in location " + loc, refused: true},
+			code: 404, reason: "notFound", message: "Not found: Dataset " + p + ":" + missing + " was not found in location " + loc},
 		{name: "unrecognized name", sql: func(int) string { return "SELECT nope FROM " + d + ".t1582" },
 			code: 400, reason: "invalidQuery", message: "Unrecognized name: nope; Did you mean note? at [1:8]", dry: true},
 		{name: "syntax error", sql: func(int) string { return "blah blah broken" },
@@ -105,10 +101,6 @@ func TestBigQueryEngineErrorReasons(t *testing.T) {
 			check("jobs.query", want)
 
 			job, err := query(1).Run(ctx)
-			if tc.refused {
-				check("jobs.insert", failedQueryError(t, "jobs.insert", err))
-				return
-			}
 			if err != nil {
 				t.Fatalf("jobs.insert: %v, want a job that fails", err)
 			}

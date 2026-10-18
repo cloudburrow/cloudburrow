@@ -19,6 +19,7 @@ import (
 // joined by AND (or a space), OR, NOT or a leading "-", and parentheses, with
 // OR binding tighter than AND as AIP-160 says. Any other field is
 // INVALID_ARGUMENT naming it (UNVERIFIED: Google documents no code for it),
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/longrunning/operations.proto
 // never ignored, since ignoring it would list operations the filter excludes.
 
 type opFilter interface {

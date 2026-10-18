@@ -512,6 +512,7 @@ func (s *Server) objectsMove(w http.ResponseWriter, r *http.Request) {
 	o.Name = dst
 	// A move is a rename: the source goes, kept neither noncurrent nor
 	// soft-deleted (UNVERIFIED: the move docs do not say).
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/copying-renaming-moving-objects
 	remove := func(tx Tx, b bucketRecord, now time.Time) error {
 		if err := protect(b, moved, now, false); err != nil {
 			return err

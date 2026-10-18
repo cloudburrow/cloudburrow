@@ -103,6 +103,7 @@ func (s *Store) topicConfigured(topics []string) error {
 				// exist: Google documents that the operation fails "with an
 				// error message indicating why the publish failed", not
 				// the code (UNVERIFIED).
+				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/secret-manager/docs/event-notifications
 				return &apierror.Error{Code: st.Code(),
 					Message: fmt.Sprintf("publishing to topic %s failed: %s", t, st.Message())}
 			}

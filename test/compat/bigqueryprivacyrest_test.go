@@ -20,19 +20,28 @@ import (
 //     groups below the threshold. One inside another is "a multi-level
 //     aggregation query", 400.
 //   - UNVERIFIED: a query with no privacy clause at all that reads an
-//     aggregation threshold or differential privacy view in a subquery, a
-//     CTE or through another view is BigQuery's documented 400 "You must
-//     use SELECT WITH ...".
-//   - UNVERIFIED: JOIN_ANY's "At least one column in join_allowed_columns
-//     must be joined upon" names no kind of join, so a LEFT JOIN upon an
-//     allowed column meets it; JOIN_ALL met by its INNER JOIN allows a
-//     LEFT JOIN alongside on allowed columns.
-//   - A NATURAL join is a syntax error: NATURAL is a reserved keyword and the
-//     join operation has no NATURAL form.
-//   - UNVERIFIED: an expression over differentially private aggregates is
-//     evaluated on their noisy values, as HAVING is; each call is one more
-//     aggregate with its share of the epsilon, and the query is charged its
-//     epsilon once against the view's budget.
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
+//
+//	  aggregation threshold or differential privacy view in a subquery, a
+//	  CTE or through another view is BigQuery's documented 400 "You must
+//	  use SELECT WITH ...".
+//	- UNVERIFIED: JOIN_ANY's "At least one column in join_allowed_columns
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
+//
+//	  must be joined upon" names no kind of join, so a LEFT JOIN upon an
+//	  allowed column meets it; JOIN_ALL met by its INNER JOIN allows a
+//	  LEFT JOIN alongside on allowed columns.
+//	- A NATURAL join is a syntax error: NATURAL is a reserved keyword and the
+//	  join operation has no NATURAL form.
+//	- UNVERIFIED: an expression over differentially private aggregates is
+//
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
+//
+//	evaluated on their noisy values, as HAVING is; each call is one more
+//	aggregate with its share of the epsilon, and the query is charged its
+//	epsilon once against the view's budget.
 //
 // What Google documents nowhere stays 501: a read of the view outside its
 // own clause in a query with a privacy clause, a view of the view read with

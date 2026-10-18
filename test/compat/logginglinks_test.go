@@ -33,6 +33,7 @@ import (
 // an instance with Cloud Logging and no BigQuery (#1304).
 func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	ctx := h.Context()
 	c, err := vlogging.NewConfigClient(ctx, loggingClientOptions(h)...)
 	if err != nil {

@@ -185,3 +185,30 @@ func runShardEndpoint(h *Harness, own, shared string) string {
 	}
 	return h.Endpoint(shared)
 }
+
+// shardEndpoint is runShardEndpoint for a test whose clients, gcloud
+// session or Terraform module read the shared variable: the shard's own
+// name is exported under the shared one for this test only, so a shard
+// runs a test that needs a service beside its own without running that
+// service's suite a second time (#1568). It skips without either.
+func shardEndpoint(h *Harness, own, shared string) string {
+	h.t.Helper()
+	addr := runShardEndpoint(h, own, shared)
+	h.t.Setenv(shared, addr)
+	return addr
+}
+
+// The shards' own names for a service a test needs beside the shard's
+// (#1568), each read through shardEndpoint so the service's own suite stays
+// in its shard: Cloud KMS for the customer-managed keys of Memorystore
+// (emulators) and the Backup and DR Service (sql); Secret Manager for Cloud
+// SQL's Data API (sql); and Cloud Storage on an instance that serves no
+// Pub/Sub (sql), for its notifications' refusal.
+const (
+	envCMEKKMS         = "CLOUDBURROW_TEST_CMEK_KMS"
+	envCloudSQLSecrets = "CLOUDBURROW_TEST_CLOUDSQL_SECRETS"
+	envNoPubSubStorage = "CLOUDBURROW_TEST_NOPUBSUB_STORAGE"
+	// Resource Manager for the sql shard's tests that make a folder or
+	// purge a project (#1568).
+	envSQLResourceManager = "CLOUDBURROW_TEST_SQL_RESOURCEMANAGER"
+)

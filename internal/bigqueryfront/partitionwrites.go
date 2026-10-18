@@ -32,6 +32,7 @@ import (
 // tables.get of `t$P` answers the table's resource, which `bq head` and
 // the client libraries read the schema of before tabledata.list, with the
 // decorated tableId and numRows the partition's (UNVERIFIED: BigQuery does
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 // not document what it answers); numBytes and the other storage counts,
 // which the emulator does not keep per partition, are left out.
 //
@@ -39,6 +40,7 @@ import (
 // queryWrite does, so a query that fails changes nothing. Then every row
 // of the result must be in P, or the job fails, reason invalid, the table
 // unchanged (BigQuery's wording UNVERIFIED); the result's columns must be
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 // the table's, or those schemaUpdateOptions make them (partitionSchema,
 // below; #1273). WRITE_APPEND adds the rows; WRITE_TRUNCATE (and
 // WRITE_TRUNCATE_DATA, the same for one partition: the table's schema is
@@ -58,6 +60,7 @@ import (
 // (destination_table "cannot be set for a multi-statement query",
 // https://cloud.google.com/bigquery/docs/multi-statement-queries); the
 // wording of both errors is UNVERIFIED. A dry run is the query's own,
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 // without its destination (partitionDryRun). Into a partition of an ingestion-time partitioned table, the
 // rows are not checked: they are written with the partition's
 // _PARTITIONTIME (and _PARTITIONDATE), as a load or a copy into one
@@ -81,7 +84,7 @@ func (f front) partitionRows(w http.ResponseWriter, r *http.Request, dataset, ba
 		if v := q.Get(key); v != "" {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil || n < 0 {
-				writeError(w, http.StatusBadRequest, "invalid", "Invalid "+key+": "+v) // UNVERIFIED wording
+				writeError(w, http.StatusBadRequest, "invalid", "Invalid "+key+": "+v) // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/tabledata/list
 				return
 			}
 			start = n
@@ -315,7 +318,8 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 			e.Message = "CloudBurrow could not read the query's result: " + why
 		} else if n > 0 {
 			e.Reason, e.Message = "invalid", "Some rows belong to different partitions rather than destination partition "+
-				dec+" of "+name+". The table was not changed." // UNVERIFIED wording
+				dec+" of "+name+". The table was not changed." // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 	}
 	if e.Message == "" && (write == "" || write == "WRITE_EMPTY") {
@@ -542,7 +546,8 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			return fail("backendError", "CloudBurrow could not read the source: "+msg)
 		} else if bad > 0 {
 			return fail("invalid", "Some rows belong to different partitions rather than destination partition "+
-				dest.dec+" of "+tableName(project, dest.ref)+". The table was not changed.") // UNVERIFIED wording
+				dest.dec+" of "+tableName(project, dest.ref)+". The table was not changed.") // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 	}
 	bp := quotePath([]string{project, dest.base.DatasetID, dest.base.TableID})
@@ -672,7 +677,8 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 			e.Message = "CloudBurrow could not read the loaded rows: " + why
 		} else if n > 0 {
 			e.Reason, e.Message = "invalid", "Some rows belong to different partitions rather than destination partition "+
-				dec+" of "+name+". The table was not changed." // UNVERIFIED wording
+				dec+" of "+name+". The table was not changed." // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 		if e.Message == "" && (write == "" || write == "WRITE_EMPTY") {
 			if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+bp+" WHERE "+filter); why != "" {
@@ -762,7 +768,7 @@ func partitionSchema(old, next []field, opts []string, name, part string) (targe
 				return nil, false, "", "whose columns leave out the partitioning column " + o.Name
 			case !relax && modeOf(o) == "REQUIRED":
 				return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
-					" is missing in new schema", "" // UNVERIFIED wording
+					" is missing in new schema", "" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-table-schemas
 			case !relax:
 				return nil, false, "", "whose columns leave out " + o.Name + " without ALLOW_FIELD_RELAXATION"
 			}
@@ -779,7 +785,7 @@ func partitionSchema(old, next []field, opts []string, name, part string) (targe
 			// "Changing a column's data type" is not a schema update
 			// BigQuery makes through a write (managing-table-schemas).
 			return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
-				" has changed type from " + canonicalType(o.Type) + " to " + canonicalType(n.Type), "" // UNVERIFIED wording
+				" has changed type from " + canonicalType(o.Type) + " to " + canonicalType(n.Type), "" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-table-schemas
 		}
 		if !sameSchema(o.Fields, n.Fields) {
 			return nil, false, "", "whose RECORD column " + n.Name + " has other fields than the table's"
@@ -790,7 +796,7 @@ func partitionSchema(old, next []field, opts []string, name, part string) (targe
 		case om == "REQUIRED" && nm == "NULLABLE":
 			if !relax {
 				return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
-					" has changed mode from REQUIRED to NULLABLE", "" // UNVERIFIED wording
+					" has changed mode from REQUIRED to NULLABLE", "" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-table-schemas
 			}
 			t.Mode, changed = "NULLABLE", true
 		default:
@@ -800,11 +806,11 @@ func partitionSchema(old, next []field, opts []string, name, part string) (targe
 	}
 	for _, n := range next[j:] {
 		if !hasOption(opts, "ALLOW_FIELD_ADDITION") {
-			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add fields (field: " + n.Name + ")", "" // UNVERIFIED wording
+			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add fields (field: " + n.Name + ")", "" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-table-schemas
 		}
 		if modeOf(n) == "REQUIRED" {
 			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add required fields to an " +
-				"existing schema. (field: " + n.Name + ")", "" // UNVERIFIED wording
+				"existing schema. (field: " + n.Name + ")", "" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/managing-table-schemas
 		}
 		t := n
 		if t.Mode == "" {
@@ -902,12 +908,15 @@ func notOneQuery(sql string) string {
 	}
 	switch {
 	case len(stmts) > 1:
-		return "configuration.query.destinationTable cannot be set for scripts" // UNVERIFIED wording
+		return "configuration.query.destinationTable cannot be set for scripts" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 	case len(stmts) == 1 && (stmts[0][0].is("INSERT") || stmts[0][0].is("UPDATE") || stmts[0][0].is("DELETE") ||
 		stmts[0][0].is("MERGE") || stmts[0][0].is("TRUNCATE")):
-		return "Cannot set destination table in jobs with DML statements" // UNVERIFIED wording
+		return "Cannot set destination table in jobs with DML statements" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 	case len(stmts) == 1:
-		return "Cannot set destination table in jobs with DDL statements" // UNVERIFIED wording
+		return "Cannot set destination table in jobs with DDL statements" // UNVERIFIED wording; docs re-read 2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 	}
 	return ""
 }

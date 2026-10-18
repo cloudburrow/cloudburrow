@@ -13,6 +13,7 @@ type selection map[string]selection // nil means "all of this field"
 
 // parseFields parses a fields value. A malformed one is INVALID_ARGUMENT, as
 // Google answers 400 invalidParameter (the reason is UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/parameters
 func parseFields(spec string) (selection, error) {
 	p := &fieldParser{s: spec}
 	sel, err := p.list(false)

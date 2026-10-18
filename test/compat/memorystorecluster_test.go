@@ -55,6 +55,35 @@ func waitClusterOp(t *testing.T, h *Harness, op *cluster.UpdateClusterOperation)
 	return nil, fmt.Errorf("operation %s is still running after 5 minutes", op.Name())
 }
 
+// memorystoreWait is a context for waiting on one Memorystore operation: a
+// cluster's or instance's creation, starting its nodes and forming it, can
+// outlast h.Context()'s minute on a loaded machine (#1568).
+func memorystoreWait(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// primariesOnly reads CLUSTER NODES until it names n primaries and no
+// replica, for up to 30 seconds: the client's view of the cluster can still
+// hold the replicas just removed, and a reload from them came back with no
+// nodes at all ("redis: cluster has no nodes").
+func primariesOnly(h *Harness, rc *redis.ClusterClient, n int) (string, error) {
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+		rc.ReloadState(h.Context())
+		nodes, err := rc.ClusterNodes(h.Context()).Result()
+		if err == nil && strings.Count(strings.TrimSpace(nodes), "\n")+1 == n && !strings.Contains(nodes, "slave") {
+			return nodes, nil
+		}
+		if time.Now().After(deadline) {
+			if err == nil {
+				err = fmt.Errorf("not %d primaries alone", n)
+			}
+			return nodes, err
+		}
+	}
+}
+
 // clusterKeys writes n keys through a cluster client, spread over every
 // slot range, and reads them back.
 func clusterKeys(t *testing.T, h *Harness, rc *redis.ClusterClient, prefix string, n int, write bool) {
@@ -105,6 +134,11 @@ func clusterMasters(t *testing.T, h *Harness, rc *redis.ClusterClient) map[strin
 // replicas; to node_type and redis_configs sets maxmemory and the policy on
 // every node. DeleteCluster removes it.
 func TestMemorystoreRedisCluster(t *testing.T) {
+	// Forming the nodes, replacing them for a new node type and deleting
+	// them each outlast h.Context()'s minute on a loaded runner; the
+	// reshapes poll for five minutes (CI run 39038657629).
+	ops, cancelOps := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancelOps()
 	h := New(t)
 	c, project := redisClusterAdminClient(t, h)
 	parent := "projects/" + project + "/locations/us-central1"
@@ -124,7 +158,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 			_ = op.Wait(h.Context())
 		}
 	})
-	cl, err := op.Wait(h.Context())
+	cl, err := op.Wait(ops)
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -183,8 +217,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if cl, err = waitClusterOp(t, h, uop); err != nil || cl.GetReplicaCount() != 0 {
 		t.Fatalf("UpdateCluster replica_count operation = %v, %v", cl, err)
 	}
-	nodes, err := rc.ClusterNodes(h.Context()).Result()
-	if err != nil || strings.Count(strings.TrimSpace(nodes), "\n")+1 != 4 || strings.Contains(nodes, "slave") {
+	if nodes, err := primariesOnly(h, rc, 4); err != nil {
 		t.Errorf("after 0 replicas CLUSTER NODES = %q, %v; want 4 primaries", nodes, err)
 	}
 
@@ -194,7 +227,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateCluster node_type: %v", err)
 	}
-	if cl, err = uop.Wait(h.Context()); err != nil || cl.GetNodeType() != clusterpb.NodeType_REDIS_STANDARD_SMALL || cl.GetSizeGb() != 26 {
+	if cl, err = uop.Wait(ops); err != nil || cl.GetNodeType() != clusterpb.NodeType_REDIS_STANDARD_SMALL || cl.GetSizeGb() != 26 {
 		t.Fatalf("UpdateCluster node_type operation = %v, %v", cl, err)
 	}
 	err = rc.ForEachShard(h.Context(), func(ctx2 context.Context, m *redis.Client) error {
@@ -216,7 +249,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteCluster: %v", err)
 	}
-	if err := dop.Wait(h.Context()); err != nil {
+	if err := dop.Wait(ops); err != nil {
 		t.Fatalf("DeleteCluster operation: %v", err)
 	}
 	if _, err := c.GetCluster(h.Context(), &clusterpb.GetClusterRequest{Name: name}); status.Code(err) != codes.NotFound {

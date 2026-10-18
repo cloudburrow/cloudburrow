@@ -144,6 +144,7 @@ func TestStorageLockRetentionPolicyInProcess(t *testing.T) {
 
 // A repeat lock is refused 400 badRequest with a message naming the lock
 // (UNVERIFIED: Google documents no answer), and changes nothing; the
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/lockRetentionPolicy
 // metageneration is checked first, so a stale one is still 412.
 func TestStorageLockRetentionPolicyTwiceInProcess(t *testing.T) {
 	_, bh, _ := sdkBucket(t, "relock")

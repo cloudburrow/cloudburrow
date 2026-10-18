@@ -34,7 +34,7 @@ any other difference fails the run. The oracle is never pointed at live Google.
 - **Why vendored, not a module requirement:** the package imports
   `fakekms/fault/faultpb` and `fault/mathpb`, which upstream generates with
   Bazel and does not commit, so the module cannot be built from the Go proxy
-  (council report §6 marked proxy importability UNVERIFIED; this is the
+  (council report §6 marked proxy importability UNVERIFIED (docs re-read 2026-10-17: <https://github.com/GoogleCloudPlatform/kms-integrations>); this is the
   measurement).
 - **This module is separate** (`test/oracle/fakekms/go.mod`). The root module's
   `go.mod` and `go.sum` do not mention it, `go list -deps ./cmd/cloudburrow`

@@ -117,6 +117,7 @@ func (s *Server) hmacKeysCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		if n >= maxHMACKeys {
 			// UNVERIFIED: the docs state the limit of 10, not the code
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/authentication/hmackeys
 			// that refuses the 11th.
 			return badRequest("The service account %s already has %d HMAC keys, the maximum; delete one first.", email, maxHMACKeys)
 		}
@@ -151,6 +152,7 @@ func (s *Server) hmacKeysGet(w http.ResponseWriter, r *http.Request) {
 
 // hmacKeysUpdate changes a key's state between ACTIVE and INACTIVE; an etag
 // in the body must match (412 otherwise, UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/projects/hmacKeys/update
 func (s *Server) hmacKeysUpdate(w http.ResponseWriter, r *http.Request) {
 	project, id := pathVar(r, jsonPrefix, 1), pathVar(r, jsonPrefix, 3)
 	body, err := readBody(r)
