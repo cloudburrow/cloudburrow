@@ -311,6 +311,12 @@ It cannot be changed after the cluster is created, as Google's cannot.
 **IAM auth:** with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH string. The
 instance's IAM is not enforced (ADR-0006), so the nodes' default user has no password and takes
 any AUTH string, a token CloudBurrow's credentials issued among them, without checking it.
+Accepting only the tokens CloudBurrow's metadata server mints and refusing others was considered
+and not built (#1614, 2026-10-18): telling one caller's token from another's is authentication,
+which ADR-0004 rules out, and refusing a principal is enforcement, which ADR-0006's rule 1 ("no
+enforcement, ever") rules out; a test that a stranger's token is refused would be the believed
+but meaningless IAM test those decisions exist to prevent. The token is still sent, so a client's
+IAM auth code path runs as it does against Google.
 
 **Token auth** (#1549): with `AUTH_MODE_TOKEN_AUTH` a client logs in as a token auth user
 with a token the service generates: `AddTokenAuthUser`, then `AddAuthToken`, and

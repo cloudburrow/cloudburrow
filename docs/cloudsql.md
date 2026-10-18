@@ -155,8 +155,7 @@ Refused with 501, each naming what is missing:
 | `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
 | `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
-| `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
+| `instances.switchover` | swaps the primary with the disaster recovery replica of an Enterprise Plus replication cluster: `replicationCluster` is not built (501), and the old primary would have to become the new one's replica, a rebuild `demote` does not do for PostgreSQL |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)
@@ -302,6 +301,15 @@ a clone keeps its source's key.
 volume of the cluster, and a server already running keeps answering direct connections through its
 host tunnel while its key is disabled. What the key controls is whether the instance can be started
 and reached through the API and the connectors.
+
+**Re-encryption (#1614).** `instances.reencrypt` (`gcloud sql instances reencrypt`, the console's
+**Re-encrypt**) unwraps the instance's data key and wraps it again with the CryptoKey's current
+primary version, which `diskEncryptionStatus.kmsKeyVersionName` then names, so the version that
+wrapped it before can be disabled or destroyed without suspending the instance. It is a `REENCRYPT`
+operation, and the server keeps running. An instance without a key is 400, and a data key whose
+wrapping version is disabled cannot be unwrapped, so it is refused naming the key. Its
+`backupReencryptionConfig` is 501: a backup here is a dump of the server's databases and records no
+key version, so there is no backup to re-encrypt.
 
 ### Read replicas (#1330)
 

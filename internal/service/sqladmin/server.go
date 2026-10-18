@@ -303,12 +303,10 @@ const (
 func verbWhy(verb string) string {
 	switch verb {
 	case "switchover":
-		return "switchover swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster, " +
-			"which needs a second region, and CloudBurrow has one (" + Region + "); promote a read replica with promoteReplica, " +
+		return "switchover swaps the primary with the disaster recovery replica of an Enterprise Plus replication cluster, " +
+			"which is not built: replicationCluster.failoverDrReplicaName is refused 501, and the old primary would have to become a replica of the new one, " +
+			"which needs a rebuild of a PostgreSQL server that demote does not do (demote of a PostgreSQL instance is 501); promote a read replica with promoteReplica, " +
 			"or fail over a REGIONAL instance with instances.failover (docs/cloudsql.md)"
-	case "reencrypt":
-		return "an instance's data is not encrypted with a customer-managed Cloud KMS key (diskEncryptionConfiguration is not applied to its server's volume), " +
-			"so there is no key version to re-encrypt it with"
 	case "acquireSsrsLease", "releaseSsrsLease":
 		return "SQL Server Reporting Services leases: " + sqlServerWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
@@ -518,6 +516,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.executeSQL(r, project, e)
 			return "sql.instances.executeSql", out, err
+		}
+	case "reencrypt":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.reencrypt(r, base, project, e)
+			return "sql.instances.reencrypt", out, err
 		}
 	case "truncateLog":
 		if len(rest) == 3 && r.Method == http.MethodPost {

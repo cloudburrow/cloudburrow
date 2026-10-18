@@ -368,6 +368,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
+	d.Actions = append(d.Actions, reencryptActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
@@ -659,6 +660,17 @@ func failoverActions(in *sqladminapi.DatabaseInstance) []console.Action {
 			"and the old primary is rebuilt as the new standby."}}
 }
 
+// reencryptActions is Re-encrypt on a CMEK instance (#1614): its data key
+// is wrapped again by its key's primary version (instances.reencrypt).
+func reencryptActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if cmekKey(in) == "" {
+		return nil
+	}
+	return []console.Action{{ID: "reencrypt", Label: "Re-encrypt",
+		Confirm: "The instance is re-encrypted with the primary version of " + cmekKey(in) +
+			"; afterwards the version that encrypted it before can be disabled."}}
+}
+
 func availabilityOr(a string) string {
 	if a == "" {
 		return "ZONAL"
@@ -898,6 +910,8 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 				Username: u, Password: v["password"]}}
 		}
 		_, err = svc.Instances.DemoteMaster(project, name, &sqladminapi.InstancesDemoteMasterRequest{DemoteMasterContext: dc}).Context(ctx).Do()
+	case "reencrypt":
+		_, err = svc.Instances.Reencrypt(project, name, &sqladminapi.InstancesReencryptRequest{}).Context(ctx).Do()
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":

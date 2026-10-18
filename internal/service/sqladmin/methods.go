@@ -61,7 +61,7 @@ var Methods = []Method{
 	{"sql.instances.pointInTimeRestore", "POST", "v1/projects/{projectsId}:pointInTimeRestore", true},
 	{"sql.instances.preCheckMajorVersionUpgrade", "POST", "v1/projects/{project}/instances/{instance}/preCheckMajorVersionUpgrade", true},
 	{"sql.instances.promoteReplica", "POST", "v1/projects/{project}/instances/{instance}/promoteReplica", true},
-	{"sql.instances.reencrypt", "POST", "v1/projects/{project}/instances/{instance}/reencrypt", false},
+	{"sql.instances.reencrypt", "POST", "v1/projects/{project}/instances/{instance}/reencrypt", true},
 	{"sql.instances.releaseSsrsLease", "POST", "v1/projects/{project}/instances/{instance}/releaseSsrsLease", false},
 	{"sql.instances.resetSslConfig", "POST", "v1/projects/{project}/instances/{instance}/resetSslConfig", true},
 	{"sql.instances.restart", "POST", "v1/projects/{project}/instances/{instance}/restart", true},
