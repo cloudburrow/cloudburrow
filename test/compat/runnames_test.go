@@ -63,6 +63,14 @@ func TestRunNamesPerProject(t *testing.T) {
 		}
 	}
 
+	// A cleanup runs after the test function returns, when its deferred
+	// cancel has ended ctx: each takes a context of its own, or every delete
+	// fails at once and project b's resources outlive the test, so the next
+	// run's CreateWorkerPool in b is AlreadyExists, as it is on Google.
+	cleanupContext := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 2*time.Minute)
+	}
+
 	const id = "compat-same"
 	parents := map[string]string{"a": runParent(h), "b": "projects/compat-names-b/locations/us-central1"}
 	one := int32(1)
@@ -70,6 +78,8 @@ func TestRunNamesPerProject(t *testing.T) {
 		parent := parents[side]
 		pool, inst, job := parent+"/workerPools/"+id, parent+"/instances/"+id, parent+"/jobs/"+id
 		t.Cleanup(func() {
+			ctx, cancel := cleanupContext()
+			defer cancel()
 			if op, err := pc.DeleteWorkerPool(ctx, &runpb.DeleteWorkerPoolRequest{Name: pool}); err == nil {
 				_, _ = op.Wait(ctx)
 			}
@@ -218,6 +228,8 @@ func TestRunNamesPerProject(t *testing.T) {
 			t.Fatalf("CreateService in %s: %v", parents[side], err)
 		}
 		t.Cleanup(func() {
+			ctx, cancel := cleanupContext()
+			defer cancel()
 			if op, err := sc.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name}); err == nil {
 				_, _ = op.Wait(ctx)
 			}
