@@ -72,8 +72,8 @@ Out of contract, not merely unscheduled:
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
   because Google publishes none, built by CloudBurrow with patches to its SQL engine (#1061), and
   inherits its other limits (docs/compatibility.md).
-- **Production durability.** CloudBurrow is a development tool. State format carries no
-  compatibility guarantee before 1.0.
+- **Production durability.** CloudBurrow is a development tool. Before 1.0 the stored state
+  of the latest release loads in the next, and no further back (docs/install.md, Upgrading).
 - **A promise that an unmodified GKE manifest runs unchanged.** Endpoint configuration and
   local overlays legitimately differ. See §7.
 

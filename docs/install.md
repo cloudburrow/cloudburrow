@@ -614,6 +614,34 @@ What this is tested to do, and what it is not:
 
 ## Upgrading
 
+**The upgrade promise (#1605).** State written by the latest release, today `v0.1.0`, loads in
+this one: a persistent instance's state directory and cluster, brought up again by the new
+`cloudburrow up` with the same `--name` and `--state-dir`, and a `cloudburrow state save`
+archive, loaded with the new `cloudburrow state load`. What that release kept is read back as it
+was written, with these exceptions:
+
+- **What the older release never kept.** In `v0.1.0`, Pub/Sub, Firestore, Bigtable, Spanner,
+  BigQuery and Cloud Logging ran in memory, so their state is not there to upgrade; Cloud Run
+  services are Knative objects in the cluster and come through with it.
+- **Cloud Storage on the volume, from before the builtin server (#519).** `v0.1.0`'s buckets are on
+  the `storage-data` volume in the layout of the server it ran then, which the builtin server
+  cannot read and refuses to start over (see below), so `up` fails until the volume is cleared.
+  Before upgrading, `cloudburrow state save` with the older release: the archive's buckets and
+  objects load into this release (#1605). Migrating that volume in place is #1606.
+- **What an archive never held.** The archive captures what the older release's `state save`
+  listed as captured (`v0.1.0`: Cloud Storage, Cloud Tasks, Secret Manager, projects and Cloud SQL
+  for PostgreSQL); its manifest names the rest and why.
+
+Checked against real instances by `test/upgrade` (`go test -tags upgrade ./test/upgrade/`, which
+builds `v0.1.0`, seeds every service through the official clients, stops it, and reads everything
+back with this release, from the state directory and from the archive), and in every CI run by
+`TestStateDirFromV010Loads` and `TestStateArchiveFromV010Loads` against what `v0.1.0` wrote, kept in
+`cmd/cloudburrow/testdata/state-v0.1.0`. A release that changes a stored layout reads the earlier one;
+the release after this moves the promise to the then-latest tag.
+
+Before 1.0 the promise covers one release back: upgrading across several releases goes through
+each, or through `state save` and `state load`.
+
 Install the new release as you installed the first, then run `cloudburrow up` as usual. Every
 cluster is stamped with the versions it was built from: a ConfigMap `cloudburrow-stamp` in
 `kube-system` records the CLI that last ran `up`, the node image the cluster was created with and
@@ -664,7 +692,7 @@ store until the server could not open its own metadata log.
 In persistent mode the volume may still hold buckets the earlier server wrote, each a directory
 beside a `<bucket>.bucketMetadata` file. The storage server cannot read them and **refuses to start
 over them**, naming them; `up` then fails with the server's message in its output, not only
-"storage did not become ready". They are not migrated. Either:
+"storage did not become ready". They are not migrated in place. Either:
 
 - start with empty storage, which **deletes the cluster and every piece of state in it**, those
   buckets included:
@@ -674,8 +702,13 @@ over them**, naming them; `up` then fails with the server's message in its outpu
   cloudburrow up
   ```
 
-- or keep the objects: run the release that wrote them, copy them out with a Cloud Storage client, then
-  upgrade, `cloudburrow delete`, `cloudburrow up` and copy them back in.
+- or keep the objects: with the release that wrote them, `cloudburrow state save <file>`; then
+  upgrade, `cloudburrow delete`, `cloudburrow up` and `cloudburrow state load <file>`. `delete`
+  also removes the volumes of Datastore, Cloud SQL and Memorystore, which the archive of `v0.1.0`
+  does not hold except PostgreSQL's databases: dump those first with their own tools. An archive
+  from before the builtin server holds its buckets, objects with their metadata, and notification
+  configurations as that release wrote them, and this release loads that layout (#1605). Or copy
+  them out with a Cloud Storage client and back in.
 
 If the storage server's data directory holds a file or directory it cannot write, it stops at start
 and names the path, its owner and mode, and the user it runs as (uid 65532), rather than failing on
