@@ -190,6 +190,22 @@ type arimaSeries struct {
 	Seasonal [][]float64   `json:"seasonal,omitempty"`
 	Spikes   []float64     `json:"spikes,omitempty"`
 	Steps    []float64     `json:"steps,omitempty"`
+	// ETS is each seasonal component's double exponential smoothing,
+	// which forecasts it (#1600, modelets.go). A model trained before
+	// #1600 has none, and it is fitted when the model is read.
+	ETS []seasonETS `json:"ets,omitempty"`
+}
+
+// withETS is s with each seasonal component's smoothing fitted.
+func (s arimaSeries) withETS() arimaSeries {
+	if len(s.ETS) == len(s.Seasonal) {
+		return s
+	}
+	s.ETS = make([]seasonETS, len(s.Seasonal))
+	for i, c := range s.Seasonal {
+		s.ETS[i] = fitSeasonETS(c, s.Seasons[i].Period)
+	}
+	return s
 }
 
 // adjusted is the series the ARIMA is fitted to: the data less its
@@ -208,14 +224,17 @@ func (s arimaSeries) adjusted() []float64 {
 	return x
 }
 
-// seasonalPart is the i-th seasonal component at point k, continued past
-// the training by its last cycle.
+// seasonalPart is the i-th seasonal component at point k, forecast past
+// the training by its double exponential smoothing (#1600).
 func (s arimaSeries) seasonalPart(i, k int) float64 {
 	c, p := s.Seasonal[i], s.Seasons[i].Period
-	if k >= len(c) {
-		k = len(c) - p + (k-len(c))%p
+	if k < len(c) {
+		return c[k]
 	}
-	return c[k]
+	if len(s.ETS) != len(s.Seasonal) {
+		return fitSeasonETS(c, p).forecast(len(c), p, k)
+	}
+	return s.ETS[i].forecast(len(c), p, k)
 }
 
 // seasonalAt is the sum of the seasonal components at point k.
@@ -505,6 +524,7 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		// The pipeline's stages before the ARIMA (#1518).
 		dc := decomposeSeries(s.Data, a.Frequency, ts)
 		s.Seasons, s.Seasonal, s.Spikes, s.Steps = dc.Seasons, dc.Seasonal, dc.Spikes, dc.Steps
+		s = s.withETS()
 		// The points the trend is modelled on.
 		switch {
 		case ts.MaxLength > 0 && n > ts.MaxLength:
@@ -969,6 +989,7 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 			if len(s.Cands) == 0 {
 				continue
 			}
+			s = s.withETS()
 			fit := s.Cands[0]
 			fitted, _, _ := s.arimaPath(fit, a.Cond, 0)
 			fc, se, lo, hi := s.arimaForecast(ts, a.Cond, h, z)
@@ -1157,6 +1178,7 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 			if len(s.Cands) == 0 {
 				continue
 			}
+			s = s.withETS()
 			key := ""
 			if s.ID != nil {
 				key = *s.ID

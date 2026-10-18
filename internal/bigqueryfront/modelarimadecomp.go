@@ -11,9 +11,9 @@ import (
 // spikes-and-dips cleaning and step-change adjustment. What is left, the
 // adjusted, deseasonalized series, is the trend the ARIMA is fitted to; a
 // forecast is that trend's forecast plus each seasonal component
-// continued by its last cycle (BigQuery says it extrapolates seasonality
-// "by using double exponential smoothing (ETS)", with no parameters;
-// CloudBurrow does not, #1600). For every point
+// extrapolated "by using double exponential smoothing (ETS)", as BigQuery
+// documents, with parameters chosen here (#1600, modelets.go). For every
+// point
 //
 //	y = trend + Σ seasonal_period_* + spikes_and_dips + step_changes + residual
 //

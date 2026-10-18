@@ -295,3 +295,77 @@ func TestBigQueryMLArimaPlusSTL(t *testing.T) {
 		t.Errorf("grow: Monday's seasonal %v in the first week and %v in the last; want it to grow from about 3 toward 10.5", first, last)
 	}
 }
+
+// TestBigQueryMLArimaPlusETS: BigQuery extrapolates seasonality "by using
+// double exponential smoothing (ETS)"
+// (https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series,
+// docs re-read 2026-10-17), so a forecast's seasonal component follows a
+// pattern whose amplitude grows, rather than repeating the last trained
+// cycle (#1600). Double exponential smoothing's forecast is linear in the
+// steps ahead: in ML.EXPLAIN_FORECAST each weekday's seasonal_period_weekly
+// moves by the same amount from one forecast week to the next, the
+// forecast weeks' amplitude grows past the last trained week's, and
+// ML.FORECAST's forecast_value is the trend plus that seasonal part. Its
+// constants and how they are fitted are UNVERIFIED (docs re-read
+// 2026-10-17: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series),
+// so the test checks these properties, not values.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryMLArimaPlusETS(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	name := mlDataset(t, h, c, map[string]string{
+		"grow": "SELECT DATE_ADD(DATE '2024-01-01', INTERVAL i DAY) AS d, 10 + (1 + i / 14) * [3.0, -1, -2, 0, 1, -4, 3][OFFSET(MOD(i, 7))] AS v " +
+			"FROM UNNEST(GENERATE_ARRAY(0, 55)) AS i",
+	})
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.m` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', "+
+		"seasonalities=['WEEKLY'], clean_spikes_and_dips=FALSE, adjust_step_changes=FALSE, horizon=21) AS SELECT d, v FROM `%s.grow`", name, name)); err != nil {
+		t.Fatalf("CREATE MODEL: %v", err)
+	}
+	ex := mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.EXPLAIN_FORECAST(MODEL `%s.m`, STRUCT(21 AS horizon)) ORDER BY time_series_timestamp", name))
+	if len(ex) != 56+21 {
+		t.Fatalf("ML.EXPLAIN_FORECAST: %d rows; want 56 + 21", len(ex))
+	}
+	seas := make([]float64, len(ex))
+	for k, r := range ex {
+		v, ok := r["seasonal_period_weekly"].(float64)
+		if !ok {
+			t.Fatalf("row %d: seasonal_period_weekly %v", k, r["seasonal_period_weekly"])
+		}
+		seas[k] = v
+	}
+	amp := func(from int) float64 {
+		lo, hi := math.Inf(1), math.Inf(-1)
+		for _, v := range seas[from : from+7] {
+			lo, hi = math.Min(lo, v), math.Max(hi, v)
+		}
+		return hi - lo
+	}
+	if last, ahead := amp(49), amp(70); ahead <= last+1 {
+		t.Errorf("weekly amplitude %v in the last trained week and %v in the third forecast week; want it to grow, not repeat", last, ahead)
+	}
+	repeated := true
+	for k := 56; k < 63; k++ {
+		if !near(seas[k], seas[k-7], 1e-6) {
+			repeated = false
+		}
+		// Linear in the weeks ahead.
+		if d1, d2 := seas[k+7]-seas[k], seas[k+14]-seas[k+7]; math.Abs(d1-d2) > 1e-6 {
+			t.Errorf("day %d: seasonal moves %v then %v a week; want the same step (double exponential smoothing)", k, d1, d2)
+		}
+	}
+	if repeated {
+		t.Errorf("the first forecast week's seasonal %v repeats the last trained week's %v", seas[56:63], seas[49:56])
+	}
+	fc := mlQuery(t, h, c, fmt.Sprintf("SELECT forecast_value FROM ML.FORECAST(MODEL `%s.m`, STRUCT(21 AS horizon)) ORDER BY forecast_timestamp", name))
+	if len(fc) != 21 {
+		t.Fatalf("ML.FORECAST: %d rows; want 21", len(fc))
+	}
+	for k, r := range fc {
+		e := ex[56+k]
+		tr, _ := e["trend"].(float64)
+		if !near(r["forecast_value"], tr+seas[56+k], 1e-6) || !near(e["time_series_data"], tr+seas[56+k], 1e-6) {
+			t.Errorf("forecast %d: %v; want the trend %v plus the seasonal %v", k, r["forecast_value"], tr, seas[56+k])
+		}
+	}
+}
