@@ -399,12 +399,33 @@ func (f front) allJobs(r *http.Request, filter *jobsFilter) ([]map[string]any, i
 	return f.listedJobs(r, filter, &engineList{})
 }
 
+// everyJobList lets one list of every job (listedJobs) run at a time
+// (#1632). Each decodes the engine's whole list in each layer of the
+// jobs.list path: measured natively at 10,000 jobs (arm64, 2026-10-18),
+// one INFORMATION_SCHEMA.JOBS query took the front's heap from about 25
+// to 100 MB and allocated about 800 MB, its live heap otherwise 57 MB, so
+// the filtered JOBS queries a client sends at once, each listing every
+// job, held several such lists together: the front's memory reached
+// 326 MiB, past its 256 MiB GOMEMLIMIT (components.FrontGoMemLimitMiB),
+// with what it keeps (job texts, configurations, the JOBS table's
+// digests, the mapped job errors) a fraction of that. A list of some jobs
+// (a sync's, jobstable.go) is small and is not held back.
+var everyJobList = make(chan struct{}, 1)
+
 // listedJobs is allJobs, of the engine's jobs some names (engineJobs,
 // jobstable.go), and the front's own; some has the engine's last job
 // after.
 func (f front) listedJobs(r *http.Request, filter *jobsFilter, some *engineList) ([]map[string]any, int, string) {
 	if f.listJobs == nil {
 		return nil, http.StatusInternalServerError, "cloudburrow: the job list cannot be read here"
+	}
+	if some == nil || !some.some {
+		select {
+		case everyJobList <- struct{}{}:
+			defer func() { <-everyJobList }()
+		case <-r.Context().Done():
+			return nil, http.StatusServiceUnavailable, "cloudburrow: the job list was not read: " + r.Context().Err().Error()
+		}
 	}
 	var jobs []map[string]any
 	token := ""

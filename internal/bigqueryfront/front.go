@@ -229,6 +229,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	models := &bqModels{}                           // models.go, #1465
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
+	if o.logf != nil {
+		frontLogf.Store(&o.logf) // serviceclient.go, #1628
+	}
 	if o.stateDir != "" {
 		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
 	}
@@ -255,6 +258,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf)    // rowpolicies.go, #1218
 		functions.keep(functionsStateFile(o.stateDir), o.logf)     // functionstate.go
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
+		jobRows.keep(jobsTableStateFile(o.stateDir), o.logf)       // jobstablestate.go, #1632
+		failed.mapped.keep(jobErrorsStateFile(o.stateDir), o.logf) // joberrorsmemo.go, #1628
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
 		numbers.keep(projectNumbersStateFile(o.stateDir), o.logf)  // projectnumbers.go, #1551

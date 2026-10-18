@@ -114,6 +114,9 @@ func TestBigQueryStorageReadSplitAndRestart(t *testing.T) {
 	}
 
 	restartFront(t, "bigquery", "bigquery")
+	// A deadline of its own (#1632): the restart waits out the kubelet's
+	// back-off, which grows with each restart of the front's container.
+	ctx = h.Context()
 
 	rc = newClient()
 	for stream, n := range want {

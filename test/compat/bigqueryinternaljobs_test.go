@@ -164,5 +164,9 @@ func TestBigQueryFrontsOwnJobsStayUnlisted(t *testing.T) {
 	}
 
 	restartFront(t, "bigquery", "bigquery")
+	// A deadline of its own (#1632): the restart waits for the kubelet,
+	// whose back-off grows with each restart of the front's container
+	// (40 s at its fourth, measured), which the test's took in too.
+	ctx = h.Context()
 	check("after a restart of the front")
 }

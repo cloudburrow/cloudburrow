@@ -25,10 +25,12 @@ import (
 // then reads the table, and the engine runs its WHERE. The rows are the
 // ones jobRow writes, so the answer is the one the literal gave.
 //
-// The table is made again (dropped first) the first time a project's
-// rows are asked for after the front starts, as the front no longer knows
-// what it holds, and forgotten when the emulator restarts (restart.go),
-// as the emulator then has neither the table nor the jobs. A filtered
+// The table is made (dropped first) the first time a project's rows are
+// asked for, and forgotten when the emulator restarts (restart.go), as
+// the emulator then has neither the table nor the jobs. A digest of each
+// row written is kept in the front's state directory, so a restart of the
+// front's container alone keeps the table, checked first
+// (jobstablestate.go, #1632); without it, the table is made again. A filtered
 // query keeps reading a literal of the jobs it keeps, which is smaller,
 // unless it keeps more than jobsLiteralMax, when it reads the table too
 // (#1515).
@@ -141,10 +143,20 @@ var jobsTableDelay = time.Second
 // jobsTable is what the front wrote to each project's table of JOBS rows.
 type jobsTable struct {
 	mu sync.Mutex
-	// rows are the rows written, by project and job ID; a project with
-	// none is one whose table the front has not made since it started
-	// or the emulator restarted.
+	// rows are the digests of the rows written (rowDigest), by project
+	// and job ID; a project with none is one whose table the front has
+	// not made, or restored from its state directory
+	// (jobstablestate.go, #1632), since it started or the emulator
+	// restarted.
 	rows map[string]map[string]string
+	// verify are the projects whose table was restored and not yet
+	// checked (verifiedLocked).
+	verify map[string]bool
+	// path is the file the tables are kept in (keep), or ""; size is its
+	// size, compacted its size when last written whole.
+	path            string
+	logf            func(string, ...any)
+	size, compacted int
 
 	// open are the IDs of the rows written of jobs not DONE, by
 	// project, which a background sync reads again.
@@ -253,7 +265,8 @@ func (j *jobsTable) reset() {
 		return
 	}
 	j.mu.Lock()
-	j.rows, j.open, j.cursor = nil, nil, nil
+	j.rows, j.open, j.cursor, j.verify = nil, nil, nil, nil
+	j.recordLocked(jobsTableLine{Reset: true})
 	j.mu.Unlock()
 	j.bg.Lock()
 	j.made, j.pending, j.overflow = nil, nil, nil
@@ -311,7 +324,7 @@ func jobsTablePath() string {
 }
 
 // jobsTableStatements are how each statement sync sends begins.
-var jobsTableStatements = []string{"DROP TABLE IF EXISTS ", "CREATE TABLE ", "DELETE FROM ", "INSERT INTO "}
+var jobsTableStatements = []string{"DROP TABLE IF EXISTS ", "CREATE TABLE ", "DELETE FROM ", "INSERT INTO ", "SELECT COUNT(*) FROM "}
 
 // isJobsTableStatement reports whether sql is one of the statements sync
 // sends, which write the table (internalText).
@@ -325,7 +338,8 @@ func isJobsTableStatement(sql string) bool {
 }
 
 // sync writes the project's table so that it holds rows (job ID to the
-// row's SQL), new ones in the order of ids, and reports whether it does;
+// row's SQL), new ones in the order of ids, and reports whether it does
+// (keeping their digests, and recording each change, jobstablestate.go);
 // a table not made is made only when create is true. open are the IDs of
 // rows of jobs not DONE, last the job the engine's list ended with. With
 // asked nil, rows are every job's; else they are some jobs', those asked
@@ -341,10 +355,26 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		return st == http.StatusOK
 	}
 	have, made := j.rows[project]
+	if made && !j.verifiedLocked(f, r, project) {
+		if j.logf != nil {
+			j.logf("bigquery front: the table of INFORMATION_SCHEMA.JOBS rows of %s is not as the front left it; making it again", project)
+		}
+		delete(j.rows, project)
+		delete(j.open, project)
+		delete(j.cursor, project)
+		j.setMade(project, false)
+		j.recordLocked(jobsTableLine{Project: project, Forget: true})
+		have, made = nil, false
+	}
 	if !made && !create {
 		return false
 	}
+	digests := make(map[string]string, len(rows))
+	for id, row := range rows {
+		digests[id] = rowDigest(row)
+	}
 	if !made {
+		j.recordLocked(jobsTableLine{Project: project, Forget: true})
 		// The dataset may not be there yet (queryResults makes it for the
 		// first query result); 409 if it is.
 		body, _ := json.Marshal(map[string]any{"datasetReference": map[string]string{"projectId": project, "datasetId": resultsDataset}})
@@ -358,6 +388,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		}
 		j.rows[project] = have
 		j.setMade(project, true)
+		j.recordLocked(jobsTableLine{Project: project, Made: true})
 	}
 	var gone []string
 	var add []string
@@ -366,7 +397,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 	// project's jobs did.
 	check := func(id string) {
 		if row, had := have[id]; had {
-			if now, ok := rows[id]; ok && now != row || !ok && (asked == nil || asked[id]) {
+			if now, ok := digests[id]; ok && now != row || !ok && (asked == nil || asked[id]) {
 				gone = append(gone, id)
 			}
 		}
@@ -386,7 +417,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		}
 	}
 	for _, id := range ids {
-		if row, ok := have[id]; !ok || row != rows[id] {
+		if row, ok := have[id]; !ok || row != digests[id] {
 			add = append(add, id)
 		}
 	}
@@ -395,6 +426,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		delete(j.open, project)
 		delete(j.cursor, project)
 		j.setMade(project, false)
+		j.recordLocked(jobsTableLine{Project: project, Forget: true})
 		return false
 	}
 	for len(gone) > 0 {
@@ -409,6 +441,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		for _, id := range gone[:n] {
 			delete(have, id)
 		}
+		j.recordLocked(jobsTableLine{Project: project, Del: gone[:n]})
 		gone = gone[n:]
 	}
 	for len(add) > 0 {
@@ -421,9 +454,12 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		if !run("INSERT INTO " + jobsTablePath() + " SELECT * FROM " + literalRows(jobsColumns, lits)) {
 			return fail()
 		}
+		written := make(map[string]string, n)
 		for _, id := range add[:n] {
-			have[id] = rows[id]
+			have[id] = digests[id]
+			written[id] = digests[id]
 		}
+		j.recordLocked(jobsTableLine{Project: project, Add: written})
 		add = add[n:]
 	}
 	if j.open == nil {
@@ -444,6 +480,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		j.cursor = map[string]string{}
 	}
 	j.cursor[project] = last
+	j.recordLocked(jobsTableLine{Project: project, End: true, Open: sortedIDs(was), Cursor: last})
 	return true
 }
 

@@ -142,6 +142,7 @@ func (j *jobFailures) reset() {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.errs, j.order, j.loads, j.loadOrder = nil, nil, nil, nil
+	j.mapped.reset()
 }
 
 // reset drops the client's texts of the jobs the front changed (#1016).

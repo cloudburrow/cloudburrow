@@ -1,8 +1,10 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -476,5 +478,84 @@ func TestJobTextNotesTheJob(t *testing.T) {
 	texts.add("p", "", jobText{query: "x"})
 	if p := rows.takePending("p"); len(p) != 0 {
 		t.Errorf("pending after a text of no job: %v", p)
+	}
+}
+
+// countingEmulator answers the front's COUNT(*) of the table of JOBS rows
+// with n, and sends every other request to e.
+type countingEmulator struct {
+	e tableEmulator
+	n *int
+}
+
+func (c countingEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/queries") {
+		b, _ := io.ReadAll(r.Body)
+		var body struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(b, &body)
+		if body.Query == "SELECT COUNT(*) FROM "+jobsTablePath() {
+			c.e.log = append(c.e.log, "POST "+string(b))
+			writeJSON(w, 200, map[string]any{"jobComplete": true, "rows": []any{map[string]any{"f": []any{map[string]any{"v": fmt.Sprint(*c.n)}}}}})
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(b))
+	}
+	c.e.ServeHTTP(w, r)
+}
+
+// TestJobsTableOutlivesAFrontRestart (#1632): a front that restarts with
+// its state directory has the table of JOBS rows it wrote, which the
+// engine still holds, and the first JOBS query after the restart writes
+// only the new rows, where it made the table again; a table unlike the
+// file (its count) is made again.
+func TestJobsTableOutlivesAFrontRestart(t *testing.T) {
+	dir := t.TempDir()
+	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}, msTimes: true}}
+	n := 0
+	h := Wrap(countingEmulator{emu, &n}, func(o *options) { o.stateDir = dir })
+	for _, q := range []string{"SELECT 1", "SELECT 2"} {
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", q, code, got)
+		}
+	}
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	table := jobsTablePath()
+	run := func(h http.Handler) []string {
+		t.Helper()
+		from := len(emu.log)
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+count+`"}`); code != 200 {
+			t.Fatalf("JOBS: %d %v", code, got)
+		}
+		return emu.sentSince(from)
+	}
+	if sent := run(h); len(sent) != 4 || sent[0] != "DROP TABLE IF EXISTS "+table || strings.Count(sent[2], "'auto") != 2 {
+		t.Fatalf("first JOBS query sent %q", sent)
+	}
+	n = 2
+	sent := run(Wrap(countingEmulator{emu, &n}, func(o *options) { o.stateDir = dir }))
+	if len(sent) != 3 || sent[0] != "SELECT COUNT(*) FROM "+table || !strings.HasPrefix(sent[1], "INSERT INTO "+table) ||
+		strings.Count(sent[1], "'auto") != 1 || !strings.Contains(sent[2], table) {
+		t.Fatalf("JOBS query after a restart sent %q, want the table checked and the one new row written", sent)
+	}
+	// The engine's table is not the one the file has: made again.
+	n = 7
+	sent = run(Wrap(countingEmulator{emu, &n}, func(o *options) { o.stateDir = dir }))
+	if len(sent) != 5 || sent[0] != "SELECT COUNT(*) FROM "+table || sent[1] != "DROP TABLE IF EXISTS "+table ||
+		strings.Count(sent[3], "'auto") != 4 {
+		t.Fatalf("JOBS query after a restart with an unlike table sent %q, want it made again", sent)
+	}
+	// The emulator's restart forgets the tables kept.
+	var rows jobsTable
+	rows.keep(jobsTableStateFile(dir), nil)
+	if len(rows.rows) != 1 || len(rows.rows["p"]) != 4 {
+		t.Fatalf("restored %v", rows.rows)
+	}
+	rows.reset()
+	var again jobsTable
+	again.keep(jobsTableStateFile(dir), nil)
+	if len(again.rows) != 0 {
+		t.Errorf("after the emulator's restart, restored %v", again.rows)
 	}
 }
