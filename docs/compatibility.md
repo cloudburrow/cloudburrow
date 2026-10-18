@@ -351,10 +351,29 @@ Contract: `google/pubsub/v1/pubsub.proto`. Client endpoint override: `PUBSUB_EMU
   10 MiB. CloudBurrow bounds the heap (`--emulator-heap-mib`, 512 MiB by default,
   [configuration.md](configuration.md#settings)), which holds about 350,000 such 1 KB messages, or
   550,000 of the soak's. **When the heap is full the emulator exits and its container restarts,
-  empty**: every topic and subscription is lost, as in any restart. Unbounded, it would instead
-  have grown to a quarter of the cluster node's memory; bounded without that exit, it was measured
-  to answer nothing at all (every `Publish` timing out) until its pod was deleted. A publisher that
-  runs for hours should delete and recreate its subscriptions, or raise the bound.
+  empty.** Unbounded, it would instead have grown to a quarter of the cluster node's memory; bounded
+  without that exit, it was measured to answer nothing at all (every `Publish` timing out) until its
+  pod was deleted. A publisher that runs for hours should delete and recreate its subscriptions, or
+  raise the bound.
+- **CloudBurrow's front brings the definitions back after an emulator restart** (#1608,
+  `internal/pubsubfront/restore.go`). It keeps every topic, subscription (its whole configuration),
+  AVRO schema with its revisions and snapshot the emulator holds in its state file, read from the
+  emulator after each call that changed one and before that call is answered. When the emulator's
+  container restarts, from an `OutOfMemoryError` or any crash, the front holds every call (at most
+  2 minutes) until it has created them all again, so no client sees an empty emulator; IAM
+  policies, updated expiration policies and labels, detached subscriptions, snapshot updates and
+  Protocol Buffer schemas were always the front's and need nothing. What cannot come back is the
+  emulator's memory: **every message not yet acknowledged when it crashed is lost**, and a snapshot
+  is taken again with no backlog. Google's at-least-once delivery redelivers an unacknowledged
+  message; it does not cover an emulator that crashed. A schema's revisions are committed again
+  in order, so they get new revision IDs and creation times (a topic bound to a revision range is
+  bound to the new IDs). The state file is on the pod's emptyDir, as before: in either `--mode`,
+  the definitions outlive a restart of the emulator's container or the front's, and go with the
+  pod, as the emulator's resources always have. The front does not delete and recreate a fully
+  acknowledged subscription to free its memory: it cannot see a subscription's backlog without
+  leasing messages, deleting it ends every open `StreamingPull` (fatal `NOT_FOUND` to the official
+  clients), a message published in between would be lost, and a `Seek` to a time before it, or a
+  snapshot's backlog, would no longer replay; none of that is invisible to a client.
 
 **CloudBurrow's front** (#873). The emulator stores a subscription's `expiration_policy` and never
 acts on it, so the Pub/Sub pod runs `cloudburrow-storage pubsub-front` (`internal/pubsubfront`)

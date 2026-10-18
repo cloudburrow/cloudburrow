@@ -5808,6 +5808,7 @@
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -5845,7 +5846,8 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
-          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic"
+          "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart"
         ]
       },
       {
@@ -5933,7 +5935,8 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
-          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart"
         ]
       },
       {
@@ -6049,6 +6052,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:132 TestPubSubUpdateSnapshot",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart",
           "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
@@ -6073,6 +6077,7 @@
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
@@ -6130,7 +6135,8 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery",
-          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubrestore1608_test.go:91 TestPubSubDefinitionsSurviveAnEmulatorRestart"
         ]
       },
       {

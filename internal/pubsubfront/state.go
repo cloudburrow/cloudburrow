@@ -68,6 +68,10 @@ type savedState struct {
 	// protojson, by name; TopicSchemas the topics bound to them.
 	ProtoSchemas map[string][]string        `json:"protoSchemas,omitempty"`
 	TopicSchemas map[string]json.RawMessage `json:"topicSchemas,omitempty"`
+	// Definitions are the topics, subscriptions, snapshots and AVRO
+	// schemas the emulator holds, created again when it restarts empty
+	// (restore.go, #1608).
+	Definitions *savedDefinitions `json:"definitions,omitempty"`
 }
 
 // KeepState restores the front's state from path, when the file exists, and
@@ -140,6 +144,10 @@ func (f *Front) restore(b []byte) error {
 		}
 		topicSchemas[name] = ss
 	}
+	defs, err := loadDefinitions(s.Definitions)
+	if err != nil {
+		return fmt.Errorf("the definitions: %w", err)
+	}
 	if s.ClockOffsetNanos < 0 {
 		return fmt.Errorf("a negative clock offset, %d", s.ClockOffsetNanos)
 	}
@@ -173,6 +181,7 @@ func (f *Front) restore(b []byte) error {
 	for name, ss := range topicSchemas {
 		f.topicSchemas[name] = ss
 	}
+	f.defs = defs
 	return nil
 }
 
@@ -271,6 +280,10 @@ func (f *Front) save() error {
 			f.mu.Unlock()
 			return fmt.Errorf("encode the schema settings of %s: %w", name, err)
 		}
+	}
+	if s.Definitions, err = f.saveDefinitionsLocked(); err != nil {
+		f.mu.Unlock()
+		return fmt.Errorf("encode the definitions: %w", err)
 	}
 	f.mu.Unlock()
 	sort.Strings(s.Projects)

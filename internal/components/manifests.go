@@ -227,7 +227,9 @@ func (b Backend) claim() string {
 // does not store (updated expiration policies, its clock, activity) in a
 // file on an emptyDir, so a restart of the front's container alone loses
 // none of it, and a restart of the pod loses it with the emulator's state
-// (#898).
+// (#898). It keeps the emulator's topics, subscriptions, schemas and
+// snapshots there too, and creates them again when the emulator's
+// container restarts empty (#1608).
 func PubSubBackend(project, frontImage string) Backend {
 	return Backend{
 		Name:  "pubsub",
