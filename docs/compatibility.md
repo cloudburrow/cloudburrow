@@ -1033,8 +1033,8 @@ A Firestore backup is the way back: a schedule's backup outlives the emulator, a
 otherwise: the emulator has no persistence of its own (`gcloud`'s `--export-on-exit` needs a clean
 shutdown, which this exit is not), and Firestore does not survive `stop` and `up` in either mode,
 above. So the bound is sized for real data rather than for the soak: 100,000 documents of about
-1 KB held 330 MiB of Firestore's heap, and at 150,000 the 512 MiB of #1603 filled and the emulator
-exited, losing all of them; Datastore's 100,000 entities held 175 MiB, and 410 MiB while it wrote
+1 KB held 330 MiB of Firestore's heap, and the 512 MiB of #1603 filled before a second 100,000 were in,
+and the emulator exited, losing all of them; Datastore's 100,000 entities held 175 MiB, and 410 MiB while it wrote
 its 110 MB store to disk, which needs 2.3 times the live heap. 1024 MiB holds about 300,000 such
 Firestore documents and 240,000 Datastore entities. A persistent Datastore store too large for the
 heap fills it at each save, so the emulator exits, loads the last save, and loses every 30 seconds'
