@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,10 @@ import (
 type Tx interface {
 	Get(key string) ([]byte, bool)
 	Put(key string, value []byte)
+	// Append adds elem, one JSON value, to the end of the JSON array at key
+	// (an absent key is an empty array). The log records elem alone, so an
+	// append costs what it adds however long the array is (#1609).
+	Append(key string, elem []byte)
 	Delete(key string)
 	// List returns the keys under prefix, sorted.
 	List(prefix string) []string
@@ -57,6 +62,8 @@ type op struct {
 	Key   string `json:"k"`
 	Value []byte `json:"v,omitempty"`
 	Del   bool   `json:"d,omitempty"`
+	// Append: Value is one JSON value appended to the array at Key.
+	Append bool `json:"a,omitempty"`
 }
 
 func (t *memTx) Get(key string) ([]byte, bool) {
@@ -71,9 +78,36 @@ func (t *memTx) Put(key string, value []byte) {
 	if t.writes == nil {
 		t.writes = map[string][]byte{}
 	}
-	v := append([]byte(nil), value...)
+	// Never nil, even for an empty value: a nil write is a deletion.
+	v := append([]byte{}, value...)
 	t.writes[key] = v
 	t.ordered = append(t.ordered, op{Key: key, Value: v})
+}
+
+func (t *memTx) Append(key string, elem []byte) {
+	old, _ := t.Get(key)
+	if t.writes == nil {
+		t.writes = map[string][]byte{}
+	}
+	e := append([]byte(nil), elem...)
+	t.writes[key] = appendJSON(old, e)
+	t.ordered = append(t.ordered, op{Key: key, Value: e, Append: true})
+}
+
+// appendJSON returns a new array: arr (a JSON array, or empty for none)
+// with elem added at its end. arr is not modified.
+func appendJSON(arr, elem []byte) []byte {
+	arr = bytes.TrimRight(arr, " \t\r\n")
+	inner := bytes.TrimSpace(bytes.TrimSuffix(bytes.TrimPrefix(bytes.TrimSpace(arr), []byte("[")), []byte("]")))
+	out := make([]byte, 0, len(arr)+len(elem)+2)
+	if len(inner) == 0 {
+		out = append(out, '[')
+	} else {
+		out = append(out, arr[:len(arr)-1]...)
+		out = append(out, ',')
+	}
+	out = append(out, elem...)
+	return append(out, ']')
 }
 
 func (t *memTx) Delete(key string) {
@@ -106,14 +140,36 @@ func (t *memTx) List(prefix string) []string {
 	return out
 }
 
+// apply replays a logged transaction's operations, in order.
 func apply(m map[string][]byte, ops []op) {
 	for _, o := range ops {
-		if o.Del {
+		switch {
+		case o.Del:
 			delete(m, o.Key)
-		} else {
+		case o.Append:
+			m[o.Key] = appendJSON(m[o.Key], o.Value)
+		default:
 			m[o.Key] = o.Value
 		}
 	}
+}
+
+// commit stores a transaction's final writes in m, and returns how much the
+// live size changed. It is what apply of the transaction's operations
+// would leave, without merging an append twice.
+func commit(m map[string][]byte, writes map[string][]byte) (delta int64) {
+	for k, v := range writes {
+		if old, ok := m[k]; ok {
+			delta -= int64(len(k) + len(old))
+		}
+		if v == nil {
+			delete(m, k)
+			continue
+		}
+		m[k] = v
+		delta += int64(len(k) + len(v))
+	}
+	return delta
 }
 
 // MemMetaStore is the in-memory store, for ephemeral mode and tests.
@@ -138,7 +194,7 @@ func (s *MemMetaStore) Update(fn func(Tx) error) error {
 	if err := fn(tx); err != nil {
 		return err
 	}
-	apply(s.data, tx.ordered)
+	commit(s.data, tx.writes)
 	return nil
 }
 
@@ -263,8 +319,9 @@ func (s *LogMetaStore) Update(fn func(Tx) error) error {
 		return fmt.Errorf("sync Cloud Storage metadata: %w", err)
 	}
 	s.logBytes += int64(len(line))
-	apply(s.data, tx.ordered)
-	s.recountLive()
+	// The live size is kept up to date by what changed: counting every key
+	// again at each write cost a pass over the whole store.
+	s.liveSize += commit(s.data, tx.writes)
 	// Compact once the log is several times the live data, and big enough
 	// for it to matter.
 	if s.logBytes > 1<<20 && s.logBytes > 4*s.liveSize {
