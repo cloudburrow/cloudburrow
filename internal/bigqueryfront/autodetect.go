@@ -221,6 +221,9 @@ type jobFailures struct {
 	order     []string
 	loads     map[string]loadCounts
 	loadOrder []string
+	// mapped are the errors of jobs as the front mapped them
+	// (joberrorsmemo.go, #1628).
+	mapped mappedJobErrors
 }
 
 const maxJobFailures = 1000
