@@ -13,7 +13,7 @@ import (
 // forecast is that trend's forecast plus each seasonal component
 // continued by its last cycle (BigQuery says it extrapolates seasonality
 // "by using double exponential smoothing (ETS)", with no parameters;
-// CloudBurrow does not). For every point
+// CloudBurrow does not, #1600). For every point
 //
 //	y = trend + Σ seasonal_period_* + spikes_and_dips + step_changes + residual
 //
