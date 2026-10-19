@@ -254,8 +254,12 @@ func (j *jobTexts) serveJob(w http.ResponseWriter, project, rawID string, serve 
 	rec := newRecorder()
 	serve(rec)
 	body := rec.body.Bytes()
+	// Decoded whole only when patch can change it: a Job's configuration,
+	// or the statistics of a DML or DDL statement; a
+	// GetQueryResultsResponse's rows are otherwise not read (#1639).
 	var job map[string]any
-	if rec.status == http.StatusOK && json.Unmarshal(body, &job) == nil {
+	if head, ok := readJobHead(body); rec.status == http.StatusOK && ok && (len(head.Configuration) > 0 || t.dml != nil || t.ddl != nil) &&
+		json.Unmarshal(body, &job) == nil {
 		t.patch(job)
 		if b, err := json.Marshal(job); err == nil {
 			body = b

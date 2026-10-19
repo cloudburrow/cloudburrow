@@ -167,3 +167,31 @@ func jsonCopy(v any) any {
 	}
 	return out
 }
+
+// jobHead is what the front reads of an answer that names a job (a Job, a
+// QueryResponse, a GetQueryResultsResponse) to decide whether it changes
+// it, without decoding the rest, such as the rows of a query of every
+// job's INFORMATION_SCHEMA.JOBS row (#1639).
+type jobHead struct {
+	JobReference map[string]any `json:"jobReference"`
+	// Configuration is the answer's configuration as it was written, or
+	// empty when it has none: a Job's, which only a Job has.
+	Configuration json.RawMessage `json:"configuration"`
+}
+
+// readJobHead reads body's jobHead, reporting whether body is a JSON
+// object.
+func readJobHead(body []byte) (jobHead, bool) {
+	var h jobHead
+	if json.Unmarshal(body, &h) != nil {
+		return jobHead{}, false
+	}
+	return h, true
+}
+
+// ref is the job the answer names: its project and ID.
+func (h jobHead) ref() (project, id string) {
+	project, _ = h.JobReference["projectId"].(string)
+	id, _ = h.JobReference["jobId"].(string)
+	return project, id
+}

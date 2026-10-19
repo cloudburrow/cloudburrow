@@ -192,3 +192,37 @@ func TestJobsQueryByIDListsThoseJobs(t *testing.T) {
 		t.Errorf("listed by ID, the query was\n%s\nlisted whole\n%s", again, first)
 	}
 }
+
+// TestJobLocationsDecodeOnlyReferences (#1639): giving the job resources
+// of an answer their location decodes their references, not the whole
+// answer: a query's rows of 10,000 jobs cost the front a map of every
+// value, which in the pod was most of its heap at its peak. Measured
+// (arm64, 2026-10-19): 41.0 times the answer decoded whole, 5.8 times
+// its references alone.
+func TestJobLocationsDecodeOnlyReferences(t *testing.T) {
+	var rows []any
+	for i := 0; i < 5000; i++ {
+		rows = append(rows, map[string]any{"f": []any{map[string]any{"v": fmt.Sprintf("job%d", i)},
+			map[string]any{"v": "DONE"}, map[string]any{"v": "1790000000000"}, map[string]any{"v": nil}}})
+	}
+	body, _ := json.Marshal(map[string]any{"kind": "bigquery#queryResponse", "jobComplete": true, "totalRows": "5000",
+		"jobReference": map[string]any{"projectId": "p", "jobId": "q1"}, "rows": rows})
+	serve := func(w http.ResponseWriter) { _, _ = w.Write(body) }
+	var out *httptest.ResponseRecorder
+	got := allocated(5, func() {
+		out = httptest.NewRecorder()
+		withJobLocations(out, "EU", serve)
+	})
+	var resp struct {
+		JobReference map[string]any `json:"jobReference"`
+		Rows         []any          `json:"rows"`
+	}
+	if err := json.Unmarshal(out.Body.Bytes(), &resp); err != nil || resp.JobReference["location"] != "EU" || len(resp.Rows) != 5000 {
+		t.Fatalf("answered %v, %d rows (%v)", resp.JobReference, len(resp.Rows), err)
+	}
+	size := uint64(len(body))
+	t.Logf("an answer of %d KB allocated %d KB (%.1f times)", size/1024, got/1024, float64(got)/float64(size))
+	if got > 10*size {
+		t.Errorf("an answer of %d bytes allocated %d (%.1f times): more than its references decoded", size, got, float64(got)/float64(size))
+	}
+}

@@ -305,20 +305,23 @@ func (j *jobRecords) timed(w http.ResponseWriter, rec *recorder, created int64, 
 		return
 	}
 	t := jobTime{created: created, ended: j.clock()}
-	var resp map[string]any
-	if rec.status != 0 && rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &resp) != nil {
+	// The job's reference alone, and the whole answer only when it is a
+	// Job: a QueryResponse's rows are not read (#1639).
+	head, ok := readJobHead(rec.body.Bytes())
+	if rec.status != 0 && rec.status != http.StatusOK || !ok {
 		// A job the emulator refused may still be recorded (jobFailures).
 		j.setTime(project, id, t)
 		rec.copyTo(w)
 		return
 	}
-	if p, i := jobRef(resp); i != "" {
+	if p, i := head.ref(); i != "" {
 		id = i
 		if p != "" {
 			project = p
 		}
 	}
-	if !isJob {
+	var resp map[string]any
+	if !isJob || json.Unmarshal(rec.body.Bytes(), &resp) != nil {
 		j.setTime(project, id, t)
 		rec.copyTo(w)
 		return
