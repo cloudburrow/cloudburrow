@@ -1,0 +1,404 @@
+CloudBurrow patch 83 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1655). Needs patches 0002 (cloudburrow_job_order,
+keepResult), 0007 (jobKeys) and 0009 and googlesqlite 0019
+(QueryRawContext, EncodeString).
+
+The bug: UpdateJob (each query job's result), DeleteJob, jobExists and
+keepResult's expiry of an old result each wrote or read one job with a
+GoogleSQL WHERE on the jobs table's key, which googlesqlite compiles to a
+function call per row, so SQLite answered each with a SCAN of every job the
+emulator kept, and DeleteJob a second of cloudburrow_job_order. The
+CloudBurrow front deletes each job of its own once it has read it
+(forgetInternalJob), so each query a client made cost several such scans,
+under the emulator's one request lock (sequentialAccessMiddleware), and
+every request waited longer with every job kept.
+
+Worst was keepResult. Once the results kept first pass ResultsMaxBytes,
+the next result drops the oldest until they fit again, one UPDATE (one
+scan) each; a result of 7 MB (an INFORMATION_SCHEMA.JOBS_BY_ORGANIZATION
+of 9,250 jobs) after thousands of small ones dropped them all at once.
+Measured on an instance that had run the BigQuery compat suite and 6,000
+more jobs (arm64, Docker Desktop), in TestBigQueryInformationSchemaJobs
+-count=200: runs 20 and 21 each held the request lock in keepResult for
+over 60 s (goroutine dumps, patch 0082), every other request waiting, and
+failed on their 60 s deadline; the runs took 5.7 s at 9,020 jobs and 8 s
+at 9,680.
+
+Each now runs as SQLite SQL keyed by (projectID, id), as findJobRow reads
+one job (patch 0009), in the request's transaction: connection.Conn.Begin
+binds each transaction to its connection (metadata.BindTx), and the
+repository reaches SQLite through it. A transaction no connection is bound
+to is written with GoogleSQL, as before.
+cloudburrow_job_by_key_test.go checks each statement's query plan is a
+SEARCH of the primary key, and that both paths write and delete the same
+rows; results_test.go's inTx binds its transactions, so the tests of
+patches 0002 and 0009 run on the new path.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/connection/manager.go
++++ b/internal/connection/manager.go
+@@ -6,6 +6,8 @@
+ 	"fmt"
+ 
+ 	"github.com/goccy/googlesqlite"
++
++	"github.com/goccy/bigquery-emulator/internal/metadata"
+ )
+ 
+ type Manager struct {
+@@ -46,10 +48,12 @@
+ 		return nil
+ 	}
+ 	defer t.conn.Conn.Close()
++	metadata.UnbindTx(t.tx) // CloudBurrow patch (cloudburrow/cloudburrow#1655)
+ 	return t.tx.Rollback()
+ }
+ 
+ func (t *Tx) Commit() error {
++	metadata.UnbindTx(t.tx) // CloudBurrow patch (cloudburrow/cloudburrow#1655)
+ 	if err := t.tx.Commit(); err != nil {
+ 		return err
+ 	}
+@@ -113,5 +117,8 @@
+ 		_ = c.Conn.Close()
+ 		return nil, err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1655): the metadata
++	// repository writes a job by its key through the connection.
++	metadata.BindTx(tx, c.Conn)
+ 	return &Tx{tx: tx, conn: c}, nil
+ }
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -542,21 +542,37 @@
+ 	if job.err != nil {
+ 		jobErr = job.err.Error()
+ 	}
+-	if _, err := tx.Exec(
+-		"UPDATE jobs SET metadata = @metadata, result = @result, error = @error WHERE projectID = @projectID AND id = @id",
+-		sql.Named("id", job.ID),
+-		sql.Named("projectID", job.ProjectID),
+-		sql.Named("metadata", string(metadata)),
+-		sql.Named("result", string(result)),
+-		sql.Named("error", jobErr),
+-	); err != nil {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1655): by its key.
++	if done, err := rawByKey(ctx, tx, updateJobByKey, nil, string(metadata), string(result), jobErr, job.ProjectID, job.ID); err != nil {
+ 		return err
++	} else if !done {
++		if _, err := tx.Exec(
++			"UPDATE jobs SET metadata = @metadata, result = @result, error = @error WHERE projectID = @projectID AND id = @id",
++			sql.Named("id", job.ID),
++			sql.Named("projectID", job.ProjectID),
++			sql.Named("metadata", string(metadata)),
++			sql.Named("result", string(result)),
++			sql.Named("error", jobErr),
++		); err != nil {
++			return err
++		}
+ 	}
+ 	r.forgetResult(job.ProjectID, job.ID)
+ 	return r.keepResult(ctx, tx, job, len(result))
+ }
+ 
+ func (r *Repository) DeleteJob(ctx context.Context, tx *sql.Tx, job *Job) error {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1655): by its key.
++	if done, err := rawByKey(ctx, tx, deleteJobByKey, nil, job.ProjectID, job.ID); err != nil {
++		return err
++	} else if done {
++		if _, err := rawByKey(ctx, tx, deleteJobOrderByKey, nil, job.ProjectID, job.ID); err != nil {
++			return err
++		}
++		r.setJobKey(job.ProjectID, job.ID, false)
++		r.forgetResult(job.ProjectID, job.ID)
++		return nil
++	}
+ 	if _, err := tx.Exec(
+ 		"DELETE FROM jobs WHERE projectID = @projectID AND id = @id",
+ 		job.ProjectID,
+@@ -684,6 +700,13 @@
+ 	r.jobKeysMu.Unlock()
+ 	if !known {
+ 		return false, nil
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1655): by its key.
++	found := false
++	if done, err := rawByKey(ctx, tx, jobByKey, func(*sql.Rows) error { found = true; return nil }, projectID, jobID); err != nil {
++		return false, err
++	} else if done {
++		return found, nil
+ 	}
+ 	rows, err := tx.QueryContext(ctx, "SELECT id FROM jobs WHERE projectID = @projectID AND id = @id",
+ 		sql.Named("projectID", projectID), sql.Named("id", jobID))
+@@ -1146,6 +1169,12 @@
+ 	}
+ 	r.resultsMu.Unlock()
+ 	for _, k := range due {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1655): by its key.
++		if done, err := rawByKey(ctx, tx, expireResultByKey, nil, expiredResult, k.projectID, k.jobID); err != nil {
++			return fmt.Errorf("failed to expire the result of job %s: %w", k.jobID, err)
++		} else if done {
++			continue
++		}
+ 		if _, err := tx.ExecContext(
+ 			ctx,
+ 			"UPDATE jobs SET result = @result WHERE projectID = @projectID AND id = @id",
+--- a/internal/metadata/results_test.go
++++ b/internal/metadata/results_test.go
+@@ -50,6 +50,11 @@
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1655): as
++	// connection.Conn.Begin binds each transaction, so the jobs are
++	// written by their key.
++	BindTx(tx, conn)
++	defer UnbindTx(tx)
+ 	if err := f(ctx, tx); err != nil {
+ 		tx.Rollback()
+ 		t.Fatal(err)
+--- /dev/null
++++ b/internal/metadata/cloudburrow_job_by_key.go
+@@ -0,0 +1,78 @@
++package metadata
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1655): a job is written and
++// deleted by its primary key, as SQLite SQL. googlesqlite compiles each
++// GoogleSQL WHERE comparison to a function call, which SQLite cannot answer
++// from the key's index (see findJobRow), so UpdateJob, DeleteJob, jobExists
++// and keepResult's expiry each visited every job the emulator kept, and the
++// order table's every row; the CloudBurrow front deletes each job of its
++// own once it has read it, so every query it made cost a few scans of a
++// table that grows with every job, under the emulator's one request lock.
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"sync"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// txConns maps a transaction to the connection it runs on, for the
++// statements below, which reach SQLite through the connection
++// (googlesqlite.Conn.QueryRawContext) and run in its transaction.
++var txConns sync.Map // *sql.Tx -> *sql.Conn
++
++// BindTx records that tx runs on conn, until UnbindTx; a transaction not
++// bound is written to with GoogleSQL, as before.
++func BindTx(tx *sql.Tx, conn *sql.Conn) { txConns.Store(tx, conn) }
++
++// UnbindTx forgets tx, once it is committed or rolled back.
++func UnbindTx(tx *sql.Tx) { txConns.Delete(tx) }
++
++// rawByKey runs query, SQLite SQL, on tx's connection, with each of strs a
++// STRING argument in googlesqlite's stored encoding, and calls each (if not
++// nil) for every row it returns. ok is false, and nothing is run, when tx
++// is not bound.
++func rawByKey(ctx context.Context, tx *sql.Tx, query string, each func(*sql.Rows) error, strs ...string) (ok bool, err error) {
++	v, bound := txConns.Load(tx)
++	if !bound {
++		return false, nil
++	}
++	args := make([]any, len(strs))
++	for i, s := range strs {
++		enc, err := googlesqlite.EncodeString(s)
++		if err != nil {
++			return true, err
++		}
++		args[i] = enc
++	}
++	return true, v.(*sql.Conn).Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		rows, err := gsqlConn.QueryRawContext(ctx, query, args...)
++		if err != nil {
++			return err
++		}
++		defer rows.Close()
++		for rows.Next() {
++			if each != nil {
++				if err := each(rows); err != nil {
++					return err
++				}
++			}
++		}
++		return rows.Err()
++	})
++}
++
++// The statements, each keyed by the table's primary key (projectID, id).
++const (
++	updateJobByKey      = "UPDATE `jobs` SET `metadata` = ?, `result` = ?, `error` = ? WHERE `projectID` = ? AND `id` = ?"
++	expireResultByKey   = "UPDATE `jobs` SET `result` = ? WHERE `projectID` = ? AND `id` = ?"
++	deleteJobByKey      = "DELETE FROM `jobs` WHERE `projectID` = ? AND `id` = ?"
++	deleteJobOrderByKey = "DELETE FROM `cloudburrow_job_order` WHERE `projectID` = ? AND `id` = ?"
++	jobByKey            = "SELECT 1 FROM `jobs` WHERE `projectID` = ? AND `id` = ?"
++)
+--- /dev/null
++++ b/internal/metadata/cloudburrow_job_by_key_test.go
+@@ -0,0 +1,156 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"strings"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// CloudBurrow regression test (cloudburrow/cloudburrow#1655): each
++// statement that writes, deletes or finds one job is answered from the
++// primary key's index, not by visiting every row. The GoogleSQL statements
++// they replace each compile their WHERE to a function call per row, which
++// SQLite can only answer with a SCAN of the table.
++func TestJobStatementsUseTheKey(t *testing.T) {
++	r, _ := testRepository(t)
++	addJobs(t, r, queryJob(r, "a", 1))
++	ctx := context.Background()
++	conn, err := r.getConnection(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	for _, stmt := range []string{updateJobByKey, expireResultByKey, deleteJobByKey, deleteJobOrderByKey, jobByKey} {
++		args := make([]any, strings.Count(stmt, "?"))
++		for i := range args {
++			args[i] = "x"
++		}
++		var plan []string
++		err := conn.Raw(func(c interface{}) error {
++			rows, err := c.(*googlesqlite.Conn).QueryRawContext(ctx, "EXPLAIN QUERY PLAN "+stmt, args...)
++			if err != nil {
++				return err
++			}
++			defer rows.Close()
++			cols, _ := rows.Columns()
++			for rows.Next() {
++				vals := make([]any, len(cols))
++				ptrs := make([]any, len(cols))
++				for i := range vals {
++					ptrs[i] = &vals[i]
++				}
++				if err := rows.Scan(ptrs...); err != nil {
++					return err
++				}
++				if s, ok := vals[len(vals)-1].(string); ok {
++					plan = append(plan, s)
++				}
++			}
++			return rows.Err()
++		})
++		if err != nil {
++			t.Fatalf("%s: %v", stmt, err)
++		}
++		got := strings.Join(plan, "; ")
++		if !strings.Contains(got, "SEARCH") || !strings.Contains(got, "(projectID=? AND id=?)") || strings.Contains(got, "SCAN") {
++			t.Errorf("%s: plan %q, want a search of the primary key", stmt, got)
++		}
++	}
++}
++
++// A transaction no connection is bound to (BindTx) is written to as before,
++// with GoogleSQL: the same results as by the key.
++func TestJobWritesOfAnUnboundTransaction(t *testing.T) {
++	r, db := testRepository(t)
++	addJobs(t, r, queryJob(r, "a", 1), queryJob(r, "b", 2))
++	ctx := context.Background()
++	unbound := func(f func(ctx context.Context, tx *sql.Tx) error) {
++		t.Helper()
++		tx, err := db.BeginTx(ctx, nil)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if err := f(ctx, tx); err != nil {
++			tx.Rollback()
++			t.Fatal(err)
++		}
++		if err := tx.Commit(); err != nil {
++			t.Fatal(err)
++		}
++	}
++	a, err := r.FindJob(ctx, "p", "a")
++	if err != nil || a == nil {
++		t.Fatalf("FindJob(a) = %v, %v", a, err)
++	}
++	unbound(func(ctx context.Context, tx *sql.Tx) error {
++		return a.SetResult(ctx, tx, queryJob(r, "a", 4).response, errors.New("it failed"))
++	})
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	unbound(func(ctx context.Context, tx *sql.Tx) error { return project.DeleteJob(ctx, tx, "b") })
++	if got, err := r.FindJob(ctx, "p", "a"); err != nil || got == nil || len(got.response.Rows) != 4 || got.err == nil {
++		t.Errorf("FindJob(a) after SetResult = %v, %v; want 4 rows and its error", got, err)
++	}
++	if got, err := r.FindJob(ctx, "p", "b"); err != nil || got != nil {
++		t.Errorf("FindJob(b) after DeleteJob = %v, %v; want none", got, err)
++	}
++}
++
++// The same in a bound transaction (inTx binds its own), and a job of the
++// same ID in another project is left as it was.
++func TestJobWritesByKey(t *testing.T) {
++	r, _ := testRepository(t)
++	addJobs(t, r, queryJob(r, "a", 1), queryJob(r, "b", 2), queryJob(r, "c", 3))
++	ctx := context.Background()
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		other := NewProject(r, "q", nil, nil)
++		if err := other.Insert(ctx, tx); err != nil {
++			return err
++		}
++		j := queryJob(r, "b", 7)
++		j.ProjectID = "q"
++		return other.AddJob(ctx, tx, j)
++	})
++	a, err := r.FindJob(ctx, "p", "a")
++	if err != nil || a == nil {
++		t.Fatalf("FindJob(a) = %v, %v", a, err)
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		return a.SetResult(ctx, tx, queryJob(r, "a", 4).response, errors.New("it 'failed'"))
++	})
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		for id, want := range map[string]bool{"b": true, "nope": false} {
++			if got, err := r.jobExists(ctx, tx, "p", id); err != nil || got != want {
++				t.Errorf("jobExists(p, %s) = %v, %v; want %v", id, got, err, want)
++			}
++		}
++		return project.DeleteJob(ctx, tx, "b")
++	})
++	if got, err := r.FindJob(ctx, "p", "a"); err != nil || got == nil || len(got.response.Rows) != 4 || got.err == nil || got.err.Error() != "it 'failed'" {
++		t.Errorf("FindJob(a) after SetResult = %v, %v; want 4 rows and its error", got, err)
++	}
++	if got, err := r.FindJob(ctx, "p", "b"); err != nil || got != nil {
++		t.Errorf("FindJob(p, b) after DeleteJob = %v, %v; want none", got, err)
++	}
++	if got, err := r.FindJob(ctx, "q", "b"); err != nil || got == nil || len(got.response.Rows) != 7 {
++		t.Errorf("FindJob(q, b) = %v, %v; want project q's job of 7 rows", got, err)
++	}
++	project, err = r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	jobs, err := project.Jobs(ctx)
++	if err != nil || len(jobs) != 2 || jobs[0].ID != "a" || jobs[1].ID != "c" {
++		t.Errorf("Jobs() = %v, %v; want a and c, in their order", jobs, err)
++	}
++}
