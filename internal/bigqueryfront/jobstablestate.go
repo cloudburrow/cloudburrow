@@ -19,11 +19,12 @@ package bigqueryfront
 //
 // A restored table is checked before it is used: its COUNT(*) must be
 // the rows the file has. Each DELETE and INSERT is recorded once the
-// engine has answered it, so a front ended between the two has a file
-// one statement behind the table, which changed the table's count by the
-// rows it wrote or deleted: the check fails, and the table is made again
-// as before. It fails too when the engine restarted meanwhile, and has
-// no table.
+// engine has answered it, and its rows as dirty before it is sent
+// (jobstable.go, #1628), so a front ended between the two has the rows
+// of the statement it sent dirty: the first sync deletes them, and the
+// check then finds the table as the file has it, where the table was made
+// again (up to 26 s at 10,000 jobs). The check fails when the engine
+// restarted meanwhile, and has no table, which is then made again.
 
 import (
 	"bufio"
@@ -58,9 +59,11 @@ type jobsTableLine struct {
 	// Made: the table was made, empty; Forget: it is not made.
 	Made   bool `json:"made,omitempty"`
 	Forget bool `json:"forget,omitempty"`
-	// Del are the rows deleted, Add the rows written (job ID to digest).
-	Del []string          `json:"del,omitempty"`
-	Add map[string]string `json:"add,omitempty"`
+	// Del are the rows deleted, Add the rows written (job ID to digest),
+	// Dirty the rows of a statement about to be sent (jobstable.go).
+	Del   []string          `json:"del,omitempty"`
+	Add   map[string]string `json:"add,omitempty"`
+	Dirty []string          `json:"dirty,omitempty"`
 	// End: a sync ended, with Open the rows of jobs not DONE and Cursor
 	// the last job listed.
 	End    bool     `json:"end,omitempty"`
@@ -89,6 +92,7 @@ func (j *jobsTable) keep(path string, logf func(string, ...any)) {
 	rows := map[string]map[string]string{}
 	open := map[string]map[string]bool{}
 	cursor := map[string]string{}
+	dirty := map[string]map[string]bool{}
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(nil, 64<<20)
 	for sc.Scan() {
@@ -99,25 +103,39 @@ func (j *jobsTable) keep(path string, logf func(string, ...any)) {
 		switch {
 		case l.Reset:
 			rows, open, cursor = map[string]map[string]string{}, map[string]map[string]bool{}, map[string]string{}
+			dirty = map[string]map[string]bool{}
 		case l.Project == "":
 		case l.Forget:
 			delete(rows, l.Project)
 			delete(open, l.Project)
 			delete(cursor, l.Project)
+			delete(dirty, l.Project)
 		case l.Made:
 			rows[l.Project] = map[string]string{}
 			delete(open, l.Project)
 			delete(cursor, l.Project)
+			delete(dirty, l.Project)
 		default:
 			have := rows[l.Project]
 			if have == nil {
 				continue
 			}
+			d := dirty[l.Project]
+			if d == nil {
+				d = map[string]bool{}
+				dirty[l.Project] = d
+			}
+			for _, id := range l.Dirty {
+				delete(have, id)
+				d[id] = true
+			}
 			for _, id := range l.Del {
 				delete(have, id)
+				delete(d, id)
 			}
-			for id, d := range l.Add {
-				have[id] = d
+			for id, digest := range l.Add {
+				have[id] = digest
+				delete(d, id)
 			}
 			if l.End {
 				o := map[string]bool{}
@@ -135,6 +153,12 @@ func (j *jobsTable) keep(path string, logf func(string, ...any)) {
 			j.rows, j.open, j.cursor = map[string]map[string]string{}, map[string]map[string]bool{}, map[string]string{}
 		}
 		j.rows[p], j.open[p], j.cursor[p] = have, open[p], cursor[p]
+		if len(dirty[p]) > 0 {
+			if j.dirty == nil {
+				j.dirty = map[string]map[string]bool{}
+			}
+			j.dirty[p] = dirty[p]
+		}
 		if j.verify == nil {
 			j.verify = map[string]bool{}
 		}
@@ -184,6 +208,9 @@ func (j *jobsTable) compactLocked() {
 			}
 		}
 		line(jobsTableLine{Project: p, Add: add, End: true, Open: sortedIDs(j.open[p]), Cursor: j.cursor[p]})
+		if d := sortedIDs(j.dirty[p]); len(d) > 0 {
+			line(jobsTableLine{Project: p, Dirty: d})
+		}
 	}
 	if err := writeFileAtomic(j.path, out.Bytes()); err != nil {
 		j.logf("bigquery front: keeping the INFORMATION_SCHEMA.JOBS rows in %s: %v", j.path, err)
