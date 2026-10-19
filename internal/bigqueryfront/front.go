@@ -223,6 +223,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	settings := &projectOptions{}                   // projectoptions.go, #1375
 	jobRows := &jobsTable{logf: o.logf}             // jobstable.go, #1378
 	newest := &newestJobs{}                         // joblisting.go, #1633
+	open := &openJobs{}                             // jobsopen.go, #1633
 	tables := &tableSettings{}                      // tableoptions.go, #1390
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
@@ -260,6 +261,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		functions.keep(functionsStateFile(o.stateDir), o.logf)     // functionstate.go
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
 		jobRows.keep(jobsTableStateFile(o.stateDir), o.logf)       // jobstablestate.go, #1632
+		open.keep(jobsOpenStateFile(o.stateDir), o.logf)           // jobsopen.go, #1633
 		failed.mapped.keep(jobErrorsStateFile(o.stateDir), o.logf) // joberrorsmemo.go, #1628
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
@@ -286,6 +288,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			settings.reset()
 			jobRows.reset()
 			newest.reset()
+			open.reset()
 			tables.reset()
 			linked.reset()
 			models.reset()
@@ -304,7 +307,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		base := j[1] + "/projects/" + j[2]
 		project := projectOf("/" + j[2])
 		l := records.listJobs(r, project, func() jobListing {
-			return own.listed(r, project, failed.listed(engineListing(next, r, project, newest)))
+			return own.listed(r, project, failed.listed(engineListing(next, r, project, newest, open)))
 		})
 		return texts.listed(configs.listed(r, next, base, l))
 	}
@@ -393,7 +396,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest,
+				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
@@ -458,7 +461,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
 			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
-			dropped: dropped, iam: iam, functions: functions, models: models} // functions, models: #1483, droppedroutines.go
+			dropped: dropped, iam: iam, functions: functions, models: models, open: open} // functions, models: #1483, droppedroutines.go; open: purge.go
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -610,6 +613,9 @@ type front struct {
 	// newest are the last job the engine listed of each project
 	// (joblisting.go, #1633), or nil.
 	newest *newestJobs
+	// open are the engine's jobs not DONE of each project (jobsopen.go,
+	// #1633), or nil.
+	open *openJobs
 	// resourceManager is the instance's Resource Manager, which
 	// JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION read the project's ancestry
 	// from (infoschemahierarchy.go, #1392), or "".

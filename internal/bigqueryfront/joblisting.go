@@ -70,8 +70,9 @@ func decodeListing(rec *recorder) jobListing {
 // project's jobs, decoded once. With an engineList in r's context
 // (jobstable.go), it is sent with the parameters of bigquery-emulator
 // patch 0064 when some is set, and the engine's last job is recorded in
-// it. The newest job the engine listed is recorded in newest (below).
-func engineListing(next http.Handler, r *http.Request, project string, newest *newestJobs) jobListing {
+// it. The newest job the engine listed is recorded in newest (below), and
+// the jobs it listed not DONE in open (jobsopen.go, #1633).
+func engineListing(next http.Handler, r *http.Request, project string, newest *newestJobs, open *openJobs) jobListing {
 	l, _ := r.Context().Value(engineListKey{}).(*engineList)
 	if l != nil && l.some {
 		q := r.URL.Query()
@@ -105,6 +106,9 @@ func engineListing(next http.Handler, r *http.Request, project string, newest *n
 	// may end before the newest.
 	q := r.URL.Query()
 	cut := q.Has("minCreationTime") || q.Has("maxCreationTime")
+	if out.list != nil && !open.listed(project, l, items, cut) && l != nil {
+		l.invalid = true
+	}
 	if last != "" && !cut && (l == nil || !l.some || !slices.Contains(l.ids, last)) {
 		newest.set(project, last)
 	}
