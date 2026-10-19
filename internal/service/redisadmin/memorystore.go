@@ -199,7 +199,8 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.valkey.autoBackups(ctx)
-	go s.valkey.watchStandalone(ctx, healthEvery)
+	// Both read here, not in the goroutine: tests swap them between runs.
+	go s.valkey.watchStandalone(ctx, healthEvery, tendEvery)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
