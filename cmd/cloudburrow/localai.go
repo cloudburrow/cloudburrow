@@ -228,14 +228,14 @@ func (r embedRuntime) Load(m localai.Model, dir string) error {
 	if err != nil {
 		return err
 	}
-	if old := r.srv.SwapEmbedder(e, nil); old != nil {
+	if old := r.srv.SwapModelEmbedder(m.ID, e, nil); old != nil {
 		_ = old.Close()
 	}
 	return nil
 }
 
 func (r embedRuntime) Unload(m localai.Model) error {
-	old := r.srv.SwapEmbedder(nil, fmt.Errorf("%s was unloaded on the console's Local models page; load it there to serve it again", m.ID))
+	old := r.srv.SwapModelEmbedder(m.ID, nil, fmt.Errorf("%s was unloaded on the console's Local models page; load it there to serve it again", m.ID))
 	if old != nil {
 		return old.Close()
 	}
@@ -244,7 +244,7 @@ func (r embedRuntime) Unload(m localai.Model) error {
 
 func (r embedRuntime) Loaded(m localai.Model) bool {
 	if m.Runtime == localai.RuntimeONNX {
-		return m.ID == localai.EmbeddingGemmaONNXID && r.srv.EmbedderLoaded()
+		return r.srv.ModelEmbedderLoaded(m.ID)
 	}
 	return m.ID == r.srv.Model()
 }

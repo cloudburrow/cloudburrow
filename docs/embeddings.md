@@ -47,6 +47,28 @@
 > - Measured against the real model on 2026-10-15 and 2026-10-16: see the Local AI section of
 >   [compatibility.md](compatibility.md#local-ai).
 >
+> **Update 2026-10-19 (#1454): images.** A second community conversion is pinned:
+> `onnx-community/embeddinggemma-2-ONNX` at revision `daa72c51243991dfcaf9f9137d2c573d8f7790c0`,
+> the int8 text model (`onnx/model_quantized.onnx` and its `.onnx_data`), the int8 vision encoder
+> (`onnx/vision_encoder_quantized.onnx` and its `.onnx_data`) and `tokenizer.json`, 541 MB, each by
+> SHA-256. It converts Google DeepMind's open, ungated **EmbeddingGemma 2**
+> ([google/embeddinggemma-2](https://huggingface.co/google/embeddinggemma-2), Apache 2.0, as is the
+> conversion), which embeds text, images, video and audio into one 768-dimensional space. It is
+> **NOT an official Google artifact**, and is served as `embeddinggemma-2-onnx-community`.
+>
+> - Get it: Vertex AI → Local models → **Download**, then **Load** (or the admin API's
+>   `download` and `load`), in an instance started with `-local-ai-embeddings` from a
+>   `make build-onnx` binary. `-local-ai-embeddings` itself still fetches only the first model.
+> - Use: `EmbedContent` (gRPC or REST `:embedContent`) with text parts and `inline_data` PNG or
+>   JPEG parts, in the shape Google documents for `gemini-embedding-2`; one `Content` is one
+>   vector. `:predict` embeds text. The console's Embeddings page has an **Images** picker.
+> - Images are prepared as the model's processor prepares them and checked against
+>   Transformers.js 4.3.1 on the same files: identical vectors for an image that is not resized,
+>   cosine 0.9991 for one that is (sharp's resampling against PIL's).
+> - Not served: audio, video, PDF, `document_ocr`, `audio_track_extraction`, `file_data` and
+>   image types beyond PNG and JPEG (#1651). See the Vertex AI PredictionService section of
+>   [compatibility.md](compatibility.md).
+>
 > Everything below records why the official LiteRT route is still blocked.
 
 Issue: [#41](https://github.com/cloudburrow/cloudburrow/issues/41) · Investigated 2026-09-21

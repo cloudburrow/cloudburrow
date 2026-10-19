@@ -15,6 +15,13 @@ import (
 // client sees must not read as Google's own model.
 const EmbeddingGemmaONNXID = "embeddinggemma-300m-onnx-community"
 
+// EmbeddingGemma2ONNXID is the identity of the community ONNX conversion of
+// EmbeddingGemma 2, the multimodal one (#1454).
+const EmbeddingGemma2ONNXID = "embeddinggemma-2-onnx-community"
+
+// EmbeddingModelIDs are the embedding models the ONNX runtime serves.
+var EmbeddingModelIDs = []string{EmbeddingGemmaONNXID, EmbeddingGemma2ONNXID}
+
 // RuntimeONNX names ONNX Runtime.
 const RuntimeONNX = "onnxruntime"
 

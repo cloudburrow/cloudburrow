@@ -207,6 +207,46 @@ var catalog = map[string]Model{
 			},
 		},
 	},
+	// A community ONNX int8 conversion of EmbeddingGemma 2 (#1454), Google
+	// DeepMind's open multimodal embedding model: text, images, video and
+	// audio in one 768-dimensional space. It is NOT an official Google
+	// artifact: onnx-community converted google/embeddinggemma-2, which Google
+	// publishes ungated under Apache 2.0, as is this conversion. Only the
+	// text model and the vision encoder are pinned: images are served, audio
+	// and video are not. Pinned values were read from the Hugging Face API
+	// (tree?expand=true, LFS oids) on 2026-10-19 and the files checked
+	// against them.
+	EmbeddingGemma2ONNXID: {
+		ID:        EmbeddingGemma2ONNXID,
+		Repo:      "onnx-community/embeddinggemma-2-ONNX",
+		Publisher: PublisherCommunity,
+		Access:    AccessOpen,
+		License:   "apache-2.0",
+		Modality:  ModalityEmbedding,
+		Artifact:  "onnx/model_quantized.onnx",
+		Runtime:   RuntimeONNX,
+		Official:  false,
+		Notes: "A COMMUNITY ONNX int8 conversion by onnx-community, NOT an official " +
+			"Google artifact. Weights are google/embeddinggemma-2 (Apache 2.0). Embeds text " +
+			"and images, and mixes of them, into one 768-dimensional vector; the vision " +
+			"encoder is pinned beside the text model, the audio encoder is not. Runs on ONNX " +
+			"Runtime in a build made with -tags onnx.",
+		Pin: &Pin{
+			Revision: "daa72c51243991dfcaf9f9137d2c573d8f7790c0",
+			Files: []PinnedFile{
+				{Path: "onnx/model_quantized.onnx", Bytes: 495165,
+					SHA256: "d06edd601f851c633a2519304cbeb8dc6170d7ceb61b436625c17fb9b6e74953"},
+				{Path: "onnx/model_quantized.onnx_data", Bytes: 313724928,
+					SHA256: "278a7ff1248c3618e4bd11a607fc54f7bdc7778854230f3956d3f86bd9db4f3b"},
+				{Path: "onnx/vision_encoder_quantized.onnx", Bytes: 162495,
+					SHA256: "bb0de2df53a2448a32dc7908a187c168c8afd514d4d6f674f7f46024875fa4e3"},
+				{Path: "onnx/vision_encoder_quantized.onnx_data", Bytes: 195228672,
+					SHA256: "3dabd69c0a36e9a8771ad82030dde74daa5a0e02b7047a5d3f3382b1137bab89"},
+				{Path: "tokenizer.json", Bytes: 32170510,
+					SHA256: "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4"},
+			},
+		},
+	},
 	"gemma-4-e2b-it-community": {
 		ID:        "gemma-4-e2b-it-community",
 		Repo:      "litert-community/gemma-4-E2B-it-litert-lm",

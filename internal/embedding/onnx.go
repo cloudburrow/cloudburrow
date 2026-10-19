@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/daulet/tokenizers"
@@ -27,6 +28,9 @@ func Open(modelDir, modelID string) (Embedder, error) {
 	})
 	if envErr != nil {
 		return nil, fmt.Errorf("initialise ONNX Runtime (set ONNXRUNTIME_LIB to libonnxruntime): %w", envErr)
+	}
+	if isEmbeddingGemma2(modelDir) {
+		return openEmbeddingGemma2(modelDir, modelID)
 	}
 	tok, err := tokenizers.FromFile(filepath.Join(modelDir, "tokenizer.json"))
 	if err != nil {
@@ -82,6 +86,16 @@ func (e *onnxEmbedder) Embed(ctx context.Context, in []Input, dim int, autoTrunc
 	for i, x := range in {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if len(x.Parts) > 0 {
+			var b []string
+			for j, p := range x.Parts {
+				if p.Image != nil {
+					return nil, fmt.Errorf("instance %d: parts[%d] is an image; %s embeds text only", i, j, e.id)
+				}
+				b = append(b, p.Text)
+			}
+			x.Content = strings.Join(b, "\n")
 		}
 		text, err := Prompt(x)
 		if err != nil {

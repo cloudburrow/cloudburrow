@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
 )
 
 // EmbeddingsNote is shown on the Embeddings screen, above the output. The
@@ -17,6 +20,12 @@ import (
 const EmbeddingsNote = "embeddinggemma-300m-onnx-community is a COMMUNITY ONNX int8 conversion " +
 	"of EmbeddingGemma by onnx-community. It is NOT an official Google artifact, and its " +
 	"vectors are not guaranteed to match Google's model. The Gemma terms apply."
+
+// Embeddings2Note is EmbeddingsNote for EmbeddingGemma 2 (#1454), the model
+// the screen sends images to.
+const Embeddings2Note = "embeddinggemma-2-onnx-community is a COMMUNITY ONNX int8 conversion " +
+	"of EmbeddingGemma 2 by onnx-community. It is NOT an official Google artifact. It embeds text " +
+	"and PNG or JPEG images into one space; load it on the Local models page to serve it."
 
 // embeddingsConfigured reports whether the Embeddings screen is offered.
 func (p *Playground) embeddingsConfigured() bool {
@@ -74,6 +83,12 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		},
 		"official": false,
 		"note":     EmbeddingsNote,
+		// The model that embeds images (#1454), sent with EmbedContent
+		// inline_data parts, and the types it decodes.
+		"imageModel":      localai.EmbeddingGemma2ONNXID,
+		"imageModelNote":  Embeddings2Note,
+		"imageMimeTypes":  embedding.ImageMIMETypes,
+		"imageMaxPerItem": embedding.MaxImages,
 		"taskTypes": []string{"RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
 			"CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING", "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY"},
 		"dimensions": []int{768, 512, 256, 128},
@@ -114,7 +129,8 @@ func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request)
 			"error": fmt.Sprintf("model %q is not a publisher model ID", model)})
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	// Images travel as base64 in an EmbedContent body (#1454).
+	body, err := io.ReadAll(io.LimitReader(r.Body, 20<<20))
 	if err != nil || !json.Valid(body) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request body must be JSON"})
 		return
