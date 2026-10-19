@@ -287,8 +287,14 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		if !c.watched(r) {
 			delete(failed, name)
 			delete(ids, name)
-			if r.suspended {
+			switch _, pending := c.busy[name]; {
+			case r.suspended:
 				c.quiesce(name)
+			case !pending && r.state == clusterpb.Cluster_ACTIVE && r.KeyState == "":
+				// Not watched for good: a secondary, a migration's target
+				// or a single node. No check of it will lift a fence a
+				// check put up while it was watched (#1652).
+				c.unfence(r)
 			}
 			continue
 		}
@@ -345,11 +351,16 @@ func (c *clusters) fence(name string, on bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, r := c.eps[name], c.byName[name]
-	if e == nil || r == nil || e.fenced == on {
+	if e == nil || r == nil || e.fenced == on || (on && !c.watched(r)) {
+		// A check that began before r stopped being watched (a switchover
+		// began, #1642) does not fence it: nothing would lift the fence of
+		// an instance that became a secondary.
 		return
 	}
 	if on {
 		log.Printf("memorystore: %s: the primary failed a health check; its primary endpoint carries no connections until it answers again or a replica is promoted", name)
+	} else {
+		log.Printf("memorystore: %s: the primary answers again; its primary endpoint carries connections", name)
 	}
 	e.fenced = on
 	c.openEndpoints(r)
