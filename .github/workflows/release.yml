@@ -339,7 +339,9 @@ jobs:
           # the bigquery-emulator job built from the modules
           # third_party/bigquery-emulator pins and checks: -prebuilt fails
           # unless it was built from the sources checked out here (#1087).
-          go run ./tools/bqengine -out internal/bigqueryimage/bin -prebuilt
+          # The tool runs here, so it is built for the runner: under the
+          # job's target GOOS/GOARCH, go run builds a binary it cannot exec.
+          GOOS='' GOARCH='' go run ./tools/bqengine -out internal/bigqueryimage/bin -prebuilt
           mkdir -p dist
           NAME="cloudburrow_${VERSION}_${GOOS}_${GOARCH}"
           # CGO_ENABLED=0 for every target (#714): left to Go's default, the
