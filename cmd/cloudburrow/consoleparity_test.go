@@ -1486,11 +1486,14 @@ var parityRows = []parityRow{
 			"with its dimension and norm, a copy of it, the pairwise cosine similarity and the request sent (#1305), " +
 			"and the token count and truncated flag as the API returns them (#1396); Images sends each chosen PNG or JPEG " +
 			"as one inline_data part to embeddinggemma-2-onnx-community, once it is loaded on Local models, so its " +
-			"vector is compared with the texts' (#1454)",
+			"vector is compared with the texts' (#1454); Audio sends each chosen WAV clip the same way, and Cloud Storage " +
+			"objects sends each gs:// URI as one file_data part, read from this instance's Cloud Storage (#1651)",
 		Tests: []string{"TestEmbeddingsScreenSendsBothMethods", "TestEmbeddingsScreenSendsTheNamedModel", "TestEmbedContentThroughThePredictionClient",
 			"TestStudioManagesLocalModelsAndTestsEmbeddings", "TestEmbeddingsPageEmbedsAnImage",
-			"TestEmbedContentEmbedsImagesThroughThePredictionClient",
-			"TestGRPCEmbedContent", "TestEmbedContentREST", "TestEmbedContentImagesOnEmbeddingGemma2"}},
+			"TestEmbeddingsPageEmbedsAudioAndCloudStorage",
+			"TestEmbedContentEmbedsImagesThroughThePredictionClient", "TestEmbedContentEmbedsAudioThroughThePredictionClient",
+			"TestGRPCEmbedContent", "TestEmbedContentREST", "TestEmbedContentImagesOnEmbeddingGemma2",
+			"TestEmbedContentAudioAndFileDataOnEmbeddingGemma2"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/GenerateContent"},
 		Screen:  "/ai/playground", Offers: "Playground: Stream off sends the generateContent subset GenerateContent serves, through the same API path, and shows the one answer (#1257)",

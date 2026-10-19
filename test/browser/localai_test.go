@@ -4,15 +4,20 @@ package browser
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // embeddingModel is the one embedding model served: a community ONNX
@@ -176,5 +181,110 @@ func TestEmbeddingsPageEmbedsAnImage(t *testing.T) {
 	p.eval(`document.querySelector("#emb-request").textContent`, &request)
 	if !strings.Contains(request, "inlineData") || !strings.Contains(request, model2+":embedContent") {
 		t.Errorf("the request shown is %q; want the EmbedContent inlineData request", request)
+	}
+}
+
+// jfkWAV is EmbeddingGemma 2's model card clip (a US government work),
+// pinned by revision and SHA-256, as test/compat's
+// TestEmbedContentEmbedsAudioThroughThePredictionClient fetches it.
+const (
+	jfkWAVURL    = "https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/542437c29cc5273cfd29e25c77696f2b349badd7/jfk.wav"
+	jfkWAVSHA256 = "aa81c2552465568567e670f3823117e633900d16bd6202346a72f3c8464c74c8"
+)
+
+// TestEmbeddingsPageEmbedsAudioAndCloudStorage (#1651) needs EmbeddingGemma
+// 2 downloaded and loaded with its audio encoder
+// (TestEmbedContentEmbedsAudioThroughThePredictionClient in test/compat
+// does both) and Cloud Storage. A WAV clip chosen on the Embeddings page,
+// and the same clip uploaded to a bucket and named by its gs:// URI, are
+// embedded beside two texts with EmbedContent: each row shows 768 values and
+// 279 tokens, both are nearer the text that describes the speech, the two
+// are the same vector, and the requests shown are an inlineData and a
+// fileData part.
+func TestEmbeddingsPageEmbedsAudioAndCloudStorage(t *testing.T) {
+	needService(t, "ai-local")
+	needService(t, "ai-embed")
+	needService(t, "storage")
+	const model2 = "embeddinggemma-2-onnx-community"
+	_, body := consoleDo(t, http.MethodGet, "/api/ai/local-models", "")
+	var list struct {
+		Models []struct {
+			ID     string
+			Loaded bool
+		}
+	}
+	_ = json.Unmarshal([]byte(body), &list)
+	loaded := false
+	for _, m := range list.Models {
+		loaded = loaded || (m.ID == model2 && m.Loaded)
+	}
+	if !loaded {
+		t.Skipf("%s is not loaded; load it on the Local models page (TestEmbedContentEmbedsAudioThroughThePredictionClient does)", model2)
+	}
+	resp, err := http.Get(jfkWAVURL)
+	if err != nil {
+		t.Skipf("fetching the test clip: %v", err)
+	}
+	clip, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if sum := sha256.Sum256(clip); err != nil || hex.EncodeToString(sum[:]) != jfkWAVSHA256 {
+		t.Fatalf("the test clip: SHA-256 %x, %v", sum, err)
+	}
+	project := servedProject(t)
+	bucket := fmt.Sprintf("browser-embed-%d", time.Now().UnixNano()%1e12)
+	q := "?project=" + url.QueryEscape(project)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/storage"+q, `{"name":"`+bucket+`"}`); code != http.StatusOK {
+		t.Fatalf("create a bucket through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/objects/storage?"+url.Values{"project": {project}, "name": {bucket, "jfk.wav"}}.Encode(), "")
+		consoleDo(t, http.MethodDelete, "/api/resources/storage"+q+"&name="+bucket, "")
+	})
+	uploadObject(t, project, []string{bucket}, "jfk.wav", string(clip))
+
+	p := open(t)
+	p.navigate("/ai/embeddings")
+	p.waitFor(`document.querySelector("#emb-audio") !== null && document.querySelector("#emb-gcs") !== null`)
+	p.setField("#emb-texts", "a president's speech about serving your country\ncats sleeping on a couch")
+	p.eval(fmt.Sprintf(`(() => {
+		const bytes = Uint8Array.from(atob(%q), (c) => c.charCodeAt(0));
+		const dt = new DataTransfer();
+		dt.items.add(new File([bytes], "jfk.wav", { type: "audio/wav" }));
+		const input = document.querySelector("#emb-audio");
+		input.files = dt.files;
+		input.dispatchEvent(new Event("change"));
+		return true;
+	})()`, base64.StdEncoding.EncodeToString(clip)), new(bool))
+	var picked []string
+	p.eval(`[document.querySelector("#emb-model").value, document.querySelector("#emb-method").value]`, &picked)
+	if len(picked) != 2 || picked[0] != model2 || picked[1] != "embedContent" {
+		t.Fatalf("after choosing a clip the model and method read %v; want %s and embedContent", picked, model2)
+	}
+	uri := "gs://" + bucket + "/jfk.wav"
+	p.setField("#emb-gcs", uri)
+	p.clickText("button", "Embed")
+	p.waitFor(`document.querySelectorAll("#emb-results tbody tr").length === 4 || /\[error\]/.test(document.body.textContent)`)
+	var rows [][]string
+	p.eval(`[...document.querySelectorAll("#emb-results tbody tr")].map((tr) => [...tr.children].map((td) => td.textContent.trim()))`, &rows)
+	if len(rows) != 4 {
+		var text string
+		p.eval(`document.querySelector("main").textContent`, &text)
+		t.Fatalf("the Embeddings view shows %d results: %s", len(rows), text)
+	}
+	for i, want := range []string{"[audio] jfk.wav", "[file_data] " + uri} {
+		if r := rows[2+i]; r[0] != want || r[1] != "768" || r[2] != "279" {
+			t.Errorf("row %d reads %v; want %s, 768 values and 279 tokens", 3+i, r, want)
+		}
+	}
+	var sim []string
+	p.eval(`[...document.querySelectorAll("#emb-similarity tbody td")].map((td) => td.textContent.trim())`, &sim)
+	// Rows 3 and 4 are the clip: nearer the speech text, and each other's twin.
+	if len(sim) != 16 || !(sim[8] > sim[9]) || !(sim[12] > sim[13]) || sim[11] != "1.0000" {
+		t.Errorf("the cosine similarity matrix reads %v; want the clip nearer the speech and both clips the same vector", sim)
+	}
+	var request string
+	p.eval(`document.querySelector("#emb-request").textContent`, &request)
+	if !strings.Contains(request, `"inlineData"`) || !strings.Contains(request, `"fileData"`) || !strings.Contains(request, uri) {
+		t.Errorf("the requests shown are %q; want an inlineData and a fileData EmbedContent request", request)
 	}
 }

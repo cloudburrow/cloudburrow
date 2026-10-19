@@ -8439,12 +8439,22 @@ async function renderEmbeddings(view) {
   // its vector can be compared with the texts'.
   const images = el("input", { id: "emb-images", type: "file", multiple: "",
     accept: (status.imageMimeTypes || []).join(","), "aria-label": "Images to embed" });
-  images.addEventListener("change", () => {
-    if (!images.files.length || !status.imageModel) return;
+  // Audio clips (#1651) go the same way, and Cloud Storage objects as
+  // file_data parts, one gs:// URI per line, read by the instance's own
+  // Cloud Storage.
+  const audio = el("input", { id: "emb-audio", type: "file", multiple: "",
+    accept: (status.audioMimeTypes || []).join(","), "aria-label": "Audio clips to embed" });
+  const gcs = el("textarea", { id: "emb-gcs", rows: 2, cols: 60, class: "mono",
+    placeholder: "gs://bucket/object.wav, one per line", "aria-label": "Cloud Storage objects to embed (file_data)" });
+  const toMultimodal = () => {
+    if (!status.imageModel) return;
     if ((model.value.trim() || status.model) === status.model) model.value = status.imageModel;
     method.value = "embedContent";
     showEndpoint();
-  });
+  };
+  images.addEventListener("change", () => { if (images.files.length) toMultimodal(); });
+  audio.addEventListener("change", () => { if (audio.files.length) toMultimodal(); });
+  gcs.addEventListener("input", () => { if (gcs.value.trim()) toMultimodal(); });
   const readBase64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
@@ -8467,9 +8477,13 @@ async function renderEmbeddings(view) {
   const run = async () => {
     const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
     const files = [...(images.files || [])];
-    if (!lines.length && !files.length) { announce("At least one text or image is required"); texts.focus(); return; }
-    if (files.length && method.value !== "embedContent") {
-      announce("Images are sent with EmbedContent"); method.focus(); return;
+    const clips = [...(audio.files || [])];
+    const uris = gcs.value.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length && !files.length && !clips.length && !uris.length) {
+      announce("At least one text, image, audio clip or Cloud Storage object is required"); texts.focus(); return;
+    }
+    if ((files.length || clips.length || uris.length) && method.value !== "embedContent") {
+      announce("Images, audio and Cloud Storage objects are sent with EmbedContent"); method.focus(); return;
     }
     send.disabled = true;
     sent.length = 0;
@@ -8497,6 +8511,24 @@ async function renderEmbeddings(view) {
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
           lines.push("[image] " + file.name);
+        }
+        const media = [
+          ...clips.map((file) => ["[audio] " + file.name, async () => ({ inlineData: { mimeType: file.type || "audio/wav", data: await readBase64(file) } })]),
+          // Google's file_data carries a mime_type; it is named from the
+          // object's extension when known, else the object's content type is used.
+          ...uris.map((uri) => ["[file_data] " + uri, async () => {
+            const ext = (uri.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
+            const mimeType = { wav: "audio/wav", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" }[ext];
+            return { fileData: { fileUri: uri, ...(mimeType ? { mimeType } : {}) } };
+          }]),
+        ];
+        for (const [label, part] of media) {
+          const data = await post("embedContent", {
+            content: { role: "user", parts: [await part()] },
+            embedContentConfig: { outputDimensionality: Number(dim.value) },
+          });
+          got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
+          lines.push(label);
         }
         const used = model.value.trim() || status.model;
         displayName = "EmbedContent: " + used + " — " + (used === status.imageModel ? status.imageModelNote : status.note);
@@ -8567,7 +8599,9 @@ async function renderEmbeddings(view) {
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
       ...(status.imageModel ? [el("div", {}, el("label", { for: "emb-images", text: "Images " }), images,
-        el("p", { class: "unavailable", id: "emb-image-note", text: status.imageModelNote }))] : []),
+        el("label", { for: "emb-audio", text: " Audio " }), audio),
+        el("div", {}, el("label", { for: "emb-gcs", text: "Cloud Storage objects " }), gcs),
+        el("p", { class: "unavailable", id: "emb-image-note", text: status.imageModelNote })] : []),
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
     result);

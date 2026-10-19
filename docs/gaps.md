@@ -166,11 +166,12 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 `StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477); `Explain` with integrated gradients, XRAI or
 examples, now `INVALID_ARGUMENT` on a custom container as Vertex documents (they are for TensorFlow
 models only; Sampled Shapley, the custom-container method, is served) (#1454); `EmbedContent` with images, on
-EmbeddingGemma 2's community ONNX conversion (#1454).
+EmbeddingGemma 2's community ONNX conversion (#1454); with WAV audio, and `file_data` `gs://` parts read
+from the instance's Cloud Storage (#1651, open for the rest).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` embeds text and PNG or JPEG images on `embeddinggemma-2-onnx-community` (#1454), but not video, audio or PDF: an `inline_data` part of another type, `document_ocr` and `audio_track_extraction` are `INVALID_ARGUMENT`, because only EmbeddingGemma 2's text model and vision encoder are served (its audio encoder is not pinned, and no video demuxer, audio decoder or PDF renderer is built in); `file_data` (a `gs://` image) is `INVALID_ARGUMENT` too, as the local PredictionService reads no Cloud Storage; WebP, BMP, HEIC, HEIF and AVIF images need decoders outside Go's standard library (#1651) | no emulator support (video, audio, PDF decoding; Cloud Storage reads) | L |
+| `EmbedContent` on `embeddinggemma-2-onnx-community` embeds text, PNG or JPEG images and WAV audio, inline or as `file_data` from the instance's Cloud Storage (#1454, #1651), but not video, PDF, MP3 or other image types: an `inline_data` or `file_data` part of video (MP4, MOV), PDF, MP3, WebP, BMP, HEIC, HEIF or AVIF, `audio_track_extraction` and `document_ocr` are `INVALID_ARGUMENT` naming the field. The model's own video path is frames at 1 fps through the vision encoder (no audio), which needs an H.264/H.265/VP9/AV1 demuxer and decoder; PDF needs a renderer; MP3 and the other image types need decoders; none is in Go's standard library or the approved modules (`golang.org/x/image`, for WebP and BMP, awaits the maintainer's decision). Google's doc re-read 2026-10-19 (last updated 2026-10-15): https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings (#1651) | no emulator support (video, PDF, MP3 and image decoders) | L |
 
 ## BigQuery
 

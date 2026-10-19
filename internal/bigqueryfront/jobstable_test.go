@@ -2,10 +2,13 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -557,5 +560,168 @@ func TestJobsTableOutlivesAFrontRestart(t *testing.T) {
 	again.keep(jobsTableStateFile(dir), nil)
 	if len(again.rows) != 0 {
 		t.Errorf("after the emulator's restart, restored %v", again.rows)
+	}
+}
+
+// flakyEmulator answers 500 to the statements of the table of JOBS rows
+// that begin with fail's keys, as many times as each says, and to those
+// sent on a request whose context has ended, as an engine reached over
+// HTTP does; it ends the client's request (cancel) when it is asked for
+// the list of jobs, as a client that gives up during it does.
+type flakyEmulator struct {
+	e      tableEmulator
+	fail   map[string]int
+	cancel func()
+}
+
+func (f *flakyEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs") && f.cancel != nil {
+		f.cancel()
+	}
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/queries") {
+		b, _ := io.ReadAll(r.Body)
+		var body struct {
+			Query string `json:"query"`
+		}
+		_ = json.Unmarshal(b, &body)
+		if isJobsTableStatement(body.Query) {
+			if r.Context().Err() != nil {
+				f.e.log = append(f.e.log, "cancelled "+string(b))
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": map[string]any{"message": "context canceled"}})
+				return
+			}
+			for prefix, n := range f.fail {
+				if n > 0 && strings.HasPrefix(body.Query, prefix) {
+					f.fail[prefix] = n - 1
+					f.e.log = append(f.e.log, "failed "+string(b))
+					writeJSON(w, http.StatusInternalServerError, map[string]any{"error": map[string]any{"message": "failed"}})
+					return
+				}
+			}
+		}
+		r.Body = io.NopCloser(bytes.NewReader(b))
+	}
+	f.e.ServeHTTP(w, r)
+}
+
+// TestJobsTableNotMadeAgainWhenAWriteFails (#1628): a statement of a sync
+// that is not answered OK leaves its rows dirty, which the next sync (the
+// query's second try) deletes and writes again, where the table was made
+// again from every job's rows: up to 26 s at 10,000 jobs, and a JOBS
+// query that waited for it ran out of its client's 60 s. And a client
+// that gives up during a query's sync does not end the sync's statements.
+func TestJobsTableNotMadeAgainWhenAWriteFails(t *testing.T) {
+	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}}}
+	flaky := &flakyEmulator{e: emu, fail: map[string]int{}}
+	h := Wrap(flaky)
+	for _, q := range []string{"SELECT 1", "SELECT 2", "SELECT 3"} {
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", q, code, got)
+		}
+	}
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	table := jobsTablePath()
+	run := func(ctx context.Context) []string {
+		t.Helper()
+		from := len(emu.log)
+		r := httptest.NewRequest("POST", base+"/queries", strings.NewReader(`{"query":"`+count+`"}`)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("JOBS: %d %s", w.Code, w.Body)
+		}
+		return emu.sentSince(from)
+	}
+	if sent := run(context.Background()); len(sent) != 4 || sent[0] != "DROP TABLE IF EXISTS "+table {
+		t.Fatalf("first JOBS query sent %q", sent)
+	}
+	// The INSERT of the one new row (the first JOBS query's job) fails.
+	flaky.fail["INSERT INTO "] = 1
+	sent := run(context.Background())
+	if len(sent) != 4 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) ||
+		!strings.HasPrefix(sent[1], "DELETE FROM "+table+" WHERE job_id IN ('auto") || strings.Count(sent[1], "'auto") != 1 ||
+		!strings.HasPrefix(sent[2], "INSERT INTO "+table) || strings.Count(sent[2], "'auto") != 1 || !strings.Contains(sent[3], table) {
+		t.Fatalf("JOBS query whose INSERT failed sent %q, want the row deleted and written again, the table not made again", heads(sent))
+	}
+	// So does the DELETE of a changed row, and the DELETE of the dirty
+	// rows after it: then, and only then, the table is made again.
+	emu.jobs["auto1"]["status"] = map[string]any{"state": "DONE", "errorResult": map[string]any{"reason": "x", "message": "y"}}
+	do(t, h, "DELETE", base+"/jobs/auto1/delete", "")
+	flaky.fail["DELETE FROM "] = 2
+	sent = run(context.Background())
+	if len(sent) < 3 || !strings.HasPrefix(sent[0], "DELETE FROM ") || !strings.HasPrefix(sent[1], "DELETE FROM ") ||
+		sent[2] != "DROP TABLE IF EXISTS "+table {
+		t.Fatalf("JOBS query whose DELETEs failed sent %q, want the table made again", heads(sent))
+	}
+	// A client that gives up while its query lists the jobs: the sync's
+	// statements are sent on a context of their own, and the table is
+	// left as it was written, not forgotten.
+	do(t, h, "POST", base+"/queries", `{"query":"SELECT 4"}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	flaky.cancel = cancel
+	from := len(emu.log)
+	r := httptest.NewRequest("POST", base+"/queries", strings.NewReader(`{"query":"`+count+`"}`)).WithContext(ctx)
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	flaky.cancel = nil
+	sent = emu.sentSince(from)
+	if len(sent) == 0 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) || strings.Contains(strings.Join(emu.log[from:], "\n"), "cancelled ") {
+		t.Fatalf("JOBS query of a client that gave up sent %q", heads(emu.log[from:]))
+	}
+	if sent := run(context.Background()); len(sent) != 2 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) || strings.Count(sent[0], "'auto") != 1 {
+		t.Fatalf("JOBS query after a client gave up sent %q, want the one new row written", heads(sent))
+	}
+}
+
+// heads returns the first 80 bytes of each of sent, for a test's message.
+func heads(sent []string) []string {
+	out := make([]string, len(sent))
+	for i, s := range sent {
+		out[i] = s[:min(len(s), 80)]
+	}
+	return out
+}
+
+// TestJobsTableDirtyRowsOutliveAFrontRestart (#1628): a front ended after
+// it sent a statement and before it recorded the answer has that
+// statement's rows dirty in its file, so the first JOBS query after its
+// restart deletes them, finds the table as the file has it, and writes
+// them again, where it made the table again.
+func TestJobsTableDirtyRowsOutliveAFrontRestart(t *testing.T) {
+	dir := t.TempDir()
+	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}, msTimes: true}}
+	n := 0
+	for _, q := range []string{"SELECT 1", "SELECT 2"} {
+		if code, got := do(t, Wrap(countingEmulator{emu, &n}, func(o *options) { o.stateDir = dir }), "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", q, code, got)
+		}
+	}
+	h := Wrap(countingEmulator{emu, &n}, func(o *options) { o.stateDir = dir })
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	table := jobsTablePath()
+	run := func(h http.Handler) []string {
+		t.Helper()
+		from := len(emu.log)
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+count+`"}`); code != 200 {
+			t.Fatalf("JOBS: %d %v", code, got)
+		}
+		return emu.sentSince(from)
+	}
+	if sent := run(h); len(sent) != 4 || sent[0] != "DROP TABLE IF EXISTS "+table {
+		t.Fatalf("first JOBS query sent %q", sent)
+	}
+	// The front ends after it sent a statement of auto2's row: the table
+	// may hold it or not.
+	f, err := os.OpenFile(jobsTableStateFile(dir), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintln(f, `{"p":"p","dirty":["auto2"]}`)
+	f.Close()
+	n = 1 // auto1's row, once auto2's is deleted
+	sent := run(Wrap(countingEmulator{emu, &n}, func(o *options) { o.stateDir = dir }))
+	if len(sent) != 4 || sent[0] != "DELETE FROM "+table+" WHERE job_id IN ('auto2')" || sent[1] != "SELECT COUNT(*) FROM "+table ||
+		!strings.HasPrefix(sent[2], "INSERT INTO "+table) || !strings.Contains(sent[2], "'auto2'") || strings.Count(sent[2], "'auto") != 2 ||
+		!strings.Contains(sent[3], table) {
+		t.Fatalf("JOBS query after a restart with a dirty row sent %q, want it deleted, the table checked, and it written again", heads(sent))
 	}
 }

@@ -11,7 +11,10 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
@@ -257,4 +260,27 @@ func localModelsFor(cfg config.Config, srv *vertexai.Server) *localai.Manager {
 		g.Runtime = embedRuntime{srv: srv}
 	}
 	return g
+}
+
+// embedObjects reads EmbedContent's file_data objects (#1651) from this
+// instance's Cloud Storage, with their content type.
+type embedObjects struct{ f storageSourceFetcher }
+
+func (o embedObjects) Read(ctx context.Context, bucket, object string, limit int64) ([]byte, string, error) {
+	rc, ct, err := o.f.fetchTyped(ctx, bucket, object)
+	if err != nil {
+		if e := apierror.From(err); e.Code == codes.NotFound {
+			return nil, "", apierror.NotFound("gs://%s/%s not found", bucket, object)
+		}
+		return nil, "", err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	if err != nil {
+		return nil, "", apierror.FailedPrecondition("read gs://%s/%s: %v", bucket, object, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, "", apierror.InvalidArgument("gs://%s/%s is larger than %d MiB, the most file_data reads", bucket, object, limit>>20)
+	}
+	return data, ct, nil
 }

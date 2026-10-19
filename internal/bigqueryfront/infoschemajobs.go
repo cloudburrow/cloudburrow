@@ -347,8 +347,27 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		// same.
 		listed = &engineList{some: true, after: after, ids: ids}
 		cut = true
+	} else if l, ok := f.parentListing(project, filter); ok {
+		listed, cut = l, true
 	}
-	jobs, status, msg := f.listedJobs(r, filter, listed)
+	by := filter // what the list is cut by
+	if !listed.some && filter.onlyOpen() {
+		// A query of jobs not DONE (state = 'PENDING' or 'RUNNING') lists
+		// those the front keeps and the ones made since its cursor
+		// (jobsopen.go, #1633), not every job; with nothing kept, every
+		// job, uncut, which the front keeps them from.
+		by, cut = nil, false
+		if l, ok := f.open.listing(project); ok {
+			listed, cut = l, true
+		}
+	}
+	jobs, status, msg := f.listedJobs(r, by, listed)
+	if status == 0 && listed.invalid {
+		// The engine's job of the cursor's ID is another: it restarted
+		// while the front was down (jobsopen.go).
+		listed, cut = &engineList{}, false
+		jobs, status, msg = f.listedJobs(r, nil, listed)
+	}
 	if status != 0 {
 		return "", status, msg
 	}
@@ -380,6 +399,29 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		rows[i] = jobRow(project, job, f.settings)
 	}
 	return rowsSubquery(jobsColumns, rows), 0, ""
+}
+
+// parentListing is the list a query that keeps the children of some jobs
+// (parent_job_id = or IN) sends (#1633): of the children the front
+// recorded of them (jobRecords.childrenOf), which alone have a
+// parent_job_id, and of the jobs made since the newest the engine listed
+// (newestJobs); ok is false when no newest job is known, or the children
+// are too many to name, and every job is listed.
+func (f front) parentListing(project string, filter *jobsFilter) (*engineList, bool) {
+	parents := filter.parentIDs()
+	after := f.newest.get(project)
+	if parents == nil || after == "" {
+		return nil, false
+	}
+	ids := f.records.childrenOf(project, parents)
+	if len(ids) > jobIDsMax {
+		return nil, false
+	}
+	sort.Strings(ids)
+	if ids == nil {
+		ids = []string{}
+	}
+	return &engineList{some: true, after: after, ids: ids}, true
 }
 
 // tableRowsOrRetry is tableJobsRows of every job, made first if need be,

@@ -65,9 +65,41 @@
 > - Images are prepared as the model's processor prepares them and checked against
 >   Transformers.js 4.3.1 on the same files: identical vectors for an image that is not resized,
 >   cosine 0.9991 for one that is (sharp's resampling against PIL's).
-> - Not served: audio, video, PDF, `document_ocr`, `audio_track_extraction`, `file_data` and
->   image types beyond PNG and JPEG (#1651). See the Vertex AI PredictionService section of
+> - Not served: video, PDF, MP3, `document_ocr`, `audio_track_extraction` and image types beyond
+>   PNG and JPEG (#1651). See the Vertex AI PredictionService section of
 >   [compatibility.md](compatibility.md).
+>
+> **Update 2026-10-19 (#1651): audio and Cloud Storage.** The audio encoder of the same revision is
+> pinned too (`onnx/audio_encoder_quantized.onnx` and its `.onnx_data`, 340 MB, by SHA-256), so the
+> model is now seven files, 882 MB. A model downloaded before this has the first five: **Download**
+> again fetches only the two new files, and until then audio is refused as a type the model does
+> not embed.
+>
+> - Use: an `inline_data` part with `mime_type` `audio/wav`, alone or among text and image parts,
+>   up to 180 seconds a request (Google's limit for `gemini-embedding-2`). A `file_data` part with a
+>   `gs://bucket/object` URI, the form Google's samples use, is read from the instance's own Cloud
+>   Storage (an instance started with `storage`) and embedded as if its bytes were `inline_data` of
+>   the part's `mime_type`, or of the object's content type when the part names none. The console's
+>   Embeddings page has an **Audio** picker and a **Cloud Storage objects** box.
+> - What the model contains, read from the pinned revision's file list and model card on
+>   2026-10-19: a text model, a vision encoder and an audio encoder (each in fp32, fp16, q8, q4 and
+>   q4f16). There is no video encoder: the model card's video path is frames at 1 fps (at most 32,
+>   uniformly subsampled) through the vision encoder at 140 soft tokens each, without the audio
+>   track ("Video frames go through the vision encoder"). Decoding those frames needs an MP4/MOV
+>   demuxer and an H.264, H.265, VP9 or AV1 decoder, none of which is in Go's standard library or
+>   the approved modules, so video stays refused, and with it `audio_track_extraction`, which
+>   Google defines as extracting a video's audio. PDF (and `document_ocr`) needs a renderer, and MP3
+>   a decoder, neither of which is available either.
+> - Audio is prepared as Transformers.js 4.3.1's `EmbeddingGemma2Processor` prepares it: stereo
+>   downmixed as its `load_audio` does, resampled to 16 kHz with a Kaiser-windowed sinc (the
+>   reference expects 16 kHz input and leaves resampling to the browser or ffmpeg), then
+>   `Gemma4AudioFeatureExtractor`'s 128-bin log-mel features (frame 320, hop 160, FFT 512,
+>   semicausal padding, masked partial frames); the audio encoder makes 25 soft tokens a second.
+>   On the same files it gave identical vectors (cosine 1.000000) for the model card's `jfk.wav` at
+>   16 kHz mono, with text, twice, and as a 44-second clip; 0.999821 for the original 44.1 kHz
+>   stereo file against ffmpeg's resampling. The reference truncates a clip at 30 seconds by
+>   default (the feature extractor's `max_length`, inherited from Gemma 3n); CloudBurrow embeds up
+>   to Google's 180 seconds, which the model card's "~327 seconds" of context allows.
 >
 > Everything below records why the official LiteRT route is still blocked.
 

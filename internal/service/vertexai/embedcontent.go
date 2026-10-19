@@ -30,13 +30,33 @@ import (
 // EmbeddingGemma 2 (#1454) also embeds images: an inline_data part holding a
 // PNG or JPEG image, up to embedding.MaxImages of them, alone or between text
 // parts, into one vector, as Google's gemini-embedding-2 embeds a Content's
-// parts. file_data (a gs:// URI), video, audio, PDF, document_ocr and
+// parts. It embeds a WAV audio clip the same way (#1651), and reads a
+// file_data part's gs:// object from this instance's Cloud Storage as if its
+// bytes were inline_data. Video, PDF, MP3, document_ocr and
 // audio_track_extraction are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
 // images as base64: 20 MiB, the inline request size Vertex documents for
 // Gemini. gRPC's bound is the transport's 32 MiB.
 const embedContentRequestBytes = 20 << 20
+
+// fileDataBytes bounds a file_data object read from Cloud Storage: room for
+// Google's 180 seconds of uncompressed stereo audio at 48 kHz.
+const fileDataBytes = 64 << 20
+
+// Objects reads objects from this instance's Cloud Storage, for file_data
+// parts (#1651): the object's bytes and its content type.
+type Objects interface {
+	Read(ctx context.Context, bucket, object string, limit int64) ([]byte, string, error)
+}
+
+// UseStorage makes EmbedContent read file_data's gs:// objects through objs;
+// without it a file_data part says Cloud Storage is not enabled.
+func (s *Server) UseStorage(objs Objects) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects = objs
+}
 
 // strictJSON rejects a field the request type does not have, as Vertex does.
 var strictJSON = protojson.UnmarshalOptions{}
@@ -94,15 +114,11 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 
 	name := embeddingDisplayName(e.Model())
 	multimodal := embedding.EmbedsImages(e)
-	parts, images, err := embedParts(req.GetContent(), multimodal, name)
-	if err != nil {
-		return nil, err
-	}
 	cfg := req.GetEmbedContentConfig()
 	if cfg.GetDocumentOcr() {
 		if multimodal {
 			return nil, apierror.InvalidArgument(
-				"embed_content_config.document_ocr is not supported: %s embeds text and images; PDF input is not served", name)
+				"embed_content_config.document_ocr is not supported: %s embeds text, images and audio; PDF input is not served", name)
 		}
 		return nil, apierror.InvalidArgument(
 			"embed_content_config.document_ocr is not supported: %s embeds text only", name)
@@ -110,7 +126,7 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	if cfg.GetAudioTrackExtraction() {
 		if multimodal {
 			return nil, apierror.InvalidArgument(
-				"embed_content_config.audio_track_extraction is not supported: %s embeds text and images; video and audio input are not served", name)
+				"embed_content_config.audio_track_extraction is not supported: %s embeds text, images and audio; video input is not served", name)
 		}
 		return nil, apierror.InvalidArgument(
 			"embed_content_config.audio_track_extraction is not supported: %s embeds text only", name)
@@ -135,6 +151,13 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	if err != nil {
 		return nil, err
 	}
+	s.mu.RLock()
+	objs := s.objects
+	s.mu.RUnlock()
+	parts, media, err := embedParts(ctx, req.GetContent(), mediaSupport{images: multimodal, audio: embedding.EmbedsAudio(e), objects: objs}, name)
+	if err != nil {
+		return nil, err
+	}
 	if !set {
 		auto = true // Vertex's default
 	}
@@ -150,7 +173,7 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	if _, err := embedding.Prompt(embedding.Input{Content: "x", TaskType: taskName}); err != nil {
 		return nil, apierror.InvalidArgument("task_type: %v", err)
 	}
-	if images > 0 {
+	if media > 0 {
 		in.Parts = parts
 	} else {
 		texts := make([]string, len(parts))
@@ -178,35 +201,69 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	}, nil
 }
 
-// embedParts are content's parts: text, and for a multimodal model images.
-// Text-only content is joined with newlines into the one text the model
-// embeds; images returns how many images there are.
-func embedParts(c *aiplatformpb.Content, multimodal bool, name string) ([]embedding.Part, int, error) {
+// mediaSupport is what a model embeds besides text, and where file_data
+// parts are read from.
+type mediaSupport struct {
+	images, audio bool
+	objects       Objects
+}
+
+// what names what the model embeds, for an error.
+func (m mediaSupport) what() string {
+	switch {
+	case m.audio:
+		return "text, images and audio"
+	case m.images:
+		return "text and images"
+	}
+	return "text only"
+}
+
+// embedParts are content's parts: text, and for a multimodal model images
+// and audio clips, inline or read from Cloud Storage. Text-only content is
+// joined with newlines into the one text the model embeds; media returns how
+// many images and clips there are.
+func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, name string) ([]embedding.Part, int, error) {
 	if c == nil || len(c.GetParts()) == 0 {
 		return nil, 0, apierror.InvalidArgument("content is required and must have at least one text part")
 	}
 	parts := make([]embedding.Part, len(c.GetParts()))
-	images := 0
+	images, clips := 0, 0
+	samples := 0 // of audio, all clips together
 	text := ""
 	for i, p := range c.GetParts() {
+		field, mt := "", ""
+		var data []byte
 		switch d := p.GetData().(type) {
 		case *aiplatformpb.Part_Text:
 			parts[i] = embedding.Part{Text: d.Text}
 			text += d.Text
 			continue
 		case *aiplatformpb.Part_InlineData:
-			if !multimodal {
+			field, mt, data = "inline_data", d.InlineData.GetMimeType(), d.InlineData.GetData()
+		case *aiplatformpb.Part_FileData:
+			if !m.images {
 				break
 			}
-			mt := d.InlineData.GetMimeType()
-			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/") {
-				return nil, 0, apierror.InvalidArgument(
-					"content.parts[%d].inline_data.mime_type %q is not supported: %s embeds text and images (%s); video, audio and PDF input are not served",
-					i, mt, name, strings.Join(embedding.ImageMIMETypes, ", "))
+			var err error
+			field = "file_data"
+			if mt, data, err = readFileData(ctx, i, d.FileData, m.objects); err != nil {
+				return nil, 0, err
 			}
-			img, err := embedding.DecodeImage(mt, d.InlineData.GetData())
+		}
+		if field == "" || !m.images {
+			if m.images {
+				return nil, 0, apierror.InvalidArgument(
+					"content.parts[%d]: only text, inline_data and file_data parts are supported; %s embeds %s", i, name, m.what())
+			}
+			return nil, 0, apierror.InvalidArgument(
+				"content.parts[%d]: only text parts are supported; %s embeds text only", i, name)
+		}
+		switch {
+		case strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/"):
+			img, err := embedding.DecodeImage(mt, data)
 			if err != nil {
-				return nil, 0, apierror.InvalidArgument("content.parts[%d].inline_data: %v", i, err)
+				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}
 			parts[i] = embedding.Part{Image: img}
 			images++
@@ -214,26 +271,59 @@ func embedParts(c *aiplatformpb.Content, multimodal bool, name string) ([]embedd
 				return nil, 0, apierror.InvalidArgument(
 					"content.parts[%d]: at most %d images are embedded in one request", i, embedding.MaxImages)
 			}
-			continue
-		case *aiplatformpb.Part_FileData:
-			if !multimodal {
-				break
+		case m.audio && embedding.IsAudioMIMEType(mt):
+			clip, err := embedding.DecodeAudio(mt, data)
+			if err != nil {
+				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+			}
+			parts[i] = embedding.Part{Audio: clip}
+			clips++
+			if samples += len(clip); samples > embedding.MaxAudioSeconds*embedding.AudioSampleRate {
+				return nil, 0, apierror.InvalidArgument(
+					"content.parts[%d]: the audio adds up to %.1f seconds; at most %d seconds are embedded in one request",
+					i, float64(samples)/embedding.AudioSampleRate, embedding.MaxAudioSeconds)
+			}
+		default:
+			types := append(append([]string(nil), embedding.ImageMIMETypes...), embedding.AudioMIMETypes...)
+			notServed := "video, MP3 and PDF input are not served"
+			if !m.audio {
+				types, notServed = embedding.ImageMIMETypes, "video, audio and PDF input are not served"
 			}
 			return nil, 0, apierror.InvalidArgument(
-				"content.parts[%d].file_data is not supported: send the image's bytes as inline_data; %s does not read %q",
-				i, name, d.FileData.GetFileUri())
+				"content.parts[%d].%s.mime_type %q is not supported: %s embeds %s (%s); %s",
+				i, field, mt, name, m.what(), strings.Join(types, ", "), notServed)
 		}
-		if multimodal {
-			return nil, 0, apierror.InvalidArgument(
-				"content.parts[%d]: only text and inline_data image parts are supported; %s embeds text and images", i, name)
-		}
-		return nil, 0, apierror.InvalidArgument(
-			"content.parts[%d]: only text parts are supported; %s embeds text only", i, name)
 	}
-	if images == 0 && strings.TrimSpace(text) == "" {
+	if images+clips == 0 && strings.TrimSpace(text) == "" {
 		return nil, 0, apierror.InvalidArgument("content.parts: the text to embed is empty")
 	}
-	return parts, images, nil
+	return parts, images + clips, nil
+}
+
+// readFileData reads a file_data part's gs:// object from this instance's
+// Cloud Storage, with its mime_type, or the object's content type when the
+// part has none.
+func readFileData(ctx context.Context, i int, fd *aiplatformpb.FileData, objs Objects) (string, []byte, error) {
+	uri := fd.GetFileUri()
+	rest, ok := strings.CutPrefix(uri, "gs://")
+	bucket, object, _ := strings.Cut(rest, "/")
+	if !ok || bucket == "" || object == "" {
+		return "", nil, apierror.InvalidArgument(
+			"content.parts[%d].file_data.file_uri must be gs://{bucket}/{object}, not %q", i, uri)
+	}
+	if objs == nil {
+		return "", nil, apierror.FailedPrecondition(
+			"content.parts[%d].file_data: reading %s needs this instance's Cloud Storage, which is not enabled; start it with the storage service, or send the bytes as inline_data", i, uri)
+	}
+	data, contentType, err := objs.Read(ctx, bucket, object, fileDataBytes)
+	if err != nil {
+		return "", nil, err
+	}
+	mt := fd.GetMimeType()
+	if strings.TrimSpace(mt) == "" {
+		mt = contentType
+	}
+	return mt, data, nil
 }
 
 // pick reconciles an option set at the top level of EmbedContentRequest with

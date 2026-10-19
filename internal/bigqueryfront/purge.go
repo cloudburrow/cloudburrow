@@ -34,6 +34,10 @@ func (f front) deleteDatasetPurging(w http.ResponseWriter, r *http.Request, data
 	if dataset != droppedDatasetID {
 		f.dropRoutines(r, d)
 	}
+	// The jobs not DONE kept for INFORMATION_SCHEMA.JOBS (jobsopen.go,
+	// #1633): a purge keeps the jobs, but the next query makes them anew
+	// from a list of every job rather than trust what the project had.
+	f.open.forget(project)
 	if f.dropped == nil {
 		return
 	}

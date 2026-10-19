@@ -57,8 +57,39 @@ type jobsFilter struct {
 	limit        int    // with ORDER BY creation_time; -1 for none
 	desc         bool
 	// ids, when set, are the only job IDs a job_id = or IN conjunct
-	// lets through (jobIDs, #1633).
-	ids map[string]bool
+	// lets through (jobIDs, #1633); states and parents likewise the only
+	// states and parent_job_id values (onlyOpen, parentIDs).
+	ids, states, parents map[string]bool
+}
+
+// onlyOpen reports whether the filter lets through only jobs not DONE: a
+// state = or IN conjunct without 'DONE' (#1633), whose jobs the front
+// keeps (jobsopen.go).
+func (f *jobsFilter) onlyOpen() bool {
+	return f != nil && f.states != nil && !f.states["DONE"]
+}
+
+// parentIDs are the only parent_job_id values the filter lets through,
+// or nil when it lets any through: a parent_job_id = or IN conjunct
+// (#1633), whose jobs are the children the front recorded of them
+// (jobRecords.childrenOf).
+func (f *jobsFilter) parentIDs() map[string]bool {
+	if f == nil {
+		return nil
+	}
+	return f.parents
+}
+
+// narrow is what both of have (every value of vals when have is nil):
+// the values of every = or IN conjunct of a column.
+func narrow(have, vals map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for v := range vals {
+		if v != "" && (have == nil || have[v]) {
+			out[v] = true
+		}
+	}
+	return out
 }
 
 // jobIDsMax is the most job IDs jobIDs gives, which a jobs.list's URL
@@ -431,15 +462,14 @@ func (f *jobsFilter) equal(col string, vals []string) bool {
 		set[v] = true
 	}
 	f.keep = append(f.keep, func(k jobKeys) bool { v := get(k); return v != "" && set[v] })
-	if col == "job_id" {
-		// What every job_id conjunct lets through (#1633).
-		ids := map[string]bool{}
-		for v := range set {
-			if v != "" && (f.ids == nil || f.ids[v]) {
-				ids[v] = true
-			}
-		}
-		f.ids = ids
+	// What every conjunct of the column lets through (#1633).
+	switch col {
+	case "job_id":
+		f.ids = narrow(f.ids, set)
+	case "state":
+		f.states = narrow(f.states, set)
+	case "parent_job_id":
+		f.parents = narrow(f.parents, set)
 	}
 	return true
 }

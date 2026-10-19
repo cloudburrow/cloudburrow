@@ -72,13 +72,14 @@ COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtabl
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR)'
 # Browser tests no shard runs: the Studio's local models (#1396) and the
-# Embeddings page's image (#1454) need a
+# Embeddings page's image (#1454), audio and Cloud Storage objects (#1651)
+# need a
 # -tags onnx build started with -local-ai-embeddings, which no shard builds;
 # they run locally, as the compat suite's local AI tests do (ci.yml never=).
 # Functions' Edit, Download and Permissions builds a function from source with
 # Google's builder, as the compat suite's Functions tests do, so it runs only
 # when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
-COMPAT_BROWSER_NEVER_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|CloudRunFunctionsEditDownloadAndPermissionsThroughThePage)$'
+COMPAT_BROWSER_NEVER_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|CloudRunFunctionsEditDownloadAndPermissionsThroughThePage)$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
