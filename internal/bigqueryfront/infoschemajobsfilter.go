@@ -56,6 +56,29 @@ type jobsFilter struct {
 	minUs, maxUs *int64 // inclusive bounds of creation_time, microseconds
 	limit        int    // with ORDER BY creation_time; -1 for none
 	desc         bool
+	// ids, when set, are the only job IDs a job_id = or IN conjunct
+	// lets through (jobIDs, #1633).
+	ids map[string]bool
+}
+
+// jobIDsMax is the most job IDs jobIDs gives, which a jobs.list's URL
+// names (bigquery-emulator patch 0064), as a background sync's does
+// (jobsPendingMax); past it the list is of every job.
+const jobIDsMax = jobsPendingMax
+
+// jobIDs are the only job IDs the filter lets through, sorted, or nil
+// when it lets any through or names more than jobIDsMax: a job_id = or
+// IN conjunct (#1633), whose jobs alone the list needs to read.
+func (f *jobsFilter) jobIDs() []string {
+	if f == nil || f.ids == nil || len(f.ids) > jobIDsMax {
+		return nil
+	}
+	ids := make([]string, 0, len(f.ids))
+	for id := range f.ids {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // listBounds sets jobs.list's creation-time bounds, milliseconds and
@@ -408,6 +431,16 @@ func (f *jobsFilter) equal(col string, vals []string) bool {
 		set[v] = true
 	}
 	f.keep = append(f.keep, func(k jobKeys) bool { v := get(k); return v != "" && set[v] })
+	if col == "job_id" {
+		// What every job_id conjunct lets through (#1633).
+		ids := map[string]bool{}
+		for v := range set {
+			if v != "" && (f.ids == nil || f.ids[v]) {
+				ids[v] = true
+			}
+		}
+		f.ids = ids
+	}
 	return true
 }
 
