@@ -101,6 +101,29 @@
 >   default (the feature extractor's `max_length`, inherited from Gemma 3n); CloudBurrow embeds up
 >   to Google's 180 seconds, which the model card's "~327 seconds" of context allows.
 >
+> **Update 2026-10-19 (#1651): WebP and BMP images.** Google's
+> [Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+> (re-read 2026-10-19, last updated 2026-10-15) lists "JPEG, PNG, WebP, BMP, HEIC, HEIF, AVIF" for
+> `gemini-embedding-2`. With the maintainer's approval (2026-10-19), `golang.org/x/image` v0.47.0
+> joins go.mod for its WebP and BMP decoders; it adds no other module.
+>
+> - Use: an `inline_data` or `file_data` part with `mime_type` `image/webp` (lossy, lossless, with or
+>   without alpha) or `image/bmp`, decoded and then prepared exactly as PNG and JPEG are. The
+>   console's **Images** picker accepts them.
+> - A lossy WebP is YUV 4:2:0 in BT.601 limited range. `golang.org/x/image/webp` returns it as an
+>   `image.YCbCr`, whose conversion is JPEG's full-range formula with the nearest chroma sample;
+>   that gave cosine 0.965 against the reference on a lossy shape. CloudBurrow converts it as libwebp
+>   does instead (bilinear "fancy" chroma upsampling, then libwebp's integer conversion), which is
+>   pixel-identical to libwebp 1.6's `dwebp` on the unit fixtures, odd sizes and alpha included.
+> - Checked against Transformers.js 4.3.1 on the same ONNX files and the same image files (CPU; sharp
+>   decodes the WebPs with libwebp, and the BMPs are read as raw pixels, since sharp reads no BMP):
+>   identical vectors (cosine 1.000000) for a 768 × 768 lossless WebP, lossy WebP and BMP; 0.999446
+>   and 0.999502 for a 1000 × 600 lossy WebP and BMP, which are resized (the PNG of that scene gives
+>   0.999502: sharp's resampling against PIL's).
+> - Not served: an animated WebP (`golang.org/x/image` decodes no animation; refused with
+>   `INVALID_ARGUMENT` saying so), and HEIC, HEIF and AVIF, for which neither Go's standard library
+>   nor `golang.org/x/image` has a decoder.
+>
 > Everything below records why the official LiteRT route is still blocked.
 
 Issue: [#41](https://github.com/cloudburrow/cloudburrow/issues/41) · Investigated 2026-09-21

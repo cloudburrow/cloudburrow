@@ -15,9 +15,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/bmp"
 )
 
 // embeddingModel is the one embedding model served: a community ONNX
@@ -106,7 +110,10 @@ func TestStudioManagesLocalModelsAndTestsEmbeddings(t *testing.T) {
 // test/compat does both). An image chosen on the Embeddings page switches
 // the request to EmbedContent on that model and is embedded beside two
 // texts; the image's row shows its 768 values and 260 tokens, and its
-// cosine similarity is higher with the text that describes it.
+// cosine similarity is higher with the text that describes it. The picker
+// accepts WebP and BMP (#1651): the same circle as a lossy WebP and as a
+// BMP is embedded beside it, each nearer the text that describes it, the
+// BMP (the same pixels) the PNG's vector.
 func TestEmbeddingsPageEmbedsAnImage(t *testing.T) {
 	needService(t, "ai-local")
 	needService(t, "ai-embed")
@@ -136,46 +143,75 @@ func TestEmbeddingsPageEmbedsAnImage(t *testing.T) {
 			img.Set(x, y, c)
 		}
 	}
-	var b bytes.Buffer
+	var b, bm bytes.Buffer
 	if err := png.Encode(&b, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := bmp.Encode(&bm, img); err != nil {
+		t.Fatal(err)
+	}
+	// The same circle, made by cwebp -q 80 (test/compat/testdata).
+	webp, err := os.ReadFile("../compat/testdata/circle-lossy.webp")
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	p := open(t)
 	p.navigate("/ai/embeddings")
 	p.waitFor(`document.querySelector("#emb-images") !== null`)
+	var accept string
+	p.eval(`document.querySelector("#emb-images").accept`, &accept)
+	for _, mt := range []string{"image/png", "image/jpeg", "image/webp", "image/bmp"} {
+		if !strings.Contains(accept, mt) {
+			t.Errorf("the image picker accepts %q; want %s among them", accept, mt)
+		}
+	}
 	p.setField("#emb-texts", "a red circle\na blue square")
 	p.eval(fmt.Sprintf(`(() => {
-		const bytes = Uint8Array.from(atob(%q), (c) => c.charCodeAt(0));
+		const file = (b64, name, type) => new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], name, { type });
 		const dt = new DataTransfer();
-		dt.items.add(new File([bytes], "circle.png", { type: "image/png" }));
+		dt.items.add(file(%q, "circle.png", "image/png"));
+		dt.items.add(file(%q, "circle.webp", "image/webp"));
+		dt.items.add(file(%q, "circle.bmp", "image/bmp"));
 		const input = document.querySelector("#emb-images");
 		input.files = dt.files;
 		input.dispatchEvent(new Event("change"));
 		return true;
-	})()`, base64.StdEncoding.EncodeToString(b.Bytes())), new(bool))
+	})()`, base64.StdEncoding.EncodeToString(b.Bytes()), base64.StdEncoding.EncodeToString(webp),
+		base64.StdEncoding.EncodeToString(bm.Bytes())), new(bool))
 	var picked []string
 	p.eval(`[document.querySelector("#emb-model").value, document.querySelector("#emb-method").value]`, &picked)
 	if len(picked) != 2 || picked[0] != model2 || picked[1] != "embedContent" {
 		t.Fatalf("after choosing an image the model and method read %v; want %s and embedContent", picked, model2)
 	}
 	p.clickText("button", "Embed")
-	p.waitFor(`document.querySelectorAll("#emb-results tbody tr").length === 3 || /\[error\]/.test(document.body.textContent)`)
+	p.waitFor(`document.querySelectorAll("#emb-results tbody tr").length === 5 || /\[error\]/.test(document.body.textContent)`)
 	var rows [][]string
 	p.eval(`[...document.querySelectorAll("#emb-results tbody tr")].map((tr) => [...tr.children].map((td) => td.textContent.trim()))`, &rows)
-	if len(rows) != 3 {
+	if len(rows) != 5 {
 		var text string
 		p.eval(`document.querySelector("main").textContent`, &text)
 		t.Fatalf("the Embeddings view shows %d results: %s", len(rows), text)
 	}
-	if r := rows[2]; r[0] != "[image] circle.png" || r[1] != "768" || r[2] != "260" {
-		t.Errorf("the image's row reads %v; want [image] circle.png, 768 values and 260 tokens", r)
+	for i, name := range []string{"circle.png", "circle.webp", "circle.bmp"} {
+		if r := rows[2+i]; r[0] != "[image] "+name || r[1] != "768" || r[2] != "260" {
+			t.Errorf("the image's row reads %v; want [image] %s, 768 values and 260 tokens", r, name)
+		}
 	}
 	var sim []string
 	p.eval(`[...document.querySelectorAll("#emb-similarity tbody td")].map((td) => td.textContent.trim())`, &sim)
-	// Row 3 is the image: its similarity with "a red circle", then "a blue square".
-	if len(sim) != 9 || !(sim[6] > sim[7]) {
-		t.Errorf("the cosine similarity matrix reads %v; want the image nearer \"a red circle\"", sim)
+	if len(sim) != 25 {
+		t.Fatalf("the cosine similarity matrix reads %v; want 5 x 5", sim)
+	}
+	// Rows 3 to 5 are the images: each one's similarity with "a red
+	// circle", then "a blue square".
+	for r := 2; r < 5; r++ {
+		if !(sim[r*5] > sim[r*5+1]) {
+			t.Errorf("row %d of the cosine similarity matrix reads %v; want the image nearer \"a red circle\"", r+1, sim[r*5:r*5+5])
+		}
+	}
+	if c, err := strconv.ParseFloat(sim[2*5+4], 64); err != nil || c < 0.999 {
+		t.Errorf("the PNG and the BMP of the same pixels have cosine %q; want 1", sim[2*5+4])
 	}
 	var request string
 	p.eval(`document.querySelector("#emb-request").textContent`, &request)
