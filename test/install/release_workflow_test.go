@@ -16,14 +16,15 @@ import (
 // cleans up after itself.
 
 // signingSecrets are the repository secrets the maintainer adds, by the
-// names docs/install.md gives.
+// names docs/release-signing.md gives. The identity's name is not one of
+// them: it is the optional MACOS_SIGNING_IDENTITY repository variable, or
+// read from the imported certificate.
 var signingSecrets = []string{
-	"MACOS_SIGNING_CERT_P12_BASE64",
-	"MACOS_SIGNING_CERT_PASSWORD",
-	"MACOS_SIGNING_IDENTITY",
-	"APPLE_NOTARY_KEY_P8_BASE64",
-	"APPLE_NOTARY_KEY_ID",
-	"APPLE_NOTARY_ISSUER_ID",
+	"MACOS_CERTIFICATE_P12_BASE64",
+	"MACOS_CERTIFICATE_PASSWORD",
+	"NOTARY_KEY_P8_BASE64",
+	"NOTARY_KEY_ID",
+	"NOTARY_ISSUER_ID",
 }
 
 // releaseJobs splits release.yml into its top-level jobs, by name, with
@@ -125,6 +126,21 @@ func TestReleaseSignsDarwinBeforeChecksumsAndAttestation(t *testing.T) {
 		if !strings.Contains(sign, "secrets."+s+" }}") {
 			t.Errorf("sign-macos does not read secrets.%s", s)
 		}
+	}
+	// The identity is a name, not a secret: the optional repository variable,
+	// or the one Developer ID Application identity in the certificate.
+	for _, want := range []string{
+		"WANT_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}",
+		"IDENTITY: ${{ steps.identity.outputs.name }}",
+		`--sign "${IDENTITY}"`,
+		"codesign --verify --strict",
+	} {
+		if !strings.Contains(sign, want) {
+			t.Errorf("sign-macos does not contain %q", want)
+		}
+	}
+	if strings.Contains(sign, "secrets.MACOS_SIGNING_IDENTITY") {
+		t.Error("sign-macos reads the identity from a secret; it is the MACOS_SIGNING_IDENTITY variable")
 	}
 	// The cleanup step runs whatever happened before it.
 	if !regexp.MustCompile(`name: Delete the temporary keychain[^\n]*\n\s+if: always\(\)`).MatchString(sign) {
@@ -239,7 +255,7 @@ func runSecretsCheck(t *testing.T, set map[string]string) (string, string, error
 // TestSigningSkipsWithoutSecrets: a fork, or this repository before the
 // maintainer adds the secrets, releases unsigned with a notice.
 func TestSigningSkipsWithoutSecrets(t *testing.T) {
-	stdout, output, err := runSecretsCheck(t, map[string]string{"MACOS_SIGNING_IDENTITY": ""})
+	stdout, output, err := runSecretsCheck(t, map[string]string{"NOTARY_KEY_ID": ""})
 	if err != nil {
 		t.Fatalf("the check failed without secrets: %v\n%s", err, stdout)
 	}
@@ -263,7 +279,7 @@ func TestSigningSkipsWithoutSecrets(t *testing.T) {
 	}
 }
 
-// TestSigningWithAllSecrets: all six set means sign.
+// TestSigningWithAllSecrets: all five set means sign.
 func TestSigningWithAllSecrets(t *testing.T) {
 	set := map[string]string{}
 	for _, s := range signingSecrets {
@@ -282,14 +298,36 @@ func TestSigningWithAllSecrets(t *testing.T) {
 // that fails the release rather than quietly shipping unsigned binaries.
 func TestSigningRefusesPartialSecrets(t *testing.T) {
 	stdout, output, err := runSecretsCheck(t, map[string]string{
-		"MACOS_SIGNING_CERT_P12_BASE64": "x",
-		"MACOS_SIGNING_IDENTITY":        "x",
+		"MACOS_CERTIFICATE_P12_BASE64": "x",
+		"MACOS_CERTIFICATE_PASSWORD":   "x",
 	})
 	if err == nil {
 		t.Fatalf("a partial set of secrets was accepted:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "::error::") || !strings.Contains(stdout, "APPLE_NOTARY_KEY_ID") {
+	if !strings.Contains(stdout, "::error::") || !strings.Contains(stdout, "NOTARY_KEY_ID") {
 		t.Errorf("the error does not name what is missing:\n%s", stdout)
+	}
+	if output != "" {
+		t.Errorf("GITHUB_OUTPUT = %q, want nothing", output)
+	}
+}
+
+// TestSigningRefusesTheOldSecretNames: #654 named the secrets
+// MACOS_SIGNING_*/APPLE_NOTARY_*. A maintainer who set those gets an error
+// naming the fix, not an unsigned release with only a notice.
+func TestSigningRefusesTheOldSecretNames(t *testing.T) {
+	sign := job(t, releaseJobs(t), "sign-macos")
+	for _, old := range []string{"secrets.MACOS_SIGNING_CERT_P12_BASE64 != ''", "secrets.APPLE_NOTARY_KEY_P8_BASE64 != ''"} {
+		if !strings.Contains(sign, old) {
+			t.Errorf("sign-macos does not check for the old secret (%s)", old)
+		}
+	}
+	stdout, output, err := runSecretsCheck(t, map[string]string{"OLD_NAMES_SET": "true"})
+	if err == nil {
+		t.Fatalf("the old secret names were accepted:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "::error::") || !strings.Contains(stdout, "docs/release-signing.md") {
+		t.Errorf("the error does not point at docs/release-signing.md:\n%s", stdout)
 	}
 	if output != "" {
 		t.Errorf("GITHUB_OUTPUT = %q, want nothing", output)
