@@ -2,6 +2,7 @@ package redisadmin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -39,22 +40,45 @@ import (
 //     reader Service selects, one each in turn, through the nodes'
 //     tunnels, which follow their pods as they restart;
 //   - a health check of the primary, as a Standard tier instance's
-//     (autofailover.go): INFO replication every healthEvery. The primary
-//     has failed once it has not answered as a primary for failAfter
-//     checks in a row, or at once when it answers with a replication ID
-//     of its own other than the last (its server started again, empty or
-//     from its files, so its replicas' stream is gone). The replica with
-//     the most of its data (bestReplica) is promoted: REPLICAOF NO ONE,
-//     then every other node, the old primary among them, REPLICAOF it at
-//     its Service; the roles are labelled again and the primary
-//     endpoint's connections are dropped, so a client reconnects to the
-//     same address and reaches the new primary. From the first failed
-//     check until the primary answers again as the primary it was, or a
-//     replica is promoted, the primary endpoint carries no connections
-//     (fence): a pod started again, empty, comes back faster than three
-//     checks, and a write to it would be lost (measured in
+//     (autofailover.go): INFO replication and server every healthEvery.
+//     The primary has failed once it has not answered as a primary for
+//     failAfter checks in a row, or at once when it answers with a run_id
+//     other than the last (its server started again, empty or from its
+//     files, so its replicas' stream is gone). A new replication ID with
+//     the same run_id is not a failure (#1657): a primary takes one when
+//     it is promoted, and again when it gains a replica with no backlog to
+//     serve it from, which a promoted node often does a second after the
+//     old primary's node rejoins it. The replica with the most of its
+//     data among those fit to promote (promotable) is promoted: REPLICAOF
+//     NO ONE, then every other node, the old primary among them,
+//     REPLICAOF it at its Service; the roles are labelled again and the
+//     primary endpoint's connections are dropped, so a client reconnects
+//     to the same address and reaches the new primary. From the first
+//     failed check until the primary answers again as the primary it was,
+//     or a replica is promoted, the primary endpoint carries no
+//     connections (fence): a pod started again, empty, comes back faster
+//     than three checks, and a write to it would be lost (measured in
 //     TestMemorystoreValkeyReaderAndFailover). Acknowledged writes the
 //     replicas had not received are lost, as replication is asynchronous.
+//
+// Google documents only that "the system detects the failure, and elects
+// a replica to be the new primary", and that "acknowledged writes may be
+// lost" (https://docs.cloud.google.com/memorystore/docs/valkey/ha-and-replicas,
+// re-read 2026-10-19); nothing there, nor in
+// https://docs.cloud.google.com/memorystore/docs/valkey/about-maintenance
+// (re-read the same day), says how the replica is chosen. So the choice
+// follows Valkey's own failover, which passes over a replica whose data is
+// too old: a replica is promotable (#1657) unless it still loads the
+// primary's dataset (master_sync_in_progress:1), has not synced since it
+// started (its link down, master_link_down_since_seconds -1: a node that
+// rejoined empty), lost the primary well before the primary failed, or
+// is limitedDataLoss or more behind the replica with the most. With none
+// promotable there is no failover; the checks go on, and a primary that
+// started again with none promotable is kept, as no replica has more of
+// its data. After a failover, for settleFor, the instance settles: it is
+// failed over again only when the new primary stops answering or starts
+// again, not when it answers as a replica or (without a run_id) with a
+// new replication ID.
 //
 // A secondary of cross-instance replication of the instance is then
 // made a replica of the promoted node at its own Service (followersOf
@@ -191,10 +215,11 @@ func (nr nodeReplicator) ReplicaOf(ctx context.Context, host string, port int) e
 	return nr.c.do(ctx, nr.r, nr.n, "REPLICAOF", host, port)
 }
 
+// Replication reads INFO replication and server, for its run_id.
 func (nr nodeReplicator) Replication(ctx context.Context) (Replication, error) {
 	cl := nr.c.dial(nr.n.addr, nr.r.password(), nr.r.TransitCA)
 	defer cl.Close()
-	v, err := cl.Do(ctx, "INFO", "replication")
+	v, err := cl.Do(ctx, "INFO", "replication", "server")
 	if err != nil {
 		return Replication{}, err
 	}
@@ -231,12 +256,38 @@ func (c *clusters) watched(r *clusterRecord) bool {
 	return p != nil && p.addr != "" && len(r.Nodes) > 1
 }
 
+// settleFor is how long an instance settles after an automatic failover
+// (#1657): only a new primary that stops answering or starts again fails
+// it over again meanwhile. linkDownSlack is how much longer than its
+// primary has been failing a replica's link may have been down for it to
+// be promotable: the link drops as the primary's pod goes, a check or two
+// before the first failed one.
+var (
+	settleFor     = 15 * time.Second
+	linkDownSlack = 10 * time.Second
+)
+
+// primaryHealth is what the health check knows of a watched instance's
+// primary.
+type primaryHealth struct {
+	// server is the primary's; the rest are reset when it changes.
+	server string
+	// replID and runID are what it last answered with as the primary.
+	replID, runID string
+	// failed counts its failed checks in a row, since failingSince.
+	failed       int
+	failingSince time.Time
+	// settleUntil ends the settling after the failover that promoted it.
+	settleUntil time.Time
+	// noneFit is that the last failover found no promotable replica.
+	noneFit bool
+}
+
 // watchStandalone checks every CLUSTER_DISABLED instance's primary until
 // ctx ends.
 func (c *clusters) watchStandalone(ctx context.Context, every time.Duration) {
 	tend := tendEvery
-	failed := map[string]int{}
-	ids := map[string]string{}
+	hs := map[string]*primaryHealth{}
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -251,18 +302,30 @@ func (c *clusters) watchStandalone(ctx context.Context, every time.Duration) {
 			return
 		case <-t.C:
 		}
-		for _, name := range c.checkStandalone(ctx, failed, ids, every, tend) {
-			delete(failed, name)
-			delete(ids, name)
-			c.failoverStandalone(ctx, name)
+		for _, name := range c.checkStandalone(ctx, hs, every, tend) {
+			h := hs[name]
+			down := h.failingSince
+			if down.IsZero() {
+				down = time.Now()
+			}
+			promoted, err := c.failoverStandalone(ctx, name, time.Since(down))
+			switch {
+			case err == nil:
+				hs[name] = &primaryHealth{server: promoted, settleUntil: time.Now().Add(settleFor)}
+			case errors.Is(err, errNoneFit):
+				if !h.noneFit {
+					log.Printf("memorystore: %s: automatic failover: %v; checking on", name, err)
+				}
+				h.noneFit = true
+			}
 		}
 	}
 }
 
-// checkStandalone closes the endpoints of instances that are gone, counts
-// the failed checks of each watched instance's primary in failed, tends
+// checkStandalone closes the endpoints of instances that are gone, checks
+// each watched instance's primary, keeping what it learns in hs, tends
 // the roles, and returns the instances whose primary failed.
-func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, ids map[string]string, every, tend time.Duration) []string {
+func (c *clusters) checkStandalone(ctx context.Context, hs map[string]*primaryHealth, every, tend time.Duration) []string {
 	type target struct {
 		name string
 		rec  clusterRecord
@@ -285,8 +348,7 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 	}
 	for name, r := range c.byName {
 		if !c.watched(r) {
-			delete(failed, name)
-			delete(ids, name)
+			delete(hs, name)
 			switch _, pending := c.busy[name]; {
 			case r.suspended:
 				c.quiesce(name)
@@ -304,29 +366,71 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 	c.mu.Unlock()
 	var out []string
 	for _, tg := range ts {
+		h := hs[tg.name]
+		if h == nil || h.server != tg.p.Server {
+			h = &primaryHealth{server: tg.p.Server}
+			hs[tg.name] = h
+		}
 		cctx, cancel := context.WithTimeout(ctx, every)
 		st, err := nodeReplicator{c, &tg.rec, &tg.p}.Replication(cctx)
 		cancel()
-		switch {
-		case err == nil && st.Primary && (ids[tg.name] == "" || ids[tg.name] == st.ReplID):
-			delete(failed, tg.name)
-			ids[tg.name] = st.ReplID
+		if healthy := h.observe(st, err, time.Now()); healthy {
+			if h.replID != "" && h.replID != st.ReplID {
+				log.Printf("memorystore: %s: the primary %s has a new replication ID (%s, was %s) and is the same server; not a failure", tg.name, tg.p.Server, st.ReplID, h.replID)
+			}
+			h.replID, h.runID = st.ReplID, st.RunID
+			h.failed, h.failingSince, h.noneFit = 0, time.Time{}, false
 			c.fence(tg.name, false)
 			c.tendRoles(ctx, tg.name, tend)
 			continue
-		case err == nil && st.Primary:
-			// Started again: its replicas' stream is gone.
-			log.Printf("memorystore: %s: the primary %s started again (replication ID %s, was %s)", tg.name, tg.p.Server, st.ReplID, ids[tg.name])
-			failed[tg.name] = failAfter
-		default:
-			failed[tg.name]++
+		} else if err == nil && st.Primary && h.failed >= failAfter && !h.noneFit {
+			log.Printf("memorystore: %s: the primary %s started again (run_id %s, was %s; replication ID %s, was %s)", tg.name, tg.p.Server, st.RunID, h.runID, st.ReplID, h.replID)
 		}
 		c.fence(tg.name, true)
-		if failed[tg.name] >= failAfter {
+		if h.failed >= failAfter {
 			out = append(out, tg.name)
 		}
 	}
 	return out
+}
+
+// observe takes one check of the primary, which answered st or err at
+// now: whether it is healthy, else counting the failure in h.
+func (h *primaryHealth) observe(st Replication, err error, now time.Time) bool {
+	settling := now.Before(h.settleUntil)
+	if err == nil && st.Primary {
+		switch {
+		case h.replID == "" && h.runID == "":
+			return true // the first check of this primary
+		case st.RunID != "" && h.runID != "":
+			if st.RunID == h.runID {
+				return true // the same server, whatever its replication ID
+			}
+		case st.ReplID == h.replID || settling:
+			// Without a run_id, a new replication ID is taken as a start,
+			// except while settling: a promoted node takes one or two.
+			return true
+		}
+		// Started again: its replicas' stream is gone. With no replica
+		// fit to promote, it is kept: none has more of its data.
+		if h.noneFit {
+			return true
+		}
+		if h.failingSince.IsZero() {
+			h.failingSince = now
+		}
+		h.failed = failAfter
+		return false
+	}
+	if h.failingSince.IsZero() {
+		h.failingSince = now
+	}
+	// Answering as a replica while settling is not a failure: the
+	// failover may still be re-pointing it. Not answering is.
+	if err != nil || !settling {
+		h.failed++
+	}
+	return false
 }
 
 // quiesce points a suspended instance's endpoints at no node, dropping
@@ -449,14 +553,73 @@ func rolePort(r *clusterRecord) int {
 	return 6379
 }
 
-// failoverStandalone promotes the replica of name with the most of its
-// failed primary's data.
-func (c *clusters) failoverStandalone(ctx context.Context, name string) {
+// errNoneFit is a failover's finding no replica fit to promote.
+var errNoneFit = errors.New("no replica is fit to promote")
+
+// promotable is whether a replica, which answered st, may be promoted,
+// its primary failing for down, and why not.
+func promotable(st Replication, down time.Duration) (bool, string) {
+	switch {
+	case st.Primary:
+		return false, "it answers as a primary"
+	case st.SyncInProgress:
+		return false, "it is still loading the primary's dataset"
+	case st.LinkUp:
+		return true, ""
+	case st.LinkDownSince < 0:
+		return false, "it has not synced with the primary since it started"
+	case time.Duration(st.LinkDownSince)*time.Second > down+linkDownSlack:
+		return false, fmt.Sprintf("it lost the primary %ds ago, before the primary failed", st.LinkDownSince)
+	}
+	return true, ""
+}
+
+// fittest is the replica of replicas, those of states that answered, with
+// the most of the failed primary's data among those promotable: not more
+// than limitedDataLoss behind the replica with the most.
+func fittest(replicas []int, states map[int]Replication, down time.Duration) (int, error) {
+	most := int64(-1)
+	for _, i := range replicas {
+		if st, ok := states[i]; ok && !st.Primary && st.Offset > most {
+			most = st.Offset
+		}
+	}
+	best, bestOffset := -1, int64(-1)
+	var why []string
+	for _, i := range replicas {
+		st, ok := states[i]
+		if !ok {
+			continue
+		}
+		fit, reason := promotable(st, down)
+		if fit && most-st.Offset >= limitedDataLoss {
+			fit, reason = false, fmt.Sprintf("it is %d bytes behind the replica with the most", most-st.Offset)
+		}
+		if !fit {
+			why = append(why, fmt.Sprintf("node %d: %s", i, reason))
+			continue
+		}
+		if st.Offset > bestOffset {
+			best, bestOffset = i, st.Offset
+		}
+	}
+	if best < 0 {
+		if len(why) == 0 {
+			why = []string{"none answers"}
+		}
+		return -1, fmt.Errorf("%w (%s)", errNoneFit, strings.Join(why, "; "))
+	}
+	return best, nil
+}
+
+// failoverStandalone promotes the fittest replica of name, whose primary
+// has been failing for down, and returns its server.
+func (c *clusters) failoverStandalone(ctx context.Context, name string, down time.Duration) (string, error) {
 	c.mu.Lock()
 	r, ok := c.byName[name]
 	if !ok || !c.watched(r) {
 		c.mu.Unlock()
-		return
+		return "", fmt.Errorf("instance %s is not watched", name)
 	}
 	c.busy[name] = autoFailover
 	rec := *r
@@ -477,20 +640,25 @@ func (c *clusters) failoverStandalone(ctx context.Context, name string) {
 		delete(c.busy, name)
 		c.mu.Unlock()
 	}()
-	log.Printf("memorystore: %s: the primary %s failed its health checks; failing over", name, nodes[old].Server)
 	fctx, cancel := context.WithTimeout(ctx, haWait)
 	defer cancel()
-	best, _, err := bestReplica(fctx, replicas, func(i int) (Replicator, error) {
-		return nodeReplicator{c, &rec, &nodes[i]}, nil
-	}, 0, false)
-	if err != nil {
-		// No replica answers either: the next checks try again.
-		log.Printf("memorystore: %s: automatic failover: %v", name, err)
-		return
+	states := map[int]Replication{}
+	for _, i := range replicas {
+		qctx, qcancel := context.WithTimeout(fctx, 5*time.Second)
+		if st, err := (nodeReplicator{c, &rec, &nodes[i]}).Replication(qctx); err == nil {
+			states[i] = st
+		}
+		qcancel()
 	}
+	best, err := fittest(replicas, states, down)
+	if err != nil {
+		// The next checks try again.
+		return "", err
+	}
+	log.Printf("memorystore: %s: the primary %s failed its health checks; failing over", name, nodes[old].Server)
 	if err := (nodeReplicator{c, &rec, &nodes[best]}).ReplicaOf(fctx, "", 0); err != nil {
 		log.Printf("memorystore: %s: automatic failover: %s: REPLICAOF NO ONE: %v", name, nodes[best].Server, err)
-		return
+		return "", err
 	}
 	host, port := c.nodeHost(&nodes[best]), nodes[best].port
 	for i := range nodes {
@@ -517,12 +685,20 @@ func (c *clusters) failoverStandalone(ctx context.Context, name string) {
 		c.openEndpoints(r)
 	}
 	fs := c.followersOf(name)
+	var events EventRecorder
+	if c.api != nil {
+		events = c.api.events
+	}
 	c.mu.Unlock()
 	log.Printf("memorystore: %s: automatic failover promoted %s", name, nodes[best].Server)
+	if events != nil {
+		events("memorystore", "failover", name, map[string]string{"from": nodes[old].Server, "to": nodes[best].Server})
+	}
 	// The secondaries of cross-instance replication replicate the promoted
 	// node at its own Service (#1641): their link to the primary Service
 	// can hang on a connection to the failed pod (see followersOf).
 	c.follow(fctx, name, fs, host, port, nil)
+	return nodes[best].Server, nil
 }
 
 // cirFollower is a secondary of cross-instance replication and its

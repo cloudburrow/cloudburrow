@@ -438,10 +438,11 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
   instance's servers with `-primary` and `-reader` select by it, on port 6379 (6378 with in-transit
   encryption); replicas replicate the primary at its node's Service, which follows its pod.
 - **Automatic failover** (#1614), as §5's for the Redis instances: the primary is checked every
-  second, INFO replication through its tunnel. Once it has not answered as a primary three checks
-  in a row (its pod is gone or not Ready), or at once when it answers with a replication ID other
-  than the last (its server started again, its replicas' stream gone), the replica with the most
-  of its data is promoted (`REPLICAOF NO ONE`, then every other node `REPLICAOF` it), the roles are
+  second, INFO replication and server through its tunnel. Once it has not answered as a primary
+  three checks in a row (its pod is gone or not Ready), or at once when it answers with a `run_id`
+  other than the last (its server started again, its replicas' stream gone), the replica with the
+  most of its data among those fit to promote is promoted (`REPLICAOF NO ONE`, then every other
+  node `REPLICAOF` it), the roles are
   labelled again, and the primary endpoint drops its connections, so a client reconnects to the
   same address and reaches the new primary. From the primary's first failed check until it answers
   again as the same primary, or a replica is promoted, the primary endpoint carries no
@@ -454,6 +455,25 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
   Memorystore for Valkey (`google.cloud.memorystore.v1` has none), so there is none here. A
   secondary of cross-instance replication, and an instance being migrated into, are not failed
   over: their primary replicates another server. `CLUSTER` mode is unchanged.
+- **One failover per failure** (#1657). A new replication ID with the same `run_id` is not a
+  failure: a primary takes one when promoted, and again when it gains a replica it has no backlog
+  for, which a promoted node did about a second after the old primary's node rejoined it, and the
+  health check then failed over a second time, back to that node, still empty or syncing (seen in
+  `TestMemorystoreValkeyCrossInstanceFollowsFailover`). A replica is not promoted while it loads
+  the primary's dataset (`master_sync_in_progress:1`), when it has not synced since it started
+  (`master_link_status:down` with `master_link_down_since_seconds:-1`, a node that rejoined empty),
+  when it lost the primary more than ten seconds before the primary began failing, or when it is
+  30 MB or more behind the replica with the most. Google documents only that the system "elects a
+  replica to be the new primary"
+  ([High availability and replicas](https://docs.cloud.google.com/memorystore/docs/valkey/ha-and-replicas),
+  re-read 2026-10-19), so this follows Valkey's own failover, which passes over a replica whose
+  data is too old. With none fit there is no failover: the checks go on, the primary endpoint
+  fenced, and a primary that started again with none fit is kept. For 15 seconds after a failover
+  the instance settles: only a new primary that stops answering or starts again is failed over.
+  Each failover is recorded in `/admin/events` (`service=memorystore&kind=failover`, the instance
+  as its target, `from` and `to` the nodes' servers); `TestMemorystoreValkeyAutomaticFailover`
+  (one replica, written to throughout) finds exactly one per pod deletion, and every write
+  acknowledged after it read back.
 - Connections come back in the form they were asked in: `endpoints`, or the deprecated
   `psc_auto_connections`; the Terraform provider reads each back as what it was configured with.
 

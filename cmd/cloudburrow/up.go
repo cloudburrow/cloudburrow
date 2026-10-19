@@ -390,6 +390,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		memorystoreAdminSvc.calls = callEvents(recorder, requestMetrics, "memorystore")
 		memorystoreAdminSvc.interpose = append(memorystoreAdminSvc.interpose, grpctransport.LogInterceptor(logger, "memorystore"), faults.Interceptor("memorystore"))
 		memorystoreAdminSvc.requests = requestEvents(recorder, requestMetrics, "memorystore")
+		memorystoreAdminSvc.events = recorder.Record
 	}
 	if loggingSvc != nil {
 		loggingSvc.calls = callEvents(recorder, requestMetrics, "logging")
