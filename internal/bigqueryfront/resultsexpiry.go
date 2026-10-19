@@ -37,6 +37,16 @@ import (
 // DROP TABLE every 5) take 454 s rather than 308 s (docs/compatibility.md,
 // "Query results").
 //
+// resultsHardCap was 1,000 until #1655. Every request the emulator answers
+// reads its project's every table (FindProject, bigquery-emulator patch
+// 0080), result tables among them, so a busy instance's requests got
+// slower with each result table until the cap: in
+// TestBigQueryInformationSchemaJobs -count=200 after the BigQuery compat
+// suite, a run took 5.0 s with 380 result tables and 7.5 s with 610, a
+// sixth of the emulator's time in that read and a quarter in collection.
+// A DROP TABLE now costs far less (googlesqlite patch 0062): 52 result
+// tables were deleted in 7.1 s with 700 held, while that loop ran.
+//
 // A job whose table was deleted is then answered as BigQuery answers a
 // reference to a table that does not exist, 404 notFound
 // (https://cloud.google.com/bigquery/docs/error-messages), at
@@ -58,7 +68,7 @@ const (
 	resultsMaxAge    = 24 * time.Hour
 	resultsMaxTables = 200
 	// resultsHardCap is how many tables make the front delete while busy.
-	resultsHardCap = 1000
+	resultsHardCap = 300
 	resultsBatch   = 20
 	resultsIdle    = 30 * time.Second
 	resultsTick    = 5 * time.Second
