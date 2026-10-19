@@ -105,7 +105,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	// The API's refusal, on the form.
 	openEdit()
 	setValue(".modal #f-softDeleteSeconds", "5")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -118,7 +118,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	setValue(".modal #f-labels", "team=blue")
 	setValue(".modal #f-retentionPeriod", "60")
 	setValue(".modal #f-lifecycle", `[{"action":{"type":"Delete"},"condition":{"age":30}}]`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := patches(); n != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2", n)
@@ -145,7 +145,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	}
 	p.clickText("#view .page-actions button", "Lock retention policy")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`#confirm-input`, bucket, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), bucket))
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Lock retention policy")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := actionPosts(); n != 1 {
@@ -227,8 +227,8 @@ func TestStorageManagedFoldersThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create managed folder")`)
 	p.clickText("#view .page-actions button", "Create managed folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-name`, "reports", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(listed)
 	if n := actionPosts(); n != 1 {
@@ -246,7 +246,7 @@ func TestStorageManagedFoldersThroughTheBrowser(t *testing.T) {
 	}
 
 	openDelete := func() {
-		p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for reports/"), chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for reports/"))))
 		p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete managed folder")
 		p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	}
@@ -262,7 +262,7 @@ func TestStorageManagedFoldersThroughTheBrowser(t *testing.T) {
 		t.Fatalf("cancelling the delete sent a request: %d in all", n)
 	}
 	openDelete()
-	p.run(chromedp.SendKeys(`#confirm-input`, "reports/", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), "reports/"))
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Delete managed folder")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`!` + listed)

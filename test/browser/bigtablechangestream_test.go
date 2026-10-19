@@ -30,7 +30,7 @@ func TestBigtableChangeStreamThroughThePage(t *testing.T) {
 		p.clickText("#view .page-actions button", "Edit change stream")
 		p.waitFor(`document.querySelector(".modal #f-retention") !== null`)
 		p.setField(".modal #f-retention", retention)
-		p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 		p.waitFor(`document.querySelector(".modal") === null`)
 	}
 

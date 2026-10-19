@@ -23,7 +23,7 @@ func TestTerminalRunsACommandAndKeepsTheSession(t *testing.T) {
 	p.navigate("/")
 	p.waitFor(`document.querySelector("#view h1") !== null`)
 
-	p.run(chromedp.Click("#terminal-toggle", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-toggle")))
 	p.waitFor(`!document.querySelector("#terminal-drawer").hidden`)
 	p.awaitTerminal()
 
@@ -32,19 +32,19 @@ func TestTerminalRunsACommandAndKeepsTheSession(t *testing.T) {
 	// Inserted as text, as an input method would, then Enter: key events
 	// for printable characters would reach xterm.js twice, as a keydown and
 	// as the input that follows it.
-	p.run(chromedp.Focus(".xterm-helper-textarea", chromedp.ByQuery),
-		input.InsertText("echo cb-$((40+2))"), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.Focus(chromedp.CSS(".xterm-helper-textarea")),
+		cmd(input.InsertText, input.InsertTextParams{Text: "echo cb-$((40+2))"}), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector("#terminal-screen .xterm-rows").innerText.includes("cb-42")`)
 
-	p.run(chromedp.Click("#terminal-minimise", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-minimise")))
 	p.waitFor(`getComputedStyle(document.querySelector("#terminal-drawer .terminal-body")).display === "none"`)
-	p.run(chromedp.Click("#terminal-minimise", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-minimise")))
 	p.waitFor(`getComputedStyle(document.querySelector("#terminal-drawer .terminal-body")).display !== "none"`)
 
-	p.run(chromedp.Click("#terminal-close", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-close")))
 	p.waitFor(`document.querySelector("#terminal-drawer").hidden &&
 		document.querySelector("#terminal-toggle").getAttribute("aria-expanded") === "false"`)
-	p.run(chromedp.Click("#terminal-toggle", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-toggle")))
 	p.waitFor(`document.querySelector("#terminal-state").textContent === "Reattached"`)
 	p.waitFor(`document.querySelector("#terminal-screen .xterm-rows").innerText.includes("cb-42")`)
 }
@@ -59,7 +59,7 @@ func TestTerminalTabsKeepTheirOwnShellsAcrossAReload(t *testing.T) {
 	p := open(t)
 	p.navigate("/")
 	p.waitFor(`document.querySelector("#view h1") !== null`)
-	p.run(chromedp.Click("#terminal-toggle", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-toggle")))
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]").length === 1`)
 	p.awaitTerminal()
 	// Each typed line evaluates arithmetic, so only that tab's shell can
@@ -67,7 +67,7 @@ func TestTerminalTabsKeepTheirOwnShellsAcrossAReload(t *testing.T) {
 	p.typeInTerminal("echo tab-one-$((40+1))")
 	p.waitFor(paneHas(0, "tab-one-41"))
 
-	p.run(chromedp.Click("#terminal-new-tab", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-new-tab")))
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]").length === 2 &&
 		document.querySelectorAll("#terminal-tabs [role=tab]")[1].getAttribute("aria-selected") === "true"`)
 	p.awaitTerminal()
@@ -76,7 +76,7 @@ func TestTerminalTabsKeepTheirOwnShellsAcrossAReload(t *testing.T) {
 
 	p.run(chromedp.Reload())
 	p.waitFor(`document.querySelector("#view h1") !== null`)
-	p.run(chromedp.Click("#terminal-toggle", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#terminal-toggle")))
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]").length === 2`)
 	// The selected tab is kept too: the second.
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]")[1].getAttribute("aria-selected") === "true"`)
@@ -88,7 +88,7 @@ func TestTerminalTabsKeepTheirOwnShellsAcrossAReload(t *testing.T) {
 
 	// ArrowLeft in the tab strip selects the first tab, reattached to its
 	// own shell.
-	p.run(chromedp.Focus(`#terminal-tabs [aria-selected="true"]`, chromedp.ByQuery), chromedp.KeyEvent(kb.ArrowLeft))
+	p.run(chromedp.Focus(chromedp.CSS(`#terminal-tabs [aria-selected="true"]`)), chromedp.KeyEvent(kb.ArrowLeft))
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]")[0].getAttribute("aria-selected") === "true"`)
 	p.waitFor(`document.querySelector("#terminal-state").textContent === "Reattached"`)
 	p.waitFor(paneHas(0, "tab-one-41"))
@@ -97,12 +97,12 @@ func TestTerminalTabsKeepTheirOwnShellsAcrossAReload(t *testing.T) {
 	}
 	// Alt+PageUp from inside the terminal moves to the previous tab, which
 	// wraps to the second.
-	p.run(chromedp.Focus(`#terminal-screen .terminal-pane:not([hidden]) .xterm-helper-textarea`, chromedp.ByQuery),
-		chromedp.KeyEvent(kb.PageUp, chromedp.KeyModifiers(input.ModifierAlt)))
+	p.run(chromedp.Focus(chromedp.CSS(`#terminal-screen .terminal-pane:not([hidden]) .xterm-helper-textarea`)),
+		chromedp.KeyEvent(kb.PageUp, chromedp.KeyModifiers(chromedp.ModifierAlt)))
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]")[1].getAttribute("aria-selected") === "true"`)
 
 	// Closing the second tab ends it and leaves the first, still a shell.
-	p.run(chromedp.Click(`#terminal-tabs [aria-selected="true"] .terminal-tab-close`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#terminal-tabs [aria-selected="true"] .terminal-tab-close`)))
 	p.waitFor(`document.querySelectorAll("#terminal-tabs [role=tab]").length === 1 &&
 		document.querySelectorAll("#terminal-tabs [role=tab]")[0].getAttribute("aria-selected") === "true"`)
 	p.typeInTerminal("echo still-$((40+3))")
@@ -115,8 +115,8 @@ func TestTerminalTabsKeepTheirOwnShellsAcrossAReload(t *testing.T) {
 // input that follows it.
 func (p *tab) typeInTerminal(line string) {
 	p.t.Helper()
-	p.run(chromedp.Focus(`#terminal-screen .terminal-pane:not([hidden]) .xterm-helper-textarea`, chromedp.ByQuery),
-		input.InsertText(line), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.Focus(chromedp.CSS(`#terminal-screen .terminal-pane:not([hidden]) .xterm-helper-textarea`)),
+		cmd(input.InsertText, input.InsertTextParams{Text: line}), chromedp.KeyEvent(kb.Enter))
 }
 
 // paneHas is an expression true when the i-th tab's screen shows s.

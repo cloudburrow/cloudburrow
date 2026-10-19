@@ -38,10 +38,10 @@ func TestLoggingAdminMetricsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create metric")`)
 	p.clickText(`#view .state button.primary`, "Create metric")
 	// A form this long is a page of its own, /logs/metrics/create.
-	p.run(chromedp.WaitVisible(`form.create-page #f-filter`, chromedp.ByQuery))
-	p.run(chromedp.SendKeys(`form.create-page #f-name`, "browser-errors", chromedp.ByQuery))
+	p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-filter`)))
+	p.run(chromedp.SendKeys(chromedp.CSS(`form.create-page #f-name`), "browser-errors"))
 	setField("filter", "jsonPayload.x:y")
-	p.run(chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	p.waitFor(`!document.querySelector("form.create-page .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("form.create-page .form-error").textContent`, &refusal)
@@ -51,7 +51,7 @@ func TestLoggingAdminMetricsThroughTheBrowser(t *testing.T) {
 	p.forgive()
 
 	setField("filter", "severity>=ERROR")
-	p.run(chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+name)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
 	if posts := p.posts(created); len(posts) != 2 {
@@ -70,7 +70,7 @@ func TestLoggingAdminMetricsThroughTheBrowser(t *testing.T) {
 		t.Error("Edit metric offers the name as editable")
 	}
 	setField("filter", "severity>=WARNING")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	code, body := consoleDo(t, http.MethodGet, "/api/detail/logging-metrics?project="+project+"&name="+url.QueryEscape(name), "")
 	if code != http.StatusOK || !strings.Contains(body, "severity\\u003e=WARNING") && !strings.Contains(body, "severity>=WARNING") {

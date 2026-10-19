@@ -52,8 +52,8 @@ func TestCloudRunJobNFSAndStorageVolumesThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/run/jobs/create?project=" + project)
 	p.waitFor(`document.querySelector("#view #f-nfsVolumes") !== null && document.querySelector("#view #f-gcsVolumes") !== null`)
-	p.run(chromedp.SendKeys(`#view #f-name`, id, chromedp.ByQuery),
-		chromedp.SendKeys(`#view #f-image`, "docker.io/library/busybox:1.36", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-name`), id),
+		chromedp.SendKeys(chromedp.CSS(`#view #f-image`), "docker.io/library/busybox:1.36"))
 	setField(p, "#view", "f-nfsVolumes", nfs)
 	setField(p, "#view", "f-gcsVolumes", gcs)
 	p.clickText(`#view button[type="submit"]`, "Create job")

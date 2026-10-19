@@ -30,7 +30,7 @@ func TestSecretExpiryThroughTheForms(t *testing.T) {
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "value")
 	setField(p, "#view", "f-ttl", "48h")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/secrets"`)
 
 	got := editDefaults(t, "secrets", project, name)
@@ -51,7 +51,7 @@ func TestSecretExpiryThroughTheForms(t *testing.T) {
 		t.Errorf("Edit secret is prefilled with expire time %q, want %q", prefilled, got["expireTime"])
 	}
 	setField(p, ".modal", "f-expireTime", "")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if got := editDefaults(t, "secrets", project, name); got["Expire time"] != "Never" || got["expireTime"] != "" {
 		t.Errorf("after clearing in Edit secret the secret reads expire time %q, form %q", got["Expire time"], got["expireTime"])
@@ -84,7 +84,7 @@ func TestSecretListFilterThroughTheBox(t *testing.T) {
 	p.navigate("/secrets?project=" + project)
 	p.waitFor(`document.querySelectorAll("#view tbody a").length === 2`)
 	setField(p, "#view", "server-filter", "labels.env=prod")
-	p.run(chromedp.Click(`#server-filter-apply`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#server-filter-apply`)))
 	p.waitFor(`document.querySelectorAll("#view tbody a").length === 1`)
 	if got := rows(); !strings.HasSuffix(got, "/secrets/filter-prod") {
 		t.Errorf("labels.env=prod lists %q", got)
@@ -96,7 +96,7 @@ func TestSecretListFilterThroughTheBox(t *testing.T) {
 	}
 
 	setField(p, "#view", "server-filter", `name ~ "filter-.*"`)
-	p.run(chromedp.Click(`#server-filter-apply`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#server-filter-apply`)))
 	p.waitFor(`document.querySelector("#server-filter-error") !== null`)
 	var refusal string
 	p.eval(`document.querySelector("#server-filter-error").textContent`, &refusal)
@@ -105,6 +105,6 @@ func TestSecretListFilterThroughTheBox(t *testing.T) {
 	}
 	p.forgive()
 
-	p.run(chromedp.Click(`#server-filter-clear`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#server-filter-clear`)))
 	p.waitFor(`document.querySelectorAll("#view tbody a").length === 2`)
 }

@@ -67,7 +67,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	// Cancel discards what was typed without asking (#783).
 	p.clickText("#view button", "Create key")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-serviceAccountEmail`, sa, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
 	p.clickText(".modal .modal-actions button", "Cancel")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := creates(); n != 0 {
@@ -76,8 +76,8 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 
 	p.clickText("#view button", "Create key")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-serviceAccountEmail`, sa, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal.is-open #one-time-value") !== null`)
 	var shown struct {
 		Secret, Note, Title string
@@ -128,7 +128,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	if !strings.Contains(status, "ACTIVE") {
 		t.Errorf("the key's row reads %q; want ACTIVE", status)
 	}
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+accessID), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+accessID))))
 	var items []string
 	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent)`, &items)
 	if !contains(items, "Deactivate") || contains(items, "Delete") {

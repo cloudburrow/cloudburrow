@@ -33,7 +33,7 @@ func (p *tab) grantOnTab(member, role string) {
 	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
 		q("#f-members").value = %q; q("#f-members").dispatchEvent(new Event("input", { bubbles: true }));
 		q("#f-role").value = %q; q("#f-role").dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, member, role), nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 }
 
@@ -132,7 +132,7 @@ func TestCloudRunSourceManagerPermissionsAndDeveloperConnectThroughThePage(t *te
 	p.waitFor(`document.querySelector(".modal.is-open #f-permissions") !== null`)
 	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-permissions");
 		f.value = "securesourcemanager.repos.get"; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelectorAll("#test-permissions-table tbody tr").length === 1`)
 	var tested string
 	p.eval(`document.querySelector("#test-permissions-table tbody tr").textContent`, &tested)
@@ -141,7 +141,7 @@ func TestCloudRunSourceManagerPermissionsAndDeveloperConnectThroughThePage(t *te
 	}
 	p.clickText(".modal.is-open .modal-actions button", "Close")
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+reader), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+reader))))
 	p.confirmByName(ada)
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelectorAll("#permissions-table tbody tr").length === 0`)

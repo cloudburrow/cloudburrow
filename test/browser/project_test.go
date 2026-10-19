@@ -19,7 +19,7 @@ func TestPickingAProjectRescopesTheNavigation(t *testing.T) {
 	p := open(t)
 	project := uniqueProject(t)
 	p.navigate("/")
-	p.run(chromedp.Click("#project-button", chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS("#project-button")))
 	p.waitFor(`[...document.querySelectorAll("#project-list button")].some((b) => b.textContent.includes("` + project + `"))`)
 	p.eval(`[...document.querySelectorAll("#project-list button")].find((b) => b.textContent.includes("`+project+`")).click()`, nil)
 	p.waitFor(`document.getElementById("project-current").textContent === "` + project + `"`)

@@ -74,7 +74,7 @@ func TestStorageACLsThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/storage/browser/" + bucket + "?project=" + project)
 	p.waitFor(`document.querySelector("#tab-acl") !== null`)
-	p.run(chromedp.Click(`#tab-acl`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-acl`)))
 	p.waitFor(`document.querySelector("#tab-acl").getAttribute("aria-selected") === "true"`)
 
 	p.clickText("#view .page-actions button", "Add ACL entry")
@@ -82,7 +82,7 @@ func TestStorageACLsThroughTheBrowser(t *testing.T) {
 	setValue(".modal.is-open #f-scope", "bucket")
 	setValue(".modal.is-open #f-entity", "user-dev@example.com")
 	setValue(".modal.is-open #f-role", "WRITER")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := actionPosts(); n != 1 {
 		t.Errorf("Add ACL entry sent %d action requests, want 1", n)
@@ -94,10 +94,10 @@ func TestStorageACLsThroughTheBrowser(t *testing.T) {
 
 	menu := fmt.Sprintf(`button[aria-label=%q]`, "Actions for user-dev@example.com")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, menu))
-	p.run(chromedp.Click(menu, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(menu)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Remove")
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "user-dev@example.com", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "user-dev@example.com"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, menu))
 	if n := actionPosts(); n != 2 {
 		t.Errorf("the add and the remove sent %d action requests, want 2", n)

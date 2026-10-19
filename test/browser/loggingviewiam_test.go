@@ -35,9 +35,9 @@ func TestLoggingViewPermissionsThroughTheBrowser(t *testing.T) {
 	view := bucket + "/views/_AllLogs"
 	openForm := func() {
 		p.waitFor(`document.querySelector("#tab-views") !== null`)
-		p.run(chromedp.Click(`#tab-views`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`#tab-views`)))
 		p.waitFor(`document.querySelector('button[aria-label="Actions for _AllLogs"]') !== null`)
-		p.run(chromedp.Click(`button[aria-label="Actions for _AllLogs"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for _AllLogs"]`)))
 		p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Permissions")
 		p.waitFor(`document.querySelector(".modal.is-open #f-bindings") !== null`)
 	}
@@ -52,7 +52,7 @@ func TestLoggingViewPermissionsThroughTheBrowser(t *testing.T) {
 	bindings := "roles/logging.viewAccessor user:a@example.com, group:g@example.com"
 	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-bindings");
 		f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, bindings), nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	pol, err := svc.Projects.Locations.Buckets.Views.GetIamPolicy(view, &logging.GetIamPolicyRequest{}).Do()

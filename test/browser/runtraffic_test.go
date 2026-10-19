@@ -55,7 +55,7 @@ func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 	setTraffic := func(v string) {
 		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-traffic"); f.value = %q;
 			f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, v), nil)
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}
 	setTraffic("LATEST 60")
 	p.waitFor(`(() => { const e = document.querySelector(".modal.is-open .form-error"); return e && !e.hidden && e.textContent.includes("sum to 100"); })()`)

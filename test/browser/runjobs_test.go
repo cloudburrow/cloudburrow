@@ -46,10 +46,10 @@ func TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser(t *testing.T) {
 	if defaults.Tasks != "1" || defaults.Retries != "3" {
 		t.Errorf("the create form opened with %s tasks and %s retries; want Cloud Run's defaults, 1 and 3", defaults.Tasks, defaults.Retries)
 	}
-	p.run(chromedp.SendKeys(`#view #f-name`, id, chromedp.ByQuery),
-		chromedp.SendKeys(`#view #f-image`, "docker.io/library/busybox:1.36", chromedp.ByQuery),
-		chromedp.SendKeys(`#view #f-command`, "sh -c", chromedp.ByQuery),
-		chromedp.SendKeys(`#view #f-args`, `'echo "from the browser"'`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-name`), id),
+		chromedp.SendKeys(chromedp.CSS(`#view #f-image`), "docker.io/library/busybox:1.36"),
+		chromedp.SendKeys(chromedp.CSS(`#view #f-command`), "sh -c"),
+		chromedp.SendKeys(chromedp.CSS(`#view #f-args`), `'echo "from the browser"'`))
 	p.clickText(`#view button[type="submit"]`, "Create job")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/run/jobs" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, id))
@@ -98,7 +98,7 @@ func TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser(t *testing.T) {
 	if form.Image != "docker.io/library/busybox:1.36" || form.Args != `'echo "from the browser"'` || !form.NameDisabled {
 		t.Errorf("Edit job opened with %+v; want the job's image and arguments, and the name disabled", form)
 	}
-	p.run(chromedp.SendKeys(`.modal.is-open #f-args`, " changed", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-args`), " changed"))
 	p.clickText(".modal.is-open .modal-actions button", "Cancel")
 	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/run-jobs"); len(sent) != 0 {
@@ -109,16 +109,16 @@ func TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser(t *testing.T) {
 	p.navigate("/run/jobs?project=" + project)
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+id)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+id), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+id))))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "not-"+id, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "not-"+id), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	if sent := p.sent(http.MethodDelete, "/api/resources/run-jobs"); len(sent) != 0 {
 		t.Fatalf("a delete confirmed with the wrong name was sent: %v", sent)
 	}
 	p.eval(`(() => { document.querySelector(".modal #confirm-input").value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, id, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), id), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if sent := p.sent(http.MethodDelete, "/api/resources/run-jobs"); len(sent) != 1 {
 		t.Errorf("the delete was sent %d times, want once: %v", len(sent), sent)

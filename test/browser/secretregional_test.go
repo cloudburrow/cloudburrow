@@ -64,7 +64,7 @@ func TestKMSKeyEncryptsARegionalSecretThroughTheBrowser(t *testing.T) {
 	setField(p, "#view", "f-payload", "regional value")
 	setField(p, "#view", "f-location", "us-central1")
 	setField(p, "#view", "f-kmsKeys", key)
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/secrets"`)
 
 	got, err := c.GetSecret(ctx, &smpb.GetSecretRequest{Name: name})

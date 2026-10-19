@@ -45,12 +45,12 @@ func TestBigtableInstanceAdminThroughTheBrowser(t *testing.T) {
 	p.navigate("/bigtable-instances?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create instance")`)
 	p.clickText(`#view .state button.primary`, "Create instance")
-	p.run(chromedp.WaitVisible(`form.create-page #f-instance`, chromedp.ByQuery))
+	p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-instance`)))
 	p.setField("form.create-page #f-instance", id)
 	p.setField("form.create-page #f-displayName", "Browser made")
 	p.setField("form.create-page #f-cluster", cluster)
 	p.setField("form.create-page #f-nodes", "2")
-	p.run(chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q)`, "Browser made"))
 	info, err := iac.InstanceInfo(ctx, id)
 	if err != nil || info.DisplayName != "Browser made" {
@@ -64,7 +64,7 @@ func TestBigtableInstanceAdminThroughTheBrowser(t *testing.T) {
 	p.cellMenu(cluster, "Edit nodes")
 	p.waitFor(`document.querySelector(".modal #f-nodes") !== null`)
 	p.setField(".modal #f-nodes", "3")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if cl, err := iac.GetCluster(ctx, id, cluster); err != nil || cl.ServeNodes != 3 {
 		t.Errorf("after Edit nodes, GetCluster = %+v, %v", cl, err)

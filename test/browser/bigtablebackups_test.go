@@ -34,7 +34,7 @@ func TestBigtableBackupRestoreAndAuthorizedViewThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Create backup")
 	p.waitFor(`document.querySelector(".modal #f-backup") !== null`)
 	p.setField(".modal #f-backup", "b1")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if info, err := admin.BackupInfo(ctx, "cloudburrow-c1", "b1"); err != nil || info.SourceTable != table {
 		t.Fatalf("BackupInfo = %+v, %v", info, err)
@@ -45,7 +45,7 @@ func TestBigtableBackupRestoreAndAuthorizedViewThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-table") !== null`)
 	p.setField(".modal #f-backup", "b1")
 	p.setField(".modal #f-table", restored)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	t.Cleanup(func() { _ = admin.DeleteTable(context.Background(), restored) })
 	if keys := bigtableRowKeys(t, client, restored); strings.Join(keys, ",") != "a1,a2,b1" {
@@ -57,7 +57,7 @@ func TestBigtableBackupRestoreAndAuthorizedViewThroughTheBrowser(t *testing.T) {
 	p.setField(".modal #f-view", "as")
 	p.setField(".modal #f-prefixes", "a")
 	p.setField(".modal #f-columns", "cf:*")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	var keys []string
 	if err := client.OpenAuthorizedView(table, "as").ReadRows(ctx, bigtable.InfiniteRange(""), func(r bigtable.Row) bool {
@@ -107,7 +107,7 @@ func TestBigtableLogicalViewAndSnapshotThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-view") !== null`)
 	p.setField(".modal #f-view", "lv")
 	p.setField(".modal #f-query", "SELECT _key FROM items")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if lv, err := iac.LogicalViewInfo(ctx, id, "lv"); err != nil || lv.Query != "SELECT _key FROM items" {
 		t.Errorf("after Create logical view, LogicalViewInfo = %+v, %v", lv, err)
@@ -118,7 +118,7 @@ func TestBigtableLogicalViewAndSnapshotThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-snapshot") !== null`)
 	p.setField(".modal #f-cluster", id+"-c1")
 	p.setField(".modal #f-snapshot", "snap")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if s, err := admin.SnapshotInfo(ctx, id+"-c1", "snap"); err != nil || s.SourceTable != "items" {
 		t.Errorf("after Snapshot table, SnapshotInfo = %+v, %v", s, err)

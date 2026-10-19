@@ -57,7 +57,7 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 	if hasLabels {
 		t.Error("Create snapshot offers labels, which the emulator does not keep")
 	}
-	p.run(chromedp.SendKeys(`.modal.is-open #f-name`, "discarded-snap", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "discarded-snap"))
 	p.clickText(".modal.is-open .modal-actions button", "Cancel")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPost, actions); len(sent) != 0 {
@@ -65,8 +65,8 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 	}
 
 	openAction("Create snapshot", "name")
-	p.run(chromedp.SendKeys(`.modal.is-open #f-name`, "browser-snap-1", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "browser-snap-1"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPost, actions); len(sent) != 1 {
 		t.Fatalf("Create snapshot sent %d requests, want 1: %v", len(sent), sent)
@@ -84,7 +84,7 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 		t.Errorf("Seek to snapshot is prefilled with %q, want browser-snap-1", prefilled)
 	}
 	submitSeek := func() {
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector("#confirm-input") !== null && document.activeElement === document.querySelector("#confirm-input")`)
 	}
 	submitSeek()
@@ -95,7 +95,7 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 		strings.Contains(confirm.Text, "cannot be undone") {
 		t.Errorf("the seek confirmation reads %+v; want it to name %s, say what is redelivered, and not claim it cannot be undone", confirm, sub)
 	}
-	p.run(chromedp.SendKeys(`#confirm-input`, "browser-snap-sub", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), "browser-snap-sub"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`!document.querySelector("#confirm-input").closest("form").querySelector(".form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("#confirm-input").closest("form").querySelector(".form-error").textContent`, &refusal)
@@ -112,7 +112,7 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 		t.Fatalf("cancelling the confirmation sent the seek: %v", sent)
 	}
 	submitSeek()
-	p.run(chromedp.SendKeys(`#confirm-input`, sub, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), sub), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPost, actions); len(sent) != 2 {
 		t.Errorf("the create and the confirmed seek sent %d requests, want 2: %v", len(sent), sent)
@@ -122,10 +122,10 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 	p.navigate("/pubsub/snapshots?project=" + project)
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+snap)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+snap), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+snap))))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, snap, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), snap), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if sent := p.sent(http.MethodDelete, "/api/resources/pubsub-snapshots"); len(sent) != 1 {
 		t.Errorf("the delete was sent %d times, want once: %v", len(sent), sent)

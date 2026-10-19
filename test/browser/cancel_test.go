@@ -25,9 +25,9 @@ func TestCancelDiscardsWithoutAskingEscapeAsks(t *testing.T) {
 		// Only the open dialog: a cancelled one fades out for a moment,
 		// inert, before it is removed.
 		p.waitFor(`document.querySelector(".modal") === null`)
-		p.run(chromedp.Click(`#view .state button.primary`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
 		p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
-		p.run(chromedp.SendKeys(`.modal.is-open #f-name`, "typed-queue", chromedp.ByQuery))
+		p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "typed-queue"))
 	}
 
 	openTyped()

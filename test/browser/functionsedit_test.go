@@ -117,7 +117,7 @@ func TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage(t *testing.T)
 	p.eval(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
 		q("#f-members").value = "allUsers"; q("#f-members").dispatchEvent(new Event("input", { bubbles: true }));
 		q("#f-role").value = "roles/cloudfunctions.invoker"; q("#f-role").dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	pol, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name})
 	b, _ := json.Marshal(pol.GetBindings())

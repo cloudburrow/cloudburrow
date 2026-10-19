@@ -80,7 +80,7 @@ func TestPubSubEditSubscriptionThroughTheForm(t *testing.T) {
 
 	openEdit()
 	set("f-ackDeadline", "601")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -93,7 +93,7 @@ func TestPubSubEditSubscriptionThroughTheForm(t *testing.T) {
 	const endpoint = "http://127.0.0.1:9/cloudburrow-browser"
 	set("f-ackDeadline", "30")
 	set("f-pushEndpoint", endpoint)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/pubsub-subscriptions"); len(sent) != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2: %v", len(sent), sent)
@@ -167,7 +167,7 @@ func TestPubSubEditSubscriptionExactlyOnceThroughTheForm(t *testing.T) {
 		p.waitFor(`document.querySelector(".modal.is-open #f-exactlyOnce") !== null`)
 	}
 	save := func() {
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector(".modal") === null`)
 	}
 	openEdit()
@@ -188,7 +188,7 @@ func TestPubSubEditSubscriptionExactlyOnceThroughTheForm(t *testing.T) {
 
 	openEdit()
 	setField(p, ".modal.is-open", "f-pushEndpoint", "http://127.0.0.1:9/cloudburrow-browser")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -255,7 +255,7 @@ func TestPubSubEditSubscriptionExpirationThroughTheForm(t *testing.T) {
 		p.waitFor(`document.querySelector(".modal.is-open #f-expiration") !== null`)
 	}
 	save := func() {
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector(".modal") === null`)
 	}
 	openEdit()
@@ -270,7 +270,7 @@ func TestPubSubEditSubscriptionExpirationThroughTheForm(t *testing.T) {
 	}
 
 	setField(p, ".modal.is-open", "f-expiration", "12h")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -323,7 +323,7 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	setField(p, ".modal.is-open", "f-name", "browser-idle-push")
 	setField(p, ".modal.is-open", "f-pushEndpoint", "http://127.0.0.1:1/push")
 	setField(p, ".modal.is-open", "f-pushAttributes", "x-goog-version=v1")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got := editDefaults(t, "pubsub-subscriptions", project, sub)
 	if got["Endpoint"] != "http://127.0.0.1:1/push" || got["Attribute x-goog-version"] != "v1" {
@@ -337,7 +337,7 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	p.navigate("/pubsub/subscriptions?project=" + project)
 	p.clickText("#view tbody a", sub)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Attribute x-goog-version")`)
-	p.run(chromedp.Click(`#tab-configuration`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-configuration`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Deleted by expiration")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)

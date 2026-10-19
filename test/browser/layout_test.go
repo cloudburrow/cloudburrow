@@ -4,7 +4,6 @@ package browser
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -18,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/chromedp/cdproto/emulation"
-	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
@@ -162,7 +160,7 @@ func TestDialogTakesFocusClosesOnEscapeAndGivesItBack(t *testing.T) {
 		}
 	}
 	for i := 0; i < 8; i++ {
-		p.run(chromedp.KeyEvent(kb.Tab, chromedp.KeyModifiers(input.ModifierShift)))
+		p.run(chromedp.KeyEvent(kb.Tab, chromedp.KeyModifiers(chromedp.ModifierShift)))
 		var ok bool
 		p.eval(inside, &ok)
 		if !ok {
@@ -317,7 +315,7 @@ func (p *tab) assertSearch(want string) {
 		if img := p.capture("#search-toggle"); img != nil && inkShare(img) < 0.02 {
 			p.t.Error("the collapsed search control's icon is not painted")
 		}
-		p.run(chromedp.Click("#search-toggle", chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS("#search-toggle")))
 		p.waitFor(`document.documentElement.getAttribute("data-search") === "open" && document.activeElement === document.getElementById("search")`)
 		if why := p.hitTest("#search"); why != "" {
 			p.t.Errorf("the search field opened from the control is not on screen: %s", why)
@@ -361,7 +359,7 @@ func (p *tab) assertDrawer(want string) {
 		if vis != "hidden" {
 			p.t.Errorf("the closed drawer is still shown (visibility %s)", vis)
 		}
-		p.run(chromedp.Click("#nav-toggle", chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS("#nav-toggle")))
 		p.waitFor(`document.documentElement.dataset.nav === "open" && document.getElementById("nav").contains(document.activeElement)`)
 		var s struct {
 			ScrimHidden, MainInert bool
@@ -461,16 +459,14 @@ func (p *tab) capture(sel string) image.Image {
 		p.t.Errorf("%s is too small to read its pixels (%vx%v)", sel, r.W, r.H)
 		return nil
 	}
-	var buf []byte
-	p.run(chromedp.ActionFunc(func(ctx context.Context) error {
-		var err error
-		buf, err = page.CaptureScreenshot().
-			WithFormat(page.CaptureScreenshotFormatPng).
-			WithClip(&page.Viewport{X: x, Y: y, Width: w, Height: h, Scale: 1}).
-			Do(ctx)
-		return err
-	}))
-	img, err := png.Decode(bytes.NewReader(buf))
+	shot, err := chromedp.Call(p.ctx, page.CaptureScreenshot, page.CaptureScreenshotParams{
+		Format: page.CaptureScreenshotFormatPng,
+		Clip:   &page.Viewport{X: x, Y: y, Width: w, Height: h, Scale: 1},
+	})
+	if err != nil {
+		p.t.Fatalf("browser: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(shot.Data))
 	if err != nil {
 		p.t.Errorf("decode the screenshot of %s: %v", sel, err)
 		return nil
@@ -564,8 +560,8 @@ func parseRGB(s string) ([3]uint8, bool) {
 
 // reducedMotion turns the drawer's and the dialogs' transitions off, so what
 // is asserted is where they end rather than a frame on the way.
-func reducedMotion() chromedp.Action {
-	return emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-reduced-motion", Value: "reduce"}})
+func reducedMotion() chromedp.Action[chromedp.Void] {
+	return cmd(emulation.SetEmulatedMedia, emulation.SetEmulatedMediaParams{Features: []*emulation.MediaFeature{{Name: "prefers-reduced-motion", Value: "reduce"}}})
 }
 
 // needService skips unless this instance's console has the screen: CI runs

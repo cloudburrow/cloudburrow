@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 )
@@ -75,7 +74,7 @@ func (p *tab) dialogFailures(want bool) []string {
 	inside := `document.querySelector(".modal.is-open") !== null && document.querySelector(".modal.is-open").contains(document.activeElement)`
 	for i, back := range []bool{false, false, false, false, false, false, true, true} {
 		if back {
-			p.run(chromedp.KeyEvent(kb.Tab, chromedp.KeyModifiers(input.ModifierShift)))
+			p.run(chromedp.KeyEvent(kb.Tab, chromedp.KeyModifiers(chromedp.ModifierShift)))
 		} else {
 			p.run(chromedp.KeyEvent(kb.Tab))
 		}

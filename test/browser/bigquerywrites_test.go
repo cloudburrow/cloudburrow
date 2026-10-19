@@ -38,14 +38,14 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	p.navigate("/bigquery/" + ds + q)
 	p.clickText("#view .page-actions button", "Create table")
 	p.waitFor(`document.querySelector(".modal #f-tableId") !== null && document.querySelectorAll(".modal .schema-row").length === 1`)
-	p.run(chromedp.SendKeys(`.modal #f-tableId`, "people", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "people"))
 	field := func(label string) string { return fmt.Sprintf(`.modal [aria-label=%q]`, label) }
-	p.run(chromedp.SendKeys(field("Field 1 name"), "id", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 1 name")), "id"))
 	p.setField(field("Field 1 type"), "INTEGER")
 	p.setField(field("Field 1 mode"), "REQUIRED")
 	p.clickText(".modal button", "Add field")
-	p.run(chromedp.SendKeys(field("Field 2 name"), "first name", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2 name")), "first name"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	schema := readDataPage(t, "bigquery", project, ds, "people").rows("schema")
 	if f, ok := schema["first name"]; !ok || f["Type"] != "STRING" {
@@ -56,8 +56,8 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	p.clickText("#view .page-actions button", "Insert rows")
 	p.waitFor(`document.querySelector(".modal #f-rows") !== null && document.querySelector(".modal #f-skipInvalidRows") !== null`)
 	p.setField(".modal #f-rows", `{"id": 1, "first name": "ann"}`+"\n"+`{"first name": "no id"}`+"\n"+`{"id": 3}`)
-	p.run(chromedp.Click(`.modal #f-skipInvalidRows`, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal #f-skipInvalidRows`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table td") !== null`)
 	var cells []string
 	p.eval(`[...document.querySelectorAll("#action-result-table td")].map((c) => c.textContent)`, &cells)
@@ -80,7 +80,7 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	p.waitFor(`document.querySelector(".modal #f-description") !== null`)
 	p.setField(".modal #f-description", "people, edited")
 	p.setField(".modal #f-labels", "team=data")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	_, body := consoleDo(t, http.MethodGet, "/api/detail/bigquery?"+url.Values{"project": {project}, "name": {ds, "people"}}.Encode(), "")
 	if !strings.Contains(body, `"people, edited"`) || !strings.Contains(body, `"team: data"`) {
@@ -92,7 +92,7 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	p.waitFor(`document.querySelector(".modal #f-description") !== null && document.querySelector(".modal #f-description").value === "people, edited"`)
 	p.setField(".modal #f-description", "")
 	p.setField(".modal #f-labels", "")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	_, body = consoleDo(t, http.MethodGet, "/api/detail/bigquery?"+url.Values{"project": {project}, "name": {ds, "people"}}.Encode(), "")
 	if strings.Contains(body, `"people, edited"`) || strings.Contains(body, `"team: data"`) {
@@ -102,10 +102,10 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 	p.navigate("/bigquery/" + ds + q)
 	p.clickText("#view .page-actions button", "Create table")
 	p.waitFor(`document.querySelector(".modal #f-tableType") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-tableId`, "names", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "names"))
 	p.setField(".modal #f-tableType", "VIEW")
 	p.setField(".modal #f-viewQuery", "SELECT `first name` AS name FROM `"+project+"."+ds+".people`")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if s := readDataPage(t, "bigquery", project, ds, "names").summary("Type"); s != "VIEW" {
 		t.Errorf("Create table with VIEW made a %q", s)
@@ -144,11 +144,11 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 
 	p.navigate("/bigquery/" + ds + q)
 	p.waitFor(`document.querySelector("#tab-query") !== null`)
-	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
 	p.waitFor(`document.querySelector("#view .query-editor") !== null && document.querySelector("#view .query-mode") !== null`)
 	statement := func(sql string) {
 		p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
-		p.run(chromedp.SendKeys(`#view .query-editor`, sql, chromedp.ByQuery))
+		p.run(chromedp.SendKeys(chromedp.CSS(`#view .query-editor`), sql))
 	}
 	alert := func() string {
 		p.waitFor(`[...document.querySelectorAll("#view .form-error[role=alert]")].some((e) => !e.hidden)`)
@@ -164,7 +164,7 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 		t.Errorf("a CREATE TABLE in Read-only was answered %q", got)
 	}
 
-	p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .query-mode input[value="read-write"]`)))
 	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
 	var hint string
 	p.eval(`document.querySelector("#view .query-pane .card > p.unavailable").textContent`, &hint)
@@ -189,7 +189,7 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	}
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
 	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The statement ran")`)
 	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); tables["totals"] == nil {
 		t.Errorf("after the confirmed CREATE TABLE the dataset lists %v", tables)
@@ -198,7 +198,7 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	statement("INSERT INTO totals (region, n) VALUES ('us', 1), ('ap', 2)")
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
 	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("This statement added 2 rows.")`)
 	if preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview"); len(preview) != 3 {
 		t.Errorf("after the INSERT the table previews %v, want its 3 rows", preview)
@@ -207,13 +207,13 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	statement("UPDATE totals t SET n = s.n FROM (SELECT 'ap' AS region, 9 AS n) s WHERE t.region = s.region")
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
 	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("This statement modified 1 row.")`)
 
 	statement("DECLARE k INT64 DEFAULT 1;\nDELETE FROM totals WHERE n = k")
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
 	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The script ran as job ") && document.querySelector("#view .query-results").textContent.includes("Line 2: This statement removed 1 row.")`)
 	preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview")
 	if len(preview) != 2 {
@@ -239,16 +239,16 @@ func TestBigQueryEditorRunsAScriptWithIF(t *testing.T) {
 
 	p.navigate("/bigquery/" + ds + q)
 	p.waitFor(`document.querySelector("#tab-query") !== null`)
-	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
 	p.waitFor(`document.querySelector("#view .query-editor") !== null && document.querySelector("#view .query-mode") !== null`)
-	p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .query-mode input[value="read-write"]`)))
 	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
 	p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(`#view .query-editor`, "DECLARE x INT64 DEFAULT 2;\n"+
-		"IF x > 1 THEN\n  CREATE TABLE big AS SELECT x AS n;\nELSE\n  CREATE TABLE small AS SELECT x AS n;\nEND IF", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view .query-editor`), "DECLARE x INT64 DEFAULT 2;\n"+
+		"IF x > 1 THEN\n  CREATE TABLE big AS SELECT x AS n;\nELSE\n  CREATE TABLE small AS SELECT x AS n;\nEND IF"))
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
 	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The statement ran")`)
 	tables := readDataPage(t, "bigquery", project, ds).rows("tables")
 	if tables["big"] == nil || tables["small"] != nil {
@@ -274,16 +274,16 @@ func TestBigQueryEditorRunsExecuteImmediate(t *testing.T) {
 
 	p.navigate("/bigquery/" + ds + q)
 	p.waitFor(`document.querySelector("#tab-query") !== null`)
-	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
 	p.waitFor(`document.querySelector("#view .query-editor") !== null && document.querySelector("#view .query-mode") !== null`)
-	p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .query-mode input[value="read-write"]`)))
 	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
 	p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(`#view .query-editor`, "DECLARE name STRING DEFAULT 'dynamic';\n"+
-		"EXECUTE IMMEDIATE FORMAT('CREATE TABLE %s AS SELECT @n AS n', name) USING 7 AS n", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view .query-editor`), "DECLARE name STRING DEFAULT 'dynamic';\n"+
+		"EXECUTE IMMEDIATE FORMAT('CREATE TABLE %s AS SELECT @n AS n', name) USING 7 AS n"))
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
 	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The statement ran")`)
 	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); tables["dynamic"] == nil {
 		t.Errorf("after the EXECUTE IMMEDIATE the dataset lists %v, want dynamic", tables)

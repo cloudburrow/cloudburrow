@@ -26,13 +26,13 @@ func (p *tab) listAction(id string, values map[string]string) string {
 	p.waitFor(`document.querySelector(".modal") === null`)
 	btn := "#list-action-" + id
 	p.waitFor(fmt.Sprintf(`(() => { const b = document.querySelector(%q); return !!b && b.getClientRects().length > 0; })()`, btn))
-	p.run(chromedp.Click(btn, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(btn)))
 	p.waitFor(`document.querySelectorAll(".modal").length === 1 && document.querySelector(".modal.is-open form") !== null`)
 	for f, v := range values {
 		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-%s");
 			f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, f, v), nil)
 	}
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	// A confirmation, when the action asks for one, opens over the form.
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null || document.querySelector("#action-result-table") !== null ||
 		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)

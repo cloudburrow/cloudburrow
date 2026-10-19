@@ -120,22 +120,22 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.navigate("/bigquery/" + ds + q)
 	p.clickText("#view .page-actions button", "Create table")
 	p.waitFor(`document.querySelector(".modal #f-tableId") !== null && document.querySelectorAll(".modal .schema-row").length === 1`)
-	p.run(chromedp.SendKeys(`.modal #f-tableId`, "events", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "events"))
 	row := func(n int, part string) string {
 		return fmt.Sprintf(`.modal .schema-row:nth-child(%d) .schema-%s`, n, part)
 	}
-	p.run(chromedp.SendKeys(row(1, "name"), "id", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(row(1, "name")), "id"))
 	p.setField(row(1, "type"), "INTEGER")
 	p.setField(row(1, "mode"), "REQUIRED")
 	p.clickText(".modal button", "Add field")
 	p.waitFor(`document.querySelectorAll(".modal .schema-row").length === 2 && document.activeElement === document.querySelector(` +
 		fmt.Sprintf("%q", row(2, "name")) + `)`)
-	p.run(chromedp.SendKeys(row(2, "name"), "tag", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(row(2, "name")), "tag"))
 	p.setField(row(2, "mode"), "REPEATED")
 	p.clickText(".modal button", "Add field")
-	p.run(chromedp.SendKeys(row(3, "name"), "ID", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(row(3, "name")), "ID"))
 
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .schema-field .form-field-error").hidden`)
 	var fieldError string
 	p.eval(`document.querySelector(".modal .schema-field .form-field-error").textContent`, &fieldError)
@@ -145,9 +145,9 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	if sent := p.sent(http.MethodPost, "/api/actions/bigquery"); len(sent) != 0 {
 		t.Fatalf("the refused schema was sent: %v", sent)
 	}
-	p.run(chromedp.Click(`.modal button[aria-label="Remove field 3"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[aria-label="Remove field 3"]`)))
 	p.waitFor(`document.querySelectorAll(".modal .schema-row").length === 2 && document.querySelector(".modal .schema-field .form-field-error").hidden`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	schema := readDataPage(t, "bigquery", project, ds, "events").rows("schema")
@@ -165,7 +165,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.clickText("#view .page-actions button", "Insert rows")
 	p.waitFor(`document.querySelector(".modal #f-rows") !== null`)
 	p.setField(".modal #f-rows", `{"id": 1, "tag": ["a"]}`+"\n"+`{"tag": ["b"]}`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -177,7 +177,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 		t.Errorf("the refused insert wrote %v", preview)
 	}
 	p.setField(".modal #f-rows", `{"id": 1, "tag": ["a"]}`+"\n"+`{"id": 2, "tag": ["b", "c"]}`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if preview := readDataPage(t, "bigquery", project, ds, "events").rows("preview"); len(preview) != 2 {
 		t.Errorf("the table previews %v after two rows were inserted", preview)
@@ -185,7 +185,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 
 	p.clickText("#view .page-actions button", "Delete table")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "events", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "events"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/bigquery/` + ds + `"`)
 	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); len(tables) != 0 {
 		t.Errorf("the dataset still lists %v after Delete table", tables)
@@ -215,17 +215,17 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 	p.navigate("/bigquery/" + ds + q)
 	p.clickText("#view .page-actions button", "Create table")
 	p.waitFor(`document.querySelector(".modal #f-tableId") !== null && document.querySelectorAll(".modal .schema-row").length === 1`)
-	p.run(chromedp.SendKeys(`.modal #f-tableId`, "people", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "people"))
 	field := func(label string) string { return fmt.Sprintf(`.modal [aria-label=%q]`, label) }
-	p.run(chromedp.SendKeys(field("Field 1 name"), "id", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 1 name")), "id"))
 	p.setField(field("Field 1 type"), "INTEGER")
 	p.clickText(".modal button", "Add field")
-	p.run(chromedp.SendKeys(field("Field 2 name"), "addr", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2 name")), "addr"))
 	p.setField(field("Field 2 type"), "RECORD")
 	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.1 name")) + `) !== null`)
 
 	// A RECORD with no nested field named is refused on the form.
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .schema-field .form-field-error").hidden`)
 	var fieldError string
 	p.eval(`document.querySelector(".modal .schema-field .form-field-error").textContent`, &fieldError)
@@ -236,17 +236,17 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 		t.Fatalf("the refused schema was sent: %v", sent)
 	}
 
-	p.run(chromedp.SendKeys(field("Field 2.1 name"), "city", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2.1 name")), "city"))
 	p.setField(field("Field 2.1 mode"), "REQUIRED")
-	p.run(chromedp.Click(field("Add a nested field to field 2"), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(field("Add a nested field to field 2"))))
 	p.waitFor(`document.activeElement === document.querySelector(` + fmt.Sprintf("%q", field("Field 2.2 name")) + `)`)
-	p.run(chromedp.SendKeys(field("Field 2.2 name"), "geo", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2.2 name")), "geo"))
 	p.setField(field("Field 2.2 type"), "RECORD")
 	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.2.1 name")) + `) !== null`)
-	p.run(chromedp.SendKeys(field("Field 2.2.1 name"), "lat", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2.2.1 name")), "lat"))
 	p.setField(field("Field 2.2.1 type"), "FLOAT")
 	p.waitFor(`document.querySelector(".modal .schema-field .form-field-error").hidden`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	schema := readDataPage(t, "bigquery", project, ds, "people").rows("schema")
@@ -266,7 +266,7 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 	p.clickText("#view .page-actions button", "Insert rows")
 	p.waitFor(`document.querySelector(".modal #f-rows") !== null`)
 	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`+"\n"+`{"id": 2, "addr": {"geo": {"lat": 1}}}`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -278,7 +278,7 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 		t.Errorf("the refused insert wrote %v", preview)
 	}
 	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	preview := readDataPage(t, "bigquery", project, ds, "people").rows("preview")
 	if got := preview["1"]["addr"]; got != `{"city":"Paris","geo":{"lat":"48.85"}}` {
@@ -304,12 +304,12 @@ func TestFirestoreStartASubcollectionOnADocumentPage(t *testing.T) {
 	p.navigate("/firestore/users/alice" + q)
 	p.clickText("#view .page-actions button", "Start collection")
 	p.waitFor(`document.querySelector(".modal #f-collection") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-collection`, "orders", chromedp.ByQuery))
-	p.run(chromedp.SendKeys(`.modal #f-documentId`, "o1", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-collection`), "orders"))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-documentId`), "o1"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
-	p.run(chromedp.Click(`#tab-collections`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-collections`)))
 	p.clickText("#view tbody a", "orders")
 	p.waitFor(`location.pathname === "/firestore/users%2Falice%2Forders" && document.querySelector("#view h1").textContent === "users/alice/orders"`)
 	// The provider's trail replaces the one drawn from the path once the
@@ -356,15 +356,15 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	p.clickText("#view tbody a", "name=w1")
 	p.clickText("#view .page-actions button", "Create child entity")
 	p.waitFor(`document.querySelector(".modal #f-kind") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-kind`, "Part", chromedp.ByQuery))
-	p.run(chromedp.SendKeys(`.modal #f-key`, "p1", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-kind`), "Part"))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-key`), "p1"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	// Listed by its Name/ID on the Children tab, headed by its key path in
 	// the same rendering (#885), and still opened by the older key-path link.
 	const child, heading = "Widget/w1/Part/p1", "Widget/name=w1/Part/name=p1"
-	p.run(chromedp.Click(`#tab-children`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-children`)))
 	p.clickText("#view tbody a", "name=p1")
 	p.waitFor(`document.querySelector("#view h1").textContent === "` + heading + `"`)
 	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); d.summary("Parent") != "Widget/name=w1" {
@@ -372,7 +372,7 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	}
 	p.clickText("#view .page-actions button", "Delete entity")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, heading, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), heading), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/__namespace__/tenant-b/Part"`)
 	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the child's page reads %+v", d)
@@ -416,7 +416,7 @@ func TestFirestoreMissingDocumentIsListedInItalics(t *testing.T) {
 
 	p.clickText("#view tbody a", "ghost")
 	p.waitFor(`location.pathname === "/firestore/users/ghost" && document.querySelector("#tab-collections") !== null`)
-	p.run(chromedp.Click(`#tab-collections`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-collections`)))
 	p.clickText("#view tbody a", "orders")
 	p.waitFor(`location.pathname === "/firestore/users%2Fghost%2Forders" && ` +
 		`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "o1")`)
@@ -479,7 +479,7 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 	p.navigate("/datastore/Order" + q)
 	for _, who := range []string{"child", "root"} {
 		p.waitFor(fmt.Sprintf(`document.querySelector('#view tbody a[href^="/datastore/Order/%s"]') !== null`, addr[who]))
-		p.run(chromedp.Click(fmt.Sprintf(`#view tbody a[href^="/datastore/Order/%s"]`, addr[who]), chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`#view tbody a[href^="/datastore/Order/%s"]`, addr[who]))))
 		p.waitFor(`location.pathname === "/datastore/Order/` + addr[who] + `" && ` +
 			`document.querySelector("#view h1").textContent === "` + heading[who] + `" && ` +
 			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + heading[who] + `"`)
@@ -493,7 +493,7 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 	// by, not its address.
 	p.clickText("#view .page-actions button", "Delete entity")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, heading["root"], chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), heading["root"]), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
 	if d := readDataPage(t, "datastore", project, "Order", addr["root"]); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the root's page reads %+v", d)
@@ -553,7 +553,7 @@ func TestDatastoreKindListShowsEachRowsParent(t *testing.T) {
 		t.Fatalf("both rows link to %s", got.Hrefs["who: root"])
 	}
 
-	p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: child"]+`"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view tbody a[href="` + got.Hrefs["who: child"] + `"]`)))
 	p.waitFor(`document.querySelector("#view h1").textContent === "Customer/name=alice/Order/name=x" && ` +
 		`document.querySelector("#view").textContent.includes("child")`)
 }
@@ -606,7 +606,7 @@ func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
 
 	for _, who := range []string{"numeric", "named"} {
 		head := got.Rows["who: "+who]
-		p.run(chromedp.Click(`#view tbody a[href="`+got.Hrefs["who: "+who]+`"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`#view tbody a[href="` + got.Hrefs["who: "+who] + `"]`)))
 		p.waitFor(`document.querySelector("#view h1").textContent === "` + head + `" && ` +
 			`document.querySelector("#view .breadcrumb").textContent === "Datastore/Order/` + head + `" && ` +
 			`document.querySelector("#view").textContent.includes("` + who + `")`)
@@ -619,7 +619,7 @@ func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
 	// On the named one's page: Delete entity, confirmed by its Name/ID.
 	p.clickText("#view .page-actions button", "Delete entity")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "name=id=7", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "name=id=7"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
 	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1 && ` +
 		`document.querySelector("#view tbody a").textContent.trim() === "id=7"`)
@@ -732,7 +732,7 @@ func TestDatastoreKeyValueEditPropertyIsANoOp(t *testing.T) {
 			t.Errorf("%s's Edit property is prefilled %s %q, want key %q", prop, form.Type, form.Value, shown[prop])
 		}
 		// Saved unchanged.
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector(".modal") === null`)
 		p.navigate("/datastore/Holder887" + q)
 		p.clickText("#view tbody a", "name=h")
@@ -900,7 +900,7 @@ func TestDatastoreNestedAndForeignKeysThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Edit property")
 	p.waitFor(`document.querySelector(".modal.is-open #f-value") !== null`)
 	p.setField(".modal.is-open #f-value", "changed")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	if got := lookup()["other"]; !proto.Equal(got, foreign) {
@@ -1001,7 +1001,7 @@ func TestDatastoreEditValueInsideAnArrayThroughTheBrowser(t *testing.T) {
 		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1`)
 		p.clickText("#view tbody a", "items")
 		p.waitFor(`document.querySelector("#tab-elements") !== null`)
-		p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`#tab-elements`)))
 		p.waitFor(`document.querySelectorAll("#view tbody tr").length === 4`)
 	}
 	openElements()
@@ -1025,7 +1025,7 @@ func TestDatastoreEditValueInsideAnArrayThroughTheBrowser(t *testing.T) {
 		t.Errorf("the Elements tab reads %v, want %v", cells, want)
 	}
 	// The other project's key is offered Remove value only (#911).
-	p.run(chromedp.Click(`button[aria-label="Actions for items[3]"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for items[3]"]`)))
 	var foreignMenu []string
 	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent.trim())`, &foreignMenu)
 	if !reflect.DeepEqual(foreignMenu, []string{"Remove value"}) {
@@ -1033,7 +1033,7 @@ func TestDatastoreEditValueInsideAnArrayThroughTheBrowser(t *testing.T) {
 	}
 	p.run(chromedp.KeyEvent(kb.Escape))
 
-	p.run(chromedp.Click(`button[aria-label="Actions for items[0]"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for items[0]"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit value")
 	p.waitFor(`document.querySelector(".modal.is-open #f-value") !== null`)
 	var form struct{ Type, Value string }
@@ -1043,7 +1043,7 @@ func TestDatastoreEditValueInsideAnArrayThroughTheBrowser(t *testing.T) {
 		t.Errorf("Edit value on items[0] is prefilled %s %q, want key Order/name=id=7", form.Type, form.Value)
 	}
 	p.setField(".modal.is-open #f-value", "Order/id=8")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	after := lookup()["items"].GetArrayValue().GetValues()

@@ -32,8 +32,8 @@ require (
 	cloud.google.com/go/storage v1.69.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
-	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
-	github.com/chromedp/chromedp v0.16.0
+	github.com/chromedp/cdproto v0.158.2
+	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/go-sql-driver/mysql v1.10.1
@@ -120,7 +120,6 @@ require (
 	github.com/apache/thrift v0.24.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
@@ -129,9 +128,6 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/gobwas/httphead v0.1.0 // indirect
-	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/btree v1.1.3 // indirect

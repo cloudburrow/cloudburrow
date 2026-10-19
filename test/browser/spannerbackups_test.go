@@ -49,12 +49,12 @@ func TestSpannerBackupsThroughThePage(t *testing.T) {
 	if dbChoice != db {
 		t.Errorf("Create backup's database is %q, want %s chosen", dbChoice, db)
 	}
-	p.run(chromedp.SendKeys(`.modal.is-open #f-backup`, "nightly", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-backup`), "nightly"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	p.waitFor(`document.querySelector("#tab-backups") !== null`)
-	p.run(chromedp.Click(`#tab-backups`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-backups`)))
 	const listed = `[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "nightly")`
 	p.waitFor(listed)
 	if b := readDataPage(t, "spanner", project, inst).rows("backups")["nightly"]; b == nil || b["Database"] != db {
@@ -69,8 +69,8 @@ func TestSpannerBackupsThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.clickText("#view .page-actions button", "Restore to a new database")
 	p.waitFor(`document.querySelector(".modal.is-open #f-database") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-database`, "restored", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-database`), "restored"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if dbs := readDataPage(t, "spanner", project, inst).rows("databases"); dbs["restored"] == nil {
 		t.Fatalf("after Restore the instance's databases are %v, want restored among them", dbs)
@@ -83,11 +83,11 @@ func TestSpannerBackupsThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.clickText("#view .page-actions button", "Create backup schedule")
 	p.waitFor(`document.querySelector(".modal.is-open #f-schedule") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-schedule`, "daily", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-schedule`), "daily"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelector("#tab-backup-schedules") !== null`)
-	p.run(chromedp.Click(`#tab-backup-schedules`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-backup-schedules`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("daily") && r.textContent.includes("0 2 * * *"))`)
 	if s := readDataPage(t, "spanner", project, inst, db).rows("backup-schedules")["daily"]; s == nil || s["Cron"] != "0 2 * * *" {
 		t.Errorf("the console API lists schedule daily as %v, want cron 0 2 * * *", s)

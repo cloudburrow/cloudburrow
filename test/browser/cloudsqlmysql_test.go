@@ -46,8 +46,8 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 	}
 	p.clickText("#view button.primary", "Create database")
 	p.waitFor(`document.querySelector(".modal #f-database") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-database`, name, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-database`), name))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+name)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
@@ -55,7 +55,7 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 	// The database's page, on its Query tab.
 	p.clickText("#view tbody a", name)
 	p.waitFor(`document.querySelector("#tab-query") !== null`)
-	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
 	p.waitFor(`document.querySelector("#view .query-editor") !== null`)
 	var hint string
 	p.eval(`document.querySelector("#view .query-pane .card > p.unavailable").textContent`, &hint)
@@ -65,7 +65,7 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 
 	runStatement := func(sql string) {
 		p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
-		p.run(chromedp.SendKeys(`#view .query-editor`, sql, chromedp.ByQuery))
+		p.run(chromedp.SendKeys(chromedp.CSS(`#view .query-editor`), sql))
 		p.clickText("#view .query-pane button.primary", "Run")
 	}
 	runStatement("SELECT 41 + 1 AS answer, NULL AS nothing")
@@ -91,10 +91,10 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 	// Back on the list, the row's Delete, confirmed by name.
 	p.navigate("/cloudsql-mysql" + q)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name))))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, name, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), name), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if code, body := consoleDo(t, http.MethodGet, "/api/resources/cloudsql-mysql"+q, ""); code != http.StatusOK || strings.Contains(body, `"`+name+`"`) {
 		t.Errorf("the console API still lists %s after Delete: %d %s", name, code, body)

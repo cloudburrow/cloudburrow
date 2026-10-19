@@ -72,7 +72,7 @@ func TestBigQueryRoutinesThroughThePage(t *testing.T) {
 
 	p.navigate("/bigquery/" + ds + q)
 	p.waitFor(`document.querySelector("#tab-routines") !== null`)
-	p.run(chromedp.Click(`#tab-routines`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-routines`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Table function")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)
@@ -88,7 +88,7 @@ func TestBigQueryRoutinesThroughThePage(t *testing.T) {
 	}
 	p.clickText("#view .page-actions button", "Delete routine")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "twice", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "twice"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/bigquery/` + ds + `"`)
 	if got := routines(); strings.Join(got, ",") != "tf" {
 		t.Errorf("after Delete routine on its page the dataset lists %v, want [tf]", got)
@@ -96,10 +96,10 @@ func TestBigQueryRoutinesThroughThePage(t *testing.T) {
 
 	p.navigate("/bigquery/" + ds + q + "&tab=routines")
 	p.waitFor(`document.querySelector('button[aria-label="Actions for tf"]') !== null`)
-	p.run(chromedp.Click(`button[aria-label="Actions for tf"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for tf"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete routine")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "tf", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "tf"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if got := routines(); len(got) != 0 {
 		t.Errorf("after Delete routine in its row the dataset lists %v", got)

@@ -93,7 +93,7 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	setField(p, "#view", "f-name", "browser-opts")
 	setField(p, "#view", "f-defaultSubscription", "false")
 	setField(p, "#view", "f-messageRetention", "2d")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/pubsub/topics"`)
 	if got := editDefaults(t, "pubsub", project, topic)["messageRetention"]; got != "2d" {
 		t.Errorf("the topic created in the browser reads a retention of %q; want 2d", got)
@@ -131,7 +131,7 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 
 	setField(p, ".modal.is-open", "f-name", "browser-opts-eu")
 	setField(p, ".modal.is-open", "f-filter", "nonsense ===")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -144,14 +144,14 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	setField(p, ".modal.is-open", "f-messageOrdering", "true")
 	setField(p, ".modal.is-open", "f-messageRetention", "1d")
 	setField(p, ".modal.is-open", "f-expiration", "12h")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden &&
 		document.querySelector(".modal.is-open .form-error").textContent.includes("at least 1 day")`)
 	p.forgive()
 
 	setField(p, ".modal.is-open", "f-expiration", "2d")
 	setField(p, ".modal.is-open", "f-exactlyOnce", "true")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPost, "/api/actions/pubsub"); len(sent) != 3 {
 		t.Errorf("the two refused and the saved create sent %d actions, want 3: %v", len(sent), sent)
@@ -192,7 +192,7 @@ func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	setField(p, ".modal.is-open", "f-destroyScheduledDuration", "3d")
 	setField(p, ".modal.is-open", "f-rotationPeriod", "30d")
 	setField(p, ".modal.is-open", "f-nextRotationTime", next)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got := editDefaults(t, "kms", project, ring, "k")
 	if got["Destroy scheduled duration"] != "72h0m0s" || got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next {
@@ -215,7 +215,7 @@ func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 	})
 	p.navigate("/storage/browser?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create")`)
-	p.run(chromedp.Click(`#view .state button.primary`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
 	p.waitFor(`document.querySelector("#view #f-storageClass") !== null`)
 	var form struct {
 		Classes                      []string
@@ -233,7 +233,7 @@ func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 	setField(p, "#view", "f-name", bucket)
 	setField(p, "#view", "f-storageClass", "NEARLINE")
 	setField(p, "#view", "f-versioning", "true")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/storage/browser"`)
 	got := editDefaults(t, "storage", project, bucket)
 	if got["storageClass"] != "NEARLINE" || got["versioning"] != "true" || got["uniformAccess"] != "true" {
@@ -275,7 +275,7 @@ func TestCloudRunJobExecuteWithOverridesThroughTheForm(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-taskCount") !== null`)
 	setField(p, ".modal.is-open", "f-args", `'echo overridden'`)
 	setField(p, ".modal.is-open", "f-taskCount", "2")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("completed"))`)
 	if sent := p.sent(http.MethodPost, "/api/actions/run-jobs"); len(sent) != 1 {
@@ -344,7 +344,7 @@ func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "value")
 	setField(p, "#view", "f-replication", "User-managed")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`!document.querySelector("#view .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("#view .form-error").textContent`, &refusal)
@@ -354,7 +354,7 @@ func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
 	p.forgive()
 
 	setField(p, "#view", "f-locations", "us-east1, europe-west1")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/secrets"`)
 	got := editDefaults(t, "secrets", project, id)
 	if got["Policy"] != "User-managed" || got["Locations"] != "us-east1, europe-west1" {
