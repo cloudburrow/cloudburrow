@@ -5076,7 +5076,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient"
+          "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient",
+          "test/compat/embedimages_test.go:110 TestEmbedContentEmbedsImagesThroughThePredictionClient"
         ]
       },
       {

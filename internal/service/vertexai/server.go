@@ -24,10 +24,11 @@ type Server struct {
 	mu      sync.RWMutex
 	aliases map[string]string
 
-	// embedder serves :predict for the one embedding model identity; nil
-	// makes every :predict a 501 carrying embedUnavailable.
-	embedder         embedding.Embedder
-	embedUnavailable error
+	// embedders serve :predict and :embedContent, by embedding model ID
+	// (EmbeddingGemma and EmbeddingGemma 2, #1454); a model with none
+	// answers a 501 carrying its embedUnavailable reason.
+	embedders        map[string]embedding.Embedder
+	embedUnavailable map[string]error
 
 	// endpoints resolves custom prediction endpoints, reached through
 	// ingress with client; nil serves none (see endpoints.go).

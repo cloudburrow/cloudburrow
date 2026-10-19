@@ -1,9 +1,11 @@
-// Package embedding runs the community ONNX int8 conversion of
-// EmbeddingGemma (#41).
+// Package embedding runs the community ONNX int8 conversions of
+// EmbeddingGemma (#41) and EmbeddingGemma 2 (#1454).
 //
-// The model is NOT an official Google artifact: it is onnx-community's
-// conversion of google/embeddinggemma-300m, pinned in internal/localai. Every
-// surface that reports it says so.
+// Neither model is an official Google artifact: they are onnx-community's
+// conversions of google/embeddinggemma-300m and google/embeddinggemma-2,
+// pinned in internal/localai. Every surface that reports them says so.
+// EmbeddingGemma embeds text; EmbeddingGemma 2 embeds text and images, and
+// any mix of them, into one vector.
 //
 // ONNX Runtime is a C library, so the runtime is compiled only with the onnx
 // build tag (`go build -tags onnx`), which also needs the Hugging Face
@@ -16,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"math"
 	"strings"
 )
@@ -30,14 +33,97 @@ const Dimensions = 768
 // caller allows it and refused otherwise.
 const MaxTokens = 2048
 
+// MaxTokens2 is EmbeddingGemma 2's context length, shared by text and the
+// soft tokens of its images.
+const MaxTokens2 = 8192
+
+// MaxImages is the most images one input may hold: Google's documented limit
+// for gemini-embedding-2's EmbedContent.
+const MaxImages = 6
+
 // ValidDimensions are the Matryoshka sizes the model card supports.
 var ValidDimensions = []int{768, 512, 256, 128}
 
-// Input is one text to embed.
+// Input is one text to embed, or with Parts one mix of text and images.
 type Input struct {
 	Content  string
 	TaskType string
 	Title    string
+	// Parts, when set, are the input in order, and Content is unused. Only an
+	// embedder that implements Multimodal accepts an image part.
+	Parts []Part
+}
+
+// Part is one text or one image of a multimodal input.
+type Part struct {
+	Text  string
+	Image image.Image
+}
+
+// Multimodal is implemented by an embedder that embeds images.
+type Multimodal interface {
+	EmbedsImages() bool
+}
+
+// EmbedsImages reports whether e embeds image parts.
+func EmbedsImages(e Embedder) bool {
+	m, ok := e.(Multimodal)
+	return ok && m.EmbedsImages()
+}
+
+// Placeholder tokens of EmbeddingGemma 2's vocabulary. ImageToken marks an
+// image's place; the processor expands it to the begin-image token, one
+// ImageToken per soft token, and the end-image token.
+const (
+	ImageToken      = "<|image|>"
+	BeginImageToken = "<|image>"
+	EndImageToken   = "<image|>"
+)
+
+// reservedMarkers are the vocabulary's media markers, which a text part may
+// not contain: the tokenizer would read them as placeholders.
+var reservedMarkers = []string{"<|image|>", "<|video|>", "<|audio|>", "<|image>", "<image|>", "<|audio>", "<audio|>"}
+
+// MultimodalPrompt is the text EmbeddingGemma 2 tokenizes for in.Parts, with
+// an ImageToken where each image goes, and the number of images. Text parts
+// are joined with newlines, as text-only content is, and each image's
+// placeholder is placed between them in order, as the model's chat template
+// does. The task prefix applies to the text: content with no text part is
+// its images alone, with no prefix, as the model card says to pass media.
+func MultimodalPrompt(in Input) (string, int, error) {
+	var b strings.Builder
+	images, texts := 0, 0
+	prevText := false
+	for i, p := range in.Parts {
+		if p.Image != nil {
+			if images > 0 && !prevText {
+				b.WriteString(" ")
+			}
+			b.WriteString(ImageToken)
+			images++
+			prevText = false
+			continue
+		}
+		for _, m := range reservedMarkers {
+			if strings.Contains(p.Text, m) {
+				return "", 0, fmt.Errorf("parts[%d]: the text contains %q, a media marker of the model's vocabulary", i, m)
+			}
+		}
+		if prevText {
+			b.WriteString("\n")
+		}
+		b.WriteString(p.Text)
+		texts++
+		prevText = true
+	}
+	if images > MaxImages {
+		return "", 0, fmt.Errorf("%d images; at most %d are embedded together", images, MaxImages)
+	}
+	if texts == 0 {
+		return b.String(), images, nil
+	}
+	text, err := Prompt(Input{Content: b.String(), TaskType: in.TaskType, Title: in.Title})
+	return text, images, err
 }
 
 // Output is one embedding.

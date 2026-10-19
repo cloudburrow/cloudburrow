@@ -8421,6 +8421,8 @@ async function renderEmbeddings(view) {
     "aria-label": "Model ID", class: "mono" });
   const models = el("datalist", { id: "emb-models" },
     el("option", { value: status.model, text: "served (community conversion)" }),
+    ...(status.imageModel ? [el("option", { value: status.imageModel,
+      text: "text and images, once loaded on Local models (community conversion)" })] : []),
     ...(status.notServed || []).map((m) => el("option", { value: m, text: "not served: answers 404" })));
   const endpointFor = (m) => {
     const ep = (status.endpoints && status.endpoints[m]) || status.endpoint;
@@ -8432,6 +8434,23 @@ async function renderEmbeddings(view) {
     if (ep) ep.textContent = endpointFor(method.value);
   };
   model.addEventListener("input", showEndpoint);
+  // Images (#1454): each chosen file is embedded with its own EmbedContent
+  // request, as one inline_data part, by the model that embeds images, so
+  // its vector can be compared with the texts'.
+  const images = el("input", { id: "emb-images", type: "file", multiple: "",
+    accept: (status.imageMimeTypes || []).join(","), "aria-label": "Images to embed" });
+  images.addEventListener("change", () => {
+    if (!images.files.length || !status.imageModel) return;
+    if ((model.value.trim() || status.model) === status.model) model.value = status.imageModel;
+    method.value = "embedContent";
+    showEndpoint();
+  });
+  const readBase64 = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(r.error || new Error("could not read " + file.name));
+    r.readAsDataURL(file);
+  });
   const sent = [];
   const post = async (m, payload) => {
     sent.push({ url: endpointFor(m), body: payload });
@@ -8447,7 +8466,11 @@ async function renderEmbeddings(view) {
 
   const run = async () => {
     const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (!lines.length) { announce("At least one text is required"); texts.focus(); return; }
+    const files = [...(images.files || [])];
+    if (!lines.length && !files.length) { announce("At least one text or image is required"); texts.focus(); return; }
+    if (files.length && method.value !== "embedContent") {
+      announce("Images are sent with EmbedContent"); method.focus(); return;
+    }
     send.disabled = true;
     sent.length = 0;
     setChildren(result, el("p", { class: "unavailable", text: "running…" }));
@@ -8467,7 +8490,16 @@ async function renderEmbeddings(view) {
             // proto3 JSON leaves a false truncated out.
             data.truncated === true]);
         }
-        displayName = "EmbedContent: " + status.model + " — " + status.note;
+        for (const file of files) {
+          const data = await post("embedContent", {
+            content: { role: "user", parts: [{ inlineData: { mimeType: file.type, data: await readBase64(file) } }] },
+            embedContentConfig: { outputDimensionality: Number(dim.value) },
+          });
+          got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
+          lines.push("[image] " + file.name);
+        }
+        const used = model.value.trim() || status.model;
+        displayName = "EmbedContent: " + used + " — " + (used === status.imageModel ? status.imageModelNote : status.note);
       } else {
         // RawPredict sends the same body unwrapped, and gets the same answer.
         const data = await post(method.value === "rawPredict" ? "rawPredict" : "predict", {
@@ -8508,9 +8540,12 @@ async function renderEmbeddings(view) {
         el("tbody", {}, ...got.map(([a], i) => el("tr", {},
           el("th", { class: "mono", text: String(i + 1) }),
           ...got.map(([b]) => el("td", { class: "mono", text: embeddingCosine(a, b).toFixed(4) })))))) : null;
+      // An image's base64 is shortened in the request shown.
+      const shown = (body) => JSON.stringify(body, (k, v) => k === "data" && typeof v === "string" && v.length > 80
+        ? v.slice(0, 80) + `… (${v.length} base64 characters)` : v, 2);
       const request = el("details", { id: "emb-request" },
         el("summary", { text: `Request${sent.length > 1 ? "s" : ""} sent (${sent.length})` }),
-        ...sent.map((r) => el("pre", { class: "mono", text: "POST " + r.url + "\n" + JSON.stringify(r.body, null, 2) })));
+        ...sent.map((r) => el("pre", { class: "mono", text: "POST " + r.url + "\n" + shown(r.body) })));
       setChildren(result,
         el("p", { class: "unavailable", text: displayName }),
         el("table", { id: "emb-results" },
@@ -8531,6 +8566,8 @@ async function renderEmbeddings(view) {
 
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
+      ...(status.imageModel ? [el("div", {}, el("label", { for: "emb-images", text: "Images " }), images,
+        el("p", { class: "unavailable", id: "emb-image-note", text: status.imageModelNote }))] : []),
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
