@@ -28,12 +28,13 @@ import (
 // and audio_track_extraction (EmbeddingGemma embeds text only).
 //
 // EmbeddingGemma 2 (#1454) also embeds images: an inline_data part holding a
-// PNG or JPEG image, up to embedding.MaxImages of them, alone or between text
-// parts, into one vector, as Google's gemini-embedding-2 embeds a Content's
-// parts. It embeds a WAV audio clip the same way (#1651), and reads a
-// file_data part's gs:// object from this instance's Cloud Storage as if its
-// bytes were inline_data. Video, PDF, MP3, document_ocr and
-// audio_track_extraction are refused, naming the field.
+// PNG, JPEG, WebP or BMP (#1651) image, up to embedding.MaxImages of them,
+// alone or between text parts, into one vector, as Google's
+// gemini-embedding-2 embeds a Content's parts. It embeds a WAV audio clip the
+// same way (#1651), and reads a file_data part's gs:// object from this
+// instance's Cloud Storage as if its bytes were inline_data. Video, PDF, MP3,
+// HEIC, HEIF, AVIF, an animated WebP, document_ocr and audio_track_extraction
+// are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
 // images as base64: 20 MiB, the inline request size Vertex documents for

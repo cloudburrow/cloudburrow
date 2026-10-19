@@ -8455,6 +8455,10 @@ async function renderEmbeddings(view) {
   images.addEventListener("change", () => { if (images.files.length) toMultimodal(); });
   audio.addEventListener("change", () => { if (audio.files.length) toMultimodal(); });
   gcs.addEventListener("input", () => { if (gcs.value.trim()) toMultimodal(); });
+  // A media type from a file name's extension, for a gs:// URI or a file
+  // the browser gives no type (#1651: WebP and BMP).
+  const mediaTypeOf = (name) => ({ wav: "audio/wav", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+    webp: "image/webp", bmp: "image/bmp" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
   const readBase64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
@@ -8506,7 +8510,7 @@ async function renderEmbeddings(view) {
         }
         for (const file of files) {
           const data = await post("embedContent", {
-            content: { role: "user", parts: [{ inlineData: { mimeType: file.type, data: await readBase64(file) } }] },
+            content: { role: "user", parts: [{ inlineData: { mimeType: file.type || mediaTypeOf(file.name), data: await readBase64(file) } }] },
             embedContentConfig: { outputDimensionality: Number(dim.value) },
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
@@ -8517,8 +8521,7 @@ async function renderEmbeddings(view) {
           // Google's file_data carries a mime_type; it is named from the
           // object's extension when known, else the object's content type is used.
           ...uris.map((uri) => ["[file_data] " + uri, async () => {
-            const ext = (uri.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase();
-            const mimeType = { wav: "audio/wav", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg" }[ext];
+            const mimeType = mediaTypeOf(uri);
             return { fileData: { fileUri: uri, ...(mimeType ? { mimeType } : {}) } };
           }]),
         ];

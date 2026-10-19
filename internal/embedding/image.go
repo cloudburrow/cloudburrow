@@ -2,13 +2,19 @@ package embedding
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"math"
 	"strings"
+
+	"golang.org/x/image/bmp"
+	"golang.org/x/image/webp"
 )
 
 // Images for EmbeddingGemma 2's vision encoder (#1454), prepared as its
@@ -20,10 +26,55 @@ import (
 // values in (row, column, channel) order, each with its (column, row)
 // position.
 
-// ImageMIMETypes are the image types decoded here: Go's standard library
-// decoders. Google's gemini-embedding-2 also takes WebP, BMP, HEIC, HEIF and
-// AVIF, which need decoders this build does not have.
-var ImageMIMETypes = []string{"image/png", "image/jpeg"}
+// ImageMIMETypes are the image types decoded here: PNG and JPEG with Go's
+// standard library, WebP (lossy, lossless, with or without alpha; not
+// animated) and BMP with golang.org/x/image (#1651). Google's
+// gemini-embedding-2 also takes HEIC, HEIF and AVIF, which need decoders
+// this build does not have (golang.org/x/image has none; re-read
+// 2026-10-19).
+var ImageMIMETypes = []string{"image/png", "image/jpeg", "image/webp", "image/bmp"}
+
+// imageDecoders are each type's DecodeConfig and Decode; the keys are
+// ImageMIMETypes and their aliases.
+var imageDecoders = map[string]struct {
+	config func(io.Reader) (image.Config, error)
+	decode func(io.Reader) (image.Image, error)
+}{
+	"image/png":  {png.DecodeConfig, png.Decode},
+	"image/jpeg": {jpeg.DecodeConfig, jpeg.Decode},
+	"image/jpg":  {jpeg.DecodeConfig, jpeg.Decode},
+	"image/webp": {webp.DecodeConfig, webp.Decode},
+	"image/bmp":  {bmp.DecodeConfig, bmp.Decode},
+}
+
+// ErrAnimatedWebP is a WebP image with animation, which golang.org/x/image
+// does not decode.
+var ErrAnimatedWebP = errors.New("animated WebP images are not supported; send a still image (one frame as PNG, JPEG, BMP or a still WebP)")
+
+// webpAnimated reports whether data is a WebP whose VP8X header sets the
+// animation flag or which holds ANIM or ANMF chunks.
+func webpAnimated(data []byte) bool {
+	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
+		return false
+	}
+	for off := 12; off+8 <= len(data); {
+		fourCC := string(data[off : off+4])
+		n := int(binary.LittleEndian.Uint32(data[off+4 : off+8]))
+		switch fourCC {
+		case "ANIM", "ANMF":
+			return true
+		case "VP8X":
+			if off+9 <= len(data) && data[off+8]&(1<<1) != 0 {
+				return true
+			}
+		}
+		if n < 0 || n > len(data) {
+			return false
+		}
+		off += 8 + n + n&1
+	}
+	return false
+}
 
 // MaxImageSide is the largest width or height accepted, Google's documented
 // 16384 x 16384 for gemini-embedding-2.
@@ -47,31 +98,31 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("the image data is empty")
 	}
-	// Check the size before decoding the pixels.
-	var cfg image.Config
-	var err error
-	switch mt {
-	case "image/png":
-		cfg, err = png.DecodeConfig(bytes.NewReader(data))
-	case "image/jpeg", "image/jpg":
-		cfg, err = jpeg.DecodeConfig(bytes.NewReader(data))
-	default:
-		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s", mimeType, strings.Join(ImageMIMETypes, ", "))
+	dec, ok := imageDecoders[mt]
+	if !ok {
+		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s (HEIC, HEIF and AVIF have no decoder in this build)",
+			mimeType, strings.Join(ImageMIMETypes, ", "))
 	}
+	if mt == "image/webp" && webpAnimated(data) {
+		return nil, ErrAnimatedWebP
+	}
+	// Check the size before decoding the pixels.
+	cfg, err := dec.config(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > MaxImageSide || cfg.Height > MaxImageSide {
 		return nil, fmt.Errorf("the image is %dx%d; each side must be 1 to %d pixels", cfg.Width, cfg.Height, MaxImageSide)
 	}
-	var img image.Image
-	if mt == "image/png" {
-		img, err = png.Decode(bytes.NewReader(data))
-	} else {
-		img, err = jpeg.Decode(bytes.NewReader(data))
-	}
+	img, err := dec.decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)
+	}
+	if mt == "image/webp" {
+		// A lossy WebP's colours as libwebp (and so the reference) makes them.
+		if rgb := webpRGB(img); rgb != nil {
+			img = rgb
+		}
 	}
 	return img, nil
 }

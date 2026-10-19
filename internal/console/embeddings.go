@@ -25,7 +25,7 @@ const EmbeddingsNote = "embeddinggemma-300m-onnx-community is a COMMUNITY ONNX i
 // the screen sends images to.
 const Embeddings2Note = "embeddinggemma-2-onnx-community is a COMMUNITY ONNX int8 conversion " +
 	"of EmbeddingGemma 2 by onnx-community. It is NOT an official Google artifact. It embeds text, " +
-	"PNG or JPEG images and WAV audio into one space, inline or read from this instance's Cloud " +
+	"PNG, JPEG, WebP or BMP images and WAV audio into one space, inline or read from this instance's Cloud " +
 	"Storage (gs://); load it on the Local models page to serve it."
 
 // embeddingsConfigured reports whether the Embeddings screen is offered.
