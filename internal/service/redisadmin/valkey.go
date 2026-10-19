@@ -252,14 +252,19 @@ func parseReplication(raw string) Replication {
 			f[k] = val
 		}
 	}
-	st := Replication{Primary: f["role"] == "master"}
+	st := Replication{Primary: f["role"] == "master", LinkDownSince: -1}
 	key := "master_repl_offset"
 	if !st.Primary {
 		key = "slave_repl_offset"
 		st.LinkUp = f["master_link_status"] == "up"
+		st.SyncInProgress = f["master_sync_in_progress"] == "1"
+		if v, err := strconv.ParseInt(f["master_link_down_since_seconds"], 10, 64); err == nil {
+			st.LinkDownSince = v
+		}
 	}
 	st.Offset, _ = strconv.ParseInt(f[key], 10, 64)
 	st.ReplID = f["master_replid"]
+	st.RunID = f["run_id"]
 	return st
 }
 

@@ -27,8 +27,12 @@ type vkNode struct {
 	port    int
 	primary string // "" when it is a primary, else the host:port it replicates
 	replID  string
+	runID   string
 	offset  int64
 	down    bool
+	// syncing is a replica still loading its primary's dataset, its link
+	// down, never synced since it started.
+	syncing bool
 }
 
 // vkNodes runs the fake nodes, as a ClusterRuntime and RoleRouter.
@@ -67,7 +71,7 @@ func (f *vkNodes) StartClusterNode(_ context.Context, spec Spec) (string, string
 	defer f.mu.Unlock()
 	f.ids++
 	port := ln.Addr().(*net.TCPAddr).Port
-	n := &vkNode{server: spec.Server, ln: ln, port: port, replID: "id" + strconv.Itoa(f.ids)}
+	n := &vkNode{server: spec.Server, ln: ln, port: port, replID: "id" + strconv.Itoa(f.ids), runID: "run" + strconv.Itoa(f.ids)}
 	f.nodes[spec.Server], f.byAddr[ln.Addr().String()] = n, n
 	return ln.Addr().String(), "10.0.0." + strconv.Itoa(f.ids), port, nil
 }
@@ -115,11 +119,15 @@ func (c vkConn) Do(_ context.Context, args ...any) (any, error) {
 		n.primary = fmt.Sprint(args[1]) + ":" + fmt.Sprint(args[2])
 	case cmd == "INFO":
 		if n.primary == "" {
-			return fmt.Sprintf("role:master\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\nslave0:ip=x,port=1,state=online\r\nslave1:ip=x,port=1,state=online\r\n", n.replID, n.offset), nil
+			return fmt.Sprintf("role:master\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\nslave0:ip=x,port=1,state=online\r\nslave1:ip=x,port=1,state=online\r\nrun_id:%s\r\n", n.replID, n.offset, n.runID), nil
 		}
 		host, port, _ := net.SplitHostPort(n.primary)
-		return fmt.Sprintf("role:slave\r\nmaster_host:%s\r\nmaster_port:%s\r\nmaster_link_status:up\r\nslave_repl_offset:%d\r\nmaster_replid:%s\r\n",
-			host, port, n.offset, n.replID), nil
+		link := "master_link_status:up\r\nmaster_sync_in_progress:0\r\n"
+		if n.syncing {
+			link = "master_link_status:down\r\nmaster_sync_in_progress:1\r\nmaster_link_down_since_seconds:-1\r\n"
+		}
+		return fmt.Sprintf("role:slave\r\nmaster_host:%s\r\nmaster_port:%s\r\n%sslave_repl_offset:%d\r\nmaster_replid:%s\r\nrun_id:%s\r\n",
+			host, port, link, n.offset, n.replID, n.runID), nil
 	}
 	return "OK", nil
 }
@@ -254,8 +262,8 @@ func TestValkeyClusterDisabledFailover(t *testing.T) {
 }
 
 // TestValkeyPrimaryStartedAgainFailsOver (#1614): a primary that answers
-// with a replication ID of its own other than the last started again,
-// its replicas' stream gone: a replica is promoted at once.
+// with a run_id and replication ID of its own other than the last
+// started again, its replicas' stream gone: a replica is promoted at once.
 func TestValkeyPrimaryStartedAgainFailsOver(t *testing.T) {
 	oldEvery, oldTend := healthEvery, tendEvery
 	healthEvery, tendEvery = 10*time.Millisecond, 10*time.Millisecond
@@ -284,7 +292,7 @@ func TestValkeyPrimaryStartedAgainFailsOver(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	f.mu.Lock()
-	f.nodes[base+"-0"].replID = "started-again"
+	f.nodes[base+"-0"].replID, f.nodes[base+"-0"].runID = "started-again", "run-again"
 	f.mu.Unlock()
 	for i := 0; i < 500; i++ {
 		f.mu.Lock()

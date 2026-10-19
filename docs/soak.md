@@ -69,8 +69,20 @@ kubectl -n cloudburrow port-forward deploy/storage 29491:6060 &
 
 Set it on one container of a pod only: the containers share the pod's loopback, and a second
 listener on the same port is refused (the process goes on without it). `set env` restarts the
-pod, so do it before the run. The BigQuery emulator itself is not a CloudBurrow process and serves
-no profile.
+pod, so do it before the run. The BigQuery emulator serves its own when
+`BIGQUERY_EMULATOR_DEBUG_PPROF` names a loopback address (bigquery-emulator patch 0082, #1655), a
+variable of its own because its container's supervisor, a `cloudburrow-storage` command, reads
+`CLOUDBURROW_DEBUG_PPROF` and would take the port first. With `GODEBUG=gctrace=1` it also logs
+each collection:
+
+```sh
+kubectl -n cloudburrow set env deploy/bigquery -c bigquery BIGQUERY_EMULATOR_DEBUG_PPROF=127.0.0.1:6062 GODEBUG=gctrace=1
+kubectl -n cloudburrow port-forward deploy/bigquery 6062:6062 &
+curl 'http://127.0.0.1:6062/debug/pprof/goroutine?debug=2'
+```
+
+The emulator keeps its tables in a temporary file of its container, so restarting its pod loses
+them: set it before the run, as above.
 
 Then export the endpoints (never print them: they include the
 admin token) and run:
