@@ -345,11 +345,16 @@ func (c *clusters) fence(name string, on bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, r := c.eps[name], c.byName[name]
-	if e == nil || r == nil || e.fenced == on {
+	if e == nil || r == nil || e.fenced == on || (on && !c.watched(r)) {
+		// A check that began before r stopped being watched (a switchover
+		// began, #1642) does not fence it: nothing would lift the fence of
+		// an instance that became a secondary.
 		return
 	}
 	if on {
 		log.Printf("memorystore: %s: the primary failed a health check; its primary endpoint carries no connections until it answers again or a replica is promoted", name)
+	} else {
+		log.Printf("memorystore: %s: the primary answers again; its primary endpoint carries connections", name)
 	}
 	e.fenced = on
 	c.openEndpoints(r)

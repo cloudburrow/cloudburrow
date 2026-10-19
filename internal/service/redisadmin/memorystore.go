@@ -776,7 +776,10 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		return nil, err
 	}
 	defer c.mu.Unlock()
-	if _, pending := c.busy[r.Name]; pending || r.state != clusterpb.Cluster_ACTIVE {
+	if _, pending := c.busy[r.Name]; pending {
+		return nil, apierror.FailedPrecondition("instance %s has an operation in progress", r.Name)
+	}
+	if r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("instance %s is %s: an instance is updated only when ACTIVE", r.Name, r.state)
 	}
 	if r.Valkey.Migration.migrating() {
