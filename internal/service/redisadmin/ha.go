@@ -44,8 +44,19 @@ type Replication struct {
 	// LinkUp is a replica's master_link_status:up.
 	LinkUp bool
 	// ReplID is master_replid: the replication ID, which a server that
-	// starts again or is promoted takes anew.
+	// starts again or is promoted takes anew, and a primary also takes when
+	// it gains a replica with no backlog to serve it from.
 	ReplID string
+	// SyncInProgress is a replica's master_sync_in_progress:1: it is still
+	// loading the primary's dataset.
+	SyncInProgress bool
+	// LinkDownSince is a replica's master_link_down_since_seconds while its
+	// link is down: -1 when it has not synced with its primary since it
+	// started, or the field is absent.
+	LinkDownSince int64
+	// RunID is INFO server's run_id, when the server was asked for it: a
+	// server takes a new one each time it starts, and only then.
+	RunID string
 }
 
 // Replicator is a server that replicates: a DataPlane of a Standard tier

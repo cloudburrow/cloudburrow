@@ -42,10 +42,13 @@ type memorystoreAdminService struct {
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
 	requests  func(rest.Request)
-	server    *grpctransport.Server
-	api       *redisadmin.Server
-	db        store.Store
-	prov      *memorystoreProvisioner
+	// events records what the service does on its own (an automatic
+	// failover, #1657) in /admin/events; nil records nothing.
+	events redisadmin.EventRecorder
+	server *grpctransport.Server
+	api    *redisadmin.Server
+	db     store.Store
+	prov   *memorystoreProvisioner
 	// kms is Cloud KMS, for customer_managed_key (#1463); nil without it.
 	kms    *kmsService
 	cancel context.CancelFunc
@@ -94,6 +97,7 @@ func memorystoreInstance(cfg config.Config, created time.Time, addr func() strin
 func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	be := memorystoreBackend(s.tunnel)
 	s.api = redisadmin.NewServer(memorystoreInstance(s.cfg, time.Now(), be.Addr), be)
+	s.api.RecordEvents(s.events)
 	// CreateInstance (#1302): a Valkey server per instance, kept across a
 	// restart in persistent mode, as the instance `up` runs keeps its data.
 	var db store.Store = store.NewMemory()

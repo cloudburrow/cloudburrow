@@ -98,7 +98,21 @@ type Server struct {
 	// valkey are the Memorystore for Valkey instances (memorystore.go),
 	// when EnableValkey was called (#1519); nil otherwise.
 	valkey *clusters
+	// events records what the service does on its own, such as an
+	// automatic failover, in /admin/events; nil records nothing.
+	events EventRecorder
 }
+
+// EventRecorder records an event of service, of kind, about target, as
+// admin.Recorder.Record does.
+type EventRecorder func(service, kind, target string, detail map[string]string)
+
+// RecordEvents makes the service record what it does on its own with
+// rec: a Memorystore for Valkey instance's automatic failover, kind
+// "failover", its target the instance and its detail the old primary's
+// server ("from") and the promoted one's ("to"). Call it before
+// EnableValkey.
+func (s *Server) RecordEvents(rec EventRecorder) { s.events = rec }
 
 // NewServer returns the API over backend, describing inst.
 func NewServer(inst Instance, backend Backend) *Server {
