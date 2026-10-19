@@ -285,8 +285,7 @@ type primaryHealth struct {
 
 // watchStandalone checks every CLUSTER_DISABLED instance's primary until
 // ctx ends.
-func (c *clusters) watchStandalone(ctx context.Context, every time.Duration) {
-	tend := tendEvery
+func (c *clusters) watchStandalone(ctx context.Context, every, tend time.Duration) {
 	hs := map[string]*primaryHealth{}
 	t := time.NewTicker(every)
 	defer t.Stop()
