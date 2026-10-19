@@ -105,13 +105,13 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	}
 	menu := func(name, item string) {
 		t.Helper()
-		p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name), chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name))))
 		p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, item)
 	}
 
 	p.navigate("/storage/browser/" + bucket + "/docs?project=" + project)
 	p.waitFor(`document.querySelector("#object-versions-toggle") !== null && [...document.querySelectorAll("#view tbody tr")].length === 1`)
-	p.run(chromedp.Click(`#object-versions-toggle`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#object-versions-toggle`)))
 	p.waitFor(rowCount(2))
 
 	// Restore as live version.
@@ -141,7 +141,7 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	}
 	menu(oldName, "Delete version")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`#confirm-input`, "docs/a.txt", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), "docs/a.txt"))
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Delete version")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(rowCount(2))
@@ -171,9 +171,9 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Edit holds and custom time")`)
 	p.clickText("#view .page-actions button", "Edit holds and custom time")
 	p.waitFor(`document.querySelector(".modal.is-open #f-temporaryHold") !== null`)
-	p.run(chromedp.Click(`.modal.is-open #f-temporaryHold`, chromedp.ByQuery))
-	p.run(chromedp.SendKeys(`.modal.is-open #f-customTime`, "2026-01-02T15:04:05Z", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-temporaryHold`)))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-customTime`), "2026-01-02T15:04:05Z"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	v = url.Values{"project": {project}, "name": {"_details", bucket, "docs/a.txt"}}
 	_, body = consoleDo(t, http.MethodGet, "/api/detail/storage?"+v.Encode(), "")
@@ -209,7 +209,7 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	if !strings.Contains(help, "/_cloudburrow/lifecycle") || !strings.Contains(help, "not a Google Cloud call") {
 		t.Errorf("Run lifecycle now's form says %q", help)
 	}
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result") !== null`)
 	var result string
 	p.eval(`document.querySelector("#action-result").textContent`, &result)
@@ -223,6 +223,6 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	p.navigate("/storage/browser/" + bucket + "/docs?project=" + project)
 	p.waitFor(`document.querySelector("#object-versions-toggle") !== null && document.querySelector("#object-versions-toggle").checked`)
 	p.waitFor(rowCount(2))
-	p.run(chromedp.Click(`#object-versions-toggle`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#object-versions-toggle`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].length === 1`)
 }

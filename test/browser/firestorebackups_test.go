@@ -74,7 +74,7 @@ func TestFirestoreBulkDeleteAndBackupsThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Bulk delete documents")
 	p.waitFor(`document.querySelector(".modal.is-open #f-collectionIds") !== null`)
 	p.setField(".modal.is-open #f-collectionIds", "gone")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.confirmByName("(default)")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if g, k := count(fs, "gone"), count(fs, "kept"); g != 0 || k != 1 {
@@ -98,14 +98,14 @@ func TestFirestoreBulkDeleteAndBackupsThroughTheBrowser(t *testing.T) {
 	id := bname[strings.LastIndex(bname, "/")+1:]
 	p.navigate("/firestore-databases/(default)" + q)
 	p.waitFor(`document.querySelector("#tab-backups") !== null`)
-	p.run(chromedp.Click(`#tab-backups`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-backups`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.offsetParent && r.textContent.includes("Ready"))`)
 
 	// Restore on its row.
 	p.cellMenu(id, "Restore")
 	p.waitFor(`document.querySelector(".modal.is-open #f-databaseId") !== null`)
 	p.setField(".modal.is-open #f-databaseId", "from-backup")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if _, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: "projects/" + project + "/databases/from-backup"}); err != nil {
 		t.Fatalf("GetDatabase of the restored database: %v", err)
@@ -122,7 +122,7 @@ func TestFirestoreBulkDeleteAndBackupsThroughTheBrowser(t *testing.T) {
 	// Delete backup, confirmed by its ID.
 	p.navigate("/firestore-databases/(default)" + q)
 	p.waitFor(`document.querySelector("#tab-backups") !== null`)
-	p.run(chromedp.Click(`#tab-backups`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-backups`)))
 	p.cellMenu(id, "Delete backup")
 	p.confirmByName(id)
 	p.waitFor(`document.querySelector(".modal") === null`)

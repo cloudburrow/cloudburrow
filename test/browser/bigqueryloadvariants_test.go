@@ -59,7 +59,7 @@ func TestBigQueryHiveAndGeoJSONLoadsThroughTheForm(t *testing.T) {
 		p.navigate("/bigquery/" + ds + q)
 		p.clickText("#view .page-actions button", "Load from Cloud Storage")
 		p.waitFor(`document.querySelector(".modal #f-uris") !== null`)
-		p.run(chromedp.SendKeys(`.modal #f-tableId`, table, chromedp.ByQuery))
+		p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), table))
 		p.setField(".modal #f-uris", uris)
 		p.setField(".modal #f-format", "NEWLINE_DELIMITED_JSON")
 		p.eval(`(() => { const f = document.querySelector(".modal #f-autodetect"); f.checked = true;
@@ -67,7 +67,7 @@ func TestBigQueryHiveAndGeoJSONLoadsThroughTheForm(t *testing.T) {
 		for f, v := range values {
 			p.setField(".modal #f-"+f, v)
 		}
-		p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 		p.waitFor(`document.querySelector("#action-result-table a") !== null ||
 			[...document.querySelectorAll(".modal .form-error")].some((e) => !e.hidden && e.textContent)`)
 		var refusal string

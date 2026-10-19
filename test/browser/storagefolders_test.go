@@ -36,7 +36,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/storage/browser?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create")`)
-	p.run(chromedp.Click(`#view .state button.primary`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
 	p.waitFor(`document.querySelector("#view #f-hierarchicalNamespace") !== null`)
 	type boxes struct{ Uniform, UniformHeld, Versioning, VersioningHeld bool }
 	read := func() boxes {
@@ -58,7 +58,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	}
 	setField(p, "#view", "f-hierarchicalNamespace", "true")
 	setField(p, "#view", "f-name", bucket)
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/storage/browser"`)
 	if got := editDefaults(t, "storage", project, bucket); got["uniformAccess"] != "true" || got["versioning"] != "false" || got["Hierarchical namespace"] != "Enabled" {
 		t.Errorf("the bucket created in the browser reads uniform %q, versioning %q, hierarchical namespace %q",
@@ -70,7 +70,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 		return fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q) && r.textContent.includes("Folder"))`, name)
 	}
 	menu := func(row, item string) {
-		p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+row), chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+row))))
 		p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, item)
 	}
 
@@ -79,8 +79,8 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create folder")`)
 	p.clickText("#view .page-actions button", "Create folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-name`, "reports", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(listed("reports/"))
 
@@ -88,7 +88,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	menu("reports/", "Rename folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-destination") !== null`)
 	setField(p, ".modal.is-open", "f-destination", "renamed/")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal #action-result") !== null`)
 	var answer string
 	p.eval(`document.querySelector(".modal #action-result").textContent`, &answer)
@@ -117,7 +117,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 		t.Fatalf("cancelling the delete sent %d requests", n-before)
 	}
 	openDelete()
-	p.run(chromedp.SendKeys(`#confirm-input`, "renamed/", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), "renamed/"))
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Delete folder and contents")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`!` + listed("renamed/"))

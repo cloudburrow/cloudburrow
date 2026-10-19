@@ -97,7 +97,7 @@ func TestLoggingAdminSinkExportErrorsThroughTheBrowser(t *testing.T) {
 	setField(p, scope, "f-name", sinkID)
 	setField(p, scope, "f-destination", "bigquery.googleapis.com/projects/"+project+"/datasets/"+ds)
 	setField(p, scope, "f-filter", filter)
-	p.run(chromedp.Click(scope+` button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(scope + ` button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`location.pathname === "/logs/sinks" && [...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, sinkID))
 
 	got, err := cc.GetSink(ctx, &loggingpb.GetSinkRequest{SinkName: sink})

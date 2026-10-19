@@ -77,7 +77,7 @@ func TestFirestoreEditAddRemoveAndBytesValuesThroughTheBrowser(t *testing.T) {
 	// Edit value on meta.when's own page.
 	openField("meta")
 	p.waitFor(`document.querySelector("#tab-elements") !== null`)
-	p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-elements`)))
 	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 5`)
 	p.clickText("#view tbody a", "meta.when")
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Edit value")`)
@@ -91,7 +91,7 @@ func TestFirestoreEditAddRemoveAndBytesValuesThroughTheBrowser(t *testing.T) {
 	}
 	later := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
 	p.setField(".modal.is-open #f-value", later.Format(time.RFC3339))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if ts, ok := read()["meta"].(map[string]any)["when"].(time.Time); !ok || !ts.Equal(later) {
 		t.Fatalf("after Edit value, the official client reads meta.when %#v, want %v", read()["meta"], later)
@@ -105,7 +105,7 @@ func TestFirestoreEditAddRemoveAndBytesValuesThroughTheBrowser(t *testing.T) {
 	p.setField(".modal.is-open #f-field", "n")
 	p.setField(".modal.is-open #f-type", "number")
 	p.setField(".modal.is-open #f-value", "5")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := read()["meta"].(map[string]any)["n"]; n != int64(5) {
 		t.Fatalf("after Add value, the official client reads meta.n %#v, want the integer 5", n)
@@ -114,12 +114,12 @@ func TestFirestoreEditAddRemoveAndBytesValuesThroughTheBrowser(t *testing.T) {
 	// Remove value on meta.items[0], from its row menu, confirmed by name.
 	openField("meta")
 	p.waitFor(`document.querySelector("#tab-elements") !== null`)
-	p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-elements`)))
 	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 6`)
-	p.run(chromedp.Click(`button[aria-label="Actions for meta.items[0]"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for meta.items[0]"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Remove value")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "meta.items[0]", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "meta.items[0]"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && document.querySelectorAll("#view tbody tr").length === 5`)
 	meta := read()["meta"].(map[string]any)
 	items, _ := meta["items"].([]any)
@@ -145,7 +145,7 @@ func TestFirestoreEditAddRemoveAndBytesValuesThroughTheBrowser(t *testing.T) {
 		t.Errorf("b's Edit field is prefilled %s %q, want bytes AAEC/w==", form.Type, form.Value)
 	}
 	p.setField(".modal.is-open #f-value", "aGk=")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if b, _ := read()["b"].([]byte); !bytes.Equal(b, []byte("hi")) {
 		t.Errorf("after Edit field, the official client reads b %#v, want the bytes hi", read()["b"])

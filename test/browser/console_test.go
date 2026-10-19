@@ -38,6 +38,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/accessibility"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	cdplog "github.com/chromedp/cdproto/log"
 	"github.com/chromedp/cdproto/network"
@@ -127,9 +129,9 @@ func TestThemeSwitchesWithoutNavigation(t *testing.T) {
 
 	choose := func(value string) (theme, bg string) {
 		t.Helper()
-		p.run(chromedp.Click("#settings", chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS("#settings")))
 		p.waitFor(`!document.querySelector("#settings-panel").hidden`)
-		p.run(chromedp.Click(fmt.Sprintf(`#settings-panel input[name="theme"][value=%q]`, value), chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`#settings-panel input[name="theme"][value=%q]`, value))))
 		want := value
 		if value == "system" {
 			want = ""
@@ -156,7 +158,7 @@ func TestThemeSwitchesWithoutNavigation(t *testing.T) {
 	if dark == light {
 		t.Errorf("dark and light render the same background %s", dark)
 	}
-	p.run(emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}))
+	p.run(cmd(emulation.SetEmulatedMedia, emulation.SetEmulatedMediaParams{Features: []*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}}))
 	if _, system := choose("system"); system != dark {
 		t.Errorf("Same as device on a dark device renders %s; dark renders %s", system, dark)
 	}
@@ -187,11 +189,11 @@ func TestCreateBucketThroughTheForm(t *testing.T) {
 
 	p.navigate("/storage/browser?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create")`)
-	p.run(chromedp.Click(`#view .state button.primary`, chromedp.ByQuery))
-	p.run(chromedp.WaitVisible(`#view #f-name`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
+	p.run(chromedp.WaitVisible(chromedp.CSS(`#view #f-name`)))
 
-	p.run(chromedp.SendKeys(`#view #f-name`, "Not-A-Valid-Name!", chromedp.ByQuery))
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-name`), "Not-A-Valid-Name!"))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	// Either the form refused it, or it was sent and the server's rejection
 	// is on the form: the assertions below say which.
 	p.waitFor(`document.querySelector("#view #f-name").getAttribute("aria-invalid") === "true" ||
@@ -215,8 +217,8 @@ func TestCreateBucketThroughTheForm(t *testing.T) {
 
 	p.eval(`(() => { const f = document.querySelector("#view #f-name");
 		f.value = ""; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.SendKeys(`#view #f-name`, bucket, chromedp.ByQuery),
-		chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-name`), bucket),
+		chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`location.pathname === "/storage/browser" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, bucket))
 	if posts := p.posts("/api/resources/storage"); len(posts) != 1 {
@@ -267,7 +269,7 @@ func TestInjectedFaultShowsTheServicesMessage(t *testing.T) {
 	}
 
 	remove()
-	p.run(chromedp.Click(`#view .state.error button`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .state.error button`)))
 	p.waitFor(`document.querySelector("#view .state.error") === null && document.querySelector("#view .state h2") !== null`)
 }
 
@@ -312,7 +314,7 @@ func TestKeyboardOpensAListRow(t *testing.T) {
 // its own protection, so it is bypassed for this page only.
 func TestLoopbackGuardCatchesAnOffLoopbackRequest(t *testing.T) {
 	p := open(t)
-	p.run(page.SetBypassCSP(true))
+	p.run(cmd(page.SetBypassCSP, page.SetBypassCSPParams{Enabled: true}))
 	p.navigate("/")
 	const target = "http://192.0.2.1/cloudburrow-browser-guard"
 	p.eval(fmt.Sprintf(`fetch(%q, { mode: "no-cors" }).then(() => true, () => true)`, target), nil, awaitPromise)
@@ -406,40 +408,45 @@ func openAt(t *testing.T, consoleAddr string) *tab {
 	t.Cleanup(cancelTimeout)
 	p.ctx = ctx
 
-	chromedp.ListenTarget(ctx, func(ev any) {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		switch ev := ev.(type) {
-		case *network.EventRequestWillBeSent:
-			p.requests = append(p.requests, ev.Request.Method+" "+ev.Request.URL)
-			if !loopbackURL(ev.Request.URL) {
-				p.offLoop = append(p.offLoop, ev.Request.URL)
-			}
-		case *runtime.EventExceptionThrown:
-			p.errors = append(p.errors, "exception: "+exceptionText(ev.ExceptionDetails))
-		case *runtime.EventConsoleAPICalled:
-			if ev.Type == runtime.APITypeError {
-				var parts []string
-				for _, a := range ev.Args {
-					if a.Description != "" {
-						parts = append(parts, a.Description)
-					} else {
-						parts = append(parts, string(a.Value))
-					}
-				}
-				p.errors = append(p.errors, "console.error: "+strings.Join(parts, " "))
-			}
-		case *cdplog.EventEntryAdded:
-			if ev.Entry.Level == cdplog.LevelError {
-				p.errors = append(p.errors, fmt.Sprintf("log (%s): %s %s", ev.Entry.Source, ev.Entry.Text, ev.Entry.URL))
-			}
-		case *page.EventFrameNavigated:
-			if ev.Frame.ParentID == "" {
-				p.mainNavs++
-			}
+	// Start the browser first, so a missing binary is reported as such; then
+	// subscribe to every event the page is checked for, before the domains
+	// that send them are enabled, so none is missed.
+	if err := chromedp.Do(ctx); err != nil {
+		t.Fatalf("start Chrome (set %s to its binary if it is not found): %v", envChrome, err)
+	}
+	listen(p, ctx, network.RequestWillBeSent, func(ev network.EventRequestWillBeSent) {
+		p.requests = append(p.requests, ev.Request.Method+" "+ev.Request.URL)
+		if !loopbackURL(ev.Request.URL) {
+			p.offLoop = append(p.offLoop, ev.Request.URL)
 		}
 	})
-	if err := chromedp.Run(ctx, network.Enable(), cdplog.Enable()); err != nil {
+	listen(p, ctx, runtime.ExceptionThrown, func(ev runtime.EventExceptionThrown) {
+		p.errors = append(p.errors, "exception: "+exceptionText(ev.ExceptionDetails))
+	})
+	listen(p, ctx, runtime.ConsoleAPICalled, func(ev runtime.EventConsoleAPICalled) {
+		if ev.Type == runtime.ConsoleAPICalledTypeError {
+			var parts []string
+			for _, a := range ev.Args {
+				if a.Description != "" {
+					parts = append(parts, a.Description)
+				} else {
+					parts = append(parts, string(a.Value))
+				}
+			}
+			p.errors = append(p.errors, "console.error: "+strings.Join(parts, " "))
+		}
+	})
+	listen(p, ctx, cdplog.EntryAdded, func(ev cdplog.EventEntryAdded) {
+		if ev.Entry.Level == cdplog.EntryLevelError {
+			p.errors = append(p.errors, fmt.Sprintf("log (%s): %s %s", ev.Entry.Source, ev.Entry.Text, ev.Entry.URL))
+		}
+	})
+	listen(p, ctx, page.FrameNavigated, func(ev page.EventFrameNavigated) {
+		if ev.Frame.ParentID == "" {
+			p.mainNavs++
+		}
+	})
+	if err := chromedp.Do(ctx, cmd(network.Enable, network.EnableParams{}), cmd(cdplog.Enable, cdp.Empty{})); err != nil {
 		t.Fatalf("start Chrome (set %s to its binary if it is not found): %v", envChrome, err)
 	}
 
@@ -469,13 +476,39 @@ func openAt(t *testing.T, consoleAddr string) *tab {
 	return p
 }
 
-func awaitPromise(p *runtime.EvaluateParams) *runtime.EvaluateParams {
-	return p.WithAwaitPromise(true)
+// listen hands each event of one kind the page's target sends to record,
+// under p.mu, until ctx ends. The subscription is made before listen
+// returns, so an event sent after that is not missed.
+func listen[E any](p *tab, ctx context.Context, ev cdp.Event[E], record func(E)) {
+	events := chromedp.Events(ctx, ev)
+	go func() {
+		for e, err := range events {
+			if err != nil {
+				return
+			}
+			p.mu.Lock()
+			record(e)
+			p.mu.Unlock()
+		}
+	}()
 }
 
-func (p *tab) run(actions ...chromedp.Action) {
+// cmd is the action that sends one protocol command to the page's target and
+// drops its result.
+func cmd[P, R any](c cdp.Command[P, R], params P) chromedp.Action[chromedp.Void] {
+	return chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+		_, err := cdp.Call(ctx, t, c, params)
+		return err
+	})
+}
+
+func awaitPromise(p *runtime.EvaluateParams) {
+	p.AwaitPromise = new(true)
+}
+
+func (p *tab) run(actions ...chromedp.Action[chromedp.Void]) {
 	p.t.Helper()
-	if err := chromedp.Run(p.ctx, actions...); err != nil {
+	if err := chromedp.Do(p.ctx, actions...); err != nil {
 		p.t.Fatalf("browser: %v", err)
 	}
 }
@@ -487,7 +520,51 @@ func (p *tab) navigate(path string) {
 
 func (p *tab) eval(js string, out any, opts ...chromedp.EvaluateOption) {
 	p.t.Helper()
-	p.run(chromedp.Evaluate(js, out, opts...))
+	p.run(evaluateInto(js, out, opts...))
+}
+
+// evaluateInto is the action that evaluates js and decodes its value into out,
+// a pointer, or drops it when out is nil: the form of chromedp.Evaluate
+// before it was generic, for a result whose type the caller chooses.
+func evaluateInto(js string, out any, opts ...chromedp.EvaluateOption) chromedp.Action[chromedp.Void] {
+	byValue := func(p *runtime.EvaluateParams) { p.ReturnByValue = new(true) }
+	opts = append([]chromedp.EvaluateOption{byValue}, opts...)
+	return func(ctx context.Context, t *chromedp.Target) (chromedp.Void, error) {
+		v, err := chromedp.Evaluate[*runtime.RemoteObject](js, opts...)(ctx, t)
+		if err != nil || out == nil {
+			return chromedp.Void{}, err
+		}
+		return chromedp.Void{}, decodeRemoteObject(v, out)
+	}
+}
+
+// decodeRemoteObject decodes the value of v into res, a pointer, as
+// chromedp's Evaluate does: JSON undefined or null is an error for a value
+// that cannot be nil.
+func decodeRemoteObject(v *runtime.RemoteObject, res any) error {
+	switch x := res.(type) {
+	case **runtime.RemoteObject:
+		*x = v
+		return nil
+	case *[]byte:
+		*x = v.Value
+		return nil
+	}
+	value := []byte(v.Value)
+	if value == nil {
+		if rv := reflect.ValueOf(res); rv.Kind() == reflect.Pointer {
+			switch rv.Elem().Kind() {
+			case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+			default:
+				if v.Type == "undefined" {
+					return chromedp.ErrJSUndefined
+				}
+				return chromedp.ErrJSNull
+			}
+		}
+		value = []byte("null")
+	}
+	return json.Unmarshal(value, res)
 }
 
 // waitFor polls a JavaScript expression until it is true.
@@ -501,8 +578,7 @@ func (p *tab) waitFor(expr string) {
 	p.t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		var ok bool
-		err := chromedp.Run(p.ctx, chromedp.Poll(expr, &ok, chromedp.WithPollingTimeout(time.Until(deadline))))
+		ok, err := chromedp.Run(p.ctx, chromedp.Poll[bool](expr, chromedp.WithPollingTimeout(time.Until(deadline))))
 		if err == nil && ok {
 			return
 		}
@@ -540,13 +616,8 @@ func (p *tab) tabTo(pred string) {
 }
 
 func (p *tab) axTree() ([]*accessibility.Node, error) {
-	var nodes []*accessibility.Node
-	err := chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-		var err error
-		nodes, err = accessibility.GetFullAXTree().Do(ctx)
-		return err
-	}))
-	return nodes, err
+	res, err := chromedp.Call(p.ctx, accessibility.GetFullAXTree, accessibility.GetFullAXTreeParams{})
+	return res.Nodes, err
 }
 
 func (p *tab) navigations() int {
@@ -601,8 +672,8 @@ func (p *tab) screenshot() {
 	}
 	ctx, cancel := context.WithTimeout(p.ctx, 15*time.Second)
 	defer cancel()
-	var png []byte
-	if err := chromedp.Run(ctx, chromedp.FullScreenshot(&png, 90)); err != nil {
+	png, err := chromedp.Run(ctx, chromedp.FullScreenshot(90))
+	if err != nil {
 		p.t.Logf("screenshot: %v", err)
 		return
 	}

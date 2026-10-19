@@ -52,14 +52,14 @@ func TestLogRouterFolderSinksThroughTheBrowser(t *testing.T) {
 
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create sink")`)
 	p.clickText(`#view .state button.primary`, "Create sink")
-	p.run(chromedp.WaitVisible(`form.create-page #f-destination`, chromedp.ByQuery))
+	p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-destination`)))
 	p.waitFor(fmt.Sprintf(`new URLSearchParams(location.search).get("parent") === %q`, folder))
 	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector("form.create-page " + s);
 		const set = (id, v) => { const f = q("#f-" + id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
 		set("name", "browser-central"); set("service", "Other project"); set("destination", %q);
 		q("#f-intercept_children").checked = true; q("#f-intercept_children").dispatchEvent(new Event("change", { bubbles: true }));
 		return true; })()`, project), nil)
-	p.run(chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	p.waitFor(`!document.querySelector("form.create-page .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("form.create-page .form-error").textContent`, &refusal)
@@ -70,7 +70,7 @@ func TestLogRouterFolderSinksThroughTheBrowser(t *testing.T) {
 
 	p.eval(`(() => { const f = document.querySelector("form.create-page #f-include_children"); f.checked = true;
 		f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+sink)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
 	var cells string

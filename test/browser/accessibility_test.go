@@ -3,7 +3,6 @@
 package browser
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -215,12 +214,8 @@ func (p *tab) describe(id cdp.BackendNodeID) string {
 	if id == 0 {
 		return "(no DOM node)"
 	}
-	var html string
-	err := chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-		var err error
-		html, err = dom.GetOuterHTML().WithBackendNodeID(id).Do(ctx)
-		return err
-	}))
+	res, err := chromedp.Call(p.ctx, dom.GetOuterHTML, dom.GetOuterHTMLParams{BackendNodeID: id})
+	html := res.OuterHTML
 	if err != nil {
 		return fmt.Sprintf("(node %d: %v)", id, err)
 	}

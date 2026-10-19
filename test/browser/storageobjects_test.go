@@ -111,7 +111,7 @@ func TestStorageObjectMetadataAndCopyThroughTheForms(t *testing.T) {
 	setValue(".modal #f-contentType", "application/json")
 	setValue(".modal #f-cacheControl", "no-cache")
 	setValue(".modal #f-metadata", "stage=edited")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	after := objectPage("docs/a.txt")
 	if after["Object/Content-Type"] != "application/json" || after["Object/Cache-Control"] != "no-cache" ||
@@ -122,7 +122,7 @@ func TestStorageObjectMetadataAndCopyThroughTheForms(t *testing.T) {
 	// Copy onto its own name: the API's refusal, on the form.
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Copy")`)
 	openAction("Copy", "destination")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -131,7 +131,7 @@ func TestStorageObjectMetadataAndCopyThroughTheForms(t *testing.T) {
 	}
 	p.forgive()
 	setValue(".modal #f-destination", "docs/copy.txt")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if c := objectPage("docs/copy.txt"); c["unavailable"] != "" || c["Custom metadata/stage"] != "edited" {
 		t.Errorf("the copy made in the browser reads %v", c)
@@ -141,17 +141,17 @@ func TestStorageObjectMetadataAndCopyThroughTheForms(t *testing.T) {
 	// Copy with Replace: asks for the name first; Cancel there sends nothing.
 	openAction("Copy", "destination")
 	setValue(".modal #f-destination", "docs/copy.txt")
-	p.run(chromedp.Click(`.modal #f-replace`, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal #f-replace`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Cancel")
 	p.waitFor(`document.querySelector("#confirm-input") === null`)
 	if n := actionPosts(); n != sent {
 		t.Fatalf("cancelling the replace confirmation sent %d requests", n-sent)
 	}
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`#confirm-input`, "docs/copy.txt", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), "docs/copy.txt"))
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Replace")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := actionPosts(); n != sent+1 {

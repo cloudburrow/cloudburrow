@@ -50,11 +50,11 @@ func TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle(t *testing.T) {
 
 	p := open(t)
 	downloads := t.TempDir()
-	p.run(browser.SetDownloadBehavior(browser.SetDownloadBehaviorBehaviorAllow).WithDownloadPath(downloads))
+	p.run(cmd(browser.SetDownloadBehavior, browser.SetDownloadBehaviorParams{Behavior: browser.SetDownloadBehaviorBehaviorAllow, DownloadPath: downloads}))
 	p.navigate("/")
 	p.waitFor(`document.querySelector("#connect-link") !== null && getComputedStyle(document.querySelector("#connect-link")).display !== "none"`)
 	before := p.navigations()
-	p.run(chromedp.Click(`#connect-link`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#connect-link`)))
 	p.waitFor(`location.pathname === "/connect" && document.querySelectorAll("#connect-vars tbody tr").length > 0`)
 	if p.navigations() != before {
 		t.Error("the Connect control reloaded the page instead of routing to /connect")
@@ -94,9 +94,9 @@ func TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle(t *testing.T) {
 	if version != about.Version || commit != about.Commit {
 		t.Errorf("About on the page = %s %s, /api/about %s %s", version, commit, about.Version, about.Commit)
 	}
-	p.run(chromedp.Click(`#settings`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#settings`)))
 	p.waitFor(`!document.querySelector("#settings-panel").hidden && document.querySelector("#about-version").textContent === ` + jsString(about.Version))
-	p.run(chromedp.Click(`#settings`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#settings`)))
 
 	var page string
 	p.eval(`document.documentElement.outerHTML`, &page)
@@ -106,16 +106,15 @@ func TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle(t *testing.T) {
 
 	// Without a token the form asks for one and sends nothing.
 	p.eval(`sessionStorage.removeItem("cb-admin-token")`, nil)
-	p.run(chromedp.Click(`#diagnose-download`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#diagnose-download`)))
 	p.waitFor(`!document.querySelector("#diagnose-error").hidden && !document.querySelector("#diagnose-token-row").hidden`)
 	if sent := p.sent(http.MethodGet, "/api/diagnose"); len(sent) != 0 {
 		t.Fatalf("Download with no token sent %v", sent)
 	}
 
-	p.run(chromedp.SendKeys(`#diagnose-token`, token, chromedp.ByQuery), chromedp.Click(`#diagnose-download`, chromedp.ByQuery))
-	var done bool
-	if err := chromedp.Run(p.ctx, chromedp.Poll(`document.querySelector("#diagnose-status").textContent.startsWith("Downloaded ") || !document.querySelector("#diagnose-error").hidden`,
-		&done, chromedp.WithPollingTimeout(3*time.Minute))); err != nil {
+	p.run(chromedp.SendKeys(chromedp.CSS(`#diagnose-token`), token), chromedp.Click(chromedp.CSS(`#diagnose-download`)))
+	if _, err := chromedp.Run(p.ctx, chromedp.Poll[bool](`document.querySelector("#diagnose-status").textContent.startsWith("Downloaded ") || !document.querySelector("#diagnose-error").hidden`,
+		chromedp.WithPollingTimeout(3*time.Minute))); err != nil {
 		t.Fatalf("waiting for the bundle: %v", err)
 	}
 	var failure string
@@ -128,7 +127,7 @@ func TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle(t *testing.T) {
 	}
 	// At the narrowest width the page does not scroll sideways: a long
 	// state-directory path wraps, and the table scrolls in its own region.
-	p.run(emulation.SetDeviceMetricsOverride(360, 900, 1, true))
+	p.run(cmd(emulation.SetDeviceMetricsOverride, emulation.SetDeviceMetricsOverrideParams{Width: 360, Height: 900, DeviceScaleFactor: 1, Mobile: true}))
 	p.navigate("/connect")
 	p.waitFor(`document.querySelector("#connect-vars") !== null`)
 	var width struct{ Scroll, Client float64 }

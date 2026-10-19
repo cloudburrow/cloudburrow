@@ -49,8 +49,8 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 	if checked {
 		t.Error("Edit database opens with Delete protection checked on a new database")
 	}
-	p.run(chromedp.Click(`.modal #f-deleteProtection`, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal #f-deleteProtection`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: db})
 	if err != nil {
@@ -66,7 +66,7 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 	p.setField(".modal #f-collectionGroup", "orders")
 	p.setField(".modal #f-fields", "city ascending\ntotal descending")
 	p.setField(".modal #f-queryScope", "COLLECTION_GROUP")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	idx, err := c.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: db + "/collectionGroups/orders"}).Next()
 	if err != nil {

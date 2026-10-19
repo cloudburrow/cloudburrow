@@ -46,7 +46,7 @@ func TestPubSubAdvanceClockThroughTheForm(t *testing.T) {
 	}
 	p.setField(".modal.is-open #f-duration", "1h")
 	submit := func() {
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector("#confirm-input") !== null && document.activeElement === document.querySelector("#confirm-input")`)
 	}
 	submit()
@@ -61,7 +61,7 @@ func TestPubSubAdvanceClockThroughTheForm(t *testing.T) {
 		t.Fatalf("cancelling the confirmation sent the advance: %v", sent)
 	}
 	submit()
-	p.run(chromedp.SendKeys(`#confirm-input`, sub, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), sub), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector("#action-result-note") !== null`)
 	var note string
 	p.eval(`document.querySelector("#action-result-note").textContent`, &note)

@@ -49,7 +49,7 @@ func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 	p.setField(".modal.is-open #f-recurrence", "weekly")
 	p.setField(".modal.is-open #f-day", "FRIDAY")
 	p.setField(".modal.is-open #f-retentionDays", "14")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	resp, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: db})
 	if err != nil || len(resp.GetBackupSchedules()) != 1 {
@@ -67,7 +67,7 @@ func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 	// The Backup schedules tab lists it.
 	p.navigate("/firestore-databases/(default)" + q)
 	p.waitFor(`document.querySelector("#tab-schedules") !== null`)
-	p.run(chromedp.Click(`#tab-schedules`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-schedules`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.offsetParent && r.textContent.includes("Weekly"))`)
 	var tab string
 	p.eval(`[...document.querySelectorAll("#view [role=tabpanel]")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &tab)
@@ -84,7 +84,7 @@ func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 		t.Errorf("Edit retention opens with %q days; want 14", days)
 	}
 	p.setField(".modal.is-open #f-retentionDays", "21")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: s.GetName()})
 	if err != nil || got.GetRetention().AsDuration() != 21*24*time.Hour {
@@ -94,7 +94,7 @@ func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 	// Delete backup schedule, confirmed by its ID.
 	p.navigate("/firestore-databases/(default)" + q)
 	p.waitFor(`document.querySelector("#tab-schedules") !== null`)
-	p.run(chromedp.Click(`#tab-schedules`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-schedules`)))
 	p.cellMenu(id, "Delete backup schedule")
 	p.confirmByName(id)
 	p.waitFor(`document.querySelector(".modal") === null`)

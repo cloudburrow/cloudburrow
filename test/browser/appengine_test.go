@@ -85,7 +85,7 @@ func TestTasksAppEngineRoutingAndTaskThroughTheForms(t *testing.T) {
 	p.setField(".modal.is-open #f-appEngineService", "worker")
 	p.setField(".modal.is-open #f-appEngineVersion", "v1")
 	p.setField(".modal.is-open #f-appEngineInstance", "i1")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err := c.GetQueue(ctx, &taskspb.GetQueueRequest{Name: name})
 	if err != nil {
@@ -106,7 +106,7 @@ func TestTasksAppEngineRoutingAndTaskThroughTheForms(t *testing.T) {
 	p.setField(".modal.is-open #f-relativeUri", "/work?from=browser")
 	p.setField(".modal.is-open #f-body", "hello")
 	p.setField(".modal.is-open #f-taskId", "ae-task")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPost, "/api/actions/tasks"); len(sent) != 1 {
 		t.Errorf("Create task sent %d actions, want one: %v", len(sent), sent)
@@ -162,14 +162,14 @@ func TestSchedulerCreateAppEngineJobThroughTheForm(t *testing.T) {
 	p.setField("#view #f-appEngineRelativeUri", "cron/no-slash")
 	p.setField("#view #f-appEngineService", "cron")
 	p.setField("#view #f-appEngineVersion", "v2")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#view #f-appEngineRelativeUri").getAttribute("aria-invalid") === "true"`)
 	if posts := p.posts("/api/resources/scheduler"); len(posts) != 0 {
 		t.Fatalf("a relative URI not beginning with / was posted: %v", posts)
 	}
 
 	p.setField("#view #f-appEngineRelativeUri", "/cron/tick")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/scheduler/jobs" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browser-ae"))`)
 	if posts := p.posts("/api/resources/scheduler"); len(posts) != 1 {

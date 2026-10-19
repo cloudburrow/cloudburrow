@@ -103,7 +103,7 @@ func TestTasksPermissionsThroughTheTab(t *testing.T) {
 
 	openGrant()
 	fill(ada+",\n"+svc, role)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelectorAll("#permissions-table tbody tr").length === 2`)
 	if _, rows := permissionsOf(t, project, name); rows[ada] != role || rows[svc] != role {
@@ -119,11 +119,11 @@ func TestTasksPermissionsThroughTheTab(t *testing.T) {
 	}
 	remove := fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+role)
 	confirmRemove := func() {
-		p.run(chromedp.Click(remove, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(remove)))
 		p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #confirm-input");
 			f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada), nil)
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}
 	confirmRemove()
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
@@ -259,7 +259,7 @@ func TestStorageManagedFolderPermissionsThroughTheTab(t *testing.T) {
 	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
 		q("#f-members").value = %q; q("#f-members").dispatchEvent(new Event("input", { bubbles: true }));
 		q("#f-role").value = %q; q("#f-role").dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada, role), nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelectorAll("#permissions-table tbody tr").length === 1`)
 	if rows, _ := folderPermissionsOf(t, project, bucket, "team"); rows[ada] != role {
@@ -269,11 +269,11 @@ func TestStorageManagedFolderPermissionsThroughTheTab(t *testing.T) {
 		t.Errorf("the bucket's policy took the managed folder's grant: %v (tab %v)", rows, ok)
 	}
 
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+role), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+role))))
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #confirm-input");
 		f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada), nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelector("#permissions-table") === null`)
 	if rows, _ := folderPermissionsOf(t, project, bucket, "team"); len(rows) != 0 {
@@ -312,7 +312,7 @@ func TestTestPermissionsThroughTheTab(t *testing.T) {
 	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-permissions");
 		f.value = "storage.objects.get,\nstorage.buckets.delete, storage.objects.get";
 		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelectorAll("#test-permissions-table tbody tr").length === 2`)
 	var rows string
 	p.eval(`[...document.querySelectorAll("#test-permissions-table tbody tr")].map((r) => r.textContent).join("|")`, &rows)

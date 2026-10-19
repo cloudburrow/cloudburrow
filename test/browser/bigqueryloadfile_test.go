@@ -53,22 +53,22 @@ func TestBigQueryLoadFromAFileThroughTheForm(t *testing.T) {
 	if shape.Type != "file" || shape.URIs || strings.Join(shape.Options, ",") != "CSV,NEWLINE_DELIMITED_JSON,PARQUET,AVRO" {
 		t.Errorf("Load from a file's form is %+v, want a file control, no URIs and Load from Cloud Storage's formats", shape)
 	}
-	p.run(chromedp.SendKeys(`.modal #f-tableId`, "people", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "people"))
 	field := func(label string) string { return fmt.Sprintf(`.modal [aria-label=%q]`, label) }
-	p.run(chromedp.SendKeys(field("Field 1 name"), "id", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 1 name")), "id"))
 	p.setField(field("Field 1 type"), "INTEGER")
 	p.clickText(".modal button", "Add field")
-	p.run(chromedp.SendKeys(field("Field 2 name"), "name", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2 name")), "name"))
 	p.setField(".modal #f-skipLeadingRows", "1")
 
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal #e-file").hidden`)
 	if sent := p.sent(http.MethodPost, "/api/actions/bigquery/upload"); len(sent) != 0 {
 		t.Fatalf("the form with no file sent %v", sent)
 	}
 
-	p.run(chromedp.SetUploadFiles(`.modal #f-file`, []string{file}, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SetUploadFiles(chromedp.CSS(`.modal #f-file`), []string{file}))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	var link struct{ Text, Href string }
 	p.eval(`(() => { const a = document.querySelector("#action-result-table a");

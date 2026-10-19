@@ -75,7 +75,7 @@ func TestStorageNotificationsThroughTheForm(t *testing.T) {
 
 	p.navigate("/storage/browser/" + bucket + "?project=" + project)
 	p.waitFor(`document.querySelector("#tab-notifications") !== null`)
-	p.run(chromedp.Click(`#tab-notifications`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-notifications`)))
 	p.waitFor(`document.querySelector("#tab-notifications").getAttribute("aria-selected") === "true"`)
 
 	openCreate := func() {
@@ -106,8 +106,8 @@ func TestStorageNotificationsThroughTheForm(t *testing.T) {
 	openCreate()
 	setValue(".modal.is-open #f-prefix", "in/")
 	setValue(".modal.is-open #f-attributes", "team=blue")
-	p.run(chromedp.Click(`.modal.is-open #f-event_OBJECT_FINALIZE`, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-event_OBJECT_FINALIZE`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := actionPosts(); n != 1 {
 		t.Errorf("the create sent %d action requests, want 1", n)
@@ -122,10 +122,10 @@ func TestStorageNotificationsThroughTheForm(t *testing.T) {
 	// Delete from its row, confirmed by its name.
 	menu := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+name)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, menu))
-	p.run(chromedp.Click(menu, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(menu)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, name, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), name), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, menu))
 	if n := actionPosts(); n != 2 {
 		t.Errorf("the create and the delete sent %d action requests, want 2", n)

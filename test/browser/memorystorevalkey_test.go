@@ -70,12 +70,12 @@ func TestMemorystoreValkeySecondaryThroughThePage(t *testing.T) {
 	p.navigate("/memorystore-valkey" + q)
 	p.waitFor(`[...document.querySelectorAll("#view button")].some((b) => b.textContent === "Create instance")`)
 	p.clickText("#view button", "Create instance")
-	p.run(chromedp.WaitVisible(`form.create-page #f-id`, chromedp.ByQuery))
+	p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-id`)))
 	for f, v := range map[string]string{"id": sid, "mode": "CLUSTER_DISABLED", "shardCount": "1", "replicaCount": "0",
 		"nodeType": "SHARED_CORE_NANO", "network": network, "engineVersion": "VALKEY_9_0", "primaryInstance": primary.GetName()} {
 		p.setField("form.create-page #f-"+f, v)
 	}
-	p.run(chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q) && document.querySelector("form.create-page") === null`, sid))
 	sname := parent + "/instances/" + sid
 	sec, err := c.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: sname})

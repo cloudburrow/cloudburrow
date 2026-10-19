@@ -105,7 +105,7 @@ func TestCloudRunArtifactRegistryPackageFormatsThroughThePage(t *testing.T) {
 	setField(p, scope, "f-id", py)
 	setField(p, scope, "f-location", "us-central1")
 	setField(p, scope, "f-format", "PYTHON")
-	p.run(chromedp.Click(scope+` button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(scope + ` button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, py))
 	if r, err := c.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: parent + "/repositories/" + py}); err != nil || r.GetFormat() != arpb.Repository_PYTHON {
 		t.Fatalf("GetRepository after Create repository = %v, %v; want a PYTHON repository", r, err)

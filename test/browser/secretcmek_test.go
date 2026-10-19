@@ -72,7 +72,7 @@ func TestKMSKeyChangesASecretsEncryptionThroughTheBrowser(t *testing.T) {
 	}
 	submit := func(v string) {
 		setField(p, ".modal.is-open", "f-kmsKeys", v)
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}
 	openForm()
 	var prefilled string

@@ -35,7 +35,7 @@ func TestBigQueryUndeleteDatasetThroughTheList(t *testing.T) {
 	p.clickText("#view button", "Undelete dataset")
 	p.waitFor(`document.querySelector(".modal.is-open #f-dataset") !== null`)
 	p.setField(".modal.is-open #f-dataset", ds)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.navigate("/bigquery" + q)
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ds))

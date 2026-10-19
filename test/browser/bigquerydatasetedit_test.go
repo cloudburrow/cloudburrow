@@ -38,7 +38,7 @@ func TestBigQueryEditDatasetThroughTheForm(t *testing.T) {
 	p.setField(".modal #f-labels", "team=data")
 	p.setField(".modal #f-defaultTableExpiration", "2")
 	p.setField(".modal #f-maxTimeTravelHours", "72")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	_, body := consoleDo(t, http.MethodGet, "/api/detail/bigquery?"+url.Values{"project": {project}, "name": {ds}}.Encode(), "")

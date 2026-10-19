@@ -73,7 +73,7 @@ func TestBigQueryModelsThroughThePage(t *testing.T) {
 
 	p.navigate("/bigquery/" + ds + q)
 	p.waitFor(`document.querySelector("#tab-models") !== null`)
-	p.run(chromedp.Click(`#tab-models`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-models`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("LINEAR_REGRESSION")`)
 	p.waitFor(`document.querySelector('button[aria-label="Actions for m"]') !== null`)
 	if got := models(); strings.Join(got, ",") != "m" {
@@ -92,7 +92,7 @@ func TestBigQueryModelsThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-description") !== null`)
 	p.setField(".modal #f-description", "trained in the browser")
 	p.setField(".modal #f-name", "Browser model")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.navigate("/bigquery/" + ds + "/models/m" + q + "&tab=details")
 	p.waitFor(`document.querySelector("#view").textContent.includes("trained in the browser")`)
@@ -103,7 +103,7 @@ func TestBigQueryModelsThroughThePage(t *testing.T) {
 
 	p.clickText("#view .page-actions button", "Delete model")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "m", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "m"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/bigquery/` + ds + `"`)
 	if got := models(); len(got) != 0 {
 		t.Errorf("after Delete model the dataset lists models %v", got)

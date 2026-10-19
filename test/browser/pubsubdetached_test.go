@@ -80,7 +80,7 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 	if n := strings.Count(warning, "This cannot be undone."); n != 1 {
 		t.Errorf("the detach confirmation says %d times that it cannot be undone: %q", n, warning)
 	}
-	p.run(chromedp.SendKeys(`#confirm-input`, sub, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), sub))
 	p.clickText(`form:has(#confirm-input) .modal-actions button`, "Detach from topic")
 	p.waitFor(`document.querySelector(".modal") === null`)
 
@@ -117,7 +117,7 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 	}
 	set("f-ackDeadline", "45")
 	set("f-labels", "team=blue")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/pubsub-subscriptions"); len(sent) != 1 {
 		t.Errorf("the edit sent %d PATCHes, want 1: %v", len(sent), sent)
