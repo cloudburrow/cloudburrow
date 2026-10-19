@@ -389,21 +389,22 @@ type listedJob struct {
 	created int64
 }
 
-// serveJobList answers jobs.list (serve, which lists every job) as
-// BigQuery pages and filters it (above).
-func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, project string, serve func(http.ResponseWriter)) {
+// listJobs answers jobs.list (serve, which lists every job) as BigQuery
+// pages and filters it (above), from the list serve decoded once
+// (joblisting.go, #1639).
+func (j *jobRecords) listJobs(r *http.Request, project string, serve func() jobListing) jobListing {
 	q := r.URL.Query()
 	maxResults := -1
 	if s := q.Get("maxResults"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "invalid", "Invalid value for maxResults: "+s)
-			return
+			return errorListing(http.StatusBadRequest, "invalid", "Invalid value for maxResults: "+s)
 		}
 		if n > 0 {
 			maxResults = n
 		}
 	}
+	var bad *jobListing
 	bound := func(name string) (int64, bool, bool) {
 		s := q.Get(name)
 		if s == "" {
@@ -411,18 +412,19 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 		}
 		n, err := strconv.ParseInt(s, 10, 64)
 		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "invalid", "Invalid value for "+name+": "+s+" (milliseconds since the epoch)")
+			e := errorListing(http.StatusBadRequest, "invalid", "Invalid value for "+name+": "+s+" (milliseconds since the epoch)")
+			bad = &e
 			return 0, false, false
 		}
 		return n, true, true
 	}
 	minTime, hasMin, ok := bound("minCreationTime")
 	if !ok {
-		return
+		return *bad
 	}
 	maxTime, hasMax, ok := bound("maxCreationTime")
 	if !ok {
-		return
+		return *bad
 	}
 	states := map[string]bool{}
 	for _, s := range q["stateFilter"] {
@@ -432,8 +434,7 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 				states[u] = true
 			case "":
 			default:
-				writeError(w, http.StatusBadRequest, "invalid", "Invalid value for stateFilter: "+one+" (DONE, PENDING or RUNNING)")
-				return
+				return errorListing(http.StatusBadRequest, "invalid", "Invalid value for stateFilter: "+one+" (DONE, PENDING or RUNNING)")
 			}
 		}
 	}
@@ -442,20 +443,17 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 	if tok := q.Get("pageToken"); tok != "" {
 		k, ok := decodePageToken(tok)
 		if !ok {
-			writeError(w, http.StatusBadRequest, "invalid", "Invalid page token: "+tok)
-			return
+			return errorListing(http.StatusBadRequest, "invalid", "Invalid page token: "+tok)
 		}
 		after = &k
 	}
 
-	rec := newRecorder()
-	serve(rec)
-	var list map[string]any
-	if rec.status != 0 && rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-		rec.copyTo(w)
-		return
+	listing := serve()
+	if listing.list == nil {
+		return listing
 	}
-	items, _ := list["jobs"].([]any)
+	list := listing.list
+	items := listing.jobs()
 	var jobs []listedJob
 	for _, item := range items {
 		job, ok := item.(map[string]any)
@@ -531,7 +529,7 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 		out[i] = lj.job
 	}
 	list["jobs"] = out
-	writeJSON(w, http.StatusOK, list)
+	return listing
 }
 
 // pageKey is the last job of a page: the next page starts after it.

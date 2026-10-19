@@ -68,7 +68,7 @@ import (
 // since (jobs.insert, jobs.query, a script's parent and children, the
 // front's own jobs, jobs.cancel and jobs.delete: noteMade) or whose row
 // was not DONE when written, which may have finished since, with one
-// jobs.list of bigquery-emulator patch 0064 (engineJobs). The jobs.list
+// jobs.list of bigquery-emulator patch 0064 (engineListing). The jobs.list
 // path gives them their times, failures, configuration and texts as it
 // gives every job's, and lists the front's own jobs whole, so each row is
 // the one a full list writes; a job asked for and not listed is gone, and
@@ -620,7 +620,7 @@ func (f front) lockedTableRows(r *http.Request, project string, jobs []map[strin
 }
 
 // engineListKey is the context key of the engineList of a jobs.list the
-// front sends itself (engineJobs).
+// front sends itself (engineListing, joblisting.go).
 type engineListKey struct{}
 
 // engineList is what a jobs.list the front sends itself asks the engine
@@ -635,43 +635,6 @@ type engineList struct {
 	// last is the ID of the last job the engine listed, or after when it
 	// listed none.
 	last string
-}
-
-// engineJobs is next, the engine, but for a jobs.list with an engineList
-// in its context (above), which it sends with the parameters of patch
-// 0064 when some is set, and whose last job it records, for the jobs.list
-// path to serve as it serves the engine's whole list.
-func engineJobs(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		l, ok := r.Context().Value(engineListKey{}).(*engineList)
-		if !ok || l == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if l.some {
-			q := r.URL.Query()
-			q.Set("cloudburrowAfterJobId", l.after)
-			q.Set("cloudburrowJobIds", strings.Join(l.ids, ","))
-			u := *r.URL
-			u.RawQuery = q.Encode()
-			r = r.Clone(r.Context())
-			r.URL = &u
-		}
-		rec := newRecorder()
-		next.ServeHTTP(rec, r)
-		var list struct {
-			Jobs []struct {
-				JobReference struct {
-					JobID string `json:"jobId"`
-				} `json:"jobReference"`
-			} `json:"jobs"`
-		}
-		l.last = l.after
-		if (rec.status == 0 || rec.status == http.StatusOK) && json.Unmarshal(rec.body.Bytes(), &list) == nil && len(list.Jobs) > 0 {
-			l.last = list.Jobs[len(list.Jobs)-1].JobReference.JobID
-		}
-		rec.copyTo(w)
-	})
 }
 
 // jobsTableSyncTimeout bounds a background sync.

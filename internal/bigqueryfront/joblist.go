@@ -109,23 +109,15 @@ func (j *jobConfigs) recording(next http.Handler, project string) http.Handler {
 	})
 }
 
-// serveJobList answers jobs.list (serve) with each job's configuration
+// listed is l, an answer to jobs.list, with each job's configuration
 // when the request asks for projection=full and the emulator's answer
-// gives none. A job whose configuration cannot be read is listed as the
-// emulator listed it.
-func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next http.Handler, base string, serve func(http.ResponseWriter)) {
-	if r.URL.Query().Get("projection") != "full" {
-		serve(w)
-		return
+// gives none, changed in place (joblisting.go). A job whose configuration
+// cannot be read is listed as the emulator listed it.
+func (j *jobConfigs) listed(r *http.Request, next http.Handler, base string, l jobListing) jobListing {
+	if r.URL.Query().Get("projection") != "full" || l.list == nil {
+		return l
 	}
-	rec := newRecorder()
-	serve(rec)
-	var list map[string]any
-	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-		rec.copyTo(w)
-		return
-	}
-	jobs, _ := list["jobs"].([]any)
+	jobs := l.jobs()
 	f := front{next: next, base: base}
 	// A job the front has not seen is read with jobs.get, several at once:
 	// one after another, a page of 200 under a busy engine took longer
@@ -175,7 +167,6 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 		}()
 	}
 	wg.Wait()
-	changed := false
 	for _, item := range jobs {
 		job, ok := item.(map[string]any)
 		if !ok || job["configuration"] != nil {
@@ -196,12 +187,7 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 		var c any
 		if json.Unmarshal(conf, &c) == nil {
 			job["configuration"] = c
-			changed = true
 		}
 	}
-	if !changed {
-		rec.copyTo(w)
-		return
-	}
-	writeJSON(w, http.StatusOK, list)
+	return l
 }

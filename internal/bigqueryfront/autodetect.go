@@ -436,27 +436,19 @@ func looksTyped(s string) bool {
 	return false
 }
 
-// listJobs answers jobs.list, with the failure the front gave each job it
-// failed (#919): the emulator lists such a job as it recorded it, done and
-// succeeded (measured).
+// listed is l, an answer to jobs.list, with the failure the front gave
+// each job it failed (#919): the emulator lists such a job as it recorded
+// it, done and succeeded (measured). The jobs are changed in place
+// (joblisting.go, #1639).
 // https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/list
-func (j *jobFailures) listJobs(next http.Handler, w http.ResponseWriter, r *http.Request) {
+func (j *jobFailures) listed(l jobListing) jobListing {
 	j.mu.Lock()
 	none := len(j.errs) == 0 && len(j.loads) == 0
 	j.mu.Unlock()
-	if none {
-		next.ServeHTTP(w, r)
-		return
+	if none || l.list == nil {
+		return l
 	}
-	rec := newRecorder()
-	next.ServeHTTP(rec, r)
-	var list map[string]any
-	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-		rec.copyTo(w)
-		return
-	}
-	jobs, _ := list["jobs"].([]any)
-	for _, item := range jobs {
+	for _, item := range l.jobs() {
 		job, ok := item.(map[string]any)
 		if !ok {
 			continue
@@ -465,12 +457,15 @@ func (j *jobFailures) listJobs(next http.Handler, w http.ResponseWriter, r *http
 		project, _ := ref["projectId"].(string)
 		id, _ := ref["jobId"].(string)
 		if e, failed := j.get(project, id); failed {
+			// As the JSON decodes, which the layers above and
+			// INFORMATION_SCHEMA.JOBS read (joblisting.go).
 			failJob(job, e)
-			job["errorResult"] = e
+			job["status"] = jsonCopy(job["status"])
+			job["errorResult"] = jsonCopy(e)
 			job["state"] = "DONE"
 		} else if c, ok := j.load(project, id); ok {
 			c.apply(job)
 		}
 	}
-	writeJSON(w, http.StatusOK, list)
+	return l
 }

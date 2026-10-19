@@ -336,6 +336,18 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		}
 	}
 	listed := &engineList{}
+	cut := filter.bounded()
+	if ids, after := filter.jobIDs(), f.newest.get(project); ids != nil && after != "" {
+		// A query that names its jobs (job_id = or IN) lists those and
+		// the jobs the engine made since the newest it listed
+		// (joblisting.go), not every job (#1633): what the list costs
+		// grew with the project's jobs (0.36 s at 3,600, six such
+		// queries a run of TestBigQueryInformationSchemaJobs). The filter
+		// cuts them as it cuts a list of every job, so the rows are the
+		// same.
+		listed = &engineList{some: true, after: after, ids: ids}
+		cut = true
+	}
 	jobs, status, msg := f.listedJobs(r, filter, listed)
 	if status != 0 {
 		return "", status, msg
@@ -344,8 +356,9 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 	if filter != nil && len(kept) > jobsLiteralMax {
 		// Too many for a literal (#1515): the table, which the query's
 		// WHERE filters as it filters the literal. Its rows are every
-		// job's, so a list cut by creation_time is read again whole.
-		if filter.bounded() {
+		// job's, so a list cut by creation_time or job ID is read again
+		// whole.
+		if cut {
 			listed = &engineList{}
 			jobs, status, msg = f.listedJobs(r, nil, listed)
 			if status != 0 {
@@ -400,8 +413,8 @@ func (f front) allJobs(r *http.Request, filter *jobsFilter) ([]map[string]any, i
 }
 
 // everyJobList lets one list of every job (listedJobs) run at a time
-// (#1632). Each decodes the engine's whole list in each layer of the
-// jobs.list path: measured natively at 10,000 jobs (arm64, 2026-10-18),
+// (#1632). Each decoded the engine's whole list in each layer of the
+// jobs.list path (now once, joblisting.go, #1639): measured natively at 10,000 jobs (arm64, 2026-10-18),
 // one INFORMATION_SCHEMA.JOBS query took the front's heap from about 25
 // to 100 MB and allocated about 800 MB, its live heap otherwise 57 MB, so
 // the filtered JOBS queries a client sends at once, each listing every
@@ -412,7 +425,7 @@ func (f front) allJobs(r *http.Request, filter *jobsFilter) ([]map[string]any, i
 // (a sync's, jobstable.go) is small and is not held back.
 var everyJobList = make(chan struct{}, 1)
 
-// listedJobs is allJobs, of the engine's jobs some names (engineJobs,
+// listedJobs is allJobs, of the engine's jobs some names (engineListing,
 // jobstable.go), and the front's own; some has the engine's last job
 // after.
 func (f front) listedJobs(r *http.Request, filter *jobsFilter, some *engineList) ([]map[string]any, int, string) {
@@ -451,20 +464,25 @@ func (f front) listedJobs(r *http.Request, filter *jobsFilter, some *engineList)
 		req.Header = r.Header.Clone()
 		req.Header.Del("Content-Type")
 		req.Header.Del("Content-Length")
-		rec := newRecorder()
-		f.listJobs(rec, req)
-		var list struct {
-			Jobs          []map[string]any `json:"jobs"`
-			NextPageToken string           `json:"nextPageToken"`
+		// Decoded once, never written (joblisting.go, #1639).
+		l := f.listJobs(req)
+		if l.list == nil {
+			return nil, http.StatusInternalServerError, "cloudburrow: could not list the jobs: " + errorMessage(l.raw.body.Bytes(), l.raw.status)
 		}
-		if rec.status != 0 && rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-			return nil, http.StatusInternalServerError, "cloudburrow: could not list the jobs: " + errorMessage(rec.body.Bytes(), rec.status)
+		items := l.jobs()
+		if jobs == nil {
+			jobs = make([]map[string]any, 0, len(items))
 		}
-		jobs = append(jobs, list.Jobs...)
-		if list.NextPageToken == "" || list.NextPageToken == token {
+		for _, item := range items {
+			if job, ok := item.(map[string]any); ok {
+				jobs = append(jobs, job)
+			}
+		}
+		next, _ := l.list["nextPageToken"].(string)
+		if next == "" || next == token {
 			break
 		}
-		token = list.NextPageToken
+		token = next
 	}
 	return jobs, 0, ""
 }
