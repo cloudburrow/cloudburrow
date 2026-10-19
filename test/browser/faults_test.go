@@ -41,7 +41,7 @@ func TestFaultRuleAddedAndDeletedThroughTheForm(t *testing.T) {
 	if !strings.HasSuffix(file, "admin-token") {
 		t.Errorf("the token form names the token file %q, want the instance's admin-token path", file)
 	}
-	p.run(chromedp.SendKeys(`#fault-token`, token, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#fault-token`), token), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`(() => { const b = document.querySelector("#fault-add"); return !!b && !b.disabled; })()`)
 	var interposed string
 	p.eval(`document.querySelector("#fault-interposed").textContent`, &interposed)
@@ -50,16 +50,16 @@ func TestFaultRuleAddedAndDeletedThroughTheForm(t *testing.T) {
 	}
 
 	// Cancel discards what was typed, without asking again.
-	p.run(chromedp.Click(`#fault-add`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#fault-add`)))
 	p.waitFor(`document.activeElement === document.querySelector(".modal #fault-service")`)
-	p.run(chromedp.SendKeys(`.modal #fault-method`, "Get*", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #fault-method`), "Get*"))
 	p.clickText(`.modal button`, "Cancel")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.posts("/api/faults"); len(sent) != 0 {
 		t.Fatalf("Cancel sent a rule: %v", sent)
 	}
 
-	p.run(chromedp.Click(`#fault-add`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#fault-add`)))
 	p.waitFor(`document.activeElement === document.querySelector(".modal #fault-service")`)
 	var method string
 	p.eval(`document.querySelector(".modal #fault-method").value`, &method)
@@ -67,11 +67,11 @@ func TestFaultRuleAddedAndDeletedThroughTheForm(t *testing.T) {
 		t.Errorf("the reopened form kept %q from the cancelled one", method)
 	}
 	p.run(
-		chromedp.SetValue(`.modal #fault-service`, "tasks", chromedp.ByQuery),
-		chromedp.SendKeys(`.modal #fault-method`, "ListQueues", chromedp.ByQuery),
-		chromedp.SendKeys(`.modal #fault-project`, project, chromedp.ByQuery),
-		chromedp.SetValue(`.modal #fault-code`, "PERMISSION_DENIED", chromedp.ByQuery),
-		chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+		chromedp.SetValue(chromedp.CSS(`.modal #fault-service`), "tasks"),
+		chromedp.SendKeys(chromedp.CSS(`.modal #fault-method`), "ListQueues"),
+		chromedp.SendKeys(chromedp.CSS(`.modal #fault-project`), project),
+		chromedp.SetValue(chromedp.CSS(`.modal #fault-code`), "PERMISSION_DENIED"),
+		chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	row := fmt.Sprintf(`[...document.querySelectorAll("#fault-rule-rows tr")].find((r) => r.textContent.includes(%q))`, project)
 	p.waitFor(`document.querySelector(".modal") === null && ` + row + ` !== undefined`)
 	var id string
@@ -101,9 +101,9 @@ func TestFaultRuleAddedAndDeletedThroughTheForm(t *testing.T) {
 	}
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#fault-recent-rows tr")].some((r) => r.textContent.includes(%q) && r.textContent.includes("PERMISSION_DENIED"))`, id))
 
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Delete rule "+id), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Delete rule "+id))))
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, id, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), id), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && ` + row + ` === undefined`)
 	deleted = true
 	if sent := p.sent(http.MethodDelete, "/api/faults"); len(sent) != 1 {

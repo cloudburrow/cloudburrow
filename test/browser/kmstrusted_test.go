@@ -149,7 +149,7 @@ func TestKMSTrustedKeyWrappingThroughThePage(t *testing.T) {
 		{"algorithm", "AES_256_GCM"}, {"cryptoKeyBackend", inst}, {"trustedWrappingEnabled", "true"}} {
 		setField(p, ".modal.is-open", "f-"+f[0], f[1])
 	}
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null || [...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
 	var refused string
 	p.eval(`[...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &refused)
@@ -172,7 +172,7 @@ func TestKMSTrustedKeyWrappingThroughThePage(t *testing.T) {
 	p.clickText("#view .page-actions button", "Export trusted-wrapped")
 	p.waitFor(`document.querySelector(".modal.is-open #f-wrappingKey") !== null`)
 	setField(p, ".modal.is-open", "f-wrappingKey", wv)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table") !== null || [...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
 	var wrapped string
 	p.eval(`(() => { const t = document.querySelector("#action-result-table"); if (!t) return "";
@@ -194,7 +194,7 @@ func TestKMSTrustedKeyWrappingThroughThePage(t *testing.T) {
 	for _, f := range [][2]string{{"importingKey", wv}, {"algorithm", "AES_256_GCM"}, {"material", wrapped}} {
 		setField(p, ".modal.is-open", "f-"+f[0], f[1])
 	}
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null || [...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
 	p.eval(`[...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &refused)
 	if refused != "" {

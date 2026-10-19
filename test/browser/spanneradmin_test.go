@@ -49,21 +49,21 @@ func TestSpannerSchemaAndPartitionsThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.clickText("#view .page-actions button", "Update schema")
 	p.waitFor(`document.querySelector(".modal.is-open #f-statements") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-statements`, "CREATE TABLE Gadgets (Id INT64 NOT NULL) PRIMARY KEY (Id);", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-statements`), "CREATE TABLE Gadgets (Id INT64 NOT NULL) PRIMARY KEY (Id);"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#confirm-input") !== null && document.activeElement === document.querySelector("#confirm-input")`)
 	var confirm string
 	p.eval(`document.querySelector("#confirm-input").closest("form").textContent`, &confirm)
 	if !strings.Contains(confirm, "database "+db+" in instance "+inst) {
 		t.Errorf("the Update schema confirmation reads %q; want it to name database %s in instance %s", confirm, db, inst)
 	}
-	p.run(chromedp.SendKeys(`#confirm-input`, "wrong", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), "wrong"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`!document.querySelector("#confirm-input").closest("form").querySelector(".form-error").hidden`)
 	if sent := p.sent(http.MethodPost, actions); len(sent) != 0 {
 		t.Fatalf("Update schema confirmed with the wrong name was sent: %v", sent)
 	}
 	p.eval(`(() => { const f = document.querySelector("#confirm-input"); f.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(`#confirm-input`, db, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), db), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPost, actions); len(sent) != 1 {
 		t.Fatalf("the confirmed Update schema sent %d requests, want 1: %v", len(sent), sent)
@@ -77,17 +77,17 @@ func TestSpannerSchemaAndPartitionsThroughThePage(t *testing.T) {
 	p.navigate("/spanner" + q)
 	p.clickText("#view tbody a", inst)
 	p.waitFor(`document.querySelector("#tab-instance-configs") !== null`)
-	p.run(chromedp.Click(`#tab-instance-configs`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-instance-configs`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("emulator-config") && r.textContent.includes("Yes"))`)
 
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.clickText("#view .page-actions button", "Create instance partition")
 	p.waitFor(`document.querySelector(".modal.is-open #f-partition") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-partition`, "browser-part", chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-partition`), "browser-part"))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelector("#tab-partitions") !== null`)
-	p.run(chromedp.Click(`#tab-partitions`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-partitions`)))
 	// A row inside a page has no Inspect label; its link and its actions
 	// button name it.
 	const listed = `[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "browser-part")`
@@ -101,12 +101,12 @@ func TestSpannerSchemaAndPartitionsThroughThePage(t *testing.T) {
 	p.navigate("/spanner" + q)
 	p.clickText("#view tbody a", inst)
 	p.waitFor(`document.querySelector("#tab-partitions") !== null`)
-	p.run(chromedp.Click(`#tab-partitions`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-partitions`)))
 	p.waitFor(listed)
-	p.run(chromedp.Click(`button[aria-label="Actions for browser-part"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for browser-part"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete instance partition")
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "browser-part", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "browser-part"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && !` + listed)
 	if parts := readDataPage(t, "spanner", project, inst).rows("partitions"); len(parts) != 0 {
 		t.Errorf("the console API still lists partitions %v after Delete", parts)

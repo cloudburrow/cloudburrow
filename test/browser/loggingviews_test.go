@@ -43,10 +43,10 @@ func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create view")`)
 	p.clickText("#view .page-actions button", "Create view")
 	p.waitFor(`document.querySelector(".modal.is-open #f-id") !== null`)
-	p.run(chromedp.SendKeys(`.modal.is-open #f-id`, "errors", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-id`), "errors"))
 	setField("filter", "severity>=ERROR")
 	setField("description", "just errors")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if body := views(); !strings.Contains(body, `"errors"`) || !strings.Contains(body, "just errors") {
 		t.Fatalf("the console API does not list the view the browser created: %s", body)
@@ -54,16 +54,16 @@ func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 
 	// _AllLogs's menu offers Permissions alone (#1519); the new view's
 	// offers Edit and Delete too.
-	p.run(chromedp.Click(`#tab-views`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-views`)))
 	p.waitFor(`document.querySelector('button[aria-label="Actions for errors"]') !== null`)
-	p.run(chromedp.Click(`button[aria-label="Actions for _AllLogs"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for _AllLogs"]`)))
 	var allLogsItems []string
 	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((i) => i.textContent.trim())`, &allLogsItems)
 	if strings.Join(allLogsItems, ",") != "Permissions" {
 		t.Errorf("_AllLogs's row offers %v; want Permissions alone", allLogsItems)
 	}
 	p.run(chromedp.KeyEvent(kb.Escape))
-	p.run(chromedp.Click(`button[aria-label="Actions for errors"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for errors"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit")
 	p.waitFor(`document.querySelector(".modal.is-open #f-filter") !== null`)
 	var prefilled string
@@ -72,19 +72,19 @@ func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 		t.Errorf("Edit's filter is prefilled with %q, want the view's", prefilled)
 	}
 	setField("filter", "severity>=WARNING")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if body := views(); !strings.Contains(body, "severity\\u003e=WARNING") && !strings.Contains(body, "severity>=WARNING") {
 		t.Errorf("the console API does not read the filter the browser saved: %s", body)
 	}
 
 	p.waitFor(`document.querySelector("#tab-views") !== null`)
-	p.run(chromedp.Click(`#tab-views`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-views`)))
 	p.waitFor(`document.querySelector('button[aria-label="Actions for errors"]') !== null`)
-	p.run(chromedp.Click(`button[aria-label="Actions for errors"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for errors"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "errors", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "errors"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if body := views(); strings.Contains(body, `"errors"`) {
 		t.Errorf("the deleted view is still listed: %s", body)

@@ -207,6 +207,9 @@ func TestRunnableReportsTheRuntimeGap(t *testing.T) {
 	t.Parallel()
 	for _, m := range Models() {
 		ok, why := m.Runnable()
+		if ok && m.Runtime == RuntimeONNX && ONNXRuntimeCompiled {
+			continue // a -tags onnx build runs the ONNX models
+		}
 		if ok {
 			t.Errorf("%s reports runnable; the audit found no runtime that works in a cluster pod", m.ID)
 		}

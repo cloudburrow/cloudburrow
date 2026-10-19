@@ -71,13 +71,13 @@ func TestMemorystoreClusterServerCATabsThroughThePage(t *testing.T) {
 		p.navigate("/" + screen + q)
 		p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view button")].some((b) => b.textContent === %q)`, label))
 		p.clickText("#view button", label)
-		p.run(chromedp.WaitVisible(`form.create-page #f-id`, chromedp.ByQuery))
+		p.run(chromedp.WaitVisible(chromedp.CSS(`form.create-page #f-id`)))
 		for f, v := range fields {
 			p.setField("form.create-page #f-"+f, v)
 		}
-		p.run(chromedp.Click(`form.create-page #f-transitEncryption`, chromedp.ByQuery),
-			chromedp.Click(`form.create-page #f-iamAuth`, chromedp.ByQuery),
-			chromedp.Click(`form.create-page button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`form.create-page #f-transitEncryption`)),
+			chromedp.Click(chromedp.CSS(`form.create-page #f-iamAuth`)),
+			chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 		p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q) && document.querySelector("form.create-page") === null`, fields["id"]))
 	}
 	serverCA := func(screen, id string) (page, tab string) {

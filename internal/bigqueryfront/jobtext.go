@@ -254,8 +254,12 @@ func (j *jobTexts) serveJob(w http.ResponseWriter, project, rawID string, serve 
 	rec := newRecorder()
 	serve(rec)
 	body := rec.body.Bytes()
+	// Decoded whole only when patch can change it: a Job's configuration,
+	// or the statistics of a DML or DDL statement; a
+	// GetQueryResultsResponse's rows are otherwise not read (#1639).
 	var job map[string]any
-	if rec.status == http.StatusOK && json.Unmarshal(body, &job) == nil {
+	if head, ok := readJobHead(body); rec.status == http.StatusOK && ok && (len(head.Configuration) > 0 || t.dml != nil || t.ddl != nil) &&
+		json.Unmarshal(body, &job) == nil {
 		t.patch(job)
 		if b, err := json.Marshal(job); err == nil {
 			body = b
@@ -267,22 +271,13 @@ func (j *jobTexts) serveJob(w http.ResponseWriter, project, rawID string, serve 
 	rec.copyTo(w)
 }
 
-// serveJobList answers jobs.list (serve) with the client's text in each
-// job whose text the front changed.
-func (j *jobTexts) serveJobList(w http.ResponseWriter, serve func(http.ResponseWriter)) {
-	if j.none() {
-		serve(w)
-		return
+// listed is l, an answer to jobs.list, with the client's text in each
+// job whose text the front changed, changed in place (joblisting.go).
+func (j *jobTexts) listed(l jobListing) jobListing {
+	if l.list == nil || j.none() {
+		return l
 	}
-	rec := newRecorder()
-	serve(rec)
-	var list map[string]any
-	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-		rec.copyTo(w)
-		return
-	}
-	jobs, _ := list["jobs"].([]any)
-	changed := false
+	jobs := l.jobs()
 	for i, item := range jobs {
 		job, ok := item.(map[string]any)
 		if !ok {
@@ -304,11 +299,6 @@ func (j *jobTexts) serveJobList(w http.ResponseWriter, serve func(http.ResponseW
 				}
 			}
 		}
-		changed = true
 	}
-	if !changed {
-		rec.copyTo(w)
-		return
-	}
-	writeJSON(w, http.StatusOK, list)
+	return l
 }

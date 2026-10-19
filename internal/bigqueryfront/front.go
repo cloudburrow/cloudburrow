@@ -222,6 +222,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
 	settings := &projectOptions{}                   // projectoptions.go, #1375
 	jobRows := &jobsTable{}                         // jobstable.go, #1378
+	newest := &newestJobs{}                         // joblisting.go, #1633
 	tables := &tableSettings{}                      // tableoptions.go, #1390
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
@@ -284,28 +285,28 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			buffers.reset()
 			settings.reset()
 			jobRows.reset()
+			newest.reset()
 			tables.reset()
 			linked.reset()
 			models.reset()
 			buffers.syncEngine(next, o.logf) // #1487: a restarted engine's clock is the system's
 		})
 	}
-	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
+	// listJobs answers jobs.list, r a GET of a project's jobs: here, and
 	// for a query of INFORMATION_SCHEMA.JOBS (infoschemajobs.go, #1275).
-	listJobs := func(w http.ResponseWriter, r *http.Request) {
+	// The engine's list is decoded once, and each layer changes it in
+	// place (joblisting.go, #1639).
+	listJobs := func(r *http.Request) jobListing {
 		j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath())
 		if j == nil {
-			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: not a jobs.list path")
-			return
+			return errorListing(http.StatusInternalServerError, "internalError", "cloudburrow: not a jobs.list path")
 		}
 		base := j[1] + "/projects/" + j[2]
-		texts.serveJobList(w, func(w http.ResponseWriter) {
-			configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) {
-				records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
-					own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) { failed.listJobs(engineJobs(next), w, r) })
-				})
-			})
+		project := projectOf("/" + j[2])
+		l := records.listJobs(r, project, func() jobListing {
+			return own.listed(r, project, failed.listed(engineListing(next, r, project, newest)))
 		})
+		return texts.listed(configs.listed(r, next, base, l))
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
@@ -362,7 +363,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// configurations before paging read every job of the project,
 			// the front's own check queries too, and outlasted a client
 			// (landing run 36437541734).
-			listJobs(w, r)
+			listJobs(r).write(w)
 			return
 		}
 		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil {
@@ -392,7 +393,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
+				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
@@ -593,10 +594,10 @@ type front struct {
 	// policies are the tables' row access policies (rowpolicies.go,
 	// #1218), or nil.
 	policies *rowPolicies
-	// listJobs serves jobs.list for a GET of a project's jobs, the
-	// records INFORMATION_SCHEMA.JOBS reads (infoschemajobs.go, #1275),
-	// or is nil.
-	listJobs func(http.ResponseWriter, *http.Request)
+	// listJobs answers jobs.list for a GET of a project's jobs, decoded
+	// (joblisting.go), the records INFORMATION_SCHEMA.JOBS reads
+	// (infoschemajobs.go, #1275), or is nil.
+	listJobs func(*http.Request) jobListing
 	// iam are the tables' and routines' IAM policies (iam.go, #1231),
 	// which OBJECT_PRIVILEGES reads (#1355), or nil.
 	iam *iamPolicies
@@ -606,6 +607,9 @@ type front struct {
 	// jobsTable is the table of INFORMATION_SCHEMA.JOBS rows
 	// (jobstable.go, #1378), or nil.
 	jobsTable *jobsTable
+	// newest are the last job the engine listed of each project
+	// (joblisting.go, #1633), or nil.
+	newest *newestJobs
 	// resourceManager is the instance's Resource Manager, which
 	// JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION read the project's ancestry
 	// from (infoschemahierarchy.go, #1392), or "".

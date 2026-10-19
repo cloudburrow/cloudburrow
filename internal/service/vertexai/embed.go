@@ -22,30 +22,60 @@ const EmbeddingModelDisplayName = "EmbeddingGemma 300M, community ONNX int8 conv
 // ProvenanceHeader carries the model's provenance on every embedding response.
 const ProvenanceHeader = "X-CloudBurrow-Model-Provenance"
 
-// SetEmbedder installs the embedding runtime. unavailable, when e is nil,
-// is the reason given with the 501 every :predict then receives.
+// EmbeddingModel2DisplayName is EmbeddingModelDisplayName for EmbeddingGemma
+// 2 (#1454).
+const EmbeddingModel2DisplayName = "EmbeddingGemma 2, community ONNX int8 conversion " +
+	"(onnx-community) — NOT an official Google artifact"
+
+// embeddingDisplayName is the display name reported for model id.
+func embeddingDisplayName(id string) string {
+	if id == localai.EmbeddingGemma2ONNXID {
+		return EmbeddingModel2DisplayName
+	}
+	return EmbeddingModelDisplayName
+}
+
+// SetEmbedder installs the EmbeddingGemma runtime. unavailable, when e is
+// nil, is the reason given with the 501 every :predict then receives.
 func (s *Server) SetEmbedder(e embedding.Embedder, unavailable error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.embedder, s.embedUnavailable = e, unavailable
+	s.SwapModelEmbedder(localai.EmbeddingGemmaONNXID, e, unavailable)
 }
 
 // SwapEmbedder installs e, or with e nil unloads the runtime with
 // unavailable as the reason, and returns the embedder it replaced for the
 // caller to close (#1306).
 func (s *Server) SwapEmbedder(e embedding.Embedder, unavailable error) embedding.Embedder {
+	return s.SwapModelEmbedder(localai.EmbeddingGemmaONNXID, e, unavailable)
+}
+
+// EmbedderLoaded reports whether the EmbeddingGemma runtime is installed.
+func (s *Server) EmbedderLoaded() bool {
+	return s.ModelEmbedderLoaded(localai.EmbeddingGemmaONNXID)
+}
+
+// SwapModelEmbedder is SwapEmbedder for embedding model id, one of
+// localai.EmbeddingModelIDs.
+func (s *Server) SwapModelEmbedder(id string, e embedding.Embedder, unavailable error) embedding.Embedder {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	old := s.embedder
-	s.embedder, s.embedUnavailable = e, unavailable
+	if s.embedders == nil {
+		s.embedders, s.embedUnavailable = map[string]embedding.Embedder{}, map[string]error{}
+	}
+	old := s.embedders[id]
+	if e == nil {
+		delete(s.embedders, id)
+	} else {
+		s.embedders[id] = e
+	}
+	s.embedUnavailable[id] = unavailable
 	return old
 }
 
-// EmbedderLoaded reports whether an embedding runtime is installed.
-func (s *Server) EmbedderLoaded() bool {
+// ModelEmbedderLoaded reports whether model id's runtime is installed.
+func (s *Server) ModelEmbedderLoaded(id string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.embedder != nil
+	return s.embedders[id] != nil
 }
 
 // PredictRequest is the Vertex text-embedding :predict subset served.
@@ -90,17 +120,26 @@ func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested strin
 // provenanceValue is ProvenanceHeader's value, sent as gRPC metadata too.
 const provenanceValue = "community; not an official Google artifact"
 
-// checkEmbeddingModel refuses any model but the one embedding identity
+// checkEmbeddingModel refuses any model but the embedding identities
 // served, for :predict and embedContent alike. No substitution is performed.
 func checkEmbeddingModel(requested, verb string) error {
-	if strings.EqualFold(strings.TrimSpace(requested), localai.EmbeddingGemmaONNXID) {
-		return nil
+	_, err := embeddingModelID(requested, verb)
+	return err
+}
+
+// embeddingModelID is the catalogue ID of the embedding model requested.
+func embeddingModelID(requested, verb string) (string, error) {
+	r := strings.ToLower(strings.TrimSpace(requested))
+	for _, id := range localai.EmbeddingModelIDs {
+		if r == id {
+			return id, nil
+		}
 	}
-	return apierror.NotFound(
-		"model %q is not served for %s; the only embedding model here is %q, "+
-			"a community ONNX conversion of EmbeddingGemma that is not an official Google artifact. "+
+	return "", apierror.NotFound(
+		"model %q is not served for %s; the embedding models here are %q and %q, "+
+			"community ONNX conversions of EmbeddingGemma and EmbeddingGemma 2 that are not official Google artifacts. "+
 			"No substitution is performed",
-		requested, verb, localai.EmbeddingGemmaONNXID)
+		requested, verb, localai.EmbeddingGemmaONNXID, localai.EmbeddingGemma2ONNXID)
 }
 
 // embeddingsUnavailable is the 501 every embedding method answers when the
@@ -178,6 +217,6 @@ func (s *Server) embedPredict(ctx context.Context, requested string, body io.Rea
 		"predictions":      preds,
 		"metadata":         map[string]any{"billableCharacterCount": chars},
 		"model":            e.Model(),
-		"modelDisplayName": EmbeddingModelDisplayName,
+		"modelDisplayName": embeddingDisplayName(e.Model()),
 	}, nil
 }

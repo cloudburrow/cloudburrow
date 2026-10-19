@@ -96,7 +96,7 @@ func TestKMSEkmConnectionsThroughTheBrowser(t *testing.T) {
 	setField(p, scope, "f-serviceDirectoryService", loc+"/namespaces/ekm/services/replica")
 	setField(p, scope, "f-hostname", host)
 	setField(p, scope, "f-certificate", ekmCertificatePEM(t, host))
-	p.run(chromedp.Click(scope+` button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(scope + ` button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, host))
 
 	got, err := c.GetEkmConnection(ctx, &kmspb.GetEkmConnectionRequest{Name: name})
@@ -117,7 +117,7 @@ func TestKMSEkmConnectionsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-keyManagementMode") !== null`)
 	setField(p, ".modal.is-open", "f-keyManagementMode", "CLOUD_KMS")
 	setField(p, ".modal.is-open", "f-cryptoSpacePath", "v0/longlived/browser")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err = c.GetEkmConnection(ctx, &kmspb.GetEkmConnectionRequest{Name: name})
 	if err != nil || got.GetKeyManagementMode() != kmspb.EkmConnection_CLOUD_KMS || got.GetCryptoSpacePath() != "v0/longlived/browser" {
@@ -189,7 +189,7 @@ func TestKMSAutokeyThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-keyProject") !== null`)
 	setField(p, ".modal.is-open", "f-keyProjectResolutionMode", "DEDICATED_KEY_PROJECT")
 	setField(p, ".modal.is-open", "f-keyProject", "projects/"+project)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	cfg, err := admin.GetAutokeyConfig(ctx, &kmspb.GetAutokeyConfigRequest{Name: cfgName})
@@ -214,7 +214,7 @@ func TestKMSAutokeyThroughTheBrowser(t *testing.T) {
 	setField(p, scope, "f-location", "us-central1")
 	setField(p, scope, "f-resourceTypeSelector", "storage.googleapis.com/Bucket")
 	setField(p, scope, "f-keyHandleId", "browser-bucket")
-	p.run(chromedp.Click(scope+` button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(scope + ` button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#f-keyHandleId") === null`)
 	p.clickText("#view tbody a", cfgName)
 	p.clickText("#view .tab-strip .tab", "Key handles")

@@ -83,7 +83,7 @@ func TestBigtableInstancePickerThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-table") !== null`)
 	p.setField(".modal #f-table", table)
 	p.setField(".modal #f-families", "cf")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if tables, err := admin.Tables(ctx); err != nil || strings.Join(tables, ",") != table {
 		t.Fatalf("after Create table in %s, its tables are %v, %v", id, tables, err)
@@ -106,7 +106,7 @@ func TestBigtableInstancePickerThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/bigtable-instances/" + id + q)
 	p.waitFor(`document.querySelector("#tab-tables") !== null`)
-	p.run(chromedp.Click(`#tab-tables`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-tables`)))
 	p.clickText("#view td a", table)
 	p.waitFor(fmt.Sprintf(`location.pathname === "/bigtable/%s" && new URLSearchParams(location.search).get("instance") === %q`, table, id))
 	p.waitFor(`document.querySelector("#tab-families") !== null`)

@@ -62,12 +62,12 @@ func TestInstanceResetConfirmedByTypingTheScope(t *testing.T) {
 	if !strings.HasSuffix(file, "admin-token") {
 		t.Errorf("the token form names the token file %q, want the instance's admin-token path", file)
 	}
-	p.run(chromedp.SendKeys(`#instance-token`, token, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#instance-token`), token), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector("#instance-reset-tasks") !== null`)
 
 	// Naming a project leaves only what can be reset by project; of those,
 	// only tasks is kept.
-	p.run(chromedp.SendKeys(`#instance-reset-project`, project, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`#instance-reset-project`), project))
 	var boxes []struct {
 		Name              string
 		ByProject, Enable bool
@@ -92,7 +92,7 @@ func TestInstanceResetConfirmedByTypingTheScope(t *testing.T) {
 	}
 
 	openConfirm := func() {
-		p.run(chromedp.Click(`#instance-reset`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`#instance-reset`)))
 		p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
 	}
 	openConfirm()
@@ -103,7 +103,7 @@ func TestInstanceResetConfirmedByTypingTheScope(t *testing.T) {
 		t.Errorf("the confirmation is headed %q with the button %q; want Reset project %s and Reset", title, label, project)
 	}
 	// Cancel discards without asking, whatever was typed.
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, project, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), project))
 	p.clickText(".modal .modal-actions button", "Cancel")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.posts("/api/instance/reset"); len(sent) != 0 {
@@ -112,7 +112,7 @@ func TestInstanceResetConfirmedByTypingTheScope(t *testing.T) {
 
 	// Another word is refused on the form.
 	openConfirm()
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "all", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "all"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -124,7 +124,7 @@ func TestInstanceResetConfirmedByTypingTheScope(t *testing.T) {
 	}
 
 	p.eval(`document.querySelector(".modal #confirm-input").value = ""`, nil)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, project, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), project), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && document.querySelector("#instance-reset-result").textContent !== ""`)
 	sent := p.posts("/api/instance/reset")
 	if len(sent) != 1 {

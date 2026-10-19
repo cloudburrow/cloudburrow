@@ -59,7 +59,7 @@ func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testin
 	setField(p, scope, "f-location", "us-east1")
 	setField(p, scope, "f-description", "made in the browser")
 	setField(p, scope, "f-labels", "team=web")
-	p.run(chromedp.Click(scope+` button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(scope + ` button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, id))
 	r, err := c.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: name})
 	if err != nil || r.GetFormat() != arpb.Repository_DOCKER || r.GetDescription() != "made in the browser" || r.GetLabels()["team"] != "web" {

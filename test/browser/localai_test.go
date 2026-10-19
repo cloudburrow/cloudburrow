@@ -3,8 +3,13 @@
 package browser
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"strings"
 	"testing"
@@ -89,4 +94,87 @@ func TestStudioManagesLocalModelsAndTestsEmbeddings(t *testing.T) {
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, model+` button[data-action="unload"]`))
 	p.navigate("/ai/playground")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q)?.children[3]?.textContent === "Loaded"`, row))
+}
+
+// TestEmbeddingsPageEmbedsAnImage (#1454) needs EmbeddingGemma 2 downloaded
+// and loaded (TestEmbedContentEmbedsImagesThroughThePredictionClient in
+// test/compat does both). An image chosen on the Embeddings page switches
+// the request to EmbedContent on that model and is embedded beside two
+// texts; the image's row shows its 768 values and 260 tokens, and its
+// cosine similarity is higher with the text that describes it.
+func TestEmbeddingsPageEmbedsAnImage(t *testing.T) {
+	needService(t, "ai-local")
+	needService(t, "ai-embed")
+	const model2 = "embeddinggemma-2-onnx-community"
+	_, body := consoleDo(t, http.MethodGet, "/api/ai/local-models", "")
+	var list struct {
+		Models []struct {
+			ID     string
+			Loaded bool
+		}
+	}
+	_ = json.Unmarshal([]byte(body), &list)
+	loaded := false
+	for _, m := range list.Models {
+		loaded = loaded || (m.ID == model2 && m.Loaded)
+	}
+	if !loaded {
+		t.Skipf("%s is not loaded; load it on the Local models page (TestEmbedContentEmbedsImagesThroughThePredictionClient does)", model2)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 768, 768))
+	for y := 0; y < 768; y++ {
+		for x := 0; x < 768; x++ {
+			c := color.RGBA{255, 255, 255, 255}
+			if (x-384)*(x-384)+(y-384)*(y-384) < 250*250 {
+				c = color.RGBA{220, 20, 30, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		t.Fatal(err)
+	}
+
+	p := open(t)
+	p.navigate("/ai/embeddings")
+	p.waitFor(`document.querySelector("#emb-images") !== null`)
+	p.setField("#emb-texts", "a red circle\na blue square")
+	p.eval(fmt.Sprintf(`(() => {
+		const bytes = Uint8Array.from(atob(%q), (c) => c.charCodeAt(0));
+		const dt = new DataTransfer();
+		dt.items.add(new File([bytes], "circle.png", { type: "image/png" }));
+		const input = document.querySelector("#emb-images");
+		input.files = dt.files;
+		input.dispatchEvent(new Event("change"));
+		return true;
+	})()`, base64.StdEncoding.EncodeToString(b.Bytes())), new(bool))
+	var picked []string
+	p.eval(`[document.querySelector("#emb-model").value, document.querySelector("#emb-method").value]`, &picked)
+	if len(picked) != 2 || picked[0] != model2 || picked[1] != "embedContent" {
+		t.Fatalf("after choosing an image the model and method read %v; want %s and embedContent", picked, model2)
+	}
+	p.clickText("button", "Embed")
+	p.waitFor(`document.querySelectorAll("#emb-results tbody tr").length === 3 || /\[error\]/.test(document.body.textContent)`)
+	var rows [][]string
+	p.eval(`[...document.querySelectorAll("#emb-results tbody tr")].map((tr) => [...tr.children].map((td) => td.textContent.trim()))`, &rows)
+	if len(rows) != 3 {
+		var text string
+		p.eval(`document.querySelector("main").textContent`, &text)
+		t.Fatalf("the Embeddings view shows %d results: %s", len(rows), text)
+	}
+	if r := rows[2]; r[0] != "[image] circle.png" || r[1] != "768" || r[2] != "260" {
+		t.Errorf("the image's row reads %v; want [image] circle.png, 768 values and 260 tokens", r)
+	}
+	var sim []string
+	p.eval(`[...document.querySelectorAll("#emb-similarity tbody td")].map((td) => td.textContent.trim())`, &sim)
+	// Row 3 is the image: its similarity with "a red circle", then "a blue square".
+	if len(sim) != 9 || !(sim[6] > sim[7]) {
+		t.Errorf("the cosine similarity matrix reads %v; want the image nearer \"a red circle\"", sim)
+	}
+	var request string
+	p.eval(`document.querySelector("#emb-request").textContent`, &request)
+	if !strings.Contains(request, "inlineData") || !strings.Contains(request, model2+":embedContent") {
+		t.Errorf("the request shown is %q; want the EmbedContent inlineData request", request)
+	}
 }

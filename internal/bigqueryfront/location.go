@@ -283,36 +283,81 @@ func (f front) requestJobLocation(r *http.Request, insert bool) string {
 // withJobLocations serves r through serve, giving every job resource of
 // its answer (the answer itself, its "job", each of its "jobs") with no
 // jobReference.location the location loc, else the default.
+//
+// Only the job references are decoded (#1639): the answer was decoded
+// whole, and a jobs.list of 10,000 jobs, or the rows of a query of every
+// one's INFORMATION_SCHEMA.JOBS row, cost the front a map of every value
+// to write one field (measured in the pod: about 130 MB of its 190 MB heap at
+// its peak was such an answer, decoded here). The rest of the answer is
+// kept as the engine wrote it.
 func withJobLocations(w http.ResponseWriter, loc string, serve func(http.ResponseWriter)) {
 	if loc == "" {
 		loc = defaultLocation // a request the front could not read
 	}
 	rec := newRecorder()
 	serve(rec)
-	var resp map[string]any
-	dec := json.NewDecoder(bytes.NewReader(rec.body.Bytes()))
-	dec.UseNumber()
-	if rec.status != 0 && rec.status != http.StatusOK || dec.Decode(&resp) != nil || resp == nil {
+	var resp map[string]json.RawMessage
+	if rec.status != 0 && rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &resp) != nil || resp == nil {
 		rec.copyTo(w)
 		return
 	}
 	changed := false
-	fill := func(v any) {
-		job, _ := v.(map[string]any)
-		ref, _ := job["jobReference"].(map[string]any)
-		if ref == nil {
-			return
+	// located gives the job ref's location, reporting whether it did.
+	located := func(job map[string]json.RawMessage) bool {
+		raw, ok := job["jobReference"]
+		if !ok {
+			return false
 		}
-		if have, _ := ref["location"].(string); have == "" {
-			ref["location"] = loc
-			changed = true
+		var ref map[string]any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if dec.Decode(&ref) != nil || ref == nil {
+			return false
 		}
+		if have, _ := ref["location"].(string); have != "" {
+			return false
+		}
+		ref["location"] = loc
+		b, err := json.Marshal(ref)
+		if err != nil {
+			return false
+		}
+		job["jobReference"] = b
+		return true
 	}
-	fill(resp)
-	fill(resp["job"])
-	if jobs, _ := resp["jobs"].([]any); jobs != nil {
-		for _, j := range jobs {
-			fill(j)
+	// fill is raw, a job, with its location.
+	fill := func(raw json.RawMessage) json.RawMessage {
+		var job map[string]json.RawMessage
+		if json.Unmarshal(raw, &job) != nil || job == nil || !located(job) {
+			return raw
+		}
+		b, err := json.Marshal(job)
+		if err != nil {
+			return raw
+		}
+		changed = true
+		return b
+	}
+	if located(resp) {
+		changed = true
+	}
+	if raw, ok := resp["job"]; ok {
+		resp["job"] = fill(raw)
+	}
+	if raw, ok := resp["jobs"]; ok {
+		var jobs []json.RawMessage
+		if json.Unmarshal(raw, &jobs) == nil && jobs != nil {
+			was := changed
+			changed = false
+			for i, j := range jobs {
+				jobs[i] = fill(j)
+			}
+			if changed {
+				if b, err := json.Marshal(jobs); err == nil {
+					resp["jobs"] = b
+				}
+			}
+			changed = changed || was
 		}
 	}
 	if !changed {

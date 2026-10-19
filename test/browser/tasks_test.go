@@ -63,7 +63,7 @@ func TestTasksEditQueueThroughTheForm(t *testing.T) {
 
 	openEdit()
 	setAttempts("-2")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -74,7 +74,7 @@ func TestTasksEditQueueThroughTheForm(t *testing.T) {
 	p.forgive()
 
 	setAttempts("7")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/tasks"); len(sent) != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2: %v", len(sent), sent)

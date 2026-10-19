@@ -33,16 +33,16 @@ func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 
 	p.navigate("/kms/keyrings?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create key ring")`)
-	p.run(chromedp.Click(`#view .state button.primary`, chromedp.ByQuery))
-	p.run(chromedp.WaitVisible(`.modal #f-keyRingId`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
+	p.run(chromedp.WaitVisible(chromedp.CSS(`.modal #f-keyRingId`)))
 	var form struct{ Focus, Location string }
 	p.eval(`({ Focus: document.activeElement.id, Location: document.querySelector(".modal #f-location").value })`, &form)
 	if form.Focus != "f-keyRingId" || form.Location != "global" {
 		t.Errorf("the Create key ring dialog opened with focus on #%s and location %q; want the name focused and global", form.Focus, form.Location)
 	}
 
-	p.run(chromedp.SendKeys(`.modal #f-keyRingId`, "browser-ring", chromedp.ByQuery),
-		chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-keyRingId`), "browser-ring"),
+		chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ring))
 	if posts := p.posts("/api/resources/kms"); len(posts) != 1 {
@@ -70,7 +70,7 @@ func TestSchedulerPauseFromARow(t *testing.T) {
 	p.waitFor(fmt.Sprintf(`(() => { const s = document.querySelector(%q); return !!s && s.textContent.trim() === "ENABLED"; })()`, status))
 
 	menu := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+job)
-	p.run(chromedp.Click(menu, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(menu)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Pause")
 	p.waitFor(fmt.Sprintf(`(() => { const s = document.querySelector(%q); return !!s && s.textContent.trim() === "PAUSED"; })()`, status))
 	if sent := p.sent(http.MethodPost, "/api/actions/scheduler"); len(sent) != 1 {
@@ -92,7 +92,7 @@ func TestSchedulerPauseFromARow(t *testing.T) {
 		t.Errorf("the console API does not read the job paused from the browser as PAUSED: %s", body)
 	}
 
-	p.run(chromedp.Click(menu, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(menu)))
 	var items []string
 	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent)`, &items)
 	if !contains(items, "Resume") || contains(items, "Pause") {
@@ -123,12 +123,12 @@ func TestSubscriptionsDeleteConfirmedByName(t *testing.T) {
 	p.navigate("/pubsub/subscriptions?project=" + project)
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+sub)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+sub), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+sub))))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null && document.activeElement === document.querySelector(".modal #confirm-input")`)
 
 	// The short name is not the name.
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "browser-topic-sub", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "browser-topic-sub"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -140,7 +140,7 @@ func TestSubscriptionsDeleteConfirmedByName(t *testing.T) {
 	}
 
 	p.eval(`(() => { const f = document.querySelector(".modal #confirm-input"); f.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, sub, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), sub), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if sent := p.sent(http.MethodDelete, "/api/resources/pubsub-subscriptions"); len(sent) != 1 {
 		t.Errorf("the delete was sent %d times, want once: %v", len(sent), sent)
@@ -229,7 +229,7 @@ func (p *tab) clickText(sel, text string) {
 	p.waitFor(find + ` !== undefined`)
 	p.eval(fmt.Sprintf(`(() => { document.querySelectorAll("[data-cb-click]").forEach((n) => n.removeAttribute("data-cb-click"));
 		%s.setAttribute("data-cb-click", ""); return true; })()`, find), nil)
-	p.run(chromedp.Click(`[data-cb-click]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
 }
 
 // sent are the requests the page made with a method to a path on the console.
@@ -333,7 +333,7 @@ func TestSchedulerEditJobThroughTheForm(t *testing.T) {
 
 	openEdit()
 	setSchedule("61 * * * *")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -344,7 +344,7 @@ func TestSchedulerEditJobThroughTheForm(t *testing.T) {
 	p.forgive()
 
 	setSchedule("30 9 * * 1")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/scheduler"); len(sent) != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2: %v", len(sent), sent)

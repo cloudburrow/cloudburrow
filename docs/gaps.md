@@ -165,11 +165,12 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 `ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285); `DirectRawPredict`,
 `StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477); `Explain` with integrated gradients, XRAI or
 examples, now `INVALID_ARGUMENT` on a custom container as Vertex documents (they are for TensorFlow
-models only; Sampled Shapley, the custom-container method, is served) (#1454).
+models only; Sampled Shapley, the custom-container method, is served) (#1454); `EmbedContent` with images, on
+EmbeddingGemma 2's community ONNX conversion (#1454).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are `INVALID_ARGUMENT`, because the one embedding model served (EmbeddingGemma) is text-only, as Google's text-only `gemini-embedding-001` is; multimodal input needs a multimodal model (Google's `gemini-embedding-2`) run locally: an image, video, audio and PDF encoder sharing one vector space, which no local model here provides (#1454) | no emulator support (one text-only model) | L |
+| `EmbedContent` embeds text and PNG or JPEG images on `embeddinggemma-2-onnx-community` (#1454), but not video, audio or PDF: an `inline_data` part of another type, `document_ocr` and `audio_track_extraction` are `INVALID_ARGUMENT`, because only EmbeddingGemma 2's text model and vision encoder are served (its audio encoder is not pinned, and no video demuxer, audio decoder or PDF renderer is built in); `file_data` (a `gs://` image) is `INVALID_ARGUMENT` too, as the local PredictionService reads no Cloud Storage; WebP, BMP, HEIC, HEIF and AVIF images need decoders outside Go's standard library (#1651) | no emulator support (video, audio, PDF decoding; Cloud Storage reads) | L |
 
 ## BigQuery
 

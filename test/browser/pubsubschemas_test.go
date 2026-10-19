@@ -38,14 +38,14 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 		p.waitFor(`document.querySelector(".modal") === null`)
 		p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create schema")`)
 		p.clickText(`#view .state button.primary`, "Create schema")
-		p.run(chromedp.WaitVisible(`.modal #f-definition`, chromedp.ByQuery))
+		p.run(chromedp.WaitVisible(chromedp.CSS(`.modal #f-definition`)))
 	}
 
 	p.navigate("/pubsub/schemas?project=" + project)
 
 	// Cancel discards without asking.
 	openCreate()
-	p.run(chromedp.SendKeys(`.modal #f-name`, "discarded-schema", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-name`), "discarded-schema"))
 	setDefinition(`{"type":"record"`)
 	p.clickText(".modal .modal-actions button", "Cancel")
 	p.waitFor(`document.querySelector(".modal") === null`)
@@ -55,9 +55,9 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 
 	// An invalid definition: ValidateSchema's refusal, on the open form.
 	openCreate()
-	p.run(chromedp.SendKeys(`.modal #f-name`, "browser-schema", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-name`), "browser-schema"))
 	setDefinition(`{"type":"record"`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal .form-error") !== null && !document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -76,7 +76,7 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 
 	// The same form, corrected: the schema is created and listed.
 	setDefinition(`{"type":"record","name":"Burrow","fields":[{"name":"name","type":"string"}]}`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+schema)
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) !== null`, row))
 	if posts := p.posts(created); len(posts) != 2 {
@@ -88,16 +88,16 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 	}
 
 	// Delete from its row, confirmed by the schema's name.
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+schema), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+schema))))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null && document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "browser-schema", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "browser-schema"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	if sent := p.sent(http.MethodDelete, created); len(sent) != 0 {
 		t.Fatalf("a delete confirmed with the short name was sent: %v", sent)
 	}
 	p.eval(`(() => { const f = document.querySelector(".modal #confirm-input"); f.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, schema, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), schema), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if sent := p.sent(http.MethodDelete, created); len(sent) != 1 {
 		t.Errorf("the delete was sent %d times, want once: %v", len(sent), sent)

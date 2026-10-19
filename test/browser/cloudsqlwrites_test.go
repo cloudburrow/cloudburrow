@@ -48,11 +48,11 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 
 			p.navigate("/" + engine.service + "/cloudburrow" + q)
 			p.waitFor(`document.querySelector("#tab-query") !== null`)
-			p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+			p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
 			p.waitFor(`document.querySelector("#view .query-editor") !== null && document.querySelector("#view .query-mode") !== null`)
 			statement := func(sql string) {
 				p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
-				p.run(chromedp.SendKeys(`#view .query-editor`, sql, chromedp.ByQuery))
+				p.run(chromedp.SendKeys(chromedp.CSS(`#view .query-editor`), sql))
 			}
 			alert := func() string {
 				p.waitFor(`[...document.querySelectorAll("#view .form-error[role=alert]")].some((e) => !e.hidden)`)
@@ -81,7 +81,7 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 				t.Errorf("a CREATE TABLE in Read-only was answered %q, want %q", got, engine.readOnly)
 			}
 
-			p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+			p.run(chromedp.Click(chromedp.CSS(`#view .query-mode input[value="read-write"]`)))
 			p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
 			var hint string
 			p.eval(`document.querySelector("#view .query-pane .card > p.unavailable").textContent`, &hint)
@@ -112,7 +112,7 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 			statement("INSERT INTO " + table + " (id, name) VALUES (1, 'one'), (2, 'two')")
 			confirmed(engine.inserted)
 
-			p.run(chromedp.Click(`#view .query-mode input[value="read-only"]`, chromedp.ByQuery))
+			p.run(chromedp.Click(chromedp.CSS(`#view .query-mode input[value="read-only"]`)))
 			p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run"`)
 			statement("SELECT name FROM " + table + " ORDER BY id")
 			p.clickText("#view .query-pane button.primary", "Run")
@@ -131,7 +131,7 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 				t.Fatalf("after the list poll the Query tab shows %d result rows, want the SELECT's 2", kept)
 			}
 
-			p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+			p.run(chromedp.Click(chromedp.CSS(`#view .query-mode input[value="read-write"]`)))
 			statement("DROP TABLE " + table)
 			confirmed(engine.dropped)
 			if tables := readDataPage(t, engine.service, project, "cloudburrow").rows("tables"); tables[table] != nil {

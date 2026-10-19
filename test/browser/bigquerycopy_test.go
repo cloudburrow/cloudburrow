@@ -59,10 +59,10 @@ func TestBigQueryCopyTableAndAvroExportThroughTheForms(t *testing.T) {
 	p.navigate("/bigquery/" + ds + "/a" + q)
 	p.clickText("#view .page-actions button", "Copy table")
 	p.waitFor(`document.querySelector(".modal #f-moreSources") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-datasetId`, ds, chromedp.ByQuery))
-	p.run(chromedp.SendKeys(`.modal #f-tableId`, "all", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-datasetId`), ds))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "all"))
 	p.setField(".modal #f-moreSources", ds+".b")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	var link struct{ Text, Href string }
 	p.eval(`(() => { const a = document.querySelector("#action-result-table a");
@@ -84,10 +84,10 @@ func TestBigQueryCopyTableAndAvroExportThroughTheForms(t *testing.T) {
 	p.navigate("/bigquery/" + ds + "/all" + q)
 	p.clickText("#view .page-actions button", "Export to Cloud Storage")
 	p.waitFor(`document.querySelector(".modal #f-uri") !== null`)
-	p.run(chromedp.SendKeys(`.modal #f-uri`, "gs://"+bucket+"/all.avro", chromedp.ByQuery))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-uri`), "gs://"+bucket+"/all.avro"))
 	p.setField(".modal #f-format", "AVRO")
 	p.setField(".modal #f-compression", "DEFLATE")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	p.eval(`[...document.querySelectorAll("#action-result-table td")].map((c) => c.textContent)`, &cells)
 	if len(cells) != 3 || cells[1] != "Succeeded" || cells[2] != "1" {

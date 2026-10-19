@@ -2,6 +2,7 @@ package vertexai
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
 )
 
 // PredictionService.EmbedContent (#1244), over REST
@@ -24,13 +26,24 @@ import (
 // and auto_truncate, whether set at the top level or in embed_content_config.
 // What it cannot is refused, naming the field: a non-text part, document_ocr
 // and audio_track_extraction (EmbeddingGemma embeds text only).
+//
+// EmbeddingGemma 2 (#1454) also embeds images: an inline_data part holding a
+// PNG or JPEG image, up to embedding.MaxImages of them, alone or between text
+// parts, into one vector, as Google's gemini-embedding-2 embeds a Content's
+// parts. file_data (a gs:// URI), video, audio, PDF, document_ocr and
+// audio_track_extraction are refused, naming the field.
+
+// embedContentRequestBytes bounds a REST :embedContent body, which may carry
+// images as base64: 20 MiB, the inline request size Vertex documents for
+// Gemini. gRPC's bound is the transport's 32 MiB.
+const embedContentRequestBytes = 20 << 20
 
 // strictJSON rejects a field the request type does not have, as Vertex does.
 var strictJSON = protojson.UnmarshalOptions{}
 
 // embedContentREST serves POST .../models/{model}:embedContent.
 func (s *Server) embedContentREST(w http.ResponseWriter, r *http.Request, requested string) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes))
+	body, err := io.ReadAll(io.LimitReader(r.Body, embedContentRequestBytes))
 	if err != nil {
 		apierror.WriteJSON(w, apierror.InvalidArgument("reading the request body: %v", err))
 		return
@@ -79,18 +92,28 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 		return nil, err
 	}
 
-	text, err := embedText(req.GetContent())
+	name := embeddingDisplayName(e.Model())
+	multimodal := embedding.EmbedsImages(e)
+	parts, images, err := embedParts(req.GetContent(), multimodal, name)
 	if err != nil {
 		return nil, err
 	}
 	cfg := req.GetEmbedContentConfig()
 	if cfg.GetDocumentOcr() {
+		if multimodal {
+			return nil, apierror.InvalidArgument(
+				"embed_content_config.document_ocr is not supported: %s embeds text and images; PDF input is not served", name)
+		}
 		return nil, apierror.InvalidArgument(
-			"embed_content_config.document_ocr is not supported: %s embeds text only", EmbeddingModelDisplayName)
+			"embed_content_config.document_ocr is not supported: %s embeds text only", name)
 	}
 	if cfg.GetAudioTrackExtraction() {
+		if multimodal {
+			return nil, apierror.InvalidArgument(
+				"embed_content_config.audio_track_extraction is not supported: %s embeds text and images; video and audio input are not served", name)
+		}
 		return nil, apierror.InvalidArgument(
-			"embed_content_config.audio_track_extraction is not supported: %s embeds text only", EmbeddingModelDisplayName)
+			"embed_content_config.audio_track_extraction is not supported: %s embeds text only", name)
 	}
 
 	// Each option may be set at the top level (deprecated) or in
@@ -123,9 +146,18 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	if task != aiplatformpb.EmbedContentRequest_UNSPECIFIED {
 		taskName = task.String()
 	}
-	in := embedding.Input{Content: text, TaskType: taskName, Title: title}
-	if _, err := embedding.Prompt(in); err != nil {
+	in := embedding.Input{TaskType: taskName, Title: title}
+	if _, err := embedding.Prompt(embedding.Input{Content: "x", TaskType: taskName}); err != nil {
 		return nil, apierror.InvalidArgument("task_type: %v", err)
+	}
+	if images > 0 {
+		in.Parts = parts
+	} else {
+		texts := make([]string, len(parts))
+		for i, p := range parts {
+			texts[i] = p.Text
+		}
+		in.Content = strings.Join(texts, "\n")
 	}
 
 	out, err := e.Embed(ctx, []embedding.Input{in}, int(dim), auto)
@@ -146,25 +178,62 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	}, nil
 }
 
-// embedText is the text of content: every part must be text, and the parts
-// are joined with newlines into the one text the model embeds.
-func embedText(c *aiplatformpb.Content) (string, error) {
+// embedParts are content's parts: text, and for a multimodal model images.
+// Text-only content is joined with newlines into the one text the model
+// embeds; images returns how many images there are.
+func embedParts(c *aiplatformpb.Content, multimodal bool, name string) ([]embedding.Part, int, error) {
 	if c == nil || len(c.GetParts()) == 0 {
-		return "", apierror.InvalidArgument("content is required and must have at least one text part")
+		return nil, 0, apierror.InvalidArgument("content is required and must have at least one text part")
 	}
-	texts := make([]string, len(c.GetParts()))
+	parts := make([]embedding.Part, len(c.GetParts()))
+	images := 0
+	text := ""
 	for i, p := range c.GetParts() {
-		if _, ok := p.GetData().(*aiplatformpb.Part_Text); !ok {
-			return "", apierror.InvalidArgument(
-				"content.parts[%d]: only text parts are supported; %s embeds text only", i, EmbeddingModelDisplayName)
+		switch d := p.GetData().(type) {
+		case *aiplatformpb.Part_Text:
+			parts[i] = embedding.Part{Text: d.Text}
+			text += d.Text
+			continue
+		case *aiplatformpb.Part_InlineData:
+			if !multimodal {
+				break
+			}
+			mt := d.InlineData.GetMimeType()
+			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/") {
+				return nil, 0, apierror.InvalidArgument(
+					"content.parts[%d].inline_data.mime_type %q is not supported: %s embeds text and images (%s); video, audio and PDF input are not served",
+					i, mt, name, strings.Join(embedding.ImageMIMETypes, ", "))
+			}
+			img, err := embedding.DecodeImage(mt, d.InlineData.GetData())
+			if err != nil {
+				return nil, 0, apierror.InvalidArgument("content.parts[%d].inline_data: %v", i, err)
+			}
+			parts[i] = embedding.Part{Image: img}
+			images++
+			if images > embedding.MaxImages {
+				return nil, 0, apierror.InvalidArgument(
+					"content.parts[%d]: at most %d images are embedded in one request", i, embedding.MaxImages)
+			}
+			continue
+		case *aiplatformpb.Part_FileData:
+			if !multimodal {
+				break
+			}
+			return nil, 0, apierror.InvalidArgument(
+				"content.parts[%d].file_data is not supported: send the image's bytes as inline_data; %s does not read %q",
+				i, name, d.FileData.GetFileUri())
 		}
-		texts[i] = p.GetText()
+		if multimodal {
+			return nil, 0, apierror.InvalidArgument(
+				"content.parts[%d]: only text and inline_data image parts are supported; %s embeds text and images", i, name)
+		}
+		return nil, 0, apierror.InvalidArgument(
+			"content.parts[%d]: only text parts are supported; %s embeds text only", i, name)
 	}
-	text := strings.Join(texts, "\n")
-	if strings.TrimSpace(text) == "" {
-		return "", apierror.InvalidArgument("content.parts: the text to embed is empty")
+	if images == 0 && strings.TrimSpace(text) == "" {
+		return nil, 0, apierror.InvalidArgument("content.parts: the text to embed is empty")
 	}
-	return text, nil
+	return parts, images, nil
 }
 
 // pick reconciles an option set at the top level of EmbedContentRequest with
@@ -185,12 +254,17 @@ func pick[T comparable](field string, top *T, fromCfg func() T, inCfg bool) (v T
 // embedderFor checks the requested model and returns the runtime, with the
 // same NOT_FOUND and 501 :predict gives.
 func (s *Server) embedderFor(requested, verb string) (embedding.Embedder, error) {
-	if err := checkEmbeddingModel(requested, verb); err != nil {
+	id, err := embeddingModelID(requested, verb)
+	if err != nil {
 		return nil, err
 	}
 	s.mu.RLock()
-	e, why := s.embedder, s.embedUnavailable
+	e, why := s.embedders[id], s.embedUnavailable[id]
 	s.mu.RUnlock()
+	if e == nil && why == nil && id == localai.EmbeddingGemma2ONNXID {
+		why = errors.New(id + " is not loaded: download and load it on the console's Vertex AI → Local models page " +
+			"(or POST /admin/local-models/" + id + "/download, then /load), in an instance started with -local-ai-embeddings")
+	}
 	if e == nil {
 		return nil, embeddingsUnavailable(why)
 	}

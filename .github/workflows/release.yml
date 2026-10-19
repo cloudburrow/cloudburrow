@@ -405,23 +405,29 @@ jobs:
     outputs:
       signed: ${{ steps.secrets.outputs.present }}
     steps:
-      # All six or none: a partial set is a misconfiguration, and shipping
-      # unsigned archives because of one would pass silently.
+      # All five or none: a partial set is a misconfiguration, and shipping
+      # unsigned archives because of one would pass silently. The names #654
+      # first used are read only to refuse them, so a maintainer who set
+      # those is told to rename rather than getting unsigned releases.
       - name: Check for the signing secrets
         id: secrets
         env:
-          MACOS_SIGNING_CERT_P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 }}
-          MACOS_SIGNING_CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
-          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
-          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
-          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          OLD_NAMES_SET: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 != '' || secrets.APPLE_NOTARY_KEY_P8_BASE64 != '' }}
         run: |
           set -eu
+          if [ "${OLD_NAMES_SET:-false}" = "true" ]; then
+            echo "::error::The macOS signing secrets use the old MACOS_SIGNING_*/APPLE_NOTARY_* names; set them under the names in docs/release-signing.md."
+            exit 1
+          fi
           present=0
           missing=""
-          for name in MACOS_SIGNING_CERT_P12_BASE64 MACOS_SIGNING_CERT_PASSWORD MACOS_SIGNING_IDENTITY \
-                      APPLE_NOTARY_KEY_P8_BASE64 APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID; do
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD \
+                      NOTARY_KEY_P8_BASE64 NOTARY_KEY_ID NOTARY_ISSUER_ID; do
             if [ -n "${!name:-}" ]; then present=$((present + 1)); else missing="${missing} ${name}"; fi
           done
           if [ "${present}" -eq 0 ]; then
@@ -430,7 +436,7 @@ jobs:
             exit 0
           fi
           if [ -n "${missing}" ]; then
-            echo "::error::Some macOS signing secrets are set but these are missing:${missing}. Set all six or none."
+            echo "::error::Some macOS signing secrets are set but these are missing:${missing}. Set all five or none (docs/release-signing.md)."
             exit 1
           fi
           echo "present=true" >> "${GITHUB_OUTPUT}"
@@ -446,11 +452,14 @@ jobs:
       # a random password nobody knows; codesign is the only tool allowed to
       # use the key. The .p12 is deleted as soon as it is imported.
       - name: Import the Developer ID certificate into a temporary keychain
+        id: identity
         if: steps.secrets.outputs.present == 'true'
         env:
-          P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 }}
-          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
-          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          # Optional and not secret: the identity's name. Without it the one
+          # Developer ID Application identity in the .p12 is used.
+          WANT_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
         run: |
           set -eu
           keychain="${RUNNER_TEMP}/cloudburrow-signing.keychain-db"
@@ -461,22 +470,36 @@ jobs:
           security unlock-keychain -p "${keychain_password}" "${keychain}"
           p12="${RUNNER_TEMP}/cloudburrow-signing.p12"
           printf '%s' "${P12_BASE64}" | base64 --decode > "${p12}"
-          security import "${p12}" -k "${keychain}" -f pkcs12 -P "${P12_PASSWORD}" -T /usr/bin/codesign
+          security import "${p12}" -k "${keychain}" -f pkcs12 -P "${P12_PASSWORD}" -T /usr/bin/codesign > /dev/null
           rm -f "${p12}"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${keychain_password}" "${keychain}" > /dev/null
           # codesign finds the identity only in the search list.
           existing="$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')"
           # shellcheck disable=SC2086 # one keychain path per line, none with spaces
           security list-keychains -d user -s "${keychain}" ${existing}
-          security find-identity -v -p codesigning "${keychain}" | grep -F "\"${IDENTITY}\"" > /dev/null \
-            || { echo "::error::MACOS_SIGNING_IDENTITY is not a valid code-signing identity in the imported certificate"; exit 1; }
+          # Identity names (not keys) of the valid Developer ID Application
+          # identities in the imported certificate.
+          ids="$(security find-identity -v -p codesigning "${keychain}" \
+            | sed -n 's/^.*"\(Developer ID Application: .*\)"$/\1/p')"
+          if [ -n "${WANT_IDENTITY}" ]; then
+            printf '%s\n' "${ids}" | grep -qxF "${WANT_IDENTITY}" \
+              || { echo "::error::the MACOS_SIGNING_IDENTITY variable names no valid Developer ID Application identity in the certificate"; exit 1; }
+            identity="${WANT_IDENTITY}"
+          else
+            count="$(printf '%s' "${ids}" | grep -c . || true)"
+            [ "${count}" -eq 1 ] \
+              || { echo "::error::the certificate holds ${count} valid Developer ID Application identities; want exactly one, or set the MACOS_SIGNING_IDENTITY variable"; exit 1; }
+            identity="${ids}"
+          fi
+          echo "Signing as: ${identity}"
+          echo "name=${identity}" >> "${GITHUB_OUTPUT}"
 
       # Hardened runtime and a secure timestamp are both required for
       # notarization. --force replaces the ad-hoc signature Go's linker adds.
       - name: Sign both darwin binaries
         if: steps.secrets.outputs.present == 'true'
         env:
-          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          IDENTITY: ${{ steps.identity.outputs.name }}
         run: |
           set -eu
           keychain="${RUNNER_TEMP}/cloudburrow-signing.keychain-db"
@@ -506,9 +529,9 @@ jobs:
       - name: Notarize
         if: steps.secrets.outputs.present == 'true'
         env:
-          KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
-          KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           set -eu
           key="${RUNNER_TEMP}/cloudburrow-notary.p8"

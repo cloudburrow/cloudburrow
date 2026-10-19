@@ -95,8 +95,10 @@ spctl -a -t exec -vv cloudburrow       # accepted, source=Notarized Developer ID
 gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
-A command-line binary cannot carry a stapled notarization ticket, so the first time it runs
-Gatekeeper looks the ticket up online; `spctl` does the same.
+A command-line binary cannot carry a stapled notarization ticket (stapling works only on app
+bundles, disk images and installer packages), so the release staples nothing. The first time a
+downloaded binary runs, Gatekeeper looks its ticket up online,, and `spctl` does the same, so
+the first run needs a network connection.
 
 **An unsigned binary** (a release from before signing was configured, a fork's release, or your
 own `make build`) is not blocked when you build it yourself: a binary compiled on your Mac carries
@@ -113,22 +115,14 @@ download would be caught by. Do it only for a file you have verified, never as a
 anything that fails to open, and prefer the install script or Homebrew, which verify before
 installing and download with `curl`, which sets no quarantine attribute.
 
-**For the maintainer: the repository secrets.** Signing turns on when all six are set, and the
-job fails, rather than silently shipping unsigned binaries, if only some are:
-
-| Secret | Value |
-|---|---|
-| `MACOS_SIGNING_CERT_P12_BASE64` | The Developer ID Application certificate and its private key, exported as `.p12`, base64-encoded |
-| `MACOS_SIGNING_CERT_PASSWORD` | The `.p12` export password |
-| `MACOS_SIGNING_IDENTITY` | The identity name, such as `Developer ID Application: Name (TEAMID)` |
-| `APPLE_NOTARY_KEY_P8_BASE64` | An App Store Connect API key (`AuthKey_<id>.p8`), base64-encoded |
-| `APPLE_NOTARY_KEY_ID` | That key's ID |
-| `APPLE_NOTARY_ISSUER_ID` | The App Store Connect issuer ID |
-
-With none set, the signing job passes with a notice and the release publishes unsigned archives.
-A manual dispatch of the release workflow signs and notarizes too, without publishing, so signing
-can be checked before a tag. It is held to the same CI gate, so dispatch it on a commit CI has
-passed.
+**For the maintainer.** Signing turns on when all five Apple secrets are set
+(`MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY_P8_BASE64`,
+`NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`). The job fails, rather than silently shipping unsigned
+binaries, if only some are. With none set, it passes with a notice and the release publishes
+unsigned archives. How to create the certificate and the API key and add them is in
+[Release signing setup](release-signing.md). A manual dispatch of the release workflow signs and
+notarizes too, without publishing, so signing can be checked before a tag. It is held to the same
+CI gate, so dispatch it on a commit CI has passed.
 
 ## How the CLI is linked
 

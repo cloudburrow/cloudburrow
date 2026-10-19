@@ -96,7 +96,7 @@ func TestSpannerEditInstanceAndDropProtectionThroughThePage(t *testing.T) {
 	}
 	p.setField(".modal.is-open #f-displayName", "edited in browser")
 	p.setField(".modal.is-open #f-processingUnits", "300")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: instName})
 	if err != nil || got.GetDisplayName() != "edited in browser" || got.GetProcessingUnits() != 300 {
@@ -106,7 +106,7 @@ func TestSpannerEditInstanceAndDropProtectionThroughThePage(t *testing.T) {
 	// 1500 is not a multiple of 1000: the API's refusal is shown on the form.
 	openEdit()
 	p.setField(".modal.is-open #f-processingUnits", "1500")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	if refusal := p.modalRefusal(); !strings.Contains(refusal, "processing_units") {
 		t.Errorf("1500 processing units is refused with %q; want the API's message about processing_units", refusal)
 	}
@@ -128,8 +128,8 @@ func TestSpannerEditInstanceAndDropProtectionThroughThePage(t *testing.T) {
 		if checked == want {
 			t.Fatalf("Drop protection opens with the box checked=%v, before setting it to %v", checked, want)
 		}
-		p.run(chromedp.Click(`.modal.is-open #f-enabled`, chromedp.ByQuery))
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-enabled`)))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector(".modal") === null`)
 		d, err := dbAdmin.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName})
 		if err != nil || d.GetEnableDropProtection() != want {
@@ -173,7 +173,7 @@ func TestSpannerCreateInstanceThroughTheListScreen(t *testing.T) {
 	setField(p, ".modal.is-open", "f-instance", inst)
 	setField(p, ".modal.is-open", "f-displayName", "Made in browser")
 	setField(p, ".modal.is-open", "f-processingUnits", "300")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: "projects/" + project + "/instances/" + inst})
 	if err != nil || got.GetDisplayName() != "Made in browser" || got.GetProcessingUnits() != 300 {

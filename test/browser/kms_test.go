@@ -74,7 +74,7 @@ func TestKMSEditKeyLabelsThroughTheForm(t *testing.T) {
 
 	openEdit()
 	setLabels("Env=x")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -85,7 +85,7 @@ func TestKMSEditKeyLabelsThroughTheForm(t *testing.T) {
 	p.forgive()
 
 	setLabels("env=prod\nteam=payments")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/kms"); len(sent) != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2: %v", len(sent), sent)
@@ -154,7 +154,7 @@ func TestKMSEditKeyRotationThroughTheForm(t *testing.T) {
 
 	set("f-rotationPeriod", "23h")
 	set("f-nextRotationTime", next)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
@@ -164,7 +164,7 @@ func TestKMSEditKeyRotationThroughTheForm(t *testing.T) {
 	p.forgive()
 
 	set("f-rotationPeriod", "30d")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if sent := p.sent(http.MethodPatch, "/api/resources/kms"); len(sent) != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2: %v", len(sent), sent)
@@ -218,7 +218,7 @@ func TestKMSSignAndVerifyThroughTheForm(t *testing.T) {
 	setField(p, ".modal.is-open", "f-cryptoKeyId", "signer")
 	setField(p, ".modal.is-open", "f-purpose", "ASYMMETRIC_SIGN")
 	setField(p, ".modal.is-open", "f-algorithm", "EC_SIGN_P256_SHA256")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	p.clickText("#view tbody a", "signer")
@@ -231,11 +231,11 @@ func TestKMSSignAndVerifyThroughTheForm(t *testing.T) {
 			p.waitFor(fmt.Sprintf(`document.querySelector(".modal.is-open #f-%s") !== null`, k))
 			setField(p, ".modal.is-open", "f-"+k, v)
 		}
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector("#action-result-table") !== null`)
 		var cells []string
 		p.eval(`[...document.querySelectorAll("#action-result-table td")].map((c) => c.textContent)`, &cells)
-		p.run(chromedp.Click(`#action-result .modal-actions button`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`#action-result .modal-actions button`)))
 		if len(cells) < 2 {
 			t.Fatalf("%s answered %v", action, cells)
 		}
@@ -275,7 +275,7 @@ func TestKMSImportJobAndVersionThroughTheForm(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-importJobId") !== null`)
 	setField(p, ".modal.is-open", "f-importJobId", "job")
 	setField(p, ".modal.is-open", "f-importMethod", "RSA_OAEP_3072_SHA256_AES_256")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	p.clickText("#view .tab-strip .tab", "Import jobs")
@@ -295,7 +295,7 @@ func TestKMSImportJobAndVersionThroughTheForm(t *testing.T) {
 	}
 	setField(p, ".modal.is-open", "f-format", "PLAIN")
 	setField(p, ".modal.is-open", "f-material", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("ENABLED") && r.querySelector("a") && r.querySelector("a").textContent === "2")`)
 }

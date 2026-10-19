@@ -111,7 +111,7 @@ func bigtableWrite(t *testing.T, client *bigtable.Client, table, row string, cel
 func (p *tab) confirmByName(word string) {
 	p.t.Helper()
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, word, chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), word), chromedp.KeyEvent(kb.Enter))
 }
 
 // modalRefusal waits for an open dialog's error and returns its text.
@@ -128,7 +128,7 @@ func (p *tab) cellMenu(column, item string) {
 	p.t.Helper()
 	sel := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+column)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, sel))
-	p.run(chromedp.Click(sel, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(sel)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, item)
 }
 
@@ -153,7 +153,7 @@ func TestBigtableDeleteRowsByPrefixAndAllRowsThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Delete rows by prefix")
 	p.waitFor(`document.querySelector(".modal #f-prefix") !== null`)
 	p.setField(".modal #f-prefix", "a")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null`)
 	if sent := p.sent(http.MethodPost, "/api/actions/bigtable"); len(sent) != 0 {
 		t.Fatalf("Delete rows by prefix was sent before it was confirmed: %v", sent)
@@ -204,8 +204,8 @@ func TestBigtableDeletionProtectionRefusesDeleteTableThroughTheBrowser(t *testin
 	if openForm() {
 		t.Error("Edit deletion protection opens checked on an unprotected table")
 	}
-	p.run(chromedp.Click(`.modal #f-protected`, chromedp.ByQuery))
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal #f-protected`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	info, err := admin.TableInfo(ctx, table)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestBigtableDeletionProtectionRefusesDeleteTableThroughTheBrowser(t *testin
 	p.navigate("/bigtable" + q)
 	sel := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+table)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, sel))
-	p.run(chromedp.Click(sel, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(sel)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
 	p.confirmByName(table)
 	if refusal := p.modalRefusal(); !strings.Contains(refusal, "protected from deletion") {
@@ -261,7 +261,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 		t.Errorf("Increment's amount is prefilled %q, want 1", prefill)
 	}
 	p.setField(".modal #f-amount", "3")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if v := bigtableLatest(t, client, table, "r1")["cf:n"]; len(v) != 8 || binary.BigEndian.Uint64(v) != 8 {
 		t.Errorf("after Increment by 3, the data client reads cf:n %v, want the integer 8", v)
@@ -273,7 +273,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 	p.cellMenu("cf:s", "Append value")
 	p.waitFor(`document.querySelector(".modal #f-value") !== null`)
 	p.setField(".modal #f-value", "cd")
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if v := string(bigtableLatest(t, client, table, "r1")["cf:s"]); v != "abcd" {
 		t.Errorf("after Append value cd, the data client reads cf:s %q, want abcd", v)
@@ -282,7 +282,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 
 	p.cellMenu("cf:s", "Increment")
 	p.waitFor(`document.querySelector(".modal #f-amount") !== null`)
-	p.run(chromedp.Click(`.modal button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
 	if refusal := p.modalRefusal(); !strings.Contains(refusal, "non-64-bit") {
 		t.Errorf("Increment on a text cell was answered %q, want the emulator's refusal", refusal)
 	}
@@ -379,7 +379,7 @@ func TestFirestoreCountOnlyThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/firestore/people" + q)
 	p.waitFor(`document.querySelector("#tab-query") !== null`)
-	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
 	p.waitFor(`document.querySelector(".query-form #f-count") !== null`)
 	results := func() map[string]string {
 		var rows map[string]string
@@ -391,7 +391,7 @@ func TestFirestoreCountOnlyThroughTheBrowser(t *testing.T) {
 	}
 	runQuery := func(wantRows int) map[string]string {
 		p.eval(`(() => { document.querySelectorAll(".query-results").forEach((r) => r.replaceChildren()); return true; })()`, nil)
-		p.run(chromedp.Click(`.query-form button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.query-form button[type="submit"]`)))
 		p.waitFor(fmt.Sprintf(`document.querySelectorAll(".query-results tbody tr").length === %d`, wantRows))
 		return results()
 	}
@@ -402,7 +402,7 @@ func TestFirestoreCountOnlyThroughTheBrowser(t *testing.T) {
 	if rows := runQuery(2); len(rows) != 2 {
 		t.Errorf("age >= 20 lists %v, want p1 and p2", rows)
 	}
-	p.run(chromedp.Click(`.query-form #f-count`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.query-form #f-count`)))
 	if rows := runQuery(1); rows["count(*)"] != "2" {
 		t.Errorf("age >= 20 with Count only shows %v, want count(*) 2", rows)
 	}

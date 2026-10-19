@@ -255,12 +255,14 @@ func (f front) immediateEval(r *http.Request, q queryOptions) immediateEval {
 // text, client, in the job it names; jobs.get and jobs.list then show it
 // too (jobTexts).
 func (f front) clientText(w http.ResponseWriter, rec *recorder, client jobText) {
-	var resp map[string]any
-	if f.texts == nil || json.Unmarshal(rec.body.Bytes(), &resp) != nil {
+	// The job's reference alone, and the whole answer only when it is a
+	// Job: a QueryResponse's rows are not read (#1639).
+	head, ok := readJobHead(rec.body.Bytes())
+	if f.texts == nil || !ok {
 		rec.copyTo(w)
 		return
 	}
-	project, id := jobRef(resp)
+	project, id := head.ref()
 	if project == "" {
 		project = projectOf(f.base)
 	}
@@ -269,7 +271,8 @@ func (f front) clientText(w http.ResponseWriter, rec *recorder, client jobText) 
 		t.merge(client)
 		f.texts.add(project, id, t)
 	}
-	if _, ok := resp["configuration"]; ok {
+	var resp map[string]any
+	if len(head.Configuration) > 0 && json.Unmarshal(rec.body.Bytes(), &resp) == nil {
 		client.patch(resp)
 		if b, err := json.Marshal(resp); err == nil {
 			rec.body.Reset()

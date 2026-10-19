@@ -81,7 +81,7 @@ func TestDatastoreAddRemoveAndBlobValuesThroughTheBrowser(t *testing.T) {
 	p.setField(".modal.is-open #f-index", "1")
 	p.setField(".modal.is-open #f-type", "key")
 	p.setField(".modal.is-open #f-value", "Order/id=9")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if items, _ := read()["items"].([]any); len(items) != 4 || !keyIs(items[1], datastore.IDKey("Order", 9, nil)) {
 		t.Fatalf("after Add value, the official client reads items %#v, want Order 9 at index 1", read()["items"])
@@ -91,12 +91,12 @@ func TestDatastoreAddRemoveAndBlobValuesThroughTheBrowser(t *testing.T) {
 	// confirmed by the row's name.
 	openProperty("items")
 	p.waitFor(`document.querySelector("#tab-elements") !== null`)
-	p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-elements`)))
 	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 4`)
-	p.run(chromedp.Click(`button[aria-label="Actions for items[0]"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for items[0]"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Remove value")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "items[0]", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "items[0]"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && document.querySelectorAll("#view tbody tr").length === 3`)
 	items, _ := read()["items"].([]any)
 	if len(items) != 3 || !keyIs(items[0], datastore.IDKey("Order", 9, nil)) {
@@ -122,7 +122,7 @@ func TestDatastoreAddRemoveAndBlobValuesThroughTheBrowser(t *testing.T) {
 		t.Errorf("b's Edit property is prefilled %s %q, want blob AAEC/w==", form.Type, form.Value)
 	}
 	p.setField(".modal.is-open #f-value", "aGk=")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if b, _ := read()["b"].([]byte); !bytes.Equal(b, []byte("hi")) {
 		t.Errorf("after Edit property, the official client reads b %#v, want the bytes hi", read()["b"])
@@ -190,16 +190,16 @@ func TestDatastoreStaleValueActionIsRefusedAndWholeArrayExcludedThroughTheBrowse
 
 	openItems()
 	p.waitFor(`document.querySelector("#tab-elements") !== null`)
-	p.run(chromedp.Click(`#tab-elements`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#tab-elements`)))
 	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 3`)
 
 	// Another writer, while the page is open.
 	put([]any{"new", datastore.IDKey("Order", 1, nil), "a", when})
 
-	p.run(chromedp.Click(`button[aria-label="Actions for items[0]"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for items[0]"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Remove value")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(`.modal #confirm-input`, "items[0]", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "items[0]"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`[...document.querySelectorAll(".modal .form-error")].some((e) => !e.hidden && e.textContent.includes("changed since the page was loaded"))`)
 	// The refusal is the 400 the page logs.
 	p.forgive()
@@ -219,8 +219,8 @@ func TestDatastoreStaleValueActionIsRefusedAndWholeArrayExcludedThroughTheBrowse
 	if prefilled {
 		t.Error("Exclude from indexes on an indexed array is prefilled checked")
 	}
-	p.run(chromedp.Click(`.modal.is-open #f-excluded`, chromedp.ByQuery),
-		chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-excluded`)),
+		chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got := read()
 	vs, _ := got.Value.([]any)

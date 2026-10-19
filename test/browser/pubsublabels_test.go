@@ -35,7 +35,7 @@ func TestPubSubLabelsAreCheckedOnTheForms(t *testing.T) {
 	setField(p, "#view", "f-name", "browser-labels")
 	setField(p, "#view", "f-defaultSubscription", "false")
 	setField(p, "#view", "f-labels", "team=a\nEnv=dev")
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`!document.querySelector("#view #e-labels").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("#view #e-labels").textContent`, &refusal)
@@ -48,7 +48,7 @@ func TestPubSubLabelsAreCheckedOnTheForms(t *testing.T) {
 
 	setField(p, "#view", "f-labels", "team=a\nenv=dev\n日本=東京")
 	p.waitFor(`document.querySelector("#view #e-labels").hidden`)
-	p.run(chromedp.Click(`#view button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/pubsub/topics"`)
 	var labels map[string]string
 	if err := json.Unmarshal([]byte(editDefaults(t, "pubsub", project, topic)["labels"]), &labels); err != nil ||
@@ -62,7 +62,7 @@ func TestPubSubLabelsAreCheckedOnTheForms(t *testing.T) {
 	p.clickText("#view .page-actions button", "Edit topic")
 	p.waitFor(`document.querySelector(".modal.is-open #f-labels") !== null`)
 	setField(p, ".modal.is-open", "f-labels", "team=a b")
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal.is-open #e-labels").hidden`)
 	p.eval(`document.querySelector(".modal.is-open #e-labels").textContent`, &refusal)
 	if !strings.Contains(refusal, `Line 1`) || !strings.Contains(refusal, `"a b"`) {

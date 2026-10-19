@@ -25,11 +25,11 @@ func storageRowAction(p *tab, row, label string, values map[string]string, confi
 	p.waitFor(`document.querySelector(".modal") === null`)
 	menu := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+row)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, menu))
-	p.run(chromedp.Click(menu, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(menu)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, label)
 	if confirm != "" {
 		p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
-		p.run(chromedp.SendKeys(`#confirm-input`, confirm, chromedp.ByQuery))
+		p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), confirm))
 		p.clickText(".modal:has(#confirm-input) .modal-actions button", label)
 	} else {
 		p.waitFor(`document.querySelector(".modal.is-open form") !== null`)
@@ -38,7 +38,7 @@ func storageRowAction(p *tab, row, label string, values map[string]string, confi
 				if (f.type === "checkbox") { f.checked = %q === "true"; f.dispatchEvent(new Event("change", { bubbles: true })); return true; }
 				f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, id, v, v), nil)
 		}
-		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}
 	p.waitFor(`document.querySelector(".modal.is-open") === null || document.querySelector("#action-result-table") !== null`)
 	var result bool

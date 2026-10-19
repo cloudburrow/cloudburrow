@@ -520,24 +520,16 @@ func (j *frontJobs) list(project string) []map[string]any {
 // jobActionRoute matches jobs.cancel and jobs.delete.
 var jobActionRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/jobs/([^/]+)/(cancel|delete)$`)
 
-// serveJobList answers jobs.list (serve) with the front's own jobs of the
+// listed is l, an answer to jobs.list, with the front's own jobs of the
 // project after the emulator's: with their configuration only for
 // projection=full, as BigQuery's "minimal" projection "Does not include
 // the job configuration".
-func (j *frontJobs) serveJobList(w http.ResponseWriter, r *http.Request, project string, serve func(http.ResponseWriter)) {
+func (j *frontJobs) listed(r *http.Request, project string, l jobListing) jobListing {
 	own := j.list(project)
-	if len(own) == 0 {
-		serve(w)
-		return
+	if len(own) == 0 || l.list == nil {
+		return l
 	}
-	rec := newRecorder()
-	serve(rec)
-	var list map[string]any
-	if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-		rec.copyTo(w)
-		return
-	}
-	jobs, _ := list["jobs"].([]any)
+	jobs := l.jobs()
 	full := r.URL.Query().Get("projection") == "full"
 	for _, job := range own {
 		item := map[string]any{"kind": job["kind"], "id": job["id"], "jobReference": job["jobReference"],
@@ -551,10 +543,12 @@ func (j *frontJobs) serveJobList(w http.ResponseWriter, r *http.Request, project
 		if full {
 			item["configuration"] = job["configuration"]
 		}
-		jobs = append(jobs, item)
+		// A copy: the layers above change the listed jobs in place
+		// (joblisting.go), and the job kept here stays as it is.
+		jobs = append(jobs, jsonCopy(item))
 	}
-	list["jobs"] = jobs
-	writeJSON(w, http.StatusOK, list)
+	l.list["jobs"] = jobs
+	return l
 }
 
 // serveJobAction answers jobs.get, jobs.cancel and jobs.delete of one of

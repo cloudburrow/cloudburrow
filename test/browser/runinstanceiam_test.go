@@ -86,7 +86,7 @@ func TestCloudRunInstancePermissionsThroughTheTab(t *testing.T) {
 	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector(".modal.is-open " + s);
 		q("#f-members").value = %q; q("#f-members").dispatchEvent(new Event("input", { bubbles: true }));
 		q("#f-role").value = %q; q("#f-role").dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada, role), nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelectorAll("#permissions-table tbody tr").length === 1`)
 	if rows := instancePermissionsOf(t, project, id); rows[ada] != role {
@@ -97,7 +97,7 @@ func TestCloudRunInstancePermissionsThroughTheTab(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-permissions") !== null`)
 	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-permissions");
 		f.value = "run.instances.get,\nrun.instances.delete"; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelectorAll("#test-permissions-table tbody tr").length === 2`)
 	var tested string
 	p.eval(`[...document.querySelectorAll("#test-permissions-table tbody tr")].map((r) => r.textContent).join("|")`, &tested)
@@ -107,11 +107,11 @@ func TestCloudRunInstancePermissionsThroughTheTab(t *testing.T) {
 	p.clickText(".modal.is-open .modal-actions button", "Close")
 	p.waitFor(`document.querySelector(".modal") === null`)
 
-	p.run(chromedp.Click(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+role), chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Remove "+ada+" from "+role))))
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #confirm-input");
 		f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, ada), nil)
-	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(`document.querySelectorAll("#permissions-table tbody tr").length === 0`)
 	if rows := instancePermissionsOf(t, project, id); len(rows) != 0 {
