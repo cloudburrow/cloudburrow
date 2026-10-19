@@ -487,12 +487,14 @@ func (c *clusters) clearBusy(names []string, op string) {
 }
 
 // unfence lets r's primary endpoint carry connections again when r is no
-// longer watched (it became a secondary of a switchover): no health check
-// of it would lift a fence the check put up before the switchover. Call
+// longer watched (it became a secondary of a switchover, or the health
+// check finds it unwatched and idle, checkStandalone): no health check of
+// it would lift a fence a check put up while it was watched, and its
+// primary endpoint would close every connection for good (#1652). Call
 // with mu held.
 func (c *clusters) unfence(r *clusterRecord) {
 	if e := c.eps[r.Name]; e != nil && e.fenced && !c.watched(r) {
-		log.Printf("memorystore: %s: a secondary now; its primary endpoint carries connections", r.Name)
+		log.Printf("memorystore: %s: no longer watched (a secondary, a migration's target or a single node); its primary endpoint carries connections", r.Name)
 		e.fenced = false
 		c.openEndpoints(r)
 	}
