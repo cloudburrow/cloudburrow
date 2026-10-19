@@ -76,7 +76,7 @@ func TestEmbedContentImagesOnEmbeddingGemma2(t *testing.T) {
 		"file data":   {`{"content":{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"gs://b/o.png"}}]}}`, "file_data"},
 		"video":       {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"AA=="}}]}}`, "video, audio and PDF"},
 		"pdf":         {`{"content":{"parts":[{"inlineData":{"mimeType":"application/pdf","data":"AA=="}}]}}`, "inline_data.mime_type"},
-		"webp":        {`{"content":{"parts":[{"inlineData":{"mimeType":"image/webp","data":"AA=="}}]}}`, "image/webp"},
+		"heic":        {`{"content":{"parts":[{"inlineData":{"mimeType":"image/heic","data":"AA=="}}]}}`, "image/heic"},
 		"bad png":     {`{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"AA=="}}]}}`, "parts[0].inline_data"},
 		"seven":       {`{"content":{"parts":[` + strings.TrimSuffix(seven, ",") + `]}}`, "at most 6"},
 		"ocr":         {`{"content":{"parts":[{"text":"x"}]},"embedContentConfig":{"documentOcr":true}}`, "document_ocr"},

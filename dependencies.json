@@ -609,6 +609,13 @@
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "BigQuery differential privacy (#1455, internal/bigqueryfront/differentialprivacy.go): Laplace noise, the noisy count thresholding of groups, BoundedMean and BoundedQuantiles of Google's own library. It brings github.com/golang/glog (Apache-2.0) and gonum.org/v1/gonum (BSD-3-Clause), indirect."
+      },
+      "goImage": {
+        "module": "golang.org/x/image",
+        "version": "v0.47.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's WebP and BMP images (#1651, internal/embedding/image.go), approved by the maintainer 2026-10-19: its webp and bmp decoders. Promoted from indirect (v0.25.0, in the module graph only) to direct. It needs golang.org/x/sys and golang.org/x/text, already required at the same versions; no new dependency was added. Lossy WebP colours are converted as libwebp converts them (internal/embedding/webp.go), not by image.YCbCr."
       }
     },
     "apiContracts": {
