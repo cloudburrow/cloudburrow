@@ -3,6 +3,7 @@ package redisadmin
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"regexp"
 	"strconv"
@@ -491,6 +492,7 @@ func (c *clusters) clearBusy(names []string, op string) {
 // with mu held.
 func (c *clusters) unfence(r *clusterRecord) {
 	if e := c.eps[r.Name]; e != nil && e.fenced && !c.watched(r) {
+		log.Printf("memorystore: %s: a secondary now; its primary endpoint carries connections", r.Name)
 		e.fenced = false
 		c.openEndpoints(r)
 	}

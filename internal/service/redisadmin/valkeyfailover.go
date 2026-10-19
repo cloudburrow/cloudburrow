@@ -353,6 +353,8 @@ func (c *clusters) fence(name string, on bool) {
 	}
 	if on {
 		log.Printf("memorystore: %s: the primary failed a health check; its primary endpoint carries no connections until it answers again or a replica is promoted", name)
+	} else {
+		log.Printf("memorystore: %s: the primary answers again; its primary endpoint carries connections", name)
 	}
 	e.fenced = on
 	c.openEndpoints(r)
