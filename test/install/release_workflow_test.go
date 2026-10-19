@@ -191,6 +191,23 @@ func TestReleaseActionsArePinnedBySHA(t *testing.T) {
 	}
 }
 
+// TestReleaseGoRunBuildsForTheRunner: a job that sets a target GOOS or
+// GOARCH must clear both for go run, which builds the tool it then runs on
+// the runner. The release dry run of 2026-10-19 failed on linux/arm64 with
+// "exec format error" when bqengine was built for the target.
+func TestReleaseGoRunBuildsForTheRunner(t *testing.T) {
+	for name, j := range releaseJobs(t) {
+		if !strings.Contains(j, "GOOS: ") && !strings.Contains(j, "GOARCH: ") {
+			continue
+		}
+		for _, line := range strings.Split(j, "\n") {
+			if strings.Contains(line, "go run ") && !strings.Contains(line, "GOOS='' GOARCH='' go run ") {
+				t.Errorf("job %s sets a target GOOS/GOARCH, but %q runs go run for it", name, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
 // TestIsPinned: local references pass; a third-party action by tag, branch
 // or short SHA does not.
 func TestIsPinned(t *testing.T) {
