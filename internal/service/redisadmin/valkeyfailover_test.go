@@ -13,7 +13,10 @@ import (
 
 	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // vkNode is a fake CLUSTER_DISABLED node: a listener that greets each
@@ -36,6 +39,9 @@ type vkNodes struct {
 	byAddr map[string]*vkNode
 	roles  map[string]string // server -> role, as last labelled
 	ids    int
+	// hook, when set, runs before each command, outside mu: its error is
+	// the command's (it may block, holding an operation where it is).
+	hook func(server string, args []any) error
 }
 
 func (f *vkNodes) StartClusterNode(_ context.Context, spec Spec) (string, string, int, error) {
@@ -86,6 +92,14 @@ type vkConn struct {
 
 func (c vkConn) Do(_ context.Context, args ...any) (any, error) {
 	c.f.mu.Lock()
+	hook := c.f.hook
+	if n := c.f.byAddr[c.addr]; hook != nil && n != nil {
+		c.f.mu.Unlock()
+		if err := hook(n.server, args); err != nil {
+			return nil, err
+		}
+		c.f.mu.Lock()
+	}
 	defer c.f.mu.Unlock()
 	n := c.f.byAddr[c.addr]
 	if n == nil || n.down {
@@ -484,5 +498,172 @@ func TestValkeySuspendedIsNotFailedOver(t *testing.T) {
 	}
 	if !rolesAre(initial) {
 		t.Fatalf("resumed: roles %v, want %v", f.roles, initial)
+	}
+}
+
+// TestValkeySwitchoverFencesHealthCheck (#1642): while a cross-instance
+// switchover re-points its members' nodes, the health check watches none
+// of them, so the former primary, whose primary node is being made a
+// replica of the new primary, is not failed over; the marks clear when
+// the switchover ends, and when it fails. A switchover is refused while
+// a member is failing over.
+func TestValkeySwitchoverFencesHealthCheck(t *testing.T) {
+	oldEvery, oldTend := healthEvery, tendEvery
+	healthEvery, tendEvery = 10*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { healthEvery, tendEvery = oldEvery, oldTend })
+	s, _ := newHA(t)
+	f := &vkNodes{t: t, nodes: map[string]*vkNode{}, byAddr: map[string]*vkNode{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.EnableValkey(ctx, f, func(addr, _, _ string) ClusterNode { return vkConn{f, addr} }, nil)
+	ms := NewMemorystoreServer(s)
+	c := s.valkey
+	psc := []*memorystorepb.PscAutoConnection{{ProjectId: "test-project", Network: "projects/test-project/global/networks/default"}}
+	waitActive := func(name string) {
+		t.Helper()
+		for i := 0; i < 500; i++ {
+			if inst, _ := ms.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: name}); inst.GetState() == memorystorepb.Instance_ACTIVE {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("instance %s is not ACTIVE", name)
+	}
+	create := func(id string, in *memorystorepb.Instance) string {
+		t.Helper()
+		in.Mode, in.NodeType, in.PscAutoConnections = memorystorepb.Instance_CLUSTER_DISABLED, memorystorepb.Instance_SHARED_CORE_NANO, psc
+		in.ReplicaCount = proto.Int32(1)
+		if _, err := ms.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: haParent, InstanceId: id, Instance: in}); err != nil {
+			t.Fatal(err)
+		}
+		name := haParent + "/instances/" + id
+		waitActive(name)
+		return name
+	}
+	pname := create("vk-swp", &memorystorepb.Instance{})
+	sname := create("vk-sws", &memorystorepb.Instance{CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+		InstanceRole:    memorystorepb.CrossInstanceReplicationConfig_SECONDARY,
+		PrimaryInstance: &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: pname}}})
+	pbase, sbase := ValkeyServerBase(pname), ValkeyServerBase(sname)
+	for i := 0; i < 500; i++ {
+		f.mu.Lock()
+		linked := f.nodes[sbase+"-0"].primary != "" && f.roles[pbase+"-0"] == rolePrimary
+		f.mu.Unlock()
+		if linked {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	switchTo := func(primary, secondary string) error {
+		_, err := ms.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cross_instance_replication_config"}},
+			Instance: &memorystorepb.Instance{Name: primary, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+				InstanceRole:       memorystorepb.CrossInstanceReplicationConfig_PRIMARY,
+				SecondaryInstances: []*memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{{Instance: secondary}}}}})
+		return err
+	}
+	busy := func() (bool, bool) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		_, p := c.busy[pname]
+		_, s := c.busy[sname]
+		return p, s
+	}
+	idle := func(what string) {
+		t.Helper()
+		for i := 0; i < 500; i++ {
+			if p, s := busy(); !p && !s {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		p, s := busy()
+		t.Fatalf("%s: busy marks left: primary %v, secondary %v", what, p, s)
+	}
+
+	// A member failing over: the switchover is refused.
+	c.mu.Lock()
+	c.busy[pname] = autoFailover
+	c.mu.Unlock()
+	if err := switchTo(sname, pname); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("a switchover while the primary instance fails over: %v, want FAILED_PRECONDITION", err)
+	}
+	c.mu.Lock()
+	delete(c.busy, pname)
+	c.mu.Unlock()
+
+	// The switchover fails re-pointing the former primary: both marks
+	// clear, and the replication is as it was.
+	f.mu.Lock()
+	f.hook = func(server string, args []any) error {
+		if server == pbase+"-0" && strings.EqualFold(fmt.Sprint(args[0]), "REPLICAOF") && !strings.EqualFold(fmt.Sprint(args[1]), "NO") {
+			return errors.New("refused")
+		}
+		return nil
+	}
+	f.mu.Unlock()
+	if err := switchTo(sname, pname); err != nil {
+		t.Fatal(err)
+	}
+	idle("failed switchover")
+	c.mu.Lock()
+	role := c.byName[pname].Valkey.role()
+	c.mu.Unlock()
+	if role != memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String() {
+		t.Fatalf("after a failed switchover the former primary is %s", role)
+	}
+	// Re-link the secondary, as the next switchover expects it.
+	f.mu.Lock()
+	f.hook = nil
+	f.nodes[sbase+"-0"].primary = pbase + "-primary.svc:6379"
+	f.mu.Unlock()
+
+	// The switchover holds while the former primary's primary node is
+	// re-pointed, and meanwhile that node answers as nothing: the former
+	// primary is not failed over.
+	hold, held := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.mu.Lock()
+	f.hook = func(server string, args []any) error {
+		if server == pbase+"-0" && strings.EqualFold(fmt.Sprint(args[0]), "REPLICAOF") && !strings.EqualFold(fmt.Sprint(args[1]), "NO") {
+			once.Do(func() { close(held) })
+			<-hold
+		}
+		return nil
+	}
+	f.mu.Unlock()
+	if err := switchTo(sname, pname); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the switchover did not re-point the former primary")
+	}
+	if p, s := busy(); !p || !s {
+		t.Fatalf("during the switchover: busy primary %v, secondary %v; want both", p, s)
+	}
+	f.mu.Lock()
+	f.nodes[pbase+"-0"].down = true
+	f.mu.Unlock()
+	time.Sleep(20 * healthEvery * time.Duration(failAfter))
+	c.mu.Lock()
+	promoted := c.byName[pname].Nodes[1].Primary
+	c.mu.Unlock()
+	f.mu.Lock()
+	follows := f.nodes[pbase+"-1"].primary
+	f.nodes[pbase+"-0"].down = false
+	f.mu.Unlock()
+	if promoted || follows == "" {
+		t.Fatalf("the former primary was failed over during the switchover (record %v, replica replicates %q)", promoted, follows)
+	}
+	close(hold)
+	idle("switchover")
+	waitActive(sname)
+	c.mu.Lock()
+	prole, srole := c.byName[pname].Valkey.role(), c.byName[sname].Valkey.role()
+	c.mu.Unlock()
+	if prole != memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() || srole != memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String() {
+		t.Fatalf("after the switchover: former primary %s, former secondary %s", prole, srole)
 	}
 }

@@ -190,6 +190,10 @@ func (c *clusters) checkPrimary(r *clusterRecord, name string) error {
 		return apierror.FailedPrecondition("primary instance %s is in CLUSTER mode: a secondary replicates a primary of its own mode, and only CLUSTER_DISABLED instances are served", name)
 	case p.state != clusterpb.Cluster_ACTIVE:
 		return apierror.FailedPrecondition("primary instance %s is %s, not ACTIVE", name, p.state)
+	case c.busy[name] != "":
+		// A switchover or detach of its replication, or its automatic
+		// failover, is re-pointing its nodes (checkIdle).
+		return apierror.FailedPrecondition("primary instance %s has an operation in progress", name)
 	case p.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String():
 		return apierror.FailedPrecondition("instance %s is itself a secondary: a secondary's primary_instance must be a primary", name)
 	case (p.TransitCA != "") != (r.TransitCA != ""):
@@ -434,8 +438,67 @@ func (c *clusters) publish(ctx context.Context, src cirSource) error {
 	return rr.Roles(ctx, src.base, src.roles, src.port)
 }
 
+// checkIdle refuses an operation on the members of a cross-instance
+// replication, rs, while any of them is not ACTIVE or has an operation in
+// progress (an automatic failover among them, autofailover.go): as
+// Google's memorystore.v1 API does for an instance with an operation
+// running ("Backup call will be rejected if there is an ongoing backup or
+// update operation", BackupInstance), FAILED_PRECONDITION, to be tried
+// again once it is done. A switchover does not wait for a failover: its
+// nodes, and so its links, change under it (#1642). Call with mu held.
+func (c *clusters) checkIdle(rs []*clusterRecord) error {
+	for _, x := range rs {
+		if _, pending := c.busy[x.Name]; pending {
+			return apierror.FailedPrecondition("instance %s has an operation in progress", x.Name)
+		}
+		if x.state != clusterpb.Cluster_ACTIVE {
+			return apierror.FailedPrecondition("instance %s is %s, not ACTIVE", x.Name, x.state)
+		}
+	}
+	return nil
+}
+
+// markBusy marks each of rs busy with op, for the whole of a switchover
+// or detach that touches them all (#1642): the health check
+// (valkeyfailover.go) watches none of them while their nodes are
+// re-pointed, so it does not fail over a former primary whose primary
+// node is being made a replica of the new one, nor re-point a secondary
+// at it. It returns the names it marked, for clearBusy. Call with mu held.
+func (c *clusters) markBusy(rs []*clusterRecord, op string) []string {
+	var names []string
+	for _, x := range rs {
+		if _, ok := c.busy[x.Name]; !ok {
+			c.busy[x.Name] = op
+			names = append(names, x.Name)
+		}
+	}
+	return names
+}
+
+// clearBusy clears the marks markBusy made for op, on every way out of the
+// operation. Call with mu held.
+func (c *clusters) clearBusy(names []string, op string) {
+	for _, n := range names {
+		if c.busy[n] == op {
+			delete(c.busy, n)
+		}
+	}
+}
+
+// unfence lets r's primary endpoint carry connections again when r is no
+// longer watched (it became a secondary of a switchover): no health check
+// of it would lift a fence the check put up before the switchover. Call
+// with mu held.
+func (c *clusters) unfence(r *clusterRecord) {
+	if e := c.eps[r.Name]; e != nil && e.fenced && !c.watched(r) {
+		e.fenced = false
+		c.openEndpoints(r)
+	}
+}
+
 // updateCIR is an UpdateInstance of cross_instance_replication_config:
-// a switchover or a detach. Call with mu held; r is ACTIVE and idle.
+// a switchover or a detach. Every member it touches is busy until it is
+// done. Call with mu held; r is ACTIVE and idle.
 func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memorystorepb.CrossInstanceReplicationConfig) (*longrunningpb.Operation, error) {
 	role := want.GetInstanceRole()
 	if role == memorystorepb.CrossInstanceReplicationConfig_INSTANCE_ROLE_UNSPECIFIED {
@@ -515,16 +578,11 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		return nil, apierror.FailedPrecondition("the primary of instance %s was not found", r.Name)
 	}
 	all := append(append([]*clusterRecord{primary}, st.unlink...), members...)
-	for _, x := range all {
-		if _, pending := c.busy[x.Name]; pending && x != r {
-			return nil, apierror.FailedPrecondition("instance %s has an operation in progress", x.Name)
-		}
-		if x.state != clusterpb.Cluster_ACTIVE {
-			return nil, apierror.FailedPrecondition("instance %s is %s, not ACTIVE", x.Name, x.state)
-		}
+	if err := c.checkIdle(all); err != nil {
+		return nil, err
 	}
 	op := c.newOperation(r.Name, "update")
-	c.busy[r.Name] = op
+	marked := c.markBusy(all, op)
 	r.state = clusterpb.Cluster_UPDATING
 	snaps := map[*clusterRecord]*clusterRecord{}
 	for _, x := range all {
@@ -561,7 +619,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 			err = c.linkTo(ctx, snaps[x], src.host, src.port, src.password)
 		}
 		c.mu.Lock()
-		delete(c.busy, r.Name)
+		c.clearBusy(marked, op)
 		r.state = clusterpb.Cluster_ACTIVE
 		if err == nil {
 			for _, x := range st.unlink {
@@ -571,6 +629,9 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 				}
 			}
 			c.setMembership(primary, members)
+			for _, x := range members {
+				c.unfence(x)
+			}
 		}
 		out := renderValkey(r)
 		c.mu.Unlock()
