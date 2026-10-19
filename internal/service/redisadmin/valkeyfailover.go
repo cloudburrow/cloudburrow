@@ -287,8 +287,14 @@ func (c *clusters) checkStandalone(ctx context.Context, failed map[string]int, i
 		if !c.watched(r) {
 			delete(failed, name)
 			delete(ids, name)
-			if r.suspended {
+			switch _, pending := c.busy[name]; {
+			case r.suspended:
 				c.quiesce(name)
+			case !pending && r.state == clusterpb.Cluster_ACTIVE && r.KeyState == "":
+				// Not watched for good: a secondary, a migration's target
+				// or a single node. No check of it will lift a fence a
+				// check put up while it was watched (#1652).
+				c.unfence(r)
 			}
 			continue
 		}

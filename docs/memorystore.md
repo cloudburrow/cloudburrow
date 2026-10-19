@@ -507,6 +507,12 @@ in progress, its automatic failover included, the switchover or detach, and a ne
 it, is FAILED_PRECONDITION, to be tried again, as Google's `memorystore.v1` API refuses an
 operation on an instance with one running ("Backup call will be rejected if there is an ongoing
 backup or update operation", `BackupInstance`) (`TestValkeySwitchoverFencesHealthCheck`).
+The former primary, a secondary afterwards, is no longer health-checked, so no fence of its
+primary endpoint outlives the switchover (#1652): a check that began before the switchover and
+ends after it, finding the primary node a replica, does not fence it, and a fence left on an
+instance that is no longer checked (a secondary, a migration's target) is lifted at the next
+check, so its primary endpoint reaches its primary node instead of closing every connection
+(`TestValkeySwitchoverCheckLeavesEndpointOpen`).
 In `CLUSTER` mode it is 501, as a
 Redis cluster's (§8): Google documents it with the same shards and slots on both, but a
 cluster-mode Valkey node refuses `REPLICAOF` ("REPLICAOF not allowed in cluster mode", measured

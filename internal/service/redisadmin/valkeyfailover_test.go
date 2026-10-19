@@ -667,3 +667,122 @@ func TestValkeySwitchoverFencesHealthCheck(t *testing.T) {
 		t.Fatalf("after the switchover: former primary %s, former secondary %s", prole, srole)
 	}
 }
+
+// TestValkeySwitchoverCheckLeavesEndpointOpen (#1652): a health check of
+// the former primary that began before a switchover and ends after it,
+// seeing the primary node answer as a replica of the new primary, does
+// not fence the former primary's primary endpoint: the instance is a
+// secondary by then, never checked again, so a fence would make its
+// primary endpoint close every connection (EOF) for good. Its primary
+// endpoint still reaches its primary node.
+func TestValkeySwitchoverCheckLeavesEndpointOpen(t *testing.T) {
+	oldEvery, oldTend := healthEvery, tendEvery
+	healthEvery, tendEvery = 10*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() { healthEvery, tendEvery = oldEvery, oldTend })
+	s, _ := newHA(t)
+	f := &vkNodes{t: t, nodes: map[string]*vkNode{}, byAddr: map[string]*vkNode{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.EnableValkey(ctx, f, func(addr, _, _ string) ClusterNode { return vkConn{f, addr} }, nil)
+	ms := NewMemorystoreServer(s)
+	c := s.valkey
+	psc := []*memorystorepb.PscAutoConnection{{ProjectId: "test-project", Network: "projects/test-project/global/networks/default"}}
+	get := func(name string) *memorystorepb.Instance {
+		t.Helper()
+		for i := 0; i < 500; i++ {
+			if inst, _ := ms.GetInstance(ctx, &memorystorepb.GetInstanceRequest{Name: name}); inst.GetState() == memorystorepb.Instance_ACTIVE {
+				return inst
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("instance %s is not ACTIVE", name)
+		return nil
+	}
+	create := func(id string, in *memorystorepb.Instance) *memorystorepb.Instance {
+		t.Helper()
+		in.Mode, in.NodeType, in.PscAutoConnections = memorystorepb.Instance_CLUSTER_DISABLED, memorystorepb.Instance_SHARED_CORE_NANO, psc
+		in.ReplicaCount = proto.Int32(1)
+		if _, err := ms.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: haParent, InstanceId: id, Instance: in}); err != nil {
+			t.Fatal(err)
+		}
+		return get(haParent + "/instances/" + id)
+	}
+	pinst := create("vk-swe-p", &memorystorepb.Instance{})
+	pname := pinst.GetName()
+	sname := create("vk-swe-s", &memorystorepb.Instance{CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+		InstanceRole:    memorystorepb.CrossInstanceReplicationConfig_SECONDARY,
+		PrimaryInstance: &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: pname}}}).GetName()
+	p0 := ValkeyServerBase(pname) + "-0"
+	ph, pp := vkEndpoint(t, pinst, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY)
+	if got := greet(t, ph, pp); got != p0 {
+		t.Fatalf("the primary endpoint reaches %s, want %s", got, p0)
+	}
+
+	// The next health check of the primary holds until the switchover is
+	// done; it then finds the primary node a replica of the new primary.
+	held, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.mu.Lock()
+	f.hook = func(server string, args []any) error {
+		if server != p0 || !strings.EqualFold(fmt.Sprint(args[0]), "INFO") {
+			return nil
+		}
+		first := false
+		once.Do(func() { first = true })
+		if first {
+			close(held)
+			<-release
+		}
+		return nil
+	}
+	f.mu.Unlock()
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no health check of the primary")
+	}
+	if _, err := ms.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cross_instance_replication_config"}},
+		Instance: &memorystorepb.Instance{Name: sname, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+			InstanceRole:       memorystorepb.CrossInstanceReplicationConfig_PRIMARY,
+			SecondaryInstances: []*memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{{Instance: pname}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; ; i++ {
+		c.mu.Lock()
+		role, busy := c.byName[pname].Valkey.role(), c.busy[sname] != ""
+		c.mu.Unlock()
+		if role == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String() && !busy {
+			break
+		}
+		if i == 500 {
+			t.Fatalf("the former primary is %s after the switchover", role)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	time.Sleep(20 * healthEvery)
+	c.mu.Lock()
+	fenced := c.eps[pname].fenced
+	c.mu.Unlock()
+	if got := greetOrEmpty(ph, pp); fenced || got != p0 {
+		t.Fatalf("after the switchover the former primary's primary endpoint reaches %q (fenced %v), want %s", got, fenced, p0)
+	}
+
+	// A fence left on the secondary by any other way is lifted by the
+	// next health check, which finds it unwatched and idle.
+	c.mu.Lock()
+	c.eps[pname].fenced = true
+	c.openEndpoints(c.byName[pname])
+	c.mu.Unlock()
+	for i := 0; ; i++ {
+		got := greetOrEmpty(ph, pp)
+		if got == p0 {
+			break
+		}
+		if i == 100 {
+			t.Fatalf("a fenced secondary's primary endpoint reaches %q, want %s", got, p0)
+		}
+		time.Sleep(healthEvery)
+	}
+}
