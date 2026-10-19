@@ -57,7 +57,7 @@ func shapeImage(t *testing.T, kind string, c color.RGBA) []byte {
 	return b.Bytes()
 }
 
-// loadEmbeddingModel2 downloads EmbeddingGemma 2 (about 541 MB, once per
+// loadEmbeddingModel2 downloads EmbeddingGemma 2 (about 882 MB, once per
 // state directory) and loads it, through the console's Local models API.
 func loadEmbeddingModel2(t *testing.T, ctx context.Context, addr string) {
 	t.Helper()
@@ -105,8 +105,9 @@ func loadEmbeddingModel2(t *testing.T, ctx context.Context, addr string) {
 // text description; the token count is the image's 256 soft tokens plus its
 // begin and end markers and the BOS and EOS tokens; Matryoshka sizes apply;
 // the console's Embeddings API returns the same vector for the same image;
-// and what is not served (file_data, a video, document OCR, an image on the
-// text-only model) is INVALID_ARGUMENT naming the field.
+// and what is not served (a video, document OCR, an image on the text-only
+// model) is INVALID_ARGUMENT naming the field. (file_data, served since
+// #1651, is TestEmbedContentEmbedsAudioThroughThePredictionClient's.)
 func TestEmbedContentEmbedsImagesThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -222,9 +223,8 @@ func TestEmbedContentEmbedsImagesThroughThePredictionClient(t *testing.T) {
 		cfg   *aiplatformpb.EmbedContentRequest_EmbedContentConfig
 		field string
 	}{
-		"file_data": {name, []*aiplatformpb.Part{{Data: &aiplatformpb.Part_FileData{FileData: &aiplatformpb.FileData{MimeType: "image/png", FileUri: "gs://bucket/shape.png"}}}}, nil, "file_data"},
-		"video":     {name, []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: "video/mp4", Data: []byte{0}}}}}, nil, "inline_data.mime_type"},
-		"ocr":       {name, []*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &ocr}, "document_ocr"},
+		"video": {name, []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: "video/mp4", Data: []byte{0}}}}}, nil, "inline_data.mime_type"},
+		"ocr":   {name, []*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &ocr}, "document_ocr"},
 		"text-only model": {"projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel,
 			[]*aiplatformpb.Part{imagePart(pngs[0])}, nil, "content.parts[0]"},
 	} {

@@ -56,28 +56,38 @@ func (f storageSourceFetcher) base() string {
 }
 
 func (f storageSourceFetcher) Fetch(ctx context.Context, bucket, object string, generation int64) (io.ReadCloser, error) {
+	rc, _, err := f.fetch(ctx, bucket, object, generation)
+	return rc, err
+}
+
+// fetchTyped reads an object's current generation with its content type.
+func (f storageSourceFetcher) fetchTyped(ctx context.Context, bucket, object string) (io.ReadCloser, string, error) {
+	return f.fetch(ctx, bucket, object, 0)
+}
+
+func (f storageSourceFetcher) fetch(ctx context.Context, bucket, object string, generation int64) (io.ReadCloser, string, error) {
 	u := f.base() + "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(object) + "?alt=media"
 	if generation != 0 {
 		u += "&generation=" + strconv.FormatInt(generation, 10)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, apierror.InvalidArgument("storage_source: %v", err)
+		return nil, "", apierror.InvalidArgument("storage_source: %v", err)
 	}
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, apierror.FailedPrecondition("read gs://%s/%s from this instance's Cloud Storage: %v", bucket, object, err)
+		return nil, "", apierror.FailedPrecondition("read gs://%s/%s from this instance's Cloud Storage: %v", bucket, object, err)
 	}
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		return resp.Body, nil
+		return resp.Body, resp.Header.Get("Content-Type"), nil
 	case resp.StatusCode == http.StatusNotFound:
 		resp.Body.Close()
-		return nil, apierror.NotFound("storage_source gs://%s/%s not found", bucket, object)
+		return nil, "", apierror.NotFound("storage_source gs://%s/%s not found", bucket, object)
 	default:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		resp.Body.Close()
-		return nil, apierror.FailedPrecondition("read gs://%s/%s: HTTP %d %s", bucket, object, resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, "", apierror.FailedPrecondition("read gs://%s/%s: HTTP %d %s", bucket, object, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 }
 
