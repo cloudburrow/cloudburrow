@@ -52,8 +52,9 @@ import (
 // sync at a time and one waiting at most: the INSERTs happen as the jobs
 // are made, and a query writes only what the last second added. A query
 // still syncs first, so it reads every job, as before. The background
-// never makes a table: one dropped (the emulator restarted, a write
-// failed) waits for the next query.
+// never makes a table: one dropped (the emulator restarted, the
+// dirty rows of a failed write could not be deleted, sync) waits for the
+// next query.
 //
 // A background sync listed every job, which costs the engine more with
 // each job made (#1525): measured on one instance with 2,100 jobs, a
@@ -165,6 +166,11 @@ type jobsTable struct {
 	// project's table was last written: the next background sync asks
 	// for the jobs added after it.
 	cursor map[string]string
+	// dirty are the IDs of the rows, by project, a statement was sent
+	// for and not answered OK, so that the table may or may not hold
+	// them (#1628): the next sync deletes them, and writes those of jobs
+	// still there again.
+	dirty map[string]map[string]bool
 
 	// bg guards queued, made and pending, apart from mu, which a sync
 	// holds while it writes.
@@ -265,7 +271,7 @@ func (j *jobsTable) reset() {
 		return
 	}
 	j.mu.Lock()
-	j.rows, j.open, j.cursor, j.verify = nil, nil, nil, nil
+	j.rows, j.open, j.cursor, j.verify, j.dirty = nil, nil, nil, nil, nil
 	j.recordLocked(jobsTableLine{Reset: true})
 	j.mu.Unlock()
 	j.bg.Lock()
@@ -346,24 +352,52 @@ func isJobsTableStatement(sql string) bool {
 // for among them if they are still there: the row of a job asked for and
 // not in rows is deleted, and the others are left as they are. No order of a query's rows is
 // promised without ORDER BY.
+//
+// A table once made is not made again because a statement failed
+// (#1628). Measured on one instance at about 10,000 jobs (--services
+// storage,bigquery, arm64, 2026-10-18), making it again took up to 26 s,
+// which the query that did it, or waited for it (inc), spent of its
+// client's deadline: one run in 200 of TestBigQueryInformationSchemaJobs
+// ran out of its 60 s ("JOBS_BY_ORGANIZATION gave context deadline
+// exceeded"). The statements ran on the client's request, so a client
+// that gave up, or a front ended mid-statement (its container's restart),
+// left the table forgotten or unlike the file, and the next query made it
+// again. Now the statements run on a context of their own
+// (jobsTableSyncTimeout), and the rows of a statement not answered OK
+// are dirty: recorded before it is sent, they are deleted by the next
+// sync and written again when their jobs are listed, so a failed write
+// costs what its rows do. The table is made again only when it is not
+// made, or when the engine's table is unlike what the front wrote even so
+// (verifiedLocked), or when deleting the dirty rows fails too.
 func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string, rows map[string]string, open, asked map[string]bool, last string, create bool) bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), jobsTableSyncTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 	run := func(sql string) bool {
 		body, _ := json.Marshal(map[string]any{"query": sql, "useLegacySql": false})
 		st, _ := f.send(r, http.MethodPost, "/queries", body)
 		return st == http.StatusOK
 	}
-	have, made := j.rows[project]
-	if made && !j.verifiedLocked(f, r, project) {
-		if j.logf != nil {
-			j.logf("bigquery front: the table of INFORMATION_SCHEMA.JOBS rows of %s is not as the front left it; making it again", project)
-		}
+	forget := func() {
 		delete(j.rows, project)
 		delete(j.open, project)
 		delete(j.cursor, project)
+		delete(j.dirty, project)
 		j.setMade(project, false)
 		j.recordLocked(jobsTableLine{Project: project, Forget: true})
+	}
+	have, made := j.rows[project]
+	if made && !j.cleanLocked(project, run) {
+		j.log("bigquery front: could not delete the %d dirty rows of the table of INFORMATION_SCHEMA.JOBS rows of %s; making it again",
+			len(j.dirty[project]), project)
+		forget()
+		have, made = nil, false
+	}
+	if made && !j.verifiedLocked(f, r, project) {
+		j.log("bigquery front: the table of INFORMATION_SCHEMA.JOBS rows of %s is not as the front left it; making it again", project)
+		forget()
 		have, made = nil, false
 	}
 	if !made && !create {
@@ -387,8 +421,15 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 			j.rows = map[string]map[string]string{}
 		}
 		j.rows[project] = have
+		delete(j.dirty, project)
 		j.setMade(project, true)
 		j.recordLocked(jobsTableLine{Project: project, Made: true})
+		if len(ids) > jobsTableBatch {
+			began := time.Now()
+			defer func() {
+				j.log("bigquery front: made the table of INFORMATION_SCHEMA.JOBS rows of %s (%d rows) in %v", project, len(ids), time.Since(began).Round(time.Millisecond))
+			}()
+		}
 	}
 	var gone []string
 	var add []string
@@ -421,12 +462,11 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 			add = append(add, id)
 		}
 	}
-	fail := func() bool {
-		delete(j.rows, project) // made again by the next query
-		delete(j.open, project)
-		delete(j.cursor, project)
-		j.setMade(project, false)
-		j.recordLocked(jobsTableLine{Project: project, Forget: true})
+	// fail leaves the rows not written dirty (above), for the next sync.
+	fail := func(stmt string) bool {
+		j.markDirtyLocked(project, append(append([]string(nil), gone...), add...))
+		j.log("bigquery front: %s of the table of INFORMATION_SCHEMA.JOBS rows of %s failed; %d rows left to the next sync",
+			stmt, project, len(j.dirty[project]))
 		return false
 	}
 	for len(gone) > 0 {
@@ -435,13 +475,11 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		for i, id := range gone[:n] {
 			ids[i] = sqlString(id)
 		}
+		j.markDirtyLocked(project, gone[:n])
 		if !run("DELETE FROM " + jobsTablePath() + " WHERE job_id IN (" + strings.Join(ids, ", ") + ")") {
-			return fail()
+			return fail("a DELETE")
 		}
-		for _, id := range gone[:n] {
-			delete(have, id)
-		}
-		j.recordLocked(jobsTableLine{Project: project, Del: gone[:n]})
+		j.cleanedLocked(project, gone[:n])
 		gone = gone[n:]
 	}
 	for len(add) > 0 {
@@ -451,13 +489,15 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		}
 		n := jobsBatch(lits)
 		lits = lits[:n]
+		j.markDirtyLocked(project, add[:n])
 		if !run("INSERT INTO " + jobsTablePath() + " SELECT * FROM " + literalRows(jobsColumns, lits)) {
-			return fail()
+			return fail("an INSERT")
 		}
 		written := make(map[string]string, n)
 		for _, id := range add[:n] {
 			have[id] = digests[id]
 			written[id] = digests[id]
+			delete(j.dirty[project], id)
 		}
 		j.recordLocked(jobsTableLine{Project: project, Add: written})
 		add = add[n:]
@@ -482,6 +522,74 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 	j.cursor[project] = last
 	j.recordLocked(jobsTableLine{Project: project, End: true, Open: sortedIDs(was), Cursor: last})
 	return true
+}
+
+// log is logf, when there is one.
+func (j *jobsTable) log(format string, args ...any) {
+	if j.logf != nil {
+		j.logf(format, args...)
+	}
+}
+
+// markDirtyLocked records that the table may or may not hold the
+// project's rows of ids (dirty, sync), before a statement that writes
+// them is sent; j.mu is held.
+func (j *jobsTable) markDirtyLocked(project string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	if j.dirty == nil {
+		j.dirty = map[string]map[string]bool{}
+	}
+	d := j.dirty[project]
+	if d == nil {
+		d = map[string]bool{}
+		j.dirty[project] = d
+	}
+	have := j.rows[project]
+	for _, id := range ids {
+		d[id] = true
+		delete(have, id)
+	}
+	j.recordLocked(jobsTableLine{Project: project, Dirty: ids})
+}
+
+// cleanedLocked records that the table holds none of the project's rows
+// of ids: a DELETE of them was answered OK; j.mu is held.
+func (j *jobsTable) cleanedLocked(project string, ids []string) {
+	have, d := j.rows[project], j.dirty[project]
+	for _, id := range ids {
+		delete(have, id)
+		delete(d, id)
+	}
+	j.recordLocked(jobsTableLine{Project: project, Del: ids})
+}
+
+// cleanLocked deletes the project's dirty rows from its table, and
+// reports whether none is left; j.mu is held.
+func (j *jobsTable) cleanLocked(project string, run func(string) bool) bool {
+	ids := sortedIDs(j.dirty[project])
+	for len(ids) > 0 {
+		n := min(len(ids), jobsTableBatch)
+		lits := make([]string, n)
+		for i, id := range ids[:n] {
+			lits[i] = sqlString(id)
+		}
+		if !run("DELETE FROM " + jobsTablePath() + " WHERE job_id IN (" + strings.Join(lits, ", ") + ")") {
+			return false
+		}
+		j.cleanedLocked(project, ids[:n])
+		ids = ids[n:]
+	}
+	return true
+}
+
+// dirtyIDs returns the IDs of the project's dirty rows (sync), which the
+// next background sync asks for.
+func (j *jobsTable) dirtyIDs(project string) []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return sortedIDs(j.dirty[project])
 }
 
 // cursorOf returns the ID of the last job the engine listed for the
@@ -565,13 +673,21 @@ func (f front) syncJobsTable(r *http.Request, project string) bool {
 		asked[id] = true
 		ids = append(ids, id)
 	}
-	for _, id := range f.jobsTable.openIDs(project) {
+	for _, id := range append(f.jobsTable.openIDs(project), f.jobsTable.dirtyIDs(project)...) {
 		if !asked[id] {
 			asked[id] = true
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
+	if len(ids) > jobsPendingMax+len(pending) {
+		// Dirty rows of a failed write of many (sync), more than one
+		// list's URL names: a query lists every job, and writes them.
+		for id := range pending {
+			f.jobsTable.noteMade(project, id)
+		}
+		return false
+	}
 	l := &engineList{some: true, after: f.jobsTable.cursorOf(project), ids: ids}
 	jobs, status, _ := f.listedJobs(r, nil, l)
 	if status != 0 || f.tableJobsRows(r, project, jobs, l.last, asked, false) == "" {

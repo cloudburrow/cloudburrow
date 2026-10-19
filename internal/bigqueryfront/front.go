@@ -221,7 +221,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	iam := &iamPolicies{}                           // iam.go, #1231
 	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
 	settings := &projectOptions{}                   // projectoptions.go, #1375
-	jobRows := &jobsTable{}                         // jobstable.go, #1378
+	jobRows := &jobsTable{logf: o.logf}             // jobstable.go, #1378
 	newest := &newestJobs{}                         // joblisting.go, #1633
 	tables := &tableSettings{}                      // tableoptions.go, #1390
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
