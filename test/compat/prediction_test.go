@@ -92,7 +92,7 @@ func moduleRoot(t *testing.T) string {
 // outside the cluster, so there is nothing to orphan.
 func deployPredictor(t *testing.T, c *run.ServicesClient, h *Harness, id string, routes prediction.Routes, env map[string]string) *runpb.Service {
 	t.Helper()
-	ctx := h.Context()
+	ctx := runWait(t)
 	name := runParent(h) + "/services/" + id
 
 	vars := routes.Env()
@@ -125,7 +125,7 @@ func deployPredictor(t *testing.T, c *run.ServicesClient, h *Harness, id string,
 		_, _ = c.DeleteService(delCtx, &runpb.DeleteServiceRequest{Name: name})
 	})
 
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("prediction endpoint %s never became ready: %v", id, err)
 	}
@@ -358,12 +358,12 @@ func TestPredictionEndpointDeletionIsComplete(t *testing.T) {
 	name := runParent(h) + "/services/" + id
 	deployPredictor(t, c, h, id, prediction.DefaultRoutes(), nil)
 
-	ctx := h.Context()
+	ctx := runWait(t)
 	op, err := c.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name})
 	if err != nil {
 		t.Fatalf("DeleteService: %v", err)
 	}
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for deletion: %v", err)
 	}
 

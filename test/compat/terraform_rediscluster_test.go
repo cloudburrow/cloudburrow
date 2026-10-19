@@ -55,7 +55,7 @@ output "endpoint" {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(module(1))

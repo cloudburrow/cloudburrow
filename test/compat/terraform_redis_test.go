@@ -57,7 +57,7 @@ output "auth" {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(module(1, "dev", "TWELVE_HOURS"))
@@ -137,7 +137,7 @@ output "read_endpoint" {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(module(2))
@@ -181,7 +181,7 @@ func TestTerraformRedisInTransitEncryption(t *testing.T) {
 	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(fmt.Sprintf(`
@@ -238,7 +238,7 @@ func TestTerraformRedisCustomerManagedKey(t *testing.T) {
 	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(fmt.Sprintf(`

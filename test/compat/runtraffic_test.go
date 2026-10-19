@@ -26,7 +26,7 @@ import (
 func TestRunTrafficSplitAndTags(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	if os.Getenv(envKubeconfig) == "" {
 		if cli := os.Getenv(EnvCLI); cli != "" {
 			t.Setenv(envKubeconfig, filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig"))
@@ -44,7 +44,7 @@ func TestRunTrafficSplitAndTags(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	first, err := op.Wait(ctx)
+	first, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRunTrafficSplitAndTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateService: %v", err)
 	}
-	second, err := uop.Wait(ctx)
+	second, err := waitLRO(ctx, uop)
 	if err != nil {
 		t.Fatalf("waiting for the update: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRunTrafficSplitAndTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateService with a split: %v", err)
 	}
-	if _, err := sop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, sop); err != nil {
 		t.Fatalf("waiting for the split: %v", err)
 	}
 	// traffic_statuses is Knative's status, which settles a moment after

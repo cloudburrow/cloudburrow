@@ -39,11 +39,11 @@ func TestTerraformMemorystore1557(t *testing.T) {
 	t.Cleanup(func() {
 		for _, id := range []string{sid, pid, kid, eid} {
 			if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: parent + "/instances/" + id}); err == nil {
-				_ = op.Wait(h.Context())
+				_ = waitLRODone(h.Context(), op)
 			}
 		}
 		if op, err := rc.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: parent + "/clusters/" + cid}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	instance := func(name, id, extra string) string {

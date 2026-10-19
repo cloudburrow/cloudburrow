@@ -30,7 +30,7 @@ func TestGcloudMemorystoreValkey(t *testing.T) {
 	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("memorystore", "instances", "create", id, p, loc, "--shard-count=1", "--replica-count=0",

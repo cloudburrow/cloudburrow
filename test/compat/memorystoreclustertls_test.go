@@ -68,10 +68,10 @@ func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
 			wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
-			_ = op.Wait(wctx)
+			_ = waitLRODone(wctx, op)
 		}
 	})
-	cl, err := op.Wait(memorystoreWait(t))
+	cl, err := waitLRO(memorystoreWait(t), op)
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -144,10 +144,10 @@ func TestMemorystoreValkeyInTransitEncryption(t *testing.T) {
 			if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
 				wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer cancel()
-				_ = op.Wait(wctx)
+				_ = waitLRODone(wctx, op)
 			}
 		})
-		inst, err := op.Wait(memorystoreWait(t))
+		inst, err := waitLRO(memorystoreWait(t), op)
 		if err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", id, err)
 		}

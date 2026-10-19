@@ -858,9 +858,18 @@ func (c *clusters) upgrade(name, op, version string) {
 		v.EngineVersion, v.Updated = version, c.now()
 		r.Valkey, r.Nodes, r.NextNode = &v, fresh, snap.NextNode
 		err = c.save(r)
+		// The endpoints follow the new nodes before the old ones go (#1669):
+		// left to the next health check, the primary endpoint carried
+		// connections to the removed primary's closed tunnel (EOF) for up to
+		// a check after the operation was done. The promoted node has caught
+		// up with the old primary, so a fence a check put up before the
+		// upgrade, which no check lifts while it runs, goes too.
+		if e := c.eps[name]; e != nil {
+			e.fenced, e.labelled = false, ""
+		}
 	}
 	secs := c.secondariesOf(name)
-	out := renderValkey(r)
+	out := c.output(r)
 	c.mu.Unlock()
 	if err == nil {
 		c.removeNodes(old)
