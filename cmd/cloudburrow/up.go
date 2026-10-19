@@ -572,6 +572,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the custom prediction containers it runs (#1193), so it is started even
 	// with no model: the official aiplatform client reaches them through it.
 	localAISrv = withPredictionEndpoints(cfg, localAISrv, runSvc, ingressAddr)
+	// EmbedContent's file_data parts (#1651) read their gs:// objects
+	// from this instance's Cloud Storage.
+	if localAISrv != nil && serviceEnabled(cfg, config.ServiceStorage) {
+		localAISrv.UseStorage(embedObjects{f: storageSourceFetcher{
+			cfg: cfg, client: &http.Client{Timeout: 2 * time.Minute},
+			addr: func() string {
+				if f := forwarderFor(forwarders, "storage"); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			},
+		}})
+	}
 
 	// One manager of the local AI models for the console's Local models
 	// page and /admin/local-models (#1396), so a download started on one is

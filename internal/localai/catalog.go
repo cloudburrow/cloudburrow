@@ -211,11 +211,11 @@ var catalog = map[string]Model{
 	// DeepMind's open multimodal embedding model: text, images, video and
 	// audio in one 768-dimensional space. It is NOT an official Google
 	// artifact: onnx-community converted google/embeddinggemma-2, which Google
-	// publishes ungated under Apache 2.0, as is this conversion. Only the
-	// text model and the vision encoder are pinned: images are served, audio
-	// and video are not. Pinned values were read from the Hugging Face API
-	// (tree?expand=true, LFS oids) on 2026-10-19 and the files checked
-	// against them.
+	// publishes ungated under Apache 2.0, as is this conversion. The int8
+	// text model, vision encoder (#1454) and audio encoder (#1651) are
+	// pinned: images and audio are served, video is not. Pinned values were
+	// read from the Hugging Face API (tree?expand=true, LFS oids) on
+	// 2026-10-19 and the files checked against them.
 	EmbeddingGemma2ONNXID: {
 		ID:        EmbeddingGemma2ONNXID,
 		Repo:      "onnx-community/embeddinggemma-2-ONNX",
@@ -227,9 +227,9 @@ var catalog = map[string]Model{
 		Runtime:   RuntimeONNX,
 		Official:  false,
 		Notes: "A COMMUNITY ONNX int8 conversion by onnx-community, NOT an official " +
-			"Google artifact. Weights are google/embeddinggemma-2 (Apache 2.0). Embeds text " +
-			"and images, and mixes of them, into one 768-dimensional vector; the vision " +
-			"encoder is pinned beside the text model, the audio encoder is not. Runs on ONNX " +
+			"Google artifact. Weights are google/embeddinggemma-2 (Apache 2.0). Embeds text, " +
+			"images and audio, and mixes of them, into one 768-dimensional vector; the vision " +
+			"and audio encoders are pinned beside the text model. Runs on ONNX " +
 			"Runtime in a build made with -tags onnx.",
 		Pin: &Pin{
 			Revision: "daa72c51243991dfcaf9f9137d2c573d8f7790c0",
@@ -242,6 +242,10 @@ var catalog = map[string]Model{
 					SHA256: "bb0de2df53a2448a32dc7908a187c168c8afd514d4d6f674f7f46024875fa4e3"},
 				{Path: "onnx/vision_encoder_quantized.onnx_data", Bytes: 195228672,
 					SHA256: "3dabd69c0a36e9a8771ad82030dde74daa5a0e02b7047a5d3f3382b1137bab89"},
+				{Path: "onnx/audio_encoder_quantized.onnx", Bytes: 249330,
+					SHA256: "04a9a9094ba76fb169e4c69be45a4b621580188654d6be59eab860eadcd42d3c"},
+				{Path: "onnx/audio_encoder_quantized.onnx_data", Bytes: 340058624,
+					SHA256: "aa6361d898e1f1d6303f8dd2b5fabf4fd3629e15fd709e9cb06ac5cb9416a030"},
 				{Path: "tokenizer.json", Bytes: 32170510,
 					SHA256: "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4"},
 			},

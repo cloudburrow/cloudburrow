@@ -35,6 +35,10 @@ type Server struct {
 	endpoints EndpointResolver
 	ingress   func() string
 	client    *http.Client
+
+	// objects reads file_data's gs:// objects (#1651); nil without Cloud
+	// Storage.
+	objects Objects
 }
 
 // NewServer returns a server. A nil generator is valid and makes every

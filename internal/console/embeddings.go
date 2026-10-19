@@ -24,8 +24,9 @@ const EmbeddingsNote = "embeddinggemma-300m-onnx-community is a COMMUNITY ONNX i
 // Embeddings2Note is EmbeddingsNote for EmbeddingGemma 2 (#1454), the model
 // the screen sends images to.
 const Embeddings2Note = "embeddinggemma-2-onnx-community is a COMMUNITY ONNX int8 conversion " +
-	"of EmbeddingGemma 2 by onnx-community. It is NOT an official Google artifact. It embeds text " +
-	"and PNG or JPEG images into one space; load it on the Local models page to serve it."
+	"of EmbeddingGemma 2 by onnx-community. It is NOT an official Google artifact. It embeds text, " +
+	"PNG or JPEG images and WAV audio into one space, inline or read from this instance's Cloud " +
+	"Storage (gs://); load it on the Local models page to serve it."
 
 // embeddingsConfigured reports whether the Embeddings screen is offered.
 func (p *Playground) embeddingsConfigured() bool {
@@ -89,6 +90,8 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		"imageModelNote":  Embeddings2Note,
 		"imageMimeTypes":  embedding.ImageMIMETypes,
 		"imageMaxPerItem": embedding.MaxImages,
+		// Audio clips (#1651) are sent the same way.
+		"audioMimeTypes": embedding.AudioMIMETypes,
 		"taskTypes": []string{"RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
 			"CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING", "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY"},
 		"dimensions": []int{768, 512, 256, 128},
