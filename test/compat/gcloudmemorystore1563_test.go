@@ -36,7 +36,7 @@ func TestGcloudMemorystore1563(t *testing.T) {
 		t.Cleanup(func() {
 			for i := 0; i < 3; i++ {
 				if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-					_ = op.Wait(h.Context())
+					_ = waitLRODone(h.Context(), op)
 					return
 				}
 				time.Sleep(2 * time.Second)

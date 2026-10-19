@@ -42,13 +42,13 @@ func valkeyDisabled(t *testing.T, ctx context.Context, c *memorystore.Client, pr
 		for i := 0; i < 3; i++ {
 			// A primary is deleted once its secondaries are gone.
 			if op, err := c.DeleteInstance(context.Background(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-				_ = op.Wait(context.Background())
+				_ = waitLRODone(context.Background(), op)
 				return
 			}
 			time.Sleep(2 * time.Second)
 		}
 	})
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("CreateInstance %s operation: %v", id, err)
 	}
@@ -83,7 +83,7 @@ func cirUpdate(t *testing.T, ctx context.Context, c *memorystore.Client, name st
 	if err != nil {
 		t.Fatalf("UpdateInstance cross_instance_replication_config of %s: %v", name, err)
 	}
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("UpdateInstance cross_instance_replication_config of %s operation: %v", name, err)
 	}
@@ -196,10 +196,10 @@ func TestMemorystoreValkeyEngineVersions(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestMemorystoreValkeyEngineVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance engine_version: %v", err)
 	}
-	if inst, err = uop.Wait(ctx); err != nil || inst.GetEngineVersion() != "VALKEY_9_0" {
+	if inst, err = waitLRO(ctx, uop); err != nil || inst.GetEngineVersion() != "VALKEY_9_0" {
 		t.Fatalf("UpdateInstance engine_version operation = %v, %v", inst.GetEngineVersion(), err)
 	}
 	addr = net.JoinHostPort(inst.GetDiscoveryEndpoints()[0].GetAddress(), strconv.Itoa(int(inst.GetDiscoveryEndpoints()[0].GetPort())))
@@ -295,7 +295,7 @@ func TestMemorystoreValkeyKmsKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BackupInstance: %v", err)
 	}
-	if _, err := bop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, bop); err != nil {
 		t.Fatalf("BackupInstance operation: %v", err)
 	}
 	bname := inst.GetBackupCollection() + "/backups/cmek"
@@ -305,7 +305,7 @@ func TestMemorystoreValkeyKmsKey(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteBackup(context.Background(), &memorystorepb.DeleteBackupRequest{Name: bname}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 
@@ -359,10 +359,10 @@ func TestMemorystoreValkeyKmsKey(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := cc.DeleteCluster(context.Background(), &clusterpb.DeleteClusterRequest{Name: parent + "/clusters/" + cid}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
-	cl, err := cop.Wait(ctx)
+	cl, err := waitLRO(ctx, cop)
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestMemorystoreValkeyMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartMigration: %v", err)
 	}
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("StartMigration operation: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestMemorystoreValkeyMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FinishMigration: %v", err)
 	}
-	if inst, err = fop.Wait(ctx); err != nil {
+	if inst, err = waitLRO(ctx, fop); err != nil {
 		t.Fatalf("FinishMigration operation: %v", err)
 	}
 	if inst.GetState() != memorystorepb.Instance_ACTIVE || inst.GetMigrationConfig().GetState() != memorystorepb.MigrationConfig_MIGRATED {

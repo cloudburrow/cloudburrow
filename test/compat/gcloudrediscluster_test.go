@@ -29,7 +29,7 @@ func TestGcloudRedisCluster(t *testing.T) {
 	name := "projects/" + g.project + "/locations/us-central1/clusters/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "clusters", "create", id, p, region, "--shard-count=1", "--replica-count=0",

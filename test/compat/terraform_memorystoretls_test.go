@@ -31,10 +31,10 @@ func TestTerraformMemorystoreInTransitEncryption(t *testing.T) {
 	vname := "projects/" + m.project + "/locations/us-central1/instances/" + vid
 	t.Cleanup(func() {
 		if op, err := rc.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: cname}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 		if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: vname}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(fmt.Sprintf(`

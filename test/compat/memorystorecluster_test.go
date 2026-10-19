@@ -155,10 +155,10 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
-	cl, err := op.Wait(ops)
+	cl, err := waitLRO(ops, op)
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateCluster node_type: %v", err)
 	}
-	if cl, err = uop.Wait(ops); err != nil || cl.GetNodeType() != clusterpb.NodeType_REDIS_STANDARD_SMALL || cl.GetSizeGb() != 26 {
+	if cl, err = waitLRO(ops, uop); err != nil || cl.GetNodeType() != clusterpb.NodeType_REDIS_STANDARD_SMALL || cl.GetSizeGb() != 26 {
 		t.Fatalf("UpdateCluster node_type operation = %v, %v", cl, err)
 	}
 	err = rc.ForEachShard(h.Context(), func(ctx2 context.Context, m *redis.Client) error {
@@ -249,7 +249,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteCluster: %v", err)
 	}
-	if err := dop.Wait(ops); err != nil {
+	if err := waitLRODone(ops, dop); err != nil {
 		t.Fatalf("DeleteCluster operation: %v", err)
 	}
 	if _, err := c.GetCluster(h.Context(), &clusterpb.GetClusterRequest{Name: name}); status.Code(err) != codes.NotFound {

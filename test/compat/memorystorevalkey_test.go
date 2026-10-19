@@ -107,10 +107,10 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
-	inst, err := op.Wait(ops)
+	inst, err := waitLRO(ops, op)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance node_type: %v", err)
 	}
-	if inst, err = uop.Wait(ops); err != nil || inst.GetNodeType() != memorystorepb.Instance_STANDARD_SMALL ||
+	if inst, err = waitLRO(ops, uop); err != nil || inst.GetNodeType() != memorystorepb.Instance_STANDARD_SMALL ||
 		inst.GetPersistenceConfig().GetMode() != memorystorepb.PersistenceConfig_AOF {
 		t.Fatalf("UpdateInstance node_type operation = %v, %v", inst, err)
 	}
@@ -214,7 +214,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteInstance: %v", err)
 	}
-	if err := dop.Wait(ops); err != nil {
+	if err := waitLRODone(ops, dop); err != nil {
 		t.Fatalf("DeleteInstance operation: %v", err)
 	}
 	if _, err := c.GetInstance(h.Context(), &memorystorepb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
@@ -247,10 +247,10 @@ func TestMemorystoreValkeyClusterDisabled(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
-	inst, err := op.Wait(memorystoreWait(t))
+	inst, err := waitLRO(memorystoreWait(t), op)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}

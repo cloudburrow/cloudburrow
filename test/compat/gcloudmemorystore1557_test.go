@@ -50,7 +50,7 @@ func TestGcloudMemorystore1557(t *testing.T) {
 		t.Cleanup(func() {
 			for i := 0; i < 3; i++ {
 				if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: parent + "/instances/" + id}); err == nil {
-					_ = op.Wait(h.Context())
+					_ = waitLRODone(h.Context(), op)
 					return
 				}
 				time.Sleep(2 * time.Second)
@@ -78,7 +78,7 @@ func TestGcloudMemorystore1557(t *testing.T) {
 	cname := parent + "/clusters/" + cid
 	t.Cleanup(func() {
 		if op, err := rc.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: cname}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "clusters", "create", cid, p, "--region=us-central1", "--shard-count=1", "--replica-count=0",

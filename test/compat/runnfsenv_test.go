@@ -117,7 +117,7 @@ func TestRunNFSVolumesAndCloudRunEnv(t *testing.T) {
 	server, kubectl := runNFSServer(t)
 	jc, _ := runJobClients(t, h)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 
 	jobID := "compat-nfs-job"
 	jobName := runParent(h) + "/jobs/" + jobID
@@ -129,14 +129,14 @@ func TestRunNFSVolumesAndCloudRunEnv(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: jobName}) })
-	if _, err := jop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, jop); err != nil {
 		t.Fatal(err)
 	}
 	rop, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: jobName})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	ex, err := rop.Wait(ctx)
+	ex, err := waitLRO(ctx, rop)
 	if err != nil {
 		t.Fatalf("the task did not write to its NFS volume: %v", err)
 	}
@@ -162,7 +162,7 @@ exec httpd -f -p 8080 -h /www`
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
@@ -213,7 +213,7 @@ exec httpd -f -p 8080 -h /www`
 // method of Cloud Run's surface.
 func TestRunCancelOperationAsGoogle(t *testing.T) {
 	h := New(t)
-	ctx := h.Context()
+	ctx := runWait(t)
 	jc, _ := runJobClients(t, h)
 	oc, err := lroauto.NewOperationsClient(ctx, runClientOptions(h)...)
 	if err != nil {
@@ -230,7 +230,7 @@ func TestRunCancelOperationAsGoogle(t *testing.T) {
 	if err := oc.CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: op.Name()}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CancelOperation = %v; want UNIMPLEMENTED", err)
 	}
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Errorf("the operation after a refused cancel: %v", err)
 	}
 	resp, err := http.Post("http://"+h.Endpoint(EnvRun)+"/v2/"+op.Name()+":cancel", "application/json", strings.NewReader(`{}`))

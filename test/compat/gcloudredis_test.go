@@ -31,7 +31,7 @@ func TestGcloudRedis(t *testing.T) {
 	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "instances", "create", id, p, region, "--size=1", "--tier=basic", "--enable-auth",
@@ -112,7 +112,7 @@ func TestGcloudRedisInTransitEncryption(t *testing.T) {
 	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "instances", "create", id, p, region, "--size=1", "--tier=basic", "--transit-encryption-mode=server-authentication")
@@ -151,7 +151,7 @@ func TestGcloudRedisCustomerManagedKey(t *testing.T) {
 	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "instances", "create", id, p, region, "--size=1", "--tier=basic", "--customer-managed-key="+key)

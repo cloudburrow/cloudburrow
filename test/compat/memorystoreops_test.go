@@ -34,7 +34,7 @@ import (
 func TestMemorystoreLocationsOperationsMaintenance(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	parent := "projects/" + project + "/locations/us-central1"
 
 	var found bool
@@ -100,7 +100,7 @@ func TestMemorystoreLocationsOperationsMaintenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance: %v", err)
 	}
-	got, err := op.Wait(ctx)
+	got, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestMemorystoreLocationsOperationsMaintenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 	// A new connection: one made before keeps the access it had.

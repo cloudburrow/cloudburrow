@@ -19,7 +19,7 @@ import (
 func TestRunJobMountsTwoVersionsInOneVolume(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	const secretID = "compat-job-two-versions"
 	runVolumeSecret(t, h, secretID, "first-value")
 	sc := secretsClient(t, h)
@@ -41,14 +41,14 @@ func TestRunJobMountsTwoVersionsInOneVolume(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 	rop, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: name})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Fatalf("the task did not see both versions: %v", err)
 	}
 }

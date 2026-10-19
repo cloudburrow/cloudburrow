@@ -32,7 +32,7 @@ func TestRunMountsASecretUnderACustomerManagedKey(t *testing.T) {
 	sc := secretsClient(t, h)
 	jc, _ := runJobClients(t, h)
 	rc := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 
 	key := cmekKeys(t, h, kc, "global")["global/k"]
 	const secretID, payload = "compat-run-cmek", "cmek-plain-value"
@@ -67,7 +67,7 @@ func TestRunMountsASecretUnderACustomerManagedKey(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(context.Background(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 	run := func() error {
@@ -75,7 +75,7 @@ func TestRunMountsASecretUnderACustomerManagedKey(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		_, err = rop.Wait(ctx)
+		_, err = waitLRO(ctx, rop)
 		return err
 	}
 	if err := run(); err != nil {

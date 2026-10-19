@@ -52,7 +52,7 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 	// Resource Manager as the emulators shard's BIGQUERY_RESOURCEMANAGER
 	// (#1568), so the Resource Manager suite stays in storage.
 	shardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	served := func(env string) bool {
 		if strings.TrimSpace(os.Getenv(env)) == "" {
 			return false
@@ -81,7 +81,7 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateProject %s: %v", id, err)
 		}
-		if _, err := op.Wait(ctx); err != nil {
+		if _, err := waitLRO(ctx, op); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -262,14 +262,14 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 			Job: &runpb.Job{Template: &runpb.ExecutionTemplate{Template: &runpb.TaskTemplate{
 				Containers: []*runpb.Container{{Image: "docker.io/library/busybox:1.36"}}}}}})
 		if err == nil {
-			_, err = op.Wait(ctx)
+			_, err = waitLRO(ctx, op)
 		}
 		if err != nil {
 			t.Fatalf("Run CreateJob: %v", err)
 		}
 		t.Cleanup(func() {
 			if op, err := jc.DeleteJob(context.Background(), &runpb.DeleteJobRequest{Name: job}); err == nil {
-				_, _ = op.Wait(context.Background())
+				_, _ = waitLRO(context.Background(), op)
 			}
 		})
 		extras = append(extras, purgeExtra{"Cloud Run job", func() bool {
@@ -288,14 +288,14 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 		op, err := rc.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent + "/locations/us-central1", InstanceId: "purged",
 			Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1}})
 		if err == nil {
-			_, err = op.Wait(ctx)
+			_, err = waitLRO(ctx, op)
 		}
 		if err != nil {
 			t.Fatalf("Memorystore CreateInstance: %v", err)
 		}
 		t.Cleanup(func() {
 			if op, err := rc.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: inst}); err == nil {
-				_ = op.Wait(context.Background())
+				_ = waitLRODone(context.Background(), op)
 			}
 		})
 		extras = append(extras, purgeExtra{"Memorystore instance", func() bool {

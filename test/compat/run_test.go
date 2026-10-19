@@ -58,7 +58,7 @@ func runParent(h *Harness) string {
 func TestRunServiceLifecycle(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-hello"
 	name := runParent(h) + "/services/" + id
 
@@ -86,7 +86,7 @@ func TestRunServiceLifecycle(t *testing.T) {
 
 	// Cloud Run returns an operation, so the caller polls. Wait returns when
 	// the revision is genuinely ready, not when the API accepted the request.
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service to become ready: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRunServiceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteService: %v", err)
 	}
-	if _, err := dop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, dop); err != nil {
 		t.Fatalf("waiting for the delete: %v", err)
 	}
 	if _, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name}); status.Code(err) != codes.NotFound {
@@ -149,7 +149,7 @@ func TestRunServiceLifecycle(t *testing.T) {
 func TestRunRevisions(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-revs"
 	name := runParent(h) + "/services/" + id
 	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
@@ -161,7 +161,7 @@ func TestRunRevisions(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
@@ -227,7 +227,7 @@ const helloDigest = "ghcr.io/knative/helloworld-go@sha256:a97656c57f547d668318eb
 func TestRunUpdateService(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	// The ingress is reached through the instance's own kubeconfig.
 	if os.Getenv(envKubeconfig) == "" {
 		if cli := os.Getenv(EnvCLI); cli != "" {
@@ -246,7 +246,7 @@ func TestRunUpdateService(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestRunUpdateService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateService: %v", err)
 	}
-	updated, err := uop.Wait(ctx)
+	updated, err := waitLRO(ctx, uop)
 	if err != nil {
 		t.Fatalf("waiting for the update: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestRunUpdateService(t *testing.T) {
 func TestRunUpdateServiceWithAMask(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-mask"
 	name := runParent(h) + "/services/" + id
 	env := func(v string) []*runpb.EnvVar {
@@ -333,7 +333,7 @@ func TestRunUpdateServiceWithAMask(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
 	update := func(svc *runpb.Service, paths ...string) *runpb.Service {
@@ -344,7 +344,7 @@ func TestRunUpdateServiceWithAMask(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UpdateService mask %v: %v", paths, err)
 		}
-		got, err := uop.Wait(ctx)
+		got, err := waitLRO(ctx, uop)
 		if err != nil {
 			t.Fatalf("waiting for the update with mask %v: %v", paths, err)
 		}
@@ -445,7 +445,7 @@ func TestRunUntaggedImageIsRefused(t *testing.T) {
 func TestRunServiceFieldsAreMappedOrRefused(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-fields"
 	name := runParent(h) + "/services/" + id
 	service := func() *runpb.Service {
@@ -487,7 +487,7 @@ func TestRunServiceFieldsAreMappedOrRefused(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
 	got, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name})

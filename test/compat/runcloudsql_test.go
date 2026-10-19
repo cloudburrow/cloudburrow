@@ -109,7 +109,7 @@ func TestRunServiceCloudSQLVolume(t *testing.T) {
 		defer cancel()
 		_, _ = c.DeleteService(dctx, &runpb.DeleteServiceRequest{Name: name})
 	})
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestRunJobCloudSQLVolume(t *testing.T) {
 	h := New(t)
 	conn := runCloudSQLConn(t, h)
 	jc, _ := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-job-cloudsql"
 	name := runParent(h) + "/jobs/" + id
 	job := shellJob(`for i in $(seq 60); do [ -S "/cloudsql/$CONN/.s.PGSQL.5432" ] && break; sleep 1; done
@@ -155,14 +155,14 @@ func TestRunJobCloudSQLVolume(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 	rop, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: name})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Fatalf("the task did not reach PostgreSQL through /cloudsql/%s: %v", conn, err)
 	}
 }

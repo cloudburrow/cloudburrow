@@ -112,7 +112,7 @@ func TestConsoleMemorystoreCreateEditDelete(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	q := "?project=" + url.QueryEscape(project)
@@ -256,7 +256,7 @@ func TestConsoleMemorystoreUpgrade(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 	q := "?project=" + url.QueryEscape(project)
@@ -304,7 +304,7 @@ func TestConsoleMemorystoreStandardTier(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 	q := "?project=" + url.QueryEscape(project)
@@ -367,7 +367,7 @@ func TestConsoleMemorystoreInTransitEncryption(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 	q := "?project=" + url.QueryEscape(project)
@@ -439,7 +439,7 @@ func TestConsoleMemorystoreCustomerManagedKey(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 	q := "?project=" + url.QueryEscape(project)
@@ -485,12 +485,12 @@ func TestConsoleMemorystoreRotateServerCA(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
 	c, project := memorystoreAdminClient(t, h)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	id := fmt.Sprintf("console-rot-%d", time.Now().UnixNano()%1e8)
 	name := "projects/" + project + "/locations/us-central1/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 	op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/us-central1", InstanceId: id,
@@ -498,7 +498,7 @@ func TestConsoleMemorystoreRotateServerCA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := op.Wait(ctx)
+	before, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatal(err)
 	}

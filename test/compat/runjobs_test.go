@@ -73,7 +73,7 @@ func completedCondition(e *runpb.Execution) *runpb.Condition {
 func TestRunJobLifecycle(t *testing.T) {
 	h := New(t)
 	jc, xc := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-job"
 	name := runParent(h) + "/jobs/" + id
 	script := `echo "task $CLOUD_RUN_TASK_INDEX of $CLOUD_RUN_TASK_COUNT says $GREETING"`
@@ -84,7 +84,7 @@ func TestRunJobLifecycle(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	job, err := op.Wait(ctx)
+	job, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for CreateJob: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestRunJobLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateJob: %v", err)
 	}
-	updated, err := uop.Wait(ctx)
+	updated, err := waitLRO(ctx, uop)
 	if err != nil {
 		t.Fatalf("waiting for UpdateJob: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRunJobLifecycle(t *testing.T) {
 	if err != nil || !strings.HasPrefix(md.GetName(), name+"/executions/") {
 		t.Fatalf("RunJob's operation metadata = %v, %v; want the execution", md, err)
 	}
-	execution, err := rop.Wait(ctx)
+	execution, err := waitLRO(ctx, rop)
 	if err != nil {
 		t.Fatalf("waiting for the execution: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestRunJobLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteExecution: %v", err)
 	}
-	if _, err := dop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, dop); err != nil {
 		t.Fatalf("waiting for DeleteExecution: %v", err)
 	}
 	if _, err := xc.GetExecution(ctx, &runpb.GetExecutionRequest{Name: execution.GetName()}); status.Code(err) != codes.NotFound {
@@ -207,7 +207,7 @@ func TestRunJobLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteJob: %v", err)
 	}
-	if _, err := djop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, djop); err != nil {
 		t.Fatalf("waiting for DeleteJob: %v", err)
 	}
 	if _, err := jc.GetJob(ctx, &runpb.GetJobRequest{Name: name}); status.Code(err) != codes.NotFound {
@@ -247,7 +247,7 @@ func TestRunJobFailureAndCancel(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,7 +255,7 @@ func TestRunJobFailureAndCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err == nil || !strings.Contains(err.Error(), "exited with code 3") {
+	if _, err := waitLRO(ctx, rop); err == nil || !strings.Contains(err.Error(), "exited with code 3") {
 		t.Errorf("waiting for a failing execution = %v; want an error naming the exit code", err)
 	}
 	md, err := rop.Metadata()
@@ -302,7 +302,7 @@ func TestRunJobFailureAndCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CancelExecution: %v", err)
 	}
-	cancelled, err := cop.Wait(ctx)
+	cancelled, err := waitLRO(ctx, cop)
 	if err != nil {
 		t.Fatalf("waiting for CancelExecution: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestRunJobFailureAndCancel(t *testing.T) {
 		completedCondition(cancelled).GetExecutionReason() != runpb.Condition_CANCELLED {
 		t.Errorf("cancelled execution = %v", cancelled)
 	}
-	if _, err := sop.Wait(ctx); err == nil {
+	if _, err := waitLRO(ctx, sop); err == nil {
 		t.Error("the cancelled execution's RunJob operation succeeded")
 	}
 }
@@ -326,7 +326,7 @@ func TestRunJobReadsASecretManagerSecret(t *testing.T) {
 	h := New(t)
 	sc := secretsClient(t, h)
 	jc, _ := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	const secretID, payload = "compat-job-secret", "job-secret-value"
 	secretName := secretsParent(h) + "/secrets/" + secretID
 	if _, err := sc.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: secretID,
@@ -351,14 +351,14 @@ func TestRunJobReadsASecretManagerSecret(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 	rop, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: name})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	execution, err := rop.Wait(ctx)
+	execution, err := waitLRO(ctx, rop)
 	if err != nil {
 		t.Fatalf("the task was not given the secret: %v", err)
 	}

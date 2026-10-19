@@ -54,7 +54,7 @@ func waitCondition(t *testing.T, what string, get func() (*runpb.Condition, erro
 // removes it.
 func TestRunWorkerPoolLifecycle(t *testing.T) {
 	h := New(t)
-	ctx := h.Context()
+	ctx := runWait(t)
 	c, err := run.NewWorkerPoolsClient(ctx, runClientOptions(h)...)
 	if err != nil {
 		t.Fatalf("run.NewWorkerPoolsClient: %v", err)
@@ -69,7 +69,7 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	name := runParent(h) + "/workerPools/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteWorkerPool(ctx, &runpb.DeleteWorkerPoolRequest{Name: name}); err == nil {
-			_, _ = op.Wait(ctx)
+			_, _ = waitLRO(ctx, op)
 		}
 	})
 
@@ -81,7 +81,7 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkerPool: %v", err)
 	}
-	created, err := op.Wait(ctx)
+	created, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for CreateWorkerPool: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateWorkerPool (scale): %v", err)
 	}
-	after, err := uop.Wait(ctx)
+	after, err := waitLRO(ctx, uop)
 	if err != nil {
 		t.Fatalf("waiting for UpdateWorkerPool: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateWorkerPool (template): %v", err)
 	}
-	after, err = uop.Wait(ctx)
+	after, err = waitLRO(ctx, uop)
 	if err != nil {
 		t.Fatalf("waiting for UpdateWorkerPool: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteWorkerPool: %v", err)
 	}
-	if _, err := dop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, dop); err != nil {
 		t.Fatalf("waiting for DeleteWorkerPool: %v", err)
 	}
 	if _, err := c.GetWorkerPool(ctx, &runpb.GetWorkerPoolRequest{Name: name}); status.Code(err) != codes.NotFound {
@@ -224,7 +224,7 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 // refused; and it is deleted.
 func TestRunInstanceLifecycle(t *testing.T) {
 	h := New(t)
-	ctx := h.Context()
+	ctx := runWait(t)
 	c, err := run.NewInstancesClient(ctx, runClientOptions(h)...)
 	if err != nil {
 		t.Fatalf("run.NewInstancesClient: %v", err)
@@ -234,7 +234,7 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	name := runParent(h) + "/instances/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(ctx, &runpb.DeleteInstanceRequest{Name: name}); err == nil {
-			_, _ = op.Wait(ctx)
+			_, _ = waitLRO(ctx, op)
 		}
 	})
 	if os.Getenv(envKubeconfig) == "" {
@@ -249,7 +249,7 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
-	created, err := op.Wait(ctx)
+	created, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for CreateInstance: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StopInstance: %v", err)
 	}
-	if _, err := sop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, sop); err != nil {
 		t.Fatalf("waiting for StopInstance: %v", err)
 	}
 	ready()
@@ -303,7 +303,7 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartInstance: %v", err)
 	}
-	if _, err := stop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, stop); err != nil {
 		t.Fatalf("waiting for StartInstance: %v", err)
 	}
 	ready()
@@ -315,7 +315,7 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteInstance: %v", err)
 	}
-	if _, err := dop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, dop); err != nil {
 		t.Fatalf("waiting for DeleteInstance: %v", err)
 	}
 	if _, err := c.GetInstance(ctx, &runpb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
