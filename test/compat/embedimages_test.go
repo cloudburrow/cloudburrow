@@ -57,7 +57,7 @@ func shapeImage(t *testing.T, kind string, c color.RGBA) []byte {
 	return b.Bytes()
 }
 
-// loadEmbeddingModel2 downloads EmbeddingGemma 2 (about 541 MB, once per
+// loadEmbeddingModel2 downloads EmbeddingGemma 2 (about 882 MB, once per
 // state directory) and loads it, through the console's Local models API.
 func loadEmbeddingModel2(t *testing.T, ctx context.Context, addr string) {
 	t.Helper()
