@@ -499,7 +499,9 @@ primary's writes are paused (`CLIENT PAUSE WRITE`) until the new node has caught
 stops replicating while the old primary replicates it, so a write sent to it afterwards is
 READONLY rather than lost. Every acknowledged write is kept
 (`TestMemorystoreValkeyUpgradeKeepsWrites`, `TestMemorystoreValkeyClusterUpgradeKeepsWrites`).
-The endpoints are the new nodes' host addresses afterwards. A downgrade is INVALID_ARGUMENT.
+The endpoints are the new nodes' host addresses afterwards; a `CLUSTER_DISABLED` instance's primary
+and reader endpoints keep their addresses and point at the new nodes before the old ones are
+removed and the operation is done (#1669). A downgrade is INVALID_ARGUMENT.
 
 **Cross-instance replication** (#1557), for `CLUSTER_DISABLED` instances: an instance created with `cross_instance_replication_config` `instance_role`
 `SECONDARY` and `primary_instance` (an `ACTIVE` `CLUSTER_DISABLED` instance of the same

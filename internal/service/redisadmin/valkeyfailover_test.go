@@ -119,7 +119,18 @@ func (c vkConn) Do(_ context.Context, args ...any) (any, error) {
 		n.primary = fmt.Sprint(args[1]) + ":" + fmt.Sprint(args[2])
 	case cmd == "INFO":
 		if n.primary == "" {
-			return fmt.Sprintf("role:master\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\nslave0:ip=x,port=1,state=online\r\nslave1:ip=x,port=1,state=online\r\nrun_id:%s\r\n", n.replID, n.offset, n.runID), nil
+			// Two replicas online, or as many as there are: an upgrade's
+			// primary has its own and the new nodes' (settle).
+			slaves, replicas := "", 0
+			for _, o := range c.f.nodes {
+				if o.primary != "" {
+					replicas++
+				}
+			}
+			for i := 0; i < max(2, replicas); i++ {
+				slaves += fmt.Sprintf("slave%d:ip=x,port=1,state=online\r\n", i)
+			}
+			return fmt.Sprintf("role:master\r\nmaster_replid:%s\r\nmaster_repl_offset:%d\r\n%srun_id:%s\r\n", n.replID, n.offset, slaves, n.runID), nil
 		}
 		host, port, _ := net.SplitHostPort(n.primary)
 		link := "master_link_status:up\r\nmaster_sync_in_progress:0\r\n"
