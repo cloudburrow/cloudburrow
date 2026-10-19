@@ -635,6 +635,10 @@ type engineList struct {
 	// last is the ID of the last job the engine listed, or after when it
 	// listed none.
 	last string
+	// open marks the list of a query of jobs not DONE (openJobs.listing,
+	// jobsopen.go, #1633); invalid, that the engine's job of the cursor's
+	// ID was not the cursor, so the list may lack jobs not DONE.
+	open, invalid bool
 }
 
 // jobsTableSyncTimeout bounds a background sync.

@@ -128,6 +128,26 @@ func (j *jobRecords) adoptScript(w http.ResponseWriter, rec *recorder, kids []sc
 	writeRecorded(w, rec, resp)
 }
 
+// childrenOf returns the IDs of the child jobs of project recorded with
+// a parent of parents (adoptScript), in the order recorded: the only jobs
+// patchScript gives a parentJobId, so the only ones a query of
+// INFORMATION_SCHEMA.JOBS WHERE parent_job_id = reads (#1633).
+func (j *jobRecords) childrenOf(project string, parents map[string]bool) []string {
+	if j == nil {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	var ids []string
+	for _, key := range j.childOrder {
+		c, ok := j.children[key]
+		if ok && parents[c.parent] && c.project == project {
+			ids = append(ids, c.id)
+		}
+	}
+	return ids
+}
+
 // patchScript gives job its place in a script, and reports whether it
 // changed it.
 func (j *jobRecords) patchScript(job map[string]any, project string) bool {
