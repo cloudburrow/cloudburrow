@@ -30,7 +30,7 @@ func TestConsoleRedisCluster(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/clusters/" + id
 	t.Cleanup(func() {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	q := "?project=" + url.QueryEscape(project)

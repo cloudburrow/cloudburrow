@@ -45,10 +45,10 @@ func TestMemorystoreVersionsAndUpgrade(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestMemorystoreVersionsAndUpgrade(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UpgradeInstance %s: %v", step.version, err)
 		}
-		inst, err = uop.Wait(ctx)
+		inst, err = waitLRO(ctx, uop)
 		if err != nil {
 			t.Fatalf("UpgradeInstance %s operation: %v", step.version, err)
 		}

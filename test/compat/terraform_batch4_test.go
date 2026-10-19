@@ -168,7 +168,7 @@ resource "google_redis_instance" "cache" {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(context.Background())
+			_ = waitLRODone(context.Background(), op)
 		}
 	})
 	check := func(when string, day string, hour int32) {

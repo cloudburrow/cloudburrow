@@ -23,7 +23,7 @@ import (
 // client of its server, deleting it when the test ends.
 func createBasic(t *testing.T, h *Harness, c *redisadmin.CloudRedisClient, parent, id string, pc *redispb.PersistenceConfig) (*redispb.Instance, *redis.Client) {
 	t.Helper()
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	name := parent + "/instances/" + id
 	op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id,
 		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, AuthEnabled: true, PersistenceConfig: pc}})
@@ -32,10 +32,10 @@ func createBasic(t *testing.T, h *Harness, c *redisadmin.CloudRedisClient, paren
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestMemorystoreExportImport(t *testing.T) {
 	c, project := memorystoreAdminClient(t, h)
 	sc := instanceStorage(t, h)
 	bh := bucket(t, h, sc)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	parent := "projects/" + project + "/locations/us-central1"
 	stamp := time.Now().UnixNano() % 1e8
 	src, rc := createBasic(t, h, c, parent, fmt.Sprintf("export-%d", stamp), nil)
@@ -89,7 +89,7 @@ func TestMemorystoreExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExportInstance: %v", err)
 	}
-	if _, err := eop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, eop); err != nil {
 		t.Fatalf("ExportInstance operation: %v", err)
 	}
 	if md, err := eop.Metadata(); err != nil || md.GetVerb() != "export" {
@@ -114,7 +114,7 @@ func TestMemorystoreExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportInstance: %v", err)
 	}
-	inst, err := iop.Wait(ctx)
+	inst, err := waitLRO(ctx, iop)
 	if err != nil {
 		t.Fatalf("ImportInstance operation: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestMemorystoreExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportInstance: %v", err)
 	}
-	if _, err := iop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, iop); err != nil {
 		t.Fatalf("ImportInstance operation: %v", err)
 	}
 	if v, _ := rc.Get(ctx, "k").Result(); v != "v1" {
@@ -157,7 +157,7 @@ func TestMemorystoreExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportInstance of a bad file: %v", err)
 	}
-	if _, err := iop.Wait(ctx); status.Code(err) != codes.InvalidArgument {
+	if _, err := waitLRO(ctx, iop); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("import of a bad file = %v, want INVALID_ARGUMENT", err)
 	}
 	if v, _ := rc.Get(ctx, "k").Result(); v != "v1" {
@@ -179,7 +179,7 @@ func TestMemorystoreExportImport(t *testing.T) {
 func TestMemorystoreRDBPersistence(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	parent := "projects/" + project + "/locations/us-central1"
 	inst, rc := createBasic(t, h, c, parent, fmt.Sprintf("rdb-%d", time.Now().UnixNano()%1e8),
 		&redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: redispb.PersistenceConfig_SIX_HOURS})
@@ -201,7 +201,7 @@ func TestMemorystoreRDBPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance: %v", err)
 	}
-	got, err := op.Wait(ctx)
+	got, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestMemorystoreRDBPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance DISABLED: %v", err)
 	}
-	if got, err = op.Wait(ctx); err != nil || got.GetPersistenceConfig().GetPersistenceMode() != redispb.PersistenceConfig_DISABLED {
+	if got, err = waitLRO(ctx, op); err != nil || got.GetPersistenceConfig().GetPersistenceMode() != redispb.PersistenceConfig_DISABLED {
 		t.Errorf("DISABLED = %v, %v", got.GetPersistenceConfig(), err)
 	}
 	if cfg, _ := rc.ConfigGet(ctx, "save").Result(); cfg["save"] != "" {

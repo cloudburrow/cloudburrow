@@ -24,7 +24,7 @@ import (
 func TestRunTasksAreAnExecutionsPods(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	tc, err := run.NewTasksClient(ctx, runClientOptions(h)...)
 	if err != nil {
 		t.Fatalf("run.NewTasksClient: %v", err)
@@ -40,7 +40,7 @@ func TestRunTasksAreAnExecutionsPods(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for CreateJob: %v", err)
 	}
 	rop, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: name})
@@ -51,7 +51,7 @@ func TestRunTasksAreAnExecutionsPods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunJob metadata: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err == nil {
+	if _, err := waitLRO(ctx, rop); err == nil {
 		t.Fatal("RunJob succeeded; task 1 exits 4, so the execution should fail")
 	}
 	exec := md.GetName()

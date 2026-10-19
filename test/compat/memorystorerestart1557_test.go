@@ -15,7 +15,6 @@ import (
 	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	cluster "cloud.google.com/go/redis/cluster/apiv1"
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
-	"github.com/googleapis/gax-go/v2"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -207,7 +206,7 @@ func createRestartProbe(t *testing.T, ctx context.Context, vc *memorystore.Clien
 		if err != nil {
 			t.Fatalf("CreateInstance %s: %v", p.id, err)
 		}
-		if _, err := pollRestartProbeOp(ctx, op); err != nil {
+		if _, err := waitLRO(ctx, op); err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", p.id, err)
 		}
 		return
@@ -216,31 +215,8 @@ func createRestartProbe(t *testing.T, ctx context.Context, vc *memorystore.Clien
 	if err != nil {
 		t.Fatalf("CreateCluster %s: %v", p.id, err)
 	}
-	if _, err := pollRestartProbeOp(ctx, op); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("CreateCluster %s operation: %v", p.id, err)
-	}
-}
-
-// pollRestartProbeOp polls a probe's creation every half second until it
-// is done or ctx ends (#1665). op.Wait backs off up to a minute between
-// polls (gax: 1 s doubling, capped at 60 s, each pause drawn from (0, cur]):
-// on CI (Landing 123) restart-probe-vk-aof formed about 18 s after
-// CreateInstance, but its seventh poll, 12 s in, was the last one before
-// h.Context()'s minute ran out.
-func pollRestartProbeOp[T any](ctx context.Context, op interface {
-	Poll(context.Context, ...gax.CallOption) (T, error)
-	Done() bool
-}) (T, error) {
-	for {
-		out, err := op.Poll(ctx)
-		if err != nil || op.Done() {
-			return out, err
-		}
-		select {
-		case <-ctx.Done():
-			return out, ctx.Err()
-		case <-time.After(500 * time.Millisecond):
-		}
 	}
 }
 
@@ -249,11 +225,11 @@ func deleteRestartProbe(vc *memorystore.Client, rcc *cluster.CloudRedisClusterCl
 	defer cancel()
 	if p.valkey != nil {
 		if op, err := vc.DeleteInstance(ctx, &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(ctx)
+			_ = waitLRODone(ctx, op)
 		}
 		return
 	}
 	if op, err := rcc.DeleteCluster(ctx, &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-		_ = op.Wait(ctx)
+		_ = waitLRODone(ctx, op)
 	}
 }

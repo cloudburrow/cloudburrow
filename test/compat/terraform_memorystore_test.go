@@ -66,7 +66,7 @@ output "endpoint" {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	m.write(module(1, "a"))

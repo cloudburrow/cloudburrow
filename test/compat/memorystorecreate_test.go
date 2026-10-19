@@ -51,7 +51,7 @@ func memorystoreAdminClient(t *testing.T, h *Harness) (*redisadmin.CloudRedisCli
 func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	parent := "projects/" + project + "/locations/us-central1"
 	id := fmt.Sprintf("compat-%d", time.Now().UnixNano()%1e9)
 	name := parent + "/instances/" + id
@@ -65,10 +65,10 @@ func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
-	inst, err := op.Wait(ctx)
+	inst, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance: %v", err)
 	}
-	updated, err := uop.Wait(ctx)
+	updated, err := waitLRO(ctx, uop)
 	if err != nil {
 		t.Fatalf("UpdateInstance operation: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteInstance: %v", err)
 	}
-	if err := dop.Wait(ctx); err != nil {
+	if err := waitLRODone(ctx, dop); err != nil {
 		t.Fatalf("DeleteInstance operation: %v", err)
 	}
 	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
@@ -211,7 +211,7 @@ func TestMemorystoreRDBAcrossRestart(t *testing.T) {
 func createdAcrossRestart(t *testing.T, id string, pc *redispb.PersistenceConfig) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
-	ctx := h.Context()
+	ctx := memorystoreWait(t)
 	parent := "projects/" + project + "/locations/us-central1"
 	name := parent + "/instances/" + id
 	expect := os.Getenv(envMemorystoreExpect)
@@ -228,7 +228,7 @@ func createdAcrossRestart(t *testing.T, id string, pc *redispb.PersistenceConfig
 			if err != nil {
 				t.Fatalf("CreateInstance: %v", err)
 			}
-			if _, err := op.Wait(ctx); err != nil {
+			if _, err := waitLRO(ctx, op); err != nil {
 				t.Fatalf("CreateInstance operation: %v", err)
 			}
 		}

@@ -56,7 +56,7 @@ func memoryVolume(name, size string) *runpb.Volume {
 func TestRunJobMountsSecretAndMemoryVolumes(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	const secretID = "compat-job-volume"
 	runVolumeSecret(t, h, secretID, "volume-secret-value")
 
@@ -74,7 +74,7 @@ echo ok > /scratch/x && [ "$(cat /scratch/x)" = ok ]`, 1, nil)
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatal(err)
 	}
 	got, err := jc.GetJob(ctx, &runpb.GetJobRequest{Name: name})
@@ -91,7 +91,7 @@ echo ok > /scratch/x && [ "$(cat /scratch/x)" = ok ]`, 1, nil)
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Fatalf("the task did not see its volumes: %v", err)
 	}
 
@@ -115,7 +115,7 @@ echo ok > /scratch/x && [ "$(cat /scratch/x)" = ok ]`, 1, nil)
 func TestRunServiceVolumesAndServiceAccount(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	const secretID = "compat-svc-volume"
 	runVolumeSecret(t, h, secretID, "service-volume-payload")
 	id := "compat-volumes"
@@ -134,7 +134,7 @@ func TestRunServiceVolumesAndServiceAccount(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
 	got, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name})
@@ -308,7 +308,7 @@ func TestConsoleRunVolumesAndServiceAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Fatalf("the console's job did not see its volumes: %v", err)
 	}
 }

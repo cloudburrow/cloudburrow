@@ -92,7 +92,7 @@ exec httpd -f -p 8080 -h /www`
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
@@ -129,14 +129,14 @@ exec httpd -f -p 8080 -h /www`
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(h.Context(), &runpb.DeleteJobRequest{Name: jobName}) })
-	if _, err := jop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, jop); err != nil {
 		t.Fatal(err)
 	}
 	rop, err := jc.RunJob(ctx, &runpb.RunJobRequest{Name: jobName})
 	if err != nil {
 		t.Fatalf("RunJob: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Fatalf("the task did not write to its Cloud Storage volume: %v", err)
 	}
 	if got, err := fuseObject(ctx, sc, bucket, "from-job.txt"); err != nil || strings.TrimSpace(got) != "0" {

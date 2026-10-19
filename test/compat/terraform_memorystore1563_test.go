@@ -28,7 +28,7 @@ func TestTerraformMemorystore1563(t *testing.T) {
 	t.Cleanup(func() {
 		for _, id := range []string{sid, pid} {
 			if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: parent + "/instances/" + id}); err == nil {
-				_ = op.Wait(h.Context())
+				_ = waitLRODone(h.Context(), op)
 			}
 		}
 	})

@@ -42,7 +42,7 @@ func TestGcloudMemorystoreTokenAuthBackups(t *testing.T) {
 	for _, n := range []string{vname, "projects/" + g.project + "/locations/us-central1/instances/" + rid} {
 		t.Cleanup(func() {
 			if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: n}); err == nil {
-				_ = op.Wait(h.Context())
+				_ = waitLRODone(h.Context(), op)
 			}
 		})
 	}
@@ -95,7 +95,7 @@ func TestGcloudMemorystoreTokenAuthBackups(t *testing.T) {
 	cname := "projects/" + g.project + "/locations/us-central1/clusters/" + cid
 	t.Cleanup(func() {
 		if op, err := rc.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: cname}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "clusters", "create", cid, p, "--region=us-central1", "--shard-count=1", "--replica-count=0",

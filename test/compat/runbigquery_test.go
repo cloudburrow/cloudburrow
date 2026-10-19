@@ -189,7 +189,7 @@ func bigqueryFromRevision(t *testing.T, id, datasetPrefix string, extra url.Valu
 		defer cancel()
 		_, _ = rc.DeleteService(delCtx, &runpb.DeleteServiceRequest{Name: name})
 	})
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("the service never became ready: %v", err)
 	}

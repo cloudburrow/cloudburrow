@@ -15,7 +15,7 @@ import (
 // through the official ServicesClient's and JobsClient's IAM methods.
 func TestConsolePermissionsOnARunServiceAndJob(t *testing.T) {
 	h := New(t)
-	ctx := h.Context()
+	ctx := runWait(t)
 	addr := consoleAddr(t, h)
 	sc := runClient(t, h)
 	jc, _ := runJobClients(t, h)
@@ -29,7 +29,7 @@ func TestConsolePermissionsOnARunServiceAndJob(t *testing.T) {
 		t.Fatalf("CreateService: %v", err)
 	}
 	t.Cleanup(func() { _, _ = sc.DeleteService(context.Background(), &runpb.DeleteServiceRequest{Name: svc}) })
-	if _, err := op.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, op); err != nil {
 		t.Fatalf("waiting for the service: %v", err)
 	}
 	consolePermissionsRoundTrip(t, h, addr, "run", []string{svcID}, policyHandle{
@@ -53,7 +53,7 @@ func TestConsolePermissionsOnARunServiceAndJob(t *testing.T) {
 		t.Fatalf("CreateJob: %v", err)
 	}
 	t.Cleanup(func() { _, _ = jc.DeleteJob(context.Background(), &runpb.DeleteJobRequest{Name: job}) })
-	if _, err := jop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, jop); err != nil {
 		t.Fatal(err)
 	}
 	consolePermissionsRoundTrip(t, h, addr, "run-jobs", []string{jobID}, policyHandle{

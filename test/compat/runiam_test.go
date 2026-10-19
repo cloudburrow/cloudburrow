@@ -84,7 +84,7 @@ func checkRunIamPolicy(t *testing.T, ctx context.Context, name, missing string,
 func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-iam"
 	name := runParent(h) + "/services/" + id
 	create := func() {
@@ -95,7 +95,7 @@ func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateService: %v", err)
 		}
-		if _, err := op.Wait(ctx); err != nil {
+		if _, err := waitLRO(ctx, op); err != nil {
 			t.Fatalf("waiting for the service: %v", err)
 		}
 	}
@@ -120,7 +120,7 @@ func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, dop); err != nil {
 		t.Fatal(err)
 	}
 	create()
@@ -139,14 +139,14 @@ func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 func TestRunJobIamPolicyIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 	id := "compat-job-iam"
 	name := runParent(h) + "/jobs/" + id
 	op, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: id, Job: shellJob("true", 1, nil)})
 	if err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
-	before, err := op.Wait(ctx)
+	before, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestRunJobIamPolicyIsStoredNotEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunJob under a policy granting no one: %v", err)
 	}
-	if _, err := rop.Wait(ctx); err != nil {
+	if _, err := waitLRO(ctx, rop); err != nil {
 		t.Errorf("execution: %v", err)
 	}
 }

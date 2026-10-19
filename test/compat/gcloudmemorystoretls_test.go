@@ -33,7 +33,7 @@ func TestGcloudMemorystoreInTransitEncryption(t *testing.T) {
 	cname := "projects/" + g.project + "/locations/us-central1/clusters/" + cid
 	t.Cleanup(func() {
 		if op, err := rc.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: cname}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("redis", "clusters", "create", cid, p, "--region=us-central1", "--shard-count=1", "--replica-count=0",
@@ -51,7 +51,7 @@ func TestGcloudMemorystoreInTransitEncryption(t *testing.T) {
 	vname := "projects/" + g.project + "/locations/us-central1/instances/" + vid
 	t.Cleanup(func() {
 		if op, err := vc.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: vname}); err == nil {
-			_ = op.Wait(h.Context())
+			_ = waitLRODone(h.Context(), op)
 		}
 	})
 	g.must("memorystore", "instances", "create", vid, p, "--location=us-central1", "--shard-count=1", "--replica-count=0",

@@ -29,7 +29,7 @@ func TestCloudRunRevisionReadsASecretManagerSecret(t *testing.T) {
 	h := New(t)
 	sc := secretsClient(t, h)
 	rc := runClient(t, h)
-	ctx := h.Context()
+	ctx := runWait(t)
 
 	const secretID = "compat-env-secret"
 	const payload = "value-from-secret-manager"
@@ -85,7 +85,7 @@ func TestCloudRunRevisionReadsASecretManagerSecret(t *testing.T) {
 		_, _ = rc.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: svcName})
 	})
 
-	svc, err := op.Wait(ctx)
+	svc, err := waitLRO(ctx, op)
 	if err != nil {
 		t.Fatalf("the service never became ready: %v", err)
 	}
