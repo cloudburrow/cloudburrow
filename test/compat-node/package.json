@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "9.3.1",
-    "@google-cloud/pubsub": "6.3.0",
+    "@google-cloud/pubsub": "6.3.1",
     "@google-cloud/secret-manager": "7.2.0",
     "@google-cloud/storage": "8.4.0",
     "@google-cloud/tasks": "7.3.0",
-    "google-auth-library": "11.3.0",
-    "google-gax": "6.12.1"
+    "google-auth-library": "11.3.1",
+    "google-gax": "6.13.0"
   }
 }
