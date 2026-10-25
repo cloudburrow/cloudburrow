@@ -32,7 +32,7 @@ require (
 	cloud.google.com/go/storage v1.69.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
-	github.com/chromedp/cdproto v0.158.2
+	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
