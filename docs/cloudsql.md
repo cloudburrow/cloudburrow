@@ -151,7 +151,6 @@ Refused with 501, each naming what is missing:
 
 | Methods | Why |
 |---|---|
-| `blueGreenDeployments.create` of a `REGIONAL` instance | the green instance is kept in step as a read replica, and a read replica here is one server (blue-green deployments, below) |
 | `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
@@ -563,6 +562,17 @@ docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
   one writable. The blue instance's name, connection name and backups then belong to the green
   server, and the green name to the old blue server, a standalone read and write instance:
   each record names its server (`Spec.Server`), so neither server restarts.
+- **A `REGIONAL` blue instance** (#1614): the green instance is "a clone of the blue
+  environment", so it is `REGIONAL` too, with a primary and a secondary zone: its primary server
+  replicates from the blue instance's primary (through the instance's Service, so it follows a
+  failover of the blue instance), and its standby, in the secondary zone, from it,
+  semi-synchronously, as a `REGIONAL` instance's standby does (the standby's user is created
+  with the replica's binary log off, so the green instance has no transaction the blue one
+  lacks). After the switchover both names keep their standbys, and `instances.failover` of
+  either moves its zones with no committed row lost. Google's pages do not say how a green
+  instance's availability is set; they call it a clone, and its diffs list `availability_type`.
+  Google documents blue-green deployments for MySQL only: "Cloud SQL for PostgreSQL and Cloud
+  SQL for SQL Server aren't supported", so a PostgreSQL source is 400.
 - **`delete`** before a switchover deletes the green instance; after one it deletes the record,
   and with `deleteOldSource` the old blue server (the green name) too.
 - In the console, a MySQL primary's page has **Create blue-green deployment**, and either

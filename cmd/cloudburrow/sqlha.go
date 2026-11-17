@@ -223,8 +223,19 @@ func (p *sqlProvisioner) mysqlScript(ctx context.Context, deployment, script str
 // from: GTIDs on, by MySQL's online procedure, the semi-synchronous source
 // plugin, and the standby's user, created only when missing, so a primary
 // with semi-synchronous replication on and no standby yet commits nothing
-// it would wait on.
+// it would wait on. A primary server that is itself a read replica (a
+// high-availability blue-green deployment's green instance, #1614) is
+// super_read_only: the setup lifts it while it runs, and creates the user
+// with its binary log off, so the replica has no transaction of its own
+// its source lacks (its standby copies the user when it is set up).
 const mysqlStandbySource = `q() { mysql $MYSQL_LOCAL -N -e "$1"; }
+sro=$(q 'SELECT @@GLOBAL.super_read_only')
+nolog=
+if [ "$sro" = 1 ]; then
+  nolog='SET SESSION sql_log_bin = 0; '
+  trap "mysql $MYSQL_LOCAL -e 'SET GLOBAL super_read_only = ON'" EXIT
+  q 'SET GLOBAL super_read_only = OFF'
+fi
 mode=$(q 'SELECT @@GLOBAL.gtid_mode')
 if [ "$mode" != ON ]; then
   q 'SET PERSIST enforce_gtid_consistency = ON'
@@ -242,7 +253,7 @@ fi
 [ "$(q "SELECT COUNT(*) FROM information_schema.plugins WHERE plugin_name = 'rpl_semi_sync_replica'")" = 1 ] ||
   q "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so'"
 if [ "$(q "SELECT COUNT(*) FROM mysql.user WHERE user = '` + components.SQLStandbyUser + `'")" = 0 ]; then
-  q "CREATE USER '` + components.SQLStandbyUser + `'@'%' IDENTIFIED BY '$1'; GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '` + components.SQLStandbyUser + `'@'%'"
+  q "${nolog}CREATE USER '` + components.SQLStandbyUser + `'@'%' IDENTIFIED BY '$1'; GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '` + components.SQLStandbyUser + `'@'%'"
 fi
 `
 
