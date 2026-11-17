@@ -789,7 +789,7 @@ func blueGreenActions(in *sqladminapi.DatabaseInstance) []console.Action {
 		}
 		return []console.Action{{ID: "blue-green-create", Label: "Create blue-green deployment",
 			Fields: []console.Field{
-				{Name: "deploymentId", Label: "Deployment ID", Type: "text", Required: true, Pattern: "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",
+				{Name: "deploymentId", Label: "Deployment ID", Type: "text", Required: true, Pattern: "^[a-z]([a-z0-9\\-]{0,61}[a-z0-9])?$",
 					Help: "Lowercase letters, digits and hyphens. The green instance, " + in.Name + "-green-XXXXXXXX, replicates from this one."},
 				{Name: "databaseVersion", Label: "Green database version", Type: "select", Options: versions, Default: versions[len(versions)-1],
 					Help: "MySQL 8.0 can be upgraded to 8.4 on the green instance; the instance needs automated backups and binary logging."},
