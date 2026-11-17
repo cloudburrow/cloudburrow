@@ -838,6 +838,22 @@ func (p *parser) primary() (expr, error) {
 			if err != nil {
 				return nil, err
 			}
+			if p.op(",") {
+				// (expr1, expr2 [, ...]): a STRUCT in tuple syntax.
+				st := &structLit{elems: []expr{e}, names: []string{""}}
+				for {
+					x, err := p.expr()
+					if err != nil {
+						return nil, err
+					}
+					st.elems = append(st.elems, x)
+					st.names = append(st.names, "")
+					if !p.op(",") {
+						break
+					}
+				}
+				return st, p.expect(")")
+			}
 			return e, p.expect(")")
 		case "[":
 			return p.arrayLiteral()
@@ -880,7 +896,7 @@ func (p *parser) primary() (expr, error) {
 			return nil, fmt.Errorf("Syntax error: subqueries are not supported by GoogleSQL for Bigtable")
 		}
 	case "STRUCT":
-		return nil, unsupportedErr{"STRUCT constructors"}
+		return p.structCtor()
 	case "INTERVAL":
 		n, err := p.additive()
 		if err != nil {

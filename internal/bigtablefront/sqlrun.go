@@ -71,7 +71,11 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 	}
 	c.argTypes = ts
 	n := len(ts)
-	if c.star {
+	if moreAggregates[c.name] {
+		if err := c.checkMoreAgg(ts); err != nil {
+			return nil, err
+		}
+	} else if c.star {
 		c.t = int64Type
 	} else {
 		bad := func() (*btpb.Type, error) { return nil, sigErr(c, ts) }
@@ -144,6 +148,9 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 func (c *call) aggregate(rows [][]any, base env) (any, error) {
 	if c.star {
 		return int64(len(rows)), nil
+	}
+	if moreAggregates[c.name] {
+		return c.aggregateMore(rows, base)
 	}
 	var vals []any
 	seen := map[string]bool{}
@@ -294,6 +301,10 @@ func walk(e expr, f func(expr) bool) {
 	case *field:
 		walk(x.x, f)
 	case *arrayLit:
+		for _, a := range x.elems {
+			walk(a, f)
+		}
+	case *structLit:
 		for _, a := range x.elems {
 			walk(a, f)
 		}

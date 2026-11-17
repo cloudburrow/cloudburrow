@@ -105,7 +105,7 @@ func sqlFixture(t *testing.T) (func(sql string, params map[string]bigtable.SQLTy
 			for i := range r.Metadata.Columns {
 				var v any
 				if err := r.GetByIndex(i, &v); err != nil {
-					t.Fatalf("GetByIndex(%d): %v", i, err)
+					t.Fatalf("%s: GetByIndex(%d): %v", sql, i, err)
 				}
 				row = append(row, show(v))
 			}
@@ -259,6 +259,40 @@ func TestSQLScalars(t *testing.T) {
 		"SELECT FORMAT('%s', 1)": codes.InvalidArgument,
 		"SELECT COSINE_DISTANCE([1.0], [CAST(1 AS FLOAT32)])": codes.InvalidArgument,
 		"SELECT PARSE_DATE('%Q', '1')":                        codes.Unimplemented,
+	} {
+		if err := prepare(sql); status.Code(err) != want {
+			t.Errorf("%s = %v, want %v", sql, err, want)
+		}
+	}
+}
+
+// TestSQLAggregatesAndStructs runs the statistical and approximate
+// aggregates and ARRAY_CONCAT_AGG over the report table, and the STRUCT
+// constructors (data-types#constructing_a_struct).
+func TestSQLAggregatesAndStructs(t *testing.T) {
+	run, prepare := sqlFixture(t)
+	for sql, want := range map[string]string{
+		"SELECT ROUND(STDDEV(CAST(CAST(report['sales'] AS STRING) AS INT64)), 6), ROUND(VAR_POP(CAST(CAST(report['sales'] AS STRING) AS INT64)), 6) FROM report": "2.12132 2.25",
+		"SELECT STDDEV_SAMP(1), VARIANCE(1), STDDEV_POP(1), COVAR_POP(1, 2), COVAR_SAMP(1, 2), CORR(1, 2)":                                                       "NULL NULL 0 0 NULL NULL",
+		"SELECT APPROX_COUNT_DISTINCT(report['sales']), APPROX_QUANTILES(CAST(CAST(report['sales'] AS STRING) AS INT64), 2) FROM report":                         "2 [9,9,12]",
+		"SELECT APPROX_TOP_COUNT(_key, 1), APPROX_TOP_SUM(_key, 2, 5), ARRAY_CONCAT_AGG(MAP_KEYS(report)) FROM report":                                           "[(Dept1,1)] [(Dept1,2),(Dept2,2)] [expenses,sales,expenses,sales]",
+		// The official Go client cannot read a STRUCT with an anonymous field
+		// ("StructSQLType field at index 0 must have a name"), so those are
+		// read through FORMAT.
+		"SELECT STRUCT(1 AS a, 'abc' AS b).b, FORMAT('%t %T', STRUCT(1, 2, 3), (1, 'x')), STRUCT<x INT64, y FLOAT64, d DATE>(1, 2, '2011-05-05'), STRUCT(1 AS a, 'abc' AS b)": "abc (1, 2, 3) (1, \"x\") (1,2,2011-05-05) (1,abc)",
+		"SELECT STRUCT(_key, 5 AS n).`_key` FROM report WHERE _key = 'Dept1'":                                                                                                 "Dept1",
+		"SELECT ROUND(COSINE_DISTANCE([(1, 1.0), (2, 2.0)], [(2, 4.0), (1, 3.0)]), 6)":                                                                                        "0.01613",
+	} {
+		got := run(sql, nil, nil)
+		if len(got) != 1 || strings.Join(got[0], " ") != want {
+			t.Errorf("%s =\n%v\nwant\n%s", sql, got, want)
+		}
+	}
+	for sql, want := range map[string]codes.Code{
+		"SELECT APPROX_QUANTILES(_key, _key) FROM report": codes.InvalidArgument,
+		"SELECT STRUCT<x INT64>(5 AS x)":                  codes.InvalidArgument,
+		"SELECT STRUCT<x INT64>('a')":                     codes.InvalidArgument,
+		"SELECT MIN_BY(_key, _key) FROM report":           codes.Unimplemented,
 	} {
 		if err := prepare(sql); status.Code(err) != want {
 			t.Errorf("%s = %v, want %v", sql, err, want)
