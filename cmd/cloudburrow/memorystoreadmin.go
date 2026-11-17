@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
@@ -676,8 +677,14 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 				return nil
 			}
 			var out []string
+			// A conditional binding (#1742) counts where its condition
+			// holds now without resource attributes: a condition on
+			// request.time is evaluated, one that reads resource.* is not
+			// (the sign-in does not say which instance), and grants
+			// nothing.
+			attrs := iamcond.Attributes{RequestTime: time.Now()}
 			for _, b := range p.Bindings {
-				if b.Role == role {
+				if b.Role == role && b.Grants(attrs) {
 					out = append(out, b.Members...)
 				}
 			}

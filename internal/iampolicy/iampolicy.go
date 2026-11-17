@@ -7,8 +7,11 @@
 //   - SetIamPolicy stores the bindings and returns them with a new etag. A
 //     request whose policy carries an etag that is not the stored one is
 //     ABORTED, as on Google, so read-modify-write loops behave.
-//   - IAM Conditions are UNIMPLEMENTED, with the field named. They are never
-//     stored and ignored. Audit configs are UNIMPLEMENTED too, except through
+//   - IAM Conditions (#1742) are stored on the resources whose policies
+//     Resource Manager keeps (projects, folders and the organization,
+//     through SetWithAuditConfigs), with Google's policy version rules
+//     (conditions.go); every other service refuses them UNIMPLEMENTED,
+//     with the field named. Audit configs are UNIMPLEMENTED too, except through
 //     SetWithAuditConfigs, which the resources Google keeps them on (projects,
 //     folders and the organization, #1486) call: there they are stored, as
 //     update_mask says, and, as everything here, configure nothing. A version 3 policy without
@@ -17,7 +20,9 @@
 //   - TestIamPermissions returns every requested permission: nothing is
 //     enforced, so nothing is denied.
 //
-// Nothing here, or anywhere in CloudBurrow, consults a stored policy.
+// A few checks consult a stored project policy (Firestore with MongoDB
+// compatibility's and Memorystore's IAM sign-ins); they evaluate a
+// binding's condition with internal/iamcond.
 package iampolicy
 
 import (
@@ -51,10 +56,12 @@ type AuditLogConfig struct {
 	ExemptedMembers []string `json:"exemptedMembers,omitempty"`
 }
 
-// Binding is one role and its members.
+// Binding is one role and its members, granted only where its condition,
+// if it has one, evaluates to true.
 type Binding struct {
-	Role    string   `json:"role"`
-	Members []string `json:"members"`
+	Role      string     `json:"role"`
+	Members   []string   `json:"members"`
+	Condition *Condition `json:"condition,omitempty"`
 }
 
 // emptyEtag is the etag of a resource that has never had a policy set: the
@@ -71,13 +78,28 @@ func (s *Stored) etag() []byte {
 }
 
 // Proto renders the policy. A nil Stored is the empty policy.
-func (s *Stored) Proto() *iampb.Policy {
+// A policy with a conditional binding is version 3, as Google returns it.
+func (s *Stored) Proto() *iampb.Policy { return s.proto(3) }
+
+// proto renders the policy for a reader that asked for version: below 3, a
+// conditional binding's role carries "_withcond_" and its condition's hash,
+// and the condition is left out, as Google's "Policy versions" documents.
+func (s *Stored) proto(version int32) *iampb.Policy {
 	p := &iampb.Policy{Version: 1, Etag: s.etag()}
 	if s == nil {
 		return p
 	}
 	for _, b := range s.Bindings {
-		p.Bindings = append(p.Bindings, &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
+		pb := &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		if b.Condition != nil {
+			if version < 3 {
+				pb.Role = b.Role + withCond + b.Condition.hash(b.Role)
+			} else {
+				pb.Condition = b.Condition.proto()
+				p.Version = 3
+			}
+		}
+		p.Bindings = append(p.Bindings, pb)
 	}
 	for _, a := range s.AuditConfigs {
 		ac := &iampb.AuditConfig{Service: a.Service}
@@ -92,16 +114,19 @@ func (s *Stored) Proto() *iampb.Policy {
 	return p
 }
 
-// Get validates GetIamPolicy's options and returns the policy. Version 3 may
-// be requested, since a client asks for it without using conditions; the
-// answer is version 1 because nothing stored has a condition.
+// Get validates GetIamPolicy's options and returns the policy. A policy
+// with no conditional binding is version 1 whatever was requested; one
+// with a conditional binding is version 3 when 3 was requested, and
+// otherwise version 1 with each conditional role renamed
+// ROLE_withcond_HASH and its condition left out, as Google answers.
 func Get(current *Stored, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
-	switch v := opts.GetRequestedPolicyVersion(); v {
+	v := opts.GetRequestedPolicyVersion()
+	switch v {
 	case 0, 1, 3:
 	default:
 		return nil, apierror.InvalidArgument("options.requested_policy_version %d is not 0, 1 or 3", v)
 	}
-	return current.Proto(), nil
+	return current.proto(v), nil
 }
 
 // Set applies a SetIamPolicy request to the current policy and returns the
@@ -110,6 +135,9 @@ func Get(current *Stored, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
 func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
 	return apply(current, req, false)
 }
+
+// SetWithAuditConfigs also stores conditions (#1742): the resources that
+// keep audit configs are the ones whose conditional bindings are served.
 
 // SetWithAuditConfigs is Set for a resource whose policy carries audit
 // configs on Google: a project, a folder or an organization (#1486). As
@@ -147,8 +175,7 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		return Stored{}, apierror.InvalidArgument("policy is required")
 	}
 	// Any valid version is accepted for a policy without conditions, as on
-	// Google. Conditions themselves are refused below, so a version 3 policy
-	// stored here never holds one.
+	// Google; a conditional binding needs version 3 (conditions.go).
 	switch p.GetVersion() {
 	case 0, 1, 3:
 	default:
@@ -158,10 +185,10 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		return Stored{}, apierror.Unimplemented("policy.audit_configs: audit configs are not supported")
 	}
 	var bindings []Binding
+	if err := checkConditions(p, audit); err != nil {
+		return Stored{}, err
+	}
 	for i, b := range p.GetBindings() {
-		if b.GetCondition() != nil {
-			return Stored{}, apierror.Unimplemented("policy.bindings[%d].condition: IAM Conditions are not supported", i)
-		}
 		if b.GetRole() == "" {
 			return Stored{}, apierror.InvalidArgument("policy.bindings[%d].role is required", i)
 		}
@@ -169,7 +196,14 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		if len(b.GetMembers()) == 0 {
 			continue
 		}
-		bindings = append(bindings, Binding{Role: b.GetRole(), Members: append([]string(nil), b.GetMembers()...)})
+		nb, err := binding(i, b, current)
+		if err != nil {
+			return Stored{}, err
+		}
+		bindings = mergeBinding(bindings, nb)
+	}
+	if err := checkSameRoleAndPrincipal(bindings); err != nil {
+		return Stored{}, err
 	}
 	audits, err := auditConfigs(p.GetAuditConfigs())
 	if err != nil {

@@ -38,15 +38,25 @@ package firestoreadmin
 // datastore.databases.getMetadata on some project, and lists the
 // Enterprise databases of the projects it holds it on.
 //
-// Not served: a binding's condition (Resource Manager refuses conditions
-// here, so a binding is project-wide), custom roles, and a role on the
-// database rather than its project.
+// A conditional binding (#1742) grants its role only on the databases its
+// condition holds for, evaluated (internal/iamcond) at each check with the
+// attributes Google's "Resource attributes for IAM Conditions" gives a
+// Firestore database: resource.service "firestore.googleapis.com",
+// resource.type "firestore.googleapis.com/Database", resource.name
+// "projects/PROJECT_ID/databases/DATABASE_ID", and request.time now. That
+// is how Google's "Authenticate and connect to a database" scopes a user
+// credentials' role to its database (--condition='expression=
+// resource.name == "projects/PROJECT_NAME/databases/DATABASE_ID"').
+//
+// Not served: custom roles, and a role on the database rather than its
+// project.
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +65,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin/mql"
+	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 )
 
 // MongoIAMPath is where the host pushes MongoIAM to the front.
@@ -66,6 +77,16 @@ const MongoIAMPath = "/cloudburrow/v1/firestoreMongoIAM"
 type MongoIAM struct {
 	Tokens []MongoIAMToken                `json:"tokens"`
 	Roles  map[string]map[string][]string `json:"roles"`
+	// Conditional are the roles of conditional bindings, by principal and
+	// project ID, each granted where its expression holds (#1742).
+	Conditional map[string]map[string][]MongoConditionalRole `json:"conditional,omitempty"`
+}
+
+// MongoConditionalRole is a role a conditional binding grants, and its
+// condition's CEL expression.
+type MongoConditionalRole struct {
+	Role       string `json:"role"`
+	Expression string `json:"expression"`
 }
 
 // MongoIAMToken is a minted access token: its SHA-256 in hex, its account
@@ -163,7 +184,7 @@ func (a *Admin) mongoVisibleDatabases(principal string) []string {
 			continue
 		}
 		var perms []string
-		for _, role := range a.mongoIAM.Roles[principal][project] {
+		for _, role := range a.mongoRolesLocked(principal, project, id) {
 			perms = append(perms, MongoRoles[role]...)
 		}
 		if grants(perms, "databases.getMetadata") {
@@ -191,18 +212,59 @@ func (a *Admin) mongoGrantsAnywhere(principal, p string) bool {
 			return true
 		}
 	}
+	// A conditional grant counts where it holds for one of the project's
+	// databases.
+	for project := range a.mongoIAM.Conditional[principal] {
+		for name, db := range a.databases {
+			pid, id, ok := strings.Cut(strings.TrimPrefix(name, "projects/"), "/databases/")
+			if !ok || pid != project || db.DeleteTime != nil {
+				continue
+			}
+			var perms []string
+			for _, role := range a.mongoRolesLocked(principal, project, id) {
+				perms = append(perms, MongoRoles[role]...)
+			}
+			if grants(perms, p) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
-// mongoPerms are the permissions email's roles on project grant.
-func (a *Admin) mongoPerms(email, project string) []string {
+// mongoRolesLocked are principal's roles on the database db of project:
+// its unconditional roles on the project, and the conditional ones whose
+// condition holds for the database now. a.mu is held.
+func (a *Admin) mongoRolesLocked(principal, project, db string) []string {
+	roles := slices.Clone(a.mongoIAM.Roles[principal][project])
+	conds := a.mongoIAM.Conditional[principal][project]
+	if len(conds) == 0 {
+		return roles
+	}
+	attrs := iamcond.Attributes{
+		ResourceName:    "projects/" + project + "/databases/" + db,
+		ResourceType:    "firestore.googleapis.com/Database",
+		ResourceService: "firestore.googleapis.com",
+		RequestTime:     a.now(),
+	}
+	for _, c := range conds {
+		if iamcond.Eval(c.Expression, attrs) {
+			roles = append(roles, c.Role)
+		}
+	}
+	return roles
+}
+
+// mongoPerms are the permissions email's roles on the database db of
+// project grant.
+func (a *Admin) mongoPerms(email, project, db string) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.mongoIAM == nil {
 		return nil
 	}
 	var out []string
-	for _, role := range a.mongoIAM.Roles[email][project] {
+	for _, role := range a.mongoRolesLocked(email, project, db) {
 		out = append(out, MongoRoles[role]...)
 	}
 	return out
@@ -280,7 +342,7 @@ func (s *MongoServer) checkMongoIAM(mc *mongoConn, lname, name string, cmd bson.
 	}
 	project := strings.TrimPrefix(mc.db.name, "projects/")
 	project, _, _ = strings.Cut(project, "/")
-	perms := s.a.mongoPerms(mc.principal, project)
+	perms := s.a.mongoPerms(mc.principal, project, mc.db.id)
 	var missing []string
 	for _, p := range mongoNeeds(lname, cmd) {
 		if !grants(perms, p) {
