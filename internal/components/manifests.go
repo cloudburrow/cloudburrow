@@ -88,6 +88,12 @@ type Backend struct {
 	// that can actually use one.
 	Persistent bool
 	MountPath  string
+	// ScratchData, for a backend that is not Persistent, mounts an
+	// emptyDir at MountPath: it outlives a restart of the container and
+	// goes with the pod, so nothing in it survives the pod, a `down` or a
+	// reboot. A Cloud SQL replica of an ephemeral instance restored from
+	// a physical backup has it, as the restore ends its server once (#1614).
+	ScratchData bool
 	// ClaimName is the PVC to mount. Empty means "<Name>-data".
 	ClaimName string
 	// OwnsClaim marks the backend responsible for creating the PVC, so two
@@ -191,7 +197,7 @@ const (
 // dataMount reports whether the backend's container mounts its claim at
 // MountPath; a backend that shares the front's state has its claim there
 // instead.
-func (b Backend) dataMount() bool { return b.Persistent && !b.sharesState() }
+func (b Backend) dataMount() bool { return (b.Persistent || b.ScratchData) && !b.sharesState() }
 
 // sharesState reports whether the front's state volume is the backend's
 // too (Front.ShareState).
@@ -685,11 +691,14 @@ spec:
 		}
 	}
 
-	if b.Persistent || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
+	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
 		sb.WriteString("      volumes:\n")
 	}
-	if b.dataMount() {
+	switch {
+	case b.dataMount() && b.Persistent:
 		fmt.Fprintf(&sb, "        - name: data\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())
+	case b.dataMount():
+		sb.WriteString("        - name: data\n          emptyDir: {}\n")
 	}
 	if shared && b.Persistent {
 		fmt.Fprintf(&sb, "        - name: front-state\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())

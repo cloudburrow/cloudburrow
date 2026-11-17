@@ -301,6 +301,18 @@ Google's discovery endpoint and node addresses are reachable from the whole VPC.
 default, and no test runs a cluster client through it end to end, because it publishes every
 endpoint of the instance on that network.
 
+An address both sides reach without the LAN was looked for again on 2026-11-17 (#1614), on
+Docker Desktop 4.98 for macOS: a kind node (and so a pod) reaches a listener the host binds on
+`127.0.0.1` through `host.docker.internal` (192.168.65.254, Docker Desktop's host gateway), but
+the host reaches neither that address (its route is the LAN's default gateway) nor the kind
+node's Docker network address (172.x), and a host client cannot dial a pod's `127.0.0.1`. The
+only addresses the host reaches locally without root are `127.0.0.1` and its interfaces' (the
+LAN's). A loopback alias (`sudo ifconfig lo0 alias 10.254.254.254` on macOS, `sudo ip addr add
+10.254.254.254/32 dev lo` on Linux) would be one: on the host it is local and on no network,
+and a pod's connection to it leaves Docker's network through the host. It needs root once, so
+it cannot be the default, and it was not measured end to end here (no root on the machine that
+ran #1614).
+
 `UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
 them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or
 forgets replicas; `node_type` sets each node's `maxmemory` (1.4, 6.5, 13 or 58 GB) and

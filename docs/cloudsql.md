@@ -589,15 +589,30 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
   not seeded from it as from a dump: it waits for the physical sync. With no `dumpFilePath`, and a
   source that is a CloudBurrow instance's server (`sqlinst-NAME:3306`, or `cloudsql-mysql:3306`),
   the sync takes the backup itself, with the source's volume mounted and the replication user.
-- **How it runs**: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
+- **How it runs** on a persistent instance: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
   of the replica's major version (`8.0`, XtraBackup 8.0.35, or `8.4`, 8.4.0; pinned by digest, and
   pulled by the node the first time), on the replica's volume while its server is stopped: the
   backup's files are first written onto that volume, then `xtrabackup --prepare` and
   `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
   and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
   password back to the instance's (the copy has the source's accounts), unlogged.
-- **It needs `--mode persistent`**: the restore is onto the replica's volume, which an
-  instance's server in an ephemeral instance has none of. Elsewhere it is 501, saying so.
+- **On an ephemeral instance** (`--mode ephemeral`, #1614) a server keeps its data in its
+  container's writable layer, with no volume, so neither that Job nor a restore that stops mysqld
+  (whose container then starts again on a fresh layer) works. Instead the replica's server, idle
+  and empty until the sync, is started again with an `emptyDir` at `/var/lib/mysql`, which
+  outlives a restart of its container and goes with its pod (nothing of it survives `down`, as
+  nothing of an ephemeral instance does), and a start that swaps a restored data directory in
+  before mysqld starts and passes the `--init-file`. XtraBackup runs in an ephemeral container
+  (Kubernetes' debug containers) added to the replica's pod with that `emptyDir` mounted: it
+  prepares the backup and copies it back beside the live data directory, then mysqld is stopped
+  and its container, started again, swaps the copy in. When the sync takes the backup, a second
+  ephemeral container is added to the source server's pod, in its process namespace: the
+  source's data files are reached through its mysqld's `/proc/PID/root`, linked at
+  `/var/lib/mysql` so the paths the server reports hold, and `xtrabackup --backup
+  --stream=xbstream` over the pod's loopback streams the backup through the host into the
+  replica's ephemeral container, which unpacks it (`xbstream -x`). Ephemeral containers stay in
+  their pod's spec, ended, until the pod goes. If the replica's pod is replaced (not its
+  container), its data goes with it, as an ephemeral instance's does.
 - **`verifyExternalSyncSettings`** with `migrationType` `PHYSICAL` answers
   `UNSUPPORTED_MIGRATION_TYPE` (a PostgreSQL replica, or `syncMode` `OFFLINE`),
   `CONNECTION_FAILURE`, `INCOMPATIBLE_DATABASE_VERSION` (the source's or the backup's
