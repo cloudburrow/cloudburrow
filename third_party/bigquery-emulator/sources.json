@@ -123,7 +123,8 @@
         "patches/googlesqlite/0067-integer-mod.patch",
         "patches/googlesqlite/0075-exact-int64-abs-and-safe-arithmetic.patch",
         "patches/googlesqlite/0074-pending-change-records.patch",
-        "patches/googlesqlite/0080-decode-string-array.patch"
+        "patches/googlesqlite/0080-decode-string-array.patch",
+        "patches/googlesqlite/0088-if-not-exists-streamed-at-column.patch"
       ]
     },
     {

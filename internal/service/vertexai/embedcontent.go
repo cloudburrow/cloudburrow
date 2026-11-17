@@ -29,7 +29,8 @@ import (
 // and audio_track_extraction (EmbeddingGemma embeds text only).
 //
 // EmbeddingGemma 2 (#1454) also embeds images: an inline_data part holding a
-// PNG, JPEG, WebP or BMP (#1651) image, up to embedding.MaxImages of them,
+// PNG, JPEG, WebP or BMP (#1651), or HEIC or HEIF (#1724) image (an
+// animated WebP as its first frame), up to embedding.MaxImages of them,
 // alone or between text parts, into one vector, as Google's
 // gemini-embedding-2 embeds a Content's parts. It embeds a WAV (#1651) or MP3
 // (#1721) audio clip the same way, and reads a file_data part's gs:// object
@@ -37,7 +38,7 @@ import (
 // embeds one MP4 or MOV video (H.264 or H.265) a request, its frames sampled
 // as video_metadata says (#1722), and one PDF of up to 6 pages, each page
 // rendered as an image, with document_ocr adding each page's text (#1723).
-// VP9 and AV1 video, HEIC, HEIF, AVIF, an animated WebP and
+// VP9 and AV1 video, AVIF, document_ocr on a PDF with no text and
 // audio_track_extraction are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
@@ -323,9 +324,9 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 				types = embedding.ImageMIMETypes
 			}
 			types = append(append(types, embedding.VideoMIMETypes...), embedding.PDFMIMEType)
-			notServed := "HEIC, HEIF and AVIF input are not served"
+			notServed := "AVIF, VP9 and AV1 input are not served"
 			if !m.audio {
-				notServed = "audio, HEIC, HEIF and AVIF input are not served"
+				notServed = "audio, AVIF, VP9 and AV1 input are not served"
 			}
 			return nil, 0, apierror.InvalidArgument(
 				"content.parts[%d].%s.mime_type %q is not supported: %s embeds %s (%s); %s",

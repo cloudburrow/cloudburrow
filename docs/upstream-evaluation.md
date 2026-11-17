@@ -692,6 +692,48 @@ MPEG-2.5 (8, 11.025 and 12 kHz), which `go-mp3` refuses, is refused naming it. C
 ffmpeg 8: the same 16 kHz mono MP3 decodes to the same samples within one 16-bit step
 (`TestDecodeMP3`). `govulncheck ./...` (v1.8.0) reports nothing in it.
 
+## Amendment: HEIC, HEIF, AVIF and animated WebP decoders for Vertex AI EmbedContent (#1724)
+
+Google's [Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) lists "JPEG, PNG, WebP, BMP, HEIC, HEIF, AVIF" for `gemini-embedding-2`, and
+says nothing of animation. `golang.org/x/image` (#1651) decodes still WebP and BMP only. The user
+approved adding the module(s) needed for HEIC, HEIF, AVIF and animated WebP (2026-11-17), pure Go
+preferred: the storage image and the default build are `CGO_ENABLED=0`, and the release CLIs are
+statically linked ([install.md](install.md#how-the-cli-is-linked)). The candidates on the Go module
+proxy, compared on 2026-11-17:
+
+| Module | Last version | Licence | How it decodes | Its own dependencies | Verdict |
+|---|---|---|---|---|---|
+| `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | Pure Go HEVC decoder and HEIF container reader (a port of the Rust `rust_h265`/`oxideav-h265`; byte-exact on the JCT-VC HEVC v1 conformance suite, per its README); Go assembly for NEON/AVX2, `-tags noasm` for none | **none** | **Adopted** for HEIC and HEIF: 2.3 MB of source, adds no other module, decodes alpha, grids, `clap`/`irot`/`imir`, 8–16 bits and image sequences |
+| `github.com/gen2brain/heic` | v0.7.2 (2026-09-15) | MIT (the Rust `heic` crate in WASM) | WASM under wazero; but first tries a system `libheif` through `purego` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | Rejected: see `purego` below; its own README points to `h265` for pure Go |
+| `github.com/gen2brain/avif` | v0.6.0 (2026-07-05) | MIT; libavif BSD-2-Clause, dav1d BSD-2-Clause, aom BSD-2-Clause | libavif + dav1d in WASM (3.5 MB, 1.3 MB gzipped) under wazero; but first tries a system `libavif` through `purego`, unless built with `-tags nodynamic` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | **Not adopted; AVIF stays refused** (below) |
+| `github.com/KarpelesLab/goavif` | v0.1.0 (2026-04-18) | MIT | Pure Go AV1 and AVIF | — | Rejected: unmaintained (created and last pushed within three days in April 2026, one star; inter prediction listed as limited) |
+| `github.com/Kagami/go-avif`, `github.com/f0reth/go-avif` | 2022; — | — | libaom through cgo; libavif through `purego` | — | Rejected: cgo, or a system library |
+
+**Why AVIF is not served.** `gen2brain/avif` (and `gen2brain/heic`) import `ebitengine/purego` in
+every build without `-tags nodynamic`, to load a system libavif when one is installed. With
+`CGO_ENABLED=0`, `purego` links its `fakecgo` runtime shim and imports libc dynamically: a probe
+binary that only imports `gen2brain/avif`, built `CGO_ENABLED=0 GOOS=linux`, is "dynamically
+linked, interpreter /lib/ld-linux-aarch64.so.1", and statically linked with `-tags nodynamic`. So
+adding it would silently break the static Linux CLIs (the release check reads only the recorded
+`CGO_ENABLED=0`, which still passes), and the decode would depend on whichever libavif the host has.
+Serving AVIF needs one of: `-tags nodynamic` on every build of `cmd/cloudburrow` (release, Makefile,
+CI, `go install` instructions) with a check that the Linux CLI is static; or a vendored copy of
+its WASM path without `purego`; or a maintained pure Go AV1 decoder. That decision is the user's;
+`image/avif` stays `INVALID_ARGUMENT` naming the field until then.
+
+**Animated WebP** needs no module: the first `ANMF` frame's VP8/VP8L bitstream (with its `ALPH`) is
+rewrapped as a still WebP, decoded with `golang.org/x/image/webp`, converted as libwebp converts it
+(`internal/embedding/webp.go`) and placed on a transparent canvas (`internal/embedding/webpanim.go`).
+Google's page does not say how an animated image is treated, and documents no refusal; CloudBurrow
+embeds the first frame, the picture a still-image reader shows (an image sequence in a HEIC is
+taken the same way), checked pixel for pixel against libwebp 1.6's `dwebp` of that frame.
+
+`h265`'s HEIC decode upsamples 4:2:0 chroma bilinearly (libavif's 9-3-3-1 weights), matching
+`heif-dec -C bilinear` (libheif 1.23.7) within 0.05 per channel on the unit fixture; libheif's
+default is nearest-neighbour. Its `go.mod` says `go 1.26.4`, so CloudBurrow's `go` line moves from
+1.26.0 to 1.26.4 (CI builds with 1.26.8 and 1.27). `govulncheck ./...` reports nothing for it.
+
 ## Amendment: video decoders and a PDF renderer for EmbedContent (#1722, #1723)
 
 EmbeddingGemma 2 embeds a video as frames through its vision encoder, and Google's
