@@ -3745,6 +3745,185 @@
     ]
   },
   {
+    "Key": "iam",
+    "Title": "IAM (custom roles)",
+    "counts": {
+      "Unimplemented": 24,
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "google.iam.admin.v1.IAM/CreateRole",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/CreateServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/CreateServiceAccountKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/DeleteRole",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/DeleteServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/DeleteServiceAccountKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/DisableServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/DisableServiceAccountKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/EnableServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/EnableServiceAccountKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/GetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/GetRole",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/GetServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/GetServiceAccountKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/LintPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): not served: #1743 serves custom roles and QueryTestablePermissions only; grantable roles, auditable services and policy lint need Google's predefined role catalog, which CloudBurrow does not carry"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/ListRoles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/ListServiceAccountKeys",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/ListServiceAccounts",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/PatchServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/QueryAuditableServices",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): not served: #1743 serves custom roles and QueryTestablePermissions only; grantable roles, auditable services and policy lint need Google's predefined role catalog, which CloudBurrow does not carry"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/QueryGrantableRoles",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): not served: #1743 serves custom roles and QueryTestablePermissions only; grantable roles, auditable services and policy lint need Google's predefined role catalog, which CloudBurrow does not carry"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/QueryTestablePermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/SetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/SignBlob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/SignJwt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/TestIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/UndeleteRole",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/UndeleteServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/UpdateRole",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+        ]
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/UpdateServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      },
+      {
+        "method": "google.iam.admin.v1.IAM/UploadServiceAccountKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+      }
+    ]
+  },
+  {
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects, Folders, Organizations, Tags)",
     "counts": {

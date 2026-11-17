@@ -29,13 +29,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 1 | 0 | 0 | 1 | 0 |
+| IAM custom roles | 3 | 2 | 0 | 1 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **50** | **2** | **18** | **24** | **6** |
+| **Total** | **53** | **4** | **18** | **25** | **6** |
 
 ## Cloud Storage
 
@@ -158,6 +159,18 @@ and never enforced (#1368).
 |---|---|---|
 | An app-enabled folder's management project is `google-mp-{folder number}`, shaped as the discovery document's one example: the project ID and display name Google assigns are not documented, and the APIs it enables on the project are not modelled (built in #1532) (#1445) | not documented by Google | S |
 
+## IAM custom roles
+
+Closed: `projects.roles` and `organizations.roles` (create, get, list, patch, delete, undelete),
+`permissions.queryTestablePermissions`, custom roles in bindings and in every permission check,
+gcloud iam roles and Terraform's custom role resources (#1743).
+
+| Gap | Why open | Size |
+|---|---|---|
+| Predefined roles (`roles/...`) through `GetRole`, `ListRoles` with no parent, `QueryGrantableRoles`, and service accounts, keys, `SignBlob`, `SignJwt`, `QueryAuditableServices`, `LintPolicy`: 501 (#1743) | not built yet | L |
+| The code for a 301st role (`FAILED_PRECONDITION`), whether deleted roles count toward the 300, the codes for deleting a deleted role and undeleting a live one, which permissions beyond the organization and folder ones a project role may not hold, and a testable permission's `stage` (#1743) | not documented by Google | S |
+| When a custom role's deletion completes Google removes its bindings; here they stay in policies and grant nothing (#1743) | not built yet | S |
+
 ## Vertex AI
 
 Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244);
@@ -235,7 +248,7 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 | Gap | Why open | Size |
 |---|---|---|
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
-| Firestore with MongoDB compatibility is served since #1703, with transactions, `explain`, the positional operators and `arrayFilters`, `$text`, `$lookup` pipelines, collection-less aggregations, TLS and the IAM role checks since #1738 ([compatibility.md](compatibility.md#firestore-with-mongodb-compatibility-1703)); left: the binding Google documents for a SCRAM user carries an IAM condition naming the database, which Resource Manager refuses here (IAM Conditions are not served), so a role is granted on the whole project; custom roles; and a Standard edition database's `Write` stream over the browser's WebChannel transport (the Firebase Web SDK in a browser) is not checked for Enterprise-only values, as its gRPC stream and the unary writes are | not built yet | M |
+| Firestore with MongoDB compatibility is served since #1703, with transactions, `explain`, the positional operators and `arrayFilters`, `$text`, `$lookup` pipelines, collection-less aggregations, TLS and the IAM role checks since #1738 ([compatibility.md](compatibility.md#firestore-with-mongodb-compatibility-1703)); left: the binding Google documents for a SCRAM user carries an IAM condition naming the database, which Resource Manager refuses here (IAM Conditions are not served), so a role is granted on the whole project (custom roles are evaluated since #1743); and a Standard edition database's `Write` stream over the browser's WebChannel transport (the Firebase Web SDK in a browser) is not checked for Enterprise-only values, as its gRPC stream and the unary writes are | not built yet | M |
 | Firestore: `ExecutePipeline` runs on Enterprise edition databases since #1500, its stages and functions since #1523 and #1613 ([compatibility.md](compatibility.md)); left: full-text search (`document_matches`, `score`) is `UNIMPLEMENTED`, Google's reference defining neither its tokenization nor its score, and the explain stats' text is CloudBurrow's own (#1577) | not documented by Google | M |
 | Spanner: 1 RPC refused, naming why: `InternalUpdateGraphOperation`, which Google documents as "an internal API called by Spanner Graph jobs. You should never need to call this API directly", every field "Internal field, do not use directly", so there is no behaviour to serve ([spanner.md](coverage/spanner.md)). `AddSplitPoints` is a stored no-op of the call front since #1523 (the emulator never splits), and `FetchCacheUpdate` answers an empty location-aware routing cache since #1523 (one server, nothing to route). Backups and restores, backup schedules, instance configurations (Google's and custom), `MoveInstance`, partition updates, database roles, the operation listings and IAM on backups and roles are served by the call front since #1498 (#1577) | not documented by Google | S |
 | Bigtable: `OpenMaterializedView`'s sessions open but their `ReadRow` is refused `UNIMPLEMENTED`, as `ReadRows` of a materialized view is: Google documents reading a continuous materialized view with `ReadRows`, but neither the column family its aggregate columns are stored in nor how its row key is encoded without a `_key` column (docs re-read 2026-11-17: <https://docs.cloud.google.com/bigtable/docs/continuous-materialized-view-queries>), so its rows are read with SQL and the client falls back to the classic path ([bigtable.md](coverage/bigtable.md)). Change streams (since #1523) have one partition, which the API allows, and a collected cell's `GARBAGE_COLLECTION` record names the cell's millisecond as its time range, UNVERIFIED (docs re-read 2026-11-17: <https://docs.cloud.google.com/bigtable/docs/change-streams-overview> names none) (#1577) | not documented by Google | M |

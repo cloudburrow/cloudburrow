@@ -39,8 +39,10 @@ import (
 //
 // Not served: a binding's condition (Resource Manager refuses conditions,
 // so a binding is project-wide here, never limited to one cluster), and
-// roles other than the two named (Google's basic roles are not expanded
-// here). A cluster or instance kept from before #1614 with IAM auth, whose
+// predefined roles other than the two named (Google's basic roles are not
+// expanded here). A custom role (#1743) grants the connection when it holds
+// redis.clusters.connect or memorystore.instances.connect, which the host's
+// IAMSource evaluates. A cluster or instance kept from before #1614 with IAM auth, whose
 // nodes' default user has no password, still takes any AUTH string, until
 // it is created again.
 

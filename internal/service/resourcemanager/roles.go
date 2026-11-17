@@ -509,9 +509,15 @@ func (r *Registry) dropRolesLocked(parent string) error {
 // QueryTestablePermissions lists the permissions a custom role on the
 // project or organization a full resource name names may hold.
 func (r *Registry) QueryTestablePermissions(req *adminpb.QueryTestablePermissionsRequest) (*adminpb.QueryTestablePermissionsResponse, error) {
-	rest, ok := strings.CutPrefix(req.GetFullResourceName(), "//cloudresourcemanager.googleapis.com/")
-	if !ok {
-		return nil, apierror.Unimplemented("full_resource_name %q: only a project's or the organization's (//cloudresourcemanager.googleapis.com/...) are served", req.GetFullResourceName())
+	if req.GetFullResourceName() == "" {
+		return nil, apierror.InvalidArgument("full_resource_name is required, such as //cloudresourcemanager.googleapis.com/projects/PROJECT")
+	}
+	// gcloud names the resource by the host its cloudresourcemanager
+	// override gives (//cloudresourcemanager.localhost:PORT/projects/P), so
+	// any host is taken: the path says what the resource is.
+	_, rest, ok := strings.Cut(strings.TrimPrefix(req.GetFullResourceName(), "//"), "/")
+	if !ok || !strings.HasPrefix(req.GetFullResourceName(), "//") || (!strings.HasPrefix(rest, "projects/") && !strings.HasPrefix(rest, "organizations/")) {
+		return nil, apierror.Unimplemented("full_resource_name %q: only a project's or the organization's (//cloudresourcemanager.googleapis.com/projects/P, .../organizations/O) are served", req.GetFullResourceName())
 	}
 	if req.GetPageSize() < 0 || req.GetPageSize() > 1000 {
 		return nil, apierror.InvalidArgument("page_size %d must be between 0 and 1000", req.GetPageSize())

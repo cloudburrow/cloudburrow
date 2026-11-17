@@ -90,7 +90,7 @@ func Names() []string {
 // Google's "Roles and permissions" page names them, and the other
 // services' organizations.* and folders.* permissions on those
 // resources). Which other permissions Google treats as organization-only
-// is UNVERIFIED (docs read 2026-11-17: https://docs.cloud.google.com/iam/docs/roles-overview).
+// is UNVERIFIED (docs re-read 2026-11-17: https://docs.cloud.google.com/iam/docs/roles-overview).
 func ProjectApplicable(p string) bool {
 	parts := strings.Split(p, ".")
 	if len(parts) != 3 {

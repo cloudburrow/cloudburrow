@@ -72,6 +72,7 @@ import (
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
 	_ "cloud.google.com/go/functions/apiv2/functionspb"
+	_ "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -141,6 +142,10 @@ var areas = []area{
 		// googleapis' service.proto has no RPC for it yet; it is served
 		// at the name Google's would have.
 		Extra: []string{"google.cloud.kms.v1.KeyManagementService/DeleteKeyRing"}},
+	// IAM custom roles (#1743), on the Resource Manager port: the roles and
+	// QueryTestablePermissions; service accounts and the rest are
+	// UNIMPLEMENTED.
+	{Key: "iam", Title: "IAM (custom roles)", Own: true, Services: []string{"google.iam.admin.v1.IAM"}},
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",

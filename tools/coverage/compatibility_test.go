@@ -37,6 +37,7 @@ var compatSections = map[string]string{
 	"kms":                 "## Cloud KMS — `google.cloud.kms.v1`",
 	"secretmanager":       "## Secret Manager — `google.cloud.secretmanager.v1`",
 	"resourcemanager":     "## Resource Manager — `google.cloud.resourcemanager.v3`",
+	"iam":                 "## IAM custom roles — `google.iam.admin.v1`",
 	// v1 REST and liens (#1296, #1295): rows of the same section, naming
 	// each Verified method by its whole discovery ID
 	// (`cloudresourcemanager.projects.getOrgPolicy`).
