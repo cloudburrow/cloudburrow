@@ -55,6 +55,7 @@
         "patches/bigquery-emulator/0081-insert-all-stream-columns.patch",
         "patches/bigquery-emulator/0082-debug-pprof.patch",
         "patches/bigquery-emulator/0083-write-jobs-by-key.patch",
+        "patches/bigquery-emulator/0084-dataset-tables-when-asked.patch",
         "patches/bigquery-emulator/0076-existing-job-is-409-duplicate.patch"
       ]
     },
