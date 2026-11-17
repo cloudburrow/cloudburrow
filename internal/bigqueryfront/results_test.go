@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,8 @@ import (
 type resultsEmulator struct {
 	datasets map[string]bool
 	log      []string
+	// inTable is resultInTableHeader of each jobs.insert sent.
+	inTable []string
 }
 
 func (e *resultsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +47,7 @@ func (e *resultsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]any{"kind": "bigquery#datasetList", "etag": "e", "datasets": list})
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs"):
+		e.inTable = append(e.inTable, r.Header.Get(resultInTableHeader))
 		var job jobBody
 		_ = json.Unmarshal(b, &job)
 		if q := job.Configuration.Query; q != nil && q.DestinationTable != nil && !e.datasets[q.DestinationTable.DatasetID] {
@@ -177,6 +181,39 @@ func TestIsLoneQuery(t *testing.T) {
 	} {
 		if got := isLoneQuery(sql); got != want {
 			t.Errorf("isLoneQuery(%q) = %v, want %v", sql, got, want)
+		}
+	}
+}
+
+// TestResultsReadFromTheTable (#1662): a job the front gives a table in
+// resultsDataset is sent with resultInTableHeader, so the emulator answers
+// jobs.getQueryResults from that table and keeps no JSON copy of its rows
+// (bigquery-emulator patch 0086); no other job is, and a client's header
+// is never passed on.
+func TestResultsReadFromTheTable(t *testing.T) {
+	emu := &resultsEmulator{}
+	q := Results(emu)
+	for _, c := range []struct {
+		name, body string
+		want       string
+	}{
+		{"query", queryJob("j1", "SELECT 1 AS x", ""), "1"},
+		{"DDL", queryJob("d1", "CREATE TABLE ds.t (a INT64)", ""), ""},
+		{"script", queryJob("d2", "SELECT 1; SELECT 2", ""), ""},
+		{"dry run", queryJob("d3", "SELECT 1", `"dryRun":true,`), ""},
+		{"own destination", `{"jobReference":{"jobId":"d4"},"configuration":{"query":{"query":"SELECT 1",` +
+			`"destinationTable":{"projectId":"p","datasetId":"a","tableId":"t"}}}}`, ""},
+	} {
+		for _, client := range []bool{false, true} {
+			emu.inTable = nil
+			r := httptest.NewRequest(http.MethodPost, base+"/jobs", strings.NewReader(c.body))
+			if client {
+				r.Header.Set(resultInTableHeader, "1")
+			}
+			q.ServeHTTP(httptest.NewRecorder(), r)
+			if len(emu.inTable) == 0 || emu.inTable[len(emu.inTable)-1] != c.want {
+				t.Errorf("%s (a client's header: %v): sent with %s %q, want %q", c.name, client, resultInTableHeader, emu.inTable, c.want)
+			}
 		}
 	}
 }
