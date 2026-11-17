@@ -215,12 +215,11 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 			return notImplemented("of a file whose column " + c.notHere)
 		}
 	}
-	if l.Schema != nil && !givenFits(l.Schema.Fields, file) {
-		return notImplemented("whose job gives a schema that is not the file's (" + describeFields(l.Schema.Fields) +
-			"; the file's is " + describeFields(file) + "). BigQuery reads a Parquet file by the file's schema, and its " +
-			"documentation does not say how it reads one by another; CloudBurrow does not guess. Leave the schema out")
-	}
-	if h := hiveFilesOf(r); h != nil { // #1547, loadvariants.go
+	// A hive-partitioned load's keys follow the file's columns (#1547,
+	// loadvariants.go): its schema, if it gives one, is the file's, with
+	// or without the keys after it.
+	withKeys := file
+	if h := hiveFilesOf(r); h != nil {
 		for _, k := range h.keys {
 			for _, fl := range file {
 				if strings.EqualFold(fl.Name, k.name) {
@@ -229,8 +228,17 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 				}
 			}
 		}
-		file = append(file, h.fields()...)
+		withKeys = append(append([]field(nil), file...), h.fields()...)
 	}
+	if l.Schema != nil && !givenFits(l.Schema.Fields, file) && !givenFits(l.Schema.Fields, withKeys) {
+		return notImplemented("whose job gives a schema that is not the file's (" + describeFields(l.Schema.Fields) +
+			"; the file's is " + describeFields(withKeys) + "). BigQuery reads a Parquet file by the file's schema, and its " +
+			"documentation does not say how it reads one by another; CloudBurrow does not guess. Leave the schema out")
+	}
+	if l.Schema != nil && len(withKeys) > len(file) && givenFits(l.Schema.Fields, file) {
+		l.Schema = &tableSchema{Fields: append(append([]field(nil), l.Schema.Fields...), withKeys[len(file):]...)}
+	}
+	file = withKeys
 	plan := &pqPlan{dest: tableRef{DatasetID: dest.DatasetID, TableID: dest.TableID}, files: files, upload: upload,
 		createNever: strings.EqualFold(el.CreateDisposition, "CREATE_NEVER")}
 	// passes: the emulator's own load would carry this one out as BigQuery

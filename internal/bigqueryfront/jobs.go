@@ -159,12 +159,28 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why+". Nothing was loaded.")
 			return
 		}
+		manifestLoad, ok := f.loadManifests(w, r) // #1547, loadmanifest.go
+		if !ok {
+			return
+		}
+		if manifestLoad != nil {
+			var nj jobBody
+			if !decodeJob(r, &nj) || nj.Configuration.Load == nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not read the load again")
+				return
+			}
+			job, kept = nj, manifestLoad
+			c = job.Configuration
+		}
 		out, k, fix, ok := f.loadVariant(w, r) // #1547, loadvariants.go
 		if !ok {
 			return
 		}
 		if out != r {
-			r, kept, detectedFix = out, k, fix
+			r, detectedFix = out, fix
+			if kept == nil {
+				kept = k
+			}
 			var nj jobBody
 			if !decodeJob(r, &nj) || nj.Configuration.Load == nil {
 				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not read the load again")

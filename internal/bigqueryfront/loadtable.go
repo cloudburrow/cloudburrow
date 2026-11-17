@@ -162,15 +162,26 @@ func loadFailed(rec *recorder) bool {
 // loadNotHere is why the front does not carry out the load in r's body,
 // or "" (#1457). The pinned emulator answered an ORC and a
 // DATASTORE_BACKUP load 500 "runtime error: invalid memory address or nil
-// pointer dereference" (measured), so each is 501 with its reason. A load
+// pointer dereference" (measured), so each is 501 with its reason. Of
+// DATASTORE_BACKUP (#1547, rechecked 2026-11-17): "Loading data from
+// Firestore exports"
+// (https://cloud.google.com/bigquery/docs/loading-data-cloud-firestore)
+// documents the URI ("must end in KIND_NAME.export_metadata"), one URI and
+// no wildcard, the collection-ids filter and the type conversions, but not
+// the bytes of the .export_metadata file nor of the output files' entities
+// ("Firestore and Datastore share an export format"); CloudBurrow's
+// Firestore export (internal/firestoreadmin/transfer.go) writes Google's
+// layout with a JSON .export_metadata ({"kind", "documents", "outputs"})
+// and LevelDB log records of Firestore Document messages, not Datastore
+// EntityProtos, so neither a Google export nor CloudBurrow's own could be
+// loaded as BigQuery loads Google's. A load
 // with hivePartitioningOptions or jsonExtension GEOJSON, which it loaded
 // as if neither were given, is read by the front (#1547, loadvariants.go).
 func loadNotHere(r *http.Request) string {
 	var job struct {
 		Configuration struct {
 			Load struct {
-				SourceFormat    string `json:"sourceFormat"`
-				FileSetSpecType string `json:"fileSetSpecType"`
+				SourceFormat string `json:"sourceFormat"`
 			} `json:"load"`
 		} `json:"configuration"`
 	}
@@ -183,10 +194,11 @@ func loadNotHere(r *http.Request) string {
 		return "an ORC load: CloudBurrow has no ORC reader (no Go module it builds with reads ORC files; Apache Arrow's Go " +
 			"module reads Parquet and Avro, not ORC)"
 	case strings.EqualFold(l.SourceFormat, "DATASTORE_BACKUP"):
-		return "a DATASTORE_BACKUP load: CloudBurrow does not read Datastore or Firestore managed exports"
-	case l.FileSetSpecType != "" && !strings.EqualFold(l.FileSetSpecType, "FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH"):
-		return "a load with fileSetSpecType " + l.FileSetSpecType + ": CloudBurrow reads the sourceUris as the files " +
-			"themselves, not as manifests"
+		return "a DATASTORE_BACKUP load: BigQuery reads a Datastore or Firestore managed export's KIND.export_metadata " +
+			"file and its output files of legacy Datastore entities, a format Google does not document (Loading data " +
+			"from Firestore exports says only that \"Firestore and Datastore share an export format\"); CloudBurrow's " +
+			"Firestore export writes the documented layout, but its .export_metadata is JSON and its output records " +
+			"are Firestore Document messages, so a load could read neither Google's exports nor faithfully its own"
 	}
 	return ""
 }

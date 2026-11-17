@@ -22,7 +22,8 @@ import (
 // the prefix encodes them, into a given schema too); a key layout that is
 // not key=value, keys in another order, a value that is not CUSTOM's
 // type, a file column that is a key, requirePartitionFilter and a missing
-// prefix are 400; CSV with hive partitioning is 501. A Parquet (AUTO) and
+// prefix are 400; CSV with hive partitioning by autodetect and no schema is
+// 501 (with a schema: TestBigQueryLoadHiveCSVAndManifests). A Parquet (AUTO) and
 // an Avro (STRINGS) load add the keys after the file's columns. jsonExtension
 // GEOJSON loads Features, by autodetect and with a schema, from Cloud
 // Storage and as an upload; a Feature that is not one is 400, as is
@@ -179,7 +180,7 @@ func TestBigQueryHivePartitionedAndGeoJSONLoads(t *testing.T) {
 		{"requirePartitionFilter", 400, &bq.JobConfigurationLoad{SourceUris: []string{gs + "t/*"},
 			HivePartitioningOptions: &bq.HivePartitioningOptions{Mode: "AUTO", SourceUriPrefix: gs + "t", RequirePartitionFilter: true}}},
 		{"no prefix", 400, &bq.JobConfigurationLoad{SourceUris: []string{gs + "t/*"}, HivePartitioningOptions: &bq.HivePartitioningOptions{Mode: "AUTO"}}},
-		{"hive CSV", 501, &bq.JobConfigurationLoad{SourceFormat: "CSV", SourceUris: []string{gs + "t/*"}, HivePartitioningOptions: hive("AUTO", "t")}},
+		{"hive CSV by autodetect with no schema", 501, &bq.JobConfigurationLoad{SourceFormat: "CSV", SourceUris: []string{gs + "t/*"}, HivePartitioningOptions: hive("AUTO", "t")}},
 		{"GEOJSON with CSV", 400, &bq.JobConfigurationLoad{SourceFormat: "CSV", JsonExtension: "GEOJSON", SourceUris: []string{gs + "geo/f.json"}}},
 		{"a FeatureCollection", 400, &bq.JobConfigurationLoad{JsonExtension: "GEOJSON", Autodetect: true, SourceUris: []string{gs + "geo/bad.json"}}},
 	} {
