@@ -48,7 +48,7 @@ func bigqueryLoadFileFields(withTable bool) []console.Field {
 	for i, f := range fields {
 		if f.Name == "uris" {
 			fields[i] = console.Field{Name: "file", Label: "File", Type: console.FileFieldType, Required: true,
-				Help: "A CSV, newline-delimited JSON or Parquet file on this computer, of the format chosen below, " +
+				Help: "A CSV, newline-delimited JSON, Parquet, Avro or ORC file on this computer, of the format chosen below, " +
 					"at most the upload limit set in Settings and utilities."}
 		}
 	}

@@ -74,7 +74,7 @@ func (s *Server) iamCredentials(w http.ResponseWriter, r *http.Request) {
 			ttl = d
 		}
 		writeJSON(w, map[string]string{
-			"accessToken": s.creds.MintAccessToken(),
+			"accessToken": s.creds.MintAccessTokenFor(s.creds.accountName(account), ttl),
 			"expireTime":  time.Now().Add(ttl).UTC().Format(time.RFC3339),
 		})
 	case "generateIdToken":
@@ -181,5 +181,14 @@ func (c *Credentials) ServiceAccountIDToken(account, audience string) (string, e
 // as Google's are, so the account and scope are not in it: nothing local
 // could check them anyway.
 func (c *Credentials) ServiceAccountAccessToken(account, scope string) (string, error) {
-	return c.MintAccessToken(), nil
+	return c.MintAccessTokenFor(c.accountName(account), TokenTTL), nil
+}
+
+// accountName is the email an impersonation names: "-" is the instance's
+// own account.
+func (c *Credentials) accountName(account string) string {
+	if account == "" || account == "-" {
+		return c.Email
+	}
+	return account
 }

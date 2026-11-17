@@ -28,6 +28,10 @@ type redisClusterProvider struct {
 func (redisClusterProvider) ID() string    { return "memorystore-clusters" }
 func (redisClusterProvider) Title() string { return "Memorystore Redis Cluster" }
 
+// redisClusterConnectRole is the role Google documents a principal needs
+// to connect to a cluster with IAM auth (#1614).
+const redisClusterConnectRole = "roles/redis.dbConnectionUser"
+
 func (p redisClusterProvider) api() (*redisadmin.ClusterServer, *redisadmin.Server, error) {
 	if p.svc == nil || p.svc.api == nil {
 		return nil, nil, errors.New("the Memorystore admin API has not started")
@@ -102,7 +106,7 @@ func (redisClusterProvider) CreateForm() (string, []console.Field) {
 		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
 			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the cluster's own CA, which its page shows. It cannot be changed later."},
 		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
-			Help: "AUTH_MODE_IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
+			Help: "AUTH_MODE_IAM_AUTH: clients send an access token as the AUTH string, taken only when this instance minted it for a principal granted " + redisClusterConnectRole + " on the project (IAM & Admin)."},
 		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
 			Help: "AUTH_MODE_TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the cluster's page adds and shows."},
 		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
@@ -257,6 +261,13 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "Capacity", Value: fmt.Sprintf("%g GB", c.GetPreciseSizeGb())},
 		{Label: "Authorization", Value: c.GetAuthorizationMode().String()},
 		{Label: "In-transit encryption", Value: c.GetTransitEncryptionMode().String()},
+	}
+	if c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH {
+		// IAM auth checks the token (#1614): who may connect is the
+		// project's IAM policy, granted on the IAM page.
+		props = append(props, console.Property{Label: "IAM connect role", Value: redisClusterConnectRole + " on the project, granted on IAM & Admin; a client's AUTH is an access token minted for the principal"})
+	}
+	props = append(props, []console.Property{
 		{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(c.GetRedisConfigs()))},
 		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
@@ -265,7 +276,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "Persistence", Value: c.GetPersistenceConfig().GetMode().String()},
 		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
 		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
-	}
+	}...)
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
 	if c.GetTransitEncryptionMode() == clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION {
@@ -293,6 +304,12 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 			{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
 		},
 		Note: "Saved through UpdateCluster, shards or replicas one change at a time.",
+	}
+	if c.GetAuthorizationMode() != clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH {
+		// IAM auth on or off (#1614), as Google's console offers it.
+		d.Edit.Fields = append(d.Edit.Fields, console.Field{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
+			Default: strconv.FormatBool(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH),
+			Help:    "Clients send an access token of a principal granted " + redisClusterConnectRole + " as the AUTH string."})
 	}
 	return d, nil
 }
@@ -331,6 +348,17 @@ func (p redisClusterProvider) Edit(ctx context.Context, project string, path []s
 	if nt := values["nodeType"]; nt != "" && nt != cur.GetNodeType().String() {
 		if err := update("node_type", &clusterpb.Cluster{NodeType: clusterpb.NodeType(clusterpb.NodeType_value[nt])}); err != nil {
 			return err
+		}
+	}
+	if v, ok := values["iamAuth"]; ok && cur.GetAuthorizationMode() != clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH {
+		mode := clusterpb.AuthorizationMode_AUTH_MODE_DISABLED
+		if v == "true" {
+			mode = clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH
+		}
+		if mode != cur.GetAuthorizationMode() {
+			if err := update("authorization_mode", &clusterpb.Cluster{AuthorizationMode: mode}); err != nil {
+				return err
+			}
 		}
 	}
 	if dp := values["deletionProtection"] == "true"; dp != cur.GetDeletionProtectionEnabled() {

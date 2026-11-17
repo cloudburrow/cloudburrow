@@ -67,10 +67,10 @@ import (
 //   - "Currently supported formats are: JSON, CSV, ORC, Avro and Parquet",
 //     and "Requesting hive partitioning on an unsupported format will lead
 //     to an error": another format is 400 invalid. CSV is 501 here: the
-//     front adds the keys to JSON records, and to the rows of a Parquet or
-//     Avro load it carries out itself (hiveFiles, parquetload.go,
-//     avroload.go), one with no schema in the job (the keys are columns
-//     after the file's).
+//     front adds the keys to JSON records, and to the rows of a Parquet,
+//     Avro or ORC load it carries out itself (hiveFiles, parquetload.go,
+//     avroload.go, orcload.go), one with no schema in the job (the keys are
+//     columns after the file's).
 //
 // UNVERIFIED: the keys are columns after the file's columns (the page does
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/hive-partitioned-loads-gcs
@@ -168,10 +168,12 @@ func (f front) loadVariant(w http.ResponseWriter, r *http.Request) (*http.Reques
 		switch format {
 		case "NEWLINE_DELIMITED_JSON":
 		case "PARQUET", "AVRO":
-		case "CSV": // csvLoad adds the keys to each record (#1547, csvhive.go)
 		case "ORC":
-			return fail(http.StatusNotImplemented, "a hive-partitioned "+format+" load: CloudBurrow adds the partition "+
-				"keys to NEWLINE_DELIMITED_JSON and CSV records and Parquet and Avro rows only.")
+			if l.Schema != nil && len(l.Schema.Fields) > 0 {
+				return fail(http.StatusNotImplemented, "a hive-partitioned "+format+" load with a schema: CloudBurrow "+
+					"reads the file by its own schema, with the keys after its columns.")
+			}
+		case "CSV": // csvLoad adds the keys to each record (#1547, csvhive.go)
 		default:
 			return fail(http.StatusBadRequest, "Hive partitioning is not supported for sourceFormat "+l.SourceFormat+
 				": \"Currently supported formats are: JSON, CSV, ORC, Avro and Parquet.\"")
@@ -310,11 +312,12 @@ func (f front) loadVariant(w http.ResponseWriter, r *http.Request) (*http.Reques
 		}
 	}
 
-	if format == "PARQUET" || format == "AVRO" || format == "CSV" {
-		// The Parquet or Avro load the front carries out adds the keys to
-		// each file's rows (parquet.go, parquetload.go, avroload.go), and
-		// the CSV load to each record (csvhive.go), whose job is sent on
-		// with its schema's keys and without hivePartitioningOptions.
+	if format == "PARQUET" || format == "AVRO" || format == "ORC" || format == "CSV" {
+		// The Parquet, Avro or ORC load the front carries out adds the keys
+		// to each file's rows (parquet.go, parquetload.go, avroload.go,
+		// orcload.go), and the CSV load to each record (csvhive.go), whose
+		// job is sent on with its schema's keys and without
+		// hivePartitioningOptions.
 		h := &hiveFiles{keys: keys, vals: map[string][]string{}}
 		for _, s := range srcs {
 			h.vals[s.loc] = s.vals
@@ -777,7 +780,7 @@ func firstByte(b []byte) byte {
 	return b[0]
 }
 
-// hiveFiles are a hive-partitioned Parquet or Avro load's keys, and each file's
+// hiveFiles are a hive-partitioned Parquet, Avro or ORC load's keys, and each file's
 // values of them by its gs:// URI, kept in its request's context.
 type hiveFiles struct {
 	keys []hiveKey

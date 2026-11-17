@@ -56,10 +56,9 @@ import (
 // each time the node starts: the nodes serve TLS only on their client port,
 // gossip (tls-cluster) and replicate (tls-replication) over TLS, and
 // GetClusterCertificateAuthority returns the CA as managed_server_ca. With
-// AUTH_MODE_IAM_AUTH a client sends an access token as its AUTH string;
-// the instance's IAM is not enforced (ADR-0006), so the nodes' default user
-// has no password and takes any AUTH, the token CloudBurrow's credentials
-// issued among them.
+// AUTH_MODE_IAM_AUTH a client sends an access token as its AUTH string,
+// which the nodes take only when this instance minted it for a principal
+// the project grants roles/redis.dbConnectionUser (iamauth.go, #1614).
 
 // ClusterRuntime runs the nodes of a cluster.
 type ClusterRuntime interface {
@@ -142,7 +141,8 @@ type clusterRecord struct {
 	TransitCA    string `json:"transitCa,omitempty"`
 	TransitCAKey string `json:"transitCaKey,omitempty"`
 	// AdminPassword is the nodes' default user's password with token auth
-	// (clusterauth.go): only the admin plane's; "" for none.
+	// (clusterauth.go) or IAM auth (iamauth.go): only the admin plane's;
+	// "" for none.
 	AdminPassword string `json:"adminPassword,omitempty"`
 	// TokenUsers are the token auth users, by username.
 	TokenUsers map[string]*tokenUser `json:"tokenUsers,omitempty"`
@@ -210,6 +210,9 @@ type clusters struct {
 	// eps are the CLUSTER_DISABLED instances' endpoints, by name
 	// (valkeyfailover.go).
 	eps map[string]*roleEndpoints
+	// iam is IAM auth's token source and bookkeeping (iamauth.go); nil
+	// until UseIAM.
+	iam *iamState
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -739,8 +742,8 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 		auth = clusterpb.AuthorizationMode_AUTH_MODE_DISABLED
 	case clusterpb.AuthorizationMode_AUTH_MODE_DISABLED:
 	case clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH:
-		// A client's AUTH is its access token. IAM is not enforced here
-		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
+		// A client's AUTH is its access token, checked against the
+		// instance's issued tokens and the project's policy (iamauth.go).
 	case clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH:
 		// Token auth users and their tokens (clusterauth.go).
 	default:
@@ -767,7 +770,9 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	r := &clusterRecord{Name: name, UID: newUID(), Created: c.now(), ShardCount: in.GetShardCount(), ReplicaCount: in.GetReplicaCount(),
 		NodeType: nt.String(), AuthMode: auth.String(), RedisConfigs: copyMap(in.GetRedisConfigs()),
 		DeletionProtect: in.GetDeletionProtectionEnabled(), state: clusterpb.Cluster_CREATING, pendingReplicas: -1}
-	if auth == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH {
+	if auth == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH || auth == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH {
+		// The default user's password is the cluster's own; with IAM auth
+		// the allowed tokens are its passwords too (iamauth.go).
 		r.AdminPassword = newUID() + newUID()
 	}
 	r.AutoBackup = protoJSON(in.GetAutomatedBackupConfig())
@@ -1498,13 +1503,23 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		next.Maintenance = ""
 		keepJSON(&next.Maintenance, in.GetMaintenancePolicy())
 	}
+	authChange, oldPassword := false, r.AdminPassword
 	if set["authorization_mode"] {
 		switch a := in.GetAuthorizationMode(); {
 		case a.String() == r.AuthMode:
 		case a == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH || r.AuthMode == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH.String():
 			return nil, apierror.Unimplemented("authorization_mode cannot be changed to or from AUTH_MODE_TOKEN_AUTH here: the nodes' default user's password is set when they start")
 		case a == clusterpb.AuthorizationMode_AUTH_MODE_DISABLED, a == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH:
+			// IAM auth checks the token (iamauth.go): the nodes' default
+			// user gets a password of the cluster's own, set on the
+			// running nodes below, or loses it again.
 			next.AuthMode = a.String()
+			if a == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH {
+				next.AdminPassword = newUID() + newUID()
+			} else {
+				next.AdminPassword = ""
+			}
+			authChange = true
 		default:
 			return nil, apierror.InvalidArgument("authorization_mode %s is not an authorization mode", a)
 		}
@@ -1544,6 +1559,9 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		}
 	}
 	reshape := next.ShardCount != r.ShardCount || next.ReplicaCount != r.ReplicaCount
+	if reshape && authChange {
+		return nil, apierror.InvalidArgument("authorization_mode is changed in an update of its own, not with shard_count or replica_count")
+	}
 	shards, replicas := next.ShardCount, next.ReplicaCount
 	next.ShardCount, next.ReplicaCount = r.ShardCount, r.ReplicaCount // until the nodes are
 	if err := c.save(&next); err != nil {
@@ -1551,15 +1569,17 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	}
 	*r = next
 	op := c.newOperation(r.Name, "update")
-	if syncACL && !reshape {
-		// The policy's users on every node (aclpolicy.go), then done.
+	if (syncACL || authChange) && !reshape {
+		// The policy's users on every node (aclpolicy.go), and the
+		// default user's password when IAM auth was turned on or off
+		// (iamauth.go), then done.
 		c.busy[r.Name] = op
 		snap, users := *r, c.aclUsers(r)
 		nodes := append([]*clusterNode(nil), r.Nodes...)
 		go func() {
 			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 			defer cancel()
-			err := c.syncUsers(ctx, &snap, users, nodes)
+			err := c.switchAuth(ctx, &snap, oldPassword, authChange, users, nodes)
 			c.mu.Lock()
 			delete(c.busy, snap.Name)
 			out := c.render(r)

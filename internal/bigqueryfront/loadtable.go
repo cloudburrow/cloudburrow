@@ -162,7 +162,8 @@ func loadFailed(rec *recorder) bool {
 // loadNotHere is why the front does not carry out the load in r's body,
 // or "" (#1457). The pinned emulator answered an ORC and a
 // DATASTORE_BACKUP load 500 "runtime error: invalid memory address or nil
-// pointer dereference" (measured), so each is 501 with its reason. Of
+// pointer dereference" (measured), so a DATASTORE_BACKUP load is 501 with
+// its reason, and an ORC load the front's own (#1713, orcload.go). Of
 // DATASTORE_BACKUP (#1547, rechecked 2026-11-17): "Loading data from
 // Firestore exports"
 // (https://cloud.google.com/bigquery/docs/loading-data-cloud-firestore)
@@ -190,9 +191,6 @@ func loadNotHere(r *http.Request) string {
 	}
 	l := job.Configuration.Load
 	switch {
-	case strings.EqualFold(l.SourceFormat, "ORC"):
-		return "an ORC load: CloudBurrow has no ORC reader (no Go module it builds with reads ORC files; Apache Arrow's Go " +
-			"module reads Parquet and Avro, not ORC)"
 	case strings.EqualFold(l.SourceFormat, "DATASTORE_BACKUP"):
 		return "a DATASTORE_BACKUP load: BigQuery reads a Datastore or Firestore managed export's KIND.export_metadata " +
 			"file and its output files of legacy Datastore entities, a format Google does not document (Loading data " +

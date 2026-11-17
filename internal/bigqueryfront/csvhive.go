@@ -23,8 +23,10 @@ import (
 // end (loadvariants.go), or the table it loads into, which must have a
 // column for each key. A file's values go, in order, to the columns that
 // are not keys, a key's column being wherever the schema puts it
-// (UNVERIFIED: the page does not say where a key's column is; a schema
-// naming it is read by name, as for a JSON load). allowJaggedRows and
+// (UNVERIFIED, docs re-read 2026-11-17:
+// https://docs.cloud.google.com/bigquery/docs/hive-partitioned-loads-gcs,
+// which does not say where a key's column is; a schema naming it is read
+// by name, as for a JSON load). allowJaggedRows and
 // ignoreUnknownValues count a record's width without the keys.
 //
 // Still 501, as the page documents none of them for CSV: a load with

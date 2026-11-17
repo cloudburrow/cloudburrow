@@ -65,8 +65,8 @@ func (r *clusterRecord) tokenAuth() bool {
 }
 
 // aclUsers are the ACL users every node of r has, each SETUSER's rules
-// after the username, in name order: the token auth users and the ACL
-// policy's (aclpolicy.go). Call with mu held, or on a snapshot.
+// after the username, in name order: the token auth users, the ACL
+// policy's (aclpolicy.go) and IAM auth's (iamauth.go). Call with mu held, or on a snapshot.
 func (c *clusters) aclUsers(r *clusterRecord) map[string][]any {
 	out := map[string][]any{}
 	for u, tu := range r.TokenUsers {
@@ -77,6 +77,10 @@ func (c *clusters) aclUsers(r *clusterRecord) map[string][]any {
 		out[u] = append(rule, "~*", "&*", "+@all")
 	}
 	for u, rule := range c.policyUsers(r) {
+		out[u] = rule
+	}
+	// IAM auth's default user and principals (iamauth.go).
+	for u, rule := range c.iamUsers(r) {
 		out[u] = rule
 	}
 	return out
