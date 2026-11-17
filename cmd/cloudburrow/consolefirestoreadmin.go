@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -26,18 +27,24 @@ import (
 type firestoreDatabasesProvider struct {
 	endpoint string
 	// mongo is Firestore with MongoDB compatibility's host address
-	// (#1703), shown in an Enterprise database's connection string.
-	mongo string
+	// (#1703), shown in an Enterprise database's connection string, and
+	// mongoCA its CA certificate's file (#1738).
+	mongo, mongoCA string
 }
 
 // mongoConnectionString is the connection string Google documents for
 // SCRAM ("Authenticate and connect to a database"), for an Enterprise
-// edition database on this instance's endpoint: cleartext, so tls=false.
-func mongoConnectionString(addr, user, dbID string) string {
-	if addr == "" {
+// edition database on this instance's endpoint: TLS, as Google's, trusting
+// the instance's CA (tlsCAFile, #1738).
+func (p firestoreDatabasesProvider) mongoConnectionString(user, dbID string) string {
+	if p.mongo == "" {
 		return ""
 	}
-	return "mongodb://" + user + ":PASSWORD@" + addr + "/" + dbID + "?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false"
+	cs := "mongodb://" + user + ":PASSWORD@" + p.mongo + "/" + dbID + "?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=true&retryWrites=false"
+	if p.mongoCA != "" {
+		cs += "&tlsCAFile=" + url.QueryEscape(p.mongoCA)
+	}
+	return cs
 }
 
 func (firestoreDatabasesProvider) ID() string    { return "firestore-databases" }
@@ -150,7 +157,7 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 	// User credentials and pipelines are Enterprise edition features
 	// (#1500, consolefirestorepipeline.go).
 	if db.DatabaseEdition == adminpb.Database_ENTERPRISE {
-		if cs := mongoConnectionString(p.mongo, "USERNAME", path[0]); cs != "" {
+		if cs := p.mongoConnectionString("USERNAME", path[0]); cs != "" {
 			summary = append(summary, console.Property{Label: "MongoDB connection string", Value: cs})
 		}
 		sections = append(sections, console.Section{ID: "usercreds", Label: "User credentials", Listing: p.userCreds(ctx, c, name, path[0])})

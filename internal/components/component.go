@@ -26,6 +26,9 @@ type LifecycleComponent struct {
 	// mysql is the instance's generated MySQL credentials, for Cloud SQL for
 	// MySQL.
 	mysql MySQLCredentials
+	// mongoCert and mongoKey are Firestore with MongoDB compatibility's
+	// TLS server certificate and key, PEM (#1738).
+	mongoCert, mongoKey string
 	// storageImage is the builtin storage server's locally built image
 	// (#514), the only Cloud Storage backend (#519). The BigQuery pod runs
 	// its validating front (#902) and the Pub/Sub pod its front (#873) from
@@ -115,6 +118,13 @@ func (c *LifecycleComponent) SetBigQueryImage(ref string) { c.bigQueryImage = re
 // with.
 func (c *LifecycleComponent) SetMySQLCredentials(m MySQLCredentials) { c.mysql = m }
 
+// SetFirestoreMongoTLS supplies the server certificate and key, PEM,
+// Firestore's front serves Firestore with MongoDB compatibility's TLS with
+// (#1738).
+func (c *LifecycleComponent) SetFirestoreMongoTLS(cert, key string) {
+	c.mongoCert, c.mongoKey = cert, key
+}
+
 // NewLifecycleComponent builds the installer component for a configuration.
 func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) *LifecycleComponent {
 	return &LifecycleComponent{
@@ -172,6 +182,14 @@ func (c *LifecycleComponent) Backends() []Backend {
 				}
 				// Firestore's exports and imports go through the
 				// instance's Cloud Storage (#1500).
+				if s == config.ServiceFirestore && c.mongoCert != "" {
+					env := map[string]string{}
+					for k, v := range b.Front.Env {
+						env[k] = v
+					}
+					env[FirestoreMongoTLSCertEnv], env[FirestoreMongoTLSKeyEnv] = c.mongoCert, c.mongoKey
+					b.Front.Env = env
+				}
 				if s == config.ServiceFirestore && c.enabled(config.ServiceStorage) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
 				}

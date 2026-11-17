@@ -20,7 +20,7 @@ import (
 // documents.
 func mongoDatabase(t *testing.T, h *Harness, id string) (*mongo.Database, string) {
 	t.Helper()
-	ep := h.Endpoint(EnvFirestoreMongoDB)
+	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	admin := firestoreAdmin(t, h)
 	dbName := enterpriseDatabase(t, h, id)
@@ -28,7 +28,7 @@ func mongoDatabase(t *testing.T, h *Harness, id string) (*mongo.Database, string
 	if err != nil {
 		t.Fatalf("CreateUserCreds: %v", err)
 	}
-	return mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, id)).Database(id), dbName
+	return mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, id, ca)).Database(id), dbName
 }
 
 func hasLabel(err error, label string) bool {

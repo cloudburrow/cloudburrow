@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
@@ -176,6 +177,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// BigQuery ML's imported ONNX models for the front (#1711).
 		comps.SetONNXRunner(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ONNX))
+	}
+	if serviceEnabled(cfg, config.ServiceFirestore) {
+		// Firestore with MongoDB compatibility serves TLS only (#1738),
+		// with a certificate of the instance's own CA, which
+		// CLOUDBURROW_FIRESTORE_MONGODB_CA_FILE names for clients.
+		ns := cfg.Cluster.Namespace
+		cert, key, err := firestoreadmin.MongoServerTLS(cfg.InstanceDir(), time.Now(),
+			"firestore", "firestore."+ns, "firestore."+ns+".svc", "firestore."+ns+".svc.cluster.local")
+		if err != nil {
+			return fmt.Errorf("Firestore with MongoDB compatibility's TLS certificate: %w", err)
+		}
+		comps.SetFirestoreMongoTLS(string(cert), string(key))
 	}
 	var mysqlCreds components.MySQLCredentials
 	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) {

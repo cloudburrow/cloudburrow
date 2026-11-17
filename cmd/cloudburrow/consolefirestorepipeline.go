@@ -98,7 +98,7 @@ func (p firestoreDatabasesProvider) passwordListing(uc *adminpb.UserCreds) *cons
 	cols := []string{"Password", "State"}
 	fields := map[string]string{"Password": uc.GetSecurePassword(), "State": enumWord(uc.GetState(), "")}
 	if m := userCredsNameRe.FindStringSubmatch(uc.GetName()); m != nil {
-		if cs := mongoConnectionString(p.mongo, m[2], m[1]); cs != "" {
+		if cs := p.mongoConnectionString(m[2], m[1]); cs != "" {
 			cols = append(cols, "Connection string")
 			fields["Connection string"] = cs
 		}

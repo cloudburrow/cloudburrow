@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/components"
@@ -252,7 +253,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// Databases, indexes and field overrides, through the Admin API the
 		// call front serves (#1331).
 		{config.ServiceFirestore, func(a string) console.Provider {
-			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb")}
+			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb"),
+				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile)}
 		}},
 		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},

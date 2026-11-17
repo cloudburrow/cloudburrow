@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,15 +19,30 @@ import (
 )
 
 // EnvFirestoreMongoDB is Firestore with MongoDB compatibility's wire
-// protocol (#1703), a second port of the Firestore front.
-const EnvFirestoreMongoDB = "CLOUDBURROW_TEST_FIRESTORE_MONGODB"
+// protocol (#1703), a second port of the Firestore front, and
+// EnvFirestoreMongoDBCA the file of the CA its TLS certificate is of
+// (#1738).
+const (
+	EnvFirestoreMongoDB   = "CLOUDBURROW_TEST_FIRESTORE_MONGODB"
+	EnvFirestoreMongoDBCA = "CLOUDBURROW_TEST_FIRESTORE_MONGODB_CA"
+)
+
+// mongoEndpoint is the endpoint and its CA file, asked for together.
+func mongoEndpoint(h *Harness) (endpoint, ca string) {
+	endpoint = h.Endpoint(EnvFirestoreMongoDB)
+	ca = os.Getenv(EnvFirestoreMongoDBCA)
+	if ca == "" {
+		h.t.Skipf("%s is not set: the endpoint serves TLS only", EnvFirestoreMongoDBCA)
+	}
+	return endpoint, ca
+}
 
 // mongoURI is the connection string Google documents for SCRAM
-// ("Authenticate and connect to a database"), with tls=false: CloudBurrow's
-// endpoints are cleartext on loopback.
-func mongoURI(user, password, endpoint, database string) string {
-	return fmt.Sprintf("mongodb://%s:%s@%s/%s?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false",
-		url.PathEscape(user), url.PathEscape(password), endpoint, database)
+// ("Authenticate and connect to a database"): TLS, trusting the instance's
+// CA (tlsCAFile), as Google's endpoint serves TLS only.
+func mongoURI(user, password, endpoint, database, ca string) string {
+	return fmt.Sprintf("mongodb://%s:%s@%s/%s?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=true&tlsCAFile=%s&retryWrites=false",
+		url.PathEscape(user), url.PathEscape(password), endpoint, database, url.QueryEscape(ca))
 }
 
 func mongoConnect(t *testing.T, uri string) *mongo.Client {
@@ -67,7 +84,7 @@ func mongoCode(err error) int32 {
 // command Google does not support.
 func TestFirestoreMongoDB(t *testing.T) {
 	h := New(t)
-	ep := h.Endpoint(EnvFirestoreMongoDB)
+	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	ctx := h.Context()
 	admin := firestoreAdmin(t, h)
@@ -77,7 +94,7 @@ func TestFirestoreMongoDB(t *testing.T) {
 		t.Fatalf("CreateUserCreds: %v", err)
 	}
 
-	client := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent"))
+	client := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent", ca))
 	if err := client.Ping(ctx, nil); err != nil {
 		t.Fatalf("Ping: %v", err)
 	}
@@ -262,21 +279,32 @@ func TestFirestoreMongoDB(t *testing.T) {
 		t.Errorf("an aggregate with $out succeeded; Google does not support $out")
 	}
 
+	// TLS only, as Google requires: a cleartext client is refused, and so
+	// is one that does not trust the instance's CA.
+	clear := mongoConnect(t, strings.Replace(mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent", ca), "tls=true&tlsCAFile="+url.QueryEscape(ca), "tls=false", 1))
+	if err := clear.Ping(ctx, nil); err == nil {
+		t.Errorf("a cleartext client reached the endpoint; Google's serves TLS only")
+	}
+	untrusted := mongoConnect(t, strings.Replace(mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent", ca), "&tlsCAFile="+url.QueryEscape(ca), "", 1))
+	if err := untrusted.Ping(ctx, nil); err == nil {
+		t.Errorf("a client that does not trust the instance's CA connected")
+	}
+
 	// Authentication failures.
-	if err := mongoConnect(t, mongoURI("app-user", "wrong-password", ep, "mongo-ent")).Ping(ctx, nil); err == nil {
+	if err := mongoConnect(t, mongoURI("app-user", "wrong-password", ep, "mongo-ent", ca)).Ping(ctx, nil); err == nil {
 		t.Errorf("a wrong password authenticated")
 	}
-	if err := mongoConnect(t, mongoURI("nobody", uc.SecurePassword, ep, "mongo-ent")).Ping(ctx, nil); err == nil {
+	if err := mongoConnect(t, mongoURI("nobody", uc.SecurePassword, ep, "mongo-ent", ca)).Ping(ctx, nil); err == nil {
 		t.Errorf("an unknown user authenticated")
 	}
-	anon := mongoConnect(t, "mongodb://"+ep+"/mongo-ent?loadBalanced=true&tls=false&retryWrites=false")
+	anon := mongoConnect(t, "mongodb://"+ep+"/mongo-ent?loadBalanced=true&tls=true&tlsCAFile="+url.QueryEscape(ca)+"&retryWrites=false")
 	if err := anon.Database("mongo-ent").Collection("books").FindOne(ctx, bson.D{}).Err(); mongoCode(err) != 13 {
 		t.Errorf("an unauthenticated find: %v, want Unauthorized (13)", err)
 	}
 	if _, err := admin.DisableUserCreds(ctx, &adminpb.DisableUserCredsRequest{Name: uc.Name}); err != nil {
 		t.Fatalf("DisableUserCreds: %v", err)
 	}
-	if err := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent")).Ping(ctx, nil); err == nil {
+	if err := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent", ca)).Ping(ctx, nil); err == nil {
 		t.Errorf("disabled user credentials authenticated")
 	}
 	if _, err := admin.EnableUserCreds(ctx, &adminpb.EnableUserCredsRequest{Name: uc.Name}); err != nil {
@@ -286,10 +314,10 @@ func TestFirestoreMongoDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResetUserPassword: %v", err)
 	}
-	if err := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent")).Ping(ctx, nil); err == nil {
+	if err := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, "mongo-ent", ca)).Ping(ctx, nil); err == nil {
 		t.Errorf("the password before ResetUserPassword still authenticates")
 	}
-	if err := mongoConnect(t, mongoURI("app-user", reset.SecurePassword, ep, "mongo-ent")).Ping(ctx, nil); err != nil {
+	if err := mongoConnect(t, mongoURI("app-user", reset.SecurePassword, ep, "mongo-ent", ca)).Ping(ctx, nil); err != nil {
 		t.Errorf("the password ResetUserPassword returned: %v", err)
 	}
 }

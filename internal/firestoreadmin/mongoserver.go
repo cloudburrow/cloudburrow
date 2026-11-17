@@ -15,8 +15,9 @@ package firestoreadmin
 //     console see the same documents (mql/bson.go has the mapping), and
 //     the front exports them as it exports every other write.
 //
-// TLS is not served: like every other CloudBurrow endpoint it is
-// cleartext on loopback, so the connection string sets tls=false.
+// It serves TLS only, as Google requires (mongotls.go, #1738), with a
+// certificate of the instance's own CA; the connection string sets
+// tls=true and tlsCAFile.
 
 import (
 	"context"
