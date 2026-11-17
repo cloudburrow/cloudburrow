@@ -32,7 +32,8 @@ package firestoreadmin
 // integer, a __binary__ of subtype 0) is left to the emulator, whose
 // refusal is the same in both editions. Queries are not refused: the
 // Standard emulator answers a filter on such a value, matching nothing.
-// The Write stream (the Firebase client SDKs' channel) is not inspected.
+// The Write stream (the Firebase client SDKs' channel) is checked request
+// by request (editionstream.go, #1738).
 
 import (
 	"bytes"
@@ -304,8 +305,11 @@ func grpcMessage(b []byte, encoding string) ([]byte, bool) {
 }
 
 // Claims reports whether r is a documents call on a Standard database
-// carrying an Enterprise-only value.
-func (g *EditionGuard) Claims(r *http.Request) bool { return g.refusal(r) != nil }
+// carrying an Enterprise-only value, or a Write stream, which the guard
+// passes on itself (editionstream.go, #1738).
+func (g *EditionGuard) Claims(r *http.Request) bool {
+	return claimsWriteStream(r) || g.refusal(r) != nil
+}
 
 // ServeHTTP answers a call Claims claimed with its refusal.
 func (g *EditionGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
