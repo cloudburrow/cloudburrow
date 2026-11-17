@@ -221,6 +221,7 @@ func (c *connector) removeInstance(instance string) {
 	_ = os.Remove(caPath(c.dir, instance) + upcomingSuffix)
 	_ = os.Remove(caPath(c.dir, instance) + previousSuffix)
 	_ = os.Remove((&sslCertStore{dir: c.dir}).path(instance))
+	_ = os.Remove(serverCertsPath(c.dir, instance))
 	c.mu.Lock()
 	for name := range c.certs {
 		if _, in, ok := parseDNSName(name); ok && in == instance {
@@ -462,7 +463,13 @@ func (c *connector) serve(s *Server, raw net.Conn) {
 			if e == nil || ca == nil {
 				return nil, fmt.Errorf("no instance %q", instance)
 			}
-			crt, err := c.serverCert(project, instance)
+			var crt *tls.Certificate
+			var err error
+			if s.serverCaMode(instance) == casCA {
+				crt, err = c.casServerCert(s.regionOf(instance), project, instance)
+			} else {
+				crt, err = c.serverCert(project, instance)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -558,17 +565,22 @@ func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any
 	if ca == nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "instance %s has no server CA yet", e.Instance())
 	}
-	return map[string]any{
+	out := map[string]any{
 		"kind":            "sql#connectSettings",
 		"serverCaCert":    sslCertJSON(project, e.Instance(), ca.cert, ca.certPEM),
 		"ipAddresses":     []any{map[string]any{"type": "PRIMARY", "ipAddress": host}},
 		"region":          s.regionOf(e.Instance()),
+		"connectionName":  project + ":" + s.regionOf(e.Instance()) + ":" + e.Instance(),
 		"databaseVersion": e.DatabaseVersion(),
 		"backendType":     "SECOND_GEN",
 		"pscEnabled":      false,
 		"dnsName":         dnsName(project, e.Instance()) + ".",
-		"serverCaMode":    "GOOGLE_MANAGED_INTERNAL_CA",
-	}, nil
+		"serverCaMode":    internalCA,
+	}
+	if err := s.casConnectSettings(out, project, e); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // generateEphemeralCert is connect.generateEphemeralCert: it signs the

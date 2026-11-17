@@ -1025,6 +1025,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	st["backupConfiguration"] = bc
 	s.diskEncryptionJSON(in, spec)
 	s.replicationClusterJSON(in, spec)
+	s.casInstanceJSON(in, spec)
 	return in, nil
 }
 

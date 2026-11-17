@@ -152,8 +152,7 @@ Refused with 501, each naming what is missing:
 | Methods | Why |
 |---|---|
 | `blueGreenDeployments.*` | the switchover moves the blue instance's write endpoint (IP address and DNS name) to the green one: Google-managed networking |
-| `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
-| `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
+| `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
 | `instances.switchover` of a PostgreSQL instance | the old primary would have to become the new one's standby, which a PostgreSQL server becomes only by a rebuild of its data directory (`pg_rewind` or a new base backup); MySQL's is served (DR replicas and switchover, below) |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
@@ -214,7 +213,26 @@ the server certificate) are served, and the console's instance page has a Client
 certificates tab. `addServerCa` and `rotateServerCa` rotate the server CA the connector path
 signs with (connectors pick it up from `connectSettings` on their next dial), and
 `listServerCas` lists the active, upcoming and rotated-out CAs; the console shows them, with
-Add server CA and Rotate server CA. The servers are reached through the connector path, so the certificates
+Add server CA and Rotate server CA.
+
+An instance created (or patched) with `settings.ipConfiguration.serverCaMode`
+`GOOGLE_MANAGED_CAS_CA` (#1614) is signed instead by its region's shared CA hierarchy, a
+subordinate CA under a root, which CloudBurrow generates locally and keeps beside the instances'
+own CAs, standing in for Google's CAS-hosted ones. `connectSettings` then answers that chain as
+`serverCaCert`, the mode, and the instance's DNS name in `dnsNames` (also on the instance as
+`dnsName` and `dnsNames`), which the connectors check the server certificate's SAN against.
+Its server certificate is rotated rather than its CA: `listServerCertificates` lists the active,
+upcoming and previous versions, `addServerCertificate` adds an upcoming one (replacing one never
+rotated in), and `rotateServerCertificate` makes the upcoming one, or with `nextVersion` the
+previous one, the one the listener presents, as `gcloud sql ssl server-certs create`, `list`,
+`rotate` and `rollback` do. `connect.resolve` answers the connect settings of the instance a DNS
+name names, in its region. On a `GOOGLE_MANAGED_INTERNAL_CA` instance the server certificate
+methods are 400, and on a CAS instance `addServerCa` and `rotateServerCa` are (CloudBurrow's own
+messages). The console has Server CA mode on Create instance and Edit instance, and on a CAS
+instance's page its server certificates, Add server certificate, Rotate server certificate and
+Resolve DNS name. Client certificates are still signed by the instance's own CA.
+
+The servers are reached through the connector path, so the certificates
 are records the servers do not check on a direct connection. `tiers.list` and `flags.list`
 answer the lists Google documents for each version served (`POSTGRES_13` to `POSTGRES_18`,
 `MYSQL_8_0`, `MYSQL_8_4`, #1381): a flag lists every served version it applies to, from the
@@ -266,7 +284,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.finalBackupConfig` | `enabled` makes a `delete` without `enableFinalBackup` take a `FINAL` backup, kept `retentionDays` (30 when not given). |
 | `settings.databaseReplicationEnabled` | A read replica's replication state, set by `stopReplica` and `startReplica`; a different value in a patch is 400 naming those methods, and `true` on a primary is 400. |
 | `settings.dataApiAccess`, `edition`, `dataDiskSizeGb`, `backupConfiguration`, `activationPolicy`, `availabilityType` | Applied: see the sections on the Data API, point-in-time recovery, storage shrink, backups and high availability. |
-| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` other than `GOOGLE_MANAGED_INTERNAL_CA`, and `serverCaPool`, are 501: per-instance CAs are Certificate Authority Service's. |
+| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614); `CUSTOMER_MANAGED_CAS_CA` and `serverCaPool` are 501: the customer's CA pool is Certificate Authority Service's. |
 | `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
 | `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
@@ -538,10 +556,23 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
 - In the console, a MySQL replica's **Verify external sync settings** and **Start external sync**
   have a **Migration type**, `LOGICAL` or `PHYSICAL`.
 
-501, naming why: `demoteMaster` with `skipReplicationSetup` (the replication is then set up by hand with Cloud
-SQL's `mysql.*` stored procedures, `mysql.setupExternalSourceAutoPosition` and the rest, which a
-stock MySQL server has not), and `demote` of a PostgreSQL instance (the subscription's first copy
-of the source's tables collides with the rows the instance has).
+`demoteMaster` with `skipReplicationSetup` (#1614) demotes the instance with its data but sets up
+no replication: it installs Cloud SQL's stored procedures in the server's `mysql` schema instead,
+and the replication is set up with them as Cloud SQL's custom import guide does, after an import
+whose GTIDs are the instance's own (so the GTID consistency check is not made):
+`CALL mysql.resetMaster()`, `CALL mysql.skipTransactionWithGtid('<the source's executed GTIDs>')`,
+`CALL mysql.setupExternalSourceAutoPosition('host', 3306, 'user', 'password', 1, false, false)`
+(or `mysql.setupExternalSource` with a binary log file and position) and
+`CALL mysql.startReplication()`, which also makes the replica `super_read_only`;
+`mysql.stopReplication()` stops it. `promoteReplica` removes them. The bodies are CloudBurrow's
+(the guide gives the calls); `USE_SSL_CLIENT_AUTH` is refused and `mysql.skipReplicationError` is
+not installed. The console's Demote has **Skip replication setup**.
+
+`demote` of a PostgreSQL instance (#1614) leaves it a replica of the source representation
+instance's server, waiting for `startExternalSync`, which first drops the instance's databases
+named as the migrated ones, as Database Migration Service documents for an existing destination,
+then copies and subscribes as for any PostgreSQL replica of an external server; its other
+databases stay. The console's Demote is on a PostgreSQL instance's page too.
 
 ### Database versions and major version upgrades (#1381)
 

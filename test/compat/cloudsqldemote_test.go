@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,8 +72,6 @@ func TestCloudSQLDemote(t *testing.T) {
 			Username: "migrator", Password: "Repl-pass1"}}
 		return svc.Instances.DemoteMaster(project, bName, &sqladmin.InstancesDemoteMasterRequest{DemoteMasterContext: ctx}).Do()
 	}
-	_, err = demoteMaster(&sqladmin.DemoteMasterContext{SkipReplicationSetup: true})
-	wantCode(t, "demoteMaster with skipReplicationSetup", err, 501, "mysql.*")
 	op, err = demoteMaster(&sqladmin.DemoteMasterContext{})
 	if err != nil {
 		t.Fatalf("demoteMaster: %v", err)
@@ -161,4 +160,130 @@ func TestCloudSQLDemote(t *testing.T) {
 	}
 	seen(cdb, "a row written on the source after the sync", 5)
 	seen(bdb, "the same row on the demoteMaster replica", 5)
+}
+
+// TestCloudSQLDemoteSkipReplicationSetup (#1614): through the official Go
+// client, demoteMaster with skipReplicationSetup makes a standalone MySQL
+// instance, which holds an import of the source's data with GTIDs of its
+// own, a read replica of the server a source representation instance
+// records without setting up its replication, and installs Cloud SQL's
+// mysql.* stored procedures; the replication is then set up with them as
+// Cloud SQL's custom import guide does (resetMaster,
+// skipTransactionWithGtid with the source's executed GTIDs,
+// setupExternalSourceAutoPosition, startReplication): a row written on the
+// source afterwards reaches the replica, which refuses writes.
+// promoteReplica removes the procedures.
+// covers: sql.instances.demoteMaster, sql.instances.insert, sql.instances.get, sql.instances.delete, sql.instances.promoteReplica, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
+func TestCloudSQLDemoteSkipReplicationSetup(t *testing.T) {
+	h := New(t)
+	svc := sqlAdminService(t, h)
+	if os.Getenv(EnvMySQL) == "" {
+		t.Skip("needs --services cloudsql-mysql")
+	}
+	project := h.Project()
+	e := sqlEngine{mysql: true}
+	n := time.Now().UnixNano() % 1e6
+	srcName, repName, bName := fmt.Sprintf("dsk-src-%d", n), fmt.Sprintf("dsk-rep-%d", n), fmt.Sprintf("dsk-b-%d", n)
+	tier := &sqladmin.Settings{Tier: "db-custom-1-3840"}
+	src := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: "MYSQL_8_4",
+		RootPassword: "Root-pass1", Settings: tier})
+	db := e.root(t, h, src.ConnectionName)
+	for _, q := range []string{"SET PERSIST enforce_gtid_consistency = ON", "SET PERSIST gtid_mode = OFF_PERMISSIVE",
+		"SET PERSIST gtid_mode = ON_PERMISSIVE", "SET PERSIST gtid_mode = ON",
+		"CREATE DATABASE shop", "CREATE TABLE shop.orders (id int primary key, item varchar(20))",
+		"INSERT INTO shop.orders VALUES (1, 'imported')",
+		"CREATE USER 'migrator'@'%' IDENTIFIED BY 'Repl-pass1'",
+		"GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, SHOW VIEW, RELOAD, TRIGGER, EVENT, EXECUTE, PROCESS ON *.* TO 'migrator'@'%'"} {
+		q := q
+		eventually(t, q, func() error { _, err := db.Exec(q); return err })
+	}
+	var srcGTIDs string
+	if err := db.QueryRow("SELECT @@GLOBAL.gtid_executed").Scan(&srcGTIDs); err != nil {
+		t.Fatal(err)
+	}
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: repName, DatabaseVersion: "MYSQL_8_4",
+		InstanceType: "ON_PREMISES_INSTANCE", Region: "us-central1",
+		OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "sqlinst-" + srcName + ":3306", Username: "migrator", Password: "Repl-pass1"}}).Do()
+	if err != nil {
+		t.Fatalf("insert the source representation instance: %v", err)
+	}
+	t.Cleanup(func() {
+		if d, err := svc.Instances.Delete(project, repName).Do(); err == nil {
+			waitSQLOpDone(t, svc, project, d)
+		}
+	})
+	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
+		t.Fatalf("create the source representation instance: %+v", op.Error.Errors[0])
+	}
+
+	// The import: the source's data, written with the instance's own GTIDs.
+	b := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: bName, DatabaseVersion: "MYSQL_8_4",
+		RootPassword: "Root-pass1", Region: "us-central1", Settings: tier})
+	bdb := e.root(t, h, b.ConnectionName)
+	for _, q := range []string{"CREATE DATABASE shop", "CREATE TABLE shop.orders (id int primary key, item varchar(20))",
+		"INSERT INTO shop.orders VALUES (1, 'imported')"} {
+		q := q
+		eventually(t, q, func() error { _, err := bdb.Exec(q); return err })
+	}
+
+	op, err = svc.Instances.DemoteMaster(project, bName, &sqladmin.InstancesDemoteMasterRequest{DemoteMasterContext: &sqladmin.DemoteMasterContext{
+		MasterInstanceName: repName, SkipReplicationSetup: true,
+		ReplicaConfiguration: &sqladmin.DemoteMasterConfiguration{MysqlReplicaConfiguration: &sqladmin.DemoteMasterMySqlReplicaConfiguration{
+			Username: "migrator", Password: "Repl-pass1"}}}}).Do()
+	if err != nil {
+		t.Fatalf("demoteMaster with skipReplicationSetup: %v", err)
+	}
+	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil || op.OperationType != "DEMOTE_MASTER" {
+		t.Fatalf("demoteMaster: %s %+v", op.OperationType, op.Error)
+	}
+	if got, err := svc.Instances.Get(project, bName).Do(); err != nil || got.InstanceType != "READ_REPLICA_INSTANCE" ||
+		got.MasterInstanceName != project+":"+repName {
+		t.Fatalf("the demoted instance: %+v %v", got, err)
+	}
+	procs := func() int {
+		t.Helper()
+		var n int
+		eventually(t, "count the mysql.* procedures", func() error {
+			return bdb.QueryRow("SELECT count(*) FROM information_schema.routines WHERE routine_schema = 'mysql' AND routine_name IN " +
+				"('resetMaster','skipTransactionWithGtid','setupExternalSourceAutoPosition','setupExternalSource','startReplication','stopReplication')").Scan(&n)
+		})
+		return n
+	}
+	if got := procs(); got != 6 {
+		t.Fatalf("the demoted instance has %d of the 6 stored procedures", got)
+	}
+	var status string
+	_ = bdb.QueryRow("SELECT service_state FROM performance_schema.replication_connection_status").Scan(&status)
+	if status == "ON" {
+		t.Fatal("replication runs before it is set up")
+	}
+	for _, q := range []string{"CALL mysql.resetMaster()",
+		"CALL mysql.skipTransactionWithGtid('" + strings.ReplaceAll(srcGTIDs, "\n", "") + "')",
+		"CALL mysql.setupExternalSourceAutoPosition('sqlinst-" + srcName + "', 3306, 'migrator', 'Repl-pass1', /* master_auto_position= */ 1, false, false)",
+		"CALL mysql.startReplication()"} {
+		if _, err := bdb.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := db.Exec("INSERT INTO shop.orders VALUES (2, 'after the setup')"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "a row written on the source after the setup", func() error {
+		var item string
+		return bdb.QueryRow("SELECT item FROM shop.orders WHERE id = 2").Scan(&item)
+	})
+	if _, err := bdb.Exec("INSERT INTO shop.orders VALUES (100, 'on the replica')"); err == nil {
+		t.Error("the replica took a write")
+	}
+
+	op, err = svc.Instances.PromoteReplica(project, bName).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
+		t.Fatalf("promoteReplica: %+v", op.Error.Errors[0])
+	}
+	if got := procs(); got != 0 {
+		t.Errorf("promoteReplica left %d of the stored procedures", got)
+	}
 }

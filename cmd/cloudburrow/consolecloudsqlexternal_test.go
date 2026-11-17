@@ -207,6 +207,9 @@ func TestCloudSQLConsoleDemote(t *testing.T) {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/solo"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "solo", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
 				"instanceType": "CLOUD_SQL_INSTANCE", "settings": map[string]any{"tier": "db-custom-1-3840"}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/pgsolo"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "pgsolo", "state": "RUNNABLE", "databaseVersion": "POSTGRES_16",
+				"instanceType": "CLOUD_SQL_INSTANCE", "settings": map[string]any{"tier": "db-custom-1-3840"}})
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/rep"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "rep", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
 				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:solo",
@@ -232,8 +235,8 @@ func TestCloudSQLConsoleDemote(t *testing.T) {
 		}
 		return false
 	}
-	if !has("solo") || has("rep") {
-		t.Errorf("Demote offered on solo %v, on a replica %v", has("solo"), has("rep"))
+	if !has("solo") || has("rep") || !has("pgsolo") {
+		t.Errorf("Demote offered on solo %v, on a replica %v, on a PostgreSQL instance %v", has("solo"), has("rep"), has("pgsolo"))
 	}
 	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demoteMaster",
 		"username": "repl", "password": "pw", "skipGtidCheck": "true"}); err != nil {
@@ -243,10 +246,25 @@ func TestCloudSQLConsoleDemote(t *testing.T) {
 		!strings.Contains(b, `"verifyGtidConsistency":false`) || !strings.Contains(b, `"username":"repl"`) {
 		t.Errorf("demoteMaster body %s", b)
 	}
+	// Skip replication setup (#1614).
+	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demoteMaster",
+		"skipReplicationSetup": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/solo/demoteMaster"]; !strings.Contains(b, `"skipReplicationSetup":true`) {
+		t.Errorf("demoteMaster body with Skip replication setup %s", b)
+	}
 	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demote"}); err != nil {
 		t.Fatal(err)
 	}
 	if b := bodies["POST /v1/projects/proj/instances/solo/demote"]; !strings.Contains(b, `"sourceRepresentativeInstanceName":"ext"`) {
 		t.Errorf("demote body %s", b)
+	}
+	// A PostgreSQL instance's Demote (#1614).
+	if err := p.ActAt(ctx, "proj", []string{"pgsolo"}, "demote", map[string]string{"source": "ext", "method": "demote"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/pgsolo/demote"]; !strings.Contains(b, `"sourceRepresentativeInstanceName":"ext"`) {
+		t.Errorf("PostgreSQL demote body %s", b)
 	}
 }

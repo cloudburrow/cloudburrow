@@ -121,7 +121,6 @@ func TestRefusedVerbsSayWhy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for what, call := range map[string]func() error{
-		"Certificate Authority Service": func() error { _, err := svc.Instances.ListServerCertificates("proj", "pg").Do(); return err },
 		"no Google-managed maintenance": func() error {
 			_, err := svc.Projects.Instances.RescheduleMaintenance("proj", "pg", &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{}).Do()
 			return err
@@ -131,7 +130,6 @@ func TestRefusedVerbsSayWhy(t *testing.T) {
 			_, err := svc.BlueGreenDeployments.List("projects/proj/locations/us-central1").Do()
 			return err
 		},
-		"Cloud DNS": func() error { _, err := svc.Connect.Resolve("us-central1", "x.example.com").Do(); return err },
 	} {
 		if err := call(); err == nil || !strings.Contains(err.Error(), "501") || !strings.Contains(err.Error(), what) {
 			t.Errorf("%s: %v", what, err)
