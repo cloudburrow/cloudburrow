@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
