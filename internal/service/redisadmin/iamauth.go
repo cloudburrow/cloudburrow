@@ -71,6 +71,10 @@ var iamEvery = 5 * time.Second
 // (a node restarted on its own loses them) before they are set again.
 const iamRefresh = 30 * time.Second
 
+// iamSyncTimeout bounds one sync of the nodes' IAM users, so a token
+// request waits at most about twice this for a sync already running.
+const iamSyncTimeout = 5 * time.Second
+
 // iamState is a clusters' IAM auth bookkeeping.
 type iamState struct {
 	src IAMSource
@@ -113,7 +117,9 @@ func (s *Server) TokenIssued(tok IssuedToken) {
 		if c == nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(c.bg, 10*time.Second)
+		// Bounded: the client asking for a token waits for this, and a
+		// node that is down (a failover) must not hold it up long.
+		ctx, cancel := context.WithTimeout(c.bg, iamSyncTimeout)
 		c.syncIAM(ctx, tok.Email)
 		cancel()
 	}
@@ -207,7 +213,7 @@ func (c *clusters) watchIAM(ctx context.Context, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			sctx, cancel := context.WithTimeout(ctx, iamSyncTimeout)
 			c.syncIAM(sctx, "")
 			cancel()
 		}
