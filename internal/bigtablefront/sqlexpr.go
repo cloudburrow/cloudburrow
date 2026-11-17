@@ -231,9 +231,6 @@ func (c *colRef) check(s *scope) (*btpb.Type, error) {
 			return col.t, nil
 		}
 	}
-	if c.name == "_timestamp" {
-		return nil, unsupportedErr{"_timestamp (UNPACK)"}
-	}
 	return nil, fmt.Errorf("Unrecognized name: %s", c.name)
 }
 func (c *colRef) eval(e *env) (any, error) { return e.row[c.idx], nil }

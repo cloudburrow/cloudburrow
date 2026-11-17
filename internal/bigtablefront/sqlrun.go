@@ -769,6 +769,7 @@ func decode(v *btpb.Value, t *btpb.Type) (any, error) {
 type temporal struct {
 	history                      bool
 	asOf, after, afterEq, before *time.Time
+	beforeEq                     *time.Time
 	latestN                      int64
 }
 
@@ -786,9 +787,9 @@ func temporalArgs(args []tableArg, params map[string]*btpb.Type, base env) (temp
 			return t, err
 		}
 		want := map[string]string{"with_history": "BOOL", "as_of": "TIMESTAMP", "after": "TIMESTAMP",
-			"after_or_equal": "TIMESTAMP", "before": "TIMESTAMP", "latest_n": "INT64"}[a.name]
+			"after_or_equal": "TIMESTAMP", "before": "TIMESTAMP", "before_or_equal": "TIMESTAMP", "latest_n": "INT64"}[a.name]
 		if want == "" {
-			return t, fmt.Errorf("Unknown named argument %s: the table arguments are with_history, as_of, after, after_or_equal, before and latest_n", a.name)
+			return t, fmt.Errorf("Unknown named argument %s: the table arguments are with_history, as_of, after, after_or_equal, before, before_or_equal and latest_n", a.name)
 		}
 		if !isKind(at, want) {
 			return t, fmt.Errorf("The named argument %s takes %s, not %s", a.name, want, kind(at))
@@ -827,11 +828,16 @@ func temporalArgs(args []tableArg, params map[string]*btpb.Type, base env) (temp
 				t.afterEq = &ts
 			case "before":
 				t.before = &ts
+			case "before_or_equal":
+				t.beforeEq = &ts
 			}
 		}
 	}
+	if t.history && seen["as_of"] {
+		return t, fmt.Errorf("The table argument as_of must not be used with with_history => TRUE")
+	}
 	if !t.history {
-		for _, n := range []string{"after", "after_or_equal", "before", "latest_n"} {
+		for _, n := range []string{"after", "after_or_equal", "before", "before_or_equal", "latest_n"} {
 			if seen[n] {
 				return t, fmt.Errorf("The table argument %s requires with_history => TRUE", n)
 			}
@@ -883,7 +889,8 @@ func tableRows(rows []row, cols []column, t temporal) [][]any {
 		for _, c := range r.cells {
 			ts := time.UnixMicro(c.ts).UTC()
 			if t.asOf != nil && ts.After(*t.asOf) || t.after != nil && !ts.After(*t.after) ||
-				t.afterEq != nil && ts.Before(*t.afterEq) || t.before != nil && !ts.Before(*t.before) {
+				t.afterEq != nil && ts.Before(*t.afterEq) || t.before != nil && !ts.Before(*t.before) ||
+				t.beforeEq != nil && ts.After(*t.beforeEq) {
 				continue
 			}
 			qs := byFam[c.family]

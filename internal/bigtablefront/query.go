@@ -21,7 +21,7 @@ import (
 // SQL (#1499, #1511): PrepareQuery and ExecuteQuery, GoogleSQL for
 // Bigtable over the emulator's rows. The statement (sqlparse.go) is
 // SELECT [DISTINCT] items [FROM table-or-view [(temporal arguments)]]
-// [WHERE] [GROUP BY] [ORDER BY _key] [LIMIT], with the operators,
+// [WHERE] [GROUP BY] [ORDER BY _key] [LIMIT], FROM UNPACK(...) too (unpack.go), with the operators,
 // conditional expressions, CAST, the scalar, map, array, JSON and
 // timestamp functions and the aggregates sqlfuncs.go runs. A family is a
 // MAP<BYTES, BYTES> of its columns' latest values, or, with
@@ -32,7 +32,7 @@ import (
 // FROM names a table, a logical view (whose query runs as a query) or a
 // materialized view (whose query runs over the table as it is now, so its
 // rows are always up to date). A documented part of the language the
-// emulator's SQL does not run (UNPACK, window functions, the functions
+// emulator's SQL does not run (window functions, the functions
 // sqlfuncs.go lists as documented and does not build) is refused
 // UNIMPLEMENTED naming it, and anything else it cannot run INVALID_ARGUMENT,
 // so a query never returns rows Google would not.
@@ -90,6 +90,11 @@ func (q *sqlFront) compile(ctx context.Context, instance, sql string, params map
 	if err != nil {
 		return nil, err
 	}
+	return q.compileParsed(ctx, instance, qu, params, bound, read, depth)
+}
+
+// compileParsed is compile of a parsed query.
+func (q *sqlFront) compileParsed(ctx context.Context, instance string, qu *query, params map[string]*btpb.Type, bound map[string]any, read bool, depth int) (*plan, error) {
 	base := env{params: bound, now: q.now()}
 	src, err := q.source(ctx, instance, qu, params, base, read, depth)
 	if err != nil {
@@ -114,6 +119,9 @@ func (q *sqlFront) view(instance, name string) (*sqlView, string) {
 func (q *sqlFront) source(ctx context.Context, instance string, qu *query, params map[string]*btpb.Type, base env, read bool, depth int) (*source, error) {
 	if qu.from == "" {
 		return &source{rows: [][]any{{}}}, nil
+	}
+	if qu.unpack != nil {
+		return q.unpackSource(ctx, instance, qu, params, base, read, depth)
 	}
 	if v, noun := q.view(instance, qu.from); v != nil {
 		if len(qu.args) > 0 {

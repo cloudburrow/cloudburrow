@@ -43,7 +43,7 @@ JSON_EXTRACT JSON_EXTRACT_SCALAR JSON_QUERY JSON_QUERY_ARRAY JSON_VALUE TO_JSON_
 ARRAY_FILTER ARRAY_FIRST ARRAY_INCLUDES ARRAY_INCLUDES_ALL ARRAY_INCLUDES_ANY ARRAY_IS_DISTINCT ARRAY_LAST
 ARRAY_LAST_N ARRAY_LENGTH ARRAY_OFFSET ARRAY_OFFSETS ARRAY_REVERSE ARRAY_SLICE ARRAY_TO_STRING ARRAY_TRANSFORM
 GENERATE_ARRAY GENERATE_DATE_ARRAY GENERATE_TIMESTAMP_ARRAY IF IFNULL NULLIF COALESCE CURRENT_DATE DATE
-UNIX_DATE DATE_ADD DATE_SUB DATE_DIFF DATE_TRUNC FORMAT_DATE PARSE_DATE DATE_FROM_UNIX_DATE`)
+UNIX_DATE DATE_ADD DATE_SUB DATE_DIFF DATE_TRUNC FORMAT_DATE PARSE_DATE DATE_FROM_UNIX_DATE LAST_DAY`)
 
 var aggregates = map[string]bool{"COUNT": true, "COUNTIF": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
 	"ANY_VALUE": true, "LOGICAL_AND": true, "LOGICAL_OR": true, "ARRAY_AGG": true, "STRING_AGG": true,
@@ -1174,6 +1174,10 @@ func addInterval(t time.Time, iv intervalValue, sign int64) (any, error) {
 func truncTimestamp(t time.Time, part string) (any, error) {
 	y, m, d := t.Date()
 	loc := t.Location()
+	if wd, ok := weekStart(part); ok {
+		// WEEK (Sundays), WEEK(<WEEKDAY>) and ISOWEEK (Mondays).
+		return time.Date(y, m, d-(int(t.Weekday())-int(wd)+7)%7, 0, 0, 0, 0, loc).UTC(), nil
+	}
 	switch part {
 	case "MICROSECOND":
 		return t.Truncate(time.Microsecond).UTC(), nil
@@ -1185,8 +1189,10 @@ func truncTimestamp(t time.Time, part string) (any, error) {
 		return shifted.Add(-time.Duration(off) * time.Second).UTC(), nil
 	case "DAY":
 		return time.Date(y, m, d, 0, 0, 0, 0, loc).UTC(), nil
-	case "WEEK":
-		return time.Date(y, m, d-int(t.Weekday()), 0, 0, 0, 0, loc).UTC(), nil
+	case "ISOYEAR":
+		iy, _ := t.ISOWeek()
+		s := isoYearStart(iy)
+		return time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, loc).UTC(), nil
 	case "MONTH":
 		return time.Date(y, m, 1, 0, 0, 0, 0, loc).UTC(), nil
 	case "QUARTER":

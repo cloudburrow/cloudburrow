@@ -210,6 +210,9 @@ type query struct {
 	groupBy  []expr
 	orderBy  bool
 	limit    expr
+	// unpack is the input of FROM UNPACK(...): its query, whose rows are
+	// expanded one per timestamp (unpack.go).
+	unpack *query
 }
 
 type parser struct {
@@ -292,6 +295,12 @@ func parseQuery(src string) (*query, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseTokens(toks)
+}
+
+// parseTokens parses one SELECT statement, the whole of toks.
+func parseTokens(toks []token) (*query, error) {
+	var err error
 	p := &parser{toks: toks}
 	for _, k := range []string{"INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "MERGE"} {
 		if p.isKeyword(k) {
@@ -353,9 +362,6 @@ func parseQuery(src string) (*query, error) {
 			}
 			return nil, fmt.Errorf("Syntax error: expected a table name after FROM")
 		}
-		if p.isKeyword("UNPACK") {
-			return nil, unsupportedErr{"UNPACK"}
-		}
 		if p.isKeyword("UNNEST") {
 			return nil, unsupportedErr{"UNNEST"}
 		}
@@ -364,7 +370,12 @@ func parseQuery(src string) (*query, error) {
 			return nil, fmt.Errorf("Syntax error: expected a table name after FROM")
 		}
 		q.from = t.text
-		if p.op("(") {
+		if t.kind == "ident" && strings.EqualFold(t.text, "UNPACK") && p.peek().text == "(" {
+			if q.unpack, err = p.unpackInput(); err != nil {
+				return nil, err
+			}
+			q.from = "UNPACK"
+		} else if p.op("(") {
 			for !p.op(")") {
 				n := p.next()
 				if n.kind != "ident" {
@@ -949,7 +960,15 @@ func (p *parser) primary() (expr, error) {
 		if !p.op(")") {
 			for {
 				// date parts are bare identifiers in the timestamp functions.
-				if a := p.peek(); a.kind == "ident" && datePart[strings.ToUpper(a.text)] && (p.peekAt(1).text == ")" || p.peekAt(1).text == ",") && (strings.HasPrefix(up, "TIMESTAMP_") || up == "DATE_TRUNC") {
+				partFn := strings.HasPrefix(up, "TIMESTAMP_") || up == "DATE_TRUNC" || up == "DATE_DIFF" || up == "LAST_DAY"
+				if a := p.peek(); partFn && a.kind == "ident" && strings.EqualFold(a.text, "WEEK") && p.peekAt(1).text == "(" && p.peekAt(2).kind == "ident" && p.peekAt(3).text == ")" {
+					// WEEK(<WEEKDAY>), the date functions' weeks beginning on WEEKDAY.
+					if _, ok := weekdays[strings.ToUpper(p.peekAt(2).text)]; !ok {
+						return nil, fmt.Errorf("Syntax error: WEEK takes a weekday, SUNDAY to SATURDAY, not %s", p.peekAt(2).text)
+					}
+					c.args = append(c.args, &literal{v: "WEEK(" + strings.ToUpper(p.peekAt(2).text) + ")", t: datePartType})
+					p.pos += 4
+				} else if a := p.peek(); partFn && a.kind == "ident" && datePart[strings.ToUpper(a.text)] && (p.peekAt(1).text == ")" || p.peekAt(1).text == ",") {
 					p.pos++
 					c.args = append(c.args, &literal{v: strings.ToUpper(a.text), t: datePartType})
 				} else {
@@ -979,6 +998,10 @@ func (p *parser) primary() (expr, error) {
 			}
 		}
 		return c.over(p)
+	}
+	if up == "CURRENT_DATE" || up == "CURRENT_TIMESTAMP" {
+		// "Parentheses are optional when called with no arguments."
+		return &call{name: up}, nil
 	}
 	return &colRef{name: t.text}, nil
 }
