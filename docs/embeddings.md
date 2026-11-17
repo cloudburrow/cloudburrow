@@ -144,7 +144,9 @@
 > (AAC-LC with `github.com/arabian9ts/aac-go`, MP3, or QuickTime PCM), cut to `video_metadata`'s
 > offsets and embedded as an audio clip right after the video's frames, as EmbeddingGemma 2's
 > processor loads a video's audio; it counts against the 180 seconds of audio a request. Opus,
-> AC-3 and HE-AAC tracks are refused naming the codec. See
+> AC-3 and HE-AAC tracks are refused naming the codec. Since #1739 a mono or stereo Opus track is
+> decoded too (`github.com/kazzmir/opus-go`, libopus transpiled to Go), within 0.71 of a 16-bit
+> step of ffmpeg's libopus decode; `aac-go` is copied into `third_party/aac-go`. See
 > [upstream-evaluation.md](upstream-evaluation.md).
 >
 > **Update 2026-11-17 (#1731): VP9 and AV1 video.** The four codecs Google lists for video are

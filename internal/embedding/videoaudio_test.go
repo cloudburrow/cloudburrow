@@ -42,16 +42,24 @@ func soundTrackOf(t *testing.T, file string) ([]float32, int) {
 // -vn -f s16le`), the AAC encoder's priming dropped by the edit list as
 // ffmpeg drops it: ffmpeg's AAC-LC (16 kHz stereo, mid/side, short blocks)
 // within one 16-bit step a channel, an MP3 track (16 kHz mono) within one
-// step, QuickTime sowt PCM exactly. Each is 1.5 seconds.
+// step, QuickTime sowt PCM exactly. Each is 1.5 seconds. Since #1739, a
+// 48 kHz stereo Opus track (libopus 64 kbit/s, its 312-sample pre-skip in
+// the edit list) is ffmpeg's libopus decode (`ffmpeg -c:a libopus -i f -vn
+// -t 1.5 -f s16le`) within 1.5 steps a channel: 0.71 in float, then
+// ffmpeg's rounding to 16 bits. va-opus.mp4 is
+//
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "aevalsrc=0.3*sin(2*PI*440*t)+0.2*sin(2*PI*1234*t)*sin(2*PI*3*t)|0.3*sin(2*PI*660*t):s=48000:d=1.5" -c:v libx264 -c:a libopus -b:a 64k -shortest -map_metadata -1 va-opus.mp4
 func TestDecodeVideoAudioTrack(t *testing.T) {
 	for _, c := range []struct {
 		file     string
 		channels int
 		steps    float64 // per channel
+		rate     int
 	}{
-		{"va-aac.mp4", 2, 1},
-		{"va-mp3.mp4", 1, 1},
-		{"va-pcm.mov", 1, 0},
+		{"va-aac.mp4", 2, 1, 16000},
+		{"va-mp3.mp4", 1, 1, 16000},
+		{"va-pcm.mov", 1, 0, 16000},
+		{"va-opus.mp4", 2, 1.5, 48000},
 	} {
 		got, rate := soundTrackOf(t, c.file)
 		ref, err := os.ReadFile(filepath.Join("testdata", strings.TrimSuffix(c.file, filepath.Ext(c.file))+".ffmpeg.s16"))
@@ -59,8 +67,8 @@ func TestDecodeVideoAudioTrack(t *testing.T) {
 			t.Fatal(err)
 		}
 		n := len(ref) / 2 / c.channels
-		if rate != 16000 || len(got) != n {
-			t.Fatalf("%s: %d samples at %d Hz, want ffmpeg's %d at 16000", c.file, len(got), rate, n)
+		if rate != c.rate || len(got) != n {
+			t.Fatalf("%s: %d samples at %d Hz, want ffmpeg's %d at %d", c.file, len(got), rate, n, c.rate)
 		}
 		var maxDiff float64
 		for i := range n {
@@ -125,7 +133,6 @@ func TestDecodeVideoAudioTrack(t *testing.T) {
 // refused naming its codec.
 func TestDecodeVideoAudioRefuses(t *testing.T) {
 	for file, want := range map[string]string{
-		"va-opus.mp4":  `codec "Opus" is not decoded`,
 		"va-heaac.mp4": "HE-AAC",
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", file))

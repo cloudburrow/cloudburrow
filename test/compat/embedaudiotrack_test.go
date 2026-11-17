@@ -31,7 +31,8 @@ import (
 // (load_audio_from_video): the vector is the one of the video's frames
 // followed by the WAV as a part of its own, and the speech query scores it
 // far higher than the frames alone; without the option it is the frames
-// alone, and with video_metadata's offsets the track is cut to them.
+// alone, and with video_metadata's offsets the track is cut to them. Since
+// #1739 an Opus track is embedded as the AAC one is.
 func TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -106,6 +107,23 @@ func TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient(t *testin
 	if ct < cf+102 || ct > cf+104 {
 		t.Errorf("2s to 6s: %d tokens with the audio track, %d without; want 102 more", ct, cf)
 	}
+
+	// An Opus track (#1739): testdata/turtle-jfk-opus.mp4 is the same file
+	// with its track re-encoded by libopus (48 kHz mono, 48 kbit/s): the
+	// same tokens, and a vector within 0.99 of the AAC track's.
+	opusVideo, err := os.ReadFile("testdata/turtle-jfk-opus.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withOpus := must(embed(true, inline("video/mp4", opusVideo)))
+	if n := withOpus.GetUsageMetadata().GetPromptTokenCount(); n != nt {
+		t.Errorf("Opus track: %d tokens, the AAC track's %d", n, nt)
+	}
+	co := cosine(withOpus.GetEmbedding().GetValues(), v)
+	if co < 0.99 {
+		t.Errorf("Opus track against the AAC track: cosine %.4f, want at least 0.99", co)
+	}
+	t.Logf("Opus track: cosine %.6f to the AAC track's vector", co)
 
 	// A track this build does not decode is refused naming it.
 	if _, err := embed(true, inline("video/mp4", []byte("not a video"))); status.Code(err) != codes.InvalidArgument ||

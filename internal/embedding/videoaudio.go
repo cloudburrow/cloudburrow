@@ -9,7 +9,8 @@ import (
 
 	"github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/mp4"
-	aacdec "github.com/arabian9ts/aac-go"
+	aacdec "github.com/cloudburrow/cloudburrow/third_party/aac-go"
+	"github.com/kazzmir/opus-go/opus"
 )
 
 // A video's audio track (#1732), for embed_content_config's
@@ -26,9 +27,10 @@ import (
 // duration kept. The codecs: AAC-LC (mp4a, the audio of nearly every MP4 and
 // MOV) with github.com/arabian9ts/aac-go (pure Go, Apache 2.0), MP3 (mp4a
 // with the MPEG-1/2 audio object types, or .mp3) with third_party/go-mp3, and
-// QuickTime linear PCM (lpcm, sowt, twos, in24, in32, fl32, fl64); the audio
-// formats Google lists are MP3 and WAV. Other codecs (Opus, AC-3, ALAC,
-// HE-AAC...) are refused naming them.
+// QuickTime linear PCM (lpcm, sowt, twos, in24, in32, fl32, fl64), and
+// (#1739) Opus with github.com/kazzmir/opus-go (libopus transpiled to Go,
+// BSD 3-Clause); the audio formats Google lists are MP3 and WAV. Other
+// codecs (AC-3, ALAC, HE-AAC...) are refused naming them.
 
 // DecodeVideoAudio decodes the audio track of an MP4 or MOV video to mono
 // samples at AudioSampleRate, between opt's start and end offsets. A video
@@ -172,14 +174,16 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 		case 0x69, 0x6b: // MPEG-2 and MPEG-1 audio
 			pcm, channels, rate, err = decodeMP3Track(tr)
 		default:
-			return nil, 0, fmt.Errorf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC-LC, MP3 and PCM audio tracks are", dcd.ObjectType)
+			return nil, 0, fmt.Errorf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC-LC, MP3, Opus and PCM audio tracks are", dcd.ObjectType)
 		}
 	case ".mp3":
 		pcm, channels, rate, err = decodeMP3Track(tr)
 	case "lpcm", "sowt", "twos", "in24", "in32", "fl32", "fl64":
 		pcm, channels, rate, err = decodePCMTrack(tr, st.Stsd.QtPcm)
+	case "Opus":
+		pcm, channels, rate, err = decodeOpusTrack(tr, st.Stsd.Opus, trak.Edts != nil && len(trak.Edts.Elst) > 0)
 	default:
-		return nil, 0, fmt.Errorf("its codec %q is not decoded; AAC-LC, MP3 and PCM audio tracks are", entry.Type())
+		return nil, 0, fmt.Errorf("its codec %q is not decoded; AAC-LC, MP3, Opus and PCM audio tracks are", entry.Type())
 	}
 	if err != nil {
 		return nil, 0, err
@@ -216,7 +220,7 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 		}
 		switch {
 		case asc.ObjectType == aac.HEAACv1 || asc.ObjectType == aac.HEAACv2 || asc.SBRPresentFlag || asc.PSPresentFlag:
-			return nil, 0, 0, errors.New("it is HE-AAC (SBR), which is not decoded; AAC-LC, MP3 and PCM audio tracks are")
+			return nil, 0, 0, errors.New("it is HE-AAC (SBR), which is not decoded; AAC-LC, MP3, Opus and PCM audio tracks are")
 		case asc.ObjectType != aac.AAClc:
 			return nil, 0, 0, fmt.Errorf("its AAC audio object type %d is not decoded; AAC-LC is", asc.ObjectType)
 		case asc.FrameLengthFlag:
@@ -358,4 +362,44 @@ func decodePCMTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32, 
 		}
 	}
 	return pcm, channels, rate, nil
+}
+
+// decodeOpusTrack decodes a mono or stereo Opus track (ISO/IEC 14496-12
+// Opus sample entry, its dOps box) at 48 kHz, as ffmpeg's libopus decoder
+// does: the output gain applied, and the pre-skip dropped when no edit list
+// stands for it.
+func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (pcm []float32, channels, rate int, err error) {
+	if e == nil || e.Dops == nil {
+		return nil, 0, 0, errors.New("the Opus track has no dOps box")
+	}
+	dops := e.Dops
+	channels = int(dops.OutputChannelCount)
+	if dops.ChannelMappingFamily != 0 || channels < 1 || channels > 2 {
+		return nil, 0, 0, fmt.Errorf("its Opus has %d channels (mapping family %d), which are not decoded; mono and stereo are",
+			channels, dops.ChannelMappingFamily)
+	}
+	const opusRate = 48000
+	d, err := opus.NewDecoder(opusRate, channels)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("the Opus track: %v", err)
+	}
+	defer d.Close()
+	gain := float32(math.Pow(10, float64(dops.OutputGain)/(20*256)))
+	buf := make([]float32, 5760*channels) // 120 ms, the longest packet
+	for i, packet := range tr.samples {
+		n, err := d.DecodeF32(packet, buf, 5760, false)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("the Opus track's packet %d: %v", i+1, err)
+		}
+		for _, v := range buf[:n*channels] {
+			pcm = append(pcm, v*gain)
+		}
+		if len(pcm) > (MaxAudioSeconds+60)*opusRate*channels {
+			return nil, 0, 0, &tooLongError{float64(len(pcm)) / opusRate / float64(channels)}
+		}
+	}
+	if !edited {
+		pcm = pcm[min(len(pcm), int(dops.PreSkip)*channels):]
+	}
+	return pcm, channels, opusRate, nil
 }

@@ -689,9 +689,19 @@
       "goAAC": {
         "module": "github.com/arabian9ts/aac-go",
         "version": "v0.1.0",
+        "sum": "h1:e298pHWu+Xcv6VPU2hmS1UTmOq5C9KHD38eQcJR4K8c=",
+        "pinnedCommit": "c4cc4c5fae73af12eb0a54aa745f10d105c825f6",
+        "source": "https://github.com/arabian9ts/aac-go",
         "license": "Apache-2.0",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Copied into third_party/aac-go since #1739 (import path github.com/cloudburrow/cloudburrow/third_party/aac-go; non-test sources without cmd/ and scripts/, imports rewritten; third_party/aac-go/PROVENANCE.md) so CloudBurrow owns its fixes: one release, no activity since. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md)."
+      },
+      "goOpus": {
+        "module": "github.com/kazzmir/opus-go",
+        "version": "v1.7.0",
+        "license": "BSD-3-Clause",
         "verification": "go.sum",
-        "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Its go.mod needs go 1.26.5, which raised CloudBurrow's go line. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md)."
+        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): libopus (BSD-3-Clause) transpiled to Go with ccgo, no cgo and no dependencies. Within 0.71 of a 16-bit step of ffmpeg 9's libopus decode here. Chosen over thesyncim/gopus (BSD-3-Clause, but its go.mod needs Go 1.27.3) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
       },
       "govpx": {
         "module": "github.com/thesyncim/govpx",

@@ -33,7 +33,6 @@ require (
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
-	github.com/arabian9ts/aac-go v0.1.0
 	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24
@@ -49,6 +48,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/kazzmir/opus-go v1.7.0
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/prometheus/client_model v0.6.3

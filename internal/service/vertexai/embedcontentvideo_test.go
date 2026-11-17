@@ -131,14 +131,19 @@ func TestEmbedContentAudioTrackExtraction(t *testing.T) {
 	if len(e.in.Parts) != 1 || e.in.Parts[0].Video == nil {
 		t.Fatalf("without audio_track_extraction: embedder got %d parts", len(e.in.Parts))
 	}
+	// An Opus track (#1739), 1.5 s at 48 kHz, resampled to 16 kHz.
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-opus.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 2 || len(e.in.Parts[1].Audio) != 24000 {
+		t.Fatalf("Opus track: embedder got %d parts, want the frames and 24000 samples", len(e.in.Parts))
+	}
 	// No sound track: the frames alone.
 	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-silent.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
 	if len(e.in.Parts) != 1 || e.in.Parts[0].Video == nil {
 		t.Fatalf("no sound track: embedder got %d parts", len(e.in.Parts))
 	}
 	for name, c := range map[string]struct{ body, want string }{
-		"opus": {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-opus.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`,
-			`audio_track_extraction: the video's audio track: its codec \"Opus\" is not decoded`},
+		"he-aac": {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-heaac.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`,
+			`audio_track_extraction: the video's audio track: it is HE-AAC (SBR), which is not decoded`},
 	} {
 		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, c.body)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {

@@ -122,8 +122,6 @@ github.com/apache/iceberg-go v0.7.0 h1:bTD6Pb4uM4sWcMfIx0/cV1haHMc84r+CvPieUqYzD
 github.com/apache/iceberg-go v0.7.0/go.mod h1:oGz5MX3/m3GDc6acsrwbdHChj28jZH8MVDWqUrW6WQQ=
 github.com/apache/thrift v0.24.0 h1:zy31L1a49QTNB2bG1BBfMXol3yJrTH975G3pPubQVLQ=
 github.com/apache/thrift v0.24.0/go.mod h1:zPt6WxgvTOM6hF92y8C+MkEM5LMxZuk4JcQOiU4Esvs=
-github.com/arabian9ts/aac-go v0.1.0 h1:e298pHWu+Xcv6VPU2hmS1UTmOq5C9KHD38eQcJR4K8c=
-github.com/arabian9ts/aac-go v0.1.0/go.mod h1:nQwjBOjeee+zm6JSmEd9yk1uUoyYFrvhJXYnWDsNXpU=
 github.com/aws/aws-sdk-go-v2 v1.45.1 h1:iIoG3NaLhV6UZpPXyPXlDj2I9oS8tV/nMcMnITCC6Ks=
 github.com/aws/aws-sdk-go-v2 v1.45.1/go.mod h1:bttEH6JqnUL8LepvDVfdrds/fZ5bCIxzpe3abyUrhDU=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 h1:GPRlPwz40I2B2VrBEASOA3Bi77NyeqejNLkifosX0rs=
@@ -410,6 +408,8 @@ github.com/jolestar/go-commons-pool/v2 v2.1.2 h1:E+XGo58F23t7HtZiC/W6jzO2Ux2IccS
 github.com/jolestar/go-commons-pool/v2 v2.1.2/go.mod h1:r4NYccrkS5UqP1YQI1COyTZ9UjPJAAGTUxzcsK1kqhY=
 github.com/jonboulle/clockwork v0.5.0 h1:Hyh9A8u51kptdkR+cqRpT1EebBwTn1oK9YfGYbdFz6I=
 github.com/jonboulle/clockwork v0.5.0/go.mod h1:3mZlmanh0g2NDKO5TWZVJAfofYk64M7XN3SzBPjZF60=
+github.com/kazzmir/opus-go v1.7.0 h1:RwUzJLCZXh4Ax6e3eWn57CUOpwBoIEwFANd5rGRasvA=
+github.com/kazzmir/opus-go v1.7.0/go.mod h1:oKDlLYxYVpknE4zKDmJyiLPB9RyhKw0n/l7EoPr6000=
 github.com/klauspost/compress v1.20.3 h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=
 github.com/klauspost/compress v1.20.3/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/klauspost/cpuid/v2 v2.4.0 h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV913Dw=

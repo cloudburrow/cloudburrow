@@ -874,3 +874,27 @@ difference remains: gav1d upsamples its chroma bilinearly, as libavif's own conv
 libavif with libyuv would take the nearest sample; 8-bit images, nearly every AVIF, convert as
 before. Upstream nit: `avif.DecodeConfig` reports a deep grid as 8-bit (the grid item has no
 `av1C`); CloudBurrow does not use the colour model. `govulncheck ./...` reports nothing for it.
+
+## Amendment: Opus, AC-3 and HE-AAC tracks, VP9 profiles 1 to 3, and copying aac-go (#1739)
+
+Compared on the Go module proxy on 2026-11-17, for a video's audio track and VP9's other profiles,
+under the user's approval of permissive pure Go decoders:
+
+| Need | Module | Version | Licence | cgo | Verdict |
+|---|---|---|---|---|---|
+| Opus | `github.com/kazzmir/opus-go` | v1.7.0 (2026-09-25) | BSD 3-Clause (libopus BSD 3-Clause) | none: libopus transpiled to Go by ccgo, no dependencies, `go 1.24.0` | **Adopted**: a 48 kHz stereo libopus track decodes within 0.71 of a 16-bit step of ffmpeg 9's libopus decode (0.16 of its native decoder's) |
+| Opus | `github.com/thesyncim/gopus` | v0.2.3 | BSD 3-Clause | none | Not needed: its `go.mod` needs Go 1.27.3 |
+| Opus | `github.com/pion/opus` | v0.1.0 | MIT | none | Rejected: SILK only, no CELT |
+| AC-3, E-AC-3 | `github.com/gravity-zero/ac3go` | 2026-10-07 pseudo-version | AGPL-3.0 | none | Rejected: AGPL |
+| AC-3 | `github.com/moon-wind/mediacommon` | — | MIT | none | Rejected: headers only, no decoder |
+| HE-AAC | `github.com/tphakala/go-aac`, `github.com/skrashevich/go-aac` | v0.7.2, v0.1.0 | LGPL-2.1, LGPL-3.0 | none | Rejected: LGPL, and neither decodes SBR |
+| HE-AAC | `github.com/llehouerou/go-faad2` | v0.3.1 | GPL-2.0 (FAAD2 in WASM) | none | Rejected: GPL |
+| HE-AAC | `github.com/Comcast/gaad` | — | Apache 2.0 | none | Rejected: parses SBR, decodes nothing |
+| VP9 profiles 1–3 | `thesyncim/govpx` (latest is the copied 2026-10-18 commit) | — | BSD 3-Clause | none | Not available: its reconstruction is 8-bit 4:2:0 only |
+
+So Opus tracks (mono and stereo, mapping family 0) are served, and AC-3, E-AC-3, HE-AAC tracks and
+VP9 profiles 1 to 3 stay refused naming the codec or profile: each needs a decoder written for
+CloudBurrow (AC-3 from ATSC A/52, SBR and PS on the copied aac-go, high-bit-depth and 4:2:2/4:4:4
+reconstruction in the copied govpx). `arabian9ts/aac-go` is copied into `third_party/aac-go`
+([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)): it has one release and no activity since,
+and SBR would be added there. `govulncheck ./...` reports nothing for `opus-go`.
