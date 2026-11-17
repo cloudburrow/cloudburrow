@@ -102,8 +102,6 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 		field string
 	}{
 		"AES_WRAPPING": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_AES_WRAPPING}, "purpose"},
-		"secp256k1": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN,
-			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_SECP256K1_SHA256}}, "algorithm"},
 		"ML-DSA": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN,
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65}}, "algorithm"},
 		"X-Wing": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_KEY_ENCAPSULATION,

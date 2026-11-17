@@ -2896,7 +2896,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
-          "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
+          "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
+          "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey"
         ],
         "unverified": [
           {
@@ -2908,6 +2909,11 @@
             "code": "INVALID_ARGUMENT",
             "case": "a digest of the wrong hash, or a data_crc32c that does not match",
             "test": "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a secp256k1 digest that is not 32 bytes of sha256",
+            "test": "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey"
           }
         ]
       },
@@ -2919,6 +2925,7 @@
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
+          "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
@@ -2932,6 +2939,11 @@
             "code": "INVALID_ARGUMENT",
             "case": "ASYMMETRIC_SIGN with no version_template.algorithm",
             "test": "test/compat/kms_test.go:374 TestKMSCreateCryptoKeyFields"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "EC_SIGN_SECP256K1_SHA256 at a protection level other than HSM or HSM_SINGLE_TENANT",
+            "test": "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -2983,6 +2995,7 @@
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
+          "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:47 TestKMSResources"
         ],
@@ -3337,6 +3350,7 @@
           "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
           "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
+          "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11"
         ]
       },

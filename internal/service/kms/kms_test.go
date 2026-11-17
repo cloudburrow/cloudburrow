@@ -115,7 +115,7 @@ func TestUnsupportedKMSIsUnimplemented(t *testing.T) {
 	ring, _ := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "r2"})
 	// Documented algorithms Go's standard library does not compute (#1212).
 	for purpose, alg := range map[kmspb.CryptoKey_CryptoKeyPurpose]kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm{
-		kmspb.CryptoKey_ASYMMETRIC_SIGN:   kmspb.CryptoKeyVersion_EC_SIGN_SECP256K1_SHA256,
+		kmspb.CryptoKey_ASYMMETRIC_SIGN:   kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
 		kmspb.CryptoKey_KEY_ENCAPSULATION: kmspb.CryptoKeyVersion_KEM_XWING,
 	} {
 		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "a",

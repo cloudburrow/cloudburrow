@@ -35,7 +35,10 @@ type algSpec struct {
 	rsaBits int
 	curve   elliptic.Curve
 	ed25519 bool
-	keyLen  int
+	// secp256k1 is EC_SIGN_SECP256K1_SHA256's curve, which Go's standard
+	// library lacks (secp256k1.go).
+	secp256k1 bool
+	keyLen    int
 	// hash is the digest the algorithm signs, MACs or uses in OAEP; zero
 	// for raw RSA PKCS#1, Ed25519 and AES.
 	hash crypto.Hash
@@ -68,6 +71,9 @@ var algorithms = map[algo]algSpec{
 	kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256:        {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, curve: elliptic.P256(), hash: crypto.SHA256},
 	kmspb.CryptoKeyVersion_EC_SIGN_P384_SHA384:        {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, curve: elliptic.P384(), hash: crypto.SHA384},
 	kmspb.CryptoKeyVersion_EC_SIGN_ED25519:            {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, ed25519: true},
+	// EC_SIGN_SECP256K1_SHA256 is HSM and HSM_SINGLE_TENANT only
+	// (levelAlgorithm, secp256k1.go, #1719).
+	kmspb.CryptoKeyVersion_EC_SIGN_SECP256K1_SHA256: {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, secp256k1: true, hash: crypto.SHA256},
 
 	kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256: {purpose: kmspb.CryptoKey_ASYMMETRIC_DECRYPT, rsaBits: 2048, hash: crypto.SHA256},
 	kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_3072_SHA256: {purpose: kmspb.CryptoKey_ASYMMETRIC_DECRYPT, rsaBits: 3072, hash: crypto.SHA256},
@@ -103,9 +109,10 @@ var algorithms = map[algo]algSpec{
 
 // algorithmPurpose is the purpose of an implemented algorithm. The documented
 // algorithms missing from the table are UNIMPLEMENTED: Go's standard library
-// has no secp256k1, ML-DSA, SLH-DSA or X-Wing. EXTERNAL_SYMMETRIC_ENCRYPTION
-// is served for external keys only, and AES_256_KWP (AES_WRAPPING) for
-// HSM_SINGLE_TENANT keys only (levelAlgorithm). ML-KEM is crypto/mlkem.
+// has no ML-DSA, SLH-DSA or X-Wing. EXTERNAL_SYMMETRIC_ENCRYPTION is served
+// for external keys only, AES_256_KWP (AES_WRAPPING) for HSM_SINGLE_TENANT
+// keys only, and EC_SIGN_SECP256K1_SHA256 for HSM and HSM_SINGLE_TENANT keys
+// only (levelAlgorithm). ML-KEM is crypto/mlkem.
 func algorithmPurpose(a algo) (kmspb.CryptoKey_CryptoKeyPurpose, bool) {
 	if s, ok := algorithms[a]; ok {
 		return s.purpose, true
@@ -157,6 +164,12 @@ func generate(a algo) ([]byte, error) {
 	var priv any
 	var err error
 	switch {
+	case s.secp256k1:
+		der, err := generateSecp256k1()
+		if err != nil {
+			return nil, apierror.Internal(err, "generate %s key", a)
+		}
+		return der, nil
 	case s.rsaBits > 0:
 		priv, err = rsa.GenerateKey(rand.Reader, s.rsaBits)
 	case s.curve != nil:
@@ -224,8 +237,9 @@ func storedAlgorithm(a algo) string {
 }
 
 // Algorithms lists the implemented algorithms of purpose, by name, sorted,
-// for the console's Create key form, at SOFTWARE and HSM; ExternalAlgorithms
-// lists the external levels'.
+// for the console's Create key form, at SOFTWARE and HSM (but
+// EC_SIGN_SECP256K1_SHA256, HSM only); ExternalAlgorithms lists the external
+// levels'.
 func Algorithms(purpose kmspb.CryptoKey_CryptoKeyPurpose) []string {
 	var out []string
 	for a, s := range algorithms {
@@ -255,10 +269,6 @@ func parsePublicPEM(p string) (any, error) {
 // create-validate-signatures page). The console's Verify uses it; nothing
 // server-side does, because Cloud KMS has no verify method.
 func VerifySignature(publicPEM string, a kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, data, sig []byte) (bool, error) {
-	pub, err := parsePublicPEM(publicPEM)
-	if err != nil {
-		return false, err
-	}
 	s, ok := algorithms[a]
 	if !ok || s.purpose != kmspb.CryptoKey_ASYMMETRIC_SIGN {
 		return false, fmt.Errorf("%s is not a signing algorithm", a)
@@ -268,6 +278,21 @@ func VerifySignature(publicPEM string, a kmspb.CryptoKeyVersion_CryptoKeyVersion
 		h := s.hash.New()
 		h.Write(data)
 		digest = h.Sum(nil)
+	}
+	if s.secp256k1 {
+		b, _ := pem.Decode([]byte(publicPEM))
+		if b == nil {
+			return false, errors.New("not a PEM public key")
+		}
+		k, err := parseSecp256k1Public(b.Bytes)
+		if err != nil {
+			return false, err
+		}
+		return verifySecp256k1(k, digest, sig), nil
+	}
+	pub, err := parsePublicPEM(publicPEM)
+	if err != nil {
+		return false, err
 	}
 	switch k := pub.(type) {
 	case *ecdsa.PublicKey:
