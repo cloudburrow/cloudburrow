@@ -40,7 +40,16 @@ func nodeName(name string, node int) string {
 // instance's Service, which selects the primary's server; a server that
 // has been a standby keeps the standby's start, at its epoch.
 func (p *sqlProvisioner) nodeBackend(spec sqladmin.Spec, node int) components.Backend {
-	b := p.backend(spec)
+	base := spec
+	if spec.HAEpochs[node] > 0 {
+		// A standby replicates from its own instance's primary, whatever
+		// that instance replicates from: a REGIONAL read replica's standby
+		// (a blue-green deployment's green instance, #1614) is not a replica
+		// of its master, so its server is the same before and after a
+		// switchover makes the instance a primary, and is not restarted.
+		base.MasterInstanceName, base.External = "", nil
+	}
+	b := p.backend(base)
 	b.Name = nodeName(spec.ServerName(), node)
 	if node == 0 {
 		b.Selects = nodeName(spec.ServerName(), spec.PrimaryNode())

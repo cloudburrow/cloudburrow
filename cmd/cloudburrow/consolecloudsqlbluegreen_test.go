@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	sqladminapi "google.golang.org/api/sqladmin/v1"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // TestCloudSQLConsoleBlueGreen (#1614): a MySQL 8.0 primary's page offers
@@ -128,5 +130,23 @@ func TestCloudSQLConsoleRegionalBlueGreenAndDR(t *testing.T) {
 		ReplicationCluster: &sqladminapi.ReplicationCluster{DrReplica: true}})
 	if len(acts) != 1 || acts[0].ID != "switchover" || !strings.Contains(acts[0].Confirm, "other read replicas stay its replicas") {
 		t.Errorf("a PostgreSQL DR replica's actions: %+v", acts)
+	}
+}
+
+// TestRegionalReplicaStandbyKeepsItsServer (#1614): a REGIONAL read
+// replica's standby (a green instance's) is the same server once the
+// instance is a primary, so a blue-green switchover and a failover after
+// it do not restart it, which on an ephemeral instance would lose its data.
+func TestRegionalReplicaStandbyKeepsItsServer(t *testing.T) {
+	p := &sqlProvisioner{}
+	green := sqladmin.Spec{Name: "blue-green-1", DatabaseVersion: "MYSQL_8_0", AvailabilityType: "REGIONAL", MasterInstanceName: "blue",
+		ReplicationPassword: "r", HAPassword: "h", HAEpochs: [2]int{0, 1}}
+	promoted := green
+	promoted.MasterInstanceName, promoted.ReplicationPassword = "", ""
+	if a, b := p.nodeBackend(green, 1).Manifest("ns", "i"), p.nodeBackend(promoted, 1).Manifest("ns", "i"); a != b {
+		t.Errorf("the standby's server changes when the replica becomes a primary:\n%s\n---\n%s", a, b)
+	}
+	if strings.Join(p.nodeBackend(green, 0).Args, " ") == strings.Join(p.nodeBackend(promoted, 0).Args, " ") {
+		t.Error("the replica's primary server is not a replica")
 	}
 }
