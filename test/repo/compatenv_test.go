@@ -27,6 +27,9 @@ var compatEnvExceptions = map[string]string{
 	// fetches unless asked (`up -local-ai-embeddings`); set it to run
 	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
 	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
+	// The instance under test is a `-tags onnx` build whose BigQuery
+	// imports ONNX models (#1711); no instance reports which build it is.
+	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
