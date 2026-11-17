@@ -92,7 +92,7 @@ func TestBigQueryModelsThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-description") !== null`)
 	p.setField(".modal #f-description", "trained in the browser")
 	p.setField(".modal #f-name", "Browser model")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.navigate("/bigquery/" + ds + "/models/m" + q + "&tab=details")
 	p.waitFor(`document.querySelector("#view").textContent.includes("trained in the browser")`)

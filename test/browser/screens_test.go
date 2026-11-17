@@ -42,7 +42,7 @@ func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 	}
 
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-keyRingId`), "browser-ring"),
-		chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+		chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ring))
 	if posts := p.posts("/api/resources/kms"); len(posts) != 1 {

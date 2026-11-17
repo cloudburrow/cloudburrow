@@ -71,7 +71,7 @@ func TestFaultRuleAddedAndDeletedThroughTheForm(t *testing.T) {
 		chromedp.SendKeys(chromedp.CSS(`.modal #fault-method`), "ListQueues"),
 		chromedp.SendKeys(chromedp.CSS(`.modal #fault-project`), project),
 		chromedp.SetValue(chromedp.CSS(`.modal #fault-code`), "PERMISSION_DENIED"),
-		chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+		chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	row := fmt.Sprintf(`[...document.querySelectorAll("#fault-rule-rows tr")].find((r) => r.textContent.includes(%q))`, project)
 	p.waitFor(`document.querySelector(".modal") === null && ` + row + ` !== undefined`)
 	var id string
