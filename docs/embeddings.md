@@ -139,6 +139,14 @@
 >   for which neither Go's standard library nor `golang.org/x/image` has a decoder (HEIC and HEIF
 >   served since #1724).
 >
+> **Update 2026-11-17 (#1732): a video's audio track.** With `embed_content_config`'s
+> `audio_track_extraction` (off by default, as on Google), a video's first sound track is decoded
+> (AAC-LC with `github.com/arabian9ts/aac-go`, MP3, or QuickTime PCM), cut to `video_metadata`'s
+> offsets and embedded as an audio clip right after the video's frames, as EmbeddingGemma 2's
+> processor loads a video's audio; it counts against the 180 seconds of audio a request. Opus,
+> AC-3 and HE-AAC tracks are refused naming the codec. See
+> [upstream-evaluation.md](upstream-evaluation.md).
+>
 > **Update 2026-11-17 (#1724): HEIC, HEIF and animated WebP.** With the maintainer's approval
 > (2026-11-17), `github.com/gen2brain/h265` v0.2.5 joins go.mod: a pure Go HEVC decoder and HEIF
 > reader, MIT, no cgo and no dependencies ([upstream-evaluation.md](upstream-evaluation.md#amendment-heic-heif-avif-and-animated-webp-decoders-for-vertex-ai-embedcontent-1724)

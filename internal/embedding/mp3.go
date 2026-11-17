@@ -202,3 +202,33 @@ type tooLongError struct{ secs float64 }
 func (e *tooLongError) Error() string {
 	return fmt.Sprintf("the clip is %.1f seconds; at most %d seconds are embedded", e.secs, MaxAudioSeconds)
 }
+
+// decodeMP3PCM decodes an MP3 stream to interleaved stereo samples at its
+// own rate (a mono stream in both channels), trimming nothing: an MP4's MP3
+// track is trimmed by its edit list instead.
+func decodeMP3PCM(b []byte) (samples []float32, rate int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			samples, rate, err = nil, 0, fmt.Errorf("a corrupt frame (%v)", r)
+		}
+	}()
+	d, err := mp3.NewDecoder(bytes.NewReader(b))
+	if err != nil {
+		return nil, 0, err
+	}
+	rate = d.SampleRate()
+	if n := d.Length(); n > 0 {
+		if secs := float64(n) / 4 / float64(rate); secs > MaxAudioSeconds+60 {
+			return nil, 0, &tooLongError{secs}
+		}
+	}
+	pcm, err := io.ReadAll(d)
+	if err != nil {
+		return nil, 0, err
+	}
+	samples = make([]float32, len(pcm)/2)
+	for i := range samples {
+		samples[i] = float32(int16(binary.LittleEndian.Uint16(pcm[2*i:]))) / 32768
+	}
+	return samples, rate, nil
+}

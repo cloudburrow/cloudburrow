@@ -38,8 +38,9 @@ import (
 // embeds one MP4 or MOV video (H.264 or H.265) a request, its frames sampled
 // as video_metadata says (#1722), and one PDF of up to 6 pages, each page
 // rendered as an image, with document_ocr adding each page's text (#1723).
-// VP9 and AV1 video, AVIF, document_ocr on a PDF with no text and
-// audio_track_extraction are refused, naming the field.
+// With audio_track_extraction, a video's audio track (AAC-LC, MP3 or PCM) is
+// embedded after its frames (#1732). VP9 and AV1 video, AVIF and
+// document_ocr on a PDF with no text are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
 // images as base64: 20 MiB, the inline request size Vertex documents for
@@ -125,11 +126,10 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 		return nil, apierror.InvalidArgument(
 			"embed_content_config.document_ocr is not supported: %s embeds text only", name)
 	}
-	if cfg.GetAudioTrackExtraction() {
+	if cfg.GetAudioTrackExtraction() && !embedding.EmbedsAudio(e) {
 		if multimodal {
 			return nil, apierror.InvalidArgument(
-				"embed_content_config.audio_track_extraction is not supported: %s embeds a video's frames, "+
-					"and a video's audio track (AAC) has no decoder in this build", name)
+				"embed_content_config.audio_track_extraction is not supported: %s embeds a video's frames, not audio", name)
 		}
 		return nil, apierror.InvalidArgument(
 			"embed_content_config.audio_track_extraction is not supported: %s embeds text only", name)
@@ -158,7 +158,7 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	objs := s.objects
 	s.mu.RUnlock()
 	parts, media, err := embedParts(ctx, req.GetContent(), mediaSupport{images: multimodal, audio: embedding.EmbedsAudio(e),
-		objects: objs, ocr: cfg.GetDocumentOcr()}, name)
+		objects: objs, ocr: cfg.GetDocumentOcr(), audioTrack: cfg.GetAudioTrackExtraction()}, name)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +211,9 @@ type mediaSupport struct {
 	images, audio bool
 	objects       Objects
 	ocr           bool // embed_content_config.document_ocr
+	// audioTrack is embed_content_config.audio_track_extraction: a video's
+	// audio track is embedded after its frames (#1732).
+	audioTrack bool
 }
 
 // what names what the model embeds, for an error.
@@ -301,6 +304,25 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}
 			parts = append(parts, embedding.Part{Video: frames})
+			if m.audioTrack {
+				// The track as a clip of its own right after the frames, as
+				// the model's processor loads a video's audio
+				// (load_audio_from_video); within the request's audio limit.
+				clip, err := embedding.DecodeVideoAudio(mt, data, opt)
+				if err != nil {
+					return nil, 0, apierror.InvalidArgument(
+						"content.parts[%d].%s: embed_content_config.audio_track_extraction: %v", i, field, err)
+				}
+				if len(clip) > 0 {
+					parts = append(parts, embedding.Part{Audio: clip})
+					clips++
+					if samples += len(clip); samples > embedding.MaxAudioSeconds*embedding.AudioSampleRate {
+						return nil, 0, apierror.InvalidArgument(
+							"content.parts[%d]: the audio, with the video's audio track, adds up to %.1f seconds; at most %d seconds are embedded in one request",
+							i, float64(samples)/embedding.AudioSampleRate, embedding.MaxAudioSeconds)
+					}
+				}
+			}
 		case embedding.IsPDFMIMEType(mt):
 			if pdfs++; pdfs > 1 {
 				return nil, 0, apierror.InvalidArgument("content.parts[%d]: at most 1 PDF is embedded in one request", i)

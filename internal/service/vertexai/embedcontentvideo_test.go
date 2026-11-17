@@ -95,3 +95,48 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 		}
 	}
 }
+
+// TestEmbedContentAudioTrackExtraction (#1732): with
+// embed_content_config.audio_track_extraction, a video's audio track is a
+// clip of its own right after its frames, between video_metadata's offsets;
+// a video with no sound track is its frames alone; the track counts
+// against the request's 180 seconds of audio.
+func TestEmbedContentAudioTrackExtraction(t *testing.T) {
+	s := NewServer(nil)
+	e := &audioEmbedder{}
+	s.SwapModelEmbedder(localai.EmbeddingGemma2ONNXID, e, nil)
+	post := func(body string) {
+		t.Helper()
+		if rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, body); rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	}
+	aac := testdataB64(t, "va-aac.mp4")
+	post(`{"content":{"parts":[{"text":"a clip"},{"inlineData":{"mimeType":"video/mp4","data":"` + aac + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 3 || e.in.Parts[0].Text != "a clip" || len(e.in.Parts[1].Video) != 1 || len(e.in.Parts[2].Audio) != 24000 {
+		t.Fatalf("video with its audio track: embedder got %d parts, want text, 1 frame and 24000 samples", len(e.in.Parts))
+	}
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + aac + `"},"videoMetadata":{"startOffset":"0.5s","endOffset":"1s"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 2 || len(e.in.Parts[1].Audio) != 8000 {
+		t.Fatalf("0.5s to 1s: embedder got %d parts, want the frame and 8000 samples", len(e.in.Parts))
+	}
+	// Off (Google's default), the frames alone.
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + aac + `"}}]}}`)
+	if len(e.in.Parts) != 1 || e.in.Parts[0].Video == nil {
+		t.Fatalf("without audio_track_extraction: embedder got %d parts", len(e.in.Parts))
+	}
+	// No sound track: the frames alone.
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-silent.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 1 || e.in.Parts[0].Video == nil {
+		t.Fatalf("no sound track: embedder got %d parts", len(e.in.Parts))
+	}
+	for name, c := range map[string]struct{ body, want string }{
+		"opus": {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-opus.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`,
+			`audio_track_extraction: the video's audio track: its codec \"Opus\" is not decoded`},
+	} {
+		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, c.body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {
+			t.Errorf("%s: status %d, want 400 naming %q: %s", name, rec.Code, c.want, rec.Body)
+		}
+	}
+}

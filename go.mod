@@ -1,6 +1,6 @@
 module github.com/cloudburrow/cloudburrow
 
-go 1.26.4
+go 1.26.5
 
 require (
 	cloud.google.com/go v0.123.0
@@ -33,6 +33,7 @@ require (
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
+	github.com/arabian9ts/aac-go v0.1.0
 	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24

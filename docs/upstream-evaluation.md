@@ -782,6 +782,35 @@ renderer is 5.8 MB of WebAssembly embedded in the binary, compiled once, the fir
 embedded. `document_ocr` reads the text PDFium finds on each page, which is the text a born-digital
 PDF holds; CloudBurrow has no OCR engine, so a PDF with no text on any page (a scan) is refused
 with `document_ocr` rather than embedded without the text Google would have read. A video's audio
-track (`audio_track_extraction`) stays refused: an MP4's audio is AAC, which none of these decode.
+track (`audio_track_extraction`) stays refused: an MP4's audio is AAC, which none of these decode
+(served since #1732, below).
 `govulncheck ./...` reports nothing for any of them. `go mod tidy` added `tetratelabs/wazero` and
 `jolestar/go-commons-pool/v2` as indirect requirements.
+
+## Amendment: an AAC decoder for a video's audio track (#1732)
+
+Google's [multimodal embeddings page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) documents `audio_track_extraction` ("Extract audio from video input"), off by
+default, the audio subject to the 180 seconds a request; it does not say how the audio is placed.
+EmbeddingGemma 2's model card does not either; Transformers' processors (`load_audio_from_video`,
+which `Gemma4Processor` takes) load a video's audio as a clip of its own with its audio placeholder
+right after the video's, and CloudBurrow does the same. An MP4's or MOV's audio is nearly always
+AAC-LC; MP3 and PCM, the formats Google lists for audio, also occur. The user approved media
+decoder modules (2026-11-17). The candidates on the Go module proxy, compared on 2026-11-17:
+
+| Module | Version | Licence | cgo | Covers | Verdict |
+|---|---|---|---|---|---|
+| `github.com/arabian9ts/aac-go` | v0.1.0 (2026-08-11) | Apache 2.0 | none, no dependencies | AAC-LC decoder and encoder, ADTS, mono and stereo, all 13 rates, long and short windows, TNS, M/S, intensity stereo, PNS; HE-AAC, more than 2 channels and 960-sample frames refused with `ErrUnsupported` | **Adopted**: within one 16-bit step of ffmpeg 9 a channel on ffmpeg's own AAC-LC (16 kHz stereo, M/S and short blocks; PNS, which is noise each decoder draws, at the encoder's level), `TestDecodeVideoAudioTrack`. Its `go.mod` says `go 1.26.5`, which raises CloudBurrow's `go` line from 1.26.4 (CI builds with 1.26.8 and 1.27). One release, one day of commits and no stars: the measured agreement with ffmpeg is what it is adopted on; if it needs a fix, copy it into `third_party/` as `go-mp3` is |
+| `github.com/tphakala/go-aac` | v0.7.2 (2026-11-05) | LGPL-2.1 (a port of ffmpeg's) | none | AAC-LC | Rejected: LGPL, not one of the permissive licences approved |
+| `github.com/thesyncim/goaac` | 2026-06 pseudo-version | GPL (a port of FAAD2) | none, but `modernc.org/libc` | AAC-LC, HE-AAC | Rejected: GPL |
+| fdk-aac, FAAD2, ffmpeg in WASM | — | Fraunhofer, GPL, LGPL | — | — | Rejected: licence (and C code) |
+
+An MP4 carries AAC as raw access units; each is given the 7-byte ADTS header its
+AudioSpecificConfig (`esds`, read with `mp4ff`) describes and decoded. The edit list's first media
+time (the encoder's priming, 1024 samples from ffmpeg) is dropped and its duration kept, as ffmpeg
+does. MP3 tracks (`mp4a` with the MPEG-1/2 audio object types, or `.mp3`) go through
+`third_party/go-mp3`, QuickTime linear PCM (`lpcm`, `sowt`, `twos`, `in24`, `in32`, `fl32`, `fl64`)
+is read directly. Opus, AC-3, E-AC-3, ALAC, FLAC and HE-AAC tracks are refused naming the codec:
+Opus has no complete pure Go decoder with a permissive licence, and the others no Go decoder at
+all. `govulncheck ./...` reports nothing for `aac-go`.
+

@@ -5091,12 +5091,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/embedaudio_test.go:71 TestEmbedContentEmbedsAudioThroughThePredictionClient",
+          "test/compat/embedaudiotrack_test.go:35 TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient",
           "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient",
           "test/compat/embedheic_test.go:45 TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient",
           "test/compat/embedimages_test.go:111 TestEmbedContentEmbedsImagesThroughThePredictionClient",
           "test/compat/embedmp3_test.go:39 TestEmbedContentEmbedsMP3ThroughThePredictionClient",
           "test/compat/embedmpeg25_test.go:28 TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient",
-          "test/compat/embedvideo_test.go:83 TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient",
+          "test/compat/embedvideo_test.go:84 TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient",
           "test/compat/embedwebp_test.go:41 TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient"
         ]
       },
