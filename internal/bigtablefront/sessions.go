@@ -36,8 +36,12 @@ import (
 // is, run by the front as a call of its own: so an authorized view's
 // subset and a table's change log apply as they do to ReadRows and
 // MutateRow. A materialized view's sessions open, but their ReadRow is
-// refused UNIMPLEMENTED as ReadRows naming a materialized view is (its
-// rows are read with SQL, sqlviews.go), and on UNIMPLEMENTED the client
+// refused UNIMPLEMENTED as ReadRows naming a materialized view is: Google
+// documents a continuous materialized view as read with ReadRows, but not
+// the column family its aggregates are stored in, nor its row key's
+// encoding without a _key column (docs re-read 2026-11-17:
+// https://docs.cloud.google.com/bigtable/docs/continuous-materialized-view-queries),
+// so its rows are read with SQL (sqlviews.go); on UNIMPLEMENTED the client
 // reads it the classic way.
 
 const (
@@ -285,7 +289,7 @@ func (f *Front) runVRPC(ctx context.Context, sess *session, payload []byte) ([]b
 			return nil, status.Errorf(codes.InvalidArgument, "cannot decode the MaterializedViewRequest: %v", err)
 		}
 		if req.GetReadRow() != nil {
-			return nil, status.Error(codes.Unimplemented, "ReadRow of a materialized view is not served here: a materialized view is not stored rows, its rows are read with SQL (ExecuteQuery), as for ReadRows")
+			return nil, status.Error(codes.Unimplemented, "ReadRow of a materialized view is not served here: Google documents reading a continuous materialized view with ReadRows, but neither the column family its aggregates are stored in nor how its row key is encoded without a _key column; its rows are read with SQL (ExecuteQuery), as for ReadRows")
 		}
 	}
 	var out proto.Message

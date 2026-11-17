@@ -82,19 +82,41 @@ func TestBigtableConsoleEditsTheChangeStream(t *testing.T) {
 	if err := client.Open(table).Apply(ctx, "row-1", m); err != nil {
 		t.Fatal(err)
 	}
-	var listed []string
-	for _, sec := range bigtableDetail(t, srv, table).Sections {
-		if sec.ID == "changestream" {
-			if sec.Listing.Unavailable != "" {
-				t.Errorf("the Change stream section is unavailable: %s", sec.Listing.Unavailable)
-			}
-			for _, it := range sec.Listing.Items {
-				listed = append(listed, it.Name+" "+it.Fields["Mutations"])
+	section := func() []string {
+		var listed []string
+		for _, sec := range bigtableDetail(t, srv, table).Sections {
+			if sec.ID == "changestream" {
+				if sec.Listing.Unavailable != "" {
+					t.Errorf("the Change stream section is unavailable: %s", sec.Listing.Unavailable)
+				}
+				for _, it := range sec.Listing.Items {
+					listed = append(listed, it.Name+" "+it.Fields["Type"]+" "+it.Fields["Mutations"])
+				}
 			}
 		}
+		return listed
 	}
-	if len(listed) != 1 || listed[0] != "row-1 SetCell cf:q = streamed value" {
+	if listed := section(); len(listed) != 1 || listed[0] != "row-1 User SetCell cf:q = streamed value" {
 		t.Errorf("the Change stream section lists %q", listed)
+	}
+	// A cell the family's rule collects is listed as garbage collection,
+	// newest first.
+	if err := admin.SetGCPolicy(ctx, table, "cf", bigtable.MaxVersionsPolicy(1)); err != nil {
+		t.Fatal(err)
+	}
+	m = bigtable.NewMutation()
+	m.Set("cf", "q", bigtable.Timestamp(2000), []byte("newer"))
+	if err := client.Open(table).Apply(ctx, "row-1", m); err != nil {
+		t.Fatal(err)
+	}
+	var listed []string
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+		if listed = section(); len(listed) == 3 {
+			break
+		}
+	}
+	if len(listed) != 3 || listed[0] != "row-1 Garbage collection DeleteFromColumn cf:q" {
+		t.Errorf("after garbage collection the Change stream section lists %q", listed)
 	}
 	if code, _ := bigtableAct(t, srv, []string{table}, "changestream", map[string]string{"retention": "9"}); code == http.StatusOK {
 		t.Errorf("a retention of 9 days was accepted")

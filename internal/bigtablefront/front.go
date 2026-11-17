@@ -200,6 +200,9 @@ func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	errc := make(chan error, 2)
 	go func() { errc <- grpcSrv.Serve(grpcL) }()
 	go func() { errc <- srv.Serve(httpL) }()
+	gcCtx, gcStop := context.WithCancel(ctx)
+	defer gcStop()
+	go f.watchGarbage(gcCtx)
 	var err error
 	select {
 	case <-ctx.Done():

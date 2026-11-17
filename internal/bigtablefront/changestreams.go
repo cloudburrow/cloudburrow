@@ -15,9 +15,11 @@ package bigtablefront
 //     value and timestamp;
 //   - CheckAndMutateRow logs the mutations of the branch that ran.
 //
-// DropRowRange is not recorded, as Google documents. Garbage collection
-// does run in the emulator, but out of the front's sight: no
-// GARBAGE_COLLECTION record is written.
+// DropRowRange is recorded, as Google documents, as each row's deletion
+// (dropRowRange). Garbage collection
+// runs in the emulator, out of the front's sight, so the front watches for
+// it (changegc.go) and records the cells it removed as GARBAGE_COLLECTION
+// records.
 //
 // The writes to a table with a change stream are applied one at a time, so
 // the log's order is the emulator's; each gets a commit timestamp later
@@ -90,6 +92,11 @@ type tableLog struct {
 	// goes.
 	wake chan struct{}
 	gone bool
+	// cells is the table's cells as the front last saw them, for the
+	// garbage collection records (changegc.go); nil until first read.
+	// Guarded by write.
+	cells     cellModel
+	gcStarted bool
 }
 
 // changeStreams is the change logs, by table name.
@@ -215,7 +222,7 @@ func (c *changeStreams) trimLocked(l *tableLog) {
 }
 
 // append logs one row's change. c.mu is held.
-func (c *changeStreams) appendLocked(table string, l *tableLog, row []byte, ms []*btpb.Mutation, cluster string) {
+func (c *changeStreams) appendLocked(l *tableLog, typ btpb.ReadChangeStreamResponse_DataChange_Type, row []byte, ms []*btpb.Mutation, cluster string) {
 	if len(ms) == 0 {
 		return
 	}
@@ -229,7 +236,7 @@ func (c *changeStreams) appendLocked(table string, l *tableLog, row []byte, ms [
 		chunks[i] = &btpb.ReadChangeStreamResponse_MutationChunk{Mutation: m}
 	}
 	rec := &btpb.ReadChangeStreamResponse_DataChange{
-		Type: btpb.ReadChangeStreamResponse_DataChange_USER, SourceClusterId: cluster,
+		Type: typ, SourceClusterId: cluster,
 		RowKey: row, CommitTimestamp: timestamppb.New(at), Chunks: chunks,
 		Done: true, Token: encodeToken(l.nextSeq),
 	}
@@ -333,8 +340,9 @@ func (p *pendingChange) commit() {
 		return
 	}
 	for _, r := range rows {
-		p.c.appendLocked(p.table, p.log, r.row, r.ms, p.cluster)
+		p.c.appendLocked(p.log, btpb.ReadChangeStreamResponse_DataChange_USER, r.row, r.ms, p.cluster)
 	}
+	p.log.cells.apply(rows)
 }
 
 // mutationMethods are the data methods a change stream records.
@@ -385,8 +393,19 @@ func (f *Front) prepareChange(ctx context.Context, method string, in frame) (fra
 	// The server's timestamp, in milliseconds, which either granularity
 	// takes.
 	stamp := f.changes.now().UnixMicro() / 1000 * 1000
-	var families []string
-	resolve := func(ms []*btpb.Mutation) ([]*btpb.Mutation, error) {
+	// A row's deletion is a DeleteFromFamily of each family where the
+	// row has data, as Google's change stream records it: the families
+	// the emulator holds for the row, followed through the request.
+	held := map[string]map[string]bool{}
+	resolve := func(row []byte, ms []*btpb.Mutation) ([]*btpb.Mutation, error) {
+		fams, ok := held[string(row)]
+		if !ok {
+			var err error
+			if fams, err = f.rowFamilies(ctx, table, row); err != nil {
+				return nil, err
+			}
+			held[string(row)] = fams
+		}
 		var out []*btpb.Mutation
 		for _, m := range ms {
 			switch x := m.GetMutation().(type) {
@@ -394,22 +413,22 @@ func (f *Front) prepareChange(ctx context.Context, method string, in frame) (fra
 				if x.SetCell.GetTimestampMicros() == -1 {
 					x.SetCell.TimestampMicros = stamp
 				}
+				fams[x.SetCell.GetFamilyName()] = true
 				out = append(out, m)
 			case *btpb.Mutation_DeleteFromRow_:
-				if families == nil {
-					t, err := btapb.NewBigtableTableAdminClient(f.upstream).GetTable(ctx, &btapb.GetTableRequest{Name: table, View: btapb.Table_SCHEMA_VIEW})
-					if err != nil {
-						return nil, err
-					}
-					families = []string{}
-					for name := range t.GetColumnFamilies() {
-						families = append(families, name)
-					}
-					sort.Strings(families)
-				}
-				for _, fam := range families {
+				for _, fam := range sortedKeys(fams) {
 					out = append(out, &btpb.Mutation{Mutation: &btpb.Mutation_DeleteFromFamily_{DeleteFromFamily: &btpb.Mutation_DeleteFromFamily{FamilyName: fam}}})
 				}
+				clear(fams)
+			case *btpb.Mutation_DeleteFromFamily_:
+				delete(fams, x.DeleteFromFamily.GetFamilyName())
+				out = append(out, m)
+			case *btpb.Mutation_AddToCell_:
+				fams[x.AddToCell.GetFamilyName()] = true
+				out = append(out, m)
+			case *btpb.Mutation_MergeToCell_:
+				fams[x.MergeToCell.GetFamilyName()] = true
+				out = append(out, m)
 			default:
 				out = append(out, m)
 			}
@@ -420,21 +439,23 @@ func (f *Front) prepareChange(ctx context.Context, method string, in frame) (fra
 	switch r := req.(type) {
 	case *btpb.MutateRowRequest:
 		var ms []*btpb.Mutation
-		if ms, err = resolve(r.GetMutations()); err == nil {
+		if ms, err = resolve(r.GetRowKey(), r.GetMutations()); err == nil {
 			p.rows = []rowChange{{row: r.GetRowKey(), ms: ms}}
 		}
 	case *btpb.MutateRowsRequest:
 		for _, e := range r.GetEntries() {
 			var ms []*btpb.Mutation
-			if ms, err = resolve(e.GetMutations()); err != nil {
+			if ms, err = resolve(e.GetRowKey(), e.GetMutations()); err != nil {
 				break
 			}
 			p.rows = append(p.rows, rowChange{row: e.GetRowKey(), ms: ms})
 		}
 	case *btpb.CheckAndMutateRowRequest:
 		var tm, fm []*btpb.Mutation
-		if tm, err = resolve(r.GetTrueMutations()); err == nil {
-			if fm, err = resolve(r.GetFalseMutations()); err == nil {
+		// Each branch starts from the row as it is.
+		if tm, err = resolve(r.GetRowKey(), r.GetTrueMutations()); err == nil {
+			delete(held, string(r.GetRowKey()))
+			if fm, err = resolve(r.GetRowKey(), r.GetFalseMutations()); err == nil {
 				p.rows = []rowChange{{row: r.GetRowKey(), ms: tm}}
 				p.alt = []rowChange{{row: r.GetRowKey(), ms: fm}}
 			}
@@ -479,10 +500,101 @@ func (f *Front) sourceCluster(table string) string {
 
 func (f *Front) changeStreamMethods() map[string]method {
 	return map[string]method{
-		admin + "CreateTable": unary(func() *btapb.CreateTableRequest { return &btapb.CreateTableRequest{} }, f.createTable),
-		admin + "GetTable":    unary(func() *btapb.GetTableRequest { return &btapb.GetTableRequest{} }, f.getTable),
-		admin + "UpdateTable": unary(func() *btapb.UpdateTableRequest { return &btapb.UpdateTableRequest{} }, f.updateTable),
+		admin + "CreateTable":  unary(func() *btapb.CreateTableRequest { return &btapb.CreateTableRequest{} }, f.createTable),
+		admin + "GetTable":     unary(func() *btapb.GetTableRequest { return &btapb.GetTableRequest{} }, f.getTable),
+		admin + "UpdateTable":  unary(func() *btapb.UpdateTableRequest { return &btapb.UpdateTableRequest{} }, f.updateTable),
+		admin + "DropRowRange": unary(func() *btapb.DropRowRangeRequest { return &btapb.DropRowRangeRequest{} }, f.dropRowRange),
 	}
+}
+
+// rowFamilies is the families where the table's row has data.
+func (f *Front) rowFamilies(ctx context.Context, table string, key []byte) (map[string]bool, error) {
+	rows, err := readAll(ctx, btpb.NewBigtableClient(f.upstream), &btpb.ReadRowsRequest{TableName: table,
+		Rows: &btpb.RowSet{RowKeys: [][]byte{key}}, Filter: &btpb.RowFilter{Filter: &btpb.RowFilter_Chain_{Chain: &btpb.RowFilter_Chain{
+			Filters: []*btpb.RowFilter{
+				{Filter: &btpb.RowFilter_CellsPerColumnLimitFilter{CellsPerColumnLimitFilter: 1}},
+				{Filter: &btpb.RowFilter_StripValueTransformer{StripValueTransformer: true}},
+			}}}}})
+	if err != nil {
+		return nil, err
+	}
+	fams := map[string]bool{}
+	for _, r := range rows {
+		for _, c := range r.cells {
+			fams[c.family] = true
+		}
+	}
+	return fams, nil
+}
+
+// dropRowRange forwards DropRowRange and, on a table with a change stream,
+// records each row it deleted, as Google's change stream does ("Rows
+// deleted using Admin API's DropRowRange method"): a USER record of the
+// row's deletion, a DeleteFromFamily of each family where it had data.
+func (f *Front) dropRowRange(ctx context.Context, req *btapb.DropRowRangeRequest) (proto.Message, error) {
+	c := btapb.NewBigtableTableAdminClient(f.upstream)
+	f.changes.mu.Lock()
+	l, ok := f.changes.tables[req.GetName()]
+	f.changes.mu.Unlock()
+	if !ok {
+		return c.DropRowRange(ctx, req)
+	}
+	l.write.Lock()
+	defer l.write.Unlock()
+	read := &btpb.ReadRowsRequest{TableName: req.GetName(), Filter: &btpb.RowFilter{Filter: &btpb.RowFilter_Chain_{Chain: &btpb.RowFilter_Chain{
+		Filters: []*btpb.RowFilter{
+			{Filter: &btpb.RowFilter_CellsPerColumnLimitFilter{CellsPerColumnLimitFilter: 1}},
+			{Filter: &btpb.RowFilter_StripValueTransformer{StripValueTransformer: true}},
+		}}}}}
+	if p := req.GetRowKeyPrefix(); len(p) > 0 {
+		read.Rows = &btpb.RowSet{RowRanges: []*btpb.RowRange{prefixRange(p)}}
+	} else if !req.GetDeleteAllDataFromTable() {
+		return c.DropRowRange(ctx, req) // the emulator says what is wrong
+	}
+	rows, err := readAll(ctx, btpb.NewBigtableClient(f.upstream), read)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.DropRowRange(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var changes []rowChange
+	for _, r := range rows {
+		fams := map[string]bool{}
+		for _, cl := range r.cells {
+			fams[cl.family] = true
+		}
+		var ms []*btpb.Mutation
+		for _, fam := range sortedKeys(fams) {
+			ms = append(ms, &btpb.Mutation{Mutation: &btpb.Mutation_DeleteFromFamily_{DeleteFromFamily: &btpb.Mutation_DeleteFromFamily{FamilyName: fam}}})
+		}
+		changes = append(changes, rowChange{row: r.key, ms: ms})
+	}
+	cluster := f.sourceCluster(req.GetName())
+	f.changes.mu.Lock()
+	if !l.gone {
+		for _, r := range changes {
+			f.changes.appendLocked(l, btpb.ReadChangeStreamResponse_DataChange_USER, r.row, r.ms, cluster)
+		}
+	}
+	f.changes.mu.Unlock()
+	l.cells.apply(changes)
+	return resp, nil
+}
+
+// prefixRange is the row range of the keys starting with p.
+func prefixRange(p []byte) *btpb.RowRange {
+	r := &btpb.RowRange{StartKey: &btpb.RowRange_StartKeyClosed{StartKeyClosed: p}}
+	end := append([]byte(nil), p...)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xff {
+			end[i]++
+			r.EndKey = &btpb.RowRange_EndKeyOpen{EndKeyOpen: end[:i+1]}
+			return r
+		}
+	}
+	return r // all 0xff: to the end of the table
 }
 
 func (f *Front) createTable(ctx context.Context, req *btapb.CreateTableRequest) (proto.Message, error) {
@@ -498,8 +610,10 @@ func (f *Front) createTable(ctx context.Context, req *btapb.CreateTableRequest) 
 	if err != nil {
 		return nil, err
 	}
+	f.startGC(ctx, t)
 	if cfg != nil {
 		f.changes.set(t.GetName(), retention)
+		f.collectGarbage(ctx, t.GetName())
 		t.ChangeStreamConfig = f.changes.config(t.GetName())
 	}
 	return t, nil
@@ -568,6 +682,7 @@ func (f *Front) updateTable(ctx context.Context, req *btapb.UpdateTableRequest) 
 	}
 	if stream {
 		f.changes.set(name, retention)
+		f.collectGarbage(ctx, name)
 	}
 	t, err := c.GetTable(ctx, &btapb.GetTableRequest{Name: name, View: btapb.Table_SCHEMA_VIEW})
 	if err != nil {
