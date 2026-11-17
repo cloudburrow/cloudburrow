@@ -432,8 +432,8 @@ func (c *call) checkWindow(s *scope) (*btpb.Type, error) {
 			}
 		}
 	case aggregates[c.name]:
-		if c.name == "MIN_BY" || c.name == "MAX_BY" {
-			return nil, unsupportedErr{"the function " + c.name}
+		if unlisted[c.name] {
+			return nil, unlistedErr{c.name}
 		}
 		// The aggregate's own typing, with no GROUP BY slot taken.
 		tmp := inner

@@ -77,7 +77,8 @@ func sqlError(err error) error {
 		return err
 	}
 	var u unsupportedErr
-	if errors.As(err, &u) {
+	var ul unlistedErr
+	if errors.As(err, &u) || errors.As(err, &ul) {
 		return status.Error(codes.Unimplemented, err.Error())
 	}
 	return status.Error(codes.InvalidArgument, err.Error())

@@ -24,8 +24,8 @@ import (
 
 // documented are the reference's function names (functions-all), so that a
 // documented function not built here is UNIMPLEMENTED, not "not found".
-var documented = strings.Fields(`ARRAY_AGG ARRAY_CONCAT_AGG AVG BIT_AND BIT_OR BIT_XOR COUNT COUNTIF GROUPING
-LOGICAL_AND LOGICAL_OR MAX MAX_BY MIN MIN_BY STRING_AGG SUM APPROX_COUNT_DISTINCT APPROX_QUANTILES
+var documented = strings.Fields(`ARRAY_AGG ARRAY_CONCAT_AGG AVG BIT_AND BIT_OR BIT_XOR COUNT COUNTIF
+LOGICAL_AND LOGICAL_OR MAX MIN STRING_AGG SUM APPROX_COUNT_DISTINCT APPROX_QUANTILES
 APPROX_TOP_COUNT APPROX_TOP_SUM CORR COVAR_POP COVAR_SAMP STDDEV STDDEV_POP STDDEV_SAMP VAR_POP VAR_SAMP VARIANCE
 MAP_CONTAINS_KEY MAP_EMPTY MAP_ENTRIES MAP_KEYS MAP_VALUES ASCII BYTE_LENGTH CHAR_LENGTH CHARACTER_LENGTH CHR
 CODE_POINTS_TO_BYTES CODE_POINTS_TO_STRING CONCAT ENDS_WITH FORMAT FROM_BASE32 FROM_BASE64 FROM_HEX INITCAP INSTR
@@ -45,7 +45,7 @@ ARRAY_LAST_N ARRAY_LENGTH ARRAY_OFFSET ARRAY_OFFSETS ARRAY_REVERSE ARRAY_SLICE A
 GENERATE_ARRAY GENERATE_DATE_ARRAY GENERATE_TIMESTAMP_ARRAY IF IFNULL NULLIF COALESCE CURRENT_DATE DATE
 UNIX_DATE DATE_ADD DATE_SUB DATE_DIFF DATE_TRUNC FORMAT_DATE PARSE_DATE DATE_FROM_UNIX_DATE LAST_DAY
 IFERROR ISERROR NULLIFERROR PERCENTILE_CONT PERCENTILE_DISC CUME_DIST DENSE_RANK FIRST_VALUE LAG LAST_VALUE LEAD
-NTH_VALUE NTILE PERCENT_RANK RANK ROW_NUMBER`)
+NTH_VALUE NTILE PERCENT_RANK RANK ROW_NUMBER S2_CELLIDFROMPOINT S2_COVERINGCELLIDS`)
 
 var aggregates = map[string]bool{"COUNT": true, "COUNTIF": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
 	"ANY_VALUE": true, "LOGICAL_AND": true, "LOGICAL_OR": true, "ARRAY_AGG": true, "STRING_AGG": true,
@@ -87,6 +87,9 @@ func (c *call) String() string {
 }
 
 func (c *call) check(s *scope) (*btpb.Type, error) {
+	if unlisted[c.name] {
+		return nil, unlistedErr{c.name}
+	}
 	if c.win != nil {
 		return c.checkWindow(s)
 	}
@@ -103,8 +106,10 @@ func (c *call) check(s *scope) (*btpb.Type, error) {
 				return nil, unsupportedErr{"the function " + c.name}
 			}
 		}
-		if strings.HasPrefix(c.name, "ST_") {
-			// The geography functions (functions-all lists ST_ACCUM to ST_WITHIN).
+		if strings.HasPrefix(c.name, "ST_") || strings.HasPrefix(c.name, "S2_") {
+			// The geography functions (functions-all lists ST_ACCUM to
+			// ST_WITHIN, S2_CELLIDFROMPOINT and S2_COVERINGCELLIDS): they
+			// need S2 spherical geometry, a module CloudBurrow does not have.
 			return nil, unsupportedErr{"the geography function " + c.name}
 		}
 		return nil, fmt.Errorf("Function not found: %s", c.name)
@@ -112,6 +117,14 @@ func (c *call) check(s *scope) (*btpb.Type, error) {
 	c.fn = fn
 	c.argTypes = nil
 	for _, a := range c.args {
+		if l, ok := a.(*lambda); ok {
+			t, err := l.checkIn(c, s)
+			if err != nil {
+				return nil, err
+			}
+			c.argTypes = append(c.argTypes, t)
+			continue
+		}
 		if iv, ok := a.(*interval); ok {
 			if _, err := iv.n.check(s); err != nil {
 				return nil, err

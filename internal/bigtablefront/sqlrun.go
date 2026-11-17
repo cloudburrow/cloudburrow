@@ -59,8 +59,8 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 	if s.inAgg {
 		return nil, fmt.Errorf("Aggregations of aggregations are not allowed")
 	}
-	if c.name == "MIN_BY" || c.name == "MAX_BY" {
-		return nil, unsupportedErr{"the function " + c.name}
+	if unlisted[c.name] {
+		return nil, unlistedErr{c.name}
 	}
 	inner := *s
 	inner.inAgg = true

@@ -26,7 +26,9 @@ import (
 // functions and PARSE_TIMESTAMP, the vector functions, the trigonometric
 // and SAFE_ functions; the statistical and approximate aggregates and
 // ARRAY_CONCAT_AGG; STRUCT constructors; window functions; and an aggregate
-// family's typed values.
+// family's typed values; the lambda array functions (ARRAY_FILTER,
+// ARRAY_TRANSFORM, ARRAY_OFFSET, ARRAY_OFFSETS) and NORMALIZE and
+// NORMALIZE_AND_CASEFOLD.
 //
 // covers: google.bigtable.v2.Bigtable/PrepareQuery, google.bigtable.v2.Bigtable/ExecuteQuery
 func TestBigtableSQLUnpackFunctionsAndAggregates(t *testing.T) {
@@ -167,6 +169,20 @@ Dept2 2025-04-01T18:00:00Z NULL`)
 	expect(`SELECT JSON_QUERY('{"a": {"b": [{"n": "Jane"}]}}', '$.a.b[0]'), TO_JSON_STRING(STRUCT(1 AS id, [10, 20] AS coordinates)), REGEXP_INSTR('a@cd-ef b@cd-ef c@cd-ef', '@[^-]*', 1, 3)`,
 		`{"n":"Jane"} {"id":1,"coordinates":[10,20]} 18`)
 
+	// The lambda array functions and NORMALIZE, the reference's examples.
+	expect("SELECT ARRAY_FILTER([1 ,2, 3], e -> e > 1), ARRAY_FILTER([0, 2, 3], (e, i) -> e > i), ARRAY_TRANSFORM([1, 4, 3], e -> e + 1), ARRAY_TRANSFORM([1, 4, 3], (e, i) -> e + i)",
+		"[2,3] [2,3] [2,5,4] [1,5,5]")
+	expect("SELECT ARRAY_OFFSET([1, 4, 4, 4, 6], 4), ARRAY_OFFSET([1, 4, 4, 4, 6], 4, 'LAST'), ARRAY_OFFSET([1, 4, 4, 4, 6], e -> e > 2 AND e < 5, 'LAST'), ARRAY_OFFSET([1, 4, 4, 4, 6], e -> e > 7), ARRAY_OFFSETS([1, 4, 4, 4, 6, 4], 4), ARRAY_OFFSETS([1, 4, 7, 3, 6, 4], e -> e > 2 AND e < 5), ARRAY_OFFSETS([1, 4, 4, 4, 6], 5)",
+		"1 3 3 NULL [1,2,3,5] [1,3,5] []")
+	expect("SELECT ARRAY_TRANSFORM(MAP_KEYS(report), k -> CONCAT(_key, '/', k)) FROM report WHERE _key = 'Dept2'", "[Dept2/expenses,Dept2/sales]")
+	if got := run("SELECT ARRAY_FILTER(@a, e -> e > @n)",
+		map[string]bigtable.SQLType{"a": bigtable.ArraySQLType{ElemType: bigtable.Int64SQLType{}}, "n": bigtable.Int64SQLType{}},
+		map[string]any{"a": []any{int64(1), int64(5), int64(9)}, "n": int64(4)}); got != "[5,9]" {
+		t.Errorf("ARRAY_FILTER with parameters = %q", got)
+	}
+	expect("SELECT NORMALIZE('\\u00ea') = NORMALIZE('\\u0065\\u0302'), NORMALIZE('Raha\\u2004Mahan', NFKC), NORMALIZE('The red barn') = NORMALIZE('The Red Barn'), NORMALIZE_AND_CASEFOLD('The red barn') = NORMALIZE_AND_CASEFOLD('The Red Barn'), NORMALIZE_AND_CASEFOLD('\\u2168', NFC) = NORMALIZE_AND_CASEFOLD('IX', NFC), NORMALIZE_AND_CASEFOLD('\\u2168', NFKD) = NORMALIZE_AND_CASEFOLD('IX', NFKD)",
+		"true Raha Mahan false true false true")
+
 	// Aggregates, over the latest sales (12, 9).
 	expect("SELECT ROUND(STDDEV(CAST(CAST(report['sales'] AS STRING) AS INT64)), 6), VAR_POP(CAST(CAST(report['sales'] AS STRING) AS INT64)), APPROX_COUNT_DISTINCT(_key), APPROX_QUANTILES(CAST(CAST(report['sales'] AS STRING) AS INT64), 2) FROM report",
 		"2.12132 2.25 2 [9,9,12]")
@@ -195,12 +211,15 @@ Dept2 5 1 5 NULL 9 0.25 9.5`)
 	expect("SELECT c['views'], c['views'] > 5 FROM counters", "7 true")
 
 	for sql, want := range map[string]codes.Code{
-		"SELECT _timestamp FROM report":                       codes.InvalidArgument,
-		"SELECT * FROM UNPACK(report)":                        codes.InvalidArgument,
-		"SELECT STRUCT<x INT64>(5 AS x)":                      codes.InvalidArgument,
-		"SELECT MIN_BY(_key, _key) FROM report":               codes.Unimplemented,
-		"SELECT ST_AREA(_key) FROM report":                    codes.Unimplemented,
-		"SELECT COSINE_DISTANCE([1.0], [CAST(1 AS FLOAT32)])": codes.InvalidArgument,
+		"SELECT _timestamp FROM report":                         codes.InvalidArgument,
+		"SELECT * FROM UNPACK(report)":                          codes.InvalidArgument,
+		"SELECT STRUCT<x INT64>(5 AS x)":                        codes.InvalidArgument,
+		"SELECT MIN_BY(_key, _key) FROM report":                 codes.Unimplemented,
+		"SELECT MAX_BY(_key, _key) FROM report":                 codes.Unimplemented,
+		"SELECT _key, GROUPING(_key) FROM report GROUP BY _key": codes.Unimplemented,
+		"SELECT ARRAY_FILTER([1, 2], e -> e + 1)":               codes.InvalidArgument,
+		"SELECT ST_AREA(_key) FROM report":                      codes.Unimplemented,
+		"SELECT COSINE_DISTANCE([1.0], [CAST(1 AS FLOAT32)])":   codes.InvalidArgument,
 	} {
 		_, err := c.PrepareStatement(ctx, sql, nil)
 		if status.Code(err) != want {
