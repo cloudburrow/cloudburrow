@@ -77,7 +77,9 @@ frames and channel configuration 0 (a program_config_element).
 
 Tests (`hev2_test.go`, `testdata/`, about 1.1 MB): five AudioToolbox fixtures (HE-AAC mono 44.1
 kHz and stereo 48 kHz in MP4, HE-AAC v2 in MP4, and HE-AAC and HE-AAC v2 in ADTS with implicit
-signalling) and four derived from them (downsampled SBR, and three with SBR header_extra2 values
+signalling), 1.5 s of HE-AAC v2 speech (the JFK clip in `test/compat/testdata`, which
+exercises PS frames with `num_env` 0: the last parameters hold for the frame; that path once
+decoded to silence), and four derived from the tone fixtures (downsampled SBR, and three with SBR header_extra2 values
 `aac_at` never sends: limiter bands 0, 1 and 3, limiter gains 0, 1 and 3, `bs_interpol_freq` 0 and
 gain smoothing on), against ffmpeg 9's native decoder, sample by sample; how each was made is in
 `TestHEAACMatchesFFmpeg`'s comment. Measured max and RMS differences (full scale 1.0):
@@ -93,6 +95,7 @@ gain smoothing on), against ffmpeg 9's native decoder, sample by sample; how eac
 | he-lim0-44k.aac (limiter 0/0, interpol 0, smoothing) | 7.84e-4 | 5.93e-5 | 1e-3, 8e-5 |
 | he-lim1-44k.aac (limiter 1/3, smoothing) | 2.84e-3 | 3.05e-4 | 3.5e-3, 4e-4 |
 | he-lim3-44k.aac (limiter 3/1, interpol 0) | 2.85e-3 | 2.99e-4 | 3.5e-3, 4e-4 |
+| hev2-speech-44k.m4a (1.5 s of speech) | 7.61e-5 | 1.80e-5 | 1e-4, 2.5e-5 |
 
 The larger differences are in SBR bands whose source is near silent (80 to 90 dB below the
 frame's peak) and whose gains are tens of dB (the limiter's G_max reaches 7866 in

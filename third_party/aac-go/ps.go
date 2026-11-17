@@ -252,10 +252,13 @@ func (p *psDecoder) parse(b *bitr, bitsLeft int) error {
 			p.icc[e] = [34]int{}
 		}
 	}
-	if p.numEnv > 0 {
-		p.nIIDPrv, p.nICCPrv = nIID, nICC
-		p.iidPrev, p.iccPrev = p.iid[p.numEnv-1], p.icc[p.numEnv-1]
+	if p.numEnv == 0 {
+		// num_env 0: no new parameters, the last ones hold.
+		p.hold()
+		return nil
 	}
+	p.nIIDPrv, p.nICCPrv = nIID, nICC
+	p.iidPrev, p.iccPrev = p.iid[p.numEnv-1], p.icc[p.numEnv-1]
 	if frameClass == 0 {
 		for e := range p.numEnv {
 			p.border[e] = (e+1)*psSlots/p.numEnv - 1
@@ -280,6 +283,26 @@ func (p *psDecoder) parse(b *bitr, bitsLeft int) error {
 		}
 	}
 	return nil
+}
+
+// hold makes the frame one envelope with the last parameters, for a frame
+// without PS data or with num_env 0 (§8.6.4.5: the previous frame's
+// parameters are used).
+func (p *psDecoder) hold() {
+	p.numEnv = 1
+	p.border[0] = psSlots - 1
+	p.iid[0] = p.iidPrev
+	p.icc[0] = p.iccPrev
+	if p.nIIDPrv == 10 {
+		for i := 9; i >= 0; i-- {
+			p.iid[0][2*i+1], p.iid[0][2*i] = p.iid[0][i], p.iid[0][i]
+		}
+	}
+	if p.nICCPrv == 10 {
+		for i := 9; i >= 0; i-- {
+			p.icc[0][2*i+1], p.icc[0][2*i] = p.icc[0][i], p.icc[0][i]
+		}
+	}
 }
 
 func (p *psDecoder) prevIID(e, n int) []int {
@@ -329,21 +352,7 @@ func (p *psDecoder) readPar(b *bitr, h *sbrHuffman, dt bool, cur, prev []int) er
 // apply turns a mono QMF matrix into left and right ones.
 func (p *psDecoder) apply(x *[sbrSlots][64]complex128, ahead *[6][3]complex128, have bool) (l, r *[sbrSlots][64]complex128) {
 	if !have || !p.haveHeader {
-		// Hold the last parameters for the whole frame.
-		p.numEnv = 1
-		p.border[0] = psSlots - 1
-		p.iid[0] = p.iidPrev
-		p.icc[0] = p.iccPrev
-		if p.nIIDPrv == 10 {
-			for i := 9; i >= 0; i-- {
-				p.iid[0][2*i+1], p.iid[0][2*i] = p.iid[0][i], p.iid[0][i]
-			}
-		}
-		if p.nICCPrv == 10 {
-			for i := 9; i >= 0; i-- {
-				p.icc[0][2*i+1], p.icc[0][2*i] = p.icc[0][i], p.icc[0][i]
-			}
-		}
+		p.hold()
 	}
 	// Hybrid analysis. The filters are centred: slot n's output takes
 	// slots n-6 to n+6 of QMF bands 0 to 2, the last six of them from

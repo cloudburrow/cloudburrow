@@ -100,6 +100,12 @@ func readS16(t *testing.T, name string) []float64 {
 //	ffmpeg -f lavfi -i "$S" -ac 2 -c:a aac_at -profile:a 4 -b:a 40k he-implicit-44k.aac                   # RATE=44100
 //	ffmpeg -f lavfi -i "$S" -ac 2 -c:a aac_at -profile:a 28 -b:a 32k hev2-implicit-48k.aac                # RATE=48000
 //
+// hev2-speech-44k.m4a is 1.5 s of real speech (the JFK clip in
+// test/compat/testdata), whose PS frames include num_env 0 (keep the last
+// parameters), which the tones never produce:
+//
+//	ffmpeg -i turtle-jfk.mp4 -vn -t 1.5 -af "aresample=44100,pan=stereo|c0=c0|c1=0.8*c0" -c:a aac_at -profile:a 28 -b:a 48k -map_metadata -1 hev2-speech-44k.m4a
+//
 // Derived fixtures, decoded by ffmpeg the same way:
 //
 //   - he-ds-22k.m4a is he-mono-44k.m4a with its AudioSpecificConfig's SBR
@@ -146,6 +152,7 @@ func TestHEAACMatchesFFmpeg(t *testing.T) {
 		{"he-lim0-44k.aac", 44100, 1e-3, 8e-5},       // measured 7.84e-4, 5.93e-5
 		{"he-lim1-44k.aac", 44100, 3.5e-3, 4e-4},     // measured 2.84e-3, 3.05e-4
 		{"he-lim3-44k.aac", 44100, 3.5e-3, 4e-4},     // measured 2.85e-3, 2.99e-4
+		{"hev2-speech-44k.m4a", 44100, 1e-4, 2.5e-5}, // measured 7.61e-5, 1.80e-5
 	} {
 		asc, aus := heFixture(t, c.file)
 		d, err := NewDecoderASC(asc)
