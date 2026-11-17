@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"io"
 	"net"
 	"net/http"
@@ -650,6 +651,13 @@ func (p *memorystoreProvisioner) stopTunnels(ctx context.Context) {
 	}
 }
 
+// connectPermission is the permission each connection role grants, from
+// Google's IAM roles reference (redis.clusters.connect, memorystore.instances.connect).
+var connectPermission = map[string]string{
+	"roles/redis.dbConnectionUser":       "redis.clusters.connect",
+	"roles/memorystore.dbConnectionUser": "memorystore.instances.connect",
+}
+
 // memorystoreIAM is IAM auth's token source (#1614): the access tokens
 // creds minted, and the members of a project's bindings of a role in the
 // registry's policies (none while the registry is not open).
@@ -675,9 +683,15 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 			if err != nil || p == nil {
 				return nil
 			}
+			// A custom role (#1743) grants the connection when it holds the
+			// permission the predefined role does.
 			var out []string
 			for _, b := range p.Bindings {
 				if b.Role == role {
+					out = append(out, b.Members...)
+					continue
+				}
+				if perms, ok := reg.RolePermissions(b.Role); ok && iamroles.Grants(perms, connectPermission[role]) {
 					out = append(out, b.Members...)
 				}
 			}

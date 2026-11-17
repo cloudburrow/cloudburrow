@@ -77,6 +77,10 @@ var gcloudVerified = []struct {
 	// given --location call {location}-cloudresourcemanager (#1350), which
 	// TestGcloudRegionalTagBindings drives.
 	{resourceManagerService, "cloudresourcemanager", "/", true, true},
+	// IAM custom roles (#1743): gcloud iam roles calls iam.googleapis.com
+	// v1, served on the Resource Manager port. TestGcloudIAMCustomRoles
+	// drives create, describe, list, update, delete and undelete.
+	{resourceManagerService, "iam", "/", true, false},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},

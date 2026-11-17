@@ -131,6 +131,9 @@ func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest)
 	if err != nil {
 		return nil, err
 	}
+	if err := r.checkCustomRoleBindingsLocked(resource, bindingRoles(current), bindingRoles(&next)); err != nil {
+		return nil, err
+	}
 	b, err := json.Marshal(next)
 	if err != nil {
 		return nil, apierror.Internal(err, "encode the IAM policy")
@@ -149,7 +152,10 @@ func (r *Registry) ResetIAM(project string) error {
 	defer r.unlock()
 	if project != "" {
 		_ = r.st.Delete(iamKey("projects/" + project))
-		return nil
+		return r.dropRolesLocked("projects/" + project)
+	}
+	if err := r.deletePrefixLocked(rolePrefix); err != nil {
+		return err
 	}
 	keys, err := r.st.List(iamPrefix)
 	if err != nil {

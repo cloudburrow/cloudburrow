@@ -171,6 +171,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// port, in TestTerraformProjectService.
 	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// google_project_iam_custom_role and google_organization_iam_custom_role
+	// (#1743): the IAM API's roles, on the Resource Manager port, in
+	// TestTerraformIAMCustomRole.
+	{resourceManagerEndpoint, "iam_custom_endpoint", "GOOGLE_IAM_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
 	// in TestTerraformGoogleFolder.

@@ -38,8 +38,9 @@ package firestoreadmin
 // datastore.databases.getMetadata on some project, and lists the
 // Enterprise databases of the projects it holds it on.
 //
-// Not served: a binding's condition (Resource Manager refuses conditions
-// here, so a binding is project-wide), custom roles, and a role on the
+// A custom role (#1743) is evaluated by the permissions it holds, as the
+// host gives them. Not served: a binding's condition (Resource Manager
+// refuses conditions here, so a binding is project-wide), and a role on the
 // database rather than its project.
 
 import (
@@ -66,6 +67,19 @@ const MongoIAMPath = "/cloudburrow/v1/firestoreMongoIAM"
 type MongoIAM struct {
 	Tokens []MongoIAMToken                `json:"tokens"`
 	Roles  map[string]map[string][]string `json:"roles"`
+	// CustomRoles are the custom roles (#1743) Roles names, with the
+	// datastore permissions each grants (without "datastore."); a deleted
+	// or DISABLED one is absent, so it grants nothing.
+	CustomRoles map[string][]string `json:"customRoles,omitempty"`
+}
+
+// rolePerms are the permissions role grants: a predefined role's from
+// MongoRoles, a custom role's from the host. The caller holds a.mu.
+func (a *Admin) rolePerms(role string) []string {
+	if p, ok := MongoRoles[role]; ok {
+		return p
+	}
+	return a.mongoIAM.CustomRoles[role]
 }
 
 // MongoIAMToken is a minted access token: its SHA-256 in hex, its account
@@ -164,7 +178,7 @@ func (a *Admin) mongoVisibleDatabases(principal string) []string {
 		}
 		var perms []string
 		for _, role := range a.mongoIAM.Roles[principal][project] {
-			perms = append(perms, MongoRoles[role]...)
+			perms = append(perms, a.rolePerms(role)...)
 		}
 		if grants(perms, "databases.getMetadata") {
 			out = append(out, id)
@@ -185,7 +199,7 @@ func (a *Admin) mongoGrantsAnywhere(principal, p string) bool {
 	for _, roles := range a.mongoIAM.Roles[principal] {
 		var perms []string
 		for _, role := range roles {
-			perms = append(perms, MongoRoles[role]...)
+			perms = append(perms, a.rolePerms(role)...)
 		}
 		if grants(perms, p) {
 			return true
@@ -203,7 +217,7 @@ func (a *Admin) mongoPerms(email, project string) []string {
 	}
 	var out []string
 	for _, role := range a.mongoIAM.Roles[email][project] {
-		out = append(out, MongoRoles[role]...)
+		out = append(out, a.rolePerms(role)...)
 	}
 	return out
 }

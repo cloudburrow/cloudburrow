@@ -140,6 +140,9 @@ func (r *Registry) ResetProjectState(project string) error {
 // caller holds r.mu.
 func (r *Registry) dropProjectStateLocked(id string) error {
 	r.dropIAM("projects/" + id)
+	if err := r.dropRolesLocked("projects/" + id); err != nil {
+		return err
+	}
 	if err := r.deletePrefixLocked(orgPolicyPrefix + id + "/"); err != nil {
 		return err
 	}

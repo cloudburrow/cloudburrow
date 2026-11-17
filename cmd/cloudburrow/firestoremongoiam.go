@@ -50,7 +50,7 @@ const (
 
 // payload is what the front is given now.
 func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
-	m := firestoreadmin.MongoIAM{Tokens: []firestoreadmin.MongoIAMToken{}, Roles: map[string]map[string][]string{}}
+	m := firestoreadmin.MongoIAM{Tokens: []firestoreadmin.MongoIAMToken{}, Roles: map[string]map[string][]string{}, CustomRoles: map[string][]string{}}
 	emails := map[string]bool{}
 	for _, t := range f.creds.LiveTokens(now) {
 		if t.Email == "" {
@@ -85,7 +85,23 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 		}
 		for _, b := range pol.Bindings {
 			if _, ok := firestoreadmin.MongoRoles[b.Role]; !ok {
-				continue
+				// A custom role (#1743) is given with its datastore.
+				// permissions, which the front checks as a predefined
+				// role's.
+				perms, custom := reg.RolePermissions(b.Role)
+				if !custom {
+					continue
+				}
+				var ds []string
+				for _, p := range perms {
+					if rest, ok := strings.CutPrefix(p, "datastore."); ok {
+						ds = append(ds, rest)
+					}
+				}
+				if len(ds) == 0 {
+					continue
+				}
+				m.CustomRoles[b.Role] = ds
 			}
 			for _, member := range b.Members {
 				if key, ok := userCredsMember(member, ids); ok {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -615,6 +616,10 @@ func (s *Server) Start(ctx context.Context) error {
 	rmpb.RegisterTagBindingsServer(g, s.tags.bindings)
 	rmpb.RegisterTagHoldsServer(g, s.tags.holds)
 	longrunningpb.RegisterOperationsServer(g, OperationsServer{})
+	iamAdmin := NewIAMAdminServer(s.projects.reg)
+	adminpb.RegisterIAMServer(g, iamAdmin)
+	iamREST := &rest.Transcoder{Packages: []string{"google.iam.admin.v1"}}
+	iamREST.RegisterService(iamAdminDesc, iamAdmin)
 
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
@@ -624,9 +629,15 @@ func (s *Server) Start(ctx context.Context) error {
 	s.folders.restRoutes(router, NewOrganizationsServer(s.projects.reg), ops)
 	s.folders.v2Routes(router, ops)
 	s.tags.restRoutes(router)
-	var jsonAPI http.Handler = router
+	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isIAMAdminPath(r.URL.Path) {
+			iamREST.ServeHTTP(w, r)
+			return
+		}
+		router.ServeHTTP(w, r)
+	})
 	if s.requests != nil {
-		jsonAPI = rest.Observe(router, s.requests)
+		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
 	both := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {

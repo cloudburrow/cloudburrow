@@ -52,3 +52,28 @@ func TestMongoIAMUserCreds(t *testing.T) {
 		t.Errorf("visible databases = %v, want [ent]", got)
 	}
 }
+
+// TestMongoIAMCustomRole (#1743): a custom role grants the datastore
+// permissions the host says it holds, and nothing else.
+func TestMongoIAMCustomRole(t *testing.T) {
+	a := New("")
+	a.databases["projects/p/databases/ent"] = &adminpb.Database{Name: "projects/p/databases/ent", DatabaseEdition: adminpb.Database_ENTERPRISE}
+	s := a.NewMongoServer("", t.Logf)
+	conn := &mongoConn{db: &mongoDB{name: "projects/p/databases/ent", id: "ent"}, principal: "sa@p.iam.gserviceaccount.com"}
+	find := bson.D{{Key: "find", Value: "c"}}
+	insert := bson.D{{Key: "insert", Value: "c"}}
+	const role = "projects/p/roles/reader"
+	a.SetMongoIAM(&MongoIAM{Roles: map[string]map[string][]string{"sa@p.iam.gserviceaccount.com": {"p": {role}}},
+		CustomRoles: map[string][]string{role: {"entities.get", "entities.list"}}})
+	if err := s.checkMongoIAM(conn, "find", "find", find); err != nil {
+		t.Errorf("a custom role with entities.get and list: find refused: %v", err)
+	}
+	if err := s.checkMongoIAM(conn, "insert", "insert", insert); err == nil {
+		t.Error("a custom role without entities.create: insert allowed")
+	}
+	// A role the host gives no permissions for (deleted, DISABLED) grants none.
+	a.SetMongoIAM(&MongoIAM{Roles: map[string]map[string][]string{"sa@p.iam.gserviceaccount.com": {"p": {role}}}})
+	if err := s.checkMongoIAM(conn, "find", "find", find); err == nil {
+		t.Error("a custom role with no permissions: find allowed")
+	}
+}
