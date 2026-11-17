@@ -389,3 +389,64 @@ func TestStorageBrowserCreatesAndDeletesManagedFolders(t *testing.T) {
 		t.Error("a deleted managed folder is still offered Delete")
 	}
 }
+
+// propertyValue is the value of the property labelled label in sec.
+func propertyValue(sec console.Section, label string) string {
+	for _, g := range sec.Groups {
+		for _, p := range g.Properties {
+			if p.Label == label {
+				return p.Value
+			}
+		}
+	}
+	return ""
+}
+
+// Edit bucket's Pause hard deletion (#1702) sets softDeletePolicy
+// .hardDeletePause through buckets.patch; the Configuration tab shows it with
+// its effective time and the Deleted objects tab says what it does; turning
+// it off clears both.
+func TestStorageHardDeletePauseThroughTheConsole(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, _ := newObjectOpsProvider(t)
+
+	d, err := p.Detail(ctx, "p", []string{"ops"})
+	if err != nil || d.Edit == nil {
+		t.Fatalf("the bucket page offers no edit (%v): %+v", err, d)
+	}
+	values := bucketEditValues(d.Edit)
+	if values["hardDeletePause"] != "false" {
+		t.Fatalf("Pause hard deletion is prefilled %q; want false", values["hardDeletePause"])
+	}
+	values["hardDeletePause"] = "true"
+	if err := p.Edit(ctx, "p", []string{"ops"}, values); err != nil {
+		t.Fatalf("Edit bucket: %v", err)
+	}
+	b, err := p.readBucket(ctx, "ops")
+	if err != nil || !b.hardDeletePaused() || b.SoftDeletePolicy.HardDeletePause.EffectiveTime == "" ||
+		b.softDeleteSeconds() != "604800" {
+		t.Fatalf("after pausing, the bucket reads %+v, %v", b.SoftDeletePolicy, err)
+	}
+	if v := propertyValue(bucketConfigSection(b), "Hard delete pause"); !strings.HasPrefix(v, "Enabled, since ") {
+		t.Errorf("the Configuration tab shows the pause as %q", v)
+	}
+	if sec := p.deletedObjects(ctx, b); !strings.Contains(sec.Listing.Note, "Hard deletion is paused") {
+		t.Errorf("the Deleted objects tab's note is %q; want it to say hard deletion is paused", sec.Listing.Note)
+	}
+	d, _ = p.Detail(ctx, "p", []string{"ops"})
+	values = bucketEditValues(d.Edit)
+	if values["hardDeletePause"] != "true" {
+		t.Errorf("Pause hard deletion is prefilled %q after the save; want true", values["hardDeletePause"])
+	}
+	values["hardDeletePause"] = "false"
+	if err := p.Edit(ctx, "p", []string{"ops"}, values); err != nil {
+		t.Fatalf("Edit bucket: %v", err)
+	}
+	if b, err = p.readBucket(ctx, "ops"); err != nil || b.hardDeletePaused() {
+		t.Fatalf("after resuming, the bucket reads %+v, %v", b.SoftDeletePolicy, err)
+	}
+	if v := propertyValue(bucketConfigSection(b), "Hard delete pause"); v != "Disabled" {
+		t.Errorf("the Configuration tab shows the resumed pause as %q", v)
+	}
+}

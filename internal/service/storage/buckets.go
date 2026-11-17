@@ -271,8 +271,11 @@ func defaultBucketFields(f map[string]any, created time.Time) {
 	if f["softDeletePolicy"] == nil {
 		f["softDeletePolicy"] = map[string]any{"retentionDurationSeconds": "604800"}
 	}
-	if p, ok := f["softDeletePolicy"].(map[string]any); ok && p["effectiveTime"] == nil {
-		p["effectiveTime"] = rfc3339(created)
+	if p, ok := f["softDeletePolicy"].(map[string]any); ok {
+		if p["effectiveTime"] == nil {
+			p["effectiveTime"] = rfc3339(created)
+		}
+		stampHardDeletePause(p, nil, created)
 	}
 }
 
