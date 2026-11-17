@@ -16,8 +16,17 @@ The Node client cannot use `STORAGE_EMULATOR_HOST` as `cloudburrow env`
 exports it. It takes the variable verbatim as the JSON API's base URL, which
 would then need `/storage/v1`, and as the upload URL, which must not have it.
 Pass the value as `apiEndpoint` instead and take the variable out of the
-environment, where the client would still read it. With a custom endpoint the
-client sends no credentials.
+environment, where the client would still read it.
+
+Give the client google-auth-library's `PassThroughClient`, which sends no
+credentials. `@google-cloud/storage` 9 authenticates every JSON API request,
+custom endpoint or not: it ignores `useAuthWithCustomEndpoint`, which 8.x
+honoured
+([googleapis/google-cloud-node#9873](https://github.com/googleapis/google-cloud-node/issues/9873)),
+so with application default credentials it would fetch a token from
+`oauth2.googleapis.com` first, and without them it fails with "Could not load
+the default credentials". A client that signs URLs still needs its
+`credentials`; signing makes no request.
 
 Pass `resumable: false` to `save()` (or give `createWriteStream()` a
 `chunkSize`). The client's default for both is a resumable upload sent as one
@@ -29,10 +38,15 @@ refuses that range with 400 `Invalid Content-Range` (see
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Storage } from '@google-cloud/storage';
+import { PassThroughClient } from 'google-auth-library';
 
 const apiEndpoint = process.env.STORAGE_EMULATOR_HOST;
 delete process.env.STORAGE_EMULATOR_HOST;
-const storage = new Storage({ apiEndpoint, projectId: process.env.GOOGLE_CLOUD_PROJECT });
+const storage = new Storage({
+  apiEndpoint,
+  projectId: process.env.GOOGLE_CLOUD_PROJECT,
+  authClient: new PassThroughClient(),
+});
 
 const [bucket] = await storage.createBucket(`example-${randomUUID()}`);
 await bucket.file('hello.txt').save('hello', { resumable: false });

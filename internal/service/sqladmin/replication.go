@@ -169,11 +169,9 @@ func (m *MySQL) Promote(ctx context.Context) error {
 		return err
 	}
 	// The stored procedures demoteMaster with skipReplicationSetup
-	// installed are removed, as Cloud SQL removes them (#1614), unlogged:
-	// Cloud SQL's own procedures are not the instance's data, and a DROP
-	// PROCEDURE IF EXISTS is written to the binary log, so each would give
-	// the promoted server a GTID of its own, which a later demoteMaster's
-	// GTID check refuses.
+	// installed are removed, as Cloud SQL removes them (#1614), outside the
+	// binary log: Cloud SQL's own housekeeping gives the instance no GTIDs,
+	// which a later demoteMaster's consistency check would count against it.
 	return m.execUnlogged(ctx, dropDemoteProceduresStmts()...)
 }
 

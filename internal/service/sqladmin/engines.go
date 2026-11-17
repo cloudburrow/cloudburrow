@@ -315,8 +315,10 @@ func (m *MySQL) exec(ctx context.Context, stmts ...string) error {
 	return nil
 }
 
-// execUnlogged runs stmts on one connection with sql_log_bin off, so they
-// are not in the binary log and take no GTID.
+// execUnlogged runs statements, in order, on one connection with
+// sql_log_bin off: Cloud SQL's own housekeeping, which neither writes to
+// the binary log nor gives the server a GTID, so neither a replica nor a
+// GTID consistency check sees it.
 func (m *MySQL) execUnlogged(ctx context.Context, stmts ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
 	defer cancel()

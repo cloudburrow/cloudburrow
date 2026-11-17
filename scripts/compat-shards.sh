@@ -226,8 +226,12 @@ compat_shard() {
       # exported, so the Cloud Storage tests stay in the storage shard.
       # Cloud KMS as CMEK_KMS, for the customer-managed keys, so the KMS
       # suite stays in served.
+      # Resource Manager, which every instance serves, as
+      # MEMORYSTORE_RESOURCEMANAGER, for the principals the IAM auth tests
+      # grant the connect roles to (#1614), so the Resource Manager suite
+      # stays in storage.
       SERVICES=memorystore,storage,kms
-      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS
+      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).

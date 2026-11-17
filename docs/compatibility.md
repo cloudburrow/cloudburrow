@@ -1463,8 +1463,11 @@ with the emulator's `owner` token as its only credential. **Storage does not wor
 with `STORAGE_EMULATOR_HOST` as exported.** The Node client uses the variable verbatim as the
 JSON API's base URL, so it would need `/storage/v1`. It also uses it as the upload endpoint, which
 must not have that path. So unset the variable and pass its value as `apiEndpoint`, as the client's
-own source advises: `new Storage({ apiEndpoint: 'http://127.0.0.1:<port>' })`. With a custom
-endpoint the client sends no credentials. Cloud Tasks and Secret Manager read no emulator
+own source advises, with google-auth-library's `PassThroughClient` as its `authClient`:
+`new Storage({ apiEndpoint: 'http://127.0.0.1:<port>', authClient: new PassThroughClient() })`.
+Version 9 authenticates a custom endpoint too and ignores `useAuthWithCustomEndpoint`
+(googleapis/google-cloud-node#9873), so without it the client fetches a token from
+`oauth2.googleapis.com`. Cloud Tasks and Secret Manager read no emulator
 variable. Pass the endpoint from `CLOUDBURROW_TASKS_ENDPOINT` or
 `CLOUDBURROW_SECRETMANAGER_ENDPOINT` as `apiEndpoint` and `port`, with `sslCreds:
 grpc.credentials.createInsecure()` (`grpc` from `google-gax`).
