@@ -26,7 +26,7 @@ import (
 // writes. A second switchover switches them back, and a row written on the
 // original primary reaches its replica again. Switchover of a replica not
 // designated, a designation on a replica, and a PostgreSQL primary's DR
-// replica and switchover (501) are refused.
+// replica that is not its replica and switchover of a primary are refused.
 // covers: sql.instances.switchover, sql.instances.patch, sql.instances.insert, sql.instances.get, sql.instances.delete, sql.instances.promoteReplica, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLSwitchover(t *testing.T) {
 	h := New(t)
@@ -174,12 +174,14 @@ func TestCloudSQLSwitchover(t *testing.T) {
 	wantCode(t, "switchover after the designation is removed", err, 400, "not the DR replica")
 
 	if os.Getenv(EnvCloudSQL) != "" {
+		// A PostgreSQL primary's DR replica and switchover are served
+		// (TestCloudSQLSwitchoverPostgres, #1524), with the same refusals.
 		pg := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: fmt.Sprintf("sw-pg-%d", n), DatabaseVersion: "POSTGRES_17",
 			Region: "us-central1", Settings: plus()})
 		_, err = designate(pg.Name, "x")
-		wantCode(t, "a PostgreSQL primary's DR replica", err, 501, "PostgreSQL")
+		wantCode(t, "a PostgreSQL primary's DR replica that is not its replica", err, 400, "not a read replica")
 		_, err = svc.Instances.Switchover(project, pg.Name).Do()
-		wantCode(t, "switchover of a PostgreSQL instance", err, 501, "PostgreSQL")
+		wantCode(t, "switchover of a PostgreSQL primary", err, 400, "not a read replica")
 	}
 }
 

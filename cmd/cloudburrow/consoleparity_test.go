@@ -523,7 +523,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestCloudSQLConsoleDemote", "TestCloudSQLDemoteThroughThePage"}},
 	{Resource: "Cloud SQL DR replicas and switchover", Service: "sqladmin",
 		Methods:  []string{"sql.instances.switchover"},
-		Provider: "cloudsql-instances", Offers: "Designate DR replica and Remove DR replica on a MySQL primary's page, which shows its DR replica; Switchover, confirmed by the primary's instance ID, with a timeout, on the DR replica's page, which shows its role (#1614)",
+		Provider: "cloudsql-instances", Offers: "Designate DR replica and Remove DR replica on a MySQL or PostgreSQL (#1524) primary's page, which shows its DR replica; Switchover, confirmed by the primary's instance ID, with a timeout, on the DR replica's page, which shows its role (#1614)",
 		Tests: []string{"TestCloudSQLConsoleSwitchover"}},
 	{Resource: "Cloud SQL high availability", Service: "sqladmin",
 		Methods:  []string{"sql.instances.failover"},

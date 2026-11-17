@@ -92,6 +92,11 @@ type Spec struct {
 	// Seeded is set on a former primary a switchover made a replica
 	// (#1614): it has its data, and replicates by GTID auto-positioning.
 	Seeded bool `json:"seeded,omitempty"`
+	// RebuildEpoch is advanced on a PostgreSQL former primary a switchover
+	// made a replica (#1524): its server replaces its data with a
+	// pg_basebackup of its primary when the epoch its volume records
+	// differs, and keeps it otherwise.
+	RebuildEpoch int `json:"rebuildEpoch,omitempty"`
 }
 
 // Regional reports whether the instance has a standby (#1408).

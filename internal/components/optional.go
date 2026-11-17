@@ -938,6 +938,13 @@ type SQLReplicaSource struct {
 	// server starts empty, and the provisioner subscribes it to the
 	// source's databases by logical replication at startExternalSync.
 	Logical bool
+	// Epoch is a PostgreSQL replica's rebuild (#1524): a former primary a
+	// switchover made a replica has data that diverged from its new
+	// primary's, so when the epoch its volume records differs, its data
+	// directory is replaced by a pg_basebackup of the primary. 0 is a
+	// replica created as one, which takes a base backup only when its data
+	// directory is empty.
+	Epoch int
 }
 
 // SQLReplicaUser is the replication user a replica connects to its
@@ -977,14 +984,23 @@ func CloudSQLReplicaBackend(b Backend, mysql bool, src SQLReplicaSource) Backend
 	for i, a := range args {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 	}
+	// A rebuilt replica's marker beside its data directory records the
+	// epoch it was rebuilt at (#1524).
+	rebuild, mark := `[ ! -s "$PGDATA/PG_VERSION" ]`, ""
+	if src.Epoch > 0 {
+		b.Env["CLOUDSQL_REBUILD_EPOCH"] = fmt.Sprint(src.Epoch)
+		rebuild = `[ "$(cat "$(dirname "$PGDATA")/cloudsql-rebuild-epoch" 2>/dev/null)" != "$CLOUDSQL_REBUILD_EPOCH" ]`
+		mark = `
+  echo "$CLOUDSQL_REBUILD_EPOCH" > "$(dirname "$PGDATA")/cloudsql-rebuild-epoch"`
+	}
 	b.Command = []string{"sh", "-c", `set -e
-if [ ! -s "$PGDATA/PG_VERSION" ]; then
-  mkdir -p "$PGDATA" && chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
+if ` + rebuild + `; then
+  mkdir -p "$PGDATA" && rm -rf "$PGDATA"/* && chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
   asuser=$(command -v su-exec || command -v gosu)
   until PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD" "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` +
 		fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser + ` -D "$PGDATA" -R -X stream -c fast; do
     echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA"/* ; sleep 2
-  done
+  done` + mark + `
 fi
 exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
