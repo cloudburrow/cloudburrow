@@ -1,0 +1,138 @@
+name: Upgrade test
+
+# The end-to-end upgrade test (#1605, #1714): test/upgrade brings up a
+# persistent instance with the older release's published linux/amd64 binary,
+# seeds every service through the official clients, takes a `state save`
+# archive and stops it, then brings the same state directory up with this
+# commit's CLI and reads everything back, and loads the archive into it and
+# reads that back. Two instances of sixteen services, one after the other,
+# take about half an hour of a runner, so it runs nightly and by hand only:
+# never on a pull request (PR CI runs fast jobs only) and not on every push
+# to main. A red scheduled run, or one dispatched on main, is reported by
+# report-red-runs.yml.
+on:
+  schedule:
+    # 05:37 UTC, off the hour and clear of the other nightlies.
+    - cron: "37 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # No job may reach Google Cloud. The test's clients refuse an empty
+  # endpoint, and keeping these unset means a mistake cannot cost money.
+  # Same as ci.yml.
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+  GOOGLE_CLOUD_PROJECT: ""
+
+jobs:
+  upgrade:
+    name: upgrade from the latest release
+    runs-on: ubuntu-latest
+    # The test's own deadline is 80 minutes (go test -timeout 90m); this
+    # leaves the build its share above it.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - id: go
+        run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+      # The embedded BigQuery emulator, from ci.yml's cache, read only and
+      # under ci.yml's key, as arm64.yml restores it (#1130): a night whose
+      # emulator sources main has already built builds nothing.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: internal/bigqueryimage/bin/bigquery-emulator-*
+          key: bigquery-emulator-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
+
+      - name: Install kubectl
+        run: |
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          install_only: true
+          version: v0.33.0
+
+      # The older release is the one test/upgrade names (OlderRelease), as
+      # this repository published it: its linux/amd64 archive from the
+      # GitHub release, with the run's own token, checked against the
+      # release's checksums.txt before it is unpacked. The test then checks
+      # that the binary says it is that release.
+      - name: Download the older release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          OLDER=$(sed -n 's/^const OlderRelease = "\(v[0-9][^"]*\)"$/\1/p' test/upgrade/upgrade_test.go)
+          [ -n "$OLDER" ] || { echo "test/upgrade names no OlderRelease"; exit 1; }
+          ARCHIVE="cloudburrow_${OLDER}_linux_amd64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/older"
+          cd "$RUNNER_TEMP/older"
+          gh release download "$OLDER" --repo "$GITHUB_REPOSITORY" --pattern "$ARCHIVE" --pattern checksums.txt
+          grep -E "  $ARCHIVE\$" checksums.txt | sha256sum -c -
+          tar -xzf "$ARCHIVE"
+          echo "CLOUDBURROW_UPGRADE_OLD_BIN=$RUNNER_TEMP/older/${ARCHIVE%.tar.gz}/cloudburrow" >> "$GITHUB_ENV"
+
+      - name: Build this commit's CLI
+        # make build, not go build: the CLI embeds the storage server and
+        # BigQuery emulator binaries `up` builds its images from (#514).
+        run: |
+          make build
+          ./bin/cloudburrow version
+
+      - name: Run the upgrade test
+        env:
+          CLOUDBURROW_UPGRADE_LOGS: ${{ runner.temp }}/upgrade-logs
+        run: |
+          mkdir -p "$CLOUDBURROW_UPGRADE_LOGS"
+          set -o pipefail
+          CLOUDBURROW_UPGRADE_BIN="$PWD/bin/cloudburrow" \
+            go test -tags upgrade -count=1 -timeout 90m -v -run '^TestUpgradeFromOlderRelease$' ./test/upgrade/ | tee upgrade.log
+          # go test exits 0 when the test skips, and it skips without its
+          # binary, so it must have passed.
+          grep -q -- '^--- PASS: TestUpgradeFromOlderRelease (' upgrade.log ||
+            { echo "TestUpgradeFromOlderRelease did not pass"; exit 1; }
+          df -h /
+          docker system df || true
+
+      - name: Collect diagnostics
+        if: failure()
+        env:
+          CLOUDBURROW_UPGRADE_LOGS: ${{ runner.temp }}/upgrade-logs
+        run: |
+          mkdir -p diagnostics
+          # The instance's up.log and, on a failure, its bug-report bundle
+          # (#293), both written by the test before it deletes the instance.
+          cp -r "$CLOUDBURROW_UPGRADE_LOGS"/. diagnostics/ 2>/dev/null || true
+          cp upgrade.log diagnostics/ 2>/dev/null || true
+          kind get clusters > diagnostics/clusters.txt 2>&1 || true
+          docker ps -a > diagnostics/containers.txt 2>&1 || true
+          df -h > diagnostics/df.txt 2>&1 || true
+          for c in $(kind get clusters 2>/dev/null); do
+            kind export logs "diagnostics/$c" --name "$c" 2>&1 | tail -50 || true
+          done
+          # Bounded on purpose: a multi-megabyte dump helps nobody.
+          find diagnostics -type f -size +1M ! -name '*bundle.tar.gz' ! -name upgrade.log -delete || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: upgrade-diagnostics
+          path: diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Leave no clusters behind
+        if: always()
+        run: |
+          for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done

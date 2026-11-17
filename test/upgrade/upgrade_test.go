@@ -56,8 +56,13 @@ func ports(base int) []string {
 //
 //	CLOUDBURROW_UPGRADE_BIN=$PWD/bin/cloudburrow go test -tags upgrade -timeout 90m ./test/upgrade/
 //
+// CLOUDBURROW_UPGRADE_OLD_BIN is OlderRelease's published binary, from the
+// repository's GitHub release (`gh release download`), as the Upgrade test
+// workflow passes it (#1714); without it the test builds OlderRelease from
+// its tag, in a worktree of this repository.
 // CLOUDBURROW_UPGRADE_PORT_BASE picks the ports (default 29300; this release
-// also takes the hundred after them).
+// also takes the hundred after them), and CLOUDBURROW_UPGRADE_NAME the
+// instance's name (default upgrade-<OlderRelease>).
 func TestUpgradeFromOlderRelease(t *testing.T) {
 	newBin := os.Getenv("CLOUDBURROW_UPGRADE_BIN")
 	if newBin == "" {
@@ -70,19 +75,27 @@ func TestUpgradeFromOlderRelease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Minute)
 	defer cancel()
 	tmp := t.TempDir()
-	oldBin := buildRelease(t, OlderRelease, tmp)
+	oldBin := olderBinary(t, tmp)
 	stateDir := filepath.Join(tmp, "state")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	name := "upgrade-" + strings.ReplaceAll(strings.TrimPrefix(OlderRelease, "v"), ".", "-")
+	if v := os.Getenv("CLOUDBURROW_UPGRADE_NAME"); v != "" {
+		name = v
+	}
 	common := append([]string{"--name", name, "--state-dir", stateDir, "--services", services}, ports(base)...)
 	t.Cleanup(func() {
 		// CLOUDBURROW_UPGRADE_LOGS keeps the instance's up.log, which names
-		// the images up built, for removing them afterwards.
+		// the images up built, for removing them afterwards, and on a failure
+		// the instance's bug-report bundle, which CI uploads (#1714).
 		if dir := os.Getenv("CLOUDBURROW_UPGRADE_LOGS"); dir != "" {
 			if b, err := os.ReadFile(filepath.Join(stateDir, name, "up.log")); err == nil {
 				_ = os.WriteFile(filepath.Join(dir, name+"-up.log"), b, 0o600)
+			}
+			if t.Failed() {
+				_ = exec.Command(newBin, "diagnose", "-o", filepath.Join(dir, name+"-bundle.tar.gz"),
+					"--name", name, "--state-dir", stateDir).Run()
 			}
 		}
 		_ = exec.Command(newBin, "stop", "--name", name, "--state-dir", stateDir).Run()
@@ -139,6 +152,25 @@ func report(t *testing.T, what string, rs map[string]error) {
 			t.Errorf("%s: %s: %v", what, s, rs[s])
 		}
 	}
+}
+
+// olderBinary is OlderRelease's CLI: the published one that
+// CLOUDBURROW_UPGRADE_OLD_BIN names, which must say it is OlderRelease, or
+// else one built from the tag.
+func olderBinary(t *testing.T, dir string) string {
+	t.Helper()
+	bin := os.Getenv("CLOUDBURROW_UPGRADE_OLD_BIN")
+	if bin == "" {
+		return buildRelease(t, OlderRelease, dir)
+	}
+	out, err := exec.Command(bin, "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s version: %v\n%s", bin, err, out)
+	}
+	if !strings.HasPrefix(string(out), "cloudburrow "+OlderRelease+" ") {
+		t.Fatalf("CLOUDBURROW_UPGRADE_OLD_BIN is not %s: %s", OlderRelease, out)
+	}
+	return bin
 }
 
 // buildRelease builds the CLI at tag into dir, from a worktree of this
