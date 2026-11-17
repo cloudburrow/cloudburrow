@@ -8,6 +8,14 @@
 // as the client's own comment advises ("Use apiEndpoint instead"), the test
 // passes it as apiEndpoint and takes it out of the environment, where the
 // client would otherwise still read it.
+//
+// 9.0.0 authenticates every JSON API request, custom endpoint or not: its
+// StorageTransport sends them all through GoogleAuth.request() and ignores
+// useAuthWithCustomEndpoint, which 8.x honoured (googleapis/google-cloud-node
+// #9873). With the ADC fixture that means a token fetch from
+// oauth2.googleapis.com, which the guard refuses. So the client gets
+// google-auth-library's PassThroughClient, the AuthClient it documents for
+// local emulators, which sends no credentials, as the 8.x client did.
 
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -15,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { Storage } from '@google-cloud/storage';
+import { PassThroughClient } from 'google-auth-library';
 
 import { skipUnless, suffix } from './guard.mjs';
 
@@ -23,7 +32,12 @@ const endpoint = process.env.STORAGE_EMULATOR_HOST;
 delete process.env.STORAGE_EMULATOR_HOST;
 
 function client(options = {}) {
-  return new Storage({ projectId: process.env.GOOGLE_CLOUD_PROJECT, apiEndpoint: endpoint, ...options });
+  return new Storage({
+    projectId: process.env.GOOGLE_CLOUD_PROJECT,
+    apiEndpoint: endpoint,
+    authClient: new PassThroughClient(),
+    ...options,
+  });
 }
 
 async function withBucket(prefix, fn) {
@@ -106,7 +120,9 @@ function signingIdentity() {
 }
 
 test('a V4 signed URL reads the object, and a tampered one is 403', { skip }, async () => {
-  const signer = client({ credentials: signingIdentity() });
+  // Signing needs the key, so this client signs with credentials and sends no
+  // request: getSignedUrl signs locally.
+  const signer = client({ credentials: signingIdentity(), authClient: undefined });
   await withBucket('signed', async (_storage, bucket) => {
     await bucket.file('secret.txt').save('classified', { resumable: false });
     const [url] = await signer.bucket(bucket.name).file('secret.txt').getSignedUrl({

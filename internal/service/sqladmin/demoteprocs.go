@@ -82,13 +82,14 @@ END`},
 }
 
 // installDemoteProcedures installs the procedures in the instance's
-// server, replacing any left from an earlier demoteMaster.
+// server, replacing any left from an earlier demoteMaster, outside the
+// binary log, so they give the instance no GTIDs of its own.
 func installDemoteProcedures(ctx context.Context, m *MySQL) error {
 	var stmts []string
 	for _, p := range demoteProcedures {
 		stmts = append(stmts, "DROP PROCEDURE IF EXISTS mysql."+p.name, "CREATE PROCEDURE mysql."+p.name+p.def)
 	}
-	return m.exec(ctx, stmts...)
+	return m.execUnlogged(ctx, stmts...)
 }
 
 // dropDemoteProceduresStmts are the statements promoteReplica removes the

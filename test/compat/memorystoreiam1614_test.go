@@ -42,11 +42,13 @@ type iamPrincipal struct {
 }
 
 // newIAMPrincipal asks for the metadata and Resource Manager endpoints
-// before any call, so a shard without them skips.
+// before any call, so a shard without them skips. Resource Manager is the
+// memorystore shard's MEMORYSTORE_RESOURCEMANAGER, so the Resource Manager
+// suite stays in storage.
 func newIAMPrincipal(t *testing.T, h *Harness, project, name string, roles ...string) *iamPrincipal {
 	t.Helper()
 	meta := h.Endpoint(EnvMetadata)
-	rmEndpoint := h.Endpoint(EnvResourceManager)
+	rmEndpoint := runShardEndpoint(h, envMemorystoreResourceManager, EnvResourceManager)
 	if !strings.HasPrefix(meta, "http://") {
 		meta = "http://" + meta
 	}
