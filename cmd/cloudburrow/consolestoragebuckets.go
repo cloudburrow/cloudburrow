@@ -91,6 +91,12 @@ type bucketMeta struct {
 	SoftDeletePolicy *struct {
 		RetentionDurationSeconds string `json:"retentionDurationSeconds"`
 		EffectiveTime            string `json:"effectiveTime"`
+		// HardDeletePause keeps soft-deleted objects past their hard
+		// delete time while enabled (#1702).
+		HardDeletePause *struct {
+			Enabled       bool   `json:"enabled"`
+			EffectiveTime string `json:"effectiveTime"`
+		} `json:"hardDeletePause"`
 	} `json:"softDeletePolicy"`
 	// ObjectRetention is set only at creation, with enableObjectRetention;
 	// it decides whether the objects' retention can be edited (#853).
@@ -148,6 +154,11 @@ func (b bucketMeta) softDeleteSeconds() string {
 		return "0"
 	}
 	return b.SoftDeletePolicy.RetentionDurationSeconds
+}
+
+// hardDeletePaused is whether the soft delete policy pauses hard deletion.
+func (b bucketMeta) hardDeletePaused() bool {
+	return b.SoftDeletePolicy != nil && b.SoftDeletePolicy.HardDeletePause != nil && b.SoftDeletePolicy.HardDeletePause.Enabled
 }
 
 // bucketURL is a bucket's JSON API address.
@@ -212,6 +223,10 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 			{Name: "softDeleteSeconds", Label: "Soft delete retention (seconds)", Type: "text", Required: true,
 				Section: protection, Default: b.softDeleteSeconds(), Pattern: `^[0-9]+$`,
 				Help: "How long a deleted object can be restored: 0 turns soft delete off, otherwise 604800 (7 days) to 7776000 (90 days). A change applies to what is deleted after it."},
+			{Name: "hardDeletePause", Label: "Pause hard deletion", Type: "checkbox", Section: protection,
+				Default: strconv.FormatBool(b.hardDeletePaused()),
+				Help: "On, soft-deleted objects are kept, and can be restored, past their hard delete time until the pause is turned off. " +
+					"Off, anything already past its hard delete time is permanently deleted."},
 			{Name: "retentionPeriod", Label: "Retention period (seconds)", Type: "text",
 				Section: protection, Default: b.retentionSeconds(), Pattern: `^[0-9]*$`, Help: retentionHelp},
 			{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: protection,
@@ -308,7 +323,8 @@ func (p storageProvider) Edit(ctx context.Context, _ string, path []string, valu
 		"versioning":            map[string]any{"enabled": values["versioning"] == "true"},
 		"defaultEventBasedHold": values["defaultEventBasedHold"] == "true",
 		"softDeletePolicy": map[string]any{
-			"retentionDurationSeconds": strings.TrimSpace(values["softDeleteSeconds"])},
+			"retentionDurationSeconds": strings.TrimSpace(values["softDeleteSeconds"]),
+			"hardDeletePause":          map[string]any{"enabled": values["hardDeletePause"] == "true"}},
 		"retentionPolicy": nil,
 		"lifecycle":       nil,
 		"cors":            nil,
@@ -437,6 +453,10 @@ func (p storageProvider) deletedObjects(ctx context.Context, b bucketMeta) conso
 	if b.softDeleteSeconds() == "0" {
 		sec.Listing.Note = "Soft delete is off for this bucket: an object deleted now is gone at once. " +
 			"Objects deleted while it was on are listed until their hard delete time."
+	}
+	if b.hardDeletePaused() {
+		sec.Listing.Note = strings.TrimSpace(sec.Listing.Note + " Hard deletion is paused: soft-deleted objects are kept, " +
+			"and can be restored, past their hard delete time until the pause is turned off in Edit bucket.")
 	}
 	c, err := p.storageClient(ctx)
 	if err != nil {

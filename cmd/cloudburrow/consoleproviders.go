@@ -3653,8 +3653,16 @@ func bucketConfigSection(b bucketMeta) console.Section {
 	if rp := b.RetentionPolicy; rp != nil && rp.EffectiveTime != "" {
 		protection = append(protection, console.Property{Label: "Retention effective", Value: shortTime(rp.EffectiveTime)})
 	}
+	hardDeletePause := "Disabled"
+	if b.hardDeletePaused() {
+		hardDeletePause = "Enabled"
+		if t := b.SoftDeletePolicy.HardDeletePause.EffectiveTime; t != "" {
+			hardDeletePause += ", since " + shortTime(t)
+		}
+	}
 	protection = append(protection,
 		console.Property{Label: "Soft delete", Value: softDelete},
+		console.Property{Label: "Hard delete pause", Value: hardDeletePause},
 		console.Property{Label: "Default event-based hold", Value: yesNo(b.DefaultEventBasedHold)})
 
 	labels := make([]console.Property, 0, len(b.Labels))
