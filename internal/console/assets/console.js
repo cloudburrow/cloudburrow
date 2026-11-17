@@ -2937,7 +2937,8 @@ async function renderDetail(view, route, resourcePath) {
   const drawPermissionsSection = (into, section, reload) => {
     const view = section.permissions || {};
     const rows = (view.bindings || []).flatMap((b) =>
-      (b.members || []).map((member) => ({ member, role: b.role, condition: b.condition || "" })))
+      (b.members || []).map((member) => ({ member, role: b.role, condition: b.condition || "",
+        conditional: b.conditional || null })))
       .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
     const withCondition = rows.some((r) => r.condition);
     const change = (body) => send(
@@ -2953,7 +2954,7 @@ async function renderDetail(view, route, resourcePath) {
       onConfirm: async () => {
         const op = recordOperation(`Remove ${row.member} from ${row.role} on ${name}`);
         try {
-          const res = await change({ Remove: { Member: row.member, Role: row.role } });
+          const res = await change({ Remove: { Member: row.member, Role: row.role, Condition: row.conditional } });
           op.succeeded("", res.operation);
         } catch (err) {
           op.failed(err.message, err.operation);
@@ -2984,8 +2985,21 @@ async function renderDetail(view, route, resourcePath) {
             el("tbody", {}, ...rows.map((row) => el("tr", {},
               el("td", { class: "mono", text: row.member }),
               el("td", { class: "mono", text: row.role }),
-              withCondition ? el("td", { text: row.condition || "—" }) : null,
+              withCondition ? el("td", { class: "permissions-condition" },
+                row.conditional ? el("span", { class: "condition-title", text: row.conditional.title }) : null,
+                row.conditional ? el("code", { class: "condition-expression", text: row.conditional.expression }) : null,
+                row.conditional && row.conditional.description
+                  ? el("span", { class: "form-help", text: row.conditional.description }) : null,
+                row.conditional ? null : el("span", { text: row.condition || "—" })) : null,
               el("td", { class: "row-actions" },
+                // Edit condition (#1742): where the service stores IAM
+                // Conditions, a row's condition is added, changed or
+                // removed, as Google's console edits a role's condition.
+                view.conditions && (row.conditional || !row.condition)
+                  ? el("button", { class: "secondary", text: row.conditional ? "Edit condition" : "Add condition",
+                      "aria-label": `${row.conditional ? "Edit" : "Add"} the condition of ${row.member}'s ${row.role}`,
+                      onclick: () => openConditionForm(row, name, change, reload) })
+                  : null,
                 el("button", { class: "secondary danger", text: "Remove principal",
                   "aria-label": `Remove ${row.member} from ${row.role}`,
                   onclick: () => remove(row) })))))))
@@ -3329,6 +3343,7 @@ function openGrantForm(view, name, change, onDone) {
     { name: "members", label: "New principals", type: "textarea", required: true,
       help: view.principalHelp || "" },
     { name: "role", label: "Role", type: "text", required: true, help: view.roleHelp || "" },
+    ...(view.conditions ? conditionFields(null) : []),
   ] });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
@@ -3347,7 +3362,8 @@ function openGrantForm(view, name, change, onDone) {
     primary.disabled = true;
     const op = recordOperation(`Grant ${values.role} on ${name}`);
     try {
-      const res = await change({ Grant: { Members: members, Role: values.role } });
+      const res = await change({ Grant: { Members: members, Role: values.role,
+        Condition: view.conditions ? conditionFrom(values) : null } });
       op.succeeded("", res.operation);
       submitting = false;
       close();
@@ -3365,6 +3381,69 @@ function openGrantForm(view, name, change, onDone) {
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     el("h2", { id: "grant-title", text: `Grant access to ${name}` }),
     el("p", { class: "form-help", text: view.note || "" }),
+    error,
+    ...fields.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// conditionFields are an IAM Condition's fields (#1742), as Google's console
+// asks for them: a title, a description and the CEL expression, all empty
+// for no condition.
+function conditionFields(c) {
+  return [
+    { name: "conditionTitle", label: "Condition title", type: "text", default: c ? c.title : "",
+      help: "Optional. A condition needs a title and an expression; leave both empty for none." },
+    { name: "conditionDescription", label: "Condition description", type: "text", default: c ? (c.description || "") : "" },
+    { name: "conditionExpression", label: "Condition expression (CEL)", type: "textarea", default: c ? c.expression : "",
+      help: 'Such as resource.name == "projects/PROJECT_ID/databases/DATABASE_ID" or ' +
+        'request.time < timestamp("2027-01-01T00:00:00Z"). Evaluated on resource.name, resource.type, ' +
+        "resource.service and request.time." },
+  ];
+}
+
+// conditionFrom is the condition the form's fields name, or null for none.
+function conditionFrom(values) {
+  const c = { title: (values.conditionTitle || "").trim(), description: (values.conditionDescription || "").trim(),
+              expression: (values.conditionExpression || "").trim() };
+  return c.title || c.description || c.expression ? c : null;
+}
+
+// openConditionForm is Edit condition (#1742): one principal's role moved to
+// the binding with the condition the form names (none when it is empty), in
+// one SetIamPolicy with the etag the page read.
+function openConditionForm(row, name, change, onDone) {
+  const fields = buildCreateForm({ label: "Edit condition", fields: conditionFields(row.conditional) });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "condition-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: "Save" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`Edit the condition of ${row.member}'s ${row.role} on ${name}`);
+    try {
+      const res = await change({ EditCondition: { Member: row.member, Role: row.role,
+        From: row.conditional, To: conditionFrom(fields.values()) } });
+      op.succeeded("", res.operation);
+      submitting = false;
+      close();
+      notify(`Changed the condition of ${row.member}'s ${row.role}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "condition-title", text: `Condition of ${row.member}'s ${row.role}` }),
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));

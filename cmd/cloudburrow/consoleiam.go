@@ -5,7 +5,10 @@ package main
 // on the Permissions tab of the project's row. Every read and write is
 // Resource Manager's own Projects GetIamPolicy, SetIamPolicy and
 // TestIamPermissions, the in-process server the API ports serve, so a stale
-// etag or a conditional binding is refused with the API's message.
+// etag or an invalid condition is refused with the API's message. Grant
+// access takes an IAM Condition, and a conditional row's Edit condition
+// changes it (#1742); the policy is read as version 3, so a condition is
+// shown with its binding.
 //
 // The policy is stored and never enforced (ADR-0006), and nothing inherits
 // it: a bucket's or a topic's own Permissions tab still shows only its own
@@ -75,8 +78,12 @@ func (p projectIAMProvider) Detail(ctx context.Context, project string, path []s
 	}
 	byPrincipal := map[string][]string{}
 	for _, b := range pol.Bindings {
+		role := b.Role
+		if b.Condition != "" {
+			role += " (condition: " + b.Condition + ")"
+		}
 		for _, m := range b.Members {
-			byPrincipal[m] = append(byPrincipal[m], b.Role)
+			byPrincipal[m] = append(byPrincipal[m], role)
 		}
 	}
 	names := make([]string, 0, len(byPrincipal))
@@ -102,7 +109,7 @@ func (projectIAMProvider) PolicyOn(_ context.Context, path []string) *console.Po
 	if len(path) != 1 {
 		return nil
 	}
-	return &console.PolicyTarget{Link: projectIAMLink, RoleHelp: roleHelp("Resource Manager", "roles/viewer")}
+	return &console.PolicyTarget{Link: projectIAMLink, RoleHelp: roleHelp("Resource Manager", "roles/viewer"), Conditions: true}
 }
 
 func (p projectIAMProvider) GetPolicy(ctx context.Context, _ string, path []string) (console.Policy, error) {

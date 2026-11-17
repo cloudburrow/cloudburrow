@@ -35,12 +35,12 @@ func (p hierarchyProvider) PolicyOn(_ context.Context, path []string) *console.P
 		return nil
 	}
 	if isOrganizationPath(path) {
-		return &console.PolicyTarget{Link: projectIAMLink, RoleHelp: roleHelp("Resource Manager", "roles/resourcemanager.organizationViewer")}
+		return &console.PolicyTarget{Link: projectIAMLink, RoleHelp: roleHelp("Resource Manager", "roles/resourcemanager.organizationViewer"), Conditions: true}
 	}
 	if f, err := p.registry.Folder(path[0]); err != nil || f.State != resourcemanager.StateActive {
 		return nil
 	}
-	return &console.PolicyTarget{Link: projectIAMLink, RoleHelp: roleHelp("Resource Manager", "roles/resourcemanager.folderViewer")}
+	return &console.PolicyTarget{Link: projectIAMLink, RoleHelp: roleHelp("Resource Manager", "roles/resourcemanager.folderViewer"), Conditions: true}
 }
 
 func (p hierarchyProvider) GetPolicy(ctx context.Context, _ string, path []string) (console.Policy, error) {

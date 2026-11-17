@@ -49,9 +49,13 @@ func roleHelp(service, example string) string {
 func policyFromProto(p *iampb.Policy) console.Policy {
 	out := console.Policy{Etag: base64.StdEncoding.EncodeToString(p.GetEtag()), Bindings: []console.Binding{}}
 	for _, b := range p.GetBindings() {
-		out.Bindings = append(out.Bindings, console.Binding{
+		cb := console.Binding{
 			Role: b.GetRole(), Members: append([]string(nil), b.GetMembers()...), Condition: conditionText(b.GetCondition()),
-		})
+		}
+		if c := b.GetCondition(); c != nil {
+			cb.Conditional = &console.Condition{Title: c.GetTitle(), Description: c.GetDescription(), Expression: c.GetExpression()}
+		}
+		out.Bindings = append(out.Bindings, cb)
 	}
 	return out
 }
@@ -66,16 +70,23 @@ func conditionText(c *expr.Expr) string {
 	return c.GetExpression()
 }
 
-// policyToProto is the policy to send with SetIamPolicy, carrying etag.
+// policyToProto is the policy to send with SetIamPolicy, carrying etag. A
+// conditional binding is written back with its condition, in a version 3
+// policy (#1742); a service that stores none refuses it with its own
+// message.
 func policyToProto(p console.Policy, etag []byte) (*iampb.Policy, error) {
 	out := &iampb.Policy{Version: 1, Etag: etag}
 	for _, b := range p.Bindings {
-		// None of these services stores a condition, so none is read back;
-		// one that were would be lost by a binding written without it.
-		if b.Condition != "" {
+		pb := &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		switch {
+		case b.Conditional != nil:
+			pb.Condition = &expr.Expr{Title: b.Conditional.Title, Description: b.Conditional.Description, Expression: b.Conditional.Expression}
+			out.Version = 3
+		case b.Condition != "":
+			// Shown as text only: written without it, it would be lost.
 			return nil, fmt.Errorf("the binding for %s has a condition, which the console cannot write back", b.Role)
 		}
-		out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
+		out.Bindings = append(out.Bindings, pb)
 	}
 	return out, nil
 }
@@ -106,7 +117,10 @@ func testProtoPermissions(ctx context.Context, api iamServer, resource string, p
 }
 
 func getProtoPolicy(ctx context.Context, api iamServer, resource string) (console.Policy, error) {
-	p, err := api.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resource})
+	// Version 3, so a conditional binding is read with its condition, not
+	// as a version 1 ROLE_withcond_HASH (#1742).
+	p, err := api.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resource,
+		Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
 	if err != nil {
 		return console.Policy{}, err
 	}
