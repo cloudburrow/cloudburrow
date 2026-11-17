@@ -167,7 +167,7 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request, sum string) {
 		return
 	}
 	var req runRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunBytes)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{"onnxrunner: could not read the run: " + err.Error()})
 		return
 	}
@@ -178,6 +178,9 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request, sum string) {
 	}
 	writeJSON(w, http.StatusOK, runResponse{Tensors: toWire(res)})
 }
+
+// maxRunBytes bounds a run's request: its input tensors, as JSON.
+const maxRunBytes = 1 << 30
 
 // modelStatus is 501 for a runner with no runtime, else 400: the model,
 // or the input it was given, failed.
