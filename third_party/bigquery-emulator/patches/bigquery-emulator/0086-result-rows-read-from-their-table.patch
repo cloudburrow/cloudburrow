@@ -18,17 +18,21 @@ as before, with a reference to the table. jobs.getQueryResults of it reads
 the rows from the table (SELECT * in the table's order, as tabledata.list
 reads them), passed through JSON as patch 0002 kept them, and pages them
 as before; once the table is deleted, it answers 404 notFound "Not found:
-Table project:dataset.table". A result with a FLOAT64 -0, which the engine
-writes to a table as 0, keeps its copy. Without the header nothing
-changes. The front sets the header on the jobs it gives a table, and
+Table project:dataset.table". A result that a SELECT * of the table would
+not give back keeps its copy: one with a column named with a leading
+underscore, as a pseudo-column is (_PARTITIONTIME, which a SELECT * leaves
+out), and one with a FLOAT64 -0, which the engine writes to a table as 0.
+Without the header nothing changes. The front sets the header on the jobs it gives a table, and
 removes it from its clients' requests.
 
 cloudburrow_result_in_table_test.go (TestResultReadFromItsTable) inserts
-each of six queries (250 rows; every scalar type, arrays, structs, a
-range, NaN and infinities; no rows; a -0) twice, with and without the
+each of seven queries (250 rows; every scalar type, arrays, structs, a
+range, NaN and infinities; no rows; a -0; columns named _PARTITIONTIME
+and _PARTITIONDATE) twice, with and without the
 header, and compares jobs.getQueryResults of both through eleven pagings
 and formats, and jobs.get without its times; it then deletes the tables:
-a job read from its table is 404, a job with its copy still answers.
+a job read from its table is 404, a job with its copy still answers. It
+fails without the patch, and without either exception.
 
 Licence: a modification of goccy/bigquery-emulator, which is under the MIT
 License, Copyright (c) 2022 Masaaki Goshima
@@ -112,10 +116,10 @@ CloudBurrow Authors.
 +	// CloudBurrow patch (cloudburrow/cloudburrow#1662): a result whose
 +	// rows are in the table this job made is kept without them (patch
 +	// 0002 kept every row as JSON in the jobs table, up to 256 MiB);
-+	// jobs.getQueryResults reads them from the table. Not one with a
-+	// FLOAT64 -0, which the table holds as 0.
++	// jobs.getQueryResults reads them from the table, when the table
++	// gives them back as they are (readsBackWhole).
 +	kept := response
-+	if rowsInTable && jobErr == nil && response != nil && !hasNegativeZero(response.Rows) {
++	if rowsInTable && jobErr == nil && response != nil && readsBackWhole(response) {
 +		kept = &internaltypes.QueryResponse{
 +			JobReference:      response.JobReference,
 +			Schema:            response.Schema,
@@ -155,7 +159,7 @@ CloudBurrow Authors.
  	TableDataList struct {
 --- /dev/null
 +++ b/server/cloudburrow_result_in_table.go
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,109 @@
 +package server
 +
 +import (
@@ -163,6 +167,7 @@ CloudBurrow Authors.
 +	"encoding/json"
 +	"fmt"
 +	"regexp"
++	"strings"
 +
 +	"github.com/goccy/bigquery-emulator/internal/metadata"
 +	internaltypes "github.com/goccy/bigquery-emulator/internal/types"
@@ -234,6 +239,25 @@ CloudBurrow Authors.
 +	return &out, nil
 +}
 +
++// readsBackWhole reports whether a SELECT * of the table a query's result
++// was written to gives back that result: not when a column's name begins
++// with an underscore, as a pseudo-column's does (_PARTITIONTIME,
++// _PARTITIONDATE, ...), which the engine leaves out of a SELECT *, nor
++// when a row holds a FLOAT64 -0, which the engine writes to a table as 0.
++// Such a result keeps its JSON copy, so jobs.getQueryResults answers it
++// as before. CloudBurrow patch (cloudburrow/cloudburrow#1662).
++func readsBackWhole(response *internaltypes.QueryResponse) bool {
++	if response.Schema == nil {
++		return false
++	}
++	for _, f := range response.Schema.Fields {
++		if strings.HasPrefix(f.Name, "_") {
++			return false
++		}
++	}
++	return !hasNegativeZero(response.Rows)
++}
++
 +// negativeZero matches a FLOAT64 -0 in a result's rows as JSON.
 +var negativeZero = regexp.MustCompile(`"-0(\.0*)?([eE][-+]?[0-9]+)?"`)
 +
@@ -247,7 +271,7 @@ CloudBurrow Authors.
 +}
 --- /dev/null
 +++ b/server/cloudburrow_result_in_table_test.go
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,193 @@
 +package server_test
 +
 +import (
@@ -348,8 +372,12 @@ CloudBurrow Authors.
 +			ST_GEOGFROMTEXT('POLYGON((0 0, 1 0, 1 1, 0 0))') AS poly, TIMESTAMP '2026-11-17 10:11:12 UTC' AS ts0`,
 +		// A FLOAT64 -0, which a table holds as 0: the job keeps its copy.
 +		"SELECT -0.0 AS negzero, [1.0, -0.0] AS arr",
++		// A column named as a pseudo-column is, which a SELECT * of a
++		// table leaves out: the job keeps its copy.
++		"SELECT a, TIMESTAMP '2024-01-02 00:00:00 UTC' AS _PARTITIONTIME, DATE '2024-01-02' AS _PARTITIONDATE FROM ds.t",
 +	}
-+	const negZeroQuery = 5
++	// keepsCopy are the queries whose jobs keep their copy.
++	keepsCopy := map[int]bool{5: true, 6: true}
 +	pages := []string{
 +		"", "?maxResults=0", "?maxResults=1", "?maxResults=2", "?maxResults=2&pageToken=2", "?startIndex=1", "?startIndex=1&maxResults=100",
 +		"?pageToken=248", "?startIndex=999", "?formatOptions.useInt64Timestamp=true", "?maxResults=3&formatOptions.useInt64Timestamp=true",
@@ -384,9 +412,9 @@ CloudBurrow Authors.
 +		}
 +		read := fmt.Sprintf("read_%d", i)
 +		status, b := do(http.MethodGet, "/queries/"+read, nil, false)
-+		if i == negZeroQuery {
++		if keepsCopy[i] {
 +			if status != http.StatusOK {
-+				t.Errorf("query %d: jobs.getQueryResults of a job with a -0, its table deleted: %d %s, want 200 from its copy", i, status, b)
++				t.Errorf("query %d: jobs.getQueryResults of a job that keeps its copy, its table deleted: %d %s, want 200 from its copy", i, status, b)
 +			}
 +			continue
 +		}
