@@ -336,6 +336,84 @@ func init() {
 		v, _, err := try(c, e)
 		return v, err
 	}}
+	// REGEXP_INSTR (string_functions#regexp_instr): positions count
+	// characters of a STRING and bytes of BYTES; with one capturing group
+	// the group's position is answered.
+	add["REGEXP_INSTR"] = &fnDef{sig: func(c *call, ts []*btpb.Type) (*btpb.Type, error) {
+		if len(ts) < 2 || len(ts) > 5 || !argOK(ts[0], "STRING|BYTES") || !argOK(ts[1], "STRING|BYTES") || !sameText(ts, 0, 1) {
+			return nil, sigErr(c, ts)
+		}
+		for _, t := range ts[2:] {
+			if !argOK(t, "INT64") {
+				return nil, sigErr(c, ts)
+			}
+		}
+		return int64Type, nil
+	}, run: func(c *call, vs []any, _ *env) (any, error) {
+		pos, occ, at := int64(1), int64(1), int64(0)
+		if len(vs) > 2 {
+			pos = vs[2].(int64)
+		}
+		if len(vs) > 3 {
+			occ = vs[3].(int64)
+		}
+		if len(vs) > 4 {
+			at = vs[4].(int64)
+		}
+		if pos <= 0 || occ <= 0 {
+			return nil, fmt.Errorf("REGEXP_INSTR: position and occurrence must be positive")
+		}
+		if at != 0 && at != 1 {
+			return nil, fmt.Errorf("REGEXP_INSTR: occurrence_position must be 0 or 1")
+		}
+		if len(asBytes(vs[1])) == 0 {
+			return int64(0), nil
+		}
+		re, err := c.regexp(vs[1])
+		if err != nil {
+			return nil, err
+		}
+		if re.NumSubexp() > 1 {
+			return nil, fmt.Errorf("Regular expressions passed into extraction functions must not have more than 1 capturing group")
+		}
+		src := asBytes(vs[0])
+		_, isBytes := vs[0].([]byte)
+		// offset converts between unit positions (0-based) and byte offsets.
+		toByte := func(u int64) int {
+			if isBytes {
+				return int(u)
+			}
+			b := 0
+			for i := int64(0); i < u && b < len(src); i++ {
+				_, n := utf8.DecodeRune(src[b:])
+				b += n
+			}
+			return b
+		}
+		toUnit := func(b int) int64 {
+			if isBytes {
+				return int64(b)
+			}
+			return int64(utf8.RuneCount(src[:b]))
+		}
+		start := toByte(pos - 1)
+		if pos-1 > toUnit(len(src)) {
+			return int64(0), nil
+		}
+		ms := re.FindAllSubmatchIndex(src[start:], -1)
+		if int64(len(ms)) < occ {
+			return int64(0), nil
+		}
+		m := ms[occ-1]
+		lo, hi := m[0], m[1]
+		if len(m) >= 4 && m[2] >= 0 {
+			lo, hi = m[2], m[3]
+		}
+		if at == 1 {
+			return toUnit(start+hi) + 1, nil
+		}
+		return toUnit(start+lo) + 1, nil
+	}}
 	for k, v := range add {
 		functions[k] = v
 	}
