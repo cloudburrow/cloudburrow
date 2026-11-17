@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	btpb "cloud.google.com/go/bigtable/apiv2/bigtablepb"
+	"github.com/cloudburrow/cloudburrow/internal/s2ops"
 	"github.com/golang/geo/r3"
 	"github.com/golang/geo/s1"
 	"github.com/golang/geo/s2"
@@ -17,31 +18,22 @@ import (
 // documents them (re-read 2026-11-17:
 // https://cloud.google.com/bigtable/docs/reference/sql/geography_functions):
 // constructors, parsers, formatters, accessors, predicates, measures,
-// transformations, the aggregates ST_ACCUM, ST_CENTROID_AGG and ST_EXTENT,
-// and S2_CELLIDFROMPOINT and S2_COVERINGCELLIDS. "All GoogleSQL geography
-// functions return NULL if any input argument is NULL."
+// transformations, the aggregates ST_ACCUM, ST_CENTROID_AGG, ST_EXTENT and
+// ST_UNION_AGG, and S2_CELLIDFROMPOINT and S2_COVERINGCELLIDS. "All
+// GoogleSQL geography functions return NULL if any input argument is NULL."
+// The point-set operations, the buffers and ST_SIMPLIFY (#1728) run on
+// internal/s2ops (sqlgeoops.go).
 //
-// Refused UNIMPLEMENTED, naming the reason: the point-set operations
-// (ST_UNION, ST_UNION_AGG, ST_INTERSECTION, ST_DIFFERENCE), ST_BUFFER,
-// ST_BUFFERWITHTOLERANCE and ST_SIMPLIFY, which need S2's
-// S2BooleanOperation, S2BufferOperation and S2Builder simplification, which
-// github.com/golang/geo does not port; and ST_REGIONSTATS, which reads
+// Refused UNIMPLEMENTED, naming the reason: ST_REGIONSTATS, which reads
 // Earth Engine rasters.
 
 // geoRefused are the listed functions the emulator does not run, and why.
 var geoRefused = map[string]string{
-	"ST_UNION":               "a point-set union (S2BooleanOperation, which github.com/golang/geo does not port)",
-	"ST_UNION_AGG":           "a point-set union (S2BooleanOperation, which github.com/golang/geo does not port)",
-	"ST_INTERSECTION":        "a point-set intersection (S2BooleanOperation, which github.com/golang/geo does not port)",
-	"ST_DIFFERENCE":          "a point-set difference (S2BooleanOperation, which github.com/golang/geo does not port)",
-	"ST_BUFFER":              "a buffer (S2BufferOperation, which github.com/golang/geo does not port)",
-	"ST_BUFFERWITHTOLERANCE": "a buffer (S2BufferOperation, which github.com/golang/geo does not port)",
-	"ST_SIMPLIFY":            "a topology-preserving simplification (S2Builder's, which github.com/golang/geo does not port)",
-	"ST_REGIONSTATS":         "Earth Engine raster statistics",
+	"ST_REGIONSTATS": "Earth Engine raster statistics",
 }
 
 // geoAggregates are the geography aggregates the emulator runs.
-var geoAggregates = map[string]bool{"ST_ACCUM": true, "ST_CENTROID_AGG": true, "ST_EXTENT": true}
+var geoAggregates = map[string]bool{"ST_ACCUM": true, "ST_CENTROID_AGG": true, "ST_EXTENT": true, "ST_UNION_AGG": true}
 
 // absent is an optional argument a call leaves out (named arguments).
 type absent struct{}
@@ -692,6 +684,84 @@ func init() {
 			n := math.Round(math.Log10(size))
 			n = math.Max(-9, math.Min(-1, n)) // "10^n, where -10 < n < 0"
 			return snapToGrid(asGeog(vs[0]), n)
+		}),
+		// Point-set operations, buffers and simplification (#1728).
+		"ST_UNION": geo(nil, func(c *call, ts []*btpb.Type) (*btpb.Type, error) {
+			if len(ts) == 1 {
+				return geoSig(geographyType, 1, "ARRAY<GEO>")(c, ts)
+			}
+			return geoSig(geographyType, 2, "GEO", "GEO")(c, ts)
+		}, func(c *call, vs []any) (any, error) {
+			var gs []*geog
+			if len(vs) == 2 {
+				gs = []*geog{asGeog(vs[0]), asGeog(vs[1])}
+			} else {
+				// "NULL elements are ignored".
+				for _, e := range vs[0].([]any) {
+					if e != nil {
+						gs = append(gs, asGeog(e))
+					}
+				}
+			}
+			g, err := geoUnion(gs)
+			return g, geoErr(c.name, err)
+		}),
+		"ST_INTERSECTION": geo(nil, geoSig(geographyType, 2, "GEO", "GEO"), func(c *call, vs []any) (any, error) {
+			g, err := geoIntersection(asGeog(vs[0]), asGeog(vs[1]))
+			return g, geoErr(c.name, err)
+		}),
+		"ST_DIFFERENCE": geo(nil, geoSig(geographyType, 2, "GEO", "GEO"), func(c *call, vs []any) (any, error) {
+			g, err := geoDifference(asGeog(vs[0]), asGeog(vs[1]))
+			return g, geoErr(c.name, err)
+		}),
+		"ST_BUFFER": geo([]string{"geography", "buffer_radius", "num_seg_quarter_circle", "use_spheroid", "endcap", "side"},
+			geoSig(geographyType, 2, "GEO", "FLOAT64", "FLOAT64", "BOOL", "STRING", "STRING"), func(c *call, vs []any) (any, error) {
+				if err := noSpheroid(c.name, vs, 3); err != nil {
+					return nil, err
+				}
+				n := 8.0
+				if v := opt(vs, 2); v != nil {
+					n = toFloat(v)
+				}
+				if !(n > 0) || math.IsInf(n, 0) {
+					return nil, fmt.Errorf("ST_BUFFER: num_seg_quarter_circle must be positive, not %v", n)
+				}
+				o, err := radiusOpt(c.name, toFloat(vs[1]))
+				if err != nil {
+					return nil, err
+				}
+				o.ErrorFraction = s2ops.ErrorFractionForSegments(4 * n)
+				if err := bufferOpts(c.name, vs, 4, &o); err != nil {
+					return nil, err
+				}
+				g, err := geoBuffer(asGeog(vs[0]), o)
+				return g, geoErr(c.name, err)
+			}),
+		"ST_BUFFERWITHTOLERANCE": geo([]string{"geography", "buffer_radius", "tolerance_meters", "use_spheroid", "endcap", "side"},
+			geoSig(geographyType, 3, "GEO", "FLOAT64", "FLOAT64", "BOOL", "STRING", "STRING"), func(c *call, vs []any) (any, error) {
+				if err := noSpheroid(c.name, vs, 3); err != nil {
+					return nil, err
+				}
+				if opt(vs, 2) == nil {
+					return nil, nil
+				}
+				tol := toFloat(vs[2])
+				if !(tol > 0) || math.IsInf(tol, 0) {
+					return nil, fmt.Errorf("ST_BUFFERWITHTOLERANCE: tolerance_meters must be positive, not %v", tol)
+				}
+				o, err := radiusOpt(c.name, toFloat(vs[1]))
+				if err != nil {
+					return nil, err
+				}
+				o.ErrorFraction = s2ops.ClampErrorFraction(tol / math.Abs(toFloat(vs[1])))
+				if err := bufferOpts(c.name, vs, 4, &o); err != nil {
+					return nil, err
+				}
+				g, err := geoBuffer(asGeog(vs[0]), o)
+				return g, geoErr(c.name, err)
+			}),
+		"ST_SIMPLIFY": geo(nil, geoSig(geographyType, 2, "GEO", "FLOAT64"), func(c *call, vs []any) (any, error) {
+			return geoSimplify(asGeog(vs[0]), toFloat(vs[1]))
 		}),
 		// S2 functions.
 		"S2_CELLIDFROMPOINT": geo([]string{"point_geography", "level"}, geoSig(int64Type, 1, "GEO", "INT64"), func(c *call, vs []any) (any, error) {
@@ -1486,7 +1556,7 @@ func (b *bufferedRegion) IntersectsCell(c s2.Cell) bool {
 	return q.Distance(s2.NewMinDistanceToCellTarget(c)).Angle() <= b.r
 }
 
-// aggregateGeo computes ST_ACCUM, ST_CENTROID_AGG and ST_EXTENT.
+// aggregateGeo computes ST_ACCUM, ST_CENTROID_AGG, ST_EXTENT and ST_UNION_AGG.
 func (c *call) aggregateGeo(envs []env) (any, error) {
 	var gs []*geog
 	acc := []any{}
@@ -1507,6 +1577,13 @@ func (c *call) aggregateGeo(envs []env) (any, error) {
 	switch c.name {
 	case "ST_ACCUM":
 		return acc, nil
+	case "ST_UNION_AGG":
+		// "ST_UNION_AGG ignores NULL input GEOGRAPHY values."
+		if len(gs) == 0 {
+			return nil, nil
+		}
+		g, err := geoUnion(gs)
+		return g, geoErr(c.name, err)
 	case "ST_EXTENT":
 		r := s2.EmptyRect()
 		for _, g := range gs {
@@ -1536,7 +1613,7 @@ func (c *call) aggregateGeo(envs []env) (any, error) {
 	return pointGeog(centroidAcc{v: sum}.point()), nil
 }
 
-// checkGeoAgg types ST_ACCUM, ST_CENTROID_AGG and ST_EXTENT.
+// checkGeoAgg types ST_ACCUM, ST_CENTROID_AGG, ST_EXTENT and ST_UNION_AGG.
 func (c *call) checkGeoAgg(ts []*btpb.Type) error {
 	if len(ts) != 1 || ts[0] != nil && !isGeography(ts[0]) {
 		return sigErr(c, ts)
@@ -1547,7 +1624,7 @@ func (c *call) checkGeoAgg(ts []*btpb.Type) error {
 	switch c.name {
 	case "ST_ACCUM":
 		c.t = arrayType(geographyType)
-	case "ST_CENTROID_AGG":
+	case "ST_CENTROID_AGG", "ST_UNION_AGG":
 		c.t = geographyType
 	case "ST_EXTENT":
 		c.t = boxType

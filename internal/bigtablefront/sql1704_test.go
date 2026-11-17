@@ -425,19 +425,18 @@ func TestSQLLambdasAndNormalize(t *testing.T) {
 		}
 	}
 	for sql, want := range map[string]codes.Code{
-		"SELECT ARRAY_FILTER([1, 2], e -> e + 1)":                            codes.InvalidArgument,
-		"SELECT ARRAY_OFFSET([1, 2], (e, i) -> e > i)":                       codes.InvalidArgument,
-		"SELECT ARRAY_FILTER([1, 2], (e, e) -> true)":                        codes.InvalidArgument,
-		"SELECT ARRAY_LENGTH(e -> e)":                                        codes.InvalidArgument,
-		"SELECT ARRAY_OFFSET([1, 2], 'a')":                                   codes.InvalidArgument,
-		"SELECT NORMALIZE('a', 'NFC')":                                       codes.InvalidArgument,
-		"SELECT NORMALIZE('a', NFX)":                                         codes.InvalidArgument,
-		"SELECT ARRAY_FILTER([1, 2], e -> COUNT(e) > 0)":                     codes.InvalidArgument,
-		"SELECT MIN_BY(_key, _key) FROM report":                              codes.Unimplemented,
-		"SELECT MAX_BY(_key, _key) FROM report":                              codes.Unimplemented,
-		"SELECT _key, GROUPING(_key) FROM report GROUP BY _key":              codes.Unimplemented,
-		"SELECT ST_ASTEXT(ST_UNION(ST_GEOGPOINT(1, 2), ST_GEOGPOINT(1, 2)))": codes.Unimplemented,
-		"SELECT ST_ASTEXT(ST_SIMPLIFY(ST_GEOGPOINT(1, 2), 1))":               codes.Unimplemented,
+		"SELECT ARRAY_FILTER([1, 2], e -> e + 1)":               codes.InvalidArgument,
+		"SELECT ARRAY_OFFSET([1, 2], (e, i) -> e > i)":          codes.InvalidArgument,
+		"SELECT ARRAY_FILTER([1, 2], (e, e) -> true)":           codes.InvalidArgument,
+		"SELECT ARRAY_LENGTH(e -> e)":                           codes.InvalidArgument,
+		"SELECT ARRAY_OFFSET([1, 2], 'a')":                      codes.InvalidArgument,
+		"SELECT NORMALIZE('a', 'NFC')":                          codes.InvalidArgument,
+		"SELECT NORMALIZE('a', NFX)":                            codes.InvalidArgument,
+		"SELECT ARRAY_FILTER([1, 2], e -> COUNT(e) > 0)":        codes.InvalidArgument,
+		"SELECT MIN_BY(_key, _key) FROM report":                 codes.Unimplemented,
+		"SELECT MAX_BY(_key, _key) FROM report":                 codes.Unimplemented,
+		"SELECT _key, GROUPING(_key) FROM report GROUP BY _key": codes.Unimplemented,
+		"SELECT ST_REGIONSTATS(ST_GEOGPOINT(1, 2), 'x')":        codes.Unimplemented,
 	} {
 		err := prepare(sql)
 		if status.Code(err) != want {

@@ -97,8 +97,7 @@ func TestSQLGeography(t *testing.T) {
 	}
 	for sql, want := range map[string]string{
 		"SELECT ST_GEOGPOINT(1, 2)":                                                         "Returning expressions of type GEOGRAPHY is not allowed",
-		"SELECT ST_BUFFER(ST_GEOGPOINT(1, 2), 50)":                                          "UNIMPLEMENTED",
-		"SELECT ST_ASTEXT(ST_UNION_AGG(ST_GEOGPOINT(1, 2)))":                                "UNIMPLEMENTED",
+		"SELECT ST_REGIONSTATS(ST_GEOGPOINT(1, 2), 'x')":                                    "UNIMPLEMENTED",
 		"SELECT ST_CLUSTERDBSCAN(ST_GEOGPOINT(1, 2), 1e5, 1) OVER ()":                       "not in GoogleSQL for Bigtable",
 		"SELECT ST_ASTEXT(ST_GEOGPOINT(1, 91))":                                             "latitude",
 		"SELECT ST_ASTEXT(ST_GEOGFROMTEXT('POINT(1 2)', oriented => TRUE, planar => TRUE))": "oriented and planar",
