@@ -288,7 +288,8 @@ connections reach the node over IPv6. Valkey announces one client address per ad
 each node announces `::1` to IPv6 clients (`cluster-announce-client-ipv6`): the host's clients, which
 `CLUSTER SLOTS` and MOVED send to `[::1]:PORT`, through the tunnels; and its Service's cluster IP to
 IPv4 clients (`cluster-announce-client-ipv4`): the pods', which reach the node through its Service
-(`redis-c<cluster>-<hash>-<n>.<namespace>.svc.cluster.local`, the discovery endpoint's port). Start
+(`redis-c<cluster>-<hash>-<n>.<namespace>.svc.cluster.local`, at the node's own port; the first
+node's is the discovery endpoint's). Start
 an in-cluster client from any node's Service. With in-transit encryption, a node's certificate
 names `::1` and its Service's cluster IP too. `TestMemorystoreRedisClusterHostAndPodClients`
 proves both end to end: a go-redis `ClusterClient` on the host and `valkey-cli -c` in a pod write

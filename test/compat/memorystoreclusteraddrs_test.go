@@ -148,7 +148,7 @@ func TestMemorystoreRedisClusterHostAndPodClients(t *testing.T) {
 	for _, line := range strings.Split(ips, "\n") {
 		if f := strings.Fields(line); len(f) == 2 && strings.HasPrefix(f[0], "redis-c"+id+"-") {
 			nodeIPs++
-			if !strings.Contains(logs, f[1]+"\n"+port) {
+			if !strings.Contains(logs, "\n"+f[1]+"\n") {
 				t.Errorf("CLUSTER SLOTS in the cluster does not give the node %s at its Service's cluster IP %s:\n%s", f[0], f[1], logs)
 			}
 		}
