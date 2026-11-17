@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// The Upgrade test workflow (#1714) runs test/upgrade nightly: half an hour
-// of a runner, two instances and the older release's published binary. It
+// The Upgrade test workflow (#1714) runs test/upgrade nightly: 11 minutes of
+// a runner, two instances and the older release's published binary. It
 // can only really run on GitHub. What can be checked here is its shape: when
 // it runs, where the older release comes from, that a skipped test cannot
 // pass it, and that nothing in it can run unbounded, unpinned or with more
@@ -36,8 +36,8 @@ func TestUpgradeWorkflowRunsNightlyAndByHandOnly(t *testing.T) {
 			t.Errorf("%s's triggers have no %s:\n%s", upgradeWorkflow, want, on)
 		}
 	}
-	// PR CI runs fast jobs only, and half an hour per landing on main is
-	// not worth it: nightly and by hand.
+	// PR CI runs fast jobs only, and a runner per landing on main is not
+	// worth it: nightly and by hand.
 	for _, never := range []string{"pull_request", "merge_group", "push"} {
 		if strings.Contains(on, never) {
 			t.Errorf("%s runs on %s; it is nightly and by hand only", upgradeWorkflow, never)

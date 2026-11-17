@@ -169,8 +169,10 @@ older binary, seeded through the official clients, saved with `state save` and s
 brought up from the same state directory with the new CLI and read back, and the archive is
 loaded into it and read back. The run fails unless the test passed, so a skip does not count.
 
-It takes about half an hour of a runner, so it runs neither on pull requests nor on every push to
-main, and it is not a required check. A failed run uploads `upgrade-diagnostics` (the test log,
+The first run (44094936759) took 11 minutes: 4.5 for `make build` with the emulator from `ci.yml`'s
+cache, 5.5 for the test (about 8 more when the emulator must be built). That is a runner on every
+landing, so it runs neither on pull requests nor on every push to main, and it is not a required
+check. A failed run uploads `upgrade-diagnostics` (the test log,
 the instance's `up.log` and its `cloudburrow diagnose` bundle), and a red scheduled run, or one
 dispatched on main, opens a `workflow-red` issue through `report-red-runs.yml`.
 `test/repo/upgrade_workflow_test.go` keeps the workflow's triggers, its download and its pass

@@ -52,7 +52,7 @@ func ports(base int) []string {
 // with this release and reads everything back; then it loads the older
 // release's `state save` archive into this release and reads that back.
 //
-// It needs Docker and kind, and takes about half an hour:
+// It needs Docker and kind, and takes 4 to 6 minutes (11 for the whole CI job):
 //
 //	CLOUDBURROW_UPGRADE_BIN=$PWD/bin/cloudburrow go test -tags upgrade -timeout 90m ./test/upgrade/
 //

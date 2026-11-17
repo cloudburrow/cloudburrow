@@ -5,10 +5,12 @@ name: Upgrade test
 # seeds every service through the official clients, takes a `state save`
 # archive and stops it, then brings the same state directory up with this
 # commit's CLI and reads everything back, and loads the archive into it and
-# reads that back. Two instances of sixteen services, one after the other,
-# take about half an hour of a runner, so it runs nightly and by hand only:
-# never on a pull request (PR CI runs fast jobs only) and not on every push
-# to main. A red scheduled run, or one dispatched on main, is reported by
+# reads that back. Two instances of sixteen services, one after the other:
+# the first run (44094936759) took 11 minutes, 4.5 of them make build with a
+# cached emulator and 5.5 the test, and a run that has to build the emulator
+# takes about 8 more. That is a runner per landing on main, and runners are
+# what landings wait on, so it runs nightly and by hand only: never on a pull
+# request (PR CI runs fast jobs only) and not on every push to main. A red scheduled run, or one dispatched on main, is reported by
 # report-red-runs.yml.
 on:
   schedule:
