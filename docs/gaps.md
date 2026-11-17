@@ -50,7 +50,7 @@ and object IAM on the JSON API are excluded (below).
 | Gap | Why open | Size |
 |---|---|---|
 | Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) (#1505); rechecked (#1521): the notifications insert reference lists no error, only the `storage.buckets.update` permission, and the Pub/Sub notifications guides describe a missing topic or publisher grant only as a delivery failure, so no documented error replaces the 501 (#1577) | no emulator support (needs Pub/Sub) | S |
-| UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints, a bucket deleted under a hard delete pause and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
+| UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints, the hard delete pause refusals (#1715) and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
 

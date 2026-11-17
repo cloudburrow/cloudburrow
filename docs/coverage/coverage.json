@@ -6484,6 +6484,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
@@ -6495,6 +6496,11 @@
             "code": "409",
             "case": "a bucket that holds a managed folder",
             "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
+          },
+          {
+            "code": "409",
+            "case": "a bucket whose hard deletions are paused",
+            "test": "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause"
           },
           {
             "code": "409",
@@ -6517,7 +6523,7 @@
           "test/compat/storageacl_test.go:40 TestStorageBucketACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
-          "test/compat/storagehardpause_test.go:28 TestStorageHardDeletePause",
+          "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
           "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
@@ -6554,6 +6560,7 @@
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
@@ -6567,6 +6574,11 @@
             "code": "400",
             "case": "an ipFilter mode other than Enabled or Disabled",
             "test": "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON"
+          },
+          {
+            "code": "400",
+            "case": "hardDeletePause enabled at creation",
+            "test": "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause"
           }
         ]
       },
@@ -6646,7 +6658,7 @@
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
-          "test/compat/storagehardpause_test.go:28 TestStorageHardDeletePause",
+          "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
           "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
@@ -6657,6 +6669,23 @@
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/storageversioning_test.go:114 TestStorageVersioningDisableKeepsExisting",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+        ],
+        "unverified": [
+          {
+            "code": "412",
+            "case": "disabling soft delete while hard deletions are paused",
+            "test": "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause"
+          },
+          {
+            "code": "412",
+            "case": "pausing hard deletions on a bucket without soft delete (softDeletePolicyNotSet)",
+            "test": "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause"
+          },
+          {
+            "code": "412",
+            "case": "pausing or resuming hard deletions within 24 hours of the last change",
+            "test": "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause"
+          }
         ]
       },
       {

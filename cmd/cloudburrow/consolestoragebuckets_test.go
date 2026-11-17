@@ -11,6 +11,8 @@ import (
 	"cloud.google.com/go/storage"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
+	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
 
 // bucketEditValues is what the browser submits for an edit form untouched: every
@@ -402,14 +404,27 @@ func propertyValue(sec console.Section, label string) string {
 	return ""
 }
 
-// Edit bucket's Pause hard deletion (#1702) sets softDeletePolicy
+// Edit bucket's Pause hard deletion (#1702, #1715) sets softDeletePolicy
 // .hardDeletePause through buckets.patch; the Configuration tab shows it with
-// its effective time and the Deleted objects tab says what it does; turning
-// it off clears both.
+// its effective time and the Deleted objects tab says what it does. Edit
+// bucket and Delete bucket show the API's own refusals: turning the pause
+// off within 24 hours, turning soft delete off while paused, and deleting
+// the paused bucket. A day on (the server's clock), turning it off clears
+// both.
 func TestStorageHardDeletePauseThroughTheConsole(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	p, _ := newObjectOpsProvider(t)
+	clock := sched.NewFakeClock(time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
+	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(srv)
+	t.Cleanup(h.Close)
+	p := storageProvider{endpoint: strings.TrimPrefix(h.URL, "http://")}
+	if _, err := p.Create(ctx, "p", map[string]string{"name": "ops"}); err != nil {
+		t.Fatal(err)
+	}
 
 	d, err := p.Detail(ctx, "p", []string{"ops"})
 	if err != nil || d.Edit == nil {
@@ -439,14 +454,36 @@ func TestStorageHardDeletePauseThroughTheConsole(t *testing.T) {
 	if values["hardDeletePause"] != "true" {
 		t.Errorf("Pause hard deletion is prefilled %q after the save; want true", values["hardDeletePause"])
 	}
-	values["hardDeletePause"] = "false"
-	if err := p.Edit(ctx, "p", []string{"ops"}, values); err != nil {
-		t.Fatalf("Edit bucket: %v", err)
+
+	off := func() map[string]string {
+		d, _ := p.Detail(ctx, "p", []string{"ops"})
+		v := bucketEditValues(d.Edit)
+		v["hardDeletePause"] = "false"
+		return v
+	}
+	if err := p.Edit(ctx, "p", []string{"ops"}, off()); err == nil || !strings.Contains(err.Error(), "at most once every 24 hours") {
+		t.Errorf("Edit bucket resuming at once = %v; want the API's refusal", err)
+	}
+	noSoft := bucketEditValues(d.Edit)
+	noSoft["softDeleteSeconds"] = "0"
+	if err := p.Edit(ctx, "p", []string{"ops"}, noSoft); err == nil || !strings.Contains(err.Error(), "Soft delete can't be disabled") {
+		t.Errorf("Edit bucket turning soft delete off while paused = %v; want the API's refusal", err)
+	}
+	if err := p.Delete(ctx, "p", "ops"); err == nil || !strings.Contains(err.Error(), "can't be deleted while hard deletions are paused") {
+		t.Errorf("Delete bucket while paused = %v; want the API's refusal", err)
+	}
+
+	clock.Advance(24 * time.Hour)
+	if err := p.Edit(ctx, "p", []string{"ops"}, off()); err != nil {
+		t.Fatalf("Edit bucket a day on: %v", err)
 	}
 	if b, err = p.readBucket(ctx, "ops"); err != nil || b.hardDeletePaused() {
 		t.Fatalf("after resuming, the bucket reads %+v, %v", b.SoftDeletePolicy, err)
 	}
 	if v := propertyValue(bucketConfigSection(b), "Hard delete pause"); v != "Disabled" {
 		t.Errorf("the Configuration tab shows the resumed pause as %q", v)
+	}
+	if err := p.Delete(ctx, "p", "ops"); err != nil {
+		t.Errorf("Delete bucket once resumed: %v", err)
 	}
 }

@@ -226,7 +226,9 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 			{Name: "hardDeletePause", Label: "Pause hard deletion", Type: "checkbox", Section: protection,
 				Default: strconv.FormatBool(b.hardDeletePaused()),
 				Help: "On, soft-deleted objects are kept, and can be restored, past their hard delete time until the pause is turned off. " +
-					"Off, anything already past its hard delete time is permanently deleted."},
+					"Off, anything already past its hard delete time is permanently deleted. " +
+					"It needs soft delete on, and can be turned on or off at most once every 24 hours; while it is on, " +
+					"soft delete can't be turned off and the bucket can't be deleted."},
 			{Name: "retentionPeriod", Label: "Retention period (seconds)", Type: "text",
 				Section: protection, Default: b.retentionSeconds(), Pattern: `^[0-9]*$`, Help: retentionHelp},
 			{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: protection,

@@ -43,6 +43,9 @@ type bucketRecord struct {
 	// is Google's default, projectPrivate (acl.go).
 	ACL              []aclEntry `json:"acl"`
 	DefaultObjectACL []aclEntry `json:"defaultObjectAcl"`
+	// HardDeletePauseChanged is when softDeletePolicy.hardDeletePause was
+	// last enabled or disabled (#1715, harddeletepause.go).
+	HardDeletePauseChanged time.Time `json:"hardDeletePauseChanged,omitempty"`
 }
 
 // bucketFields says how each Bucket property (the discovery schema's 38) is
@@ -436,6 +439,10 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if err := checkHardDeletePauseCreate(f); err != nil {
+		writeError(w, err)
+		return
+	}
 	now := s.now()
 	if err := checkRetentionPolicy(f, nil, now); err != nil {
 		writeError(w, err)
@@ -670,8 +677,10 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			if err := pre.check(b.Metageneration, false); err != nil {
 				return err
 			}
+			// The merge below edits b.Fields in place: read the pause first.
+			prior := pauseStateOf(b)
 			next := kept(body)
-			old := map[string]any{"softDeletePolicy": copyMap(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"])}
+			old := map[string]any{"softDeletePolicy": copySoftDeletePolicy(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"])}
 			if loc, ok := next["location"].(string); ok && !strings.EqualFold(loc, b.Fields["location"].(string)) {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
 				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets
@@ -715,6 +724,13 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			if err := checkHierarchical(next); err != nil {
 				return err
 			}
+			toggled, err := prior.check(b.Name, next, s.now())
+			if err != nil {
+				return err
+			}
+			if toggled {
+				b.HardDeletePauseChanged = s.now()
+			}
 			stampSoftDeletePolicy(next, old, s.now())
 			if err := checkRetentionPolicy(next, old, s.now()); err != nil {
 				return err
@@ -754,6 +770,9 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 			return notFound("The specified bucket does not exist.")
 		}
 		if err := pre.check(b.Metageneration, false); err != nil {
+			return err
+		}
+		if err := checkBucketDeletePause(b); err != nil {
 			return err
 		}
 		if len(tx.List(objectPrefix+name+"/")) > 0 || len(tx.List(noncurrentPrefix+name+"/")) > 0 {

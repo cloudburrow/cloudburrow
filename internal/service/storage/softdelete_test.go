@@ -324,7 +324,10 @@ func TestStorageHardDeletePauseHoldsSweep(t *testing.T) {
 	h := httptest.NewServer(s)
 	t.Cleanup(h.Close)
 	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
-		`{"name":"paused","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`); code != 200 {
+		`{"name":"paused","softDeletePolicy":{"retentionDurationSeconds":"604800"}}`); code != 200 {
+		t.Fatal(body)
+	}
+	if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/paused", `{"softDeletePolicy":{"hardDeletePause":{"enabled":true}}}`); code != 200 {
 		t.Fatal(body)
 	}
 	gens := map[string]string{}
@@ -386,10 +389,12 @@ func TestStorageHardDeletePauseHoldsSweep(t *testing.T) {
 	})
 }
 
-// A bucket deleted while its policy pauses hard deletion is kept, with its
-// soft-deleted objects, past its hardDeleteTime (#1702): buckets.restore
-// still brings it back, and its objects are still restorable.
-func TestStorageHardDeletePauseDeletedBucket(t *testing.T) {
+// The pause page's rules (#1715) on the server's clock: the pause changes,
+// either way, at most once every 24 hours (412); it needs soft delete
+// (412 softDeletePolicyNotSet); while it holds, soft delete can't be
+// disabled, by a 0 retention or by removing the policy (412), though the
+// retention can change, and buckets.delete is refused (409).
+func TestStorageHardDeletePauseOncePerDay(t *testing.T) {
 	clock := sched.NewFakeClock(time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
 	s, err := NewServer(Options{Now: clock.Now})
 	if err != nil {
@@ -397,38 +402,68 @@ func TestStorageHardDeletePauseDeletedBucket(t *testing.T) {
 	}
 	h := httptest.NewServer(s)
 	t.Cleanup(h.Close)
-	code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
-		`{"name":"pbk","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`)
-	var bucket struct {
-		Generation string `json:"generation"`
+	patch := func(body string) (int, string) {
+		t.Helper()
+		return raw(t, "PATCH", h.URL+"/storage/v1/b/day", body)
 	}
-	if code != 200 || json.Unmarshal([]byte(body), &bucket) != nil || bucket.Generation == "" {
-		t.Fatalf("insert = %d %s", code, body)
+	const on, off = `{"softDeletePolicy":{"hardDeletePause":{"enabled":true}}}`, `{"softDeletePolicy":{"hardDeletePause":{"enabled":false}}}`
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p", `{"name":"day","softDeletePolicy":{"retentionDurationSeconds":"0"}}`); code != 200 {
+		t.Fatal(body)
 	}
-	code, body = raw(t, "POST", h.URL+"/upload/storage/v1/b/pbk/o?uploadType=media&name=o", "x")
-	var obj struct {
-		Generation string `json:"generation"`
+	if code, body := patch(on); code != http.StatusPreconditionFailed || !strings.Contains(body, "softDeletePolicyNotSet") {
+		t.Errorf("pausing a bucket without soft delete = %d %s; want 412 softDeletePolicyNotSet", code, body)
 	}
-	if code != 200 || json.Unmarshal([]byte(body), &obj) != nil {
-		t.Fatalf("upload = %d %s", code, body)
+	if code, body := patch(`{"softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`); code != http.StatusPreconditionFailed {
+		t.Errorf("pausing while enabling soft delete = %d %s; want 412, the bucket has no soft delete yet", code, body)
 	}
-	if code, _ := raw(t, "DELETE", h.URL+"/storage/v1/b/pbk/o/o", ""); code != http.StatusNoContent {
-		t.Fatalf("delete object = %d", code)
+	if code, body := patch(`{"softDeletePolicy":{"retentionDurationSeconds":"604800"}}`); code != 200 {
+		t.Fatal(body)
 	}
-	if code, body := raw(t, "DELETE", h.URL+"/storage/v1/b/pbk", ""); code != http.StatusNoContent {
-		t.Fatalf("delete bucket = %d %s", code, body)
+	if code, body := patch(on); code != 200 {
+		t.Fatalf("the first pause = %d %s", code, body)
 	}
-	clock.Advance(30 * 24 * time.Hour)
-	if _, err := s.Sweep(); err != nil {
-		t.Fatal(err)
+	if code, body := patch(on); code != 200 {
+		t.Errorf("pausing again, which changes nothing = %d %s; want 200", code, body)
 	}
-	if code, body := raw(t, "GET", h.URL+"/storage/v1/b?project=p&softDeleted=true", ""); code != 200 || !strings.Contains(body, `"pbk"`) {
-		t.Errorf("softDeleted bucket listing = %d %s; want pb", code, body)
+
+	clock.Advance(23*time.Hour + 59*time.Minute)
+	if code, body := patch(off); code != http.StatusPreconditionFailed || !strings.Contains(body, "at most once every 24 hours") {
+		t.Errorf("resuming 23h59m after the pause = %d %s; want 412", code, body)
 	}
-	if code, body := raw(t, "POST", h.URL+"/storage/v1/b/pbk/restore?generation="+bucket.Generation, ""); code != 200 {
-		t.Fatalf("buckets.restore of a paused bucket past its hardDeleteTime = %d %s", code, body)
+	for _, body := range []string{
+		`{"softDeletePolicy":{"retentionDurationSeconds":"0"}}`,
+		`{"softDeletePolicy":null}`,
+		`{"softDeletePolicy":{"retentionDurationSeconds":"0","hardDeletePause":{"enabled":false}}}`,
+	} {
+		if code, got := patch(body); code != http.StatusPreconditionFailed || !strings.Contains(got, "Soft delete can't be disabled") {
+			t.Errorf("patch %s while paused = %d %s; want 412", body, code, got)
+		}
 	}
-	if code, body := raw(t, "POST", h.URL+"/storage/v1/b/pbk/o/o/restore?generation="+obj.Generation, ""); code != 200 {
-		t.Errorf("objects.restore in the restored bucket = %d %s", code, body)
+	if code, body := raw(t, "PUT", h.URL+"/storage/v1/b/day", `{"softDeletePolicy":{"retentionDurationSeconds":"0","hardDeletePause":{"enabled":true}}}`); code != http.StatusPreconditionFailed {
+		t.Errorf("buckets.update disabling soft delete while paused = %d %s; want 412", code, body)
+	}
+	if code, body := patch(`{"softDeletePolicy":{"retentionDurationSeconds":"1209600"}}`); code != 200 ||
+		!strings.Contains(body, `"retentionDurationSeconds": "1209600"`) || !strings.Contains(body, `"enabled": true`) {
+		t.Errorf("changing the retention while paused = %d %s; want it taken, still paused", code, body)
+	}
+	if code, body := raw(t, "DELETE", h.URL+"/storage/v1/b/day", ""); code != http.StatusConflict || !strings.Contains(body, "while hard deletions are paused") {
+		t.Errorf("buckets.delete while paused = %d %s; want 409", code, body)
+	}
+	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/day", ""); code != 200 {
+		t.Errorf("the bucket after the refused delete = %d; want it live", code)
+	}
+
+	clock.Advance(time.Minute)
+	if code, body := patch(off); code != 200 {
+		t.Fatalf("resuming 24h after the pause = %d %s", code, body)
+	}
+	if code, body := patch(on); code != http.StatusPreconditionFailed || !strings.Contains(body, "can't be paused until 2026-11-03T12:00:00.000Z") {
+		t.Errorf("pausing right after the resume = %d %s; want 412 naming when it can", code, body)
+	}
+	if code, body := patch(`{"softDeletePolicy":{"retentionDurationSeconds":"0"}}`); code != 200 {
+		t.Errorf("disabling soft delete once resumed = %d %s", code, body)
+	}
+	if code, body := raw(t, "DELETE", h.URL+"/storage/v1/b/day", ""); code != http.StatusNoContent {
+		t.Errorf("buckets.delete once resumed = %d %s", code, body)
 	}
 }

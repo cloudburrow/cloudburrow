@@ -101,10 +101,11 @@ func checkSoftDeletePolicy(f map[string]any) error {
 // them as gone past it. Disabling the pause resumes the sweep, which then
 // removes what is past its hardDeleteTime (the docs: until "you resume hard
 // deletions for the bucket and the original retention period expires").
-// A soft-deleted bucket whose policy held the pause when it was deleted is
-// kept the same way (UNVERIFIED: the docs say only that pausing gives "more
-// time to restore a soft-deleted bucket and its objects").
+// A bucket is never soft-deleted while paused: buckets.delete refuses it
+// (checkHardDeletePause), so a soft-deleted bucket's own hardDeleteTime is
+// never held.
 // Docs re-read 2026-11-17: https://docs.cloud.google.com/storage/docs/soft-delete
+// and https://docs.cloud.google.com/storage/docs/pause-hard-deletions
 func hardDeletePaused(b bucketRecord) bool {
 	p, _ := b.Fields["softDeletePolicy"].(map[string]any)
 	hp, _ := p["hardDeletePause"].(map[string]any)
@@ -152,6 +153,16 @@ func stampSoftDeletePolicy(next, old map[string]any, now time.Time) {
 		return
 	}
 	p["effectiveTime"] = rfc3339(now)
+}
+
+// copySoftDeletePolicy copies a softDeletePolicy and its hardDeletePause,
+// which a merge patch would otherwise edit in place, nil for anything else.
+func copySoftDeletePolicy(v any) map[string]any {
+	p := copyMap(v)
+	if hp := copyMap(p["hardDeletePause"]); hp != nil {
+		p["hardDeletePause"] = hp
+	}
+	return p
 }
 
 // copyMap is a shallow copy of a JSON object, nil for anything else.
@@ -410,7 +421,7 @@ func (s *Server) getSoftBucket(tx Tx, name, gen string) (bucketRecord, bool, err
 	if err := json.Unmarshal(raw, &b); err != nil {
 		return b, false, err
 	}
-	return b, !pastHardDelete(b, b.HardDelete, s.now()), nil
+	return b, s.now().Before(b.HardDelete), nil
 }
 
 // bucketsGetSoftDeleted is buckets.get with softDeleted=true, which needs
@@ -450,7 +461,7 @@ func (s *Server) softBuckets(tx Tx, project, prefix string) ([]bucketRecord, err
 		if err := json.Unmarshal(raw, &b); err != nil {
 			return nil, err
 		}
-		if b.Project == project && !pastHardDelete(b, b.HardDelete, now) {
+		if b.Project == project && now.Before(b.HardDelete) {
 			out = append(out, b)
 		}
 	}
@@ -576,9 +587,6 @@ func (s *Server) Sweep() (time.Time, error) {
 			}
 			if now.Before(b.HardDelete) {
 				later(b.HardDelete)
-				continue
-			}
-			if hardDeletePaused(b) {
 				continue
 			}
 			tx.Delete(key)
