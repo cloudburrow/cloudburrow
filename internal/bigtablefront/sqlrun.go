@@ -463,7 +463,7 @@ func build(q *query, src *source, params map[string]*btpb.Type) (*plan, error) {
 		if hasGeography(t) {
 			// Bigtable's Type has no GEOGRAPHY kind, nor the reference's
 			// data types a GEOGRAPHY (#1720): ZetaSQL's refusal of an output
-			// type the product does not support (UNVERIFIED 2026-11-17).
+			// type the product does not support (UNVERIFIED, re-read 2026-11-17: data-types).
 			return nil, fmt.Errorf("Returning expressions of type %s is not allowed; return ST_ASTEXT, ST_ASGEOJSON or ST_ASBINARY of it", kind(t))
 		}
 		name := p.items[i].alias

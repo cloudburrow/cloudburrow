@@ -1168,7 +1168,7 @@ func boxValue(r s2.Rect, extent bool) []any {
 	} else if r.Lng.IsInverted() {
 		hi += 360
 	}
-	// to 15 significant digits, as WKT's coordinates (UNVERIFIED 2026-11-17).
+	// to 15 significant digits, as WKT's coordinates (UNVERIFIED, re-read 2026-11-17: geography_functions).
 	return []any{round15(lo), round15(r.Lat.Lo * 180 / math.Pi), round15(hi), round15(r.Lat.Hi * 180 / math.Pi)}
 }
 
