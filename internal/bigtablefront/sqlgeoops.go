@@ -24,8 +24,12 @@ import (
 // intersect in that edge; ST_UNION splits linestrings where they cross.
 //
 // UNVERIFIED (docs re-read 2026-11-17: https://cloud.google.com/bigtable/docs/reference/sql/geography_functions):
-// the reference documents no error message texts; the messages here name
-// the argument and the bound.
+// the reference names no snap function and no error text. The operations
+// and buffers use S2's default, IdentitySnapFunction of radius zero (every
+// input and computed vertex stays where S2 puts it), and ST_SIMPLIFY an
+// IdentitySnapFunction of radius tolerance_meters; where Google snaps
+// otherwise a vertex's last digits differ. The error messages here name the
+// argument and the bound.
 
 // closedSetOutput collects the three layers' output as a geog.
 type closedSetOutput struct {
