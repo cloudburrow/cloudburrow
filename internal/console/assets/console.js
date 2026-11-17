@@ -184,6 +184,9 @@ const ROUTES = [
   // never enforced (ADR-0006); Grant access and Remove principal on its
   // Permissions tab.
   { path: "/iam-admin/iam", service: "iam", title: "IAM", section: "IAM & Admin" },
+  // IAM & Admin > Roles (#1743): the project's and the organization's
+  // custom roles, with Create role, Edit role, Delete and Undelete.
+  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", section: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },

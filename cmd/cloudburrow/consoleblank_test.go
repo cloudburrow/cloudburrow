@@ -2,6 +2,7 @@ package main
 
 import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
+	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc"
 	"time"
@@ -228,6 +229,10 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 	// Tags (#1295): a key with a value, bound to the project.
+	if _, err := d.projects.CreateRole("projects/"+blankProject, "blankRole", &adminpb.Role{Title: "Blank role", Description: "Blank role",
+		IncludedPermissions: []string{"datastore.entities.get"}}); err != nil {
+		t.Fatal(err)
+	}
 	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)
 	if err != nil {
 		t.Fatal(err)
