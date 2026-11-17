@@ -91,9 +91,9 @@ func TestDecodeHEICAndHEIF(t *testing.T) {
 	}
 }
 
-// TestDecodeImageRefusesBadHEIFAndAVIF: an AV1-coded HEIF (AVIF), random
-// bytes and a truncated HEIC are INVALID_ARGUMENT-ready errors naming the
-// type, and image/avif is not a served type.
+// TestDecodeImageRefusesBadHEIFAndAVIF: an AV1-coded HEIF (AVIF) sent as
+// image/heif, random bytes and a truncated HEIC are INVALID_ARGUMENT-ready
+// errors naming the type (AVIF itself is served as image/avif, #1729).
 func TestDecodeImageRefusesBadHEIFAndAVIF(t *testing.T) {
 	avif := readTestImage(t, "pattern.avif")
 	heic := readTestImage(t, "pattern-lossy.heic")
@@ -106,7 +106,6 @@ func TestDecodeImageRefusesBadHEIFAndAVIF(t *testing.T) {
 		"garbage":      {"image/heic", []byte("not an image at all"), "not a valid image/heic"},
 		"truncated":    {"image/heic", heic[:len(heic)/2], "not a valid image/heic"},
 		"png as heic":  {"image/heic", readTestImage(t, "pattern.png"), "not a valid image/heic"},
-		"avif":         {"image/avif", avif, `mime_type "image/avif" is not supported`},
 	} {
 		_, err := DecodeImage(c.mt, c.data)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

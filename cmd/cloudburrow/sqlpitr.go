@@ -86,7 +86,7 @@ dbs=$(mysql $MYSQL_LOCAL -N -B -e "SELECT schema_name FROM information_schema.sc
 if [ -n "$dbs" ]; then
   mysqldump $MYSQL_LOCAL --single-transaction --source-data=2 --set-gtid-purged=OFF --routines --triggers --events --no-tablespaces --databases $dbs > "$R/base/.tmp"
 else
-  mysql $MYSQL_LOCAL -N -B -e 'SHOW BINARY LOG STATUS' | awk '{printf "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='"'"'%s'"'"', SOURCE_LOG_POS=%s;\n", $1, $2}' > "$R/base/.tmp"
+  { mysql $MYSQL_LOCAL -N -B -e 'SHOW BINARY LOG STATUS' 2>/dev/null || mysql $MYSQL_LOCAL -N -B -e 'SHOW MASTER STATUS'; } | awk '{printf "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='"'"'%s'"'"', SOURCE_LOG_POS=%s;\n", $1, $2}' > "$R/base/.tmp"
 fi
 grep -q 'SOURCE_LOG_FILE=' "$R/base/.tmp"
 mv "$R/base/.tmp" "$R/base/$(( $(date -u +%s) + 1 )).sql"`)

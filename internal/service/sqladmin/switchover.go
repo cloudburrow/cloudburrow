@@ -306,7 +306,7 @@ func (s *Server) runSwitchover(c, pc *created, timeout time.Duration) (err error
 	serverID := 2 + crc32.ChecksumIEEE([]byte(master))%1000000
 	if err := oldPrimary.exec(ctx,
 		fmt.Sprintf("SET PERSIST server_id = %d", serverID),
-		"CHANGE REPLICATION SOURCE TO SOURCE_HOST = "+myString(instanceServicePrefix+name)+", SOURCE_PORT = 3306, SOURCE_USER = "+
+		"CHANGE REPLICATION SOURCE TO SOURCE_HOST = "+myString(instanceServicePrefix+s.ServerOf(name))+", SOURCE_PORT = 3306, SOURCE_USER = "+
 			myString(ReplicaUser)+", SOURCE_PASSWORD = "+myString(password)+", SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1",
 		"START REPLICA"); err != nil {
 		return fmt.Errorf("make %s a replica of %s: %w", master, name, err)

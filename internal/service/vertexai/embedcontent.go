@@ -29,8 +29,8 @@ import (
 // and audio_track_extraction (EmbeddingGemma embeds text only).
 //
 // EmbeddingGemma 2 (#1454) also embeds images: an inline_data part holding a
-// PNG, JPEG, WebP or BMP (#1651), or HEIC or HEIF (#1724) image (an
-// animated WebP as its first frame), up to embedding.MaxImages of them,
+// PNG, JPEG, WebP or BMP (#1651), HEIC or HEIF (#1724), or AVIF (#1729)
+// image (an animated WebP or an image sequence as its first frame), up to embedding.MaxImages of them,
 // alone or between text parts, into one vector, as Google's
 // gemini-embedding-2 embeds a Content's parts. It embeds a WAV (#1651) or MP3
 // (#1721) audio clip the same way, and reads a file_data part's gs:// object
@@ -39,8 +39,8 @@ import (
 // as video_metadata says (#1722), and one PDF of up to 6 pages, each page
 // rendered as an image, with document_ocr adding each page's text (#1723).
 // With audio_track_extraction, a video's audio track (AAC-LC, MP3 or PCM) is
-// embedded after its frames (#1732). AVIF, VP9 profiles 1 to 3 and
-// document_ocr on a PDF with no text are refused, naming the field.
+// embedded after its frames (#1732). VP9 profiles 1 to 3 and document_ocr on
+// a PDF with no text are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
 // images as base64: 20 MiB, the inline request size Vertex documents for
@@ -270,6 +270,9 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		switch {
 		case strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/"):
 			img, err := embedding.DecodeImage(mt, data)
+			if errors.Is(err, embedding.ErrImageTooLarge) {
+				return nil, 0, apierror.Unimplemented("content.parts[%d].%s: %v", i, field, err)
+			}
 			if err != nil {
 				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}
@@ -346,12 +349,12 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 				types = embedding.ImageMIMETypes
 			}
 			types = append(append(types, embedding.VideoMIMETypes...), embedding.PDFMIMEType)
-			notServed := "AVIF input is not served"
+			notServed := ""
 			if !m.audio {
-				notServed = "audio and AVIF input are not served"
+				notServed = "; audio input is not served"
 			}
 			return nil, 0, apierror.InvalidArgument(
-				"content.parts[%d].%s.mime_type %q is not supported: %s embeds %s (%s); %s",
+				"content.parts[%d].%s.mime_type %q is not supported: %s embeds %s (%s)%s",
 				i, field, mt, name, m.what(), strings.Join(types, ", "), notServed)
 		}
 	}

@@ -171,7 +171,26 @@
 > - Not checked against Transformers.js: the sharp it bundles reads no HEVC-coded HEIC.
 > - Not served: AVIF, still `INVALID_ARGUMENT`. Its cgo-free decoder (`github.com/gen2brain/avif`)
 >   would link libc dynamically into the static Linux CLI through `purego` unless every build sets
->   `-tags nodynamic`; that choice is the maintainer's.
+>   `-tags nodynamic`; that choice is the maintainer's (served since #1729, below).
+>
+> **Update 2026-11-17 (#1729): AVIF.** The user chose to vendor `github.com/gen2brain/avif` v0.6.0's
+> WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, and its Go glue) into
+> `internal/avif` without its `purego` loader, run on `github.com/tetratelabs/wazero` v1.12.0 (pure
+> Go, Apache 2.0), so no build tag is needed and the Linux CLI stays statically linked
+> ([third_party/avif/PROVENANCE.md](../third_party/avif/PROVENANCE.md) records the files, their
+> hashes and the deletions).
+>
+> - Use: an `inline_data` or `file_data` part with `mime_type` `image/avif`, 8 to 12 bits, with or
+>   without alpha, decoded with the primary item's crop, rotation and mirror applied (as `heif-dec`
+>   and ImageMagick apply them; libavif only reports them), then prepared as PNG is; an AVIS image
+>   sequence gives its first frame. The console's **Images** picker accepts `.avif` files.
+> - 4:2:0 chroma is upsampled as libavif's default (`AUTOMATIC`) does in this build, which has
+>   libyuv: nearest-neighbour, within one step of `avifdec -u nearest`. Homebrew's `avifdec` (no
+>   libyuv) defaults to bilinear: 3.5 a channel apart on average on a sharp-edged 32 × 24 fixture.
+> - The first AVIF compiles the 3.5 MB module (about half a second on an M4 Max); each decode
+>   instantiates it afresh. A 10- or 12-bit AVIF over 13312 × 13312 does not fit the module's 4 GiB
+>   of memory and is `UNIMPLEMENTED` saying so (#1736); 8-bit AVIFs decode up to 16384 × 16384.
+> - Not checked against Transformers.js.
 >
 > Everything below records why the official LiteRT route is still blocked.
 

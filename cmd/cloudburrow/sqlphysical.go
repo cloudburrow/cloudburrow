@@ -43,8 +43,13 @@ func (p *sqlProvisioner) PhysicalUnsupported(spec sqladmin.Spec) string {
 		return "there is no Percona XtraBackup image for " + spec.DatabaseVersion + "; MYSQL_8_0 and MYSQL_8_4 are served"
 	}
 	if !p.persistent {
+		// Measured for #1614: an ephemeral instance's MySQL Deployment has no
+		// volume (components.CloudSQLMySQLBackend with persistent false).
 		return "the backup is restored onto the replica's volume, and an instance started without --mode persistent " +
-			"keeps its servers' data in their containers: start it with --mode persistent"
+			"keeps its servers' data in their containers' writable layer, with no volume: the restore replaces the data " +
+			"directory while mysqld is stopped, which ends the container, and Kubernetes starts a new one with a fresh layer; " +
+			"taking the backup reads the source's data files, which exist only inside its running container, whose image " +
+			"has no xtrabackup. Start the instance with --mode persistent"
 	}
 	return ""
 }
@@ -58,7 +63,7 @@ func sourceClaim(ext *sqladmin.ExternalSource) string {
 	case ext.InstanceUp:
 		return components.CloudSQLMySQLBackend(true, components.MySQLCredentials{}).Name + "-data"
 	}
-	return components.SQLInstancePrefix + ext.Instance + "-data"
+	return components.SQLInstancePrefix + sqlServerOf(ext.Instance) + "-data"
 }
 
 func (p *sqlProvisioner) PhysicalRestore(ctx context.Context, spec sqladmin.Spec, b sqladmin.PhysicalBackup) error {
@@ -66,7 +71,7 @@ func (p *sqlProvisioner) PhysicalRestore(ctx context.Context, spec sqladmin.Spec
 		return fmt.Errorf("%s", why)
 	}
 	ext := spec.External
-	deploy := nodeName(spec.Name, spec.PrimaryNode())
+	deploy := nodeName(spec.ServerName(), spec.PrimaryNode())
 	take := len(b.Files) == 0
 	if take && sourceClaim(ext) == "" {
 		return fmt.Errorf("the source is not a CloudBurrow instance's server, and dumpFilePath names no backup")
@@ -205,7 +210,7 @@ func physicalJob(namespace, instance, job string, spec sqladmin.Spec, take bool)
 	ext := spec.External
 	env := map[string]string{"CLOUDSQL_INIT_SQL": physicalInitSQL(spec.RootPassword)}
 	volumes := fmt.Sprintf("        - name: replica\n          persistentVolumeClaim:\n            claimName: %s\n",
-		nodeName(spec.Name, spec.PrimaryNode())+"-data")
+		nodeName(spec.ServerName(), spec.PrimaryNode())+"-data")
 	mounts := "            - name: replica\n              mountPath: /replica\n"
 	if take {
 		env["CLOUDSQL_TAKE_BACKUP"] = "1"

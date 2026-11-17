@@ -5092,8 +5092,9 @@
         "tests": [
           "test/compat/embedaudio_test.go:71 TestEmbedContentEmbedsAudioThroughThePredictionClient",
           "test/compat/embedaudiotrack_test.go:35 TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient",
+          "test/compat/embedavif_test.go:43 TestEmbedContentEmbedsAVIFThroughThePredictionClient",
           "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient",
-          "test/compat/embedheic_test.go:45 TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient",
+          "test/compat/embedheic_test.go:46 TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient",
           "test/compat/embedimages_test.go:111 TestEmbedContentEmbedsImagesThroughThePredictionClient",
           "test/compat/embedmp3_test.go:39 TestEmbedContentEmbedsMP3ThroughThePredictionClient",
           "test/compat/embedmpeg25_test.go:28 TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient",
@@ -10441,8 +10442,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 11,
-      "Verified": 69
+      "Unimplemented": 6,
+      "Verified": 74
     },
     "rows": [
       {
@@ -10527,48 +10528,44 @@
       },
       {
         "method": "sql.blueGreenDeployments.create",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector, and read replicas with promoteReplica are served instead"
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment"
+        ]
       },
       {
         "method": "sql.blueGreenDeployments.delete",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector, and read replicas with promoteReplica are served instead"
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment"
+        ]
       },
       {
         "method": "sql.blueGreenDeployments.get",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector, and read replicas with promoteReplica are served instead"
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment"
+        ]
       },
       {
         "method": "sql.blueGreenDeployments.list",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector, and read replicas with promoteReplica are served instead"
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment"
+        ]
       },
       {
         "method": "sql.blueGreenDeployments.switchover",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector, and read replicas with promoteReplica are served instead"
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment"
+        ]
       },
       {
         "method": "sql.connect.generateEphemeral",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
@@ -10593,6 +10590,7 @@
         "method": "sql.connect.get",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
@@ -10855,6 +10853,7 @@
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -10917,6 +10916,7 @@
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -11095,6 +11095,7 @@
         "method": "sql.instances.startReplica",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
@@ -11102,6 +11103,7 @@
         "method": "sql.instances.stopReplica",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
@@ -11145,6 +11147,7 @@
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
+          "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",

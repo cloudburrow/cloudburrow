@@ -151,7 +151,7 @@ Refused with 501, each naming what is missing:
 
 | Methods | Why |
 |---|---|
-| `blueGreenDeployments.*` | the switchover moves the blue instance's write endpoint (IP address and DNS name) to the green one: Google-managed networking |
+| `blueGreenDeployments.create` of a `REGIONAL` instance | the green instance is kept in step as a read replica, and a read replica here is one server (blue-green deployments, below) |
 | `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
 | `instances.switchover` from a PostgreSQL primary with read replicas besides its DR replica | the old primary is rebuilt from a base backup of the new one, and its other replicas would have to follow the new timeline through it while it is rebuilt; with only its DR replica it is served (DR replicas and switchover, below) |
@@ -535,6 +535,34 @@ docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
   `--clear-failover-dr-replica-name`, and `gcloud sql instances switchover --db-timeout`. In the
   console, a MySQL or PostgreSQL primary with replicas has **Designate DR replica** and **Remove DR replica**,
   and its DR replica's page **Switchover**, confirmed by typing the primary's instance ID.
+
+**Blue-green deployments** (#1614), for MySQL, as Cloud SQL documents them
+([about](https://docs.cloud.google.com/sql/docs/mysql/about-blue-green-deployments),
+[create](https://docs.cloud.google.com/sql/docs/mysql/create-blue-green-deployment),
+[switchover](https://docs.cloud.google.com/sql/docs/mysql/switchover-blue-green-deployment)):
+
+- **`blueGreenDeployments.create`** (`CREATE_BLUE_GREEN_DEPLOYMENT`) in the blue instance's region
+  makes the green instance, `BLUE-green-XXXXXXXX` (the blue name truncated to 48 characters and 8
+  hex digits), a read replica of the blue one with `requestedConfig.databaseVersion` applied
+  (MySQL 8.0 to `MYSQL_8_4` only). The blue instance must be a RUNNABLE MySQL primary with
+  automated backups and binary logging and no read replicas (400 otherwise). Here a green name
+  longer than 55 characters (a blue name over 40) is 501: the server's Kubernetes names hold it.
+- **The state**: `PROVISIONING` while the green instance starts, then `SWITCHOVER_READY` while
+  its replication runs (both threads `ON`), and `SWITCHOVER_NOT_READY` with `errorDetail` when it
+  is stopped or broken, or either instance is gone. `deploymentMappings` holds the one pair; the
+  `DETAILED` view adds its `diffs` (`database_version`, `tier`, `edition`, `availability_type`).
+  Both instances answer `deploymentInfo` (`PRE_SWITCHOVER`, `POST_SWITCHOVER`).
+- **`switchover`** (`SWITCHOVER_BLUE_GREEN_DEPLOYMENT`) makes the blue instance read-only, waits
+  up to a minute for the green one to apply its GTIDs (else it fails, "replication lag is too
+  high", and the blue instance takes writes again), promotes the green one, and makes the blue
+  one writable. The blue instance's name, connection name and backups then belong to the green
+  server, and the green name to the old blue server, a standalone read and write instance:
+  each record names its server (`Spec.Server`), so neither server restarts.
+- **`delete`** before a switchover deletes the green instance; after one it deletes the record,
+  and with `deleteOldSource` the old blue server (the green name) too.
+- In the console, a MySQL primary's page has **Create blue-green deployment**, and either
+  instance's page the deployment's role and state, **Switch over blue-green** and **Delete
+  blue-green deployment**.
 
 **A physical sync** (#1570), for MySQL: `startExternalSync` with `migrationType` `PHYSICAL`
 gives the replica a Percona XtraBackup backup of the source instead of a dump, and then

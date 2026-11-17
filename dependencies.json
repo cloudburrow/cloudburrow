@@ -646,14 +646,35 @@
         "version": "v1.12.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723); an indirect requirement, no cgo and no dependencies."
+        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723), and that runs the vendored AVIF decoder (#1729, internal/avif), which made it a direct requirement; no cgo and no dependencies beyond golang.org/x/sys, already required at the same version."
       },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",
         "license": "MIT",
         "verification": "go.sum",
-        "notes": "Vertex AI EmbedContent's HEIC and HEIF images (#1724, internal/embedding/heic.go), approved by the maintainer 2026-11-17: a pure Go HEVC decoder and HEIF container reader, no cgo and no dependencies. Its go.mod needs go 1.26.4, which raised CloudBurrow's go line. Chosen over gen2brain/heic and gen2brain/avif, which import purego and so link libc dynamically into a CGO_ENABLED=0 Linux binary (docs/upstream-evaluation.md, #1724); AVIF stays refused."
+        "notes": "Vertex AI EmbedContent's HEIC and HEIF images (#1724, internal/embedding/heic.go), approved by the maintainer 2026-11-17: a pure Go HEVC decoder and HEIF container reader, no cgo and no dependencies. Its go.mod needs go 1.26.4, which raised CloudBurrow's go line. Chosen over gen2brain/heic and gen2brain/avif, which import purego and so link libc dynamically into a CGO_ENABLED=0 Linux binary (docs/upstream-evaluation.md, #1724); AVIF is served by the vendored WebAssembly path of gen2brain/avif (goAVIFVendored, #1729)."
+      },
+      "goAVIFVendored": {
+        "module": "github.com/gen2brain/avif",
+        "version": "v0.6.0",
+        "source": "https://github.com/gen2brain/avif",
+        "commit": "1fd2a9a51895ca03a192dd49917840794c8a77a1",
+        "moduleSum": "h1:/8WSgcU+IEF0jhKYsUZ/mzlziFuTeJFpIKBj2siTQps=",
+        "license": "MIT; the WebAssembly blob: libavif BSD-2-Clause, dav1d BSD-2-Clause, aom BSD-2-Clause, libyuv BSD-3-Clause",
+        "redistribution": "vendored-modified",
+        "files": {
+          "internal/avif/avif.go": "sha256:5211d811be32260ec6c991308a2bc2646dd9f2c04838d26362074019e36e7462",
+          "internal/avif/avif_wazero.go": "sha256:b02291fe9bcc0bb0f89d42fface8df63fd6130fecf3c53df19e9b9f8d5a59e2a",
+          "internal/avif/isobmff.go": "sha256:b8db4004e6e429f7c75cfd6c8613df8024a4e5ef3d2d3d852dcf4e8a223fd006",
+          "internal/avif/orientation.go": "sha256:18ebce9fc39f7728193ff9132c4af0f94237bf9323b5295e4c379b60529fee27",
+          "internal/avif/lib/avif.wasm.gz": "sha256:92ffd604d276359c2df829effc615cd9f286c36ece5761644929e4396eb97360",
+          "internal/avif/LICENSE": "sha256:7ccd0e2f82eac9b87608576a9e559567f1ba049bebe709135eef3a9661bbc96e",
+          "internal/avif/lib/LICENSE.libavif": "sha256:10952217a6d404de8bf8a997fbea9b88f682df1fe98cb9b9f467ade641525639",
+          "internal/avif/lib/LICENSE.aom": "sha256:4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2"
+        },
+        "verification": "file-checksums",
+        "notes": "Vertex AI EmbedContent's AVIF images (#1729, internal/embedding/avif.go), the user's decision of 2026-11-17: NOT a go.mod dependency. Its WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, lib/avif.wasm.gz, and the Go glue that runs it on wazero) is vendored into internal/avif from the module zip of v0.6.0 (commit 1fd2a9a51895ca03a192dd49917840794c8a77a1), without its purego loader of a system libavif, so the CGO_ENABLED=0 Linux CLI stays statically linked (test/repo TestLinuxBinariesNeverImportPurego). Files, hashes and the deletions made: third_party/avif/PROVENANCE.md (checked by test/repo TestVendoredAVIFMatchesProvenance)."
       },
       "goOrc": {
         "module": "github.com/scritchley/orc",
