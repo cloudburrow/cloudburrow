@@ -13,11 +13,13 @@ package sqladmin
 //   - demote, Database Migration Service's step for a migration to an
 //     existing instance, leaves it a replica waiting for startExternalSync,
 //     which dumps the source's databases into it and starts replicating.
+//     A PostgreSQL instance is demoted too (#1614): its databases named as
+//     the migrated ones are dropped first, as Database Migration Service
+//     documents.
 //
-// demoteMaster with skipReplicationSetup is 501: the replication is then
-// set up by hand with Cloud SQL's mysql.* stored procedures
-// (mysql.setupExternalSourceAutoPosition and the rest), which a MySQL
-// server's own mysql schema does not have.
+// demoteMaster with skipReplicationSetup (#1614) installs Cloud SQL's
+// mysql.* replication stored procedures instead of setting up the
+// replication (demoteprocs.go).
 
 import (
 	"context"
@@ -49,12 +51,6 @@ type demoteBody struct {
 	} `json:"demoteContext"`
 }
 
-// skipReplicationSetupWhy is why demoteMaster's skipReplicationSetup is
-// refused.
-const skipReplicationSetupWhy = "with skipReplicationSetup the replication is set up afterwards with Cloud SQL's mysql.* stored procedures " +
-	"(mysql.setupExternalSourceAutoPosition, mysql.startReplication and the rest), which a MySQL server's own mysql schema does not have; " +
-	"send it false and the replication is set up by demoteMaster (docs/cloudsql.md)"
-
 // demoteInstance is instances.demoteMaster and instances.demote.
 func (s *Server) demoteInstance(r *http.Request, base, project, name, verb string) (any, error) {
 	var b demoteBody
@@ -65,7 +61,7 @@ func (s *Server) demoteInstance(r *http.Request, base, project, name, verb strin
 		}
 	}
 	var master, user, pass string
-	verify, isMaster := true, verb == "demoteMaster"
+	verify, isMaster, manual := true, verb == "demoteMaster", false
 	switch {
 	case isMaster && b.DemoteMasterContext != nil:
 		d := b.DemoteMasterContext
@@ -76,9 +72,11 @@ func (s *Server) demoteInstance(r *http.Request, base, project, name, verb strin
 		if d.VerifyGtidConsistency != nil {
 			verify = *d.VerifyGtidConsistency
 		}
-		if d.SkipReplicationSetup {
-			return nil, unimplemented("demoteMaster with skipReplicationSetup", skipReplicationSetupWhy)
-		}
+		// The custom import guide demotes an instance whose imported
+		// data has GTIDs of its own, then resets them (mysql.resetMaster):
+		// with skipReplicationSetup there is no auto-positioning to check.
+		manual = d.SkipReplicationSetup
+		verify = verify && !manual
 	case !isMaster && b.DemoteContext != nil:
 		master = b.DemoteContext.SourceRepresentativeInstanceName
 	}
@@ -107,10 +105,6 @@ func (s *Server) demoteInstance(r *http.Request, base, project, name, verb strin
 	switch {
 	case !spec.MySQL() && isMaster:
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: demoteMaster is for a MySQL instance; %s runs %s.", name, spec.DatabaseVersion)
-	case !spec.MySQL():
-		return nil, unimplemented("instances.demote of a PostgreSQL instance", "the sync after it subscribes the instance to the source's tables, "+
-			"whose first copy collides with the rows the instance has; a PostgreSQL replica of a source representation instance is created "+
-			"with masterInstanceName and synced with startExternalSync (docs/cloudsql.md)")
 	case spec.MasterInstanceName != "":
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: %s is already a read replica (of %s).", name, spec.MasterInstanceName)
 	case len(replicas) > 0:
@@ -153,7 +147,22 @@ func (s *Server) demoteInstance(r *http.Request, base, project, name, verb strin
 				return nil, err
 			}
 		}
+		ext.Demoted, ext.ManualSetup = true, manual
+	} else if !spec.MySQL() {
+		// demote of a PostgreSQL instance (#1614): as Database Migration
+		// Service documents for a migration to an existing instance, a
+		// database of the instance with the name of one being migrated is
+		// dropped before the sync copies it (pgExternalSetup).
 		ext.Demoted = true
+	}
+	if manual {
+		m, ok := c.engine.(*MySQL)
+		if !ok {
+			return nil, unimplemented("demoteMaster with skipReplicationSetup", "this server is not MySQL")
+		}
+		if err := installDemoteProcedures(r.Context(), m); err != nil {
+			return nil, err
+		}
 	}
 	s.emu.Lock()
 	if c.state != "RUNNABLE" || c.spec.MasterInstanceName != "" {
@@ -162,6 +171,11 @@ func (s *Server) demoteInstance(r *http.Request, base, project, name, verb strin
 	}
 	c.spec.MasterInstanceName, c.spec.External = next.MasterInstanceName, &ext
 	c.spec.ExternalSyncStarted = isMaster
+	if !spec.MySQL() {
+		// A PostgreSQL replica of an external server is a logical one,
+		// which promoteReplica ends by dropping its subscriptions (#1614).
+		c.engine = s.writes.prov.Engine(c.spec)
+	}
 	c.spec.ReplicationStopped = false
 	c.state = "MAINTENANCE"
 	err = s.saveLocked()

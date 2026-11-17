@@ -52,6 +52,15 @@ func (s *Server) serverCAsReady(e Engine) (*serverCA, error) {
 	if s.conn == nil || s.conn.cas == nil {
 		return nil, unimplemented("server CAs", "this server was started without its connector, which holds the instances' server CAs")
 	}
+	if s.serverCaMode(e.Instance()) == casCA {
+		// UNVERIFIED (docs re-read 2026-11-17:
+		// <https://docs.cloud.google.com/sql/docs/postgres/admin-api/rest/v1/instances/addServerCertificate>,
+		// "For instances not using CAS server CA, use instances.addServerCa
+		// instead"; no error is documented): the 400 and its message are
+		// CloudBurrow's.
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance %s's serverCaMode is %s: its server CA is the region's, "+
+			"and its server certificate is rotated with addServerCertificate and rotateServerCertificate.", e.Instance(), casCA)
+	}
 	ca := s.conn.ca(e.Instance())
 	if ca == nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "instance %s has no server CA yet", e.Instance())
@@ -62,6 +71,15 @@ func (s *Server) serverCAsReady(e Engine) (*serverCA, error) {
 // listServerCas is instances.listServerCas: the active CA, the upcoming one
 // addServerCa made, and the one rotated out.
 func (s *Server) listServerCas(project string, e Engine) (any, error) {
+	if s.serverCaMode(e.Instance()) == casCA && s.conn != nil && s.conn.cas != nil {
+		// A CAS instance trusts its region's CA chain.
+		chain, err := s.conn.casFor(s.regionOf(e.Instance()))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"kind": "sql#instancesListServerCas", "certs": []any{casCertJSON(project, e.Instance(), chain)},
+			"activeVersion": fingerprint(chain.sub)}, nil
+	}
 	ca, err := s.serverCAsReady(e)
 	if err != nil {
 		return nil, err

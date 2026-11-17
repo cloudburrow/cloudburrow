@@ -299,10 +299,12 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 	waitSQLOp(t, svc, project, op)
 }
 
-// TestCloudSQLRefusedMethods (#1462): what needs Compute Engine,
-// Google-managed networking, another service or another engine is refused
-// 501 through the official client, naming what is missing.
-// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.connect.resolve (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.ListServerCertificates (unimplemented), sql.instances.addServerCertificate (unimplemented), sql.instances.RotateServerCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
+// TestCloudSQLRefusedMethods (#1462): what needs Google-managed
+// networking, a maintenance schedule or another engine is refused 501
+// through the official client, naming what is missing. Server
+// certificates and connect.resolve are served since #1614
+// (TestCloudSQLServerCertificates).
+// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
 func TestCloudSQLRefusedMethods(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -327,17 +329,10 @@ func TestCloudSQLRefusedMethods(t *testing.T) {
 			_, err := svc.BlueGreenDeployments.Switchover(bg, &sqladmin.SwitchoverBlueGreenDeploymentRequest{}).Do()
 			return err
 		}},
-		{"connect.resolve", "Cloud DNS", func() error { _, err := svc.Connect.Resolve("us-central1", "db.example.com").Do(); return err }},
 		{"ListEntraIdCertificates", "SQL Server", func() error { _, err := svc.Instances.ListEntraIdCertificates(p, i).Do(); return err }},
 		{"addEntraIdCertificate", "SQL Server", func() error { _, err := svc.Instances.AddEntraIdCertificate(p, i).Do(); return err }},
 		{"RotateEntraIdCertificate", "SQL Server", func() error {
 			_, err := svc.Instances.RotateEntraIdCertificate(p, i, &sqladmin.InstancesRotateEntraIdCertificateRequest{}).Do()
-			return err
-		}},
-		{"ListServerCertificates", "Certificate Authority Service", func() error { _, err := svc.Instances.ListServerCertificates(p, i).Do(); return err }},
-		{"addServerCertificate", "Certificate Authority Service", func() error { _, err := svc.Instances.AddServerCertificate(p, i).Do(); return err }},
-		{"RotateServerCertificate", "Certificate Authority Service", func() error {
-			_, err := svc.Instances.RotateServerCertificate(p, i, &sqladmin.InstancesRotateServerCertificateRequest{}).Do()
 			return err
 		}},
 		{"acquireSsrsLease", "SQL Server", func() error {

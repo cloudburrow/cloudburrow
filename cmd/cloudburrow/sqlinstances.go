@@ -332,10 +332,17 @@ func replicaSetup(spec sqladmin.Spec) string {
 	switch {
 	case spec.MasterInstanceName == "":
 		return ""
-	case ext != nil && !spec.ExternalSyncStarted:
+	case ext != nil && (!spec.ExternalSyncStarted || ext.ManualSetup):
+		// demoteMaster with skipReplicationSetup (#1614): set up by hand
+		// with the mysql.* stored procedures.
 		return ""
 	case ext != nil && !spec.MySQL():
-		return "export CLOUDSQL_SYNC_MODE=" + shellQuote(ext.SyncMode) + " CLOUDSQL_DATABASES=" + shellQuote(strings.Join(ext.Databases, " ")) +
+		demoted := ""
+		if ext.Demoted {
+			// demote of an existing instance (#1614).
+			demoted = " CLOUDSQL_DEMOTED=1"
+		}
+		return "export CLOUDSQL_SYNC_MODE=" + shellQuote(ext.SyncMode) + " CLOUDSQL_DATABASES=" + shellQuote(strings.Join(ext.Databases, " ")) + demoted +
 			" CLOUDSQL_SYNC_ID=" + fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(spec.Project+":"+spec.Name))) + "\n" + pgExternalSetup
 	case !spec.MySQL():
 		return ""
@@ -389,8 +396,13 @@ fi
 n=0
 for db in $dbs; do
   n=$((n+1))
-  if [ -z "$(dst -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]; then
-    dst -d postgres -c "CREATE DATABASE \"$db\""
+  # A demoted instance's database named as a migrated one is dropped first,
+  # as Database Migration Service does for an existing destination (#1614).
+  if [ -n "${CLOUDSQL_DEMOTED:-}" ] && [ -n "$(dst -d template1 -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]; then
+    dst -d template1 -c "DROP DATABASE \"$db\" WITH (FORCE)" 2>/dev/null || dst -d template1 -c "DROP DATABASE \"$db\""
+  fi
+  if [ -z "$(dst -d template1 -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]; then
+    dst -d template1 -c "CREATE DATABASE \"$db\""
   fi
   pg_dump "$conn dbname=$db" --schema-only --no-owner --no-privileges --no-publications --no-subscriptions | PGPASSWORD= psql -h 127.0.0.1 -U postgres -q -d "$db" >/dev/null
   if [ "$CLOUDSQL_SYNC_MODE" = OFFLINE ]; then
