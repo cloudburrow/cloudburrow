@@ -649,7 +649,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleRedisCluster", "TestMemorystoreClusterServerCATabsThroughThePage"}},
 	{Resource: "Memorystore Redis cluster CA", Service: "memorystore",
 		Methods:  []string{"CloudRedisCluster/GetClusterCertificateAuthority"},
-		Provider: "memorystore-clusters", Offers: "Create cluster's Enable in-transit encryption and IAM authentication (#1549); a cluster's page shows both modes and, with in-transit encryption, a Server CA tab with the CA its clients trust, as Google's console offers the CA's download on the cluster's page (#1591)",
+		Provider: "memorystore-clusters", Offers: "Create cluster's Enable in-transit encryption and IAM authentication (#1549); a cluster's page shows both modes, with IAM authentication the role a principal needs (roles/redis.dbConnectionUser, granted on the IAM page, which IAM auth checks, #1614), Edit's IAM authentication through UpdateCluster's authorization_mode (#1614) and, with in-transit encryption, a Server CA tab with the CA its clients trust, as Google's console offers the CA's download on the cluster's page (#1591)",
 		Tests: []string{"TestConsoleRedisClusterServerCA", "TestMemorystoreClusterServerCATabsThroughThePage"}},
 
 	{Resource: "Memorystore Redis cluster token auth and backups", Service: "memorystore",
@@ -690,7 +690,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleValkeyReplicationMigrationVersions", "TestMemorystoreValkeyMigrationThroughThePage"}},
 	{Resource: "Memorystore for Valkey CA", Service: "memorystore",
 		Methods:  []string{"Memorystore/GetCertificateAuthority"},
-		Provider: "memorystore-valkey", Offers: "Create instance's Enable in-transit encryption and IAM authentication (#1549); an instance's page shows both modes and, with in-transit encryption, a Server CA tab with the CA its clients trust, as Google's console offers the CA's download on the instance's page (#1591)",
+		Provider: "memorystore-valkey", Offers: "Create instance's Enable in-transit encryption and IAM authentication (#1549); an instance's page shows both modes, with IAM authentication the role a principal needs (roles/memorystore.dbConnectionUser, granted on the IAM page, which IAM auth checks, #1614) and, with in-transit encryption, a Server CA tab with the CA its clients trust, as Google's console offers the CA's download on the instance's page (#1591)",
 		Tests: []string{"TestConsoleValkeyInstances", "TestMemorystoreClusterServerCATabsThroughThePage"}},
 
 	// Memorystore for Redis (#1302)

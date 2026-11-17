@@ -273,7 +273,7 @@ func (s *Server) serviceAccounts(w http.ResponseWriter, r *http.Request) {
 	case "scopes":
 		s.text(w, "https://www.googleapis.com/auth/cloud-platform\n")
 	case "token":
-		s.writeAccessToken(w)
+		s.writeAccessToken(w, email)
 	case "identity":
 		audience := r.URL.Query().Get("audience")
 		if audience == "" {
@@ -293,16 +293,20 @@ func (s *Server) serviceAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) writeAccessToken(w http.ResponseWriter) {
+// writeAccessToken mints a token for email (issued.go) and writes it.
+func (s *Server) writeAccessToken(w http.ResponseWriter, email string) {
+	tok := s.creds.MintAccessTokenFor(email, TokenTTL)
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"access_token":%q,"expires_in":%d,"token_type":"Bearer"}`,
-		s.creds.MintAccessToken(), int(TokenTTL.Seconds()))
+		tok, int(TokenTTL.Seconds()))
 }
 
 // token is the OAuth endpoint the generated ADC file points at.
 //
-// The assertion is not verified. CloudBurrow authenticates nothing, and a
-// check here would imply a guarantee the rest of the system does not make.
+// An assertion that does not verify is still answered. CloudBurrow
+// authenticates nothing, and refusing here would imply a guarantee the rest
+// of the system does not make; it only decides which account the token is
+// recorded for (issued.go).
 // What it does check is that an assertion was sent at all, so a client that
 // is silently sending nothing finds out.
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
@@ -319,7 +323,11 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest)
 		return
 	}
-	s.writeAccessToken(w)
+	// The token is minted for the account the assertion names when this
+	// instance's key signed it (the ADC fixture's), and for no account
+	// otherwise: it is still served, but no check that needs an account
+	// (Memorystore's IAM auth, #1614) passes with it.
+	s.writeAccessToken(w, s.creds.assertionAccount(r.PostForm.Get("assertion")))
 }
 
 // certs serves the public key, so a client configured to fetch certificates

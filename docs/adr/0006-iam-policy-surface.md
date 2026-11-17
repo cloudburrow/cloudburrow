@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -429,6 +429,20 @@ again under the same name starts with none. Required tests: `TestSecureSourceMan
 official client, gRPC and REST), `TestTerraformSecureSourceManager` (`_repository_iam_member`,
 `_instance_iam_member`), and the console's Permissions tab on an instance's and a repository's
 page. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+### Memorystore IAM auth (amended 2026-11-17 by #1614)
+
+The one exception to rule 1, decided with #1614, which asked for Memorystore for Redis Cluster's
+and Valkey's IAM auth "served as Google documents it". A client of a cluster or instance with
+IAM auth sends an access token as its AUTH password, and Google refuses a token it did not issue
+or whose principal lacks `redis.dbConnectionUser` (Redis Cluster) or `memorystore.dbConnectionUser`
+(Valkey). Taking any string, as before, made a client's misconfigured token pass here and fail on
+Google. The token is checked the only way a local token can be: against the SHA-256s of the
+access tokens this instance minted, each with its account and expiry, and the project's stored
+policy (unconditioned bindings of those two roles, `serviceAccount:` and `user:` members; no basic
+roles, inheritance or conditions). Nothing else reads a stored policy; every other service still
+serves any caller (ADR-0004). The test that a principal without the role is refused proves only
+that this instance's own rule is applied, and its compatibility.md row says so.
 
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row

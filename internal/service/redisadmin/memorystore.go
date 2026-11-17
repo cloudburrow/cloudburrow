@@ -46,7 +46,8 @@ import (
 // In-transit encryption (SERVER_AUTHENTICATION, #1549) is a Redis
 // cluster's (cluster.go): a CA of the instance's own, which
 // GetCertificateAuthority returns as managed_server_ca, every node serving
-// TLS only. IAM_AUTH takes any AUTH string (ADR-0006: IAM is not enforced).
+// TLS only. IAM_AUTH takes an access token this instance minted for a
+// principal granted roles/memorystore.dbConnectionUser (iamauth.go, #1614).
 
 // MemorystoreRESTPrefix is the path the JSON API of memorystore.googleapis.com
 // is served under on the admin port: a client's endpoint is
@@ -613,8 +614,8 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		auth = memorystorepb.Instance_AUTH_DISABLED
 	case memorystorepb.Instance_AUTH_DISABLED:
 	case memorystorepb.Instance_IAM_AUTH:
-		// A client's AUTH is its access token. IAM is not enforced here
-		// (ADR-0006), so the nodes take any AUTH string (docs/memorystore.md).
+		// A client's AUTH is its access token, checked against the
+		// instance's issued tokens and the project's policy (iamauth.go).
 	case memorystorepb.Instance_TOKEN_AUTH:
 		// Token auth users and their tokens (clusterauth.go).
 	default:
@@ -661,7 +662,9 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		Valkey: &valkeyFields{Mode: mode.String(), NodeType: nt.String(), EngineVersion: version, AuthMode: auth.String(),
 			Updated: now, Persistence: protoJSON(in.GetPersistenceConfig()), Networks: nets, Endpoints: asEndpoints,
 			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(in.GetMaintenancePolicy())}}
-	if auth == memorystorepb.Instance_TOKEN_AUTH {
+	if auth == memorystorepb.Instance_TOKEN_AUTH || auth == memorystorepb.Instance_IAM_AUTH {
+		// IAM auth's allowed tokens are the default user's passwords
+		// beside this one (iamauth.go).
 		r.AdminPassword = newUID() + newUID()
 	}
 	r.AutoBackup = protoJSON(ab)

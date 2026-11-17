@@ -249,7 +249,8 @@ replicas (#1381), high availability (#1408), Google's Auth Proxy binary (#1421),
 `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433);
 the Memorystore admin API over Valkey (#1302), exports, imports and RDB persistence (#1384),
 STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), in-transit
-encryption (#1413), and customer-managed keys and server CA rotation (#1463). IAM database authentication is excluded (below).
+encryption (#1413), and customer-managed keys and server CA rotation (#1463); Memorystore for Redis Cluster's and Valkey's IAM
+auth checks the access token against the tokens this instance minted and the project's connect role (#1614). IAM database authentication is excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -289,7 +290,8 @@ Not gaps to close; each stays until its decision is amended.
 - **IAM Conditions** on every policy (Tasks, Secret Manager, KMS, Storage, the console): refused
   by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365. **Audit configs** are refused
   too, except on projects, folders and the organization, where they are stored, not acted on (#1486).
-- **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them.
+- **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them,
+  but for Memorystore's IAM auth, which checks a client's token and the project's connect role (amended by #1614).
 - **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
   service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
 - **Cloud SQL IAM database authentication** (`generateEphemeralCert` with an access token,

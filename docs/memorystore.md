@@ -308,15 +308,26 @@ rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery},
 
 It cannot be changed after the cluster is created, as Google's cannot.
 
-**IAM auth:** with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH string. The
-instance's IAM is not enforced (ADR-0006), so the nodes' default user has no password and takes
-any AUTH string, a token CloudBurrow's credentials issued among them, without checking it.
-Accepting only the tokens CloudBurrow's metadata server mints and refusing others was considered
-and not built (#1614, 2026-10-18): telling one caller's token from another's is authentication,
-which ADR-0004 rules out, and refusing a principal is enforcement, which ADR-0006's rule 1 ("no
-enforcement, ever") rules out; a test that a stranger's token is refused would be the believed
-but meaningless IAM test those decisions exist to prevent. The token is still sent, so a client's
-IAM auth code path runs as it does against Google.
+**IAM auth** (#1614): with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH
+password, with no username, `default` or the principal's email, as Google documents. The token is
+checked: the nodes take it only when this instance minted it (its metadata server, its token
+endpoint for the ADC fixture, or IAM Credentials' `generateAccessToken`), it has not expired, and
+the project's IAM policy grants its account `roles/redis.dbConnectionUser` (a Redis cluster) or
+`roles/memorystore.dbConnectionUser` (a Valkey instance) as `serviceAccount:` or `user:`. Anything
+else is refused `WRONGPASS invalid username-password pair or user is disabled`, and no AUTH is
+`NOAUTH Authentication required`; a connection already authenticated keeps working after its token
+expires or the role is taken back, as Google documents. Nothing is asked of Google: the instance
+keeps the SHA-256 of every token it mints, with its account and expiry
+(`<state-dir>/<name>/issued-tokens.json`, so a cached token outlives `stop` and `up`), and gives
+every node's default user, beside a password of the cluster's own, the hashes of the live tokens
+of the principals granted the role, and each such principal an ACL user named by its email. A new
+token is on the nodes before it is returned to the client; policy changes and expiries reach them
+within seconds (Google: "may take a few minutes"). Not served: a condition on the binding
+(Resource Manager refuses conditions, so a grant is project-wide), basic roles (`roles/owner` is
+not expanded), groups and domains (Google does not support them either). A Redis cluster's
+`authorization_mode` changes between `AUTH_MODE_DISABLED` and `AUTH_MODE_IAM_AUTH` on the running
+nodes, in an update of its own. A cluster or instance kept from before #1614 with IAM auth still
+takes any AUTH string until it is created again. `TestMemorystoreIAMAuthChecksTheToken`.
 
 **Token auth** (#1549): with `AUTH_MODE_TOKEN_AUTH` a client logs in as a token auth user
 with a token the service generates: `AddTokenAuthUser`, then `AddAuthToken`, and
@@ -588,6 +599,6 @@ restore MIGRATEs the keys to its primary. Memorystore for Valkey has no ACL poli
 In-transit encryption (`SERVER_AUTHENTICATION`) and `IAM_AUTH` are a Redis cluster's (§8): a CA of
 the instance's own, which `GetCertificateAuthority` returns as `managedServerCa` (gRPC
 `{instance}/certificateAuthority`, JSON `/memorystore/v1/{instance}/certificateAuthority`), every
-node serving TLS only, a `CLUSTER_DISABLED` instance's replicas replicating over TLS; any AUTH
-string is taken under `IAM_AUTH`. The console's Create has **Enable in-transit encryption** and
+node serving TLS only, a `CLUSTER_DISABLED` instance's replicas replicating over TLS; `IAM_AUTH`
+checks the token as a Redis cluster's does (§8, #1614). The console's Create has **Enable in-transit encryption** and
 **IAM authentication**, and the instance's page a **Server CA** tab.
