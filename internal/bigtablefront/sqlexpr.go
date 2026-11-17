@@ -165,6 +165,9 @@ type scope struct {
 	// (the SELECT list), and windows the query's named windows.
 	wins    *[]*call
 	windows map[string]*windowSpec
+	// locals are the aliases of the lambdas around the expression, the
+	// innermost last (sqllambda.go).
+	locals []column
 }
 
 type env struct {
@@ -173,6 +176,7 @@ type env struct {
 	wins   []any
 	params map[string]any
 	now    time.Time
+	locals []any // the values of scope.locals
 }
 
 type expr interface {
@@ -224,9 +228,14 @@ type colRef struct {
 	quoted          bool
 	idx             int
 	t               *btpb.Type
+	local, field    int // 1 + a lambda alias's slot in env.locals, and 1 + its field
 }
 
 func (c *colRef) check(s *scope) (*btpb.Type, error) {
+	c.local, c.field = 0, 0
+	if t, ok, err := c.checkLocal(s); ok || err != nil {
+		return t, err
+	}
 	if c.qualifier != "" && c.qualifier != s.alias {
 		return nil, fmt.Errorf("Unrecognized name: %s", c.qualifier)
 	}
@@ -238,8 +247,13 @@ func (c *colRef) check(s *scope) (*btpb.Type, error) {
 	}
 	return nil, fmt.Errorf("Unrecognized name: %s", c.name)
 }
-func (c *colRef) eval(e *env) (any, error) { return e.row[c.idx], nil }
-func (c *colRef) String() string           { return "col:" + c.name }
+func (c *colRef) eval(e *env) (any, error) {
+	if c.local > 0 {
+		return c.evalLocal(e), nil
+	}
+	return e.row[c.idx], nil
+}
+func (c *colRef) String() string { return "col:" + c.name }
 
 // --- composites ---
 

@@ -8635,7 +8635,7 @@
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
           "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
-          "test/compat/bigtablesql1704_test.go:32 TestBigtableSQLUnpackFunctionsAndAggregates"
+          "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates"
         ]
       },
       {
@@ -8701,7 +8701,7 @@
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
           "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
-          "test/compat/bigtablesql1704_test.go:32 TestBigtableSQLUnpackFunctionsAndAggregates"
+          "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates"
         ]
       },
       {
