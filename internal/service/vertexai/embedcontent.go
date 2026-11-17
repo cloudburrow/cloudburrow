@@ -28,13 +28,13 @@ import (
 // and audio_track_extraction (EmbeddingGemma embeds text only).
 //
 // EmbeddingGemma 2 (#1454) also embeds images: an inline_data part holding a
-// PNG, JPEG, WebP or BMP (#1651), or HEIC or HEIF (#1724) image (an
-// animated WebP as its first frame), up to embedding.MaxImages of them,
+// PNG, JPEG, WebP or BMP (#1651), HEIC or HEIF (#1724), or AVIF (#1729)
+// image (an animated WebP or an image sequence as its first frame), up to embedding.MaxImages of them,
 // alone or between text parts, into one vector, as Google's
 // gemini-embedding-2 embeds a Content's parts. It embeds a WAV (#1651) or MP3
 // (#1721) audio clip the same way, and reads a file_data part's gs:// object
 // from this instance's Cloud Storage as if its bytes were inline_data. Video,
-// PDF, AVIF, document_ocr and audio_track_extraction are refused, naming the
+// PDF, document_ocr and audio_track_extraction are refused, naming the
 // field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
@@ -264,6 +264,9 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		switch {
 		case strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/"):
 			img, err := embedding.DecodeImage(mt, data)
+			if errors.Is(err, embedding.ErrImageTooLarge) {
+				return nil, 0, apierror.Unimplemented("content.parts[%d].%s: %v", i, field, err)
+			}
 			if err != nil {
 				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}

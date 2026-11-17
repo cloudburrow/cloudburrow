@@ -548,6 +548,8 @@ github.com/testcontainers/testcontainers-go v0.44.0 h1:/Fwh6HY1mIikhnm9e7HwoxGyc
 github.com/testcontainers/testcontainers-go v0.44.0/go.mod h1:IcnwQrYTO86xHXu5bvMaBH7ATlbS3Qn1M1QWW3c66rE=
 github.com/testcontainers/testcontainers-go/modules/compose v0.44.0 h1:8YcW51jhgpkkiRVe10Wj9TCBthJmoNpU2fK5WSf7TQ8=
 github.com/testcontainers/testcontainers-go/modules/compose v0.44.0/go.mod h1:0du5YaH5n8Of4bDM/RwIt421Q14kvqrXZ0mB8EjuMoo=
+github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
+github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/tilt-dev/fsnotify v1.4.8-0.20220602155310-fff9c274a375 h1:QB54BJwA6x8QU9nHY3xJSZR2kX9bgpZekRKGkLTmEXA=
 github.com/tilt-dev/fsnotify v1.4.8-0.20220602155310-fff9c274a375/go.mod h1:xRroudyp5iVtxKqZCrA6n2TLFRBf8bmnjr1UD4x+z7g=
 github.com/tink-crypto/tink-go-gcpkms/v2 v2.4.0 h1:xpI5pnEQ0erFCS3JmcEl7Blluo8ZieEPNOURqy9uD70=

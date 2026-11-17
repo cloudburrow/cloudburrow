@@ -8438,9 +8438,9 @@ async function renderEmbeddings(view) {
   // request, as one inline_data part, by the model that embeds images, so
   // its vector can be compared with the texts'.
   const images = el("input", { id: "emb-images", type: "file", multiple: "",
-    // The extensions too: a browser that knows no image/heic type (#1724)
-    // matches the picker's filter by name.
-    accept: [...(status.imageMimeTypes || []), ".heic", ".heif"].join(","), "aria-label": "Images to embed" });
+    // The extensions too: a browser that knows no image/heic or image/avif
+    // type (#1724, #1729) matches the picker's filter by name.
+    accept: [...(status.imageMimeTypes || []), ".heic", ".heif", ".avif"].join(","), "aria-label": "Images to embed" });
   // Audio clips (#1651) go the same way, and Cloud Storage objects as
   // file_data parts, one gs:// URI per line, read by the instance's own
   // Cloud Storage.
@@ -8459,9 +8459,9 @@ async function renderEmbeddings(view) {
   gcs.addEventListener("input", () => { if (gcs.value.trim()) toMultimodal(); });
   // A media type from a file name's extension, for a gs:// URI or a file
   // the browser gives no type (#1651: WebP and BMP; #1721: MP3; #1724: HEIC
-  // and HEIF).
+  // and HEIF; #1729: AVIF).
   const mediaTypeOf = (name) => ({ wav: "audio/wav", mp3: "audio/mpeg", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
+    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif", avif: "image/avif" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
   const readBase64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));

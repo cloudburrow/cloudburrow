@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -27,10 +28,10 @@ import (
 // ImageMIMETypes are the image types decoded here: PNG and JPEG with Go's
 // standard library, WebP (lossy, lossless, with or without alpha) and BMP
 // with golang.org/x/image (#1651), an animated WebP as its first frame and
-// HEIC and HEIF with github.com/gen2brain/h265 (#1724). Google's
-// gemini-embedding-2 also takes AVIF, which needs a decoder this build does
-// not have (docs/upstream-evaluation.md; re-read 2026-11-17).
-var ImageMIMETypes = []string{"image/png", "image/jpeg", "image/webp", "image/bmp", "image/heic", "image/heif"}
+// HEIC and HEIF with github.com/gen2brain/h265 (#1724), and AVIF with
+// libavif and dav1d in WebAssembly (#1729, avif.go): the image types Google's
+// gemini-embedding-2 takes (re-read 2026-11-17).
+var ImageMIMETypes = []string{"image/png", "image/jpeg", "image/webp", "image/bmp", "image/heic", "image/heif", "image/avif"}
 
 // imageDecoders are each type's DecodeConfig and Decode; the keys are
 // ImageMIMETypes and their aliases.
@@ -45,6 +46,7 @@ var imageDecoders = map[string]struct {
 	"image/bmp":  {bmp.DecodeConfig, bmp.Decode},
 	"image/heic": {heicConfig, heicDecode},
 	"image/heif": {heicConfig, heicDecode},
+	"image/avif": {avifConfig, avifDecode},
 }
 
 // MaxImageSide is the largest width or height accepted, Google's documented
@@ -71,7 +73,7 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 	}
 	dec, ok := imageDecoders[mt]
 	if !ok {
-		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s (AVIF has no decoder in this build)",
+		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s",
 			mimeType, strings.Join(ImageMIMETypes, ", "))
 	}
 	// Check the size before decoding the pixels.
@@ -89,6 +91,9 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 		img, err = decodeWebP(data)
 	} else {
 		img, err = dec.decode(bytes.NewReader(data))
+	}
+	if errors.Is(err, ErrImageTooLarge) {
+		return nil, err
 	}
 	if err != nil {
 		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)

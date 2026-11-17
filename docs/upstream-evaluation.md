@@ -706,7 +706,7 @@ proxy, compared on 2026-11-17:
 |---|---|---|---|---|---|
 | `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | Pure Go HEVC decoder and HEIF container reader (a port of the Rust `rust_h265`/`oxideav-h265`; byte-exact on the JCT-VC HEVC v1 conformance suite, per its README); Go assembly for NEON/AVX2, `-tags noasm` for none | **none** | **Adopted** for HEIC and HEIF: 2.3 MB of source, adds no other module, decodes alpha, grids, `clap`/`irot`/`imir`, 8–16 bits and image sequences |
 | `github.com/gen2brain/heic` | v0.7.2 (2026-09-15) | MIT (the Rust `heic` crate in WASM) | WASM under wazero; but first tries a system `libheif` through `purego` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | Rejected: see `purego` below; its own README points to `h265` for pure Go |
-| `github.com/gen2brain/avif` | v0.6.0 (2026-07-05) | MIT; libavif BSD-2-Clause, dav1d BSD-2-Clause, aom BSD-2-Clause | libavif + dav1d in WASM (3.5 MB, 1.3 MB gzipped) under wazero; but first tries a system `libavif` through `purego`, unless built with `-tags nodynamic` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | **Not adopted; AVIF stays refused** (below) |
+| `github.com/gen2brain/avif` | v0.6.0 (2026-07-05) | MIT; libavif BSD-2-Clause, dav1d BSD-2-Clause, aom BSD-2-Clause | libavif + dav1d in WASM (3.5 MB, 1.3 MB gzipped) under wazero; but first tries a system `libavif` through `purego`, unless built with `-tags nodynamic` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | **Not adopted as a module; its WASM path vendored** (#1729, below) |
 | `github.com/KarpelesLab/goavif` | v0.1.0 (2026-04-18) | MIT | Pure Go AV1 and AVIF | — | Rejected: unmaintained (created and last pushed within three days in April 2026, one star; inter prediction listed as limited) |
 | `github.com/Kagami/go-avif`, `github.com/f0reth/go-avif` | 2022; — | — | libaom through cgo; libavif through `purego` | — | Rejected: cgo, or a system library |
 
@@ -721,6 +721,25 @@ Serving AVIF needs one of: `-tags nodynamic` on every build of `cmd/cloudburrow`
 CI, `go install` instructions) with a check that the Linux CLI is static; or a vendored copy of
 its WASM path without `purego`; or a maintained pure Go AV1 decoder. That decision is the user's;
 `image/avif` stays `INVALID_ARGUMENT` naming the field until then.
+
+**Update 2026-11-17 (#1729): the WASM path is vendored.** The user chose the second: serve AVIF
+fully by vendoring `gen2brain/avif` v0.6.0's WebAssembly decode path, with no build tag. From the
+module zip the Go module proxy serves (commit `1fd2a9a5`), `avif.go`, `avif_wazero.go`,
+`isobmff.go`, `orientation.go`, `lib/avif.wasm.gz` (libavif 1.4.2, dav1d 1.5.3, aom 3.14.1 and
+libyuv, built upstream with wasi-sdk; CloudBurrow compiles no C) and the MIT, libavif and aom licence
+texts are copied into `internal/avif`, unmodified but for deletions: the `if dynamic` branches that
+called the `purego` loader (whose files, `avif_dynamic.go` and `purego_*.go`, are not copied), the
+exported `Dynamic()`, and `avif_wazero.go`'s `!wasm2go` build constraint.
+[third_party/avif/PROVENANCE.md](../third_party/avif/PROVENANCE.md) records every file's upstream
+and committed SHA-256, and `TestVendoredAVIFMatchesProvenance` checks them. The one new module is
+`github.com/tetratelabs/wazero` v1.12.0 (Apache-2.0, approved with the media decoders; its only
+dependency, `golang.org/x/sys`, was already required at the same version). `TestLinuxCLILinksNoPurego`
+asserts that `CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/cloudburrow` names no
+`github.com/ebitengine/purego`, and the linux/amd64 and linux/arm64 CLIs build "statically linked"
+(`file`, 2026-11-17). The binary grows by the 1.3 MB blob and wazero's compiler. The blob also
+holds aom's encoder, unused here, and links libyuv, whose BSD-3-Clause text the module does not
+ship (NOTICE names it). A 10- or 12-bit AVIF over 13312 × 13312 does not fit the module's 4 GiB of
+memory (#1736). `govulncheck ./...` reports nothing for wazero or the vendored code.
 
 **Animated WebP** needs no module: the first `ANMF` frame's VP8/VP8L bitstream (with its `ALPH`) is
 rewrapped as a still WebP, decoded with `golang.org/x/image/webp`, converted as libwebp converts it

@@ -65,7 +65,7 @@ func TestDecodeImage(t *testing.T) {
 	if err != nil || img.Bounds().Dx() != 3 {
 		t.Fatalf("%v %v", img, err)
 	}
-	for mt, want := range map[string]string{"image/heic": "not a valid", "image/heif": "not a valid", "image/avif": "not supported", "image/webp": "not a valid", "image/bmp": "not a valid", "image/jpeg": "not a valid", "": "not supported"} {
+	for mt, want := range map[string]string{"image/heic": "not a valid", "image/heif": "not a valid", "image/avif": "not a valid", "image/webp": "not a valid", "image/bmp": "not a valid", "image/jpeg": "not a valid", "": "not supported"} {
 		if _, err := DecodeImage(mt, b.Bytes()); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", mt, err, want)
 		}

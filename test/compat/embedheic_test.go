@@ -40,8 +40,9 @@ import (
 // animated WebP is its first frame, the square's vector, nearest "a blue
 // square" and not the circle of its second frame; each is 260 tokens; the
 // HEIC uploaded with the official Cloud Storage client and sent as
-// file_data with no mime_type is the inline vector; and AVIF, an AV1-coded
-// HEIF and a truncated HEIC are INVALID_ARGUMENT naming the part.
+// file_data with no mime_type is the inline vector; and an AV1-coded HEIF
+// (an AVIF sent as image/heif) and a truncated HEIC are INVALID_ARGUMENT
+// naming the part. AVIF itself is embedded (#1729, embedavif_test.go).
 func TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -168,7 +169,6 @@ func TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient(t *test
 		part *aiplatformpb.Part
 		want string
 	}{
-		"AVIF":           {inline("image/avif", avif), `content.parts[0].inline_data: mime_type "image/avif" is not supported`},
 		"AVIF as HEIF":   {inline("image/heif", avif), "content.parts[0].inline_data: the data is not a valid image/heif image"},
 		"truncated HEIC": {inline("image/heic", circleHEIC[:len(circleHEIC)/2]), "content.parts[0].inline_data: the data is not a valid image/heic image"},
 	} {

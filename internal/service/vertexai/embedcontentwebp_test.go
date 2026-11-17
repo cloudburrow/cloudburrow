@@ -12,8 +12,8 @@ import (
 
 // TestEmbedContentWebPAndBMPOnEmbeddingGemma2 (#1651): WebP (lossless,
 // lossy, with alpha) and BMP images are embedded as PNG and JPEG are,
-// inline or as file_data, and AVIF and a bad BMP are INVALID_ARGUMENT naming
-// the part (HEIC, HEIF and animated WebP: embedcontentheic_test.go).
+// inline or as file_data, and a bad AVIF or BMP is INVALID_ARGUMENT naming
+// the part (HEIC, HEIF, animated WebP and AVIF: embedcontentheic_test.go).
 func TestEmbedContentWebPAndBMPOnEmbeddingGemma2(t *testing.T) {
 	e := &multimodalEmbedder{}
 	s := NewServer(nil)
