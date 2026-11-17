@@ -28,6 +28,12 @@ import (
 // exists" (the engine's text), and a dry run of a CREATE VIEW with a column
 // list was 501.
 //
+// A dry run of a CREATE TABLE or CREATE VIEW of a new name makes nothing
+// ("the query is not executed"): tables.get of it is 404 and a query of it
+// 404 notFound, as of any table that does not exist. Measured first: the
+// query failed 400 jobInternalError "no such table: p_ds_t", the engine's
+// analyzer keeping the name its dry run rolled back.
+//
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get
 func TestBigQueryCreateOfAnExistingName(t *testing.T) {
 	h := New(t)
@@ -85,5 +91,24 @@ func TestBigQueryCreateOfAnExistingName(t *testing.T) {
 	md, err := ds.Table("v").Metadata(ctx)
 	if err != nil || md.Type != bigquery.ViewTable || len(md.Schema) != 1 || md.Schema[0].Name != "a" {
 		t.Errorf("the view's metadata: %+v (%v)", md, err)
+	}
+	// A dry run of a new name makes nothing.
+	for _, st := range []struct{ sql, name string }{
+		{"CREATE TABLE " + path("drytable") + " (z STRING)", "drytable"},
+		{"CREATE VIEW " + path("dryview") + " AS SELECT 1 AS a", "dryview"},
+	} {
+		q := c.Query(st.sql)
+		q.DryRun = true
+		if _, err := q.Run(ctx); err != nil {
+			t.Fatalf("%s (dry run): %v", st.sql, err)
+		}
+		if tableExists(t, ctx, ds.Table(st.name)) {
+			t.Errorf("the dry run of %s made it", st.sql)
+		}
+		_, err := c.Query("SELECT * FROM " + path(st.name)).Read(ctx)
+		wantReason(t, "a query of "+st.name+" after a dry run", err, http.StatusNotFound, "notFound")
+		if err := bqRun(ctx, c, st.sql, true); err != nil {
+			t.Errorf("%s after its dry run: %v", st.sql, err)
+		}
 	}
 }

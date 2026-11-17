@@ -53,6 +53,8 @@ func TestEngineErrorMapping(t *testing.T) {
 			"duplicate", "Already Exists: Table p:ds.t", ""},
 		{"failed to exec SELECT `a#1` FROM (SELECT 1): sqlite3: SQL logic error: view `p_ds_my_v` already exists",
 			"duplicate", "Already Exists: Table p:ds.my_v", ""},
+		{"failed to query SELECT * FROM ds.gone: sqlite3: SQL logic error: no such table: p_ds_gone",
+			"notFound", "Not found: Table p:ds.gone was not found in location EU", ""},
 	} {
 		ec := &engineContext{r: r, engine: fakeEngine(), prefix: "/bigquery/v2", project: "p", location: "EU", defaultDataset: c.defaultDataset}
 		got, ok := ec.mapError(rowError{Reason: "jobInternalError", Message: c.msg})
