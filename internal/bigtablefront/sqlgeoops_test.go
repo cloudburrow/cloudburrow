@@ -1,6 +1,7 @@
 package bigtablefront
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -59,6 +60,60 @@ func TestSQLGeographyOperations(t *testing.T) {
 		err := prepare(sql)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", sql, err, want)
+		}
+	}
+}
+
+// TestSQLGeographyBooleanSemantics (#1735) runs the cases the reference
+// prints no result for, whose results follow from its definitions (the
+// point-set union and intersection, and "the closure of the point set
+// difference", https://cloud.google.com/bigtable/docs/reference/sql/geography_functions,
+// read 2026-11-17) as S2BooleanOperation computes them with closed
+// polygons and polylines (the ported s2boolean_operation_test.cc cases in
+// internal/s2ops check the same models on S2's own inputs): shapes that
+// only touch intersect in their shared boundary, linestrings are split
+// where they cross, a lower-dimensional part a polygon covers is dropped,
+// MULTIPOINT members come in S2Builder's output vertex order, and
+// ST_SIMPLIFY never moves a line across a neighbouring point.
+func TestSQLGeographyBooleanSemantics(t *testing.T) {
+	run, _ := sqlFixture(t)
+	sq := func(x0, y0, x1, y1 int) string {
+		return fmt.Sprintf("ST_GEOGFROMTEXT('POLYGON((%d %d, %d %d, %d %d, %d %d, %d %d))')", x0, y0, x1, y0, x1, y1, x0, y1, x0, y0)
+	}
+	w := func(s string) string { return "ST_GEOGFROMTEXT('" + s + "')" }
+	a, right, corner := sq(0, 0, 1, 1), sq(1, 0, 2, 1), sq(1, 1, 2, 2)
+	x1, x2 := w("LINESTRING(0 0, 2 2)"), w("LINESTRING(0 2, 2 0)")
+	bar := w("POLYGON((1 -1, 3 -1, 3 1, 1 1, 1 -1))")
+	line := w("LINESTRING(0 0, 2 0)")
+	for _, p := range [][2]string{
+		// Touching polygons: the shared edge, the shared corner.
+		{"ST_INTERSECTION(" + a + ", " + right + ")", "LINESTRING(1 0, 1 1)"},
+		{"ST_INTERSECTION(" + a + ", " + corner + ")", "POINT(1 1)"},
+		{"ST_UNION(" + a + ", " + right + ")", "POLYGON((1 1, 0 1, 0 0, 1 0, 2 0, 2 1, 1 1))"},
+		{"ST_DIFFERENCE(" + a + ", " + right + ")", "POLYGON((1 1, 0 1, 0 0, 1 0, 1 1))"},
+		// A polygon's edge and a line along it.
+		{"ST_INTERSECTION(" + w("LINESTRING(1 0, 1 1)") + ", " + a + ")", "LINESTRING(1 0, 1 1)"},
+		{"ST_DIFFERENCE(" + w("LINESTRING(1 0, 1 1)") + ", " + a + ")", "GEOMETRYCOLLECTION EMPTY"},
+		{"ST_UNION(ST_GEOGPOINT(1, 0), " + a + ")", "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"},
+		// Crossing linestrings: split at the crossing; their intersection.
+		{"ST_UNION(" + x1 + ", " + x2 + ")", "MULTILINESTRING((0 0, 1 1.00045705372412), (1 1.00045705372412, 2 2), (1 1.00045705372412, 2 0), (0 2, 1 1.00045705372412))"},
+		{"ST_INTERSECTION(" + x1 + ", " + x2 + ")", "POINT(1 1.00045705372412)"},
+		{"ST_UNION(" + line + ", " + w("LINESTRING(1 0, 3 0)") + ")", "LINESTRING(0 0, 1 0, 2 0, 3 0)"},
+		// A line entering a polygon.
+		{"ST_INTERSECTION(" + line + ", " + bar + ")", "LINESTRING(1 0, 2 0)"},
+		{"ST_DIFFERENCE(" + line + ", " + bar + ")", "LINESTRING(0 0, 1 0)"},
+		{"ST_UNION(" + line + ", " + bar + ")", "GEOMETRYCOLLECTION(LINESTRING(0 0, 1 0), POLYGON((1 -1, 3 -1, 3 1, 1 1, 1 0, 1 -1)))"},
+		// MULTIPOINT members in S2Builder's vertex order.
+		{"ST_UNION(" + w("MULTIPOINT(3 3, 1 1)") + ", ST_GEOGPOINT(2, 2))", "MULTIPOINT(1 1, 2 2, 3 3)"},
+		{"ST_UNION(" + w("MULTIPOINT(30 3, -100 1, 5 60)") + ", ST_GEOGPOINT(2, -2))", "MULTIPOINT(30 3, 2 -2, 5 60, -100 1)"},
+		// ST_SIMPLIFY: alone the bend goes; a point beside it holds the
+		// line, which is snapped through the point.
+		{"ST_SIMPLIFY(" + w("LINESTRING(0 0, 0.5 0.03, 1 0)") + ", 4000)", "LINESTRING(0 0, 1 0)"},
+		{"ST_SIMPLIFY(" + w("GEOMETRYCOLLECTION(POINT(0.25 0.002), LINESTRING(0 0, 0.5 0.03, 1 0))") + ", 4000)", "LINESTRING(0 0, 0.25 0.002, 1 0)"},
+	} {
+		sql := "SELECT ST_ASTEXT(" + p[0] + ")"
+		if got := joined(run(sql, nil, nil)); got != p[1] {
+			t.Errorf("%s =\n%s\nwant\n%s", sql, got, p[1])
 		}
 	}
 }
