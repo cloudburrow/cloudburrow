@@ -133,6 +133,9 @@ type mongoConn struct {
 	// names no database: the first command's database is the
 	// connection's.
 	token bool
+	// principal is a token sign-in's account, whose roles each command
+	// is checked against (mongoiam.go, #1738).
+	principal string
 	// tx is the transaction the command being run is part of, if any.
 	tx *mongoTxn
 }
@@ -381,6 +384,9 @@ func (s *MongoServer) dispatch(ctx context.Context, mc *mongoConn, cmd bson.D) b
 	if err := checkCommonOptions(cmd); err != nil {
 		return errorReply(err)
 	}
+	if err := s.checkMongoIAM(mc, lname, name, cmd); err != nil {
+		return errorReply(err)
+	}
 	var resp bson.D
 	var err error
 	switch lname {
@@ -504,17 +510,26 @@ func (s *MongoServer) saslStart(mc *mongoConn, cmd bson.D, dbName string) (bson.
 		if dbName != "$external" || len(parts) != 3 || parts[1] != "access_token" || parts[2] == "" {
 			return nil, authFailed()
 		}
-		mc.token = true
+		email, ok := s.a.mongoTokenEmail(parts[2])
+		if !ok {
+			return nil, authFailed()
+		}
+		mc.token, mc.principal = true, email
 		return bson.D{{Key: "conversationId", Value: int32(1)}, {Key: "done", Value: true}, {Key: "payload", Value: bson.Binary{Data: []byte{}}}}, nil
 	case "MONGODB-OIDC":
 		var p bson.D
 		if dbName != "$external" || bson.Unmarshal(payload, &p) != nil {
 			return nil, authFailed()
 		}
-		if jwt, _ := mql.Lookup(p, "jwt").(string); jwt == "" {
+		jwt, _ := mql.Lookup(p, "jwt").(string)
+		if jwt == "" {
 			return nil, authFailed()
 		}
-		mc.token = true
+		email, ok := s.a.mongoTokenEmail(jwt)
+		if !ok {
+			return nil, authFailed()
+		}
+		mc.token, mc.principal = true, email
 		return bson.D{{Key: "conversationId", Value: int32(1)}, {Key: "done", Value: true}, {Key: "payload", Value: bson.Binary{Data: []byte{}}}}, nil
 	}
 	return nil, mql.Errorf(334, "MechanismUnavailable", "Received authentication for mechanism %s which is unknown or not enabled", mech)

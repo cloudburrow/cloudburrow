@@ -303,6 +303,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
+	if serviceEnabled(cfg, config.ServiceFirestore) {
+		// Firestore with MongoDB compatibility's token sign-in (#1738)
+		// checks the tokens these credentials minted and the project's
+		// IAM policy, as Memorystore's IAM auth does.
+		fmIAM := &firestoreMongoIAM{creds: creds, client: &http.Client{Timeout: 5 * time.Second},
+			registry: func() *resourcemanager.Registry { return projectRegistry },
+			addr:     func() string { return forwardedAddr(forwarders, "firestore") }}
+		fmIAM.start(ctx)
+	}
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server

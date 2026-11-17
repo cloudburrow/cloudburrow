@@ -9,11 +9,12 @@ package firestoreadmin
 //     authentication database the database's ID;
 //   - PLAIN with the user access_token and an access token as the
 //     password, from $external, for diagnostics;
-//   - MONGODB-OIDC with a Google identity token.
+//   - MONGODB-OIDC with an access token (Google's callback returns the
+//     application default credentials' access token).
 //
-// CloudBurrow verifies no Google token (docs/credentials.md), so the last
-// two accept any token that is not empty, as every other service does;
-// the IAM roles Google checks are not checked either.
+// The last two take only a live access token this instance minted, and
+// each command then needs its permissions in the principal's roles
+// (mongoiam.go, #1738).
 
 import (
 	"crypto/hmac"
