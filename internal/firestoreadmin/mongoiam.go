@@ -28,10 +28,19 @@ package firestoreadmin
 // signed in keeps working after its token expires, as on Google; its
 // permissions follow the policy.
 //
+// A SCRAM sign-in is checked against the roles of its user credentials'
+// principal, principal://firestore.googleapis.com/projects/PROJECT_NUMBER/
+// name/databases/DATABASE_ID/userCreds/USERNAME, as Google's "Authenticate
+// and connect to a database" grants them ("A new user credential has no
+// permissions by default"): the host gives that member's bindings keyed by
+// UserCredsPrincipal, its project named by ID. listDatabases on a token
+// connection that has not chosen its database needs
+// datastore.databases.getMetadata on some project, and lists the
+// Enterprise databases of the projects it holds it on.
+//
 // Not served: a binding's condition (Resource Manager refuses conditions
 // here, so a binding is project-wide), custom roles, and a role on the
-// database rather than its project. SCRAM user credentials are checked by
-// their password, not by their principal's roles.
+// database rather than its project.
 
 import (
 	"crypto/sha256"
@@ -42,6 +51,7 @@ import (
 	"strings"
 	"time"
 
+	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin/mql"
@@ -127,6 +137,63 @@ func (a *Admin) mongoTokenEmail(token string) (string, bool) {
 	return "", false
 }
 
+// UserCredsPrincipal is the IAM principal of the user credentials user of
+// the database dbName (projects/{project ID}/databases/{id}), its project
+// named by ID: the key the host gives that member's roles under.
+func UserCredsPrincipal(dbName, user string) string {
+	project, db, _ := strings.Cut(strings.TrimPrefix(dbName, "projects/"), "/databases/")
+	return "principal://firestore.googleapis.com/projects/" + project + "/name/databases/" + db + "/userCreds/" + user
+}
+
+// mongoVisibleDatabases are the IDs of the Enterprise databases, in the
+// projects where principal's roles grant databases.getMetadata, sorted.
+func (a *Admin) mongoVisibleDatabases(principal string) []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mongoIAM == nil || principal == "" {
+		return nil
+	}
+	var out []string
+	for name, db := range a.databases {
+		if db.DeleteTime != nil || db.GetDatabaseEdition() != adminpb.Database_ENTERPRISE {
+			continue
+		}
+		project, id, ok := strings.Cut(strings.TrimPrefix(name, "projects/"), "/databases/")
+		if !ok {
+			continue
+		}
+		var perms []string
+		for _, role := range a.mongoIAM.Roles[principal][project] {
+			perms = append(perms, MongoRoles[role]...)
+		}
+		if grants(perms, "databases.getMetadata") {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mongoGrantsAnywhere reports whether principal's roles grant p on any
+// project.
+func (a *Admin) mongoGrantsAnywhere(principal, p string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mongoIAM == nil {
+		return false
+	}
+	for _, roles := range a.mongoIAM.Roles[principal] {
+		var perms []string
+		for _, role := range roles {
+			perms = append(perms, MongoRoles[role]...)
+		}
+		if grants(perms, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // mongoPerms are the permissions email's roles on project grant.
 func (a *Admin) mongoPerms(email, project string) []string {
 	a.mu.Lock()
@@ -199,7 +266,16 @@ func mongoNeeds(lname string, cmd bson.D) []string {
 // checkMongoIAM refuses a command of a token connection its principal's
 // roles do not grant.
 func (s *MongoServer) checkMongoIAM(mc *mongoConn, lname, name string, cmd bson.D) error {
-	if mc.principal == "" || mc.db == nil {
+	if mc.principal == "" {
+		return nil
+	}
+	if mc.db == nil {
+		// Only listDatabases runs before a token connection chooses its
+		// database (dispatch); it needs the permission on some project.
+		if lname == "listdatabases" && !s.a.mongoGrantsAnywhere(mc.principal, "databases.getMetadata") {
+			return mql.Errorf(13, "Unauthorized", "not authorized on admin to execute command %s: %s lacks datastore.databases.getMetadata on every project",
+				name, mc.principal)
+		}
 		return nil
 	}
 	project := strings.TrimPrefix(mc.db.name, "projects/")

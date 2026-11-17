@@ -22,13 +22,16 @@ func mongoDatabase(t *testing.T, h *Harness, id string) (*mongo.Database, string
 	t.Helper()
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
+	h.Endpoint(EnvResourceManager)
 	admin := firestoreAdmin(t, h)
 	dbName := enterpriseDatabase(t, h, id)
 	uc, err := admin.CreateUserCreds(h.Context(), &adminpb.CreateUserCredsRequest{Parent: dbName, UserCredsId: "app-user", UserCreds: &adminpb.UserCreds{}})
 	if err != nil {
 		t.Fatalf("CreateUserCreds: %v", err)
 	}
-	return mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, id, ca)).Database(id), dbName
+	db := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, id, ca)).Database(id)
+	grantUserCreds(t, h, dbName, "app-user", "roles/datastore.user", db)
+	return db, dbName
 }
 
 func hasLabel(err error, label string) bool {

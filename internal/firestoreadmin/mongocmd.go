@@ -82,7 +82,14 @@ func (s *MongoServer) command(ctx context.Context, mc *mongoConn, lname, name st
 			return nil, mql.BadValue("filter must be empty if provided.")
 		}
 		if mc.db == nil {
-			return bson.D{{Key: "databases", Value: bson.A{}}, {Key: "totalSize", Value: int64(0)}}, nil
+			// A token connection that has not chosen its database yet:
+			// the Enterprise databases its principal may read the
+			// metadata of (mongoiam.go).
+			dbs := bson.A{}
+			for _, id := range s.a.mongoVisibleDatabases(mc.principal) {
+				dbs = append(dbs, bson.D{{Key: "name", Value: id}, {Key: "sizeOnDisk", Value: int64(0)}, {Key: "empty", Value: false}})
+			}
+			return bson.D{{Key: "databases", Value: dbs}, {Key: "totalSize", Value: int64(0)}}, nil
 		}
 		return bson.D{{Key: "databases", Value: bson.A{bson.D{{Key: "name", Value: mc.db.id}, {Key: "sizeOnDisk", Value: int64(0)}, {Key: "empty", Value: false}}}},
 			{Key: "totalSize", Value: int64(0)}}, nil

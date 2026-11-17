@@ -86,6 +86,7 @@ func TestFirestoreMongoDB(t *testing.T) {
 	h := New(t)
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
+	h.Endpoint(EnvResourceManager)
 	ctx := h.Context()
 	admin := firestoreAdmin(t, h)
 	dbName := enterpriseDatabase(t, h, "mongo-ent")
@@ -98,6 +99,8 @@ func TestFirestoreMongoDB(t *testing.T) {
 	if err := client.Ping(ctx, nil); err != nil {
 		t.Fatalf("Ping: %v", err)
 	}
+	// A new user credential has no permissions until a role is granted.
+	grantUserCreds(t, h, dbName, "app-user", "roles/datastore.user", client.Database("mongo-ent"))
 	books := client.Database("mongo-ent").Collection("books")
 	oid := bson.NewObjectID()
 	published := time.Date(1965, 8, 1, 0, 0, 0, 0, time.UTC)

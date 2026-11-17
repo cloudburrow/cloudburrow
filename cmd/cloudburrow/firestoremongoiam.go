@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
@@ -24,7 +26,8 @@ import (
 // its nodes theirs (memorystoreIAM, #1614): the live access tokens these
 // credentials minted, and the roles each of their accounts holds on each
 // project in the registry's IAM policies (serviceAccount: and user:
-// members of the roles firestoreadmin.MongoRoles names). It pushes them
+// members of the roles firestoreadmin.MongoRoles names, and the principal://
+// members of Firestore user credentials, for a SCRAM sign-in). It pushes them
 // to the front through Firestore's tunnel every iamEvery when they
 // changed, every iamRefresh regardless (a restarted front lost them), and
 // as soon as a token is minted, before it is returned.
@@ -61,12 +64,19 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 	if f.registry != nil {
 		reg = f.registry()
 	}
-	if reg == nil || len(emails) == 0 {
+	if reg == nil {
 		return m
 	}
 	projects, err := reg.List()
 	if err != nil {
 		return m
+	}
+	// A user credentials principal names its project by number; the
+	// front keys it by ID (firestoreadmin.UserCredsPrincipal).
+	ids := map[string]string{}
+	for _, p := range projects {
+		ids[p.ProjectID] = p.ProjectID
+		ids[strconv.FormatInt(resource.ProjectNumber(p.ProjectID), 10)] = p.ProjectID
 	}
 	for _, p := range projects {
 		pol, err := reg.IAMPolicy("projects/" + p.ProjectID)
@@ -78,6 +88,13 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 				continue
 			}
 			for _, member := range b.Members {
+				if key, ok := userCredsMember(member, ids); ok {
+					if m.Roles[key] == nil {
+						m.Roles[key] = map[string][]string{}
+					}
+					m.Roles[key][p.ProjectID] = append(m.Roles[key][p.ProjectID], b.Role)
+					continue
+				}
 				kind, email, ok := strings.Cut(member, ":")
 				email = strings.ToLower(email)
 				if !ok || (kind != "serviceAccount" && kind != "user") || !emails[email] {
@@ -91,6 +108,29 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 		}
 	}
 	return m
+}
+
+// userCredsPrefix starts the IAM principal of Firestore user credentials,
+// which Google's "Authenticate and connect to a database" grants roles to:
+// principal://firestore.googleapis.com/projects/PROJECT_NUMBER/name/databases/DATABASE_ID/userCreds/USERNAME.
+const userCredsPrefix = "principal://firestore.googleapis.com/projects/"
+
+// userCredsMember is member's front key when it is a user credentials
+// principal of a project in ids (by number or ID).
+func userCredsMember(member string, ids map[string]string) (string, bool) {
+	rest, ok := strings.CutPrefix(member, userCredsPrefix)
+	if !ok {
+		return "", false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 6 || parts[1] != "name" || parts[2] != "databases" || parts[4] != "userCreds" || parts[3] == "" || parts[5] == "" {
+		return "", false
+	}
+	id, ok := ids[parts[0]]
+	if !ok {
+		return "", false
+	}
+	return firestoreadmin.UserCredsPrincipal("projects/"+id+"/databases/"+parts[3], parts[5]), true
 }
 
 // sync pushes the payload when it changed, or when force or the refresh

@@ -133,8 +133,9 @@ type mongoConn struct {
 	// names no database: the first command's database is the
 	// connection's.
 	token bool
-	// principal is a token sign-in's account, whose roles each command
-	// is checked against (mongoiam.go, #1738).
+	// principal is a token sign-in's account, or a SCRAM sign-in's user
+	// credentials as an IAM principal, whose roles each command is
+	// checked against (mongoiam.go, #1738).
 	principal string
 	// tx is the transaction the command being run is part of, if any.
 	tx *mongoTxn
@@ -549,6 +550,7 @@ func (s *MongoServer) saslContinue(mc *mongoConn, cmd bson.D) (bson.D, error) {
 		return nil, err
 	}
 	mc.db = conv.db
+	mc.principal = UserCredsPrincipal(conv.db.name, conv.user)
 	return bson.D{{Key: "conversationId", Value: int32(1)}, {Key: "done", Value: true}, {Key: "payload", Value: bson.Binary{Data: final}}}, nil
 }
 
