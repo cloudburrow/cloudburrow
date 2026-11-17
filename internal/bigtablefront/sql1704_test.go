@@ -328,3 +328,45 @@ func TestSQLAggregateFamily(t *testing.T) {
 	expectRows(t, "counter history", run("SELECT c['views'] FROM counters(with_history => true)", nil, nil), "[(1970-01-01T00:00:00Z,7)]")
 	expectRows(t, "unpacked counter", run("SELECT _timestamp, v FROM UNPACK((SELECT c['views'] AS v FROM counters(with_history => true)))", nil, nil), "1970-01-01T00:00:00Z 7")
 }
+
+// TestSQLWindowFunctions runs window function calls (window-function-calls,
+// numbering_functions, navigation_functions) over the reference's report
+// table's sales, unpacked: Dept1 12 and 10, Dept2 9 and 5.
+func TestSQLWindowFunctions(t *testing.T) {
+	run, prepare := sqlFixture(t)
+	const v = "CAST(CAST(s AS STRING) AS INT64)"
+	from := " FROM UNPACK((SELECT _key, report['sales'] AS s FROM report(with_history => true)))"
+	q := func(sql string) string { return strings.ReplaceAll(sql, "$V", v) }
+	expectRows(t, "windows", run(q("SELECT _key, $V AS v, ROW_NUMBER() OVER (PARTITION BY _key ORDER BY $V) AS rn, RANK() OVER (ORDER BY $V DESC) AS r, "+
+		"SUM($V) OVER (PARTITION BY _key) AS tot, SUM($V) OVER (ORDER BY $V ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS mov, "+
+		"LAG($V) OVER (PARTITION BY _key ORDER BY $V) AS prev, FIRST_VALUE($V) OVER w AS top, NTILE(2) OVER (ORDER BY $V) AS tile, "+
+		"CUME_DIST() OVER (ORDER BY $V) AS cd, PERCENTILE_CONT($V, 0.5) OVER () AS med, "+
+		"COUNT(*) OVER (ORDER BY $V RANGE BETWEEN 2 PRECEDING AND 2 FOLLOWING) AS near"+from+
+		" WINDOW w AS (PARTITION BY _key ORDER BY $V DESC)"), nil, nil),
+		`Dept1 12 2 1 22 22 10 12 2 1 9.5 2
+Dept1 10 1 2 22 19 NULL 12 2 0.75 9.5 3
+Dept2 9 2 3 14 14 5 9 1 0.5 9.5 2
+Dept2 5 1 4 14 5 NULL 9 1 0.25 9.5 1`)
+	expectRows(t, "after GROUP BY", run(q("SELECT _key, SUM($V) AS t, RANK() OVER (ORDER BY SUM($V) DESC) AS r, LEAD(_key, 1, 'none') OVER (ORDER BY _key) AS nxt"+from+" GROUP BY _key"), nil, nil),
+		"Dept1 22 1 Dept2\nDept2 14 2 none")
+	expectRows(t, "frames", run(q("SELECT $V, LAST_VALUE($V) OVER (ORDER BY $V ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING), NTH_VALUE($V, 2) OVER (ORDER BY $V ROWS UNBOUNDED PRECEDING), "+
+		"DENSE_RANK() OVER (ORDER BY _key), PERCENT_RANK() OVER (ORDER BY $V), PERCENTILE_DISC($V, 0.5) OVER (PARTITION BY _key)"+from), nil, nil),
+		`12 12 9 1 1 10
+10 12 9 1 0.6666666666666666 10
+9 12 9 2 0.3333333333333333 5
+5 12 NULL 2 0 5`)
+	for sql, want := range map[string]codes.Code{
+		"SELECT RANK() OVER () FROM report":                                                  codes.InvalidArgument,
+		"SELECT RANK() FROM report":                                                          codes.InvalidArgument,
+		"SELECT _key FROM report WHERE ROW_NUMBER() OVER () = 1":                             codes.InvalidArgument,
+		"SELECT SUM(COUNT(*) OVER ()) FROM report":                                           codes.InvalidArgument,
+		"SELECT RANK() OVER (ORDER BY _key ROWS 1 PRECEDING) FROM report":                    codes.InvalidArgument,
+		"SELECT COUNT(DISTINCT _key) OVER () FROM report":                                    codes.InvalidArgument,
+		"SELECT ROW_NUMBER() OVER w FROM report":                                             codes.InvalidArgument,
+		"SELECT ROW_NUMBER() OVER (w ORDER BY _key) FROM report WINDOW w AS (ORDER BY _key)": codes.InvalidArgument,
+	} {
+		if err := prepare(sql); status.Code(err) != want {
+			t.Errorf("%s = %v, want %v", sql, err, want)
+		}
+	}
+}

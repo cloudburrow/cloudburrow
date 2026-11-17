@@ -172,6 +172,19 @@ Dept2 2025-04-01T18:00:00Z NULL`)
 	expect("SELECT STRUCT(1 AS a, 'abc' AS b).b, FORMAT('%t', (1, 'x')), STRUCT<x INT64, d DATE>(1, '2011-05-05')",
 		"abc (1, x) (1,2011-05-05)")
 
+	// Window function calls, over the sales unpacked (Dept1 12 and 10,
+	// Dept2 9 and 5), and after GROUP BY.
+	v := "CAST(CAST(s AS STRING) AS INT64)"
+	from := " FROM UNPACK((SELECT _key, report['sales'] AS s FROM report(with_history => true)))"
+	expect("SELECT _key, "+v+", ROW_NUMBER() OVER (PARTITION BY _key ORDER BY "+v+"), SUM("+v+") OVER (ORDER BY "+v+" ROWS BETWEEN 1 PRECEDING AND CURRENT ROW), "+
+		"LAG("+v+") OVER (PARTITION BY _key ORDER BY "+v+"), FIRST_VALUE("+v+") OVER w, CUME_DIST() OVER (ORDER BY "+v+"), PERCENTILE_CONT("+v+", 0.5) OVER ()"+from+
+		" WINDOW w AS (PARTITION BY _key ORDER BY "+v+" DESC)",
+		`Dept1 12 2 22 10 12 1 9.5
+Dept1 10 1 19 NULL 12 0.75 9.5
+Dept2 9 2 14 5 9 0.5 9.5
+Dept2 5 1 5 NULL 9 0.25 9.5`)
+	expect("SELECT _key, SUM("+v+") AS t, RANK() OVER (ORDER BY SUM("+v+") DESC) AS r"+from+" GROUP BY _key", "Dept1 22 1\nDept2 14 2")
+
 	// An aggregate family's typed values.
 	expect("SELECT c['views'], c['views'] > 5 FROM counters", "7 true")
 

@@ -17,7 +17,8 @@ import (
 //
 // Statements the reference does not have (DML, DDL, joins, subqueries, set
 // operations) are refused INVALID_ARGUMENT, and documented features the
-// emulator's SQL lacks (UNPACK, window functions) UNIMPLEMENTED.
+// emulator's SQL lacks UNIMPLEMENTED; UNPACK is unpack.go's, window
+// function calls and the WINDOW clause sqlwindow.go's.
 
 type token struct {
 	kind string // "ident", "qident", "string", "bytes", "param", "int", "float", "op"
@@ -213,6 +214,8 @@ type query struct {
 	// unpack is the input of FROM UNPACK(...): its query, whose rows are
 	// expanded one per timestamp (unpack.go).
 	unpack *query
+	// windows are the WINDOW clause's named windows, by lower-case name.
+	windows map[string]*windowSpec
 }
 
 type parser struct {
@@ -279,7 +282,8 @@ var reserved = map[string]bool{
 	"WHEN": true, "THEN": true, "ELSE": true, "END": true, "BY": true, "HAVING": true, "JOIN": true, "UNION": true,
 	"ON": true, "CROSS": true, "INNER": true, "LEFT": true, "RIGHT": true, "FULL": true, "WINDOW": true,
 	"WITH": true, "OFFSET": true, "ASC": true, "DESC": true, "DISTINCT": true, "INTERVAL": true, "EXCEPT": true,
-	"INTERSECT": true, "QUALIFY": true, "UNNEST": true, "OVER": true,
+	"INTERSECT": true, "QUALIFY": true, "UNNEST": true, "OVER": true, "PARTITION": true, "ROWS": true, "RANGE": true,
+	"PRECEDING": true, "FOLLOWING": true, "UNBOUNDED": true, "CURRENT": true,
 }
 
 // unsupportedErr is an error the front answers UNIMPLEMENTED: a part of
@@ -434,8 +438,13 @@ func parseTokens(toks []token) (*query, error) {
 	if p.isKeyword("HAVING") {
 		return nil, fmt.Errorf("Syntax error: HAVING is not part of GoogleSQL for Bigtable")
 	}
-	if p.isKeyword("WINDOW") || p.isKeyword("QUALIFY") {
-		return nil, unsupportedErr{strings.ToUpper(p.peek().text)}
+	if p.keyword("WINDOW") {
+		if err := p.windowClause(q); err != nil {
+			return nil, err
+		}
+	}
+	if p.isKeyword("QUALIFY") {
+		return nil, fmt.Errorf("Syntax error: QUALIFY is not part of GoogleSQL for Bigtable")
 	}
 	if p.keyword("ORDER") {
 		if !p.keyword("BY") {
@@ -1020,14 +1029,6 @@ func (p *parser) primary() (expr, error) {
 		return &call{name: up}, nil
 	}
 	return &colRef{name: t.text}, nil
-}
-
-// over refuses window functions: an OVER clause after a call.
-func (c *call) over(p *parser) (expr, error) {
-	if p.isKeyword("OVER") {
-		return nil, unsupportedErr{"window function calls (OVER)"}
-	}
-	return c, nil
 }
 
 func (p *parser) arrayLiteral() (expr, error) {

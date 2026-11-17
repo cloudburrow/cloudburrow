@@ -35,6 +35,7 @@ type plan struct {
 	items    []selectItem
 	cols     []*btpb.ColumnMetadata
 	aggs     []*call
+	wins     []*call // the window function calls, evaluated after aggregation
 	grouped  bool
 	groupBy  []expr
 	keyIndex int // the _key column of the source, or -1
@@ -63,6 +64,7 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 	}
 	inner := *s
 	inner.inAgg = true
+	inner.wins = nil // "Analytic functions cannot be arguments to aggregate functions"
 	var ts []*btpb.Type
 	for _, a := range c.args {
 		t, err := a.check(&inner)
@@ -147,19 +149,20 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 }
 
 // aggregate computes c over rows.
-func (c *call) aggregate(rows [][]any, base env) (any, error) {
+// envs are the rows (or, for a window over a grouped query, the groups)
+// it aggregates, each as its expressions are evaluated.
+func (c *call) aggregate(envs []env) (any, error) {
 	if c.star {
-		return int64(len(rows)), nil
+		return int64(len(envs)), nil
 	}
 	if moreAggregates[c.name] {
-		return c.aggregateMore(rows, base)
+		return c.aggregateMore(envs)
 	}
 	var vals []any
 	seen := map[string]bool{}
 	var sep any
-	for _, r := range rows {
-		e := base
-		e.row = r
+	for _, e0 := range envs {
+		e := e0
 		v, err := c.args[0].eval(&e)
 		if err != nil {
 			return nil, err
@@ -336,6 +339,14 @@ func walk(e expr, f func(expr) bool) {
 		for _, a := range x.args {
 			walk(a, f)
 		}
+		if x.win != nil {
+			for _, a := range x.win.partition {
+				walk(a, f)
+			}
+			for _, o := range x.win.order {
+				walk(o.e, f)
+			}
+		}
 	case *cast:
 		walk(x.x, f)
 	case *extract:
@@ -352,7 +363,7 @@ func constant(e expr) bool {
 		case *colRef:
 			ok = false
 		case *call:
-			if c.isAgg || aggregates[c.name] {
+			if c.isAgg || aggregates[c.name] || c.win != nil {
 				ok = false
 			}
 		}
@@ -439,6 +450,8 @@ func build(q *query, src *source, params map[string]*btpb.Type) (*plan, error) {
 	}
 	aggScope := *base
 	aggScope.aggs = &p.aggs
+	aggScope.wins = &p.wins
+	aggScope.windows = q.windows
 	for i := range p.items {
 		if err := refusedCheck(p.items[i].e); err != nil {
 			return nil, err
@@ -580,85 +593,102 @@ func (p *plan) run(base env) ([][]any, error) {
 		}
 		return out, nil
 	}
-	var out [][]any
-	seen := map[string]bool{}
-	emit := func(r []any) bool {
-		if p.q.distinct {
-			k := groupKey(r)
-			if seen[k] {
-				return true
-			}
-			seen[k] = true
-		}
-		out = append(out, r)
-		return limit < 0 || int64(len(out)) < limit
-	}
 	if limit == 0 {
 		return nil, nil
 	}
+	// inputs are the rows the SELECT list is evaluated on: the source's
+	// rows, or one per group with its aggregates.
+	var inputs []env
 	if !p.grouped {
 		for _, r := range rows {
 			e := base
 			e.row = r
-			v, err := project(e)
+			inputs = append(inputs, e)
+		}
+	} else {
+		type group struct{ rows [][]any }
+		var order []string
+		groups := map[string]*group{}
+		for _, r := range rows {
+			e := base
+			e.row = r
+			var kv []any
+			for _, g := range p.groupBy {
+				v, err := g.eval(&e)
+				if err != nil {
+					return nil, err
+				}
+				kv = append(kv, v)
+			}
+			k := groupKey(kv)
+			gr, ok := groups[k]
+			if !ok {
+				gr = &group{}
+				groups[k] = gr
+				order = append(order, k)
+			}
+			gr.rows = append(gr.rows, r)
+		}
+		if len(p.groupBy) == 0 && len(order) == 0 {
+			// Aggregates over no rows: one row.
+			order = []string{""}
+			groups[""] = &group{}
+		}
+		for _, k := range order {
+			gr := groups[k]
+			e := base
+			if len(gr.rows) > 0 {
+				e.row = gr.rows[0]
+			} else {
+				e.row = make([]any, len(p.src.cols))
+			}
+			envs := make([]env, len(gr.rows))
+			for i, r := range gr.rows {
+				envs[i] = base
+				envs[i].row = r
+			}
+			e.aggs = make([]any, len(p.aggs))
+			for i, a := range p.aggs {
+				v, err := a.aggregate(envs)
+				if err != nil {
+					return nil, err
+				}
+				e.aggs[i] = v
+			}
+			inputs = append(inputs, e)
+		}
+	}
+	// Window functions are evaluated after aggregation (window-function-calls).
+	if len(p.wins) > 0 {
+		for i := range inputs {
+			inputs[i].wins = make([]any, len(p.wins))
+		}
+		for w, c := range p.wins {
+			vals, err := c.window(inputs)
 			if err != nil {
 				return nil, err
 			}
-			if !emit(v) {
-				break
+			for i := range inputs {
+				inputs[i].wins[w] = vals[i]
 			}
 		}
-		return out, nil
 	}
-	type group struct{ rows [][]any }
-	var order []string
-	groups := map[string]*group{}
-	for _, r := range rows {
-		e := base
-		e.row = r
-		var kv []any
-		for _, g := range p.groupBy {
-			v, err := g.eval(&e)
-			if err != nil {
-				return nil, err
-			}
-			kv = append(kv, v)
-		}
-		k := groupKey(kv)
-		gr, ok := groups[k]
-		if !ok {
-			gr = &group{}
-			groups[k] = gr
-			order = append(order, k)
-		}
-		gr.rows = append(gr.rows, r)
-	}
-	if len(p.groupBy) == 0 && len(order) == 0 {
-		// Aggregates over no rows: one row.
-		order = []string{""}
-		groups[""] = &group{}
-	}
-	for _, k := range order {
-		gr := groups[k]
-		e := base
-		if len(gr.rows) > 0 {
-			e.row = gr.rows[0]
-		} else {
-			e.row = make([]any, len(p.src.cols))
-		}
-		e.aggs = make([]any, len(p.aggs))
-		for i, a := range p.aggs {
-			v, err := a.aggregate(gr.rows, base)
-			if err != nil {
-				return nil, err
-			}
-			e.aggs[i] = v
-		}
+	var out [][]any
+	seen := map[string]bool{}
+	for _, e := range inputs {
 		v, err := project(e)
 		if err != nil {
 			return nil, err
 		}
-		if !emit(v) {
+		if p.q.distinct {
+			k := groupKey(v)
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+		}
+		out = append(out, v)
+		if limit >= 0 && int64(len(out)) >= limit {
 			break
 		}
 	}

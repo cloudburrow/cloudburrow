@@ -63,6 +63,8 @@ type call struct {
 	agg         int // the aggregate's slot, for an aggregate
 	isAgg       bool
 	re          *regexp.Regexp // a constant regular expression argument
+	win         *windowSpec    // the OVER clause of a window function call
+	winSlot     int            // its slot in env.wins
 }
 
 // fnDef is a scalar function: sig types a call, run evaluates it. Unless
@@ -82,6 +84,9 @@ func (c *call) String() string {
 }
 
 func (c *call) check(s *scope) (*btpb.Type, error) {
+	if c.win != nil {
+		return c.checkWindow(s)
+	}
 	if aggregates[c.name] {
 		return c.checkAgg(s)
 	}
@@ -129,6 +134,9 @@ func (c *call) check(s *scope) (*btpb.Type, error) {
 }
 
 func (c *call) eval(e *env) (any, error) {
+	if c.win != nil {
+		return e.wins[c.winSlot], nil
+	}
 	if c.isAgg {
 		return e.aggs[c.agg], nil
 	}

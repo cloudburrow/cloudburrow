@@ -112,13 +112,12 @@ func (c *call) checkMoreAgg(ts []*btpb.Type) error {
 }
 
 // aggregateMore computes one of moreAggregates over rows.
-func (c *call) aggregateMore(rows [][]any, base env) (any, error) {
+func (c *call) aggregateMore(envs []env) (any, error) {
 	keepNulls := c.name == "APPROX_TOP_COUNT" || c.name == "APPROX_TOP_SUM"
 	var tuples [][]any
 	seen := map[string]bool{}
-	for _, r := range rows {
-		e := base
-		e.row = r
+	for _, e0 := range envs {
+		e := e0
 		var tup []any
 		null := false
 		for _, a := range c.args {

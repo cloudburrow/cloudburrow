@@ -219,7 +219,7 @@ func TestBigtableSQLLanguage(t *testing.T) {
 		"SELECT _key FROM orders ORDER BY o":                    codes.InvalidArgument,
 		"SELECT _key FROM orders ORDER BY _key DESC":            codes.InvalidArgument,
 		"SELECT * FROM UNPACK(orders)":                          codes.InvalidArgument,
-		"SELECT _key, RANK() OVER () FROM orders":               codes.Unimplemented,
+		"SELECT ST_AREA(_key) FROM orders":                      codes.Unimplemented,
 		"SELECT NOPE(1)":                                        codes.InvalidArgument,
 		"SELECT _key, COUNT(*) FROM orders":                     codes.InvalidArgument,
 		"SELECT _key FROM orders(after => CURRENT_TIMESTAMP())": codes.InvalidArgument,
