@@ -265,6 +265,8 @@ github.com/fsnotify/fsevents v0.2.0 h1:BRlvlqjvNTfogHfeBOFvSC9N0Ddy+wzQCQukyoD7o
 github.com/fsnotify/fsevents v0.2.0/go.mod h1:B3eEk39i4hz8y1zaWS/wPrAP4O6wkIl7HQwKBr1qH/w=
 github.com/fvbommel/sortorder v1.1.0 h1:fUmoe+HLsBTctBDoaBwpQo5N+nrCp8g/BjKb/6ZQmYw=
 github.com/fvbommel/sortorder v1.1.0/go.mod h1:uk88iVf1ovNn1iLfgUVU2F9o5eO30ui720w+kxuqRs0=
+github.com/gen2brain/h265 v0.2.5 h1:D3qCPx5GU+gHpinvLJtYMLSmQy64RGOm4fzMNGQcA1g=
+github.com/gen2brain/h265 v0.2.5/go.mod h1:kefpLxLhGpNCUG/q/aabJcD6GqB9Nhet3fNi9xX9Wzw=
 github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1 h1:8VcjuP5pKZ717K4zOLS9Lm4Zsn8JwD9X+CQGFCiRT2E=
 github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1/go.mod h1:XMOIOA5J96jEzAOpBROPyz0n14sHsooeF+y2FtGdrCY=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=

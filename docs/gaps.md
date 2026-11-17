@@ -168,11 +168,12 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 examples, now `INVALID_ARGUMENT` on a custom container as Vertex documents (they are for TensorFlow
 models only; Sampled Shapley, the custom-container method, is served) (#1454); `EmbedContent` with images, on
 EmbeddingGemma 2's community ONNX conversion (#1454); with WAV audio, and `file_data` `gs://` parts read
-from the instance's Cloud Storage (#1651, open for the rest).
+from the instance's Cloud Storage (#1651, open for the rest); with HEIC and HEIF images and an animated
+WebP's first frame (#1724).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` on `embeddinggemma-2-onnx-community` embeds text, PNG, JPEG, WebP or BMP images and WAV audio, inline or as `file_data` from the instance's Cloud Storage (#1454, #1651), but not video, PDF, MP3, HEIC, HEIF, AVIF or animated WebP: an `inline_data` or `file_data` part of video (MP4, MOV), PDF, MP3, HEIC, HEIF or AVIF, an animated WebP, `audio_track_extraction` and `document_ocr` are `INVALID_ARGUMENT` naming the field. The model's own video path is frames at 1 fps through the vision encoder (no audio), which needs an H.264/H.265/VP9/AV1 demuxer and decoder; PDF needs a renderer; MP3, HEIC, HEIF and AVIF need decoders; none is in Go's standard library or the approved modules (`golang.org/x/image`, approved 2026-10-19, decodes WebP and BMP but none of these, and no WebP animation). Google's doc re-read 2026-10-19 (last updated 2026-10-15): https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings (#1651) | no emulator support (video, PDF, MP3, HEIC/HEIF/AVIF and animated WebP decoders) | L |
+| `EmbedContent` on `embeddinggemma-2-onnx-community` embeds text, PNG, JPEG, WebP (an animated one as its first frame), BMP, HEIC or HEIF images and WAV audio, inline or as `file_data` from the instance's Cloud Storage (#1454, #1651, #1724), but not video, PDF, MP3 or AVIF: an `inline_data` or `file_data` part of video (MP4, MOV), PDF, MP3 or AVIF, `audio_track_extraction` and `document_ocr` are `INVALID_ARGUMENT` naming the field. The model's own video path is frames at 1 fps through the vision encoder (no audio), which needs an H.264/H.265/VP9/AV1 demuxer and decoder; PDF needs a renderer; MP3 needs a decoder. AVIF has a cgo-free decoder (`github.com/gen2brain/avif`, libavif and dav1d in WASM), but it imports `purego`, which links libc dynamically into the static Linux CLI unless every build sets `-tags nodynamic`; the user's decision ([upstream-evaluation.md](upstream-evaluation.md#amendment-heic-heif-avif-and-animated-webp-decoders-for-vertex-ai-embedcontent-1724)). Google's doc re-read 2026-11-17: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings (#1651, #1724) | no emulator support (video, PDF, MP3 and AVIF decoders) | L |
 
 ## BigQuery
 
