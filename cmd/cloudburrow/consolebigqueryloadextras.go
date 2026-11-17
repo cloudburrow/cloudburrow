@@ -23,7 +23,10 @@ import (
 // The load options the official Go client's loader has no field for
 // (#1547): hivePartitioningOptions (mode and sourceUriPrefix) and
 // jsonExtension GEOJSON, which the front serves for a
-// NEWLINE_DELIMITED_JSON load (hive partitioning for Parquet, Avro and ORC too) (internal/bigqueryfront/loadvariants.go).
+// NEWLINE_DELIMITED_JSON load (hive partitioning for CSV, Parquet, Avro
+// and ORC too) (internal/bigqueryfront/loadvariants.go), and
+// fileSetSpecType FILE_SET_SPEC_TYPE_NEW_LINE_DELIMITED_MANIFEST
+// (internal/bigqueryfront/loadmanifest.go).
 // The form's load is still sent by the official client, through a
 // transport that adds the two to the job's configuration.load in
 // jobs.insert's body (JSON, or the metadata part of a multipart upload).
@@ -32,6 +35,9 @@ import (
 
 // bigqueryHiveModes are hivePartitioningOptions.mode's values, and NONE.
 var bigqueryHiveModes = []string{"NONE", "AUTO", "STRINGS", "CUSTOM"}
+
+// bigqueryFileSetSpecTypes are fileSetSpecType's values (#1547).
+var bigqueryFileSetSpecTypes = []string{"FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH", "FILE_SET_SPEC_TYPE_NEW_LINE_DELIMITED_MANIFEST"}
 
 // bigqueryJSONExtensions are jsonExtension's values, and NONE.
 var bigqueryJSONExtensions = []string{"NONE", "GEOJSON"}
@@ -45,18 +51,24 @@ func bigqueryLoadExtraFields() []console.Field {
 				"GEOGRAPHY column named geometry and each member of its properties a column."},
 		{Name: "hiveMode", Label: "Source data partitioning", Type: "select", Options: bigqueryHiveModes,
 			Section: "Hive partitioning",
-			Help: "Cloud Storage, newline-delimited JSON, Parquet, Avro or ORC: read partition keys from directories key=value " +
+			Help: "Cloud Storage, CSV (with a schema), newline-delimited JSON, Parquet, Avro or ORC: read partition keys from directories key=value " +
 				"after the prefix below, as columns: AUTO detects STRING, INTEGER, DATE or TIMESTAMP, STRINGS makes " +
 				"each a STRING, CUSTOM takes the types the prefix encodes, as gs://bucket/table/{dt:DATE}/{n:INTEGER}."},
 		{Name: "hiveSourceUriPrefix", Label: "Source URI prefix", Type: "text", Section: "Hive partitioning",
 			Help: "The gs:// URI every file is under, ending where the key=value directories begin."},
+		{Name: "fileSetSpecType", Label: "Source URIs are", Type: "select", Options: bigqueryFileSetSpecTypes,
+			Section: "File set",
+			Help: "Cloud Storage only: FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH loads the files the URIs name; " +
+				"FILE_SET_SPEC_TYPE_NEW_LINE_DELIMITED_MANIFEST reads each URI as a manifest listing one gs:// URI a " +
+				"line (no wildcards) and loads those files."},
 	}
 }
 
 // loadExtras are those options, from the form.
 type loadExtras struct {
-	hive          map[string]any
-	jsonExtension string
+	hive            map[string]any
+	jsonExtension   string
+	fileSetSpecType string
 }
 
 // loadExtrasOf reads them; fromStorage is whether the load reads Cloud
@@ -94,7 +106,16 @@ func loadExtrasOf(values map[string]string, fromStorage bool) (*loadExtras, erro
 	default:
 		x.hive = map[string]any{"mode": mode, "sourceUriPrefix": prefix}
 	}
-	if x.hive == nil && x.jsonExtension == "" {
+	switch spec := strings.TrimSpace(values["fileSetSpecType"]); {
+	case spec == "" || spec == bigqueryFileSetSpecTypes[0]:
+	case !slices.Contains(bigqueryFileSetSpecTypes, spec):
+		return nil, fmt.Errorf("the source URIs are one of %s, not %q", strings.Join(bigqueryFileSetSpecTypes, ", "), spec)
+	case !fromStorage:
+		return nil, errors.New("manifests are read from Cloud Storage: use Load from Cloud Storage")
+	default:
+		x.fileSetSpecType = spec
+	}
+	if x.hive == nil && x.jsonExtension == "" && x.fileSetSpecType == "" {
 		return nil, nil
 	}
 	return &x, nil
@@ -205,6 +226,9 @@ func (x *loadExtras) editJob(job []byte) ([]byte, error) {
 	}
 	if x.jsonExtension != "" {
 		load["jsonExtension"] = x.jsonExtension
+	}
+	if x.fileSetSpecType != "" {
+		load["fileSetSpecType"] = x.fileSetSpecType
 	}
 	return json.Marshal(j)
 }

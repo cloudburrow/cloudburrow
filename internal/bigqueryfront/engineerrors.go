@@ -125,6 +125,32 @@ var enginePosition = regexp.MustCompile(` \[at ([0-9]+):([0-9]+)\]$`)
 // dataset that does not exist.
 var engineDatasetMissing = regexp.MustCompile(`^dataset ([A-Za-z0-9_]+) is not found$`)
 
+// engineExists is the engine's error of a CREATE TABLE or CREATE VIEW of a
+// name a table or view has (measured through the front, 2026-11-17: "failed
+// to exec CREATE TABLE ds.t (a INT64): sqlite3: SQL logic error: table
+// `p_ds_t` already exists", and "view `p_ds_v` already exists" when the
+// name is a view's, alone and in a dry run). BigQuery fails it with reason
+// duplicate, 409: "This error returns when trying to create a job,
+// dataset, or table that already exists"
+// (https://cloud.google.com/bigquery/docs/error-messages), and a dry run
+// answers "the same error it would if it wasn't a dry run"
+// (JobConfiguration.dryRun,
+// https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfiguration).
+// The message is tables.insert's "Already Exists: Table p:ds.t" (#1456;
+// that DDL gives the same text is UNVERIFIED, docs re-read 2026-11-17).
+var engineExists = regexp.MustCompile("sqlite3: SQL logic error: (?:table|view) `([^`]+)` already exists$")
+
+// engineNoSuchTable is the engine's error of a query of a table its
+// analyzer still knows but its storage lacks: one a dry run of a CREATE
+// TABLE or CREATE VIEW named (measured through the front, 2026-11-17: the
+// dry run rolls the storage back and leaves the name in the analyzer's
+// catalog, so "SELECT * FROM ds.t" then fails "sqlite3: SQL logic error:
+// no such table: p_ds_t"). The dry run made nothing ("Dry run: the query
+// is not executed", https://cloud.google.com/bigquery/docs/running-queries#dry-run),
+// so the query is answered as one of a table that does not exist, 404
+// notFound (#1456).
+var engineNoSuchTable = regexp.MustCompile(`sqlite3: SQL logic error: no such table: ([A-Za-z0-9_-]+)$`)
+
 // engineText is the parser's or the analyzer's message in msg, the
 // engine's error, without the engine's prefixes.
 func engineText(msg string) (string, bool) {
@@ -147,6 +173,18 @@ func (c *engineContext) mapError(e rowError) (rowError, bool) {
 	if m := engineDatasetMissing.FindStringSubmatch(e.Message); m != nil && e.Reason == "jobInternalError" {
 		e.Reason, e.Message = "notFound", "Not found: Dataset "+c.project+":"+m[1]+" was not found in location "+c.jobLocation()
 		return e, true
+	}
+	if m := engineExists.FindStringSubmatch(e.Message); m != nil && e.Reason == "jobInternalError" {
+		if ds, table, ok := c.storageTable(m[1]); ok {
+			e.Reason, e.Message = "duplicate", "Already Exists: Table "+c.project+":"+ds+"."+table
+			return e, true
+		}
+	}
+	if m := engineNoSuchTable.FindStringSubmatch(e.Message); m != nil && e.Reason == "jobInternalError" {
+		if ds, table, ok := c.storageTable(m[1]); ok && !c.tableExists(ds, table) {
+			e.Reason, e.Message = "notFound", "Not found: Table "+c.project+":"+ds+"."+table+" was not found in location "+c.jobLocation()
+			return e, true
+		}
 	}
 	if e.Reason == "jobInternalError" {
 		if msg, ok := c.runtimeError(e.Message); ok {
@@ -265,6 +303,22 @@ func (c *engineContext) storageNames(text string) string {
 	}
 }
 
+// storageTable is the dataset and table of name, the storage name
+// <project>_<dataset>_<table> of a table of the job's project: the dataset
+// is the longest prefix of the rest, at an underscore, that the engine has.
+func (c *engineContext) storageTable(name string) (dataset, table string, ok bool) {
+	rest, cut := strings.CutPrefix(name, c.project+"_")
+	if c.project == "" || !cut {
+		return "", "", false
+	}
+	for k := strings.LastIndex(rest, "_"); k > 0; k = strings.LastIndex(rest[:k], "_") {
+		if k+1 < len(rest) && c.datasetExists(c.project, rest[:k]) {
+			return rest[:k], rest[k+1:], true
+		}
+	}
+	return "", "", false
+}
+
 // tableNotFound is BigQuery's message of name, a table the engine did not
 // find: the table's, or its dataset's when that does not exist either.
 func (c *engineContext) tableNotFound(name string) (string, bool) {
@@ -318,6 +372,14 @@ func (c *engineContext) datasetExists(project, dataset string) bool {
 	}
 	c.datasets[key] = st != http.StatusNotFound
 	return c.datasets[key]
+}
+
+// tableExists reports whether the engine has the job's project's table;
+// one it cannot read is taken to exist.
+func (c *engineContext) tableExists(dataset, table string) bool {
+	f := front{next: c.engine, base: c.prefix + "/projects/" + url.PathEscape(c.project)}
+	st, _ := f.get(c.r, tablePath(dataset, table))
+	return st != http.StatusNotFound
 }
 
 // jobLocation is the job's location, else the project's default.

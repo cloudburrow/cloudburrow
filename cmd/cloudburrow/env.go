@@ -296,6 +296,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 		vars = append(vars, envVar{name, netfwd.EnvValueFor(string(s), addr(port)),
 			"read by the official " + string(s) + " clients"})
+		// Firestore with MongoDB compatibility (#1703): the MongoDB wire
+		// protocol of the Enterprise edition databases, a second port of
+		// Firestore's front. MongoDB drivers take it in a connection
+		// string, which the console's database page shows.
+		if s == config.ServiceFirestore && cfg.Endpoints.FirestoreMongoDB != 0 {
+			vars = append(vars, envVar{"CLOUDBURROW_FIRESTORE_MONGODB_ENDPOINT", addr(cfg.Endpoints.FirestoreMongoDB),
+				"Firestore with MongoDB compatibility; read by no client library: put it in a mongodb:// connection string"})
+		}
 		// Spanner's REST API, a second port of the same emulator (#1331):
 		// the Terraform provider's instance and database admin calls use
 		// it, as spanner_custom_endpoint. The client libraries do not.
@@ -576,7 +584,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"storage": &e.Storage, "pubsub": &e.PubSub, "tasks": &e.Tasks, "run": &e.Run,
 		"secretmanager": &e.Secrets, "scheduler": &e.Scheduler, "logging": &e.Logging, "kms": &e.KMS,
 		"metadata": &e.Metadata, "control": &e.Control,
-		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
+		"firestore": &e.Firestore, "firestore-mongodb": &e.FirestoreMongoDB, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "spanner-rest": &e.SpannerREST, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
 		"sqladmin": &e.SQLAdmin,
@@ -585,6 +593,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
 		"backupdr":          &e.BackupDR,
+		"onnx":              &e.ONNX,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,9 @@ import (
 // result, as Google's console shows it, and is not in the operations log.
 // A Standard edition database is offered neither: Google serves both on
 // Enterprise databases alone.
+
+// userCredsNameRe is a user's credentials name: its database ID and user.
+var userCredsNameRe = regexp.MustCompile(`/databases/([^/]+)/userCreds/([^/]+)$`)
 
 // firestoreCredsSegment is the second segment of a user's action path.
 const firestoreCredsSegment = "userCreds"
@@ -85,16 +89,22 @@ func (p firestoreDatabasesProvider) userCreds(ctx context.Context, c *admin.Fire
 		}, Actions: credsActions(uc), ActsOn: []string{id, firestoreCredsSegment, lastSegment(uc.GetName())}})
 	}
 	list.Total = len(list.Items)
-	list.Note = "User credentials are for MongoDB drivers. They are stored and served as Google documents them, " +
-		"but nothing authenticates with them here: CloudBurrow does not serve the MongoDB wire protocol."
+	list.Note = "User credentials authenticate MongoDB drivers, by SCRAM-SHA-256, to Firestore with MongoDB compatibility: " +
+		"use the database's MongoDB connection string with the user's name and password."
 	return list
 }
 
-func passwordListing(uc *adminpb.UserCreds) *console.Listing {
-	return &console.Listing{Columns: []string{"Password", "State"}, NameColumn: "User", Noun: "user credentials",
-		Items: []console.Resource{{Name: lastSegment(uc.GetName()), Fields: map[string]string{
-			"Password": uc.GetSecurePassword(), "State": enumWord(uc.GetState(), ""),
-		}}}, Total: 1,
+func (p firestoreDatabasesProvider) passwordListing(uc *adminpb.UserCreds) *console.Listing {
+	cols := []string{"Password", "State"}
+	fields := map[string]string{"Password": uc.GetSecurePassword(), "State": enumWord(uc.GetState(), "")}
+	if m := userCredsNameRe.FindStringSubmatch(uc.GetName()); m != nil {
+		if cs := mongoConnectionString(p.mongo, m[2], m[1]); cs != "" {
+			cols = append(cols, "Connection string")
+			fields["Connection string"] = cs
+		}
+	}
+	return &console.Listing{Columns: cols, NameColumn: "User", Noun: "user credentials",
+		Items: []console.Resource{{Name: lastSegment(uc.GetName()), Fields: fields}}, Total: 1,
 		Note: "Copy the password now: it is shown once, and cannot be read again (Reset password makes a new one)."}
 }
 
@@ -130,13 +140,13 @@ func (p firestoreDatabasesProvider) ActAtResult(ctx context.Context, project str
 		if err != nil {
 			return nil, err
 		}
-		return passwordListing(uc), nil
+		return p.passwordListing(uc), nil
 	case "resetpassword":
 		uc, err := c.ResetUserPassword(ctx, &adminpb.ResetUserPasswordRequest{Name: db + "/userCreds/" + path[2]})
 		if err != nil {
 			return nil, err
 		}
-		return passwordListing(uc), nil
+		return p.passwordListing(uc), nil
 	case "disablecreds":
 		_, err := c.DisableUserCreds(ctx, &adminpb.DisableUserCredsRequest{Name: db + "/userCreds/" + path[2]})
 		return nil, err

@@ -45,11 +45,16 @@ type savedState struct {
 	// UserCreds are the user credentials, each with its password's
 	// digest, never the password (#1500).
 	UserCreds map[string]savedCreds `json:"userCreds,omitempty"`
+	// MongoIndexNames are the MongoDB names of the indexes MongoDB drivers
+	// created, by index name (#1703).
+	MongoIndexNames map[string]string `json:"mongoIndexNames,omitempty"`
 }
 
 type savedCreds struct {
 	UserCreds []byte `json:"userCreds"`
 	Digest    []byte `json:"digest"`
+	// Scram is the password's SCRAM-SHA-256 verifier (#1703).
+	Scram *scramKeys `json:"scram,omitempty"`
 }
 
 // KeepState restores the API's state from dir, when it holds any, and
@@ -149,11 +154,15 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 		if err := proto.Unmarshal(sc.UserCreds, uc); err != nil {
 			return fmt.Errorf("the user creds %s: %w", name, err)
 		}
-		userCreds[name] = &creds{UserCreds: uc, Digest: sc.Digest}
+		userCreds[name] = &creds{UserCreds: uc, Digest: sc.Digest, Scram: sc.Scram}
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.userCreds = userCreds
+	a.mongoIndexNames = map[string]string{}
+	for k, v := range s.MongoIndexNames {
+		a.mongoIndexNames[k] = v
+	}
 	a.databases, a.indexes, a.fields, a.schedules, a.ops, a.backups = dbs, idx, fields, scheds, ops, backups
 	a.opOrder = s.OpOrder
 	a.seeded = map[string]bool{}
@@ -232,7 +241,13 @@ func (a *Admin) save() error {
 		if s.UserCreds == nil {
 			s.UserCreds = map[string]savedCreds{}
 		}
-		s.UserCreds[name] = savedCreds{UserCreds: b, Digest: c.Digest}
+		s.UserCreds[name] = savedCreds{UserCreds: b, Digest: c.Digest, Scram: c.Scram}
+	}
+	if len(a.mongoIndexNames) > 0 {
+		s.MongoIndexNames = make(map[string]string, len(a.mongoIndexNames))
+		for k, v := range a.mongoIndexNames {
+			s.MongoIndexNames[k] = v
+		}
 	}
 	s.OpOrder = append([]string(nil), a.opOrder...)
 	if len(a.seeded) > 0 {
@@ -279,6 +294,7 @@ func (a *Admin) ResetState() error {
 	a.backups = map[string]*backup{}
 	a.lastBackup = map[string]time.Time{}
 	a.userCreds = map[string]*creds{}
+	a.mongoIndexNames = map[string]string{}
 	st := a.state
 	a.mu.Unlock()
 	if st == nil {

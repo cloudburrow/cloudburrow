@@ -56,6 +56,9 @@ func hostPorts(cfg config.Config) map[string]int {
 			// The admin API (#1302) is bound beside the server it describes.
 			ports["memorystore"] = e.Memorystore
 			ports["memorystore-admin"] = e.MemorystoreAdmin
+		case config.ServiceFirestore:
+			ports["firestore"] = e.Firestore
+			ports["firestore-mongodb"] = e.FirestoreMongoDB
 		case config.ServiceSpanner:
 			ports["spanner"] = e.Spanner
 			ports["spanner-rest"] = e.SpannerREST
@@ -68,6 +71,10 @@ func hostPorts(cfg config.Config) map[string]int {
 	}
 	if !backupDREnabled(cfg) {
 		delete(ports, "backupdr")
+	}
+	if onnxRunnerEnabled(cfg) {
+		// The onnx build's ONNX runner (#1711).
+		ports["onnx"] = e.ONNX
 	}
 	for name, port := range ports {
 		// 0 is OS-assigned; a negative console port disables the console.

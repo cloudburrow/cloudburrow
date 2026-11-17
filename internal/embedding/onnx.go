@@ -5,29 +5,21 @@ package embedding
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/cloudburrow/cloudburrow/internal/onnxmodel"
 	"github.com/daulet/tokenizers"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-var envOnce sync.Once
-var envErr error
-
 // Open loads the pinned model from modelDir, the revision directory that
 // localai.Cache.PinnedDir names. ONNXRUNTIME_LIB points at libonnxruntime.
 func Open(modelDir, modelID string) (Embedder, error) {
-	envOnce.Do(func() {
-		if lib := os.Getenv("ONNXRUNTIME_LIB"); lib != "" {
-			ort.SetSharedLibraryPath(lib)
-		}
-		envErr = ort.InitializeEnvironment()
-	})
-	if envErr != nil {
-		return nil, fmt.Errorf("initialise ONNX Runtime (set ONNXRUNTIME_LIB to libonnxruntime): %w", envErr)
+	// The runtime is shared with BigQuery's imported ONNX models (#1711).
+	if err := onnxmodel.InitRuntime(); err != nil {
+		return nil, err
 	}
 	if isEmbeddingGemma2(modelDir) {
 		return openEmbeddingGemma2(modelDir, modelID)
