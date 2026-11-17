@@ -39,6 +39,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
+	github.com/gen2brain/gav1d v0.2.7
 	github.com/gen2brain/h265 v0.2.5
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/golang/geo v0.0.0-20261029132150-f51d36688936

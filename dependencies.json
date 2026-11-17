@@ -693,6 +693,23 @@
         "verification": "go.sum",
         "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Its go.mod needs go 1.26.5, which raised CloudBurrow's go line. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md)."
       },
+      "govpx": {
+        "module": "github.com/thesyncim/govpx",
+        "version": "v0.0.0-20261018202535-159dce5b931a",
+        "sum": "h1:NIUp9Ir2/cvq/yY3XnNLQG68w4hxFoW2DnkBVu/lu8o=",
+        "pinnedCommit": "159dce5b931af4f7c600f157d64c2a813092ec57",
+        "source": "https://github.com/thesyncim/govpx",
+        "license": "BSD-3-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's VP9 video (#1731, internal/embedding/video.go): a pure Go libvpx port, standard library only. Its go.mod needs Go 1.27 for GOEXPERIMENT=simd files only, so the VP9 decoder is copied without them and without the encoders (import path github.com/cloudburrow/cloudburrow/third_party/govpx; third_party/govpx/PROVENANCE.md). Bit-exact against ffmpeg 9 on a libvpx clip with hidden alternate reference frames."
+      },
+      "gav1d": {
+        "module": "github.com/gen2brain/gav1d",
+        "version": "v0.2.7",
+        "license": "BSD-2-Clause",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's AV1 video (#1731, internal/embedding/video.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go port of dav1d, no cgo and no dependencies, 8 to 12 bits and every chroma format. Bit-exact against ffmpeg 9's libdav1d on an SVT-AV1 clip (docs/upstream-evaluation.md)."
+      },
       "goMongoDriver": {
         "module": "go.mongodb.org/mongo-driver/v2",
         "version": "v2.10.0",

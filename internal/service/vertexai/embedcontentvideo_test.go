@@ -48,6 +48,13 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 	if len(e.in.Parts) != 1 || len(e.in.Parts[0].Video) != 3 {
 		t.Fatalf("video: embedder got %d parts, %d frames; want 1 video of 3 frames", len(e.in.Parts), len(e.in.Parts[0].Video))
 	}
+	// VP9 and AV1 (#1731).
+	for _, f := range []string{"turtle-vp9.mp4", "turtle-av1.mp4"} {
+		post(`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, f)) + `]}}`)
+		if len(e.in.Parts) != 1 || len(e.in.Parts[0].Video) != 3 {
+			t.Fatalf("%s: embedder got %d parts; want 1 video of 3 frames", f, len(e.in.Parts))
+		}
+	}
 	post(`{"content":{"parts":[{"text":"a turtle"},` + inline("video/quicktime", mov) + `]}}`)
 	if len(e.in.Parts) != 2 || e.in.Parts[0].Text != "a turtle" || len(e.in.Parts[1].Video) != 3 {
 		t.Fatalf("text and MOV: embedder got %+v", e.in.Parts)
@@ -72,8 +79,7 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 
 	for name, c := range map[string]struct{ body, want string }{
 		"two videos": {`{"content":{"parts":[` + inline("video/mp4", video) + `,` + inline("video/mp4", video) + `]}}`, "at most 1 video"},
-		"vp9":        {`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, "turtle-vp9.mp4")) + `]}}`, "VP9"},
-		"av1":        {`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, "turtle-av1.mp4")) + `]}}`, "AV1"},
+		"vp9 10-bit": {`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, "turtle-vp9-10bit.mp4")) + `]}}`, "VP9 profile 2"},
 		"fps":        {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + video + `"},"videoMetadata":{"fps":25}}]}}`, "(0.0, 24.0]"},
 		"frames":     {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + video + `"},"videoMetadata":{"fps":24,"endOffset":"200s"}}]}}`, ""},
 		"two pdfs":   {`{"content":{"parts":[` + inline("application/pdf", pdf) + `,` + inline("application/pdf", pdf) + `]}}`, "at most 1 PDF"},

@@ -767,10 +767,10 @@ pure Go or WebAssembly. The candidates on the Go module proxy, compared on 2026-
 | H.264 | `github.com/go-avkit/h264` | v0.10.0 | BSD 3-Clause | none | go.264's decoder imported, 69 of 73 JVT streams | Rejected: its `go.mod` needs Go 1.27.1, and CloudBurrow builds with Go 1.26 |
 | H.264 | `github.com/Eyevinn/hi264` | v0.12.3 | MIT | none | IDR and P_Skip only | Rejected: "full P/B-frame decoding is out of scope" |
 | H.265 | `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | none | HEVC v1 and range extensions (8–16 bit, all chroma formats), inter prediction, open GOPs; byte-exact on the JCT-VC conformance suite (its claim) | **Adopted**: measured bit-exact against ffmpeg here (70 dB PSNR) on an x265 MOV with B-frames and a CRA with RASL pictures; raises `go.mod`'s `go` line to 1.26.4 |
-| VP9 | `github.com/thesyncim/govpx` | 2026-10-18 pseudo-version | BSD 3-Clause | none | VP8 and VP9 profile 0, the VP9 conformance corpus (its claim) | **Blocked**: its `go.mod` needs Go 1.27.0 (`toolchain go1.27.2`); CloudBurrow's CI still builds main with Go 1.26. Usable once Go 1.26 is dropped |
+| VP9 | `github.com/thesyncim/govpx` | 2026-10-18 pseudo-version | BSD 3-Clause | none | VP8 and VP9 profile 0, the VP9 conformance corpus (its claim) | **Blocked**: its `go.mod` needs Go 1.27.0 (`toolchain go1.27.2`); CloudBurrow's CI still builds main with Go 1.26. Usable once Go 1.26 is dropped (adopted as a copy since #1731, below) |
 | VP9 | `github.com/go-avkit/vp9` | v0.2.2 | BSD 3-Clause | none | headers and superframes only | Rejected: no pixels |
 | AV1 | `github.com/KarpelesLab/goavif` | v0.1.0 (2026-04) | MIT | none | AV1 intra and single-reference translational inter | Rejected: compound, warped and global motion, which libaom and SVT-AV1 use, repeat the previous frame instead (its README) |
-| AV1 | `github.com/gen2brain/avif` | v0.6.0 | MIT (libavif and libaom BSD 2-Clause) | none (WASM on wazero) | AVIF stills and AVIS sequences | Rejected for video: it reads only AVIF containers, not an MP4's AV1 track |
+| AV1 | `github.com/gen2brain/avif` | v0.6.0 | MIT (libavif and libaom BSD 2-Clause) | none (WASM on wazero) | AVIF stills and AVIS sequences | Rejected for video: it reads only AVIF containers, not an MP4's AV1 track (`gen2brain/gav1d` adopted since #1731, below) |
 | any | `codeberg.org/gruf/go-ffmpreg` | 2026-09 | GPL-3.0 (ffmpeg built with `--enable-gpl`) | none (WASM on wazero) | ffmpeg 5.1 | Rejected: GPL |
 | PDF | `github.com/klippa-app/go-pdfium` | v1.21.4 (2026-10-21) | MIT; PDFium BSD 3-Clause and Apache 2.0 | none in its `webassembly` package (PDFium compiled to WASM, run on `tetratelabs/wazero` v1.12.0, Apache 2.0) | rendering, page sizes, text | **Adopted** |
 | PDF | `github.com/gen2brain/go-fitz` | — | AGPL-3.0 (MuPDF) | cgo | rendering | Rejected: AGPL and cgo |
@@ -814,3 +814,22 @@ is read directly. Opus, AC-3, E-AC-3, ALAC, FLAC and HE-AAC tracks are refused n
 Opus has no complete pure Go decoder with a permissive licence, and the others no Go decoder at
 all. `govulncheck ./...` reports nothing for `aac-go`.
 
+## Amendment: VP9 and AV1 decoders for EmbedContent video (#1731)
+
+Google's [multimodal embeddings page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) lists "Codec: AV1, H264, H265, VP9" for `gemini-embedding-2` video, so the
+VP9 and AV1 refusals of #1722 are a gap. The user approved pure Go, permissively licensed decoders,
+copied into `third_party/` where a module cannot be required (2026-11-17). Compared on the Go module
+proxy on 2026-11-17:
+
+| Need | Module | Version | Licence | cgo | Covers | Verdict |
+|---|---|---|---|---|---|---|
+| VP9 | `github.com/thesyncim/govpx` | v0.0.0-20261018202535-159dce5b931a | BSD 3-Clause (a libvpx port; libvpx's licence and patent grant included) | none, standard library only | VP9 profile 0 (8-bit 4:2:0), superframes, hidden frames, every inter mode | **Adopted as a copy** in `third_party/govpx` ([PROVENANCE.md](../third_party/govpx/PROVENANCE.md)): its `go.mod` needs Go 1.27, which only its `GOEXPERIMENT=simd` files use; the decoder is copied without them and without the encoders, two changes recorded. Bit-exact against ffmpeg 9 on a two-pass libvpx clip with alternate reference frames (180 frames by MD5) |
+| AV1 | `github.com/gen2brain/gav1d` | v0.2.7 (2026-11-11) | BSD 2-Clause (a port of dav1d; dav1d's patent grant in `PATENTS`) | none, no dependencies | every AV1 tool, 8 to 12 bits, 4:0:0 to 4:4:4, film grain | **Adopted**: bit-exact against ffmpeg 9's libdav1d on an SVT-AV1 clip (180 frames by MD5); its `go.mod` says `go 1.26.4`, below CloudBurrow's line. Pure Go, so no WebAssembly blob is needed (it could also serve AVIF) |
+| AV1 | `github.com/KarpelesLab/goavif` | v0.1.0 | MIT | none | intra and single-reference inter | Rejected, as in #1722 |
+| AV1 | dav1d or libaom compiled to WASM on wazero | — | BSD 2-Clause | none | complete | Not needed: `gav1d` is complete in pure Go and needs no blob |
+
+VP9 profiles 1 to 3 (4:2:2, 4:4:4, 10 and 12 bits), which `govpx` does not decode, are refused
+naming the profile; libvpx and every browser's encoder default to profile 0. Neither copy imports
+`ebitengine/purego`, so the `CGO_ENABLED=0` Linux CLI stays statically linked. `govulncheck ./...`
+reports nothing for either.

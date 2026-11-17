@@ -147,6 +147,14 @@
 > AC-3 and HE-AAC tracks are refused naming the codec. See
 > [upstream-evaluation.md](upstream-evaluation.md).
 >
+> **Update 2026-11-17 (#1731): VP9 and AV1 video.** The four codecs Google lists for video are
+> decoded: VP9 with `github.com/thesyncim/govpx` (copied into `third_party/govpx` for Go 1.26;
+> profile 0, 8-bit 4:2:0, the profile libvpx and browsers encode by default; profiles 1 to 3 are
+> refused naming the profile) and AV1 with `github.com/gen2brain/gav1d` (a pure Go port of dav1d;
+> 8 to 12 bits, every chroma format). Both are bit-exact against ffmpeg on the unit fixtures; frames
+> are then sampled and prepared as H.264's are. The sea turtle clip in VP9 and AV1 gives the H.264
+> clip's 368 tokens and vectors at cosine 0.995 and 0.993 to it.
+>
 > **Update 2026-11-17 (#1724): HEIC, HEIF and animated WebP.** With the maintainer's approval
 > (2026-11-17), `github.com/gen2brain/h265` v0.2.5 joins go.mod: a pure Go HEVC decoder and HEIF
 > reader, MIT, no cgo and no dependencies ([upstream-evaluation.md](upstream-evaluation.md#amendment-heic-heif-avif-and-animated-webp-decoders-for-vertex-ai-embedcontent-1724)

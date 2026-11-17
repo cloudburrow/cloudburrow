@@ -1,0 +1,6 @@
+// CloudBurrow: upstream "//go:build !goexperiment.simd || (!arm64 && !amd64) || purego" removed: the GOEXPERIMENT=simd
+// kernels are not vendored, so this portable Go fallback is always built.
+
+package pixel
+
+func Copy8Rows(src []byte, ss int, dst []byte, ds int) bool { return false }

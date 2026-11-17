@@ -35,11 +35,11 @@ import (
 // gemini-embedding-2 embeds a Content's parts. It embeds a WAV (#1651) or MP3
 // (#1721) audio clip the same way, and reads a file_data part's gs:// object
 // from this instance's Cloud Storage as if its bytes were inline_data. It
-// embeds one MP4 or MOV video (H.264 or H.265) a request, its frames sampled
+// embeds one MP4 or MOV video (H.264, H.265, or since #1731 VP9 and AV1) a request, its frames sampled
 // as video_metadata says (#1722), and one PDF of up to 6 pages, each page
 // rendered as an image, with document_ocr adding each page's text (#1723).
 // With audio_track_extraction, a video's audio track (AAC-LC, MP3 or PCM) is
-// embedded after its frames (#1732). VP9 and AV1 video, AVIF and
+// embedded after its frames (#1732). AVIF, VP9 profiles 1 to 3 and
 // document_ocr on a PDF with no text are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
@@ -346,9 +346,9 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 				types = embedding.ImageMIMETypes
 			}
 			types = append(append(types, embedding.VideoMIMETypes...), embedding.PDFMIMEType)
-			notServed := "AVIF, VP9 and AV1 input are not served"
+			notServed := "AVIF input is not served"
 			if !m.audio {
-				notServed = "audio, AVIF, VP9 and AV1 input are not served"
+				notServed = "audio and AVIF input are not served"
 			}
 			return nil, 0, apierror.InvalidArgument(
 				"content.parts[%d].%s.mime_type %q is not supported: %s embeds %s (%s); %s",
