@@ -50,10 +50,10 @@ type blueGreen struct {
 	Description string `json:"description,omitempty"`
 	// Source is the blue instance's name, Target the green one's: the
 	// names stay, and after the switchover Source names the green server.
-	Source          string `json:"source"`
-	Target          string `json:"target"`
+	Source           string `json:"source"`
+	Target           string `json:"target"`
 	RequestedVersion string `json:"requestedVersion,omitempty"`
-	CreateTime      string `json:"createTime"`
+	CreateTime       string `json:"createTime"`
 	// Phase is PROVISIONING, PROVISIONED, UPGRADE_FAILED,
 	// SWITCHOVER_IN_PROGRESS, SWITCHOVER_FAILED, SWITCHOVER_SUCCEEDED or
 	// DELETING: the paired node's state.

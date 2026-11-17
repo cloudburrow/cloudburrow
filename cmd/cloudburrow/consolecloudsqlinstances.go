@@ -315,6 +315,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Encryption key (CMEK)", Value: cmekKey(in)}, {Label: "Encryption key version", Value: cmekVersion(in)},
 		{Label: "Suspension reason", Value: strings.Join(in.SuspensionReason, ", ")},
 		{Label: "Server CA mode", Value: serverCAMode(in)}, {Label: "DNS name", Value: in.DnsName},
+		{Label: "Blue-green deployment", Value: blueGreenRole(in)},
+		{Label: "Blue-green deployment state", Value: blueGreenState(ctx, svc, project, in)},
 	} {
 		if pr.Value != "" {
 			d.Summary = append(d.Summary, pr)
@@ -376,6 +378,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, drActions(in)...)
 	d.Actions = append(d.Actions, reencryptActions(in)...)
+	d.Actions = append(d.Actions, blueGreenActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
@@ -731,6 +734,111 @@ func drActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	return acts
 }
 
+// blueGreenName is the blue-green deployment in is part of, "" for none.
+func blueGreenName(project string, in *sqladminapi.DatabaseInstance) string {
+	if in.DeploymentInfo == nil || in.DeploymentInfo.DeploymentId == "" {
+		return ""
+	}
+	return "projects/" + project + "/locations/" + in.Region + "/blueGreenDeployments/" + in.DeploymentInfo.DeploymentId
+}
+
+// blueGreenRole says which side of a blue-green deployment (#1614) the
+// instance is.
+func blueGreenRole(in *sqladminapi.DatabaseInstance) string {
+	di := in.DeploymentInfo
+	if di == nil {
+		return ""
+	}
+	switch {
+	case di.Source != nil && di.Source.TargetId != nil:
+		return di.DeploymentId + ": blue (source), green " + di.Source.TargetId.Name + " (" + di.State + ")"
+	case di.Target != nil && di.Target.SourceId != nil:
+		return di.DeploymentId + ": green (target), blue " + di.Target.SourceId.Name + " (" + di.State + ")"
+	}
+	return di.DeploymentId + " (" + di.State + ")"
+}
+
+// blueGreenState is the deployment's state, with why it is not ready.
+func blueGreenState(ctx context.Context, svc *sqladminapi.Service, project string, in *sqladminapi.DatabaseInstance) string {
+	n := blueGreenName(project, in)
+	if n == "" {
+		return ""
+	}
+	d, err := svc.BlueGreenDeployments.Get(n).Context(ctx).Do()
+	if err != nil {
+		return ""
+	}
+	if d.ErrorDetail != "" {
+		return d.State + ": " + d.ErrorDetail
+	}
+	return d.State
+}
+
+// blueGreenActions are, on a MySQL primary, Create blue-green deployment
+// (#1614), and on either instance of one, Switch over (before the
+// switchover) and Delete blue-green deployment.
+func blueGreenActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	di := in.DeploymentInfo
+	if di == nil {
+		if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") || in.MasterInstanceName != "" {
+			return nil
+		}
+		versions := []string{in.DatabaseVersion}
+		if strings.HasPrefix(in.DatabaseVersion, "MYSQL_8_0") {
+			versions = append(versions, "MYSQL_8_4")
+		}
+		return []console.Action{{ID: "blue-green-create", Label: "Create blue-green deployment",
+			Fields: []console.Field{
+				{Name: "deploymentId", Label: "Deployment ID", Type: "text", Required: true, Pattern: "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",
+					Help: "Lowercase letters, digits and hyphens. The green instance, " + in.Name + "-green-XXXXXXXX, replicates from this one."},
+				{Name: "databaseVersion", Label: "Green database version", Type: "select", Options: versions, Default: versions[len(versions)-1],
+					Help: "MySQL 8.0 can be upgraded to 8.4 on the green instance; the instance needs automated backups and binary logging."},
+				{Name: "description", Label: "Description", Type: "text", Help: "Up to 255 characters."}}}}
+	}
+	var acts []console.Action
+	if di.State != "POST_SWITCHOVER" {
+		acts = append(acts, console.Action{ID: "blue-green-switchover", Label: "Switch over blue-green", Destructive: true,
+			Confirm: "The blue instance stops taking writes until the green one has applied every transaction; the green server then " +
+				"takes the blue instance's name and connection name, and the old blue server the green name."})
+	}
+	del := console.Action{ID: "blue-green-delete", Label: "Delete blue-green deployment", Destructive: true,
+		Confirm: "Before a switchover this deletes the green instance; after one, the deployment's record."}
+	if di.State == "POST_SWITCHOVER" {
+		del.Fields = []console.Field{{Name: "deleteOldSource", Label: "Delete the old blue instance", Type: "checkbox", Default: "false",
+			Help: "deleteOldSource: the old blue server, now under the green name, is deleted too."}}
+	}
+	return append(acts, del)
+}
+
+// blueGreenAct runs a blue-green deployment action on instance name.
+func blueGreenAct(ctx context.Context, svc *sqladminapi.Service, project, name, action string, v map[string]string) error {
+	in, err := svc.Instances.Get(project, name).Context(ctx).Do()
+	if err != nil {
+		return err
+	}
+	switch action {
+	case "blue-green-create":
+		d := &sqladminapi.BlueGreenDeployment{SourceInstance: "projects/" + project + "/instances/" + name,
+			Description: strings.TrimSpace(v["description"])}
+		if ver := v["databaseVersion"]; ver != "" && ver != in.DatabaseVersion {
+			d.RequestedConfig = &sqladminapi.RequestedConfig{DatabaseVersion: ver}
+		}
+		_, err = svc.BlueGreenDeployments.Create("projects/"+project+"/locations/"+in.Region, d).
+			BlueGreenDeploymentId(strings.TrimSpace(v["deploymentId"])).Context(ctx).Do()
+		return err
+	}
+	n := blueGreenName(project, in)
+	if n == "" {
+		return fmt.Errorf("%s is not part of a blue-green deployment", name)
+	}
+	if action == "blue-green-switchover" {
+		_, err = svc.BlueGreenDeployments.Switchover(n, &sqladminapi.SwitchoverBlueGreenDeploymentRequest{}).Context(ctx).Do()
+		return err
+	}
+	_, err = svc.BlueGreenDeployments.Delete(n).DeleteOldSource(v["deleteOldSource"] == "true").Context(ctx).Do()
+	return err
+}
+
 // reencryptActions is Re-encrypt on a CMEK instance (#1614): its data key
 // is wrapped again by its key's primary version (instances.reencrypt).
 func reencryptActions(in *sqladminapi.DatabaseInstance) []console.Action {
@@ -993,6 +1101,8 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 				Username: u, Password: v["password"]}}
 		}
 		_, err = svc.Instances.DemoteMaster(project, name, &sqladminapi.InstancesDemoteMasterRequest{DemoteMasterContext: dc}).Context(ctx).Do()
+	case "blue-green-create", "blue-green-switchover", "blue-green-delete":
+		err = blueGreenAct(ctx, svc, project, name, action, v)
 	case "reencrypt":
 		_, err = svc.Instances.Reencrypt(project, name, &sqladminapi.InstancesReencryptRequest{}).Context(ctx).Do()
 	case "designate-dr-replica", "clear-dr-replica":
