@@ -103,11 +103,12 @@ type sbrChannel struct {
 	qOrig [sbrMaxNoise][5]float64
 
 	// QMF state.
-	anaX  [320]float64
-	synV  [1280]float64
-	xLow  [sbrSlots + sbrHFGen][32]complex128 // X_Low; index 8 is this frame's first slot
-	yBuf  [sbrSlots + sbrHFGen + 2][64]complex128
-	yPrev [sbrSlots + sbrHFGen + 2][64]complex128
+	anaX   [320]float64
+	synV   [1280]float64
+	synV32 [640]float64                        // downsampled synthesis
+	xLow   [sbrSlots + sbrHFGen][32]complex128 // X_Low; index 8 is this frame's first slot
+	yBuf   [sbrSlots + sbrHFGen + 2][64]complex128
+	yPrev  [sbrSlots + sbrHFGen + 2][64]complex128
 }
 
 // sbrElement holds a channel element's SBR state.

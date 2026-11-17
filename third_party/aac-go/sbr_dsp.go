@@ -8,6 +8,7 @@ import "math"
 var (
 	anaCos, anaSin [32][64]float64  // 2·exp(iπ/64·(k+½)(2n−½))
 	synCos, synSin [128][64]float64 // exp(iπ/128·(k+½)(2n−255))/64
+	dsCos, dsSin   [64][32]float64  // exp(iπ/128·(k+½)(4n−255))/64
 )
 
 func init() {
@@ -21,6 +22,13 @@ func init() {
 		for k := range 64 {
 			a := math.Pi / 128 * (float64(k) + 0.5) * (2*float64(n) - 255)
 			synCos[n][k], synSin[n][k] = math.Cos(a)/64, math.Sin(a)/64
+		}
+	}
+	for n := range 64 {
+		for k := range 32 {
+			// The 64-band bank's modulation at every other sample.
+			a := math.Pi / 128 * (float64(k) + 0.5) * (4*float64(n) - 255)
+			dsCos[n][k], dsSin[n][k] = math.Cos(a)/64, math.Sin(a)/64
 		}
 	}
 }
@@ -82,6 +90,38 @@ func (c *sbrChannel) synthesis(x *[sbrSlots][64]complex128, out []float64) {
 				s += w[64*i+j]
 			}
 			out[64*l+j] = s
+		}
+	}
+}
+
+// synthesis32 runs the downsampled (32-band) synthesis QMF bank over
+// bands 0 to 31 of 32 slots of X to 1024 samples, the window being every
+// other coefficient of c.
+func (c *sbrChannel) synthesis32(x *[sbrSlots][64]complex128, out []float64) {
+	var w [320]float64
+	for l := range sbrSlots {
+		copy(c.synV32[64:], c.synV32[:576])
+		xs := &x[l]
+		for n := range 64 {
+			var s float64
+			cs, sn := &dsCos[n], &dsSin[n]
+			for k := range 32 {
+				s += real(xs[k])*cs[k] - imag(xs[k])*sn[k]
+			}
+			c.synV32[n] = s
+		}
+		for i := range 5 {
+			for j := range 32 {
+				w[64*i+j] = c.synV32[128*i+j] * sbrQMFWindow[2*(64*i+j)]
+				w[64*i+32+j] = c.synV32[128*i+96+j] * sbrQMFWindow[2*(64*i+32+j)]
+			}
+		}
+		for j := range 32 {
+			var s float64
+			for i := range 10 {
+				s += w[32*i+j]
+			}
+			out[32*l+j] = s
 		}
 	}
 }

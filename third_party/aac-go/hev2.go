@@ -13,11 +13,15 @@ import (
 
 // heState is the decoder's SBR and PS state.
 type heState struct {
-	sbrOn    bool // SBR is decoded: signalled, or found in the stream
-	noSBR    bool // the AudioSpecificConfig rules SBR out
-	sbrRate  int  // the SBR (output) rate
-	sbrElems []*sbrElement
-	sbrHit   []bool // per element: this frame carried SBR data
+	sbrOn   bool // SBR is decoded: signalled, or found in the stream
+	noSBR   bool // the AudioSpecificConfig rules SBR out
+	sbrRate int  // the SBR (output) rate
+	// downsampled: the ASC sets the SBR rate to the core's, so SBR runs
+	// at twice the core rate and a 32-band synthesis bank gives samples at
+	// the core rate (downsampled SBR).
+	downsampled bool
+	sbrElems    []*sbrElement
+	sbrHit      []bool // per element: this frame carried SBR data
 }
 
 // frameElement is one SCE or CPE of a raw_data_block.
@@ -132,8 +136,11 @@ func NewDecoderASC(asc []byte) (*Decoder, error) {
 	case 1:
 		d.sbrOn = true
 		d.sbrRate = a.ExtensionSamplingFrequency
-		if d.sbrRate == d.sampleRate {
-			return nil, unsupportedf("downsampled SBR")
+		switch {
+		case d.sbrRate == d.sampleRate:
+			d.downsampled = true
+		case d.sbrRate != 2*d.sampleRate:
+			return nil, unsupportedf("SBR at %d Hz over a %d Hz core", d.sbrRate, d.sampleRate)
 		}
 	case 0:
 		d.noSBR = true
@@ -193,7 +200,7 @@ func (d *Decoder) readSBR(r *bits.BitReader, elems []frameElement, crc bool, pay
 	}
 	e := d.sbrElems[i]
 	if e == nil || e.stereo != elems[i].stereo {
-		e = newSBRElement(d.sbrRate, elems[i].stereo)
+		e = newSBRElement(d.sbrTableRate(), elems[i].stereo)
 		d.sbrElems[i] = e
 	}
 	if err := e.parseExtension(r, crc, payloadBits); err != nil {
@@ -201,6 +208,23 @@ func (d *Decoder) readSBR(r *bits.BitReader, elems []frameElement, crc bool, pay
 	}
 	d.sbrHit[i] = true
 	return nil
+}
+
+// sbrTableRate is the rate SBR's frequency tables are for: twice the
+// core's, downsampled or not.
+func (d *Decoder) sbrTableRate() int { return 2 * d.sampleRate }
+
+// synth runs a channel's synthesis bank: 64 bands to 2048 samples, or, for
+// downsampled SBR, 32 bands to 1024.
+func (d *Decoder) synth(c *sbrChannel, x *[sbrSlots][64]complex128) []float64 {
+	if d.downsampled {
+		o := make([]float64, SamplesPerFrame)
+		c.synthesis32(x, o)
+		return o
+	}
+	o := make([]float64, 2*SamplesPerFrame)
+	c.synthesis(x, o)
+	return o
 }
 
 // applySBR runs SBR and PS over a frame's channels.
@@ -216,7 +240,7 @@ func (d *Decoder) applySBR(pcm [][]float64, elems []frameElement) [][]float64 {
 		}
 		e := d.sbrElems[i]
 		if e == nil {
-			e = newSBRElement(d.sbrRate, el.stereo)
+			e = newSBRElement(d.sbrTableRate(), el.stereo)
 			d.sbrElems[i] = e
 		}
 		hit := d.sbrHit[i]
@@ -224,22 +248,19 @@ func (d *Decoder) applySBR(pcm [][]float64, elems []frameElement) [][]float64 {
 		if el.stereo {
 			for c := range 2 {
 				x := e.process(c, pcm[el.first+c], hit)
-				o := make([]float64, 2*SamplesPerFrame)
-				e.ch[c].synthesis(x, o)
-				out = append(out, o)
+				out = append(out, d.synth(&e.ch[c], x))
 			}
 			continue
 		}
 		x := e.process(0, pcm[el.first], hit)
-		l := make([]float64, 2*SamplesPerFrame)
-		r := make([]float64, 2*SamplesPerFrame)
+		var l, r []float64
 		if e.ps != nil {
 			xl, xr := e.ps.apply(x, e.ch[0].ahead(), hit && e.psHit)
-			e.ch[0].synthesis(xl, l)
-			e.ch[1].synthesis(xr, r)
+			l = d.synth(&e.ch[0], xl)
+			r = d.synth(&e.ch[1], xr)
 		} else {
-			e.ch[0].synthesis(x, l)
-			copy(r, l)
+			l = d.synth(&e.ch[0], x)
+			r = append([]float64(nil), l...)
 		}
 		out = append(out, l)
 		if len(elems) == 1 {

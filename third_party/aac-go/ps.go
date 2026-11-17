@@ -5,7 +5,9 @@ package aac
 // (Table 8.1), delta decoding (§8.6.4.5), the hybrid filterbank
 // (§8.6.4.3), decorrelation with transient detection (§8.6.4.6), and the
 // mixing procedure with time interpolation (§8.6.4.6.3), with 10 or 20
-// parameter bands.
+// parameter bands. 34 stereo bands, mixing procedure B and IPD/OPD are
+// refused with ErrUnsupported: their normative tables (the 34-band hybrid
+// filters and maps, the IPD/OPD Huffman books) had no allowed source.
 
 import (
 	"math"
@@ -151,10 +153,10 @@ func (p *psDecoder) parse(b *bitr, bitsLeft int) error {
 		return unsupportedf("PS iid_mode %d, icc_mode %d", p.iidMode, p.iccMode)
 	}
 	if p.haveHeader && ((p.enableIID && p.iidMode%3 == 2) || (p.enableICC && p.iccMode%3 == 2)) {
-		return unsupportedf("PS with 34 stereo bands")
+		return unsupportedf("HE-AACv2 parametric stereo with 34 stereo bands is not decoded")
 	}
 	if p.enableICC && p.iccMode >= 3 {
-		return unsupportedf("PS mixing procedure B (icc_mode %d)", p.iccMode)
+		return unsupportedf("HE-AACv2 parametric stereo mixing procedure B (icc_mode %d) is not decoded", p.iccMode)
 	}
 	frameClass := b.u(1)
 	p.numEnv = psNumEnv[frameClass][b.u(2)]
@@ -216,9 +218,20 @@ func (p *psDecoder) parse(b *bitr, bitsLeft int) error {
 		if cnt == 15 {
 			cnt += b.u(8)
 		}
-		// ps_extension()s: IPD/OPD (id 0) is parsed but, as the baseline
-		// decoder of HE-AAC v2 does, not applied.
-		for range 8 * cnt {
+		// ps_extension(): IPD/OPD (extension id 0) is refused when
+		// enabled; anything else is skipped.
+		bits := 8 * cnt
+		if bits >= 3 {
+			id := b.u(2)
+			bits -= 2
+			if id == 0 {
+				bits--
+				if b.u(1) == 1 {
+					return unsupportedf("HE-AACv2 parametric stereo with IPD/OPD is not decoded")
+				}
+			}
+		}
+		for range bits {
 			b.u(1)
 		}
 	}

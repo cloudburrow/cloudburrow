@@ -3,13 +3,16 @@ package aac
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/cloudburrow/cloudburrow/third_party/aac-go/adts"
+	"github.com/cloudburrow/cloudburrow/third_party/aac-go/internal/bits"
 )
 
 // heFixture reads a test file's AudioSpecificConfig and access units: an
@@ -97,15 +100,37 @@ func readS16(t *testing.T, name string) []float64 {
 //	ffmpeg -f lavfi -i "$S" -ac 2 -c:a aac_at -profile:a 4 -b:a 40k he-implicit-44k.aac                   # RATE=44100
 //	ffmpeg -f lavfi -i "$S" -ac 2 -c:a aac_at -profile:a 28 -b:a 32k hev2-implicit-48k.aac                # RATE=48000
 //
+// Derived fixtures, decoded by ffmpeg the same way:
+//
+//   - he-ds-22k.m4a is he-mono-44k.m4a with its AudioSpecificConfig's SBR
+//     extension sampling frequency index set from 4 (44.1 kHz) to 7 (22.05
+//     kHz, the core's rate), which asks for downsampled SBR: ffmpeg then
+//     decodes it at 22.05 kHz.
+//   - he-lim0-44k.aac, he-lim1-44k.aac and he-lim3-44k.aac are
+//     he-implicit-44k.aac with its one SBR header given bs_header_extra2 = 1
+//     and (bs_limiter_bands, bs_limiter_gains, bs_interpol_freq,
+//     bs_smoothing_mode) = (0, 0, 0, 0), (1, 3, 1, 0) and (3, 1, 0, 1): the
+//     six bits are inserted after the flag, the SBR payload padded by two
+//     bits, and the fill element's count and the ADTS frame_length grown by
+//     one byte. aac_at only ever sends the defaults (2, 2, 1, 1), so these
+//     cover the gain smoothing, per-band energy estimation off and the
+//     other limiter tables and gains.
+//
 // The MP4s signal SBR (and PS) in their AudioSpecificConfig's backward
 // compatible extension; the ADTS streams' headers say AAC-LC at the core
 // rate, so SBR and PS are found in the stream (implicit signalling).
 //
-// The tolerances are the measured differences (max, RMS) with a margin;
-// the goal of 1e-4 is met by he-stereo-48k and nearly by hev2-implicit-48k.
-// The rest of the difference is in the SBR high band around the 9 kHz
-// burst's onsets (gains 0.1 dB apart in a few QMF bands), not yet
-// explained.
+// The tolerances are the measured differences (max, RMS) with a margin.
+// The goal of 1e-4 is met only by he-stereo-48k. The larger differences sit
+// in SBR bands whose source is near silent (energies 80 to 90 dB below the
+// frame's peak) and whose gains are tens of dB (the limiter's G_max reaches
+// 7866 in he-implicit-44k): there the output follows the core's last bits.
+// Adding noise of 1e-3 of a 16-bit step (3e-8 of full scale, below
+// ffmpeg's float32 precision) to our core output moves he-lim1-44k's max
+// difference from 2.8e-3 to 3.7e-3, so differences of this size are
+// ffmpeg's float32 arithmetic, amplified, rather than a different
+// algorithm; every alternative reading of the gain, limiter, sinusoid,
+// noise and chirp rules tried made the match worse.
 func TestHEAACMatchesFFmpeg(t *testing.T) {
 	for _, c := range []struct {
 		file     string
@@ -117,6 +142,10 @@ func TestHEAACMatchesFFmpeg(t *testing.T) {
 		{"hev2-44k.m4a", 44100, 1.2e-3, 1.1e-4},      // measured 8.83e-4, 8.15e-5
 		{"he-implicit-44k.aac", 44100, 2e-3, 2e-4},   // measured 1.58e-3, 1.59e-4
 		{"hev2-implicit-48k.aac", 48000, 2e-4, 3e-5}, // measured 1.30e-4, 2.01e-5
+		{"he-ds-22k.m4a", 22050, 2.5e-4, 3.5e-5},     // measured 1.70e-4, 2.72e-5
+		{"he-lim0-44k.aac", 44100, 1e-3, 8e-5},       // measured 7.84e-4, 5.93e-5
+		{"he-lim1-44k.aac", 44100, 3.5e-3, 4e-4},     // measured 2.84e-3, 3.05e-4
+		{"he-lim3-44k.aac", 44100, 3.5e-3, 4e-4},     // measured 2.85e-3, 2.99e-4
 	} {
 		asc, aus := heFixture(t, c.file)
 		d, err := NewDecoderASC(asc)
@@ -254,6 +283,54 @@ func TestDecodeAUMatchesDecodeLC(t *testing.T) {
 			if math.Abs(float64(pcm[i])-math.Max(-32768, math.Min(32767, float64(v)*32768))) > 0.501 {
 				t.Fatalf("%d channels: sample %d: Decode %d, DecodeAU %g", channels, i, pcm[i], float64(v)*32768)
 			}
+		}
+	}
+}
+
+// TestPSRefusals: ps_data() asking for 34 stereo bands, mixing procedure
+// B or IPD/OPD is refused with ErrUnsupported, frame by frame, so that a
+// stream switching to one mid-way fails rather than decoding wrongly;
+// baseline ps_data() is accepted. (aac_at, the only HE-AAC v2 encoder
+// available, emits iid_mode and icc_mode 1 without extensions.)
+func TestPSRefusals(t *testing.T) {
+	type field struct {
+		v uint64
+		n int
+	}
+	header := func(iid, icc, ext uint64) []field {
+		return []field{{1, 1}, {1, 1}, {iid, 3}, {1, 1}, {icc, 3}, {ext, 1}}
+	}
+	// frame_class 0 and num_env index 0: no envelopes, so no parameters
+	// follow.
+	noEnv := []field{{0, 1}, {0, 2}}
+	for _, c := range []struct {
+		name   string
+		fields []field
+		want   string // "" when accepted
+	}{
+		{"baseline", append(header(1, 1, 0), noEnv...), ""},
+		{"34 bands (iid_mode 2)", append(header(2, 1, 0), noEnv...), "34 stereo bands"},
+		{"34 bands (icc_mode 5)", append(header(1, 5, 0), noEnv...), "34 stereo bands"},
+		{"mixing B (icc_mode 3)", append(header(1, 3, 0), noEnv...), "mixing procedure B"},
+		{"IPD/OPD", append(append(header(1, 1, 1), noEnv...), field{1, 4}, field{0, 2}, field{1, 1}, field{0, 5}), "IPD/OPD"},
+		{"other extension", append(append(header(1, 1, 1), noEnv...), field{1, 4}, field{1, 2}, field{0, 6}), ""},
+	} {
+		w := bits.NewBitWriter()
+		n := 0
+		for _, f := range c.fields {
+			if err := w.WriteBits(f.v, f.n); err != nil {
+				t.Fatal(err)
+			}
+			n += f.n
+		}
+		w.Align()
+		p := newPSDecoder()
+		err := p.parse(&bitr{r: bits.NewReader(w.Bytes())}, n)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case c.want != "" && (!errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: got %v, want ErrUnsupported naming %q", c.name, err, c.want)
 		}
 	}
 }
