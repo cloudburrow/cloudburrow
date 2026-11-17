@@ -159,7 +159,11 @@ func (q *sqlFront) source(ctx context.Context, instance string, qu *query, param
 	}
 	fams := map[string]*familyInfo{}
 	for id, f := range t.GetColumnFamilies() {
-		fams[id] = &familyInfo{typed: f.GetValueType() != nil}
+		fi := &familyInfo{typed: f.GetValueType() != nil}
+		if fi.typed {
+			fi.value, fi.why = familyValue(f.GetValueType())
+		}
+		fams[id] = fi
 	}
 	cols, refused := tableColumns(fams, tp)
 	src := &source{cols: cols, refused: refused}

@@ -89,6 +89,7 @@ func sqlFixture(t *testing.T) (func(sql string, params map[string]bigtable.SQLTy
 		t.Fatal(err)
 	}
 	seedReport(ctx, t, ac, c)
+	seedCounters(ctx, t, ac, c)
 	run := func(sql string, params map[string]bigtable.SQLType, bind map[string]any) [][]string {
 		t.Helper()
 		ps, err := c.PrepareStatement(ctx, sql, params)
@@ -153,6 +154,24 @@ func seedReport(ctx context.Context, t *testing.T, ac *bigtable.AdminClient, c *
 			m.Set("report", cl[0].(string), at(cl[1].(int)), []byte(cl[2].(string)))
 		}
 		if err := c.Open("report").Apply(ctx, key, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// seedCounters writes an aggregate family, a Sum of INT64, the reference's
+// counters (https://cloud.google.com/bigtable/docs/create-update-counters).
+func seedCounters(ctx context.Context, t *testing.T, ac *bigtable.AdminClient, c *bigtable.Client) {
+	t.Helper()
+	if err := ac.CreateTableFromConf(ctx, &bigtable.TableConf{TableID: "counters", ColumnFamilies: map[string]bigtable.Family{
+		"c": {ValueType: bigtable.AggregateType{Input: bigtable.Int64Type{}, Aggregator: bigtable.SumAggregator{}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int64{3, 4} {
+		m := bigtable.NewMutation()
+		m.AddIntToCell("c", "views", bigtable.Timestamp(0), n)
+		if err := c.Open("counters").Apply(ctx, "page#1", m); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -281,6 +300,7 @@ func TestSQLAggregatesAndStructs(t *testing.T) {
 		// read through FORMAT.
 		"SELECT STRUCT(1 AS a, 'abc' AS b).b, FORMAT('%t %T', STRUCT(1, 2, 3), (1, 'x')), STRUCT<x INT64, y FLOAT64, d DATE>(1, 2, '2011-05-05'), STRUCT(1 AS a, 'abc' AS b)": "abc (1, 2, 3) (1, \"x\") (1,2,2011-05-05) (1,abc)",
 		"SELECT STRUCT(_key, 5 AS n).`_key` FROM report WHERE _key = 'Dept1'":                                                                                                 "Dept1",
+		"SELECT c['views'], c['views'] > 5 FROM counters":                                                                                                                     "7 true",
 		"SELECT ROUND(COSINE_DISTANCE([(1, 1.0), (2, 2.0)], [(2, 4.0), (1, 3.0)]), 6)":                                                                                        "0.01613",
 	} {
 		got := run(sql, nil, nil)
@@ -298,4 +318,13 @@ func TestSQLAggregatesAndStructs(t *testing.T) {
 			t.Errorf("%s = %v, want %v", sql, err, want)
 		}
 	}
+}
+
+// TestSQLAggregateFamily reads an aggregate family's typed values: a Sum
+// of INT64 is MAP<BYTES, INT64>, with history its cells' INT64 values.
+func TestSQLAggregateFamily(t *testing.T) {
+	run, _ := sqlFixture(t)
+	expectRows(t, "counter", run("SELECT c['views'], c['views'] > 5, c FROM counters", nil, nil), "7 true {views:7}")
+	expectRows(t, "counter history", run("SELECT c['views'] FROM counters(with_history => true)", nil, nil), "[(1970-01-01T00:00:00Z,7)]")
+	expectRows(t, "unpacked counter", run("SELECT _timestamp, v FROM UNPACK((SELECT c['views'] AS v FROM counters(with_history => true)))", nil, nil), "1970-01-01T00:00:00Z 7")
 }

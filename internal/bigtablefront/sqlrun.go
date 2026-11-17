@@ -1,12 +1,14 @@
 package bigtablefront
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	btpb "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -871,15 +873,58 @@ func tableColumns(families map[string]*familyInfo, t temporal) ([]column, map[st
 		if t.history {
 			ft = historyType
 		}
-		if families[id].typed {
-			refused[id] = "reading the aggregate column family " + id
+		if f := families[id]; f.typed {
+			// An aggregate family's values are typed (#1704): "When you
+			// query the data in aggregate cells using SQL, SQL automatically
+			// incorporates type information"
+			// (https://cloud.google.com/bigtable/docs/data-types).
+			if f.value == nil {
+				refused[id] = "reading the column family " + id + " of value type " + f.why
+			} else {
+				ft = mapType(bytesType, f.value)
+				if t.history {
+					ft = mapType(bytesType, arrayType(structType([]string{"timestamp", "value"}, []*btpb.Type{timestampType, f.value})))
+				}
+			}
 		}
 		cols = append(cols, column{id, ft})
 	}
 	return cols, refused
 }
 
-type familyInfo struct{ typed bool }
+// familyInfo is what the SQL reads of a column family: whether it has a
+// value type, and if so the SQL type of its values (nil, with why, when the
+// emulator's SQL cannot read them).
+type familyInfo struct {
+	typed bool
+	value *btpb.Type
+	why   string
+}
+
+// familyValue is the SQL type of a family's value type: an aggregate of
+// INT64 inputs (Sum, Min, Max) is INT64, whose cells hold the big-endian
+// value; an HLL++ unique count's state is BYTES, read as stored.
+func familyValue(vt *btapb.Type) (*btpb.Type, string) {
+	agg := vt.GetAggregateType()
+	if agg == nil {
+		return nil, fmt.Sprintf("%T", vt.GetKind())
+	}
+	if agg.GetHllppUniqueCount() != nil {
+		return bytesType, ""
+	}
+	if agg.GetInputType().GetInt64Type() != nil {
+		return int64Type, ""
+	}
+	return nil, "an aggregate of " + fmt.Sprintf("%T", agg.GetInputType().GetKind())
+}
+
+// cellValue is a cell's value as a column of type t holds it.
+func cellValue(b []byte, t *btpb.Type) any {
+	if isKind(t, "INT64") && len(b) == 8 {
+		return int64(binary.BigEndian.Uint64(b))
+	}
+	return b
+}
 
 // tableRows is the table's rows as the columns tableColumns names.
 func tableRows(rows []row, cols []column, t temporal) [][]any {
@@ -919,13 +964,17 @@ func tableRows(rows []row, cols []column, t temporal) [][]any {
 		}
 		for i := 1; i < len(cols); i++ {
 			m := &mapValue{}
+			vt := cols[i].t.GetMapType().GetValueType()
+			if t.history {
+				vt = vt.GetArrayType().GetElementType().GetStructType().GetFields()[1].GetType()
+			}
 			qs := byFam[cols[i].name]
 			sort.Slice(qs, func(a, b int) bool { return string(qs[a].q) < string(qs[b].q) })
 			for _, q := range qs {
 				sort.SliceStable(q.cells, func(a, b int) bool { return q.cells[a].ts > q.cells[b].ts })
 				m.keys = append(m.keys, q.q)
 				if !t.history {
-					m.vals = append(m.vals, q.cells[0].value)
+					m.vals = append(m.vals, cellValue(q.cells[0].value, vt))
 					continue
 				}
 				cs := q.cells
@@ -934,7 +983,7 @@ func tableRows(rows []row, cols []column, t temporal) [][]any {
 				}
 				hist := make([]any, len(cs))
 				for j, c := range cs {
-					hist[j] = []any{time.UnixMicro(c.ts).UTC(), c.value}
+					hist[j] = []any{time.UnixMicro(c.ts).UTC(), cellValue(c.value, vt)}
 				}
 				m.vals = append(m.vals, hist)
 			}
