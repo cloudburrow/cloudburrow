@@ -19,7 +19,8 @@ package firestoreadmin
 // operand, and answers it as the same emulator does in Standard mode; every
 // other call goes on to the emulator untouched. Google's page names no
 // error, so the Standard emulator's is the closest evidence (UNVERIFIED
-// against Google, 2026-11-17): INVALID_ARGUMENT, "Value type INT is not
+// against Google; docs re-read 2026-11-17, still unanswered:
+// https://docs.cloud.google.com/firestore/docs/concepts/data-types): INVALID_ARGUMENT, "Value type INT is not
 // allowed" (OBJECT_ID, DECIMAL128, REQUEST_TIMESTAMP, REGEX, MIN_KEY,
 // MAX_KEY), and "Nested arrays are not allowed". Two cases differ from
 // that emulator, which follows the page less closely: it accepts bytes
