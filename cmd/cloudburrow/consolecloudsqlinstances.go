@@ -712,7 +712,7 @@ func drActions(in *sqladminapi.DatabaseInstance) []console.Action {
 		if strings.HasPrefix(in.DatabaseVersion, "POSTGRES_") {
 			confirm = "This DR replica becomes the primary and " + primary + " its read replica: the primary stops taking writes, " +
 				"its sessions are ended, this replica replays all of its WAL and is promoted, and " + primary +
-				" is rebuilt from a base backup of this one."
+				" is rebuilt from a base backup of this one; " + primary + "'s other read replicas stay its replicas, rebuilt from it."
 		}
 		return []console.Action{{ID: "switchover", Label: "Switchover", Destructive: true,
 			Confirm: confirm,
@@ -787,10 +787,15 @@ func blueGreenActions(in *sqladminapi.DatabaseInstance) []console.Action {
 		if strings.HasPrefix(in.DatabaseVersion, "MYSQL_8_0") {
 			versions = append(versions, "MYSQL_8_4")
 		}
+		green := "The green instance, " + in.Name + "-green-XXXXXXXX, replicates from this one."
+		if in.Settings != nil && in.Settings.AvailabilityType == "REGIONAL" {
+			green = "The green instance, " + in.Name + "-green-XXXXXXXX, replicates from this one, and is high-availability (REGIONAL) " +
+				"as this one is: its standby replicates from it."
+		}
 		return []console.Action{{ID: "blue-green-create", Label: "Create blue-green deployment",
 			Fields: []console.Field{
 				{Name: "deploymentId", Label: "Deployment ID", Type: "text", Required: true, Pattern: "^[a-z]([a-z0-9\\-]{0,61}[a-z0-9])?$",
-					Help: "Lowercase letters, digits and hyphens. The green instance, " + in.Name + "-green-XXXXXXXX, replicates from this one."},
+					Help: "Lowercase letters, digits and hyphens. " + green},
 				{Name: "databaseVersion", Label: "Green database version", Type: "select", Options: versions, Default: versions[len(versions)-1],
 					Help: "MySQL 8.0 can be upgraded to 8.4 on the green instance; the instance needs automated backups and binary logging."},
 				{Name: "description", Label: "Description", Type: "text", Help: "Up to 255 characters."}}}}

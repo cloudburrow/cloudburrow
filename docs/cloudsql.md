@@ -154,7 +154,6 @@ Refused with 501, each naming what is missing:
 | `blueGreenDeployments.create` of a `REGIONAL` instance | the green instance is kept in step as a read replica, and a read replica here is one server (blue-green deployments, below) |
 | `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `instances.switchover` from a PostgreSQL primary with read replicas besides its DR replica | the old primary is rebuilt from a base backup of the new one, and its other replicas would have to follow the new timeline through it while it is rebuilt; with only its DR replica it is served (DR replicas and switchover, below) |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)
@@ -519,18 +518,24 @@ docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
   Google's "the original primary is reconfigured as a read replica of the new primary". The
   instances then answer as for MySQL. If the replica does not catch up, the primary takes writes
   again; if the old primary cannot be rebuilt, the new primary stays the primary and the old one
-  is `FAILED`, naming why.
+  is `FAILED`, naming why. The primary's other read replicas (#1614) stay its replicas, so they
+  are cascading replicas of the new primary through it, as a MySQL primary's are; Google's DR
+  pages say the old primary is "reconfigured as a read replica" and nothing of its other
+  replicas, which keep their `masterInstanceName`. Their WAL went on past the point the DR
+  replica was promoted at (the old primary's shutdown checkpoint reaches them as its server
+  stops to be rebuilt), so they cannot follow the new timeline: each is `MAINTENANCE` during the
+  switchover and, once the old primary serves again, rebuilt from a `pg_basebackup` of it, its
+  own cascading replicas after it from them; a stopped replica (`stopReplica`) stays stopped.
 - **Refused**: switchover of an instance that is not its primary's DR replica (400, also when no
   DR replica is designated), of a primary (400), while either instance is not `RUNNABLE` (409), or
   while the replica's replication is stopped (400); a REGIONAL primary's DR replica and switchover
   are 501 (the old primary would be a read replica, which here is one server); a switchover of a
-  PostgreSQL primary that has read replicas besides its DR replica is 501 (they would have to
-  follow the new timeline through the old primary while it is rebuilt).
+  PostgreSQL primary while one of its other read replicas is not `RUNNABLE` is 409.
 - **Not as Google**: there is no write endpoint (`psaWriteEndpoint`, a DNS name that follows the
   primary): clients connect to the new primary by its own connection name. No backup is taken
   of the new primary after the switchover, and point-in-time recovery is not required of the
-  primary. A MySQL primary's other read replicas stay its replicas, so they are cascading
-  replicas of the new primary.
+  primary. A primary's other read replicas stay its replicas, so they are cascading replicas of
+  the new primary (a PostgreSQL primary's are rebuilt, above).
 - **gcloud**: `gcloud sql instances patch --failover-dr-replica-name` and
   `--clear-failover-dr-replica-name`, and `gcloud sql instances switchover --db-timeout`. In the
   console, a MySQL or PostgreSQL primary with replicas has **Designate DR replica** and **Remove DR replica**,
