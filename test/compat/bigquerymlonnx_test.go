@@ -38,9 +38,13 @@ const EnvONNX = "CLOUDBURROW_TEST_ONNX"
 // models work only with the ML.PREDICT function"), a path that is not a
 // .onnx file or names none.
 //
-// Not passing yet (#1711): the BigQuery front runs in the cluster without
-// ONNX Runtime and refuses the CREATE MODEL 501; this is the acceptance test
-// for the runner that will serve it. CI never runs it (ci.yml's never=).
+// It runs on an instance of the onnx build (make build-onnx, then
+// bin/cloudburrow-onnx up with ONNXRUNTIME_LIB set, and BigQuery and Cloud
+// Storage enabled): the BigQuery front, in the cluster, runs the model on
+// the CLI's ONNX runner through cloudburrow-host (#1711). CI never runs it
+// (ci.yml's never=): no CI instance is an onnx build.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.models.get, bigquery.models.delete
 func TestBigQueryMLImportedONNXModel(t *testing.T) {
 	if os.Getenv(EnvONNX) == "" {
 		t.Skipf("%s is not set: the instance must be a -tags onnx build run with ONNXRUNTIME_LIB", EnvONNX)
@@ -161,9 +165,9 @@ func TestBigQueryMLImportedONNXModel(t *testing.T) {
 	}
 }
 
-// TestBigQueryMLONNXNeedsTheOnnxBuild (#1711): the default build, without
-// ONNX Runtime, refuses an imported ONNX model 501, naming the build that
-// runs one, and keeps no model.
+// TestBigQueryMLONNXNeedsTheOnnxBuild (#1711): the default build, which
+// serves no ONNX runner, refuses an imported ONNX model 501, naming the
+// make target of the build that runs one, and keeps no model.
 //
 // covers: bigquery.jobs.query, bigquery.models.get
 func TestBigQueryMLONNXNeedsTheOnnxBuild(t *testing.T) {
@@ -175,7 +179,7 @@ func TestBigQueryMLONNXNeedsTheOnnxBuild(t *testing.T) {
 	ctx := h.Context()
 	name := mlDataset(t, h, c, nil)
 	_, err := c.Query(fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='onnx', model_path='gs://bucket/model.onnx')", name)).Read(ctx)
-	wantAPIError(t, "an imported ONNX model", err, http.StatusNotImplemented, "-tags onnx")
+	wantAPIError(t, "an imported ONNX model", err, http.StatusNotImplemented, "make build-onnx")
 	_, err = c.Dataset(name).Model("no").Metadata(ctx)
 	wantHTTPStatus(t, "Model.Metadata after the refusal", err, http.StatusNotFound)
 }

@@ -186,3 +186,52 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		}
 	}
 }
+
+// TestBigQueryONNXModelPage (#1711): an imported ONNX model's page shows
+// its inputs and outputs, as models.get reports them, and where it was
+// imported from; it asks for no weights.
+func TestBigQueryONNXModelPage(t *testing.T) {
+	const model = `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"lin"},"modelType":"ONNX",
+"creationTime":"1700000000000","lastModifiedTime":"1700000000000","location":"US","etag":"e",
+"featureColumns":[{"name":"a","type":{"typeKind":"FLOAT64"}},{"name":"v","type":{"typeKind":"ARRAY","arrayElementType":{"typeKind":"FLOAT64"}}}],
+"labelColumns":[{"name":"y","type":{"typeKind":"FLOAT64"}},{"name":"label","type":{"typeKind":"INT64"}}],
+"trainingRuns":[{"trainingOptions":{"modelUri":"gs://b/models/linear/*"},"startTime":"2023-11-14T22:13:20Z"}]}`
+	var calls []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/datasets/d/models/lin") {
+			fmt.Fprint(w, model)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	d, err := p.Detail(context.Background(), "p", []string{"d", "models", "lin"})
+	if err != nil || d.Unavailable != "" {
+		t.Fatalf("the model's page: %v %+v", err, d)
+	}
+	sections := map[string]string{}
+	for _, s := range d.Sections {
+		var rows []string
+		for _, it := range s.Listing.Items {
+			rows = append(rows, it.Name+" "+it.Fields["Type"])
+		}
+		for _, g := range s.Groups {
+			for _, p := range g.Properties {
+				rows = append(rows, p.Label+"="+p.Value)
+			}
+		}
+		sections[s.ID] = strings.Join(rows, "; ")
+	}
+	if sections["inputs"] != "a FLOAT64; v ARRAY<FLOAT64>" || sections["outputs"] != "y FLOAT64; label INT64" ||
+		!strings.Contains(sections["details"], "Imported from=gs://b/models/linear/*") || len(d.Sections) != 3 {
+		t.Errorf("sections %q", sections)
+	}
+	for _, c := range calls {
+		if strings.HasSuffix(c, "/queries") {
+			t.Errorf("the page of an ONNX model ran a query: %v", calls)
+		}
+	}
+}

@@ -13,6 +13,10 @@
 >   builds it on every push to main and nightly, never on pull requests. Run with
 >   `ONNXRUNTIME_LIB=/path/to/libonnxruntime.{so,dylib}`. The default build has no ONNX
 >   Runtime and answers every `:predict` 501.
+> - The same `bin/cloudburrow-onnx` also runs BigQuery ML's imported ONNX models
+>   (`CREATE MODEL … OPTIONS (MODEL_TYPE='ONNX')`, #1711) with BigQuery enabled: its ONNX
+>   runner listens on `--port-onnx` (default 9025) and is published to the BigQuery front
+>   through `cloudburrow-host`. No model download is involved; the default build answers 501.
 > - Enable: `cloudburrow up -local-ai-embeddings`. The pinned files (~330 MB) are fetched
 >   over HTTPS into `<state-dir>/models` and verified before use.
 > - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`

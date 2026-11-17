@@ -102,7 +102,7 @@ type onnxRunner interface {
 func onnxRefusal() string {
 	return "Not implemented here: model_type ONNX: an imported ONNX model runs on ONNX Runtime, which only CloudBurrow's " +
 		"opt-in onnx build runs: build it with `make build-onnx` and start the instance with bin/cloudburrow-onnx up, " +
-		"ONNXRUNTIME_LIB set to libonnxruntime (docs/embeddings.md, #1711). Nothing was run."
+		"ONNXRUNTIME_LIB set to libonnxruntime (docs/compatibility.md, BQML, #1711). Nothing was run."
 }
 
 // onnxRunnerFailed is the answer to a runner's failure that is not the
@@ -110,7 +110,7 @@ func onnxRefusal() string {
 func onnxRunnerFailed(err error) (int, string) {
 	if onnxrunner.IsUnavailable(err) {
 		return 501, "Not implemented here: model_type ONNX: the instance's ONNX runner cannot run ONNX Runtime: " + err.Error() +
-			" (docs/embeddings.md, #1711). Nothing was run."
+			" (#1711). Nothing was run."
 	}
 	return 500, "cloudburrow: " + err.Error()
 }
