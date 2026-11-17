@@ -91,6 +91,7 @@ func TestReportRedRunsWatchesTheUnreportedWorkflows(t *testing.T) {
 		"linux/arm64 nightly": "arm64.yml",
 		"Functions build":     "functions.yml",
 		"ONNX build":          "onnx.yml",
+		"Upgrade test":        "upgrade.yml",
 	}
 	pending := map[string]bool{}
 	if len(watched) != len(want) {

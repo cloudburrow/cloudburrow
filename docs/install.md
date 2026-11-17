@@ -629,8 +629,10 @@ was written, with these exceptions:
   for PostgreSQL); its manifest names the rest and why.
 
 Checked against real instances by `test/upgrade` (`go test -tags upgrade ./test/upgrade/`, which
-builds `v0.1.0`, seeds every service through the official clients, stops it, and reads everything
-back with this release, from the state directory and from the archive), and in every CI run by
+builds `v0.1.0`, or takes its published binary from `CLOUDBURROW_UPGRADE_OLD_BIN`, seeds every
+service through the official clients, stops it, and reads everything back with this release, from
+the state directory and from the archive), nightly in CI by the Upgrade test workflow
+([CI](ci.md#the-upgrade-test)), and in every CI run by
 `TestStateDirFromV010Loads`, `TestStateArchiveFromV010Loads` and `TestEarlierStorageSpoolLoads`
 against what `v0.1.0` wrote, kept in `cmd/cloudburrow/testdata/state-v0.1.0`. A release that
 changes a stored layout reads the earlier one; the release after this moves the promise to the

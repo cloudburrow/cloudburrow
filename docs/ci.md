@@ -157,6 +157,27 @@ which flags each CLI version gets.
 The release workflow calls the same self-test once a tag is published, with `version` set to that
 tag, so each release is tested with the action at its own ref (#679).
 
+### The upgrade test
+
+`.github/workflows/upgrade.yml` ("Upgrade test", #1714) runs the end-to-end upgrade test,
+`test/upgrade`, nightly at 05:37 UTC and by hand (`gh workflow run upgrade.yml`). It downloads the
+release the test names (`OlderRelease`, today `v0.1.0`) from this repository's GitHub release with
+`gh release download` and the run's token, checks the archive against the release's
+`checksums.txt`, builds this commit's CLI with `make build`, and runs
+`TestUpgradeFromOlderRelease`: a persistent instance of sixteen services is brought up with the
+older binary, seeded through the official clients, saved with `state save` and stopped, then
+brought up from the same state directory with the new CLI and read back, and the archive is
+loaded into it and read back. The run fails unless the test passed, so a skip does not count.
+
+The first run (44094936759) took 11 minutes: 4.5 for `make build` with the emulator from `ci.yml`'s
+cache, 5.5 for the test (about 8 more when the emulator must be built). That is a runner on every
+landing, so it runs neither on pull requests nor on every push to main, and it is not a required
+check. A failed run uploads `upgrade-diagnostics` (the test log,
+the instance's `up.log` and its `cloudburrow diagnose` bundle), and a red scheduled run, or one
+dispatched on main, opens a `workflow-red` issue through `report-red-runs.yml`.
+`test/repo/upgrade_workflow_test.go` keeps the workflow's triggers, its download and its pass
+check in shape.
+
 ### The embedded BigQuery emulator
 
 Every CLI embeds CloudBurrow's build of the BigQuery emulator (#1061,
