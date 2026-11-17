@@ -33,10 +33,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -146,20 +148,28 @@ func (s *Server) blueGreenDeployments(r *http.Request, base string, p []string) 
 			out, err := s.switchoverBlueGreen(base, name)
 			return "sql.blueGreenDeployments.switchover", out, err
 		case verb == "" && r.Method == http.MethodGet:
-			s.emu.Lock()
-			s.loadBlueGreensLocked()
-			d := s.bgs[name]
-			s.emu.Unlock()
-			if d == nil {
+			d, ok := s.blueGreenCopy(name)
+			if !ok {
 				return "sql.blueGreenDeployments.get", nil, bgNotFound(name)
 			}
-			return "sql.blueGreenDeployments.get", s.blueGreenJSON(r.Context(), d, r.URL.Query().Get("view") == "DETAILED"), nil
+			return "sql.blueGreenDeployments.get", s.blueGreenJSON(r.Context(), &d, r.URL.Query().Get("view") == "DETAILED"), nil
 		case verb == "" && r.Method == http.MethodDelete:
 			out, err := s.deleteBlueGreen(r, base, name)
 			return "sql.blueGreenDeployments.delete", out, err
 		}
 	}
 	return "sql.blueGreenDeployments", nil, Errorf(http.StatusNotFound, "method %s is not served on %s", r.Method, strings.Join(p, "/"))
+}
+
+// blueGreenCopy is a copy of deployment name's record, taken under emu.
+func (s *Server) blueGreenCopy(name string) (blueGreen, bool) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	s.loadBlueGreensLocked()
+	if d := s.bgs[name]; d != nil {
+		return *d, true
+	}
+	return blueGreen{}, false
 }
 
 func bgNotFound(name string) error {
@@ -282,7 +292,8 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 		return nil, err
 	}
 	gspec := Spec{Name: green, Project: project, DatabaseVersion: spec.DatabaseVersion, CreateTime: time.Now().UTC().Format(time.RFC3339Nano),
-		SettingsVersion: 1, AvailabilityType: "ZONAL", Tier: spec.Tier, Labels: spec.Labels, Flags: spec.Flags, Settings: spec.Settings,
+		SettingsVersion: 1, AvailabilityType: "ZONAL", Tier: spec.Tier, Labels: maps.Clone(spec.Labels), Flags: slices.Clone(spec.Flags),
+		Settings:      maps.Clone(spec.Settings),
 		BackupEnabled: spec.BackupEnabled, Region: spec.Region, ActivationPolicy: spec.ActivationPolicy}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
@@ -446,17 +457,17 @@ func (s *Server) blueGreenJSON(ctx context.Context, d *blueGreen, detailed bool)
 func (s *Server) listBlueGreens(project, location string) (any, error) {
 	s.emu.Lock()
 	s.loadBlueGreensLocked()
-	var list []*blueGreen
+	var list []blueGreen
 	for _, d := range s.bgs {
 		if d.Project == project && (location == "-" || d.Location == location) {
-			list = append(list, d)
+			list = append(list, *d)
 		}
 	}
 	s.emu.Unlock()
 	sort.Slice(list, func(i, j int) bool { return list[i].name() < list[j].name() })
 	out := []any{}
-	for _, d := range list {
-		out = append(out, s.blueGreenJSON(context.Background(), d, false))
+	for i := range list {
+		out = append(out, s.blueGreenJSON(context.Background(), &list[i], false))
 	}
 	if len(out) == 0 {
 		return map[string]any{}, nil
@@ -466,14 +477,11 @@ func (s *Server) listBlueGreens(project, location string) (any, error) {
 
 // switchoverBlueGreen is blueGreenDeployments.switchover.
 func (s *Server) switchoverBlueGreen(base, name string) (any, error) {
-	s.emu.Lock()
-	s.loadBlueGreensLocked()
-	d := s.bgs[name]
-	s.emu.Unlock()
-	if d == nil {
+	dc, ok := s.blueGreenCopy(name)
+	if !ok {
 		return nil, bgNotFound(name)
 	}
-	if state, detail := s.bgState(context.Background(), d); state != "SWITCHOVER_READY" {
+	if state, detail := s.bgState(context.Background(), &dc); state != "SWITCHOVER_READY" {
 		msg := "Invalid request: the blue-green deployment " + name + " is " + state + ", not SWITCHOVER_READY"
 		if detail != "" {
 			msg += ": " + detail
@@ -481,6 +489,11 @@ func (s *Server) switchoverBlueGreen(base, name string) (any, error) {
 		return nil, Errorf(http.StatusBadRequest, "%s", msg)
 	}
 	s.emu.Lock()
+	d := s.bgs[name]
+	if d == nil || d.Phase == "SWITCHOVER_IN_PROGRESS" || d.Phase == "DELETING" || d.switched() {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusConflict, "Operation failed because the blue-green deployment %s changed meanwhile.", name)
+	}
 	bc, gc := s.writes.byName[d.Source], s.writes.byName[d.Target]
 	if bc == nil || gc == nil || bc.state != "RUNNABLE" || gc.state != "RUNNABLE" {
 		s.emu.Unlock()
