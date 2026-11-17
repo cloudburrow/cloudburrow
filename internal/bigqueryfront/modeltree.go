@@ -91,7 +91,7 @@ func isTreeModel(typ string) bool { return isBoostedTree(typ) || isRandomForest(
 
 // isClassifierType reports whether typ's label is a class.
 func isClassifierType(typ string) bool {
-	return typ == "LOGISTIC_REG" || typ == "BOOSTED_TREE_CLASSIFIER" || typ == "RANDOM_FOREST_CLASSIFIER" || typ == "DNN_CLASSIFIER"
+	return typ == "LOGISTIC_REG" || typ == "BOOSTED_TREE_CLASSIFIER" || typ == "RANDOM_FOREST_CLASSIFIER" || typ == "DNN_CLASSIFIER" || typ == "DNN_LINEAR_COMBINED_CLASSIFIER"
 }
 
 // checkTreeSampling refuses a boosted tree model's sampling other than

@@ -161,11 +161,16 @@ type scope struct {
 	aggs    *[]*call // the aggregates found, when they are allowed
 	inAgg   bool
 	noAggOK string // why aggregates are not allowed here, if they are not
+	// wins are the window function calls found, when they are allowed
+	// (the SELECT list), and windows the query's named windows.
+	wins    *[]*call
+	windows map[string]*windowSpec
 }
 
 type env struct {
 	row    []any
 	aggs   []any
+	wins   []any
 	params map[string]any
 	now    time.Time
 }
@@ -230,9 +235,6 @@ func (c *colRef) check(s *scope) (*btpb.Type, error) {
 			c.idx, c.t = i, col.t
 			return col.t, nil
 		}
-	}
-	if c.name == "_timestamp" {
-		return nil, unsupportedErr{"_timestamp (UNPACK)"}
 	}
 	return nil, fmt.Errorf("Unrecognized name: %s", c.name)
 }

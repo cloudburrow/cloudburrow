@@ -143,12 +143,9 @@ func TestBigQueryMLDNN(t *testing.T) {
 	// What stays refused.
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.WEIGHTS(MODEL `%s.dnn`)", name)).Read(ctx)
 	wantHTTPStatus(t, "ML.WEIGHTS of a DNN", err, http.StatusBadRequest)
-	for what, sql := range map[string]string{
-		"ML.EXPLAIN_PREDICT of a DNN":   "SELECT * FROM ML.EXPLAIN_PREDICT(MODEL `%s.dnn`, (SELECT 1.0 AS x))",
-		"DNN_LINEAR_COMBINED_REGRESSOR": "CREATE MODEL `%s.no` OPTIONS(model_type='dnn_linear_combined_regressor', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`",
-		"an imported ONNX model":        "CREATE MODEL `%s.no` OPTIONS(model_type='onnx', model_path='gs://bucket/model.onnx')",
-	} {
-		_, err := c.Query(fmt.Sprintf(sql, name)).Read(ctx)
-		wantHTTPStatus(t, what, err, http.StatusNotImplemented)
-	}
+	// BigQuery's explainability table lists no DNN (#1562).
+	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.EXPLAIN_PREDICT(MODEL `%s.dnn`, (SELECT 1.0 AS x))", name)).Read(ctx)
+	wantHTTPStatus(t, "ML.EXPLAIN_PREDICT of a DNN", err, http.StatusBadRequest)
+	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='onnx', model_path='gs://bucket/model.onnx')", name)).Read(ctx)
+	wantHTTPStatus(t, "an imported ONNX model", err, http.StatusNotImplemented)
 }

@@ -154,7 +154,7 @@ Refused with 501, each naming what is missing:
 | `blueGreenDeployments.*` | the switchover moves the blue instance's write endpoint (IP address and DNS name) to the green one: Google-managed networking |
 | `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `instances.switchover` of a PostgreSQL instance | the old primary would have to become the new one's standby, which a PostgreSQL server becomes only by a rebuild of its data directory (`pg_rewind` or a new base backup); MySQL's is served (DR replicas and switchover, below) |
+| `instances.switchover` from a PostgreSQL primary with read replicas besides its DR replica | the old primary is rebuilt from a base backup of the new one, and its other replicas would have to follow the new timeline through it while it is rebuilt; with only its DR replica it is served (DR replicas and switchover, below) |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)
@@ -289,7 +289,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
 | `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
 | `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
-| `replicationCluster.failoverDrReplicaName` | Applied on a MySQL primary: see DR replicas and switchover. 501 on a PostgreSQL one; `drReplica` and `psaWriteEndpoint` are output fields. |
+| `replicationCluster.failoverDrReplicaName` | Applied on a MySQL or PostgreSQL primary: see DR replicas and switchover. `drReplica` is answered on the DR replica; `psaWriteEndpoint`, a private services access DNS name, is never answered, as no instance has a private IP. |
 | `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
 | `databaseCenterIntegration` `ENABLED` | 501, as `databaseCenterIntegrationEnabled` `true` is: Database Center is not served. `DISABLED` and `DATABASE_CENTER_INTEGRATION_UNSPECIFIED` are taken (#1700). |
 | `skipPrecheck` | Taken. A major version upgrade here has no separate precheck step to skip: what `preCheckMajorVersionUpgrade` reports is the validation `instances.patch` makes either way (#1700). |
@@ -479,14 +479,17 @@ own, GTIDs on, read-only); the source is verified first, as for `startExternalSy
 `promoteReplica` makes it a primary again. In the console, a standalone MySQL instance's page has
 **Demote** (either method); gcloud and Terraform have no demote command or resource.
 
-**DR replicas and switchover** (#1614), for MySQL, as Cloud SQL documents advanced disaster
-recovery for an Enterprise Plus primary:
+**DR replicas and switchover** (#1614), for MySQL, and for PostgreSQL 12 and later (#1524), as
+Cloud SQL documents advanced disaster recovery for an Enterprise Plus primary
+(docs.cloud.google.com/sql/docs/mysql/use-advanced-disaster-recovery and
+docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
 
 - **Designating a DR replica**: `instances.patch` of the primary with
   `replicationCluster.failoverDrReplicaName` (the replica's name, or `PROJECT:NAME`), as
   `gcloud sql instances patch --failover-dr-replica-name` and Terraform's `replication_cluster`
   send it. Both instances must be Enterprise Plus (`settings.edition`; Cloud SQL's default is
-  Enterprise Plus for MySQL 8.4, Enterprise for 8.0), and the replica a direct (not cascading),
+  Enterprise Plus for MySQL 8.4 and PostgreSQL 16 to 18, Enterprise for MySQL 8.0 and
+  PostgreSQL 12 to 15), and the replica a direct (not cascading),
   non-external read replica of the primary in another region, with none of the `replicate_*`
   flags; otherwise 400. A designation on a replica, or on a new instance, is 400. The primary then
   answers `replicationCluster.failoverDrReplicaName` as `PROJECT:NAME`, and the replica
@@ -505,19 +508,32 @@ recovery for an Enterprise Plus primary:
   `masterInstanceName` the new primary, `drReplica` true and automated backups off. A switchover
   back reverses it again. If the replica does not catch up within `dbTimeout`, the primary takes
   writes again and the operation fails.
+- **PostgreSQL switchover** (#1524): the primary is made read-only (`default_transaction_read_only`,
+  reloaded), its client sessions are ended, so no write is in flight, and it checkpoints; the
+  replica waits until it has replayed the primary's WAL up to there (`pg_last_wal_replay_lsn`,
+  bounded by `dbTimeout`) and is promoted (`pg_promote`, a new timeline). A PostgreSQL server
+  that has diverged from another becomes its standby only from a copy of its data directory, so
+  the old primary's server is started again and its data replaced by a `pg_basebackup` of the
+  new primary (an epoch recorded beside the data directory, `rebuildEpoch`, says it was rebuilt,
+  so a restart keeps its data), and it streams from the new primary as a hot standby, as
+  Google's "the original primary is reconfigured as a read replica of the new primary". The
+  instances then answer as for MySQL. If the replica does not catch up, the primary takes writes
+  again; if the old primary cannot be rebuilt, the new primary stays the primary and the old one
+  is `FAILED`, naming why.
 - **Refused**: switchover of an instance that is not its primary's DR replica (400, also when no
   DR replica is designated), of a primary (400), while either instance is not `RUNNABLE` (409), or
   while the replica's replication is stopped (400); a REGIONAL primary's DR replica and switchover
-  are 501 (the old primary would be a read replica, which here is one server); a PostgreSQL
-  primary's DR replica and switchover are 501 (the old primary would need a rebuild to become a
-  standby).
+  are 501 (the old primary would be a read replica, which here is one server); a switchover of a
+  PostgreSQL primary that has read replicas besides its DR replica is 501 (they would have to
+  follow the new timeline through the old primary while it is rebuilt).
 - **Not as Google**: there is no write endpoint (`psaWriteEndpoint`, a DNS name that follows the
   primary): clients connect to the new primary by its own connection name. No backup is taken
-  of the new primary after the switchover. The old primary's other read replicas stay its
-  replicas, so they are cascading replicas of the new primary.
+  of the new primary after the switchover, and point-in-time recovery is not required of the
+  primary. A MySQL primary's other read replicas stay its replicas, so they are cascading
+  replicas of the new primary.
 - **gcloud**: `gcloud sql instances patch --failover-dr-replica-name` and
   `--clear-failover-dr-replica-name`, and `gcloud sql instances switchover --db-timeout`. In the
-  console, a MySQL primary with replicas has **Designate DR replica** and **Remove DR replica**,
+  console, a MySQL or PostgreSQL primary with replicas has **Designate DR replica** and **Remove DR replica**,
   and its DR replica's page **Switchover**, confirmed by typing the primary's instance ID.
 
 **A physical sync** (#1570), for MySQL: `startExternalSync` with `migrationType` `PHYSICAL`

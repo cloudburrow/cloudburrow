@@ -35,8 +35,11 @@ import (
 // emulator runs it: a table named after the job, in one dataset per
 // project, resultsDataset, which the front makes when it first needs it.
 // The emulator then writes the result there as it writes any query's
-// destination table, and the job names it as before; jobs.getQueryResults
-// is unchanged (the emulator answers it from the job, not the table). The
+// destination table, and the job names it as before. jobs.getQueryResults
+// is answered by the emulator from that table (resultInTableHeader,
+// bigquery-emulator patch 0086, #1662): before, it also kept every row as
+// JSON in its jobs table, up to 256 MiB, which was most of its temporary
+// file; its answers, schema, totalRows and statistics are the same. The
 // engine builds one catalog for that dataset rather than one per job; a
 // table in it costs the engine a table, not a catalog. Measured with
 // scripts/bigquery-engine-soak.sh (docs/compatibility.md, BigQuery).
@@ -78,6 +81,13 @@ var (
 	// function (functionddl.go, replaceFunction).
 	scratchDropFunction = regexp.MustCompile("^DROP FUNCTION IF EXISTS (?:`[^`]+`\\.)?`" + resultsDataset + "`\\.`(" + scratchPrefix + "[a-z]+_[0-9a-f]+)`$")
 )
+
+// resultInTableHeader asks the emulator to answer jobs.getQueryResults of
+// a query job from the destination table the job makes, and keep no JSON
+// copy of its rows (bigquery-emulator patch 0086, #1662). The front sets
+// it on the jobs it gives a table in resultsDataset, which no one else
+// writes to, and never passes on a client's.
+const resultInTableHeader = "X-Cloudburrow-Result-In-Table"
 
 // datasetsListRoute matches datasets.list.
 var datasetsListRoute = regexp.MustCompile(`^(/bigquery/v2)?/projects/([^/]+)/datasets$`)
@@ -128,6 +138,7 @@ func (q *queryResults) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		q.serveExpire(w, r)
 		return
 	}
+	r.Header.Del(resultInTableHeader) // the front's alone (above)
 	if !strings.HasPrefix(path, "/cloudburrow/") {
 		// A client's request; not the liveness probe's (engine.go).
 		q.expiry.begin()
@@ -181,6 +192,7 @@ func (q *queryResults) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	rec := newRecorder()
 	setBody(r, out)
+	r.Header.Set(resultInTableHeader, "1")
 	q.next.ServeHTTP(rec, r)
 	if rec.status >= 400 && bytes.Contains(rec.body.Bytes(), missingDataset) {
 		// The dataset is gone (a client deleted it): make it again, once.

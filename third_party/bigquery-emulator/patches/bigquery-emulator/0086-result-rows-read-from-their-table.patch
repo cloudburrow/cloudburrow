@@ -1,0 +1,467 @@
+CloudBurrow patch 86 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1662). Needs 0002, 0084 and 0085.
+
+The emulator kept every query job's rows as JSON in its jobs table, for
+jobs.getQueryResults, up to 256 MiB of JSON (patch 0002), even when the
+job had written them to a destination table: CloudBurrow's front gives
+each query job that names no destination a table of its own in its hidden
+dataset (_cloudburrow_query_results), so every such result was held
+twice. Measured after 5,000 jobs and 100 query jobs of the region's
+INFORMATION_SCHEMA.JOBS (about 5,100 rows each, arm64, Docker Desktop):
+the temporary file (server.TempStorage) reached 605 MB, most of it the
+JSON copies.
+
+A jobs.insert that carries the header X-Cloudburrow-Result-In-Table, of
+a query whose destination table the job makes, now keeps its result
+without the rows: the schema, totalRows and the job's statistics are kept
+as before, with a reference to the table. jobs.getQueryResults of it reads
+the rows from the table (SELECT * in the table's order, as tabledata.list
+reads them), passed through JSON as patch 0002 kept them, and pages them
+as before; once the table is deleted, it answers 404 notFound "Not found:
+Table project:dataset.table". A result that a SELECT * of the table would
+not give back keeps its copy: one with a column named with a leading
+underscore, as a pseudo-column is (_PARTITIONTIME, which a SELECT * leaves
+out), and one with a FLOAT64 -0, which the engine writes to a table as 0.
+Without the header nothing changes. The front sets the header on the jobs it gives a table, and
+removes it from its clients' requests.
+
+cloudburrow_result_in_table_test.go (TestResultReadFromItsTable) inserts
+each of seven queries (250 rows; every scalar type, arrays, structs, a
+range, NaN and infinities; no rows; a -0; columns named _PARTITIONTIME
+and _PARTITIONDATE) twice, with and without the
+header, and compares jobs.getQueryResults of both through eleven pagings
+and formats, and jobs.get without its times; it then deletes the tables:
+a job read from its table is 404, a job with its copy still answers. It
+fails without the patch, and without either exception.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1201,6 +1201,14 @@
+ 		hasMaxResults:     hasMaxResults,
+ 		startIndex:        startIndex,
+ 	})
++	var gone *resultTableGone
++	if errors.As(err, &gone) {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1662): the table the
++		// job's rows are read from was deleted, as BigQuery answers a
++		// query whose temporary result table has expired.
++		errorResponse(ctx, w, errNotFound(gone.Error()))
++		return
++	}
+ 	if errors.Is(err, metadata.ErrResultExpired) {
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1086): as BigQuery
+ 		// answers a query whose temporary result table has expired.
+@@ -1230,6 +1238,12 @@
+ 	response, err := r.job.Wait(ctx)
+ 	if err != nil {
+ 		return nil, err
++	}
++	if response.CloudBurrowRowsIn != nil {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1662).
++		if response, err = rowsFromTable(ctx, r.server, r.project, response); err != nil {
++			return nil, err
++		}
+ 	}
+ 	rows := internaltypes.Format(response.Schema, response.Rows, r.useInt64Timestamp)
+ 
+@@ -1315,6 +1329,8 @@
+ 		server:  server,
+ 		project: project,
+ 		job:     &job,
++		// CloudBurrow patch (cloudburrow/cloudburrow#1662).
++		resultInTable: r.Header.Get(ResultInTableHeader) != "",
+ 	})
+ 	if err != nil {
+ 		var dup *metadata.DuplicatedJobError
+@@ -1360,6 +1376,10 @@
+ 	server  *Server
+ 	project *metadata.Project
+ 	job     *bigqueryv2.Job
++	// resultInTable is set when the request asks that the job's rows be
++	// read back from its destination table (ResultInTableHeader).
++	// CloudBurrow patch (cloudburrow/cloudburrow#1662).
++	resultInTable bool
+ }
+ 
+ func (h *jobsInsertHandler) tableDefFromQueryResponse(tableID string, response *internaltypes.QueryResponse) (*types.Table, error) {
+@@ -1753,6 +1773,7 @@
+ 	}
+ 	defer tx.RollbackIfNotCommitted()
+ 	hasDestinationTable := job.Configuration.Query.DestinationTable != nil
++	rowsInTable := false            // CloudBurrow patch (cloudburrow/cloudburrow#1662)
+ 	startTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	response, jobErr := r.server.contentRepo.Query(
+ 		ctx,
+@@ -1792,6 +1813,10 @@
+ 			}
+ 			destinationTable := destinationDataset.Table(tableRef.TableId)
+ 			destinationTableExists := destinationTable != nil
++			// CloudBurrow patch (cloudburrow/cloudburrow#1662): the rows
++			// are read back from a table this job makes, which holds them
++			// alone.
++			rowsInTable = r.resultInTable && !destinationTableExists
+ 			if !destinationTableExists {
+ 				// CreateDisposition controls whether a missing destination
+ 				// table is materialized on the fly. CREATE_NEVER must
+@@ -1862,6 +1887,23 @@
+ 		EndTime:             endTime.UnixMilli(),
+ 		TotalBytesProcessed: totalBytes,
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1662): a result whose
++	// rows are in the table this job made is kept without them (patch
++	// 0002 kept every row as JSON in the jobs table, up to 256 MiB);
++	// jobs.getQueryResults reads them from the table, when the table
++	// gives them back as they are (readsBackWhole).
++	kept := response
++	if rowsInTable && jobErr == nil && response != nil && readsBackWhole(response) {
++		kept = &internaltypes.QueryResponse{
++			JobReference:      response.JobReference,
++			Schema:            response.Schema,
++			TotalRows:         response.TotalRows,
++			JobComplete:       response.JobComplete,
++			TotalBytes:        response.TotalBytes,
++			ChangedCatalog:    response.ChangedCatalog,
++			CloudBurrowRowsIn: job.Configuration.Query.DestinationTable,
++		}
++	}
+ 	if err := r.project.AddJob(
+ 		ctx,
+ 		tx.Tx(),
+@@ -1870,7 +1912,7 @@
+ 			r.project.ID,
+ 			job.JobReference.JobId,
+ 			job,
+-			response,
++			kept,
+ 			jobErr,
+ 		),
+ 	); err != nil {
+--- a/internal/types/types.go
++++ b/internal/types/types.go
+@@ -30,6 +30,12 @@
+ 		JobComplete    bool                         `json:"jobComplete"`
+ 		TotalBytes     int64                        `json:"-"`
+ 		ChangedCatalog *googlesqlite.ChangedCatalog `json:"-"`
++		// CloudBurrowRowsIn names the table a job's rows are read back
++		// from, when the jobs table keeps its result without them (Rows
++		// is then empty). It is set only on that kept result, which no
++		// client is answered with. CloudBurrow patch
++		// (cloudburrow/cloudburrow#1662).
++		CloudBurrowRowsIn *bigqueryv2.TableReference `json:"cloudburrowRowsIn,omitempty"`
+ 	}
+ 
+ 	TableDataList struct {
+--- /dev/null
++++ b/server/cloudburrow_result_in_table.go
+@@ -0,0 +1,109 @@
++package server
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"regexp"
++	"strings"
++
++	"github.com/goccy/bigquery-emulator/internal/metadata"
++	internaltypes "github.com/goccy/bigquery-emulator/internal/types"
++)
++
++// ResultInTableHeader, on a jobs.insert of a query that names a
++// destination table the job makes, asks that the job's rows be read back
++// from that table at jobs.getQueryResults, not kept a second time as JSON
++// in the jobs table (patch 0002, up to 256 MiB). The job's schema, row
++// count and statistics are kept as before. CloudBurrow's front sets it on
++// the jobs whose results it has written to its hidden dataset, which no
++// one else writes to; it removes the header from its clients' requests.
++// CloudBurrow patch (cloudburrow/cloudburrow#1662).
++const ResultInTableHeader = "X-Cloudburrow-Result-In-Table"
++
++// resultTableGone is the error of jobs.getQueryResults of a job whose
++// rows were read from a table that has since been deleted.
++// CloudBurrow patch (cloudburrow/cloudburrow#1662).
++type resultTableGone struct {
++	projectID, datasetID, tableID string
++}
++
++func (e *resultTableGone) Error() string {
++	return fmt.Sprintf("Not found: Table %s:%s.%s", e.projectID, e.datasetID, e.tableID)
++}
++
++// rowsFromTable is kept, a job's result kept without its rows, with the
++// rows of the table that holds them (kept.CloudBurrowRowsIn), in the
++// table's order, as tabledata.list reads them. They are passed through
++// JSON as patch 0002 kept them, so the answer is the one the JSON copy
++// gave. CloudBurrow patch (cloudburrow/cloudburrow#1662).
++func rowsFromTable(ctx context.Context, server *Server, project *metadata.Project, kept *internaltypes.QueryResponse) (*internaltypes.QueryResponse, error) {
++	ref := kept.CloudBurrowRowsIn
++	gone := &resultTableGone{projectID: project.ID, datasetID: ref.DatasetId, tableID: ref.TableId}
++	exists := func() bool {
++		ds := project.Dataset(ref.DatasetId)
++		return ds != nil && ds.Table(ref.TableId) != nil
++	}
++	if !exists() {
++		return nil, gone
++	}
++	conn, err := server.connMgr.Connection(ctx, project.ID, ref.DatasetId)
++	if err != nil {
++		return nil, fmt.Errorf("failed to get connection: %w", err)
++	}
++	tx, err := conn.Begin(ctx)
++	if err != nil {
++		return nil, fmt.Errorf("failed to start transaction: %w", err)
++	}
++	defer tx.RollbackIfNotCommitted()
++	res, err := server.contentRepo.Query(ctx, tx, project.ID, ref.DatasetId, fmt.Sprintf("SELECT * FROM `%s`", ref.TableId), nil)
++	if err != nil {
++		if !exists() {
++			return nil, gone
++		}
++		return nil, fmt.Errorf("failed to read the result of the job from table %s.%s: %w", ref.DatasetId, ref.TableId, err)
++	}
++	b, err := json.Marshal(res.Rows)
++	if err != nil {
++		return nil, fmt.Errorf("failed to encode the result rows: %w", err)
++	}
++	var rows []*internaltypes.TableRow
++	if err := json.Unmarshal(b, &rows); err != nil {
++		return nil, fmt.Errorf("failed to decode the result rows: %w", err)
++	}
++	out := *kept
++	out.Rows = rows
++	out.CloudBurrowRowsIn = nil
++	return &out, nil
++}
++
++// readsBackWhole reports whether a SELECT * of the table a query's result
++// was written to gives back that result: not when a column's name begins
++// with an underscore, as a pseudo-column's does (_PARTITIONTIME,
++// _PARTITIONDATE, ...), which the engine leaves out of a SELECT *, nor
++// when a row holds a FLOAT64 -0, which the engine writes to a table as 0.
++// Such a result keeps its JSON copy, so jobs.getQueryResults answers it
++// as before. CloudBurrow patch (cloudburrow/cloudburrow#1662).
++func readsBackWhole(response *internaltypes.QueryResponse) bool {
++	if response.Schema == nil {
++		return false
++	}
++	for _, f := range response.Schema.Fields {
++		if strings.HasPrefix(f.Name, "_") {
++			return false
++		}
++	}
++	return !hasNegativeZero(response.Rows)
++}
++
++// negativeZero matches a FLOAT64 -0 in a result's rows as JSON.
++var negativeZero = regexp.MustCompile(`"-0(\.0*)?([eE][-+]?[0-9]+)?"`)
++
++// hasNegativeZero reports whether rows hold a FLOAT64 -0 (or a STRING
++// that reads as one), which the engine writes to a table as 0: such a
++// result keeps its JSON copy, so jobs.getQueryResults answers it as before.
++// CloudBurrow patch (cloudburrow/cloudburrow#1662).
++func hasNegativeZero(rows []*internaltypes.TableRow) bool {
++	b, err := json.Marshal(rows)
++	return err != nil || negativeZero.Match(b)
++}
+--- /dev/null
++++ b/server/cloudburrow_result_in_table_test.go
+@@ -0,0 +1,193 @@
++package server_test
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestResultReadFromItsTable is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1662): the emulator kept every query job's rows
++// as JSON in its jobs table (patch 0002), up to 256 MiB, even when the
++// front had them written to a table of their own, and that copy was most
++// of the emulator's temporary file. A jobs.insert with ResultInTableHeader
++// now keeps the result without its rows, and jobs.getQueryResults reads
++// them from the destination table. Its answers, page by page, and the
++// job's jobs.get are the same as those of the same job inserted without the
++// header, which keeps the JSON copy; and once the table is deleted, it is
++// 404 notFound, where the copy would still answer.
++func TestResultReadFromItsTable(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	project := types.NewProject("test",
++		types.NewDataset("ds", types.NewTable("t", []*types.Column{types.NewColumn("a", types.INT64), types.NewColumn("b", types.STRING)}, types.Data{
++			{"a": int64(2), "b": "two"}, {"a": int64(1), "b": nil}, {"a": int64(3), "b": "three"},
++		})),
++		types.NewDataset("results"),
++	)
++	if err := bqServer.Load(server.StructSource(project)); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	base := testServer.URL + "/bigquery/v2/projects/test"
++	do := func(method, path string, body any, header bool) (int, []byte) {
++		t.Helper()
++		var r io.Reader
++		if body != nil {
++			b, _ := json.Marshal(body)
++			r = bytes.NewReader(b)
++		}
++		req, _ := http.NewRequestWithContext(ctx, method, base+path, r)
++		req.Header.Set("Content-Type", "application/json")
++		if header {
++			req.Header.Set(server.ResultInTableHeader, "1")
++		}
++		resp, err := http.DefaultClient.Do(req)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer resp.Body.Close()
++		b, _ := io.ReadAll(resp.Body)
++		return resp.StatusCode, b
++	}
++	insert := func(id, sql string, header bool) {
++		t.Helper()
++		status, b := do(http.MethodPost, "/jobs", map[string]any{
++			"jobReference": map[string]any{"projectId": "test", "jobId": id},
++			"configuration": map[string]any{"query": map[string]any{
++				"query": sql, "useLegacySql": false,
++				"destinationTable": map[string]any{"projectId": "test", "datasetId": "results", "tableId": id},
++			}},
++		}, header)
++		if status != http.StatusOK {
++			t.Fatalf("jobs.insert %s: %d %s", id, status, b)
++		}
++	}
++	// same is an answer of job id with its ID made the other's.
++	same := func(b []byte, id string) string {
++		return strings.ReplaceAll(string(b), id, "JOB")
++	}
++	queries := []string{
++		"SELECT * FROM ds.t",
++		"SELECT * FROM ds.t ORDER BY a DESC",
++		"SELECT a, b FROM ds.t WHERE a > 100",
++		"SELECT x, x * 1.5 AS f, CAST(x AS STRING) AS s, x > 100 AS big FROM UNNEST(GENERATE_ARRAY(1, 250)) AS x",
++		`SELECT 1 AS i, CAST('inf' AS FLOAT64) AS inf, CAST('nan' AS FLOAT64) AS nan, 1e300 AS huge, 0.1 + 0.2 AS sum, -0.5 AS neg,
++			NUMERIC '1.25' AS n, BIGNUMERIC '123456789012345678901234567890.5' AS bn, b'\x00\xff' AS byt, 'héllo' AS s, CAST(NULL AS STRING) AS nul,
++			DATE '2026-11-17' AS d, DATETIME '2026-11-17 10:11:12.123456' AS dt, TIME '10:11:12.5' AS tm,
++			TIMESTAMP '2026-11-17 10:11:12.123456 UTC' AS ts, ST_GEOGPOINT(1.5, 2.5) AS g, JSON '{"a":[1,2],"b":null}' AS j,
++			INTERVAL 5 DAY AS iv, [1, 2, 3] AS arr, ARRAY<STRING>[] AS empty, STRUCT(1 AS x, 'y' AS y, [TIMESTAMP '2026-01-01 00:00:00 UTC'] AS z) AS st,
++			[STRUCT(1 AS x, [2.5] AS y), STRUCT(2 AS x, ARRAY<FLOAT64>[] AS y)] AS arrst, RANGE(DATE '2026-01-01', DATE '2026-02-01') AS rg,
++			ST_GEOGFROMTEXT('POLYGON((0 0, 1 0, 1 1, 0 0))') AS poly, TIMESTAMP '2026-11-17 10:11:12 UTC' AS ts0`,
++		// A FLOAT64 -0, which a table holds as 0: the job keeps its copy.
++		"SELECT -0.0 AS negzero, [1.0, -0.0] AS arr",
++		// A column named as a pseudo-column is, which a SELECT * of a
++		// table leaves out: the job keeps its copy.
++		"SELECT a, TIMESTAMP '2024-01-02 00:00:00 UTC' AS _PARTITIONTIME, DATE '2024-01-02' AS _PARTITIONDATE FROM ds.t",
++	}
++	// keepsCopy are the queries whose jobs keep their copy.
++	keepsCopy := map[int]bool{5: true, 6: true}
++	pages := []string{
++		"", "?maxResults=0", "?maxResults=1", "?maxResults=2", "?maxResults=2&pageToken=2", "?startIndex=1", "?startIndex=1&maxResults=100",
++		"?pageToken=248", "?startIndex=999", "?formatOptions.useInt64Timestamp=true", "?maxResults=3&formatOptions.useInt64Timestamp=true",
++	}
++	for i, sql := range queries {
++		copied, read := fmt.Sprintf("copied_%d", i), fmt.Sprintf("read_%d", i)
++		insert(copied, sql, false)
++		insert(read, sql, true)
++		for _, page := range pages {
++			s1, b1 := do(http.MethodGet, "/queries/"+copied+page, nil, false)
++			s2, b2 := do(http.MethodGet, "/queries/"+read+page, nil, false)
++			if s1 != http.StatusOK || s1 != s2 || same(b1, copied) != same(b2, read) {
++				t.Errorf("query %d, jobs.getQueryResults%s:\nfrom the JSON copy %d %s\nfrom the table     %d %s", i, page, s1, b1, s2, b2)
++			}
++		}
++		_, j1 := do(http.MethodGet, "/jobs/"+copied, nil, false)
++		_, j2 := do(http.MethodGet, "/jobs/"+read, nil, false)
++		if a, b := jobWithoutTimes(t, j1), jobWithoutTimes(t, j2); same([]byte(a), copied) != same([]byte(b), read) {
++			t.Errorf("query %d, jobs.get:\nwith the JSON copy %s\nwithout it         %s", i, a, b)
++		}
++	}
++	// The rows are the table's: deleting it leaves the job's result 404,
++	// where a job with its copy still answers.
++	for i := range queries {
++		for _, id := range []string{fmt.Sprintf("copied_%d", i), fmt.Sprintf("read_%d", i)} {
++			if status, b := do(http.MethodDelete, "/datasets/results/tables/"+id, nil, false); status/100 != 2 {
++				t.Fatalf("tables.delete %s: %d %s", id, status, b)
++			}
++		}
++		if status, b := do(http.MethodGet, fmt.Sprintf("/queries/copied_%d", i), nil, false); status != http.StatusOK {
++			t.Errorf("query %d: jobs.getQueryResults of the job with the JSON copy, its table deleted: %d %s, want 200", i, status, b)
++		}
++		read := fmt.Sprintf("read_%d", i)
++		status, b := do(http.MethodGet, "/queries/"+read, nil, false)
++		if keepsCopy[i] {
++			if status != http.StatusOK {
++				t.Errorf("query %d: jobs.getQueryResults of a job that keeps its copy, its table deleted: %d %s, want 200 from its copy", i, status, b)
++			}
++			continue
++		}
++		var e struct {
++			Error struct {
++				Message string `json:"message"`
++				Errors  []struct {
++					Reason string `json:"reason"`
++				} `json:"errors"`
++			} `json:"error"`
++		}
++		_ = json.Unmarshal(b, &e)
++		if want := "Not found: Table test:results." + read; status != http.StatusNotFound || len(e.Error.Errors) == 0 || e.Error.Errors[0].Reason != "notFound" || e.Error.Message != want {
++			t.Errorf("query %d: jobs.getQueryResults of the job read from its table, the table deleted: %d %s, want 404 notFound %q", i, status, b, want)
++		}
++	}
++	// Without the header, a job that appends to a table it did not make
++	// keeps its copy, as the table holds other rows.
++	insert("appended", "SELECT 7 AS a, 'seven' AS b", false)
++	status, b := do(http.MethodPost, "/jobs", map[string]any{
++		"jobReference": map[string]any{"projectId": "test", "jobId": "appended_again"},
++		"configuration": map[string]any{"query": map[string]any{
++			"query": "SELECT 8 AS a, 'eight' AS b", "useLegacySql": false, "writeDisposition": "WRITE_APPEND",
++			"destinationTable": map[string]any{"projectId": "test", "datasetId": "results", "tableId": "appended"},
++		}},
++	}, true)
++	if status != http.StatusOK {
++		t.Fatalf("jobs.insert appended_again: %d %s", status, b)
++	}
++	if status, b := do(http.MethodGet, "/queries/appended_again", nil, false); status != http.StatusOK || !strings.Contains(string(b), `"totalRows":"1"`) || !strings.Contains(string(b), "eight") || strings.Contains(string(b), "seven") {
++		t.Errorf("jobs.getQueryResults of a job that appended to a table it did not make: %d %s, want its one row", status, b)
++	}
++}
++
++// jobWithoutTimes is a jobs.get answer without its times, which differ
++// between two jobs.
++func jobWithoutTimes(t *testing.T, b []byte) string {
++	t.Helper()
++	var job map[string]any
++	if err := json.Unmarshal(b, &job); err != nil {
++		t.Fatalf("jobs.get: %s", b)
++	}
++	if st, ok := job["statistics"].(map[string]any); ok {
++		for _, k := range []string{"creationTime", "startTime", "endTime"} {
++			delete(st, k)
++		}
++	}
++	out, _ := json.Marshal(job)
++	return string(out)
++}

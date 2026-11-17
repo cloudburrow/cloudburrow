@@ -8643,7 +8643,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
-          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage"
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
+          "test/compat/bigtablesql1704_test.go:32 TestBigtableSQLUnpackFunctionsAndAggregates"
         ]
       },
       {
@@ -8708,7 +8709,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
-          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage"
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
+          "test/compat/bigtablesql1704_test.go:32 TestBigtableSQLUnpackFunctionsAndAggregates"
         ]
       },
       {
@@ -9589,7 +9591,7 @@
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
-          "test/compat/bigqueryml_test.go:284 TestBigQueryMLRandomSplit",
+          "test/compat/bigqueryml_test.go:283 TestBigQueryMLRandomSplit",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
@@ -9609,6 +9611,7 @@
           "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
+          "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -9802,7 +9805,7 @@
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
           "test/compat/bigqueryml_test.go:251 TestBigQueryMLRefusals",
-          "test/compat/bigqueryml_test.go:284 TestBigQueryMLRandomSplit",
+          "test/compat/bigqueryml_test.go:283 TestBigQueryMLRandomSplit",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
           "test/compat/bigquerymlarima_test.go:24 TestBigQueryMLArimaPlus",
@@ -9824,6 +9827,8 @@
           "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
+          "test/compat/bigquerymlwnd_test.go:159 TestBigQueryMLHostedModelsRefused",
+          "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -9912,6 +9917,8 @@
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
           "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
+          "test/compat/bigquerymlwnd_test.go:159 TestBigQueryMLHostedModelsRefused",
+          "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
         ]
       },
@@ -10496,6 +10503,7 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
@@ -10520,6 +10528,7 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
@@ -10703,8 +10712,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
@@ -10795,8 +10805,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -10854,8 +10865,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -10902,8 +10914,9 @@
           "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
@@ -10944,6 +10957,7 @@
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
@@ -11014,8 +11028,9 @@
         "method": "sql.instances.switchover",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
-          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover"
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres"
         ]
       },
       {
@@ -11069,8 +11084,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",

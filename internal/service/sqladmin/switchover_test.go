@@ -26,7 +26,8 @@ func TestSwitchoverRefusals(t *testing.T) {
 	for _, in := range []*sqladmin.DatabaseInstance{
 		{Name: "plus", DatabaseVersion: "MYSQL_8_4", Settings: &sqladmin.Settings{Tier: "db-perf-optimized-N-2", Edition: "ENTERPRISE_PLUS"}},
 		{Name: "ent", DatabaseVersion: "MYSQL_8_0", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}},
-		{Name: "pgi", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", Edition: "ENTERPRISE_PLUS"}},
+		{Name: "pgi", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "db-perf-optimized-N-2"}},
+		{Name: "pg15", DatabaseVersion: "POSTGRES_15", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}},
 	} {
 		op, err := svc.Instances.Insert("proj", in).Do()
 		if err != nil {
@@ -55,9 +56,10 @@ func TestSwitchoverRefusals(t *testing.T) {
 		{"a DR replica that is not a replica", designate("plus", "ent"), "not a read replica of plus"},
 		{"a DR replica of another project", designate("plus", "other:ent"), "primary's project"},
 		{"an Enterprise primary's DR replica", designate("ent", "plus"), "Enterprise Plus"},
-		{"a PostgreSQL primary's DR replica", designate("pgi", "x"), "501"},
+		{"a PostgreSQL primary's DR replica that is not its replica", designate("pgi", "x"), "not a read replica of pgi"},
+		{"an Enterprise PostgreSQL primary's DR replica", designate("pg15", "x"), "Enterprise Plus"},
 		{"switchover of a primary", soloErr, "not a read replica"},
-		{"switchover of a PostgreSQL instance", pgErr, "501"},
+		{"switchover of a PostgreSQL primary", pgErr, "not a read replica"},
 		{"dbTimeout over 24 hours", timeoutErr, "24 hours"},
 	} {
 		if c.err == nil || !strings.Contains(c.err.Error(), c.want) {

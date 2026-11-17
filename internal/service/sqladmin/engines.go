@@ -90,6 +90,22 @@ func pgError(err error) error {
 	return Errorf(http.StatusBadRequest, "%s", msg)
 }
 
+// queryText is the one value q answers, as text.
+func (p *Postgres) queryText(ctx context.Context, q string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
+	defer cancel()
+	c, err := p.conn(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close(context.Background())
+	var v string
+	if err := c.QueryRow(ctx, q).Scan(&v); err != nil {
+		return "", pgError(err)
+	}
+	return v, nil
+}
+
 func (p *Postgres) InstalledVersion(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
 	defer cancel()

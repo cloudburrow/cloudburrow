@@ -579,7 +579,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			lin = func([]string) string { return "_cbml_o0" }
 		}
 		switch {
-		case typ == "LINEAR_REG" || typ == "BOOSTED_TREE_REGRESSOR" || typ == "RANDOM_FOREST_REGRESSOR" || typ == "DNN_REGRESSOR":
+		case typ == "LINEAR_REG" || typ == "BOOSTED_TREE_REGRESSOR" || typ == "RANDOM_FOREST_REGRESSOR" || typ == "DNN_REGRESSOR" || typ == "DNN_LINEAR_COMBINED_REGRESSOR":
 			return "(SELECT " + except(helpers) + ", " + lin(enc) + " AS " + out + " FROM " + from + ")", 0, ""
 		case binary:
 			thr, why := c.threshold()
