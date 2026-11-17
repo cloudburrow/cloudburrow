@@ -244,6 +244,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 		memorystoreAdminSvc.kms = kmsSvc
+		// IAM auth (#1614) checks a token against the tokens these
+		// credentials minted and the project's IAM policy.
+		memorystoreAdminSvc.creds = creds
 	}
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
@@ -278,6 +281,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	if memorystoreAdminSvc != nil {
+		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server

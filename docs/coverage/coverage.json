@@ -5216,7 +5216,8 @@
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
-          "test/compat/memorystoreclustertls_test.go:131 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
@@ -5305,7 +5306,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
-          "test/compat/memorystoreclustertls_test.go:131 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals"
         ]
       },
@@ -5449,7 +5450,8 @@
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:266 TestMemorystoreRedisClusterRefusals",
-          "test/compat/memorystoreclustertls_test.go:53 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
@@ -5554,7 +5556,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclustertls_test.go:53 TestMemorystoreRedisClusterInTransitEncryption"
+          "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption"
         ]
       },
       {
@@ -5640,6 +5642,7 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
+          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },

@@ -32,10 +32,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 2 | 0 | 3 | 1 |
-| Cloud SQL, Memorystore | 8 | 2 | 5 | 1 | 0 |
+| Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **51** | **4** | **17** | **24** | **6** |
+| **Total** | **50** | **3** | **17** | **24** | **6** |
 
 ## Cloud Storage
 
@@ -250,7 +250,10 @@ replicas (#1381), high availability (#1408), Google's Auth Proxy binary (#1421),
 `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433);
 the Memorystore admin API over Valkey (#1302), exports, imports and RDB persistence (#1384),
 STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), in-transit
-encryption (#1413), and customer-managed keys and server CA rotation (#1463). IAM database authentication is excluded (below).
+encryption (#1413), and customer-managed keys and server CA rotation (#1463); Memorystore for Redis Cluster's and Valkey's IAM
+auth checks the access token against the tokens this instance minted and the project's connect role (#1614); a
+`CLUSTER_DISABLED` Valkey instance's reader endpoint follows the replicas' health and its primary endpoint an
+automatic failover, and a cross-instance secondary follows its primary instance's failover (#1614). IAM database authentication is excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -260,8 +263,7 @@ encryption (#1413), and customer-managed keys and server CA rotation (#1463). IA
 | Cloud SQL: a `PHYSICAL` external sync on an instance without `--mode persistent` (served since #1570 with it), and a switchover of a PostgreSQL primary with read replicas besides its DR replica (they would have to follow the new timeline through the old primary while it is rebuilt) stay 501 (a PostgreSQL primary's DR replica (`replicationCluster`) and `switchover`, which rebuilds the old primary from a `pg_basebackup` of the new one as its standby, are built since #1524; a MySQL external primary, its source representation instance, `verifyExternalSyncSettings`, `startExternalSync`, a PostgreSQL external primary, `dumpFilePath`, `OFFLINE` syncs, and `demoteMaster` and `demote` of a MySQL instance are built since #1501 and #1524, `demoteMaster` with `skipReplicationSetup`, which installs Cloud SQL's `mysql.*` replication stored procedures, and `demote` of a PostgreSQL instance since #1614). 11 methods are 501, here by how often gcloud, Terraform and the connectors call them, each reason dated 2026-10-18 (#1614) and in [sqladmin.md](coverage/sqladmin.md): `rescheduleMaintenance` (`gcloud sql reschedule-maintenance`) needs a scheduled maintenance event, and none is ever scheduled here; the five `blueGreenDeployments` methods need a write endpoint that moves between instances; the three Entra ID certificate methods and the two SSRS leases are SQL Server's, whose image is amd64 only. A `CUSTOMER_MANAGED_CAS_CA` instance is 501 (its CA pool is Certificate Authority Service's). `reencrypt`, a MySQL primary's DR replica and `instances.switchover` (`gcloud sql instances switchover`), `GOOGLE_MANAGED_CAS_CA` instances with `listServerCertificates`, `addServerCertificate` and `rotateServerCertificate` (`gcloud sql ssl server-certs`), and `connect.resolve` are built since #1614 (#1570) (#1614) (#1462) | not built yet | L |
 | Backup and DR: `serviceConfig.initialize` is 501: it creates Google's default backup plan for a resource type, and the reference names none of its names, rules or retention (docs re-read 2026-10-17: https://docs.cloud.google.com/backup-disaster-recovery/docs/reference/rest/v1/projects.locations.serviceConfig/initialize); create them with `backupVaults.create` and `backupPlans.create` (#1536) (#1577) | not documented by Google | S |
 | Cloud SQL: `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files, are 501: their images, `mysql:5.6`, `mysql:5.7` and `mcr.microsoft.com/mssql/server` 2022 and 2025, are linux/amd64 only (checked again with `docker manifest inspect` 2026-10-17); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal` in those versions) and upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions) are 501 naming why (#1462) (#1501) (#1524) | no emulator support (amd64-only images; the engine versions lack the primitives) | M |
-| Memorystore for Redis Cluster and for Valkey: the nodes announce the host's address to clients, so an in-cluster client must use pod addresses. Valkey announces one client address per address family (`cluster-announce-client-ipv4`, `-ipv6`), and both the host's tunnels and the pods reach a node over IPv4 (#1549); serving both needs the kind cluster dual-stack, with in-cluster clients dialing IPv6, which CloudBurrow's cluster is not (reason re-read 2026-10-18, #1614) (#1519) (#1557) (#1614) | no emulator support (one client address per address family) | M |
-| Memorystore for Valkey: a secondary of cross-instance replication replicates its primary instance's primary node at its pod's address, so after that instance fails over on its own (served since #1614: a `CLUSTER_DISABLED` instance's reader endpoint spreads over the replicas, and its primary endpoint follows a promoted replica) the secondary is left replicating the failed pod's address, which no pod has any more, until it is linked again (a switchover or a detach and a new secondary); following the primary instance's `-primary` Service, which selects by role, would keep it (#1614) | not built yet | S |
+| Memorystore for Redis Cluster and for Valkey: the nodes announce the host's address to clients, so an in-cluster client must use pod addresses. Valkey announces one client address per address family (`cluster-announce-client-ipv4`, `-ipv6`), and both the host's tunnels and the pods reach a node over IPv4 (#1549); serving both needs the kind cluster dual-stack, with in-cluster clients dialing IPv6, which CloudBurrow's cluster is not (reason re-read 2026-10-18, #1614). Measured 2026-11-17 on Valkey 8.1.10 (#1614): its announce settings (`cluster-announce-ip`, `-client-ipv4`, `-client-ipv6`, `-hostname`, `-port`, `-tls-port`, `-bus-port`, one `cluster-preferred-endpoint-type`) answer every IPv4 client alike; a hostname both sides resolve fails on the host, as a `*.localhost` name resolves through macOS's resolver but not Go's own ("no such host"), the default on Linux and in `CGO_ENABLED=0` clients ([memorystore.md](memorystore.md) §8) (#1519) (#1557) (#1614) | no emulator support (one client address per address family) | M |
 
 ## Functions, credentials, tooling
 
@@ -290,7 +292,8 @@ Not gaps to close; each stays until its decision is amended.
 - **IAM Conditions** on every policy (Tasks, Secret Manager, KMS, Storage, the console): refused
   by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365. **Audit configs** are refused
   too, except on projects, folders and the organization, where they are stored, not acted on (#1486).
-- **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them.
+- **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them,
+  but for Memorystore's IAM auth, which checks a client's token and the project's connect role (amended by #1614).
 - **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
   service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
 - **Cloud SQL IAM database authentication** (`generateEphemeralCert` with an access token,
