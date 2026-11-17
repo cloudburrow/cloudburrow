@@ -28,14 +28,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
-| Resource Manager | 3 | 1 | 0 | 2 | 0 |
+| Resource Manager | 4 | 2 | 0 | 2 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **52** | **3** | **18** | **25** | **6** |
+| **Total** | **53** | **4** | **18** | **25** | **6** |
 
 ## Cloud Storage
 
@@ -153,12 +153,16 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org pol
 (#1296), and regional tag bindings and effective tags through the
 `{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
 and never enforced (#1368); IAM Conditions on their policies, evaluated by Firestore with MongoDB
-compatibility's and Memorystore's IAM checks, and edited in the console (#1742).
+compatibility's and Memorystore's IAM checks, and edited in the console (#1742); every
+attribute Google's reference documents for a role binding, conditions on the policies of the
+services Google lists as allowing them (and the same refusal elsewhere), and Memorystore's
+per-instance evaluation (#1745).
 
 | Gap | Why open | Size |
 |---|---|---|
-| IAM Conditions: the attributes beyond `resource.name`, `resource.type`, `resource.service` and `request.time` (`request.path`, `request.host`, access levels, resource tags, `api.getAttribute`, `destination.*`, `principal.*`) are refused INVALID_ARGUMENT; conditions on other services' own policies stay UNIMPLEMENTED; Memorystore's IAM auth grants nothing for a `resource.*` condition (built in #1742) (#1745) | not built yet | M |
-| IAM Conditions: the INVALID_ARGUMENT messages for a condition on a version 1 policy, a missing title or expression, an expression that does not compile, and the 12-operator and 20-condition limits are CloudBurrow's (Google publishes only `Policy cannot contain both conditions and condition hashes`), and so is the hash in `ROLE_withcond_HASH` (built in #1742) (#1745) | not documented by Google | S |
+| IAM Conditions: `api.getAttribute` with a map default (`aiplatform.googleapis.com/memoryScope`, whose default is `{}`) does not compile: map literals are not parsed. Vertex AI Agent Engine is not served, so nothing would supply the attribute (built in #1745) (#1745) | not built yet | S |
+| IAM Conditions: the Permissions tabs of Bigtable instances and tables and of log views read version 1 (a conditional binding shows as `ROLE_withcond_HASH` and is kept on a write back) and offer no condition, though the services store them (built in #1745) (#1745) | not built yet | S |
+| IAM Conditions: the INVALID_ARGUMENT messages for a condition on a version 1 policy, a missing title or expression, an expression that does not compile, and the 12-operator and 20-condition limits are CloudBurrow's (Google publishes only `Policy cannot contain both conditions and condition hashes`), and so is the hash in `ROLE_withcond_HASH`, the INVALID_ARGUMENT a service that does not allow conditions answers one, and Cloud Storage's 400s for a condition without uniform bucket-level access and for disabling it under one (built in #1742, #1745) (#1745) | not documented by Google | S |
 | An app-enabled folder's management project is `google-mp-{folder number}`, shaped as the discovery document's one example: the project ID and display name Google assigns are not documented, and the APIs it enables on the project are not modelled (built in #1532) (#1445) | not documented by Google | S |
 
 ## Vertex AI
@@ -294,9 +298,11 @@ Not gaps to close; each stays until its decision is amended.
 
 - **Cloud Storage ACLs and object IAM** (`bucketAccessControls.*`, `objectAccessControls.*`,
   `defaultObjectAccessControls.*`, `objects.*IamPolicy`): 501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504.
-- **IAM Conditions** on every other service's policy (Tasks, Secret Manager, KMS, Storage): refused
-  by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365; served on projects, folders and the
-  organization since #1742 (open work for the rest: #1745). **Audit configs** are refused
+- **IAM Conditions** on the policies of services Google does not list as allowing them (Pub/Sub,
+  Cloud Tasks, Artifact Registry, Secure Source Manager, Cloud Functions): refused INVALID_ARGUMENT,
+  as Google refuses them; served on projects, folders and the organization since #1742, and on the
+  services Google lists (Bigtable, BigQuery, KMS, Logging, Run, Secret Manager, Spanner, Storage
+  buckets with uniform bucket-level access, tag keys and values) since #1745. **Audit configs** are refused
   too, except on projects, folders and the organization, where they are stored, not acted on (#1486).
 - **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them,
   but for Memorystore's IAM auth, which checks a client's token and the project's connect role (amended by #1614).

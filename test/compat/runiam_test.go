@@ -51,10 +51,11 @@ func checkRunIamPolicy(t *testing.T, ctx context.Context, name, missing string,
 	if _, err := set(&iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{Etag: empty.GetEtag()}}); status.Code(err) != codes.Aborted {
 		t.Errorf("SetIamPolicy with a stale etag = %v, want ABORTED", err)
 	}
-	if _, err := set(&iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{Version: 3,
+	// #1745: Cloud Run takes conditions, in a version 3 policy only.
+	if _, err := set(&iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{Version: 1,
 		Bindings: []*iampb.Binding{{Role: "roles/run.invoker", Members: []string{"allUsers"},
-			Condition: &expr.Expr{Title: "t", Expression: `request.time < timestamp("2030-01-01T00:00:00Z")`}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("SetIamPolicy with a condition = %v, want UNIMPLEMENTED", err)
+			Condition: &expr.Expr{Title: "t", Expression: `request.time < timestamp("2030-01-01T00:00:00Z")`}}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SetIamPolicy with a condition in a version 1 policy = %v, want INVALID_ARGUMENT", err)
 	}
 	if after, err := get(&iampb.GetIamPolicyRequest{Resource: name}); err != nil || !bytes.Equal(after.GetEtag(), set1.GetEtag()) {
 		t.Errorf("a refused SetIamPolicy changed the policy: %v, %v", after, err)

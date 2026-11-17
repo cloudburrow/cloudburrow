@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/iam"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/storage"
+	exprpb "google.golang.org/genproto/googleapis/type/expr"
 )
 
 // Bucket IAM (#504), stored and not enforced under ADR-0006 as amended for
@@ -77,15 +80,45 @@ func TestStorageBucketIAMStaleEtag(t *testing.T) {
 	}
 }
 
-// TestStorageBucketIAMConditionUnimplemented: a conditional binding is 501
-// naming the condition, never stored and ignored (ADR-0006 rule 3).
-func TestStorageBucketIAMConditionUnimplemented(t *testing.T) {
+// TestStorageBucketIAMConditions (#1745), through the official client's
+// version 3 IAM handle: a conditional binding is refused on a bucket
+// without uniform bucket-level access ("To use conditions in the allow
+// policy for a Cloud Storage bucket, you must enable uniform bucket-level
+// access"), and stored and read back with its condition on one with it; a
+// version 1 read renders the role ROLE_withcond_HASH without the
+// condition; uniform bucket-level access cannot then be disabled.
+//
+// unverified: storage.buckets.setIamPolicy 400: the refusals' text (Google does not publish it)
+// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/storage/docs/access-control/using-iam-permissions
+// covers: storage.buckets.getIamPolicy, storage.buckets.setIamPolicy
+func TestStorageBucketIAMConditions(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
+	ctx := h.Context()
 	bh := iamBucket(t, h, c)
-	code, body := rawStorage(t, h, "PUT", "/storage/v1/b/"+bh.BucketName()+"/iam",
-		`{"version":3,"bindings":[{"role":"roles/storage.objectViewer","members":["user:a@example.com"],"condition":{"title":"t","expression":"true"}}]}`)
-	if code != http.StatusNotImplemented || !strings.Contains(body, "condition") {
-		t.Errorf("a conditional binding = %d %s; want 501 naming the condition", code, body)
+	expr := `resource.name.startsWith("projects/_/buckets/` + bh.BucketName() + `/objects/public/")`
+	policy := func() *iam.Policy3 {
+		return &iam.Policy3{Bindings: []*iampb.Binding{{Role: "roles/storage.objectViewer", Members: []string{"user:a@example.com"},
+			Condition: &exprpb.Expr{Title: "public objects", Expression: expr}}}}
+	}
+	if code, _ := apiError(bh.IAM().V3().SetPolicy(ctx, policy())); code != http.StatusBadRequest {
+		t.Errorf("a conditional binding without uniform bucket-level access = %d; want 400", code)
+	}
+	if _, err := bh.Update(ctx, storage.BucketAttrsToUpdate{UniformBucketLevelAccess: &storage.UniformBucketLevelAccess{Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bh.IAM().V3().SetPolicy(ctx, policy()); err != nil {
+		t.Fatalf("a conditional binding with uniform bucket-level access: %v", err)
+	}
+	got, err := bh.IAM().V3().Policy(ctx)
+	if err != nil || len(got.Bindings) != 1 || got.Bindings[0].GetCondition().GetExpression() != expr || got.Bindings[0].GetCondition().GetTitle() != "public objects" {
+		t.Fatalf("version 3 read = %v, %v", got, err)
+	}
+	v1, err := bh.IAM().Policy(ctx)
+	if err != nil || len(v1.Roles()) != 1 || !strings.HasPrefix(string(v1.Roles()[0]), "roles/storage.objectViewer_withcond_") {
+		t.Errorf("version 1 read = %v, %v; want the ROLE_withcond_HASH rendering", v1, err)
+	}
+	if _, err := bh.Update(ctx, storage.BucketAttrsToUpdate{UniformBucketLevelAccess: &storage.UniformBucketLevelAccess{Enabled: false}}); err == nil {
+		t.Error("uniform bucket-level access was disabled under a conditional binding")
 	}
 }

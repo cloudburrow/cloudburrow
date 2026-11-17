@@ -88,8 +88,10 @@ func TestPubSubIAMHandle(t *testing.T) {
 		}
 		cond := &iam.Policy3{Bindings: []*iampb.Binding{{Role: tc.role, Members: []string{member},
 			Condition: &expr.Expr{Title: "later", Expression: `request.time > timestamp("2030-01-01T00:00:00Z")`}}}}
-		if err := hd.V3().SetPolicy(ctx, cond); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "condition") {
-			t.Errorf("%s: a conditional binding: %v, want UNIMPLEMENTED naming the condition", tc.name, err)
+		// #1745: Pub/Sub is not among the services Google lists as
+		// allowing conditions.
+		if err := hd.V3().SetPolicy(ctx, cond); status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "condition") {
+			t.Errorf("%s: a conditional binding: %v, want INVALID_ARGUMENT naming the condition", tc.name, err)
 		}
 		held, err := hd.TestPermissions(ctx, tc.perms)
 		if err != nil || strings.Join(held, ",") != strings.Join(tc.want, ",") {

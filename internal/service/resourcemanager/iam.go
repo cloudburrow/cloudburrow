@@ -125,7 +125,10 @@ func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest)
 	}
 	set := iampolicy.SetWithAuditConfigs
 	if isTag(resource) {
-		set = iampolicy.Set
+		// A tag key's or value's policy keeps no audit configs; Resource
+		// Manager is among the services Google lists as allowing
+		// conditions, so it takes conditional bindings (#1745).
+		set = iampolicy.SetConditional
 	}
 	next, err := set(current, req)
 	if err != nil {
