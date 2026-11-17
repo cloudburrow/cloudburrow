@@ -668,3 +668,38 @@ func unit8(v float64) uint8 {
 	}
 	return uint8(v)
 }
+
+// videoSoftTokens and videoMaxFrames are the model's video_processor
+// values: max_soft_tokens per frame and max_frames.
+const (
+	videoSoftTokens = 140
+	videoMaxFrames  = 32
+)
+
+// VideoFrames are the frames the video processor keeps of a video's: all of
+// them up to videoMaxFrames, or that many taken uniformly
+// (np.linspace(0, n-1, max_frames).astype(int)), as
+// EmbeddingGemma2VideoProcessor's sample_frames does with
+// overflow_strategy "uniform".
+func VideoFrames(frames []image.Image) []image.Image {
+	n := len(frames)
+	if n <= videoMaxFrames {
+		return frames
+	}
+	step := float64(n-1) / float64(videoMaxFrames-1)
+	out := make([]image.Image, videoMaxFrames)
+	for i := range out {
+		k := int(math.Floor(float64(i) * step))
+		if i == videoMaxFrames-1 {
+			k = n - 1
+		}
+		out[i] = frames[k]
+	}
+	return out
+}
+
+// PatchVideoFrame prepares a video frame for the vision encoder, with the
+// video processor's budget of soft tokens.
+func PatchVideoFrame(img image.Image) (ImagePatches, error) {
+	return patchImage(img, videoSoftTokens)
+}

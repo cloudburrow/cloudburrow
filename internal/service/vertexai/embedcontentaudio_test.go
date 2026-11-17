@@ -99,7 +99,7 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	}{
 		"missing":    {`{"content":{"parts":[{"fileData":{"mimeType":"audio/wav","fileUri":"gs://b/none.wav"}}]}}`, "not found", http.StatusNotFound},
 		"bad uri":    {`{"content":{"parts":[{"fileData":{"mimeType":"audio/wav","fileUri":"https://x/y.wav"}}]}}`, "file_data.file_uri", http.StatusBadRequest},
-		"video":      {`{"content":{"parts":[{"fileData":{"fileUri":"gs://b/movie.mp4"}}]}}`, "file_data.mime_type", http.StatusBadRequest},
+		"video":      {`{"content":{"parts":[{"fileData":{"fileUri":"gs://b/movie.mp4"}}]}}`, "file_data: the data is not a valid MP4", http.StatusBadRequest},
 		"mp3":        {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/mpeg","data":"AA=="}}]}}`, "audio/wav", http.StatusBadRequest},
 		"over 180 s": {twoLong, "at most 180 seconds", http.StatusBadRequest},
 		"bad wav":    {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"AA=="}}]}}`, "parts[0].inline_data", http.StatusBadRequest},
@@ -114,7 +114,7 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	// audio is refused as a type the model does not embed.
 	s.SwapModelEmbedder(localai.EmbeddingGemma2ONNXID, &multimodalEmbedder{}, nil)
 	rec = postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, `{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"`+b64+`"}}]}}`)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "video, audio and PDF") {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "audio, HEIC, HEIF and AVIF input are not served") {
 		t.Fatalf("no audio encoder: status %d: %s", rec.Code, rec.Body)
 	}
 }

@@ -131,3 +131,34 @@ func TestDecodeVideoRefuses(t *testing.T) {
 		}
 	}
 }
+
+// TestVideoFramesAndPrompt: more than 32 frames are taken uniformly, as
+// np.linspace(0, n-1, 32).astype(int) picks them, and a video's place in the
+// prompt is the video placeholder.
+func TestVideoFramesAndPrompt(t *testing.T) {
+	frames := make([]image.Image, 120)
+	for i := range frames {
+		frames[i] = image.NewGray(image.Rect(0, 0, i+1, 1))
+	}
+	got := VideoFrames(frames)
+	if len(got) != 32 {
+		t.Fatalf("%d frames, want 32", len(got))
+	}
+	// linspace(0, 119, 32) = 0, 3.839, 7.677, ... 119
+	for i, want := range map[int]int{0: 0, 1: 3, 2: 7, 16: 61, 30: 115, 31: 119} {
+		if w := got[i].Bounds().Dx() - 1; w != want {
+			t.Errorf("frame %d is input frame %d, want %d", i, w, want)
+		}
+	}
+	if len(VideoFrames(frames[:32])) != 32 {
+		t.Errorf("32 frames are not all kept")
+	}
+	p, n, err := MultimodalPrompt(Input{Parts: []Part{{Text: "a turtle"}, {Video: frames[:2]}}})
+	if err != nil || n != 1 || p != "task: search result | query: a turtle<|video|>" {
+		t.Errorf("prompt %q, %d media, %v", p, n, err)
+	}
+	ip, err := PatchVideoFrame(image.NewRGBA(image.Rect(0, 0, 1280, 720)))
+	if err != nil || ip.SoftTokens > videoSoftTokens || ip.SoftTokens < videoSoftTokens-20 {
+		t.Errorf("a 720p frame is %d soft tokens (%v), want at most %d", ip.SoftTokens, err, videoSoftTokens)
+	}
+}

@@ -659,3 +659,41 @@ ORC's tools print for them (`TestORCExamples`). A corrupt file's panic in a deco
 as a 400. `govulncheck ./...` reports nothing for it, and adding it added no other module to the
 graph (`golang/protobuf` moved from the graph into `go.mod`'s list because the module has no
 `go.mod`).
+
+## Amendment: video decoders and a PDF renderer for EmbedContent (#1722, #1723)
+
+EmbeddingGemma 2 embeds a video as frames through its vision encoder, and Google's
+[multimodal embeddings page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) takes, for `gemini-embedding-2`, MP4 and MOV video in AV1, H.264, H.265 or
+VP9 (1 video a request, up to 120 frames, 1 frame a second unless `video_metadata.fps` says
+otherwise, `start_offset` and `end_offset` bounding it; `audio_track_extraction` off by
+default), and one PDF of up to 6 pages a request, each page "rendered as an image", with
+`document_ocr` adding the text OCR reads. The user approved adding the modules needed
+(2026-11-17). CloudBurrow's default build and its storage image have cgo off, so a decoder must be
+pure Go or WebAssembly. The candidates on the Go module proxy, compared on 2026-11-17:
+
+| Need | Module | Version | Licence | cgo | Covers | Verdict |
+|---|---|---|---|---|---|---|
+| MP4/MOV demuxing | `github.com/Eyevinn/mp4ff` | v0.63.0 (2026-11-13) | MIT | none | progressive and fragmented ISO BMFF, `avcC`, `hvcC`, edit lists | **Adopted** (its only requirement, `go-test/deep`, is for its tests) |
+| H.264 | `github.com/oops1/go.264` | v1.14.0 (2026-11-10) | BSD 2-Clause | none (hardware paths load libraries through `ebitengine/purego`, which CloudBurrow turns off with `ForceSoftware`) | High profile, CABAC and CAVLC, P and B slices, weighted prediction, progressive 8-bit 4:2:0; bit-exact against ffmpeg on 29 clips (its claim) | **Adopted**: measured bit-exact here too (70 dB PSNR, the YUV-to-RGB rounding, against ffmpeg on the model card's 720p High-profile clip with B-frames) |
+| H.264 | `github.com/go-avkit/h264` | v0.10.0 | BSD 3-Clause | none | go.264's decoder imported, 69 of 73 JVT streams | Rejected: its `go.mod` needs Go 1.27.1, and CloudBurrow builds with Go 1.26 |
+| H.264 | `github.com/Eyevinn/hi264` | v0.12.3 | MIT | none | IDR and P_Skip only | Rejected: "full P/B-frame decoding is out of scope" |
+| H.265 | `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | none | HEVC v1 and range extensions (8–16 bit, all chroma formats), inter prediction, open GOPs; byte-exact on the JCT-VC conformance suite (its claim) | **Adopted**: measured bit-exact against ffmpeg here (70 dB PSNR) on an x265 MOV with B-frames and a CRA with RASL pictures; raises `go.mod`'s `go` line to 1.26.4 |
+| VP9 | `github.com/thesyncim/govpx` | 2026-10-18 pseudo-version | BSD 3-Clause | none | VP8 and VP9 profile 0, the VP9 conformance corpus (its claim) | **Blocked**: its `go.mod` needs Go 1.27.0 (`toolchain go1.27.2`); CloudBurrow's CI still builds main with Go 1.26. Usable once Go 1.26 is dropped |
+| VP9 | `github.com/go-avkit/vp9` | v0.2.2 | BSD 3-Clause | none | headers and superframes only | Rejected: no pixels |
+| AV1 | `github.com/KarpelesLab/goavif` | v0.1.0 (2026-04) | MIT | none | AV1 intra and single-reference translational inter | Rejected: compound, warped and global motion, which libaom and SVT-AV1 use, repeat the previous frame instead (its README) |
+| AV1 | `github.com/gen2brain/avif` | v0.6.0 | MIT (libavif and libaom BSD 2-Clause) | none (WASM on wazero) | AVIF stills and AVIS sequences | Rejected for video: it reads only AVIF containers, not an MP4's AV1 track |
+| any | `codeberg.org/gruf/go-ffmpreg` | 2026-09 | GPL-3.0 (ffmpeg built with `--enable-gpl`) | none (WASM on wazero) | ffmpeg 5.1 | Rejected: GPL |
+| PDF | `github.com/klippa-app/go-pdfium` | v1.21.4 (2026-10-21) | MIT; PDFium BSD 3-Clause and Apache 2.0 | none in its `webassembly` package (PDFium compiled to WASM, run on `tetratelabs/wazero` v1.12.0, Apache 2.0) | rendering, page sizes, text | **Adopted** |
+| PDF | `github.com/gen2brain/go-fitz` | — | AGPL-3.0 (MuPDF) | cgo | rendering | Rejected: AGPL and cgo |
+| PDF | `github.com/pdfcpu/pdfcpu`, `rsc.io/pdf`, `github.com/ledongthuc/pdf` | — | Apache 2.0 / BSD | none | parsing, text | Rejected: no renderer |
+| PDF | `github.com/unidoc/unipdf` | — | commercial | none | rendering | Rejected: licence |
+
+So H.264 and H.265 in MP4 or MOV are served, and VP9 and AV1 stay refused naming why. The PDF
+renderer is 5.8 MB of WebAssembly embedded in the binary, compiled once, the first time a PDF is
+embedded. `document_ocr` reads the text PDFium finds on each page, which is the text a born-digital
+PDF holds; CloudBurrow has no OCR engine, so a PDF with no text on any page (a scan) is refused
+with `document_ocr` rather than embedded without the text Google would have read. A video's audio
+track (`audio_track_extraction`) stays refused: an MP4's audio is AAC, which none of these decode.
+`govulncheck ./...` reports nothing for any of them. `go mod tidy` added `tetratelabs/wazero`,
+`jolestar/go-commons-pool/v2` and `ebitengine/purego` as indirect requirements.

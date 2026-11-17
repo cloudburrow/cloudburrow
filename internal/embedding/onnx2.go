@@ -19,7 +19,8 @@ import (
 // audio token per soft token, and the soft tokens of every image, video and
 // audio clip (empty for the absent ones), and returns the mean-pooled,
 // normalised sentence_embedding, as Transformers.js's EmbeddingGemma2Model
-// runs it. Video is not served: its frames need a video decoder.
+// runs it. A video's frames go through the vision encoder as images do, with
+// the video processor's smaller budget of soft tokens (#1722).
 
 // visionEncoderFile marks a model directory as EmbeddingGemma 2's.
 const visionEncoderFile = "vision_encoder_quantized.onnx"
@@ -68,6 +69,7 @@ func openEmbeddingGemma2(modelDir, modelID string) (Embedder, error) {
 	for name, s := range map[string]*uint32{
 		BeginImageToken: &e.boi, ImageToken: &e.img, EndImageToken: &e.eoi,
 		BeginAudioToken: &e.boa, AudioToken: &e.aud, EndAudioToken: &e.eoa,
+		VideoToken: &e.vid,
 	} {
 		ids, _ := tok.Encode(name, false)
 		if len(ids) != 1 {
@@ -87,6 +89,7 @@ type gemma2Embedder struct {
 	audio         *ort.DynamicAdvancedSession // nil without the audio encoder
 	boi, img, eoi uint32
 	boa, aud, eoa uint32
+	vid           uint32
 	closed        bool
 }
 
@@ -148,8 +151,19 @@ func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
 	}
 	var patches []ImagePatches
 	var clips []AudioFeatures
+	var videos [][]ImagePatches // each video's frames
 	for _, p := range x.Parts {
 		switch {
+		case p.Video != nil:
+			var frames []ImagePatches
+			for _, f := range VideoFrames(p.Video) {
+				ip, err := PatchVideoFrame(f)
+				if err != nil {
+					return Output{}, fmt.Errorf("video frame: %w", err)
+				}
+				frames = append(frames, ip)
+			}
+			videos = append(videos, frames)
 		case p.Image != nil:
 			ip, err := PatchImage(p.Image)
 			if err != nil {
@@ -170,9 +184,22 @@ func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
 	ids, _ := e.tok.Encode(text, true)
 	// Expand each placeholder to its image's or clip's soft tokens, in order.
 	expanded := make([]uint32, 0, len(ids))
-	k, a := 0, 0
+	k, a, v := 0, 0, 0
 	for _, id := range ids {
 		switch id {
+		case e.vid:
+			if v >= len(videos) {
+				return Output{}, fmt.Errorf("the text has more video placeholders than videos")
+			}
+			// One image-like block per frame.
+			for _, f := range videos[v] {
+				expanded = append(expanded, e.boi)
+				for j := 0; j < f.SoftTokens; j++ {
+					expanded = append(expanded, e.vid)
+				}
+				expanded = append(expanded, e.eoi)
+			}
+			v++
 		case e.img:
 			if k >= len(patches) {
 				return Output{}, fmt.Errorf("the text has more image placeholders than images")
@@ -197,12 +224,13 @@ func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
 			expanded = append(expanded, id)
 		}
 	}
-	if k != len(patches) || a != len(clips) {
-		return Output{}, fmt.Errorf("%d images and %d clips but %d and %d placeholders", len(patches), len(clips), k, a)
+	if k != len(patches) || a != len(clips) || v != len(videos) {
+		return Output{}, fmt.Errorf("%d images, %d clips and %d videos but %d, %d and %d placeholders",
+			len(patches), len(clips), len(videos), k, a, v)
 	}
 	truncated := false
 	if len(expanded) > MaxTokens2 {
-		if len(patches) > 0 || len(clips) > 0 || !autoTruncate {
+		if len(patches) > 0 || len(clips) > 0 || len(videos) > 0 || !autoTruncate {
 			return Output{}, fmt.Errorf("%d tokens exceeds %d", len(expanded), MaxTokens2)
 		}
 		expanded, truncated = expanded[:MaxTokens2], true
@@ -210,11 +238,21 @@ func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
 
 	features := make([]float32, 0)
 	for _, ip := range patches {
-		f, err := e.encodeImage(ip)
+		f, err := e.encodeImage(ip, imageSoftTokens)
 		if err != nil {
 			return Output{}, fmt.Errorf("vision encoder: %w", err)
 		}
 		features = append(features, f...)
+	}
+	var videoFeatures []float32
+	for _, frames := range videos {
+		for _, ip := range frames {
+			f, err := e.encodeImage(ip, videoSoftTokens)
+			if err != nil {
+				return Output{}, fmt.Errorf("vision encoder: %w", err)
+			}
+			videoFeatures = append(videoFeatures, f...)
+		}
 	}
 	var audioFeatures []float32
 	for _, af := range clips {
@@ -224,18 +262,18 @@ func (e *gemma2Embedder) embedOne(x Input, autoTruncate bool) (Output, error) {
 		}
 		audioFeatures = append(audioFeatures, f...)
 	}
-	v, err := e.run(expanded, features, audioFeatures)
+	vec, err := e.run(expanded, features, videoFeatures, audioFeatures)
 	if err != nil {
 		return Output{}, err
 	}
-	return Output{Values: v, TokenCount: len(expanded), Truncated: truncated}, nil
+	return Output{Values: vec, TokenCount: len(expanded), Truncated: truncated}, nil
 }
 
-// encodeImage runs the vision encoder on one image, padded to the processor's
-// maximum number of patches with zero pixels and -1 positions, as the
-// processor pads it.
-func (e *gemma2Embedder) encodeImage(ip ImagePatches) ([]float32, error) {
-	maxPatches := imageSoftTokens * imagePoolingKernel * imagePoolingKernel
+// encodeImage runs the vision encoder on one image or video frame, padded to
+// its processor's maximum number of patches (softTokens' worth) with zero
+// pixels and -1 positions, as the processor pads it.
+func (e *gemma2Embedder) encodeImage(ip ImagePatches, softTokens int) ([]float32, error) {
+	maxPatches := softTokens * imagePoolingKernel * imagePoolingKernel
 	dim := imagePatchSize * imagePatchSize * 3
 	pix := make([]float32, maxPatches*dim)
 	copy(pix, ip.Pixels)
@@ -293,7 +331,7 @@ func (e *gemma2Embedder) encodeAudio(af AudioFeatures) ([]float32, error) {
 	return append([]float32(nil), t.GetData()...), nil
 }
 
-func (e *gemma2Embedder) run(ids []uint32, imageFeatures, audioFeatures []float32) ([]float32, error) {
+func (e *gemma2Embedder) run(ids []uint32, imageFeatures, videoFeatures, audioFeatures []float32) ([]float32, error) {
 	n := int64(len(ids))
 	idData := make([]int64, n)
 	mask := make([]int64, n)
@@ -316,6 +354,8 @@ func (e *gemma2Embedder) run(ids []uint32, imageFeatures, audioFeatures []float3
 		switch i {
 		case 0:
 			data, rows = imageFeatures, int64(len(imageFeatures)/hiddenSize)
+		case 1:
+			data, rows = videoFeatures, int64(len(videoFeatures)/hiddenSize)
 		case 2:
 			data, rows = audioFeatures, int64(len(audioFeatures)/hiddenSize)
 		}

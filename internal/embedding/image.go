@@ -161,12 +161,18 @@ type ImagePatches struct {
 
 // PatchImage prepares img for the vision encoder.
 func PatchImage(img image.Image) (ImagePatches, error) {
+	return patchImage(img, imageSoftTokens)
+}
+
+// patchImage prepares img for the vision encoder with a budget of
+// softTokens: the image processor's, or the video processor's for a frame.
+func patchImage(img image.Image, softTokens int) (ImagePatches, error) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
 		return ImagePatches{}, fmt.Errorf("the image is empty")
 	}
-	maxPatches := imageSoftTokens * imagePoolingKernel * imagePoolingKernel
+	maxPatches := softTokens * imagePoolingKernel * imagePoolingKernel
 	th, tw, err := imageTargetSize(h, w, maxPatches)
 	if err != nil {
 		return ImagePatches{}, err
