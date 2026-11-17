@@ -54,7 +54,7 @@ const MongoIAMPath = "/cloudburrow/v1/firestoreMongoIAM"
 // instance minted, and each principal's roles, by email (lower case) and
 // project ID.
 type MongoIAM struct {
-	Tokens []MongoIAMToken                 `json:"tokens"`
+	Tokens []MongoIAMToken                `json:"tokens"`
 	Roles  map[string]map[string][]string `json:"roles"`
 }
 
