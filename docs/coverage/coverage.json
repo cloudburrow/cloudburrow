@@ -5091,10 +5091,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/embedaudio_test.go:71 TestEmbedContentEmbedsAudioThroughThePredictionClient",
+          "test/compat/embedavif_test.go:43 TestEmbedContentEmbedsAVIFThroughThePredictionClient",
           "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient",
-          "test/compat/embedheic_test.go:45 TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient",
+          "test/compat/embedheic_test.go:46 TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient",
           "test/compat/embedimages_test.go:111 TestEmbedContentEmbedsImagesThroughThePredictionClient",
           "test/compat/embedmp3_test.go:39 TestEmbedContentEmbedsMP3ThroughThePredictionClient",
+          "test/compat/embedvideo_test.go:83 TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient",
           "test/compat/embedwebp_test.go:41 TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient"
         ]
       },
@@ -8693,7 +8695,7 @@
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
           "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
           "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates",
-          "test/compat/bigtablesqlgeo_test.go:28 TestBigtableSQLGeography"
+          "test/compat/bigtablesqlgeo_test.go:31 TestBigtableSQLGeography"
         ]
       },
       {
@@ -8760,7 +8762,7 @@
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
           "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
           "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates",
-          "test/compat/bigtablesqlgeo_test.go:28 TestBigtableSQLGeography"
+          "test/compat/bigtablesqlgeo_test.go:31 TestBigtableSQLGeography"
         ]
       },
       {

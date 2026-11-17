@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -33,9 +34,12 @@ import (
 // alone or between text parts, into one vector, as Google's
 // gemini-embedding-2 embeds a Content's parts. It embeds a WAV (#1651) or MP3
 // (#1721) audio clip the same way, and reads a file_data part's gs:// object
-// from this instance's Cloud Storage as if its bytes were inline_data. Video,
-// PDF, document_ocr and audio_track_extraction are refused, naming the
-// field.
+// from this instance's Cloud Storage as if its bytes were inline_data. It
+// embeds one MP4 or MOV video (H.264 or H.265) a request, its frames sampled
+// as video_metadata says (#1722), and one PDF of up to 6 pages, each page
+// rendered as an image, with document_ocr adding each page's text (#1723).
+// VP9 and AV1 video, document_ocr on a PDF with no text and
+// audio_track_extraction are refused, naming the field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
 // images as base64: 20 MiB, the inline request size Vertex documents for
@@ -117,18 +121,15 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	name := embeddingDisplayName(e.Model())
 	multimodal := embedding.EmbedsImages(e)
 	cfg := req.GetEmbedContentConfig()
-	if cfg.GetDocumentOcr() {
-		if multimodal {
-			return nil, apierror.InvalidArgument(
-				"embed_content_config.document_ocr is not supported: %s embeds text, images and audio; PDF input is not served", name)
-		}
+	if cfg.GetDocumentOcr() && !multimodal {
 		return nil, apierror.InvalidArgument(
 			"embed_content_config.document_ocr is not supported: %s embeds text only", name)
 	}
 	if cfg.GetAudioTrackExtraction() {
 		if multimodal {
 			return nil, apierror.InvalidArgument(
-				"embed_content_config.audio_track_extraction is not supported: %s embeds text, images and audio; video input is not served", name)
+				"embed_content_config.audio_track_extraction is not supported: %s embeds a video's frames, "+
+					"and a video's audio track (AAC) has no decoder in this build", name)
 		}
 		return nil, apierror.InvalidArgument(
 			"embed_content_config.audio_track_extraction is not supported: %s embeds text only", name)
@@ -156,7 +157,8 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 	s.mu.RLock()
 	objs := s.objects
 	s.mu.RUnlock()
-	parts, media, err := embedParts(ctx, req.GetContent(), mediaSupport{images: multimodal, audio: embedding.EmbedsAudio(e), objects: objs}, name)
+	parts, media, err := embedParts(ctx, req.GetContent(), mediaSupport{images: multimodal, audio: embedding.EmbedsAudio(e),
+		objects: objs, ocr: cfg.GetDocumentOcr()}, name)
 	if err != nil {
 		return nil, err
 	}
@@ -208,15 +210,16 @@ func (s *Server) embedContent(ctx context.Context, requested string, req *aiplat
 type mediaSupport struct {
 	images, audio bool
 	objects       Objects
+	ocr           bool // embed_content_config.document_ocr
 }
 
 // what names what the model embeds, for an error.
 func (m mediaSupport) what() string {
 	switch {
 	case m.audio:
-		return "text, images and audio"
+		return "text, images, audio, video and PDF"
 	case m.images:
-		return "text and images"
+		return "text, images, video and PDF"
 	}
 	return "text only"
 }
@@ -229,8 +232,8 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 	if c == nil || len(c.GetParts()) == 0 {
 		return nil, 0, apierror.InvalidArgument("content is required and must have at least one text part")
 	}
-	parts := make([]embedding.Part, len(c.GetParts()))
-	images, clips := 0, 0
+	parts := make([]embedding.Part, 0, len(c.GetParts()))
+	images, clips, videos, pdfs := 0, 0, 0, 0
 	samples := 0 // of audio, all clips together
 	text := ""
 	for i, p := range c.GetParts() {
@@ -238,7 +241,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		var data []byte
 		switch d := p.GetData().(type) {
 		case *aiplatformpb.Part_Text:
-			parts[i] = embedding.Part{Text: d.Text}
+			parts = append(parts, embedding.Part{Text: d.Text})
 			text += d.Text
 			continue
 		case *aiplatformpb.Part_InlineData:
@@ -270,7 +273,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 			if err != nil {
 				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}
-			parts[i] = embedding.Part{Image: img}
+			parts = append(parts, embedding.Part{Image: img})
 			images++
 			if images > embedding.MaxImages {
 				return nil, 0, apierror.InvalidArgument(
@@ -281,28 +284,96 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 			if err != nil {
 				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}
-			parts[i] = embedding.Part{Audio: clip}
+			parts = append(parts, embedding.Part{Audio: clip})
 			clips++
 			if samples += len(clip); samples > embedding.MaxAudioSeconds*embedding.AudioSampleRate {
 				return nil, 0, apierror.InvalidArgument(
 					"content.parts[%d]: the audio adds up to %.1f seconds; at most %d seconds are embedded in one request",
 					i, float64(samples)/embedding.AudioSampleRate, embedding.MaxAudioSeconds)
 			}
+		case embedding.IsVideoMIMEType(mt):
+			if videos++; videos > 1 {
+				return nil, 0, apierror.InvalidArgument("content.parts[%d]: at most 1 video is embedded in one request", i)
+			}
+			opt, err := videoOptions(i, p.GetVideoMetadata())
+			if err != nil {
+				return nil, 0, err
+			}
+			frames, err := embedding.DecodeVideo(mt, data, opt)
+			if err != nil {
+				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+			}
+			parts = append(parts, embedding.Part{Video: frames})
+		case embedding.IsPDFMIMEType(mt):
+			if pdfs++; pdfs > 1 {
+				return nil, 0, apierror.InvalidArgument("content.parts[%d]: at most 1 PDF is embedded in one request", i)
+			}
+			pages, err := embedding.DecodePDF(mt, data, m.ocr)
+			if err != nil {
+				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+			}
+			// Each page is an image, followed with document_ocr by its text.
+			for _, pg := range pages {
+				parts = append(parts, embedding.Part{Image: pg.Image})
+				if pg.Text != "" {
+					parts = append(parts, embedding.Part{Text: pg.Text})
+					text += pg.Text
+				}
+			}
+			clips += len(pages) // media, but not counted against the image limit
 		default:
 			types := append(append([]string(nil), embedding.ImageMIMETypes...), embedding.AudioMIMETypes...)
-			notServed := "video and PDF input are not served"
 			if !m.audio {
-				types, notServed = embedding.ImageMIMETypes, "video, audio and PDF input are not served"
+				types = embedding.ImageMIMETypes
+			}
+			types = append(append(types, embedding.VideoMIMETypes...), embedding.PDFMIMEType)
+			notServed := "VP9 and AV1 input are not served"
+			if !m.audio {
+				notServed = "audio, VP9 and AV1 input are not served"
 			}
 			return nil, 0, apierror.InvalidArgument(
 				"content.parts[%d].%s.mime_type %q is not supported: %s embeds %s (%s); %s",
 				i, field, mt, name, m.what(), strings.Join(types, ", "), notServed)
 		}
 	}
-	if images+clips == 0 && strings.TrimSpace(text) == "" {
+	if images+clips+videos == 0 && strings.TrimSpace(text) == "" {
 		return nil, 0, apierror.InvalidArgument("content.parts: the text to embed is empty")
 	}
-	return parts, images + clips, nil
+	return parts, images + clips + videos, nil
+}
+
+// videoOptions are a video part's video_metadata: its interval and its
+// sampling rate.
+func videoOptions(i int, vm *aiplatformpb.VideoMetadata) (embedding.VideoOptions, error) {
+	var opt embedding.VideoOptions
+	if vm == nil {
+		return opt, nil
+	}
+	for _, d := range []struct {
+		name string
+		v    interface {
+			CheckValid() error
+			AsDuration() time.Duration
+		}
+		set bool
+		dst *time.Duration
+	}{
+		{"start_offset", vm.GetStartOffset(), vm.GetStartOffset() != nil, &opt.Start},
+		{"end_offset", vm.GetEndOffset(), vm.GetEndOffset() != nil, &opt.End},
+	} {
+		if !d.set {
+			continue
+		}
+		if err := d.v.CheckValid(); err != nil {
+			return opt, apierror.InvalidArgument("content.parts[%d].video_metadata.%s: %v", i, d.name, err)
+		}
+		*d.dst = d.v.AsDuration()
+	}
+	opt.FPS = vm.GetFps()
+	if opt.FPS < 0 || opt.FPS > 24 {
+		return opt, apierror.InvalidArgument("content.parts[%d].video_metadata.fps %v must be in (0.0, 24.0]", i, opt.FPS)
+	}
+	return opt, nil
 }
 
 // readFileData reads a file_data part's gs:// object from this instance's

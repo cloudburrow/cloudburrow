@@ -8434,13 +8434,16 @@ async function renderEmbeddings(view) {
     if (ep) ep.textContent = endpointFor(method.value);
   };
   model.addEventListener("input", showEndpoint);
-  // Images (#1454): each chosen file is embedded with its own EmbedContent
-  // request, as one inline_data part, by the model that embeds images, so
-  // its vector can be compared with the texts'.
+  // Images (#1454), and videos (#1722) and PDFs (#1723): each chosen file
+  // is embedded with its own EmbedContent request, as one inline_data part,
+  // by the model that embeds images, so its vector can be compared with the
+  // texts'.
   const images = el("input", { id: "emb-images", type: "file", multiple: "",
     // The extensions too: a browser that knows no image/heic or image/avif
     // type (#1724, #1729) matches the picker's filter by name.
-    accept: [...(status.imageMimeTypes || []), ".heic", ".heif", ".avif"].join(","), "aria-label": "Images to embed" });
+    accept: [...(status.imageMimeTypes || []), ".heic", ".heif", ".avif", ...(status.videoMimeTypes || []),
+      ...(status.documentMimeTypes || [])].join(","),
+    "aria-label": "Images, videos and PDFs to embed" });
   // Audio clips (#1651) go the same way, and Cloud Storage objects as
   // file_data parts, one gs:// URI per line, read by the instance's own
   // Cloud Storage.
@@ -8459,9 +8462,10 @@ async function renderEmbeddings(view) {
   gcs.addEventListener("input", () => { if (gcs.value.trim()) toMultimodal(); });
   // A media type from a file name's extension, for a gs:// URI or a file
   // the browser gives no type (#1651: WebP and BMP; #1721: MP3; #1724: HEIC
-  // and HEIF; #1729: AVIF).
+  // and HEIF; #1722, #1723: video and PDF; #1729: AVIF).
   const mediaTypeOf = (name) => ({ wav: "audio/wav", mp3: "audio/mpeg", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif", avif: "image/avif" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
+    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif", avif: "image/avif", mp4: "video/mp4", mov: "video/quicktime",
+    pdf: "application/pdf" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
   const readBase64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
@@ -8517,7 +8521,8 @@ async function renderEmbeddings(view) {
             embedContentConfig: { outputDimensionality: Number(dim.value) },
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
-          lines.push("[image] " + file.name);
+          const type = file.type || mediaTypeOf(file.name) || "";
+          lines.push((type.startsWith("video/") ? "[video] " : type === "application/pdf" ? "[pdf] " : "[image] ") + file.name);
         }
         const media = [
           ...clips.map((file) => ["[audio] " + file.name, async () => ({ inlineData: { mimeType: file.type || mediaTypeOf(file.name) || "audio/wav", data: await readBase64(file) } })]),

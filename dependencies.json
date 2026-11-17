@@ -617,6 +617,37 @@
         "verification": "go.sum",
         "notes": "Vertex AI EmbedContent's WebP and BMP images (#1651, internal/embedding/image.go), approved by the maintainer 2026-10-19: its webp and bmp decoders. Promoted from indirect (v0.25.0, in the module graph only) to direct. It needs golang.org/x/sys and golang.org/x/text, already required at the same versions; no new dependency was added. Lossy WebP colours are converted as libwebp converts them (internal/embedding/webp.go), not by image.YCbCr."
       },
+      "go264": {
+        "module": "github.com/oops1/go.264",
+        "version": "v1.14.0",
+        "sum": "h1:CLElIjsfp3sI6s1YWVl08vjacB4h3G56EeYhPaNk/Wc=",
+        "pinnedCommit": "cc9c9d0309d6e8a0e80bb182c14d2e3e13276aa2",
+        "source": "https://github.com/oops1/go.264",
+        "license": "BSD-2-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's H.264 video (#1722, internal/embedding/video.go), approved by the maintainer 2026-11-17: a pure Go H.264 High-profile decoder (P and B slices, CABAC), bit-exact against ffmpeg here. Copied into third_party/go264 (import path github.com/cloudburrow/cloudburrow/third_party/go264; the module's non-test sources, fetched through the go command at this sum, with hwaccel_linux.go and its NVENC and VA-API backends left out and the import paths rewritten, third_party/go264/PROVENANCE.md), not required in go.mod: those backends import ebitengine/purego, which links libc dynamically into a CGO_ENABLED=0 Linux binary (TestLinuxBinariesNeverImportPurego), and a replace directive would break `go install ...@latest`. Chosen over go-avkit/h264, which needs Go 1.27 (docs/upstream-evaluation.md)."
+      },
+      "goMp4ff": {
+        "module": "github.com/Eyevinn/mp4ff",
+        "version": "v0.63.0",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's MP4 and MOV video (#1722, internal/embedding/video.go), approved by the maintainer 2026-11-17: an ISO BMFF reader (progressive and fragmented files, avcC, hvcC, edit lists), pure Go. Its one requirement, go-test/deep, is for its tests (docs/upstream-evaluation.md)."
+      },
+      "goPdfium": {
+        "module": "github.com/klippa-app/go-pdfium",
+        "version": "v1.21.4",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's PDF pages and document_ocr (#1723, internal/embedding/pdf.go), approved by the maintainer 2026-11-17: its webassembly package runs PDFium (BSD-3-Clause and Apache-2.0, compiled to WebAssembly and embedded, 5.8 MB) on wazero, so no cgo; its native packages, which need cgo, are not imported. Chosen over go-fitz, which is AGPL MuPDF and cgo (docs/upstream-evaluation.md)."
+      },
+      "goWazero": {
+        "module": "github.com/tetratelabs/wazero",
+        "version": "v1.12.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723); an indirect requirement, no cgo and no dependencies."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",
