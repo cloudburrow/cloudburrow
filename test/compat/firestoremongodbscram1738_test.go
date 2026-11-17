@@ -15,6 +15,9 @@ import (
 	"cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // userCredsMember is the IAM principal of the user credentials user of the
@@ -31,6 +34,16 @@ func userCredsMember(t *testing.T, h *Harness, dbName, user string) string {
 	}
 	defer rm.Close()
 	p, err := rm.GetProject(h.Context(), &resourcemanagerpb.GetProjectRequest{Name: "projects/" + project})
+	if status.Code(err) == codes.NotFound {
+		// The test's own project, which Firestore takes unregistered: a
+		// role is granted on a project Resource Manager has.
+		v1 := rmV1(t, h)
+		if _, err := v1.Projects.Create(&crmv1.Project{ProjectId: project, Name: "Firestore MongoDB"}).Context(h.Context()).Do(); err != nil {
+			t.Fatalf("v1 projects.create %s: %v", project, err)
+		}
+		t.Cleanup(func() { _, _ = v1.Projects.Delete(project).Do() })
+		p, err = rm.GetProject(h.Context(), &resourcemanagerpb.GetProjectRequest{Name: "projects/" + project})
+	}
 	if err != nil {
 		t.Fatalf("GetProject %s: %v", project, err)
 	}
@@ -38,16 +51,18 @@ func userCredsMember(t *testing.T, h *Harness, dbName, user string) string {
 	return "principal://firestore.googleapis.com/projects/" + number + "/name/databases/" + db + "/userCreds/" + user
 }
 
-// grantUserCreds grants role on dbName's project to its user credentials
-// user, takes it back when the test ends, and waits until db (a driver
+// grantUserCreds grants roles on dbName's project to its user credentials
+// user, takes them back when the test ends, and waits until db (a driver
 // signed in as them) may list its collections, the grant having reached the
 // front.
-func grantUserCreds(t *testing.T, h *Harness, dbName, user, role string, db *mongo.Database) {
+func grantUserCreds(t *testing.T, h *Harness, dbName, user string, db *mongo.Database, roles ...string) {
 	t.Helper()
 	project, _, _ := strings.Cut(strings.TrimPrefix(dbName, "projects/"), "/databases/")
 	change := projectRoles(t, h, project, userCredsMember(t, h, dbName, user))
-	change(role, true)
-	t.Cleanup(func() { change(role, false) })
+	for _, role := range roles {
+		change(role, true)
+		t.Cleanup(func() { change(role, false) })
+	}
 	waitMongo(t, func() error { _, err := db.ListCollectionNames(h.Context(), bson.D{}); return err }, true)
 }
 

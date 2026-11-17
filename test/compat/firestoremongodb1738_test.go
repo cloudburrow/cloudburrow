@@ -30,7 +30,7 @@ func mongoDatabase(t *testing.T, h *Harness, id string) (*mongo.Database, string
 		t.Fatalf("CreateUserCreds: %v", err)
 	}
 	db := mongoConnect(t, mongoURI("app-user", uc.SecurePassword, ep, id, ca)).Database(id)
-	grantUserCreds(t, h, dbName, "app-user", "roles/datastore.user", db)
+	grantUserCreds(t, h, dbName, "app-user", db, "roles/datastore.user", "roles/datastore.indexAdmin")
 	return db, dbName
 }
 
