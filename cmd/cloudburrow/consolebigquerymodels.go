@@ -108,6 +108,9 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the model: " + bigqueryRefusal(err).Error(), Trail: trail}, nil
 	}
+	if md.Type == "ONNX" {
+		return p.onnxModelDetail(md, datasetID, modelID, trail), nil
+	}
 	feats := console.Listing{Columns: []string{"Type", "Weight"}, NameColumn: "Feature", Noun: "features"}
 	cols, _ := md.RawFeatureColumns()
 	weights := map[string]string{}
@@ -238,6 +241,57 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 			console.Section{ID: "training", Label: "Training", Listing: iters},
 			console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups}),
 	}, nil
+}
+
+// onnxModelDetail is an imported ONNX model's page (#1711): its inputs and
+// outputs, which models.get reports as featureColumns and labelColumns,
+// and the Cloud Storage URI it was imported from. It has no training,
+// weights or evaluation: BigQuery imports the model as it is.
+func (p bigqueryProvider) onnxModelDetail(md *bigquery.ModelMetadata, datasetID, modelID string, trail []console.Crumb) console.Detail {
+	ports := func(cols []*bigquery.StandardSQLField, name, noun string) console.Listing {
+		l := console.Listing{Columns: []string{"Type"}, NameColumn: name, Noun: noun}
+		for _, f := range cols {
+			l.Items = append(l.Items, console.Resource{Name: f.Name, Fields: map[string]string{"Type": orDash(sqlType(f.Type))}})
+		}
+		l.Total = len(l.Items)
+		return l
+	}
+	in, _ := md.RawFeatureColumns()
+	out, _ := md.RawLabelColumns()
+	props := []console.Property{
+		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},
+		{Label: "Type", Value: "ONNX"},
+		{Label: "Location", Value: orDash(md.Location)},
+	}
+	if runs := md.RawTrainingRuns(); len(runs) > 0 && runs[0].TrainingOptions != nil && runs[0].TrainingOptions.ModelUri != "" {
+		props = append(props, console.Property{Label: "Imported from", Value: runs[0].TrainingOptions.ModelUri})
+	}
+	if md.Description != "" {
+		props = append(props, console.Property{Label: "Description", Value: md.Description})
+	}
+	if md.Name != "" {
+		props = append(props, console.Property{Label: "Friendly name", Value: md.Name})
+	}
+	if len(md.Labels) > 0 {
+		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
+	}
+	if !md.CreationTime.IsZero() {
+		props = append(props, console.Property{Label: "Created", Value: md.CreationTime.UTC().Format(time.RFC3339)})
+	}
+	return console.Detail{
+		Trail: trail,
+		Summary: []console.Property{
+			{Label: "Dataset", Value: datasetID},
+			{Label: "Type", Value: "ONNX"},
+			{Label: "Inputs", Value: fmt.Sprint(len(in))},
+			{Label: "Outputs", Value: fmt.Sprint(len(out))},
+		},
+		Sections: []console.Section{
+			{ID: "inputs", Label: "Inputs", Listing: ports(in, "Input", "inputs")},
+			{ID: "outputs", Label: "Outputs", Listing: ports(out, "Output", "outputs")},
+			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Model", Properties: props}}},
+		},
+	}
 }
 
 // modelResultSections are a model's centroids (KMEANS, ML.CENTROIDS),

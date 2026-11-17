@@ -106,6 +106,8 @@ Flags:
     	Memorystore admin API (redis.googleapis.com) host port (0 = OS-assigned; default 9021)
   -port-metadata int
     	host port for the local metadata server (0 = OS-assigned)
+  -port-onnx int
+    	ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)
   -port-pubsub int
     	Pub/Sub host port (0 = OS-assigned)
   -port-resourcemanager int

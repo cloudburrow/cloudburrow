@@ -69,6 +69,10 @@ func hostPorts(cfg config.Config) map[string]int {
 	if !backupDREnabled(cfg) {
 		delete(ports, "backupdr")
 	}
+	if onnxRunnerEnabled(cfg) {
+		// The onnx build's ONNX runner (#1711).
+		ports["onnx"] = e.ONNX
+	}
 	for name, port := range ports {
 		// 0 is OS-assigned; a negative console port disables the console.
 		if port <= 0 {

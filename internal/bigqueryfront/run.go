@@ -15,6 +15,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/onnxrunner"
 )
 
 // ServiceName is the cluster Service the front serves: pods dial it as
@@ -42,6 +43,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from and an extract job's bucket is looked up in")
 	resourceManager := fs.String("resourcemanager", "", "the instance's Resource Manager (http://host:port), which INFORMATION_SCHEMA.JOBS_BY_FOLDER "+
 		"and JOBS_BY_ORGANIZATION read a project's ancestry from (#1392); empty: those views are 501")
+	onnx := fs.String("onnx", "", "the ONNX runner of the onnx build's CLI (http://host:port), which runs BigQuery ML's imported "+
+		"ONNX models (#1711); empty: CREATE MODEL of model_type ONNX is 501")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -77,6 +80,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	handler := Wrap(results, WithStorage(*storage), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
 		o.policies, o.resourceManager = policies, *resourceManager
+		if *onnx != "" {
+			o.onnx = onnxrunner.NewClient(*onnx, nil)
+		}
 		o.streamTimes = true // streamingbuffer.go, #1370
 	})
 	// The emulator listens on the pod's loopback alone (#1114), so its

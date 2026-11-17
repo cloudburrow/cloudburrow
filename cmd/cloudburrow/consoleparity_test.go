@@ -1414,8 +1414,8 @@ var parityRows = []parityRow{
 	// have no coverage page; this row writes the exclusion down (#782).
 	{Resource: "BigQuery models", Service: "bigquery",
 		Methods:  []string{"bigquery.models.list", "bigquery.models.get", "bigquery.models.patch", "bigquery.models.delete"},
-		Provider: "bigquery", Offers: "a dataset's Models section (models.list) of the models CREATE MODEL trains in the query editor's Read-write mode; a model's page with its type, features, label, training runs, evaluation metrics and weights (models.get and ML.WEIGHTS); Edit model, its description and friendly name (models.patch); Delete model (models.delete) (#1465)",
-		Tests: []string{"TestBigQueryModelsSectionAndPage", "TestBigQueryModelPageResults", "TestBigQueryModelsThroughThePage"}},
+		Provider: "bigquery", Offers: "a dataset's Models section (models.list) of the models CREATE MODEL trains in the query editor's Read-write mode; a model's page with its type, features, label, training runs, evaluation metrics and weights (models.get and ML.WEIGHTS); Edit model, its description and friendly name (models.patch); Delete model (models.delete) (#1465); an imported ONNX model's page shows its inputs and outputs (models.get's featureColumns and labelColumns) and the Cloud Storage URI it was imported from, and no training or weights (#1711)",
+		Tests: []string{"TestBigQueryModelsSectionAndPage", "TestBigQueryModelPageResults", "TestBigQueryModelsThroughThePage", "TestBigQueryONNXModelPage"}},
 	{Resource: "BigQuery projects", Service: "bigquery",
 		Methods:  []string{"bigquery.projects.list"},
 		Excluded: "lists the one project the instance serves; the console's project picker already names it, from Resource Manager"},

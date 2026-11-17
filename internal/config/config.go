@@ -316,6 +316,12 @@ type Endpoints struct {
 	// BackupDR is the host port of the Backup and DR Service API
 	// (backupdr.googleapis.com, #1433), served in process.
 	BackupDR int `json:"backupdr"`
+	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
+	// ML's imported ONNX models for the BigQuery front, published to the
+	// cluster through cloudburrow-host. CloudBurrow's own API, not a
+	// Google one: bound only by the onnx build's CLI (make build-onnx),
+	// with BigQuery enabled.
+	ONNX int `json:"onnx"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -373,6 +379,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"sqladmin", &e.SQLAdmin},
 		{"serviceusage", &e.ServiceUsage},
 		{"backupdr", &e.BackupDR},
+		{"onnx", &e.ONNX},
 	}
 }
 
@@ -725,6 +732,9 @@ func Default() Config {
 			ServiceUsage: 9023,
 			// The Backup and DR Service (#1433): the next free port.
 			BackupDR: 9024,
+			// The ONNX runner of the onnx build (#1711): the next free
+			// port.
+			ONNX: 9025,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
