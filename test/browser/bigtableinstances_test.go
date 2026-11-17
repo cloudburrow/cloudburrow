@@ -64,7 +64,7 @@ func TestBigtableInstanceAdminThroughTheBrowser(t *testing.T) {
 	p.cellMenu(cluster, "Edit nodes")
 	p.waitFor(`document.querySelector(".modal #f-nodes") !== null`)
 	p.setField(".modal #f-nodes", "3")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if cl, err := iac.GetCluster(ctx, id, cluster); err != nil || cl.ServeNodes != 3 {
 		t.Errorf("after Edit nodes, GetCluster = %+v, %v", cl, err)

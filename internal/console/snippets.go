@@ -73,10 +73,19 @@ client = tasks_v2.CloudTasksClient(transport=CloudTasksGrpcTransport(channel=cha
 		Language: "Node.js", Title: "Cloud Storage",
 		Needs:  []string{"STORAGE_EMULATOR_HOST", "GOOGLE_CLOUD_PROJECT"},
 		Source: "docs/credentials.md",
-		Note:   "@google-cloud/storage cannot use STORAGE_EMULATOR_HOST as exported: pass it as apiEndpoint and take it out of the environment.",
-		Code: `const apiEndpoint = process.env.STORAGE_EMULATOR_HOST;
+		Note: "@google-cloud/storage cannot use STORAGE_EMULATOR_HOST as exported: pass it as apiEndpoint and take it out of the environment. " +
+			"Since @google-cloud/storage 9 the client authenticates a custom endpoint too, and with application default credentials would fetch a token from Google: " +
+			"google-auth-library's PassThroughClient sends none.",
+		Code: `import { Storage } from '@google-cloud/storage';
+import { PassThroughClient } from 'google-auth-library';
+
+const apiEndpoint = process.env.STORAGE_EMULATOR_HOST;
 delete process.env.STORAGE_EMULATOR_HOST;
-const storage = new Storage({ apiEndpoint, projectId: process.env.GOOGLE_CLOUD_PROJECT });`,
+const storage = new Storage({
+  apiEndpoint,
+  projectId: process.env.GOOGLE_CLOUD_PROJECT,
+  authClient: new PassThroughClient(),
+});`,
 	},
 	{
 		Language: "Node.js", Title: "Cloud Tasks",
