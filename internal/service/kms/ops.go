@@ -104,13 +104,9 @@ func (s *Server) GetPublicKey(_ context.Context, req *kmspb.GetPublicKeyRequest)
 	if algorithms[v.algorithm()].kem > 0 {
 		return v.kemPublicKey(req.GetPublicKeyFormat())
 	}
-	priv, err := v.privateKey()
+	der, err := v.publicDER()
 	if err != nil {
 		return nil, err
-	}
-	der, err := x509.MarshalPKIXPublicKey(priv.Public())
-	if err != nil {
-		return nil, apierror.Wrap(apierror.Internal(err, "encode the public key of %s", v.Name))
 	}
 	p := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
 	out := &kmspb.PublicKey{
@@ -135,6 +131,30 @@ func (s *Server) GetPublicKey(_ context.Context, req *kmspb.GetPublicKeyRequest)
 	return out, nil
 }
 
+// publicDER is the version's public key as a SubjectPublicKeyInfo.
+func (v keyVersion) publicDER() ([]byte, error) {
+	if algorithms[v.algorithm()].secp256k1 {
+		k, err := v.secp256k1Key()
+		if err != nil {
+			return nil, err
+		}
+		der, err := secp256k1PublicDER(k.PubKey())
+		if err != nil {
+			return nil, apierror.Wrap(apierror.Internal(err, "encode the public key of %s", v.Name))
+		}
+		return der, nil
+	}
+	priv, err := v.privateKey()
+	if err != nil {
+		return nil, err
+	}
+	der, err := x509.MarshalPKIXPublicKey(priv.Public())
+	if err != nil {
+		return nil, apierror.Wrap(apierror.Internal(err, "encode the public key of %s", v.Name))
+	}
+	return der, nil
+}
+
 func digestBytes(d *kmspb.Digest) (crypto.Hash, []byte) {
 	switch x := d.GetDigest().(type) {
 	case *kmspb.Digest_Sha256:
@@ -151,7 +171,8 @@ func digestBytes(d *kmspb.Digest) (crypto.Hash, []byte) {
 // ASYMMETRIC_SIGN version. digest and data are exclusive (service.proto).
 // RSA_SIGN_RAW_PKCS1_* and EC_SIGN_ED25519 sign data as given, so they take
 // data only (the algorithms page). EC signatures are DER, as Google returns
-// them; PSS uses a salt as long as the digest.
+// them, and secp256k1's are lower-S (secp256k1.go); PSS uses a salt as long
+// as the digest.
 func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error) {
 	data, hasDigest := req.GetData(), req.GetDigest() != nil
 	if hasDigest && len(data) > 0 {
@@ -195,11 +216,19 @@ func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequ
 		h.Write(data)
 		digest = h.Sum(nil)
 	}
+	var sig []byte
+	if spec.secp256k1 {
+		key, err := v.secp256k1Key()
+		if err != nil {
+			return nil, err
+		}
+		sig = signSecp256k1(key, digest)
+		return v.signed(sig, digestOK, dataOK), nil
+	}
 	priv, err := v.privateKey()
 	if err != nil {
 		return nil, err
 	}
-	var sig []byte
 	switch key := priv.(type) {
 	case *rsa.PrivateKey:
 		switch {
@@ -221,6 +250,10 @@ func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequ
 		// Raw PKCS#1 input too long for the modulus is the caller's.
 		return nil, apierror.Wrap(apierror.InvalidArgument("sign with %s: %v", v.algorithm(), err))
 	}
+	return v.signed(sig, digestOK, dataOK), nil
+}
+
+func (v keyVersion) signed(sig []byte, digestOK, dataOK bool) *kmspb.AsymmetricSignResponse {
 	return &kmspb.AsymmetricSignResponse{
 		Signature:            sig,
 		SignatureCrc32C:      crc(sig),
@@ -228,7 +261,7 @@ func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequ
 		VerifiedDataCrc32C:   dataOK,
 		Name:                 v.Name,
 		ProtectionLevel:      v.protectionLevel(),
-	}, nil
+	}
 }
 
 // AsymmetricDecrypt opens RSA-OAEP ciphertext made with the version's public

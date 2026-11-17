@@ -575,11 +575,14 @@ flags, which they set) and the plain create, get, list, encrypt and decrypt path
 
 **Parts worth taking, without adopting the server** (each is the user's call):
 
-- **`EC_SIGN_SECP256K1_SHA256`**, the one algorithm it has and CloudBurrow lacks. It uses
+- **`EC_SIGN_SECP256K1_SHA256`**, the one algorithm it had and CloudBurrow lacked. It uses
   `github.com/decred/dcrd/dcrec/secp256k1/v4` with low-S normalisation
-  ([secp256k1.go][kmsemu-secp]). Serving it would mean adding that module to CloudBurrow's
-  `go.mod`, which needs the user's approval; it would be a new ticket, written against
-  Google's docs, not a port.
+  ([secp256k1.go][kmsemu-secp]). Serving it meant adding that module to CloudBurrow's
+  `go.mod`, which needed the user's approval; it would be a new ticket, written against
+  Google's docs, not a port. **Since #1719 CloudBurrow serves it** (the user approved the
+  module, v4.4.1, on 2026-11-17), written against Google's algorithms page: HSM and
+  HSM_SINGLE_TENANT keys only, lower-S DER signatures, and a secp256k1
+  SubjectPublicKeyInfo from `GetPublicKey`. That algorithm gap is closed.
 - **Error wording.** If the user wants it, a recorded observation of Cloud KMS's
   "is not enabled, current state is:" and "has incorrect key purpose" messages would settle
   whether CloudBurrow should match them.
