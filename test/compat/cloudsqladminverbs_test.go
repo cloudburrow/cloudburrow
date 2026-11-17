@@ -299,12 +299,12 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 	waitSQLOp(t, svc, project, op)
 }
 
-// TestCloudSQLRefusedMethods (#1462): what needs Google-managed
-// networking, a maintenance schedule or another engine is refused 501
-// through the official client, naming what is missing. Server
-// certificates and connect.resolve are served since #1614
-// (TestCloudSQLServerCertificates).
-// covers: sql.blueGreenDeployments.create (unimplemented), sql.blueGreenDeployments.delete (unimplemented), sql.blueGreenDeployments.get (unimplemented), sql.blueGreenDeployments.list (unimplemented), sql.blueGreenDeployments.switchover (unimplemented), sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
+// TestCloudSQLRefusedMethods (#1462): what needs a maintenance schedule
+// or another engine is refused 501 through the official client, naming
+// what is missing. Server certificates and connect.resolve are served
+// since #1614 (TestCloudSQLServerCertificates), and blue-green
+// deployments (TestCloudSQLBlueGreenDeployment).
+// covers: sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
 func TestCloudSQLRefusedMethods(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -312,23 +312,10 @@ func TestCloudSQLRefusedMethods(t *testing.T) {
 	}
 	svc := sqlAdminService(t, h)
 	p, i := h.Project(), "postgres"
-	loc := "projects/" + p + "/locations/us-central1"
-	bg := loc + "/blueGreenDeployments/bg"
 	for _, c := range []struct {
 		what, why string
 		call      func() error
 	}{
-		{"blueGreenDeployments.create", "Google-managed networking", func() error {
-			_, err := svc.BlueGreenDeployments.Create(loc, &sqladmin.BlueGreenDeployment{}).Do()
-			return err
-		}},
-		{"blueGreenDeployments.delete", "Google-managed networking", func() error { _, err := svc.BlueGreenDeployments.Delete(bg).Do(); return err }},
-		{"blueGreenDeployments.get", "Google-managed networking", func() error { _, err := svc.BlueGreenDeployments.Get(bg).Do(); return err }},
-		{"blueGreenDeployments.list", "Google-managed networking", func() error { _, err := svc.BlueGreenDeployments.List(loc).Do(); return err }},
-		{"blueGreenDeployments.switchover", "Google-managed networking", func() error {
-			_, err := svc.BlueGreenDeployments.Switchover(bg, &sqladmin.SwitchoverBlueGreenDeploymentRequest{}).Do()
-			return err
-		}},
 		{"ListEntraIdCertificates", "SQL Server", func() error { _, err := svc.Instances.ListEntraIdCertificates(p, i).Do(); return err }},
 		{"addEntraIdCertificate", "SQL Server", func() error { _, err := svc.Instances.AddEntraIdCertificate(p, i).Do(); return err }},
 		{"RotateEntraIdCertificate", "SQL Server", func() error {

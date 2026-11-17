@@ -291,6 +291,16 @@ macOS's resolver, but Go's own resolver (the default of a `CGO_ENABLED=0` client
 answers "no such host", so host clients would break; and announcing a name would also need the
 cluster's DNS to answer it. Serving both stays not built (docs/gaps.md).
 
+What does serve both is an address both sides reach. The nodes announce the address their host
+tunnels listen on, the instance's `--bind-address`, and a pod reaches the host's own network
+address: measured 2026-11-17 (#1614) on Docker Desktop for macOS, a pod's TCP connection to the
+host's LAN address (and to `host.docker.internal`) reached a listener on the host. An instance
+started with `--bind-address <the host's LAN address> --allow-remote` therefore announces an
+address that, by that measurement, a host client and an in-cluster client can both dial, as
+Google's discovery endpoint and node addresses are reachable from the whole VPC. It is not the
+default, and no test runs a cluster client through it end to end, because it publishes every
+endpoint of the instance on that network.
+
 `UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
 them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or
 forgets replicas; `node_type` sets each node's `maxmemory` (1.4, 6.5, 13 or 58 GB) and
