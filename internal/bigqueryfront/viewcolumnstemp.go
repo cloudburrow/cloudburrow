@@ -36,8 +36,10 @@ import (
 // made), and no schema or rows: the statement gives no result. The
 // emulator's own dry run of a CREATE VIEW answered statementType SELECT
 // (measured). A dry run of CREATE VIEW, without OR REPLACE or IF NOT
-// EXISTS, of a view that exists is 501: what BigQuery's dry run answers
-// for it is not known here. A script with a column list in a dry run
+// EXISTS, of a name a table or view has is 409 duplicate "Already Exists:
+// Table p:ds.v", the statement's own error (engineerrors.go), as "an
+// invalid query will return the same error it would if it wasn't a dry
+// run" (JobConfiguration.dryRun, #1456). A script with a column list in a dry run
 // (#1416) is put in the text it amounts to as above, each query's columns
 // read with a dry run of it alone (loneDry), and that text is given to
 // the emulator's dry run, as a script without a list is: it is answered
@@ -187,9 +189,7 @@ func (f front) dryRunViewWithColumns(w http.ResponseWriter, r *http.Request, q q
 		}
 		if !v.orReplace && !v.ifNotExists {
 			if status, _ := f.get(r, tablePath(ds, table)); status == http.StatusOK {
-				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of CREATE "+
-					"VIEW with a column list, without OR REPLACE or IF NOT EXISTS, of "+ds+"."+table+", which exists. "+
-					"CloudBurrow does not know what BigQuery's dry run answers for it. Nothing was run.")
+				writeError(w, http.StatusConflict, "duplicate", "Already Exists: Table "+projectOf(f.base)+":"+ds+"."+table)
 				return
 			}
 		}
