@@ -39,6 +39,9 @@ func init() {
 
 // checkMoreAgg types one of moreAggregates; c.args are checked already.
 func (c *call) checkMoreAgg(ts []*btpb.Type) error {
+	if geoAggregates[c.name] {
+		return c.checkGeoAgg(ts)
+	}
 	n := len(ts)
 	bad := func() error { return sigErr(c, ts) }
 	count := func(i int) error {
@@ -113,6 +116,9 @@ func (c *call) checkMoreAgg(ts []*btpb.Type) error {
 
 // aggregateMore computes one of moreAggregates over rows.
 func (c *call) aggregateMore(envs []env) (any, error) {
+	if geoAggregates[c.name] {
+		return c.aggregateGeo(envs)
+	}
 	keepNulls := c.name == "APPROX_TOP_COUNT" || c.name == "APPROX_TOP_SUM"
 	var tuples [][]any
 	seen := map[string]bool{}

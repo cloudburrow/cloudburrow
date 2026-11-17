@@ -37,6 +37,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/golang/geo v0.0.0-20261029132150-f51d36688936
 	github.com/golang/protobuf v1.5.4
 	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.20.6
