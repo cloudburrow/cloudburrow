@@ -50,6 +50,10 @@ type Target struct {
 	// (guard.go, #725). It is for ports that carry HTTP a browser could
 	// send: raw TCP and gRPC-only ports stay a plain tunnel.
 	Guarded bool
+	// Loopback6, for an unguarded tunnel bound to 127.0.0.1, also listens
+	// on [::1] at the same port: a Memorystore cluster node announces ::1
+	// to the clients its tunnel brings in (#1614).
+	Loopback6 bool
 }
 
 // InClusterHost returns the DNS name a pod uses to reach this Service.
@@ -310,7 +314,11 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	}
 	spec := fmt.Sprintf("%d:%d", listenPort, remote)
 	errOut := &syncBuffer{}
-	proc, err := f.kube.PortForward(listenAddr, resource, spec, io.Discard, errOut)
+	kubeAddr := listenAddr
+	if f.target.Loopback6 && !f.target.Guarded && listenAddr == "127.0.0.1" {
+		kubeAddr = "127.0.0.1,::1"
+	}
+	proc, err := f.kube.PortForward(kubeAddr, resource, spec, io.Discard, errOut)
 	if err != nil {
 		return fmt.Errorf("%w: start kubectl port-forward: %w", ErrForwardFailed, err)
 	}

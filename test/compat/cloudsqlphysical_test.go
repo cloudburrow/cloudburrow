@@ -30,7 +30,9 @@ import (
 // Cloud Storage, which dumpFilePath names. Each has the source's rows,
 // keeps its own root password (the copy carries the source's accounts) and
 // its own server UUID, and replicates by GTID a row written on the source
-// afterwards.
+// afterwards. It runs on a persistent and on an ephemeral instance alike
+// (#1614): on an ephemeral one the restored replicas' servers keep their
+// data across the restart the restore makes.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.projects.instances.verifyExternalSyncSettings, sql.projects.instances.startExternalSync, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	h := New(t)
@@ -202,9 +204,12 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	}
 }
 
-// uploadXtraBackup runs XtraBackup in a pod with deployment's volume
-// mounted, as `xtrabackup --backup --target-dir` runs on a server's host,
-// and uploads every file it wrote to bh under folder.
+// uploadXtraBackup runs XtraBackup beside the source's server, as
+// `xtrabackup --backup --target-dir` runs on a server's host, and uploads
+// every file it wrote to bh under folder. On a persistent instance it runs
+// in a pod with deployment's volume mounted; on an ephemeral one, whose
+// server has no volume, in an ephemeral container added to the server's
+// pod, reading its data files through its mysqld's /proc/PID/root.
 func uploadXtraBackup(t *testing.T, h *Harness, kubeconfig string, bh *storage.BucketHandle, deployment, pod, folder string) {
 	t.Helper()
 	kubectl := func(stdin string, args ...string) ([]byte, error) {
@@ -220,7 +225,11 @@ func uploadXtraBackup(t *testing.T, h *Harness, kubeconfig string, bh *storage.B
 		}
 		return out, nil
 	}
-	manifest := fmt.Sprintf(`apiVersion: v1
+	const backup = "xtrabackup --backup --no-server-version-check --datadir=/var/lib/mysql/data --target-dir=/backup --port=3306 " +
+		"--user=migrator --password=Repl-pass1"
+	in := []string{pod}
+	if _, err := kubectl("", "get", "pvc", deployment+"-data"); err == nil {
+		manifest := fmt.Sprintf(`apiVersion: v1
 kind: Pod
 metadata:
   name: %s
@@ -231,7 +240,7 @@ spec:
   containers:
     - name: xtrabackup
       image: %s
-      command: ["bash", "-c", "xtrabackup --backup --no-server-version-check --datadir=/var/lib/mysql/data --target-dir=/backup --host=%s --port=3306 --user=migrator --password=Repl-pass1 && touch /done || touch /failed; sleep 3600"]
+      command: ["bash", "-c", "%s --host=%s && touch /done || touch /failed; sleep 3600"]
       volumeMounts:
         - {name: source, mountPath: /var/lib/mysql, readOnly: true}
         - {name: backup, mountPath: /backup}
@@ -240,24 +249,49 @@ spec:
       persistentVolumeClaim: {claimName: %s-data, readOnly: true}
     - name: backup
       emptyDir: {}
-`, pod, components.XtraBackup84Image, deployment, deployment)
-	if _, err := kubectl(manifest, "apply", "-f", "-"); err != nil {
-		t.Fatal(err)
+`, pod, components.XtraBackup84Image, backup, deployment, deployment)
+		if _, err := kubectl(manifest, "apply", "-f", "-"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = kubectl("", "delete", "pod", pod, "--ignore-not-found", "--wait=false") })
+	} else {
+		out, err := kubectl("", "get", "pods", "-l", "app="+deployment, "-o", "jsonpath={.items[0].metadata.name} {.items[0].spec.containers[0].name}")
+		f := strings.Fields(string(out))
+		if err != nil || len(f) != 2 {
+			t.Fatalf("the source's pod: %v %q", err, out)
+		}
+		script := `pid=; for d in /proc/[0-9]*; do [ "$(cat $d/comm 2>/dev/null)" = mysqld ] && pid=${d#/proc/} && break; done; ` +
+			`rm -rf /var/lib/mysql && mkdir -p /var/lib && ln -s /proc/$pid/root/var/lib/mysql /var/lib/mysql && ` +
+			backup + ` --host=127.0.0.1 && ` +
+			// The data directory's tablespaces, read through another
+			// container's root, are listed as external (realpath does not
+			// resolve there); on a server's host they are its own.
+			`sed -i -E 's#\{"file_name":"/var/lib/mysql/data/[^"]*","tablespace_name":"[^"]*","tablespace_type":"[^"]*"\},?##g; s#,\]#]#g' /backup/xtrabackup_tablespaces && ` +
+			`touch /done || touch /failed; sleep 3600`
+		patch := fmt.Sprintf(`{"spec":{"ephemeralContainers":[{"name":%q,"image":%q,"targetContainerName":%q,"command":["bash","-c",%q],`+
+			`"securityContext":{"runAsUser":0,"capabilities":{"add":["SYS_PTRACE","DAC_READ_SEARCH"]}}}]}}`,
+			pod, components.XtraBackup84Image, f[1], script)
+		if _, err := kubectl("", "patch", "pod", f[0], "--subresource=ephemeralcontainers", "--type=strategic", "-p", patch); err != nil {
+			t.Fatal(err)
+		}
+		in = []string{f[0], "-c", pod}
 	}
-	t.Cleanup(func() { _, _ = kubectl("", "delete", "pod", pod, "--ignore-not-found", "--wait=false") })
+	run := func(args ...string) ([]byte, error) {
+		return kubectl("", append(append([]string{"exec"}, in...), append([]string{"--"}, args...)...)...)
+	}
 	deadline := time.Now().Add(10 * time.Minute)
 	for {
-		if _, err := kubectl("", "exec", pod, "--", "test", "-f", "/done"); err == nil {
+		if _, err := run("test", "-f", "/done"); err == nil {
 			break
 		}
-		_, err := kubectl("", "exec", pod, "--", "test", "-f", "/failed")
+		_, err := run("test", "-f", "/failed")
 		if err == nil || time.Now().After(deadline) {
-			logs, _ := kubectl("", "logs", pod, "--tail=20")
-			t.Fatalf("the XtraBackup pod did not take its backup: %s", logs)
+			logs, _ := kubectl("", append([]string{"logs"}, append(in, "--tail=20")...)...)
+			t.Fatalf("XtraBackup did not take its backup: %s", logs)
 		}
 		time.Sleep(3 * time.Second)
 	}
-	list, err := kubectl("", "exec", pod, "--", "find", "/backup", "-type", "f")
+	list, err := run("find", "/backup", "-type", "f")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +300,7 @@ spec:
 		t.Fatal("the backup has no files")
 	}
 	for _, f := range files {
-		data, err := kubectl("", "exec", pod, "--", "cat", f)
+		data, err := run("cat", f)
 		if err != nil {
 			t.Fatal(err)
 		}

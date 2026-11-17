@@ -276,30 +276,34 @@ gcloud redis clusters describe orders --region=us-central1 --format='value(disco
 
 Start a cluster client (go-redis `ClusterClient`, redis-py `RedisCluster`, Lettuce, ...) from the
 `discoveryEndpoints[0]` address and port: it reads `CLUSTER SLOTS` and follows MOVED to every node.
-Each node serves clients on one port that is the same in the cluster and on the host, and
-announces the host's address to clients (`cluster-announce-client-ipv4`); the nodes gossip on
-their pod addresses (bus port 16379). A client inside the Kubernetes cluster therefore gets host
-addresses from `CLUSTER SLOTS`, which it cannot reach: in the cluster, reach the nodes by pod
-address. Valkey announces one client address per address family (`cluster-announce-client-ipv4`,
-`-ipv6`), and both the host's tunnels and the pods reach a node over IPv4, so no setting
-serves both (#1549); the discovery endpoint is the host's too. Measured again 2026-11-17 (#1614)
-on the Valkey 8.1.10 the nodes run: the announce settings are `cluster-announce-ip`,
-`-client-ipv4`, `-client-ipv6`, `-hostname`, `-human-nodename`, `-port`, `-tls-port`, `-bus-port`
-and one `cluster-preferred-endpoint-type` for every client, so a node answers every IPv4 client
-alike. A hostname both sides resolve was tried: a `*.localhost` name resolves to 127.0.0.1 through
-macOS's resolver, but Go's own resolver (the default of a `CGO_ENABLED=0` client, and Linux's)
-answers "no such host", so host clients would break; and announcing a name would also need the
-cluster's DNS to answer it. Serving both stays not built (docs/gaps.md).
+Each node serves clients on one port that is the same in the cluster and on the host; the nodes
+gossip on their pod addresses (bus port 16379).
 
-What does serve both is an address both sides reach. The nodes announce the address their host
-tunnels listen on, the instance's `--bind-address`, and a pod reaches the host's own network
-address: measured 2026-11-17 (#1614) on Docker Desktop for macOS, a pod's TCP connection to the
-host's LAN address (and to `host.docker.internal`) reached a listener on the host. An instance
-started with `--bind-address <the host's LAN address> --allow-remote` therefore announces an
-address that, by that measurement, a host client and an in-cluster client can both dial, as
-Google's discovery endpoint and node addresses are reachable from the whole VPC. It is not the
-default, and no test runs a cluster client through it end to end, because it publishes every
-endpoint of the instance on that network.
+Host clients and clients inside the Kubernetes cluster are each given addresses they reach
+(#1614), with no address on any network. On an instance bound to `127.0.0.1` (the default), each
+node binds its pod's address and `::1` only, not `127.0.0.1`; its host tunnel listens on
+`127.0.0.1` and `[::1]` at the node's port, and the kubelet's port forwarding dials the pod's
+`localhost` over IPv4 first and over IPv6 when nothing listens there, so a host client's
+connections reach the node over IPv6. Valkey announces one client address per address family, so
+each node announces `::1` to IPv6 clients (`cluster-announce-client-ipv6`): the host's clients, which
+`CLUSTER SLOTS` and MOVED send to `[::1]:PORT`, through the tunnels; and its Service's cluster IP to
+IPv4 clients (`cluster-announce-client-ipv4`): the pods', which reach the node through its Service
+(`redis-c<cluster>-<hash>-<n>.<namespace>.svc.cluster.local`, at the node's own port; the first
+node's is the discovery endpoint's). Start
+an in-cluster client from any node's Service. With in-transit encryption, a node's certificate
+names `::1` and its Service's cluster IP too. `TestMemorystoreRedisClusterHostAndPodClients`
+proves both end to end: a go-redis `ClusterClient` on the host and `valkey-cli -c` in a pod write
+and read each other's keys in every shard. A Valkey 7.2 node (`VALKEY_7_2`, #1557) has no
+per-family announce and announces the host's address alone, as the hostname.
+
+An instance started with `--bind-address <the host's LAN address> --allow-remote` announces that
+address to every client instead: a pod reached a listener on the host's LAN address (measured
+2026-11-17 on Docker Desktop for macOS), as Google's node addresses are reachable from the whole
+VPC, but it publishes every endpoint of the instance on that network. Other routes were measured
+on 2026-11-17 and not taken: a `*.localhost` hostname resolves through macOS's resolver but not
+Go's own ("no such host"); the host reaches neither `host.docker.internal` (192.168.65.254, through
+which a pod reaches the host's `127.0.0.1`) nor the kind node's Docker address; and a loopback alias
+(`sudo ifconfig lo0 alias ...`) needs root.
 
 `UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
 them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or

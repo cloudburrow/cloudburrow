@@ -155,7 +155,13 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 			}
 		}
 		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), src)
-		if ext := spec.External; ext != nil && ext.Physical && ext.PhysicalRestored && spec.MySQL() {
+		if p.scratchPhysical(spec) {
+			// An ephemeral instance's physically synced replica (#1614):
+			// its data on an emptyDir, swapped in and given its --init-file
+			// at start (sqlphysical.go).
+			b.ScratchData = true
+			b.Command = []string{"sh", "-c", physicalWrapper, "sh"}
+		} else if ext := spec.External; ext != nil && ext.Physical && ext.PhysicalRestored && spec.MySQL() {
 			// The restored copy has the source's accounts (#1570).
 			b.Args = append(append([]string{}, b.Args...), "--init-file=/var/lib/mysql/"+physicalInitFile)
 		}

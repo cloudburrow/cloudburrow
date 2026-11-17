@@ -9,6 +9,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	sqladminapi "google.golang.org/api/sqladmin/v1"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // TestCloudSQLConsoleBlueGreen (#1614): a MySQL 8.0 primary's page offers
@@ -105,5 +109,44 @@ func TestCloudSQLConsoleBlueGreen(t *testing.T) {
 	}
 	if q := calls["DELETE /v1/projects/proj/locations/us-central1/blueGreenDeployments/bg1"]; !strings.Contains(q, "deleteOldSource=true") {
 		t.Errorf("delete: %q", q)
+	}
+}
+
+// TestCloudSQLConsoleRegionalBlueGreenAndDR (#1614): a REGIONAL MySQL
+// primary's Create blue-green deployment says its green instance is
+// high-availability too, and a PostgreSQL DR replica's Switchover says the
+// primary's other read replicas stay its replicas, rebuilt.
+func TestCloudSQLConsoleRegionalBlueGreenAndDR(t *testing.T) {
+	acts := blueGreenActions(&sqladminapi.DatabaseInstance{Name: "blue", DatabaseVersion: "MYSQL_8_0",
+		Settings: &sqladminapi.Settings{AvailabilityType: "REGIONAL"}})
+	if len(acts) != 1 || acts[0].ID != "blue-green-create" || !strings.Contains(acts[0].Fields[0].Help, "high-availability (REGIONAL)") {
+		t.Errorf("a REGIONAL blue instance's actions: %+v", acts)
+	}
+	acts = blueGreenActions(&sqladminapi.DatabaseInstance{Name: "blue", DatabaseVersion: "MYSQL_8_0", Settings: &sqladminapi.Settings{}})
+	if len(acts) != 1 || strings.Contains(acts[0].Fields[0].Help, "REGIONAL") {
+		t.Errorf("a ZONAL blue instance's actions: %+v", acts)
+	}
+	acts = drActions(&sqladminapi.DatabaseInstance{Name: "r", DatabaseVersion: "POSTGRES_17", MasterInstanceName: "p:prim",
+		ReplicationCluster: &sqladminapi.ReplicationCluster{DrReplica: true}})
+	if len(acts) != 1 || acts[0].ID != "switchover" || !strings.Contains(acts[0].Confirm, "other read replicas stay its replicas") {
+		t.Errorf("a PostgreSQL DR replica's actions: %+v", acts)
+	}
+}
+
+// TestRegionalReplicaStandbyKeepsItsServer (#1614): a REGIONAL read
+// replica's standby (a green instance's) is the same server once the
+// instance is a primary, so a blue-green switchover and a failover after
+// it do not restart it, which on an ephemeral instance would lose its data.
+func TestRegionalReplicaStandbyKeepsItsServer(t *testing.T) {
+	p := &sqlProvisioner{}
+	green := sqladmin.Spec{Name: "blue-green-1", DatabaseVersion: "MYSQL_8_0", AvailabilityType: "REGIONAL", MasterInstanceName: "blue",
+		ReplicationPassword: "r", HAPassword: "h", HAEpochs: [2]int{0, 1}}
+	promoted := green
+	promoted.MasterInstanceName, promoted.ReplicationPassword = "", ""
+	if a, b := p.nodeBackend(green, 1).Manifest("ns", "i"), p.nodeBackend(promoted, 1).Manifest("ns", "i"); a != b {
+		t.Errorf("the standby's server changes when the replica becomes a primary:\n%s\n---\n%s", a, b)
+	}
+	if strings.Join(p.nodeBackend(green, 0).Args, " ") == strings.Join(p.nodeBackend(promoted, 0).Args, " ") {
+		t.Error("the replica's primary server is not a replica")
 	}
 }

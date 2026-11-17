@@ -23,6 +23,12 @@ package sqladmin
 //     is then the green server, reached through the same connection name,
 //     and the old blue server, "a standalone read and write instance",
 //     takes the green name. The servers are not restarted;
+//   - the green instance is "a clone of the blue environment": a
+//     high-availability (REGIONAL) blue instance's green instance is
+//     REGIONAL too, its primary server replicating from the blue
+//     instance's primary and its standby, in its secondary zone, from it,
+//     semi-synchronously, as a REGIONAL instance's standby does; after the
+//     switchover both instances keep their standbys;
 //   - delete before a switchover deletes the green instance; after one it
 //     deletes the record only, and the old blue instance with
 //     deleteOldSource.
@@ -255,9 +261,6 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 	case target != "" && target != spec.DatabaseVersion && (target != "MYSQL_8_4" || !strings.HasPrefix(spec.DatabaseVersion, "MYSQL_8_0")):
 		return fail(Errorf(http.StatusBadRequest, "Invalid request: requestedConfig.databaseVersion %s: major version upgrade targets are "+
 			"supported from MySQL 8.0 to 8.4 (MYSQL_8_4); %s is %s.", target, blue, spec.DatabaseVersion))
-	case spec.Regional():
-		return fail(unimplemented("a blue-green deployment of a high-availability (REGIONAL) instance",
-			"the green instance is kept in step as a read replica, and a read replica here is one server"))
 	}
 	for _, d := range s.bgs {
 		if d.Project == project && (d.Source == blue || d.Target == blue) {
@@ -292,9 +295,19 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 		return nil, err
 	}
 	gspec := Spec{Name: green, Project: project, DatabaseVersion: spec.DatabaseVersion, CreateTime: time.Now().UTC().Format(time.RFC3339Nano),
-		SettingsVersion: 1, AvailabilityType: "ZONAL", Tier: spec.Tier, Labels: maps.Clone(spec.Labels), Flags: slices.Clone(spec.Flags),
+		SettingsVersion: 1, AvailabilityType: spec.AvailabilityType, Tier: spec.Tier, Labels: maps.Clone(spec.Labels), Flags: slices.Clone(spec.Flags),
 		Settings:      maps.Clone(spec.Settings),
 		BackupEnabled: spec.BackupEnabled, Region: spec.Region, ActivationPolicy: spec.ActivationPolicy}
+	if gspec.AvailabilityType == "" {
+		gspec.AvailabilityType = "ZONAL"
+	}
+	if gspec.Regional() {
+		// The green instance mirrors a high-availability blue one: a
+		// primary server, kept in step with the blue instance, and a
+		// standby in another zone replicating from it semi-synchronously,
+		// so after the switchover the instance is as available as before.
+		gspec.HAPassword, gspec.HAEpochs[1] = newReplicationPassword(), 1
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 	err = s.prepareReplica(ctx, project, instanceBody{MasterInstanceName: blue, Region: spec.Region}, &gspec)
