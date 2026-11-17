@@ -14,7 +14,7 @@ import (
 // TestBigQueryTableStoragePhysicalAndJobColumns (#1458): region
 // TABLE_STORAGE has every column the TABLE_STORAGE page documents, the
 // physical byte columns estimated from the logical bytes (UNVERIFIED,
-// 2026-11-17: BigQuery's are compressed sizes): current_physical_bytes
+// docs re-read 2026-11-17: BigQuery's are compressed sizes): current_physical_bytes
 // the table's logical bytes, time_travel_physical_bytes those of the rows
 // a DELETE or an UPDATE replaced within the time travel window,
 // total_physical_bytes and active_physical_bytes the two added,

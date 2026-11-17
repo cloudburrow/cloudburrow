@@ -303,7 +303,7 @@ func jobRow(project string, job map[string]any, settings *projectOptions) []stri
 		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs),
 		// global_query_info: "Information about a global query"; an
 		// instance runs every query in the region it names, so no job is
-		// one (NULL, UNVERIFIED that BigQuery gives NULL, 2026-11-17).
+		// one (NULL, UNVERIFIED that BigQuery gives NULL, docs re-read 2026-11-17).
 		"NULL", copyStatisticsSQL(stats)}, statisticsValues(job, qc, qs, cache)...)
 }
 
@@ -333,7 +333,7 @@ func statisticsValues(job, qc, qs map[string]any, cache string) []string {
 // text is normalized, so CloudBurrow's is its own: the SHA-256, in hex, of
 // the query's tokens (comments and spacing gone, by the front's lexer),
 // with each string, bytes, number, TRUE, FALSE and NULL literal and each
-// query parameter written ?, keywords in capitals. UNVERIFIED, 2026-11-17:
+// query parameter written ?, keywords in capitals. UNVERIFIED, docs re-read 2026-11-17:
 // BigQuery's value differs; it is "ignores UDFs" and "will differ when
 // underlying views change" that CloudBurrow does not follow (a view's or
 // a table's schema plays no part). "" when the text does not lex.
@@ -791,7 +791,7 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 // read again 2026-11-17), in the page's order. The logical ones and
 // storage_last_modified_time: storageBytes (#1458). The physical ones are
 // estimates (physicalBytes, #1458): BigQuery's are compressed sizes, which
-// no value defines and the engine does not keep (UNVERIFIED, 2026-11-17). project_number is NULL: an instance has none.
+// no value defines and the engine does not keep (UNVERIFIED, docs re-read 2026-11-17). project_number is NULL: an instance has none.
 // total_partitions, "the number of partitions present in the table" (0
 // for a table not partitioned), counts the partitions PARTITIONS has a
 // row for (#1458): those holding rows, with __NULL__ and
@@ -900,7 +900,7 @@ func timeTravelBytesExpr(fields []field, hours int64) string {
 // time-travel (deleted or changed data) bytes"), long-term the long-term
 // logical bytes, and fail-safe 0, the front letting go of every change
 // older than the window (changehistoryretention.go), so the instance keeps
-// none past it. UNVERIFIED, 2026-11-17: estimates, not BigQuery's
+// none past it. UNVERIFIED, docs re-read 2026-11-17: estimates, not BigQuery's
 // compressed sizes (https://docs.cloud.google.com/bigquery/docs/information-schema-table-storage).
 func physicalBytes(logical, active, long, travel string) []string {
 	sum := func(a, b string) string {
