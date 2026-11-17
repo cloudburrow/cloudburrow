@@ -41,3 +41,11 @@ three MIT licence texts are in third_party/bigquery-emulator/; the licence and
 notice files of every module linked into the emulator ship in the image it
 runs from (/licenses/bigquery-emulator.txt) and, in each release archive, as
 LICENSES-bigquery-emulator.txt.
+
+internal/s2ops contains code ported from the S2 Geometry Library
+(https://github.com/google/s2geometry, commit
+677c8cebcff11ba11accc0b02005bc214e06e9fd), Copyright Google Inc., under the
+Apache License, Version 2.0: S2BufferOperation's offset curves
+(src/s2/s2buffer_operation.cc) and S2Builder::Graph's loop and polyline
+ordering (src/s2/s2builder_graph.cc). internal/s2ops/PROVENANCE.md records
+what was taken and what was changed.
