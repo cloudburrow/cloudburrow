@@ -18,6 +18,7 @@ import (
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -88,6 +89,30 @@ func (f *Docs) ListDocuments(_ context.Context, r *firestorepb.ListDocumentsRequ
 	}
 	sort.Slice(out.Documents, func(i, j int) bool { return out.Documents[i].Name < out.Documents[j].Name })
 	return out, nil
+}
+
+// RunQuery answers a query of one collection with all of its documents,
+// in name order: the query's filters and orders are not applied (the
+// MongoDB server, which reads through it, applies its own).
+func (f *Docs) RunQuery(r *firestorepb.RunQueryRequest, s firestorepb.Firestore_RunQueryServer) error {
+	q := r.GetStructuredQuery()
+	if q == nil || len(q.GetFrom()) != 1 {
+		return status.Error(codes.Unimplemented, "fstest: RunQuery of one collection only")
+	}
+	list, err := f.ListDocuments(s.Context(), &firestorepb.ListDocumentsRequest{Parent: r.GetParent(), CollectionId: q.GetFrom()[0].GetCollectionId()})
+	if err != nil {
+		return err
+	}
+	now := timestamppb.Now()
+	for _, d := range list.Documents {
+		if d.CreateTime == nil && len(d.Fields) == 0 {
+			continue // missing
+		}
+		if err := s.Send(&firestorepb.RunQueryResponse{Document: d, ReadTime: now}); err != nil {
+			return err
+		}
+	}
+	return s.Send(&firestorepb.RunQueryResponse{ReadTime: now})
 }
 
 func (f *Docs) Commit(_ context.Context, r *firestorepb.CommitRequest) (*firestorepb.CommitResponse, error) {

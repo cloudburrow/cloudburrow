@@ -108,6 +108,9 @@ type Admin struct {
 	// mongoIAM is what a MongoDB token sign-in is checked against, as the
 	// host last pushed it (mongoiam.go, #1738); nil until it does.
 	mongoIAM *MongoIAM
+	// mongoServer is the front's MongoDB server, for the console's
+	// Query Explain (mongoexplainhttp.go, #1738); nil when none runs.
+	mongoServer *MongoServer
 	// mongoIndexNames are the MongoDB names of the indexes MongoDB
 	// drivers created, by index name (mongoindex.go, #1703).
 	mongoIndexNames map[string]string
@@ -161,7 +164,7 @@ const (
 // a gRPC call to FirestoreAdmin or Operations, or a REST call under
 // /v1/projects/ that is not under a database's documents.
 func (a *Admin) Claims(r *http.Request) bool {
-	if r.URL.Path == frontstate.ResetPath || r.URL.Path == MongoIAMPath {
+	if r.URL.Path == frontstate.ResetPath || r.URL.Path == MongoIAMPath || r.URL.Path == MongoExplainPath {
 		return true
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
@@ -192,6 +195,10 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == MongoIAMPath {
 		a.serveMongoIAM(w, r)
+		return
+	}
+	if r.URL.Path == MongoExplainPath {
+		a.serveMongoExplain(w, r)
 		return
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {

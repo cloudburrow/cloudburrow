@@ -114,6 +114,7 @@ func (p firestoreDatabasesProvider) passwordListing(uc *adminpb.UserCreds) *cons
 func (p firestoreDatabasesProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
 	switch {
 	case action == "runpipeline" && len(path) == 1,
+		action == "explainquery" && len(path) == 1,
 		action == "createcreds" && len(path) == 1,
 		len(path) == 3 && path[1] == firestoreCredsSegment:
 	default:
@@ -127,6 +128,9 @@ func (p firestoreDatabasesProvider) ActAtResult(ctx context.Context, project str
 	db := p.dbName(project, path[0])
 	if action == "runpipeline" {
 		return p.runPipeline(ctx, project, path[0], values)
+	}
+	if action == "explainquery" {
+		return p.explainQuery(ctx, db, values)
 	}
 	c, err := p.client(ctx)
 	if err != nil {

@@ -168,7 +168,7 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 // indexes is a database's Indexes tab: its composite indexes, in every
 // collection group.
 func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.FirestoreAdminClient, db, id string) console.Listing {
-	list := console.Listing{Columns: []string{"Collection group", "Fields", "Query scope", "State"}, NameColumn: "Index ID", Noun: "indexes"}
+	list := console.Listing{Columns: []string{"Collection group", "Fields", "Query scope", "API scope", "State"}, NameColumn: "Index ID", Noun: "indexes"}
 	it := c.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: db + "/collectionGroups/-"})
 	for {
 		x, err := it.Next()
@@ -184,6 +184,7 @@ func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.Firest
 			"Collection group": parts[len(parts)-3],
 			"Fields":           indexFields(x.Fields),
 			"Query scope":      enumWord(x.QueryScope, ""),
+			"API scope":        apiScopeWord(x),
 			"State":            enumWord(x.State, ""),
 		},
 			// Delete index (#1343), addressed by the collection group and ID.
@@ -208,10 +209,25 @@ func indexFields(fields []*adminpb.Index_IndexField) string {
 			mode = "Array contains"
 		case f.GetVectorConfig() != nil:
 			mode = fmt.Sprintf("Vector (%d)", f.GetVectorConfig().GetDimension())
+		case f.GetSearchConfig().GetTextSpec() != nil:
+			mode = "Text"
 		}
 		out = append(out, f.FieldPath+" "+mode)
 	}
 	return strings.Join(out, ", ")
+}
+
+// apiScopeWord is an index's API scope as the console shows it, with a
+// text index's language (#1738).
+func apiScopeWord(x *adminpb.Index) string {
+	w := "Any API"
+	if x.GetApiScope() == adminpb.Index_MONGODB_COMPATIBLE_API {
+		w = "MongoDB compatible API"
+	}
+	if l := x.GetSearchIndexOptions().GetTextLanguage(); l != "" {
+		w += ", text language " + l
+	}
+	return w
 }
 
 // fields is a database's Field overrides tab: the fields with index

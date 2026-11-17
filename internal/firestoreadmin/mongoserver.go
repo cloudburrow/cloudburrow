@@ -86,7 +86,11 @@ type mongoCursor struct {
 // writes through the Firestore documents API at upstream: the front's own
 // port, so its writes are kept as every other call's are.
 func (a *Admin) NewMongoServer(upstream string, logf func(string, ...any)) *MongoServer {
-	return &MongoServer{a: a, upstream: upstream, logf: logf, cursors: map[int64]*mongoCursor{}, sessions: map[string]*mongoSession{}}
+	s := &MongoServer{a: a, upstream: upstream, logf: logf, cursors: map[int64]*mongoCursor{}, sessions: map[string]*mongoSession{}}
+	a.mu.Lock()
+	a.mongoServer = s
+	a.mu.Unlock()
+	return s
 }
 
 func (s *MongoServer) docs() (firestorepb.FirestoreClient, error) {
