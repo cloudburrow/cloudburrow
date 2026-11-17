@@ -47,7 +47,7 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 	p.clickText("#view button.primary", "Create database")
 	p.waitFor(`document.querySelector(".modal #f-database") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-database`), name))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+name)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))

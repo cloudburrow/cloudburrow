@@ -67,7 +67,7 @@ func TestBigQueryHiveAndGeoJSONLoadsThroughTheForm(t *testing.T) {
 		for f, v := range values {
 			p.setField(".modal #f-"+f, v)
 		}
-		p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector("#action-result-table a") !== null ||
 			[...document.querySelectorAll(".modal .form-error")].some((e) => !e.hidden && e.textContent)`)
 		var refusal string

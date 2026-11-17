@@ -153,7 +153,7 @@ func TestBigtableDeleteRowsByPrefixAndAllRowsThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Delete rows by prefix")
 	p.waitFor(`document.querySelector(".modal #f-prefix") !== null`)
 	p.setField(".modal #f-prefix", "a")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal #confirm-input") !== null`)
 	if sent := p.sent(http.MethodPost, "/api/actions/bigtable"); len(sent) != 0 {
 		t.Fatalf("Delete rows by prefix was sent before it was confirmed: %v", sent)
@@ -204,8 +204,8 @@ func TestBigtableDeletionProtectionRefusesDeleteTableThroughTheBrowser(t *testin
 	if openForm() {
 		t.Error("Edit deletion protection opens checked on an unprotected table")
 	}
-	p.run(chromedp.Click(chromedp.CSS(`.modal #f-protected`)))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-protected`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	info, err := admin.TableInfo(ctx, table)
 	if err != nil {
@@ -261,7 +261,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 		t.Errorf("Increment's amount is prefilled %q, want 1", prefill)
 	}
 	p.setField(".modal #f-amount", "3")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if v := bigtableLatest(t, client, table, "r1")["cf:n"]; len(v) != 8 || binary.BigEndian.Uint64(v) != 8 {
 		t.Errorf("after Increment by 3, the data client reads cf:n %v, want the integer 8", v)
@@ -273,7 +273,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 	p.cellMenu("cf:s", "Append value")
 	p.waitFor(`document.querySelector(".modal #f-value") !== null`)
 	p.setField(".modal #f-value", "cd")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if v := string(bigtableLatest(t, client, table, "r1")["cf:s"]); v != "abcd" {
 		t.Errorf("after Append value cd, the data client reads cf:s %q, want abcd", v)
@@ -282,7 +282,7 @@ func TestBigtableIncrementAndAppendValueThroughTheBrowser(t *testing.T) {
 
 	p.cellMenu("cf:s", "Increment")
 	p.waitFor(`document.querySelector(".modal #f-amount") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	if refusal := p.modalRefusal(); !strings.Contains(refusal, "non-64-bit") {
 		t.Errorf("Increment on a text cell was answered %q, want the emulator's refusal", refusal)
 	}

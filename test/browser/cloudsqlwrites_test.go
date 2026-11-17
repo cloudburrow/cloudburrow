@@ -91,7 +91,7 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 			statement(create)
 			before := len(p.posts("/api/query/" + engine.service))
 			p.clickText("#view .query-pane button.primary", "Run statement")
-			p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
+			p.waitFor(`document.querySelector(".modal.is-open #dml-confirm-title") !== null`)
 			var confirm struct{ Title, Statement, Button string }
 			p.eval(`({ Title: document.querySelector("#dml-confirm-title").textContent,
 				Statement: document.querySelector(".modal pre").textContent,

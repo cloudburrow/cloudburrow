@@ -57,7 +57,7 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 	openCreate()
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-name`), "browser-schema"))
 	setDefinition(`{"type":"record"`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal .form-error") !== null && !document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -76,7 +76,7 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 
 	// The same form, corrected: the schema is created and listed.
 	setDefinition(`{"type":"record","name":"Burrow","fields":[{"name":"name","type":"string"}]}`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+schema)
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) !== null`, row))
 	if posts := p.posts(created); len(posts) != 2 {

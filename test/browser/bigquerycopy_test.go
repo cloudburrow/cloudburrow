@@ -62,7 +62,7 @@ func TestBigQueryCopyTableAndAvroExportThroughTheForms(t *testing.T) {
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-datasetId`), ds))
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-tableId`), "all"))
 	p.setField(".modal #f-moreSources", ds+".b")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	var link struct{ Text, Href string }
 	p.eval(`(() => { const a = document.querySelector("#action-result-table a");
@@ -87,7 +87,7 @@ func TestBigQueryCopyTableAndAvroExportThroughTheForms(t *testing.T) {
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-uri`), "gs://"+bucket+"/all.avro"))
 	p.setField(".modal #f-format", "AVRO")
 	p.setField(".modal #f-compression", "DEFLATE")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	p.eval(`[...document.querySelectorAll("#action-result-table td")].map((c) => c.textContent)`, &cells)
 	if len(cells) != 3 || cells[1] != "Succeeded" || cells[2] != "1" {

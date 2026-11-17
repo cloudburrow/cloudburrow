@@ -173,7 +173,7 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-temporaryHold") !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-temporaryHold`)))
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-customTime`), "2026-01-02T15:04:05Z"))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	v = url.Values{"project": {project}, "name": {"_details", bucket, "docs/a.txt"}}
 	_, body = consoleDo(t, http.MethodGet, "/api/detail/storage?"+v.Encode(), "")
@@ -209,7 +209,7 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	if !strings.Contains(help, "/_cloudburrow/lifecycle") || !strings.Contains(help, "not a Google Cloud call") {
 		t.Errorf("Run lifecycle now's form says %q", help)
 	}
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result") !== null`)
 	var result string
 	p.eval(`document.querySelector("#action-result").textContent`, &result)
