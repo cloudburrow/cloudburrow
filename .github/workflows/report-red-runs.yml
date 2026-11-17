@@ -8,7 +8,8 @@ name: Report red runs
 # nightly differential oracles, the nightly dependency discovery, and the
 # CLI integration (push to main) and Offline (nightly) workflows of #685, the
 # linux/arm64 nightly (#689), Functions build (#678), which runs only by
-# hand, and ONNX build (#41, push to main and nightly).
+# hand, ONNX build (#41, push to main and nightly), and the Upgrade test
+# (#1714, nightly).
 #
 # This workflow watches them by their `name:` and, for a run on main (a push,
 # or a run dispatched by hand on main, the only way Functions build runs) or
@@ -37,6 +38,7 @@ on:
       - linux/arm64 nightly
       - Functions build
       - ONNX build
+      - Upgrade test
     types: [completed]
 
 permissions: {}
