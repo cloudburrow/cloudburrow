@@ -22,8 +22,9 @@ import (
 // none): a JSON upload with a schema, a CSV with autodetect, a Parquet
 // load (ingestion-time partitioned) and an Avro one (from Cloud Storage),
 // WRITE_TRUNCATE into a new table too; a load that fails leaves no table;
-// a table that exists keeps its own properties. ORC and DATASTORE_BACKUP
-// are 501 (hivePartitioningOptions and GEOJSON: bigqueryloadvariants_test.go).
+// a table that exists keeps its own properties. DATASTORE_BACKUP is 501
+// (ORC: bigqueryorcload_test.go; hivePartitioningOptions and GEOJSON:
+// bigqueryloadvariants_test.go).
 //
 // covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.get, bigquery.jobs.query
 func TestBigQueryLoadMakesItsTableWithItsProperties(t *testing.T) {
@@ -149,12 +150,11 @@ func TestBigQueryLoadMakesItsTableWithItsProperties(t *testing.T) {
 		t.Errorf("the existing table: %+v %q", md.Clustering, md.Description)
 	}
 
-	// 501: ORC, DATASTORE_BACKUP.
+	// 501: DATASTORE_BACKUP.
 	for _, tc := range []struct {
 		what string
 		load *bq.JobConfigurationLoad
 	}{
-		{"ORC", &bq.JobConfigurationLoad{SourceFormat: "ORC"}},
 		{"DATASTORE_BACKUP", &bq.JobConfigurationLoad{SourceFormat: "DATASTORE_BACKUP"}},
 	} {
 		tc.load.DestinationTable = &bq.TableReference{ProjectId: project, DatasetId: ds.DatasetID, TableId: "refused"}
