@@ -3773,7 +3773,7 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -3784,7 +3784,7 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -3803,7 +3803,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -3836,7 +3836,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -3845,7 +3845,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM"
         ]
       },
       {
@@ -3867,7 +3867,7 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch10_test.go:93 TestTerraformOrganizationIAMAuditConfig",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
@@ -3891,7 +3891,7 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch10_test.go:93 TestTerraformOrganizationIAMAuditConfig"
         ]
       },
@@ -3899,7 +3899,7 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM"
         ]
       },
       {
@@ -3920,10 +3920,11 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:203 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
           "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
@@ -3965,8 +3966,9 @@
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
@@ -3975,8 +3977,8 @@
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
+          "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM"
         ]
       },
       {
@@ -4308,7 +4310,7 @@
         "method": "cloudresourcemanager.organizations.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
@@ -4348,7 +4350,7 @@
         "method": "cloudresourcemanager.organizations.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
@@ -4365,7 +4367,7 @@
         "method": "cloudresourcemanager.organizations.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM"
         ]
       },
       {
@@ -4380,7 +4382,7 @@
         "method": "cloudresourcemanager.projects.create",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
           "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
@@ -4390,7 +4392,7 @@
         "method": "cloudresourcemanager.projects.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
@@ -4399,7 +4401,7 @@
         "method": "cloudresourcemanager.projects.get",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
           "test/compat/terraform_batch10_test.go:460 TestTerraformResourceManagerDataSources"
@@ -4427,9 +4429,10 @@
         "method": "cloudresourcemanager.projects.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:203 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
           "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
@@ -4468,9 +4471,10 @@
         "method": "cloudresourcemanager.projects.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:203 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus",
           "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
@@ -4489,7 +4493,7 @@
         "method": "cloudresourcemanager.projects.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM"
         ]
       },
       {
