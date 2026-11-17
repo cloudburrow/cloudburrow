@@ -50,7 +50,6 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/linkedin/goavro/v2 v2.15.0
-	github.com/oops1/go.264 v1.14.0
 	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.72.1
 	github.com/redis/go-redis/v9 v9.23.0
@@ -93,7 +92,6 @@ require (
 	github.com/docker/cli v29.6.0+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
-	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
 	github.com/golang/glog v1.2.5 // indirect

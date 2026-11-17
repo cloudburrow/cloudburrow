@@ -749,7 +749,7 @@ pure Go or WebAssembly. The candidates on the Go module proxy, compared on 2026-
 | Need | Module | Version | Licence | cgo | Covers | Verdict |
 |---|---|---|---|---|---|---|
 | MP4/MOV demuxing | `github.com/Eyevinn/mp4ff` | v0.63.0 (2026-11-13) | MIT | none | progressive and fragmented ISO BMFF, `avcC`, `hvcC`, edit lists | **Adopted** (its only requirement, `go-test/deep`, is for its tests) |
-| H.264 | `github.com/oops1/go.264` | v1.14.0 (2026-11-10) | BSD 2-Clause | none (hardware paths load libraries through `ebitengine/purego`, which CloudBurrow turns off with `ForceSoftware`) | High profile, CABAC and CAVLC, P and B slices, weighted prediction, progressive 8-bit 4:2:0; bit-exact against ffmpeg on 29 clips (its claim) | **Adopted**: measured bit-exact here too (70 dB PSNR, the YUV-to-RGB rounding, against ffmpeg on the model card's 720p High-profile clip with B-frames) |
+| H.264 | `github.com/oops1/go.264` | v1.14.0 (2026-11-10) | BSD 2-Clause | none, but its Linux hardware encoders import `ebitengine/purego`, which links libc dynamically into a `CGO_ENABLED=0` Linux binary | High profile, CABAC and CAVLC, P and B slices, weighted prediction, progressive 8-bit 4:2:0; bit-exact against ffmpeg on 29 clips (its claim) | **Adopted**, copied into `third_party/go264` (its sources less `hwaccel_linux.go` and the NVENC and VA-API backends, imports rewritten, so every build stays static without `-tags go264_nohwaccel` and `go install ...@latest` still works; `TestLinuxBinariesNeverImportPurego`): measured bit-exact here too (70 dB PSNR, the YUV-to-RGB rounding, against ffmpeg on the model card's 720p High-profile clip with B-frames) |
 | H.264 | `github.com/go-avkit/h264` | v0.10.0 | BSD 3-Clause | none | go.264's decoder imported, 69 of 73 JVT streams | Rejected: its `go.mod` needs Go 1.27.1, and CloudBurrow builds with Go 1.26 |
 | H.264 | `github.com/Eyevinn/hi264` | v0.12.3 | MIT | none | IDR and P_Skip only | Rejected: "full P/B-frame decoding is out of scope" |
 | H.265 | `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | none | HEVC v1 and range extensions (8–16 bit, all chroma formats), inter prediction, open GOPs; byte-exact on the JCT-VC conformance suite (its claim) | **Adopted**: measured bit-exact against ffmpeg here (70 dB PSNR) on an x265 MOV with B-frames and a CRA with RASL pictures; raises `go.mod`'s `go` line to 1.26.4 |
@@ -769,5 +769,5 @@ embedded. `document_ocr` reads the text PDFium finds on each page, which is the 
 PDF holds; CloudBurrow has no OCR engine, so a PDF with no text on any page (a scan) is refused
 with `document_ocr` rather than embedded without the text Google would have read. A video's audio
 track (`audio_track_extraction`) stays refused: an MP4's audio is AAC, which none of these decode.
-`govulncheck ./...` reports nothing for any of them. `go mod tidy` added `tetratelabs/wazero`,
-`jolestar/go-commons-pool/v2` and `ebitengine/purego` as indirect requirements.
+`govulncheck ./...` reports nothing for any of them. `go mod tidy` added `tetratelabs/wazero` and
+`jolestar/go-commons-pool/v2` as indirect requirements.

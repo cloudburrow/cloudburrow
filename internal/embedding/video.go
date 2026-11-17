@@ -12,8 +12,8 @@ import (
 
 	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/mp4ff/mp4"
+	go264 "github.com/cloudburrow/cloudburrow/third_party/go264"
 	"github.com/gen2brain/h265/hevc"
-	go264 "github.com/oops1/go.264"
 )
 
 // Video for EmbeddingGemma 2 (#1722), as Google documents it for
@@ -27,8 +27,9 @@ import (
 // prepares it.
 //
 // The container is read with github.com/Eyevinn/mp4ff (MIT). H.264 is
-// decoded with github.com/oops1/go.264 (BSD 2-Clause; High profile,
-// progressive, 8-bit 4:2:0) and H.265 with github.com/gen2brain/h265 (MIT),
+// decoded with github.com/oops1/go.264 (copied into third_party/go264,
+// BSD 2-Clause; High profile, progressive, 8-bit 4:2:0) and H.265 with
+// github.com/gen2brain/h265 (MIT),
 // both pure Go. VP9 and AV1, which Google also takes, are refused: the only
 // complete pure-Go VP9 decoder (github.com/thesyncim/govpx) needs Go 1.27,
 // and no complete AV1 decoder without cgo exists (docs/upstream-evaluation.md).
