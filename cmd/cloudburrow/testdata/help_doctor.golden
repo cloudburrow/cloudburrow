@@ -71,6 +71,8 @@ Flags:
     	Datastore emulator host port (0 = OS-assigned; default 9011)
   -port-firestore int
     	Firestore emulator host port (0 = OS-assigned; default 9010)
+  -port-firestore-mongodb int
+    	Firestore with MongoDB compatibility host port, the MongoDB wire protocol (0 = OS-assigned; default 9025)
   -port-ingress int
     	host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)
   -port-kms int

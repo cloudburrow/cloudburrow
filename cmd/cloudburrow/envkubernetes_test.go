@@ -82,6 +82,8 @@ func TestEnvKubernetesListsTheInClusterAddressOfEveryEnabledService(t *testing.T
 				want["CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT"] = addr
 			case key == "spanner-rest":
 				want["CLOUDBURROW_SPANNER_REST_ENDPOINT"] = "http://" + addr
+			case key == "firestore-mongodb":
+				want["CLOUDBURROW_FIRESTORE_MONGODB_ENDPOINT"] = addr
 			}
 		}
 	}

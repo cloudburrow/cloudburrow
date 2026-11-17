@@ -22,11 +22,13 @@ func TestWhichTunnelsAreGuarded(t *testing.T) {
 		"bigquery-storage": false,
 		"spanner":          false,
 		"spanner-rest":     true, // Spanner's REST API on 9020 (#1331)
-		"bigtable":         false,
-		"storage":          false,
-		"cloudsql":         false,
-		"cloudsql-mysql":   false,
-		"memorystore":      false,
+		// The MongoDB wire protocol (#1703), which no browser sends.
+		"firestore-mongodb": false,
+		"bigtable":          false,
+		"storage":           false,
+		"cloudsql":          false,
+		"cloudsql-mysql":    false,
+		"memorystore":       false,
 	}
 	seen := map[string]bool{}
 	for _, s := range cfg.EnabledServices() {

@@ -105,6 +105,9 @@ type Admin struct {
 	seen map[string]bool
 	// userCreds by name (usercreds.go, #1500).
 	userCreds map[string]*creds
+	// mongoIndexNames are the MongoDB names of the indexes MongoDB
+	// drivers created, by index name (mongoindex.go, #1703).
+	mongoIndexNames map[string]string
 
 	// storage is the instance's Cloud Storage, for exports and imports.
 	storage string
@@ -133,6 +136,8 @@ func New(emulator string) *Admin {
 		lastBackup: map[string]time.Time{},
 		seen:       map[string]bool{},
 		userCreds:  map[string]*creds{},
+
+		mongoIndexNames: map[string]string{},
 	}
 	a.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(a.persistAfter))
 	adminpb.RegisterFirestoreAdminServer(a.grpc, a)

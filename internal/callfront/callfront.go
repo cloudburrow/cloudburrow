@@ -218,6 +218,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	documentsDir := fs.String("firestore-documents", "", "directory the Firestore emulator's documents are exported to and imported from (#1615), shared with the emulator's container")
 	documentsFresh := fs.Bool("firestore-documents-fresh", false, "discard the exports an earlier front made (ephemeral mode)")
 	exportInterval := fs.Duration("firestore-export-interval", 30*time.Second, "how often the Firestore emulator's documents are exported while calls write")
+	// Firestore with MongoDB compatibility (#1703): the MongoDB wire
+	// protocol for the Admin API's Enterprise edition databases.
+	mongoListen := fs.String("mongodb-listen", "", "address the front serves Firestore with MongoDB compatibility's wire protocol on (needs --firestore-admin)")
 	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API or the Spanner front keeps its state in")
 	// The named Datastore databases calls name, which the emulator cannot
 	// list, kept for the project's purge (#1550).
@@ -230,6 +233,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if fs.NArg() > 0 || *listen == "" || *upstream == "" || (*restListen == "") != (*restUpstream == "") {
 		fmt.Fprintln(stderr, "call-front: --listen and --upstream are required, --rest-listen and --rest-upstream go together, and nothing else")
+		return ErrUsage
+	}
+	if *mongoListen != "" && !*firestoreAdmin {
+		fmt.Fprintln(stderr, "call-front: --mongodb-listen needs --firestore-admin")
 		return ErrUsage
 	}
 	if *queries != "" && *queries != "datastore" && *queries != "firestore" {
@@ -275,6 +282,22 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		fa.Start(ctx)
 		icpts = append(icpts, fa)
+		if *mongoListen != "" {
+			ml, err := net.Listen("tcp", *mongoListen)
+			if err != nil {
+				return fmt.Errorf("listen on %s: %w", *mongoListen, err)
+			}
+			// Its documents calls go through this front's own port, so
+			// they are logged, gated and exported as every other call.
+			_, port, _ := net.SplitHostPort(*listen)
+			ms := fa.NewMongoServer(net.JoinHostPort("127.0.0.1", port), logger.Printf)
+			go func() {
+				if err := ms.Serve(ctx, ml); err != nil {
+					logger.Printf("firestore mongodb: %v", err)
+				}
+			}()
+			logger.Printf("call front: serving Firestore with MongoDB compatibility on %s", ml.Addr())
+		}
 	}
 	if *spannerInstances {
 		si, err := spannerfront.New(*upstream)

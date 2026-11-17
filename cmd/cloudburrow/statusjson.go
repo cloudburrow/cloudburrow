@@ -128,6 +128,8 @@ func componentsOf(s config.Service) []string {
 		return []string{"components", "forward:bigquery", "forward:bigquery-storage"}
 	case config.ServiceSpanner:
 		return []string{"components", "forward:spanner", "forward:spanner-rest"}
+	case config.ServiceFirestore:
+		return []string{"components", "forward:firestore", "forward:firestore-mongodb"}
 	default:
 		return []string{"components", "forward:" + string(s)}
 	}

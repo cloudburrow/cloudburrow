@@ -923,6 +923,19 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		HostPort:    hostPort,
 		Guarded:     guardedTunnel(s),
 	}}
+	if s == config.ServiceFirestore {
+		// Firestore with MongoDB compatibility (#1703), the same Service
+		// on a second port, which the call front serves itself. It is
+		// the MongoDB wire protocol, not HTTP, so it is left raw, as
+		// Memorystore's and Cloud SQL's are.
+		out = append(out, netfwd.Target{
+			Name:        string(s),
+			Label:       "firestore-mongodb",
+			Namespace:   cfg.Cluster.Namespace,
+			ServicePort: components.FirestoreMongoDBPort,
+			HostPort:    cfg.Endpoints.FirestoreMongoDB,
+		})
+	}
 	if s == config.ServiceSpanner {
 		// Spanner's REST API (#1331), the same Service on a second port,
 		// which the call front in the pod serves (#1288) into the same
@@ -1213,6 +1226,8 @@ func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoi
 		return []configuredEndpoint{{"bigquery", e.BigQuery}, {"bigquery-storage", e.BigQueryStorage}}
 	case config.ServiceSpanner:
 		return []configuredEndpoint{{"spanner", e.Spanner}, {"spanner-rest", e.SpannerREST}}
+	case config.ServiceFirestore:
+		return []configuredEndpoint{{"firestore", e.Firestore}, {"firestore-mongodb", e.FirestoreMongoDB}}
 	default:
 		return []configuredEndpoint{{string(s), e.OptionalPort(s)}}
 	}

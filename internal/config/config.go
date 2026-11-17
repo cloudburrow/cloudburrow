@@ -287,6 +287,9 @@ type Endpoints struct {
 	// admin among it, which the Terraform provider uses (#1331); the official
 	// client libraries use Spanner's gRPC port.
 	SpannerREST int `json:"spannerREST"`
+	// FirestoreMongoDB is Firestore with MongoDB compatibility's wire
+	// protocol (#1703), a second port of the Firestore pod's front.
+	FirestoreMongoDB int `json:"firestoreMongoDB"`
 	// BigQuery is the REST API; BigQueryStorage the gRPC Storage Read API,
 	// which the Go client's result iterator uses for large reads.
 	BigQuery        int `json:"bigquery"`
@@ -364,6 +367,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"bigtable", &e.Bigtable},
 		{"spanner", &e.Spanner},
 		{"spanner-rest", &e.SpannerREST},
+		{"firestore-mongodb", &e.FirestoreMongoDB},
 		{"bigquery", &e.BigQuery},
 		{"bigquery-storage", &e.BigQueryStorage},
 		{"memorystore", &e.Memorystore},
@@ -725,6 +729,9 @@ func Default() Config {
 			ServiceUsage: 9023,
 			// The Backup and DR Service (#1433): the next free port.
 			BackupDR: 9024,
+			// Firestore with MongoDB compatibility (#1703): the next free
+			// port.
+			FirestoreMongoDB: 9025,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
