@@ -1,6 +1,6 @@
 module github.com/cloudburrow/cloudburrow
 
-go 1.26.4
+go 1.26.5
 
 require (
 	cloud.google.com/go v0.123.0
@@ -38,6 +38,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
+	github.com/gen2brain/gav1d v0.2.7
 	github.com/gen2brain/h265 v0.2.5
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/golang/geo v0.0.0-20261029132150-f51d36688936
@@ -46,8 +47,8 @@ require (
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
-	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/kazzmir/opus-go v1.7.0
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/prometheus/client_model v0.6.3
@@ -55,7 +56,6 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/scritchley/orc v0.0.0-20210513144143-06dddf1ad665
-	github.com/tetratelabs/wazero v1.12.0
 	github.com/tink-crypto/tink-go-gcpkms/v2 v2.4.0
 	github.com/tink-crypto/tink-go/v2 v2.9.0
 	github.com/yalue/onnxruntime_go v1.36.0
@@ -110,6 +110,7 @@ require (
 	github.com/substrait-io/substrait v0.87.0 // indirect
 	github.com/substrait-io/substrait-go/v8 v8.1.1 // indirect
 	github.com/substrait-io/substrait-protobuf/go v0.85.0 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/twmb/avro v1.8.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect

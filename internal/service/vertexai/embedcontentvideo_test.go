@@ -48,6 +48,13 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 	if len(e.in.Parts) != 1 || len(e.in.Parts[0].Video) != 3 {
 		t.Fatalf("video: embedder got %d parts, %d frames; want 1 video of 3 frames", len(e.in.Parts), len(e.in.Parts[0].Video))
 	}
+	// VP9 and AV1 (#1731).
+	for _, f := range []string{"turtle-vp9.mp4", "turtle-av1.mp4"} {
+		post(`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, f)) + `]}}`)
+		if len(e.in.Parts) != 1 || len(e.in.Parts[0].Video) != 3 {
+			t.Fatalf("%s: embedder got %d parts; want 1 video of 3 frames", f, len(e.in.Parts))
+		}
+	}
 	post(`{"content":{"parts":[{"text":"a turtle"},` + inline("video/quicktime", mov) + `]}}`)
 	if len(e.in.Parts) != 2 || e.in.Parts[0].Text != "a turtle" || len(e.in.Parts[1].Video) != 3 {
 		t.Fatalf("text and MOV: embedder got %+v", e.in.Parts)
@@ -72,8 +79,7 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 
 	for name, c := range map[string]struct{ body, want string }{
 		"two videos": {`{"content":{"parts":[` + inline("video/mp4", video) + `,` + inline("video/mp4", video) + `]}}`, "at most 1 video"},
-		"vp9":        {`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, "turtle-vp9.mp4")) + `]}}`, "VP9"},
-		"av1":        {`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, "turtle-av1.mp4")) + `]}}`, "AV1"},
+		"vp9 10-bit": {`{"content":{"parts":[` + inline("video/mp4", testdataB64(t, "turtle-vp9-10bit.mp4")) + `]}}`, "VP9 profile 2"},
 		"fps":        {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + video + `"},"videoMetadata":{"fps":25}}]}}`, "(0.0, 24.0]"},
 		"frames":     {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + video + `"},"videoMetadata":{"fps":24,"endOffset":"200s"}}]}}`, ""},
 		"two pdfs":   {`{"content":{"parts":[` + inline("application/pdf", pdf) + `,` + inline("application/pdf", pdf) + `]}}`, "at most 1 PDF"},
@@ -90,6 +96,56 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 			}
 			continue
 		}
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {
+			t.Errorf("%s: status %d, want 400 naming %q: %s", name, rec.Code, c.want, rec.Body)
+		}
+	}
+}
+
+// TestEmbedContentAudioTrackExtraction (#1732): with
+// embed_content_config.audio_track_extraction, a video's audio track is a
+// clip of its own right after its frames, between video_metadata's offsets;
+// a video with no sound track is its frames alone; the track counts
+// against the request's 180 seconds of audio.
+func TestEmbedContentAudioTrackExtraction(t *testing.T) {
+	s := NewServer(nil)
+	e := &audioEmbedder{}
+	s.SwapModelEmbedder(localai.EmbeddingGemma2ONNXID, e, nil)
+	post := func(body string) {
+		t.Helper()
+		if rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, body); rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body)
+		}
+	}
+	aac := testdataB64(t, "va-aac.mp4")
+	post(`{"content":{"parts":[{"text":"a clip"},{"inlineData":{"mimeType":"video/mp4","data":"` + aac + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 3 || e.in.Parts[0].Text != "a clip" || len(e.in.Parts[1].Video) != 1 || len(e.in.Parts[2].Audio) != 24000 {
+		t.Fatalf("video with its audio track: embedder got %d parts, want text, 1 frame and 24000 samples", len(e.in.Parts))
+	}
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + aac + `"},"videoMetadata":{"startOffset":"0.5s","endOffset":"1s"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 2 || len(e.in.Parts[1].Audio) != 8000 {
+		t.Fatalf("0.5s to 1s: embedder got %d parts, want the frame and 8000 samples", len(e.in.Parts))
+	}
+	// Off (Google's default), the frames alone.
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + aac + `"}}]}}`)
+	if len(e.in.Parts) != 1 || e.in.Parts[0].Video == nil {
+		t.Fatalf("without audio_track_extraction: embedder got %d parts", len(e.in.Parts))
+	}
+	// An Opus track (#1739), 1.5 s at 48 kHz, resampled to 16 kHz.
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-opus.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 2 || len(e.in.Parts[1].Audio) != 24000 {
+		t.Fatalf("Opus track: embedder got %d parts, want the frames and 24000 samples", len(e.in.Parts))
+	}
+	// No sound track: the frames alone.
+	post(`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-silent.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`)
+	if len(e.in.Parts) != 1 || e.in.Parts[0].Video == nil {
+		t.Fatalf("no sound track: embedder got %d parts", len(e.in.Parts))
+	}
+	for name, c := range map[string]struct{ body, want string }{
+		"he-aac": {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + testdataB64(t, "va-heaac.mp4") + `"}}]},"embedContentConfig":{"audioTrackExtraction":true}}`,
+			`audio_track_extraction: the video's audio track: it is HE-AAC (SBR), which is not decoded`},
+	} {
+		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, c.body)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {
 			t.Errorf("%s: status %d, want 400 naming %q: %s", name, rec.Code, c.want, rec.Body)
 		}

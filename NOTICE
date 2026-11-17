@@ -31,17 +31,19 @@ under the Apache License, Version 2.0, and with its dependencies
 github.com/golang/glog (Apache License, Version 2.0) and gonum.org/v1/gonum,
 Copyright The Gonum Authors, under the BSD 3-Clause License.
 
-The binary embeds the WebAssembly AVIF decoder of gen2brain/avif v0.6.0
-(https://github.com/gen2brain/avif), Copyright (c) 2024 gen2brain, under the
-MIT License: libavif, Copyright 2019 Joe Drago, and dav1d, Copyright
-2018-2019 VideoLAN and dav1d authors, under the BSD 2-Clause License; aom,
-Copyright (c) 2016 Alliance for Open Media, under the BSD 2-Clause License;
-and libyuv, Copyright The LibYuv Project Authors, under the BSD 3-Clause
-License, compiled together to WebAssembly. It runs on
-github.com/tetratelabs/wazero, under the Apache License, Version 2.0. The Go
-glue and the blob are in internal/avif with the licence texts gen2brain/avif
-ships; third_party/avif/PROVENANCE.md records where each file comes from and
-what was removed.
+The binary is linked with gen2brain/gav1d v0.2.7
+(https://github.com/gen2brain/gav1d), a pure Go port of dav1d that decodes
+AVIF images and AV1 video, Copyright (c) 2018-2025 VideoLAN and dav1d
+authors and Copyright (c) 2016 Alliance for Open Media, under the BSD 2-Clause
+License, with the Alliance for Open Media Patent License 1.0 its PATENTS file
+carries. (AVIF was decoded until #1736 by libavif, dav1d, aom and libyuv
+compiled to WebAssembly; none of them is in the binary now.)
+
+The binary is linked with a copy of thesyncim/govpx
+(https://github.com/thesyncim/govpx), a pure Go port of libvpx's VP9 decoder,
+under the BSD 3-Clause License, with libvpx's BSD 3-Clause licence and patent
+grant (Copyright (c) 2010, The WebM Project authors); third_party/govpx holds
+the texts and PROVENANCE.md records what was copied and changed.
 
 The binary embeds builds of goccy/bigquery-emulator v0.8.1
 (https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki

@@ -646,7 +646,7 @@
         "version": "v1.12.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723), and that runs the vendored AVIF decoder (#1729, internal/avif), which made it a direct requirement; no cgo and no dependencies beyond golang.org/x/sys, already required at the same version."
+        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723); an indirect requirement again since #1736, when AVIF moved from a vendored WebAssembly decoder to gen2brain/gav1d; no cgo and no dependencies beyond golang.org/x/sys, already required at the same version."
       },
       "goH265": {
         "module": "github.com/gen2brain/h265",
@@ -654,27 +654,6 @@
         "license": "MIT",
         "verification": "go.sum",
         "notes": "Vertex AI EmbedContent's HEIC and HEIF images (#1724, internal/embedding/heic.go), approved by the maintainer 2026-11-17: a pure Go HEVC decoder and HEIF container reader, no cgo and no dependencies. Its go.mod needs go 1.26.4, which raised CloudBurrow's go line. Chosen over gen2brain/heic and gen2brain/avif, which import purego and so link libc dynamically into a CGO_ENABLED=0 Linux binary (docs/upstream-evaluation.md, #1724); AVIF is served by the vendored WebAssembly path of gen2brain/avif (goAVIFVendored, #1729)."
-      },
-      "goAVIFVendored": {
-        "module": "github.com/gen2brain/avif",
-        "version": "v0.6.0",
-        "source": "https://github.com/gen2brain/avif",
-        "commit": "1fd2a9a51895ca03a192dd49917840794c8a77a1",
-        "moduleSum": "h1:/8WSgcU+IEF0jhKYsUZ/mzlziFuTeJFpIKBj2siTQps=",
-        "license": "MIT; the WebAssembly blob: libavif BSD-2-Clause, dav1d BSD-2-Clause, aom BSD-2-Clause, libyuv BSD-3-Clause",
-        "redistribution": "vendored-modified",
-        "files": {
-          "internal/avif/avif.go": "sha256:5211d811be32260ec6c991308a2bc2646dd9f2c04838d26362074019e36e7462",
-          "internal/avif/avif_wazero.go": "sha256:b02291fe9bcc0bb0f89d42fface8df63fd6130fecf3c53df19e9b9f8d5a59e2a",
-          "internal/avif/isobmff.go": "sha256:b8db4004e6e429f7c75cfd6c8613df8024a4e5ef3d2d3d852dcf4e8a223fd006",
-          "internal/avif/orientation.go": "sha256:18ebce9fc39f7728193ff9132c4af0f94237bf9323b5295e4c379b60529fee27",
-          "internal/avif/lib/avif.wasm.gz": "sha256:92ffd604d276359c2df829effc615cd9f286c36ece5761644929e4396eb97360",
-          "internal/avif/LICENSE": "sha256:7ccd0e2f82eac9b87608576a9e559567f1ba049bebe709135eef3a9661bbc96e",
-          "internal/avif/lib/LICENSE.libavif": "sha256:10952217a6d404de8bf8a997fbea9b88f682df1fe98cb9b9f467ade641525639",
-          "internal/avif/lib/LICENSE.aom": "sha256:4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2"
-        },
-        "verification": "file-checksums",
-        "notes": "Vertex AI EmbedContent's AVIF images (#1729, internal/embedding/avif.go), the user's decision of 2026-11-17: NOT a go.mod dependency. Its WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, lib/avif.wasm.gz, and the Go glue that runs it on wazero) is vendored into internal/avif from the module zip of v0.6.0 (commit 1fd2a9a51895ca03a192dd49917840794c8a77a1), without its purego loader of a system libavif, so the CGO_ENABLED=0 Linux CLI stays statically linked (test/repo TestLinuxBinariesNeverImportPurego). Files, hashes and the deletions made: third_party/avif/PROVENANCE.md (checked by test/repo TestVendoredAVIFMatchesProvenance)."
       },
       "goOrc": {
         "module": "github.com/scritchley/orc",
@@ -700,9 +679,46 @@
       "goMP3": {
         "module": "github.com/hajimehoshi/go-mp3",
         "version": "v0.3.4",
+        "sum": "h1:NUP7pBYH8OguP4diaTZ9wJbUbk3tC0KlfzsEpWmYj68=",
+        "pinnedCommit": "26f0b17459ab4b2b3d9d2b484a27a4eab3cca17b",
+        "source": "https://github.com/hajimehoshi/go-mp3",
         "license": "Apache-2.0",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's MP3 audio (#1721, internal/embedding/mp3.go), approved by the maintainer 2026-11-17: a pure Go MPEG-1/2 Layer III decoder, no cgo. Copied into third_party/go-mp3 (import path github.com/cloudburrow/cloudburrow/third_party/go-mp3; the module's non-test sources, fetched through the go command at this sum, imports rewritten) and extended there to MPEG-2.5, 8 to 12 kHz (#1734: its sample rates, scalefactor bands and short-block regions, checked against ffmpeg), which upstream refuses and has not released since 2022 (third_party/go-mp3/PROVENANCE.md). No longer required in go.mod (docs/upstream-evaluation.md)."
+      },
+      "goAAC": {
+        "module": "github.com/arabian9ts/aac-go",
+        "version": "v0.1.0",
+        "sum": "h1:e298pHWu+Xcv6VPU2hmS1UTmOq5C9KHD38eQcJR4K8c=",
+        "pinnedCommit": "c4cc4c5fae73af12eb0a54aa745f10d105c825f6",
+        "source": "https://github.com/arabian9ts/aac-go",
+        "license": "Apache-2.0",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Copied into third_party/aac-go since #1739 (import path github.com/cloudburrow/cloudburrow/third_party/aac-go; non-test sources without cmd/ and scripts/, imports rewritten; third_party/aac-go/PROVENANCE.md) so CloudBurrow owns its fixes: one release, no activity since. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md)."
+      },
+      "goOpus": {
+        "module": "github.com/kazzmir/opus-go",
+        "version": "v1.7.0",
+        "license": "BSD-3-Clause",
         "verification": "go.sum",
-        "notes": "Vertex AI EmbedContent's MP3 audio (#1721, internal/embedding/mp3.go), approved by the maintainer 2026-11-17: a pure Go MPEG-1/2 Layer III decoder, no cgo. go.sum gains go.mod-only hashes for github.com/hajimehoshi/oto/v2 (its example only) and an old golang.org/x/sys; neither is compiled in (docs/upstream-evaluation.md)."
+        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): libopus (BSD-3-Clause) transpiled to Go with ccgo, no cgo and no dependencies. Within 0.71 of a 16-bit step of ffmpeg 9's libopus decode here. Chosen over thesyncim/gopus (BSD-3-Clause, but its go.mod needs Go 1.27.3) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
+      },
+      "govpx": {
+        "module": "github.com/thesyncim/govpx",
+        "version": "v0.0.0-20261018202535-159dce5b931a",
+        "sum": "h1:NIUp9Ir2/cvq/yY3XnNLQG68w4hxFoW2DnkBVu/lu8o=",
+        "pinnedCommit": "159dce5b931af4f7c600f157d64c2a813092ec57",
+        "source": "https://github.com/thesyncim/govpx",
+        "license": "BSD-3-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's VP9 video (#1731, internal/embedding/video.go): a pure Go libvpx port, standard library only. Its go.mod needs Go 1.27 for GOEXPERIMENT=simd files only, so the VP9 decoder is copied without them and without the encoders (import path github.com/cloudburrow/cloudburrow/third_party/govpx; third_party/govpx/PROVENANCE.md). Bit-exact against ffmpeg 9 on a libvpx clip with hidden alternate reference frames."
+      },
+      "gav1d": {
+        "module": "github.com/gen2brain/gav1d",
+        "version": "v0.2.7",
+        "license": "BSD-2-Clause",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's AV1 video (#1731, internal/embedding/video.go) and AVIF images (#1736, internal/embedding/avif.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go port of dav1d with an AVIF reader, no cgo, no WebAssembly and no dependencies, 8 to 12 bits and every chroma format. Bit-exact against ffmpeg 9's libdav1d on an SVT-AV1 clip; AVIF pixel-identical to libavif 1.4.2's references, and a 10-bit 16384 x 16384 AVIF decodes at a 3.8 GB peak RSS. It replaced the vendored WebAssembly build of gen2brain/avif (libavif, dav1d, aom, libyuv), which could not decode a 10- or 12-bit AVIF over 13312 x 13312 in its 4 GiB of memory (docs/upstream-evaluation.md)."
       },
       "goMongoDriver": {
         "module": "go.mongodb.org/mongo-driver/v2",

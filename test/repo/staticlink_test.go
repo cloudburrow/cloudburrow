@@ -14,10 +14,10 @@ import (
 // the storage image's binary would no longer run on a system without glibc.
 // go.264 imports it for its Linux hardware encoders, which is why
 // third_party/go264 is go.264 copied without them (a replace directive
-// would break go install ...@latest), and why internal/avif is only
-// gen2brain/avif's WebAssembly path, without its purego loader of a system
-// libavif (#1729, third_party/avif/PROVENANCE.md). No package these Linux
-// builds compile may import it, without any build tag.
+// would break go install ...@latest); AVIF is decoded with
+// gen2brain/gav1d (#1736), pure Go, rather than gen2brain/avif, whose
+// loader of a system libavif imports it. No package these Linux builds
+// compile may import it, without any build tag.
 func TestLinuxBinariesNeverImportPurego(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the dependencies of the CLI")

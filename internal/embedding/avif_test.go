@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"os"
 	"strings"
 	"testing"
 )
@@ -46,13 +47,14 @@ func TestDecodeAVIF(t *testing.T) {
 		}
 	}
 
-	// The reference decode is the avifdec of the same libavif release. The
-	// WASM build converts YUV to RGB with libyuv, whose 4:2:0 chroma
-	// upsampling (libavif's default, AUTOMATIC) is nearest-neighbour, so the
-	// 4:2:0 reference is avifdec -u nearest (Homebrew's avifdec has no
-	// libyuv, and its default is bilinear: 3.5 a channel from this on
-	// average, 86 at a sharp edge). The two YUV-to-RGB conversions round
-	// differently: a channel may differ by one step, 0.5 on average at most.
+	// The reference decode is the avifdec of the same libavif release. An
+	// 8-bit image is converted as libavif with libyuv converts it, whose
+	// 4:2:0 chroma upsampling (libavif's default, AUTOMATIC) is
+	// nearest-neighbour, so the 4:2:0 reference is avifdec -u nearest
+	// (Homebrew's avifdec has no libyuv, and its default is bilinear: 3.5 a
+	// channel from this on average, 86 at a sharp edge). Both fixtures match
+	// exactly since #1736 (gav1d); a channel may differ by one step, 0.5 on
+	// average at most, as YUV-to-RGB conversions may round differently.
 	for name, ref := range map[string]string{
 		"pattern-420.avif":   "pattern-420.avifdec-nearest.png",
 		"pattern-10bit.avif": "pattern-10bit.avifdec.png",
@@ -74,7 +76,7 @@ func TestDecodeAVIF(t *testing.T) {
 			t.Errorf("%s: differs from %s by %.3f on average, %d at most", name, ref, d, m)
 		}
 		if name == "pattern-10bit.avif" {
-			if _, deep := img.(*image.RGBA64); !deep {
+			if _, deep := img.(*image.NRGBA64); !deep {
 				t.Errorf("%s: a %T, want 16 bits a channel", name, img)
 			}
 		}
@@ -215,5 +217,32 @@ func TestAVIFCrop(t *testing.T) {
 		if ok != c.ok || r != c.want {
 			t.Errorf("%s: %v %v, want %v %v", name, r, ok, c.want, c.ok)
 		}
+	}
+}
+
+// TestDecodeDeepAVIFAtGooglesLimit (#1736): a 10-bit 4:2:0 AVIF of Google's
+// largest size, 16384 x 16384 (a 2 x 2 grid, as libavif 1.4.2 writes one,
+// `avifenc -d 10 -y 420 -s 10 -q 60 --grid 2x2` of a 16-bit swirl), is
+// read at that size; with CLOUDBURROW_TEST_LARGE_IMAGES set it is
+// decoded too (on 2026-11-17 in 1.2 s at a peak RSS of 3.8 GB on darwin/arm64,
+// two 512 x 512 regions identical to avifdec -d 16's), which the WebAssembly
+// decoder before it refused for its 4 GiB of memory.
+func TestDecodeDeepAVIFAtGooglesLimit(t *testing.T) {
+	data := readTestImage(t, "avif-10bit-16384.avif")
+	cfg, err := avifConfig(bytes.NewReader(data))
+	// (gav1d's DecodeConfig reports a grid's colour model as 8-bit: the
+	// grid item has no av1C of its own.)
+	if err != nil || cfg.Width != 16384 || cfg.Height != 16384 {
+		t.Fatalf("config %dx%d, %v; want 16384x16384", cfg.Width, cfg.Height, err)
+	}
+	if os.Getenv("CLOUDBURROW_TEST_LARGE_IMAGES") == "" {
+		t.Skip("decoding it takes about 4 GB; set CLOUDBURROW_TEST_LARGE_IMAGES to run it")
+	}
+	img, err := DecodeImage("image/avif", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, deep := img.(*image.NRGBA64); !deep || img.Bounds() != image.Rect(0, 0, 16384, 16384) {
+		t.Fatalf("a %T of %v, want a 16384x16384 NRGBA64", img, img.Bounds())
 	}
 }

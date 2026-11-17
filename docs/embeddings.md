@@ -112,7 +112,8 @@
 > channel and stereo downmixed as a stereo WAV is, the encoder delay and padding a LAME or Lavc
 > Info frame records trimmed as ffmpeg trims them, then resampled and prepared as WAV is, within
 > the same 180 seconds a request. The model card's `jfk.wav` encoded at 64 kbit/s gives the WAV's
-> 279 tokens and a vector at cosine 0.999290 to the WAV's. MPEG-2.5 (8 to 12 kHz) is refused.
+> 279 tokens and a vector at cosine 0.999290 to the WAV's. MPEG-2.5 (8 to 12 kHz) is decoded too
+> (#1734): `go-mp3` is copied into `third_party/go-mp3` and extended to it, checked against ffmpeg.
 >
 > **Update 2026-10-19 (#1651): WebP and BMP images.** Google's
 > [Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
@@ -138,6 +139,24 @@
 >   for which neither Go's standard library nor `golang.org/x/image` has a decoder (HEIC and HEIF
 >   served since #1724).
 >
+> **Update 2026-11-17 (#1732): a video's audio track.** With `embed_content_config`'s
+> `audio_track_extraction` (off by default, as on Google), a video's first sound track is decoded
+> (AAC-LC with `github.com/arabian9ts/aac-go`, MP3, or QuickTime PCM), cut to `video_metadata`'s
+> offsets and embedded as an audio clip right after the video's frames, as EmbeddingGemma 2's
+> processor loads a video's audio; it counts against the 180 seconds of audio a request. Opus,
+> AC-3 and HE-AAC tracks are refused naming the codec. Since #1739 a mono or stereo Opus track is
+> decoded too (`github.com/kazzmir/opus-go`, libopus transpiled to Go), within 0.71 of a 16-bit
+> step of ffmpeg's libopus decode; `aac-go` is copied into `third_party/aac-go`. See
+> [upstream-evaluation.md](upstream-evaluation.md).
+>
+> **Update 2026-11-17 (#1731): VP9 and AV1 video.** The four codecs Google lists for video are
+> decoded: VP9 with `github.com/thesyncim/govpx` (copied into `third_party/govpx` for Go 1.26;
+> profile 0, 8-bit 4:2:0, the profile libvpx and browsers encode by default; profiles 1 to 3 are
+> refused naming the profile) and AV1 with `github.com/gen2brain/gav1d` (a pure Go port of dav1d;
+> 8 to 12 bits, every chroma format). Both are bit-exact against ffmpeg on the unit fixtures; frames
+> are then sampled and prepared as H.264's are. The sea turtle clip in VP9 and AV1 gives the H.264
+> clip's 368 tokens and vectors at cosine 0.995 and 0.993 to it.
+>
 > **Update 2026-11-17 (#1724): HEIC, HEIF and animated WebP.** With the maintainer's approval
 > (2026-11-17), `github.com/gen2brain/h265` v0.2.5 joins go.mod: a pure Go HEVC decoder and HEIF
 > reader, MIT, no cgo and no dependencies ([upstream-evaluation.md](upstream-evaluation.md#amendment-heic-heif-avif-and-animated-webp-decoders-for-vertex-ai-embedcontent-1724)
@@ -160,7 +179,7 @@
 > WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, and its Go glue) into
 > `internal/avif` without its `purego` loader, run on `github.com/tetratelabs/wazero` v1.12.0 (pure
 > Go, Apache 2.0), so no build tag is needed and the Linux CLI stays statically linked
-> ([third_party/avif/PROVENANCE.md](../third_party/avif/PROVENANCE.md) records the files, their
+> (`third_party/avif/PROVENANCE.md` (deleted with the decoder in #1736; in git history) records the files, their
 > hashes and the deletions).
 >
 > - Use: an `inline_data` or `file_data` part with `mime_type` `image/avif`, 8 to 12 bits, with or
@@ -173,7 +192,17 @@
 > - The first AVIF compiles the 3.5 MB module (about half a second on an M4 Max); each decode
 >   instantiates it afresh. A 10- or 12-bit AVIF over 13312 × 13312 does not fit the module's 4 GiB
 >   of memory and is `UNIMPLEMENTED` saying so (#1736); 8-bit AVIFs decode up to 16384 × 16384.
+>   (Both superseded by #1736, below.)
 > - Not checked against Transformers.js.
+>
+> **Update 2026-11-17 (#1736): AVIF on gav1d.** AVIF is now decoded with `github.com/gen2brain/gav1d`
+> (already required for AV1 video, #1731): a pure Go port of dav1d with an AVIF reader, so the
+> WebAssembly module, its 4 GiB memory ceiling and `internal/avif` are gone, and every AVIF Google
+> takes decodes, a 10-bit 16384 × 16384 one at a peak RSS of 3.8 GB in 1.2 s on an M4 Max (avifdec:
+> 2.9 GB, 10 s). An 8-bit image's YUV is converted as libavif with libyuv converts it (nearest
+> chroma), a deeper one with gav1d's converter, bilinear like libavif's own; on the #1729 fixtures
+> both are pixel-identical to libavif 1.4.2's references, crop, rotation, mirror, alpha and an AVIS
+> sequence's first frame included.
 >
 > Everything below records why the official LiteRT route is still blocked.
 

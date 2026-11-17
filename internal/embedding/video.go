@@ -13,6 +13,8 @@ import (
 	"github.com/Eyevinn/mp4ff/avc"
 	"github.com/Eyevinn/mp4ff/mp4"
 	go264 "github.com/cloudburrow/cloudburrow/third_party/go264"
+	"github.com/cloudburrow/cloudburrow/third_party/govpx"
+	"github.com/gen2brain/gav1d/av1"
 	"github.com/gen2brain/h265/hevc"
 )
 
@@ -29,10 +31,11 @@ import (
 // The container is read with github.com/Eyevinn/mp4ff (MIT). H.264 is
 // decoded with github.com/oops1/go.264 (copied into third_party/go264,
 // BSD 2-Clause; High profile, progressive, 8-bit 4:2:0) and H.265 with
-// github.com/gen2brain/h265 (MIT),
-// both pure Go. VP9 and AV1, which Google also takes, are refused: the only
-// complete pure-Go VP9 decoder (github.com/thesyncim/govpx) needs Go 1.27,
-// and no complete AV1 decoder without cgo exists (docs/upstream-evaluation.md).
+// github.com/gen2brain/h265 (MIT), VP9 (#1731) with github.com/thesyncim/govpx
+// (copied into third_party/govpx, BSD 3-Clause; profile 0, 8-bit 4:2:0)
+// and AV1 (#1731) with github.com/gen2brain/gav1d (BSD 2-Clause, a port of
+// dav1d; 8 to 12 bits, every chroma format, film grain), all pure Go and
+// bit-exact against ffmpeg here (docs/upstream-evaluation.md).
 
 // VideoMIMETypes are the video types decoded here.
 var VideoMIMETypes = []string{"video/mp4", "video/quicktime"}
@@ -76,6 +79,8 @@ type videoTrack struct {
 	avcC          *avc.DecConfRec
 	hvcC          [][]byte // VPS, SPS and PPS NAL units
 	nalLengthSize int
+	vpcC          *mp4.VppCBox // VP9's colour description
+	av1Config     []byte       // AV1's configOBUs: the sequence header
 }
 
 // DecodeVideo samples the frames of an MP4 or MOV video.
@@ -210,11 +215,19 @@ func videoTrackOf(f *mp4.File, trak *mp4.TrakBox, data []byte) (*videoTrack, err
 		}
 		tr.nalLengthSize = int(rec.LengthSizeMinusOne) + 1
 	case "vp09":
-		return nil, fmt.Errorf("%w: VP9 has no decoder without cgo that this build's Go version can compile; send H.264 or H.265", ErrVideoCodec)
+		if st.Stsd.VpXX != nil {
+			tr.vpcC = st.Stsd.VpXX.VppC
+		}
+		if tr.vpcC != nil && tr.vpcC.Profile != 0 {
+			return nil, fmt.Errorf("%w: VP9 profile %d (%d-bit or 4:2:2/4:4:4) is not decoded; VP9 profile 0 (8-bit 4:2:0) is",
+				ErrVideoCodec, tr.vpcC.Profile, tr.vpcC.BitDepth)
+		}
 	case "av01":
-		return nil, fmt.Errorf("%w: AV1 has no complete decoder without cgo; send H.264 or H.265", ErrVideoCodec)
+		if st.Stsd.Av01 != nil && st.Stsd.Av01.Av1C != nil {
+			tr.av1Config = st.Stsd.Av01.Av1C.ConfigOBUs
+		}
 	default:
-		return nil, fmt.Errorf("%w %q; Google takes H.264, H.265, VP9 and AV1, and this build decodes H.264 and H.265", ErrVideoCodec, tr.codec)
+		return nil, fmt.Errorf("%w %q; Google takes H.264, H.265, VP9 and AV1, and this build decodes those", ErrVideoCodec, tr.codec)
 	}
 
 	// The edit list's first media time is where presentation starts.
@@ -357,9 +370,14 @@ func decodeSamples(tr *videoTrack, want []int) (map[int]image.Image, error) {
 			pics map[int]image.Image
 			err  error
 		)
-		if tr.avcC != nil {
+		switch tr.codec {
+		case "avc1", "avc3":
 			pics, err = decodeH264(tr, k, stop)
-		} else {
+		case "vp09":
+			pics, err = decodeVP9(tr, k, stop)
+		case "av01":
+			pics, err = decodeAV1(tr, k, stop)
+		default:
 			pics, err = decodeH265(tr, k, stop)
 		}
 		if err != nil {
@@ -548,6 +566,142 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 		pics[int(p.Tag)] = yuvToNRGBA(planes, colourMatrix(p.ColorMatrix != 2, int(p.ColorMatrix), p.CropH), p.FullRange)
 	}
 	return pics, nil
+}
+
+// decodeVP9 decodes samples from to stop (exclusive) of a VP9 track. A
+// sample is one shown frame, with any hidden frame (an alternate reference)
+// before it in a superframe; VP9 has no reordering, so each sample's picture
+// is the one it shows.
+func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			pics, err = nil, fmt.Errorf("decoding the VP9 video: %v", r)
+		}
+	}()
+	d, err := govpx.NewVP9Decoder(govpx.VP9DecoderOptions{MaxWidth: 8192, MaxHeight: 8192})
+	if err != nil {
+		return nil, fmt.Errorf("decoding the VP9 video: %v", err)
+	}
+	defer d.Close()
+	// The colour description vpcC carries (the bitstream's own color_space
+	// and color_range, which the container repeats); without one, BT.601
+	// or BT.709 by size, limited range, as for H.264 with no VUI.
+	full, declared, mc := false, false, 2
+	if c := tr.vpcC; c != nil {
+		full, declared, mc = c.VideoFullRangeFlag != 0, c.MatrixCoefficients != 2, int(c.MatrixCoefficients)
+	}
+	pics = make(map[int]image.Image, stop-from)
+	for s := from; s < stop; s++ {
+		if err := d.Decode(tr.samples[s]); err != nil {
+			if errors.Is(err, govpx.ErrVP9NotImplemented) {
+				return nil, fmt.Errorf("%w: this VP9 stream uses a profile that is not decoded (%v); VP9 profile 0 (8-bit 4:2:0) is", ErrVideoCodec, err)
+			}
+			return nil, fmt.Errorf("decoding the VP9 video's sample %d: %v", s+1, err)
+		}
+		img, ok := d.NextFrame()
+		if !ok {
+			continue
+		}
+		if img.Width*img.Height > maxVideoPixels {
+			return nil, fmt.Errorf("the video is %dx%d; at most %d pixels a frame are decoded", img.Width, img.Height, maxVideoPixels)
+		}
+		// The planes are the decoder's until the next Decode, which
+		// yuvToNRGBA's copy precedes.
+		pics[s] = yuvToNRGBA(yuvPlanes{w: img.Width, h: img.Height, y: img.Y, cb: img.U, cr: img.V,
+			strideY: img.YStride, strideC: img.UStride, ssX: 1, ssY: 1, depth: 8},
+			colourMatrix(declared, mc, img.Height), full)
+	}
+	return pics, nil
+}
+
+// decodeAV1 decodes samples from to stop (exclusive) of an AV1 track. A
+// sample is a temporal unit, which shows at most one frame; AV1 has no
+// reordering in its output, so each sample's picture is the one it shows.
+func decodeAV1(tr *videoTrack, from, stop int) (pics map[int]image.Image, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			pics, err = nil, fmt.Errorf("decoding the AV1 video: %v", r)
+		}
+	}()
+	d := &av1.Decoder{FrameSizeLimit: maxVideoPixels, FrameThreads: 1}
+	defer d.Flush()
+	// The sequence header av1C carries, ahead of the first temporal unit
+	// (a sync sample repeats it).
+	if len(tr.av1Config) > 0 {
+		if _, err := d.DecodeOBUs(tr.av1Config); err != nil {
+			return nil, fmt.Errorf("decoding the AV1 video's configuration: %v", err)
+		}
+	}
+	pics = make(map[int]image.Image, stop-from)
+	for s := from; s < stop; s++ {
+		ps, err := d.DecodeOBUs(tr.samples[s])
+		if err != nil {
+			return nil, fmt.Errorf("decoding the AV1 video's sample %d: %v", s+1, err)
+		}
+		if len(ps) == 0 {
+			continue
+		}
+		p := ps[len(ps)-1]
+		img, err := av1Picture(p)
+		for _, q := range ps {
+			q.Release()
+		}
+		if err != nil {
+			return nil, err
+		}
+		pics[s] = img
+	}
+	return pics, nil
+}
+
+// av1Picture converts a decoded AV1 picture to RGB, before the caller
+// releases its planes.
+func av1Picture(p *av1.Picture) (image.Image, error) {
+	planes := yuvPlanes{w: p.Width, h: p.Height, strideY: p.Stride[0], strideC: p.Stride[1], depth: p.BitDepth}
+	switch p.Layout {
+	case av1.LayoutI420:
+		planes.ssX, planes.ssY = 1, 1
+	case av1.LayoutI422:
+		planes.ssX = 1
+	case av1.LayoutI444:
+	default: // monochrome: neutral chroma
+		cw, ch := (p.Width+1)/2, (p.Height+1)/2
+		planes.ssX, planes.ssY, planes.strideC = 1, 1, cw
+		mid := 128 << (p.BitDepth - 8)
+		if p.BitDepth > 8 {
+			planes.cb16 = make([]uint16, cw*ch)
+			for i := range planes.cb16 {
+				planes.cb16[i] = uint16(mid)
+			}
+			planes.cr16 = planes.cb16
+			planes.strideY /= 2
+			planes.y16 = u16(p.Data[0])
+		} else {
+			planes.cb = bytes.Repeat([]byte{byte(mid)}, cw*ch)
+			planes.cr = planes.cb
+			planes.y = p.Data[0]
+		}
+		return yuvToNRGBA(planes, colourMatrix(p.MatrixCoeffs != 2, p.MatrixCoeffs, p.Height), p.FullRange), nil
+	}
+	if p.BitDepth > 8 {
+		// Samples are native-endian uint16, strides in bytes.
+		planes.strideY /= 2
+		planes.strideC /= 2
+		planes.y16, planes.cb16, planes.cr16 = u16(p.Data[0]), u16(p.Data[1]), u16(p.Data[2])
+	} else {
+		planes.y, planes.cb, planes.cr = p.Data[0], p.Data[1], p.Data[2]
+	}
+	return yuvToNRGBA(planes, colourMatrix(p.MatrixCoeffs != 2, p.MatrixCoeffs, p.Height), p.FullRange), nil
+}
+
+// u16 reads native-endian (little-endian on every platform Go builds
+// CloudBurrow for) 16-bit samples.
+func u16(b []byte) []uint16 {
+	out := make([]uint16, len(b)/2)
+	for i := range out {
+		out[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+	}
+	return out
 }
 
 // YUV to RGB, as a browser draws a video frame on a canvas: the matrix the

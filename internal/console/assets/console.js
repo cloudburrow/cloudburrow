@@ -8449,6 +8449,10 @@ async function renderEmbeddings(view) {
   // Cloud Storage.
   const audio = el("input", { id: "emb-audio", type: "file", multiple: "",
     accept: (status.audioMimeTypes || []).join(","), "aria-label": "Audio clips to embed" });
+  // A video's audio track (#1732): embed_content_config.audio_track_extraction
+  // on each video's request, off by default as on Google.
+  const audioTrack = el("input", { id: "emb-audio-track", type: "checkbox",
+    "aria-label": "Embed each video's audio track (audio_track_extraction)" });
   const gcs = el("textarea", { id: "emb-gcs", rows: 2, cols: 60, class: "mono",
     placeholder: "gs://bucket/object.wav, one per line", "aria-label": "Cloud Storage objects to embed (file_data)" });
   const toMultimodal = () => {
@@ -8516,9 +8520,11 @@ async function renderEmbeddings(view) {
             data.truncated === true]);
         }
         for (const file of files) {
+          const isVideo = (file.type || mediaTypeOf(file.name) || "").startsWith("video/");
           const data = await post("embedContent", {
             content: { role: "user", parts: [{ inlineData: { mimeType: file.type || mediaTypeOf(file.name), data: await readBase64(file) } }] },
-            embedContentConfig: { outputDimensionality: Number(dim.value) },
+            embedContentConfig: { outputDimensionality: Number(dim.value),
+              ...(isVideo && audioTrack.checked ? { audioTrackExtraction: true } : {}) },
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
           const type = file.type || mediaTypeOf(file.name) || "";
@@ -8610,7 +8616,8 @@ async function renderEmbeddings(view) {
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
       ...(status.imageModel ? [el("div", {}, el("label", { for: "emb-images", text: "Images " }), images,
-        el("label", { for: "emb-audio", text: " Audio " }), audio),
+        el("label", { for: "emb-audio", text: " Audio " }), audio,
+        el("label", { for: "emb-audio-track", text: " Videos' audio track " }), audioTrack),
         el("div", {}, el("label", { for: "emb-gcs", text: "Cloud Storage objects " }), gcs),
         el("p", { class: "unavailable", id: "emb-image-note", text: status.imageModelNote })] : []),
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
