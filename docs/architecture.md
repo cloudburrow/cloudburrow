@@ -117,6 +117,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
+| `internal/avif/` | The AVIF decoder (#1729): gen2brain/avif v0.6.0's WebAssembly decode path, libavif and dav1d compiled to WASM and run on wazero, vendored without its purego loader so the Linux CLI stays static; third_party/avif/PROVENANCE.md records each file. Used by `internal/embedding/`. |
 | `internal/bigqueryfront/` | The checks in front of the BigQuery emulator (#861), run in its pod by `cloudburrow-storage bigquery-front` (#902): IDs, schemas, DDL, jobs and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`, and what the emulator would report done without doing is 501. |
 | `internal/bqiceberg/` | Writes the Parquet data files and Apache Iceberg metadata of BigQuery tables for Apache Iceberg (#1427) with `apache/iceberg-go`, on a local mirror the BigQuery front uploads to the instance's Cloud Storage. |
 | `internal/bigqueryimage/` | Builds the in-cluster BigQuery emulator's image from the patched goccy/bigquery-emulator builds the CLI embeds (#1061), and says which architectures a CLI embeds. |

@@ -12,8 +12,9 @@ import (
 
 // TestEmbedContentHEICAndAnimatedWebPOnEmbeddingGemma2 (#1724): HEIC and
 // HEIF images and an animated WebP (its first frame) are embedded as the
-// other images are, inline or as file_data; AVIF, an AV1-coded HEIF and a
-// broken HEIC are INVALID_ARGUMENT naming the part.
+// other images are, inline or as file_data; an AV1-coded HEIF and a broken
+// HEIC are INVALID_ARGUMENT naming the part. So, since #1729, are AVIF
+// images and AVIS sequences, and a broken AVIF is refused naming the part.
 func TestEmbedContentHEICAndAnimatedWebPOnEmbeddingGemma2(t *testing.T) {
 	e := &multimodalEmbedder{}
 	s := NewServer(nil)
@@ -40,6 +41,11 @@ func TestEmbedContentHEICAndAnimatedWebPOnEmbeddingGemma2(t *testing.T) {
 		{"image/heic", "pattern-sequence.heic", 32},
 		{"image/webp", "anim-lossy.webp", 32},
 		{"image/webp", "anim-offset-alpha.webp", 36},
+		{"image/avif", "pattern.avif", 32},
+		{"image/avif", "pattern-lossless.avif", 32},
+		{"image/avif", "pattern-10bit.avif", 32},
+		{"image/avif", "pattern-sequence.avif", 32},
+		{"image/avif", "pattern-transformed.avif", 16},
 	} {
 		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, inline(c.mt, read(c.file)))
 		if rec.Code != http.StatusOK || len(e.in.Parts) != 2 || e.in.Parts[1].Image == nil || e.in.Parts[1].Image.Bounds().Dx() != c.width {
@@ -52,8 +58,9 @@ func TestEmbedContentHEICAndAnimatedWebPOnEmbeddingGemma2(t *testing.T) {
 		"gs://b/pic.heic": {read("pattern-lossy.heic"), "image/heic"},
 		"gs://b/pic.heif": {read("pattern-lossy.heic"), "image/heif"},
 		"gs://b/anim":     {read("anim-lossy.webp"), "image/webp"},
+		"gs://b/pic.avif": {read("pattern.avif"), "image/avif"},
 	})
-	for _, uri := range []string{"gs://b/pic.heic", "gs://b/pic.heif", "gs://b/anim"} {
+	for _, uri := range []string{"gs://b/pic.heic", "gs://b/pic.heif", "gs://b/anim", "gs://b/pic.avif"} {
 		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, `{"content":{"parts":[{"fileData":{"fileUri":"`+uri+`"}}]}}`)
 		if rec.Code != http.StatusOK || len(e.in.Parts) != 1 || e.in.Parts[0].Image == nil {
 			t.Errorf("file_data %s: status %d: %s", uri, rec.Code, rec.Body)
@@ -62,7 +69,7 @@ func TestEmbedContentHEICAndAnimatedWebPOnEmbeddingGemma2(t *testing.T) {
 
 	heic := read("pattern-lossy.heic")
 	for name, c := range map[string]struct{ body, want string }{
-		"avif":         {inline("image/avif", read("pattern.avif")), `parts[1].inline_data: mime_type \"image/avif\" is not supported`},
+		"cut avif":     {inline("image/avif", read("pattern.avif")[:100]), "parts[1].inline_data: the data is not a valid image/avif image"},
 		"avif as heif": {inline("image/heif", read("pattern.avif")), "parts[1].inline_data: the data is not a valid image/heif image"},
 		"cut heic":     {inline("image/heic", heic[:len(heic)/2]), "parts[1].inline_data: the data is not a valid image/heic image"},
 	} {

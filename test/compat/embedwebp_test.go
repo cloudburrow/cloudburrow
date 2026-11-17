@@ -35,9 +35,9 @@ import (
 // are the PNG's vector; a lossy WebP is within 0.98 of it (0.989 in Transformers.js too) and nearest its
 // own description; each is 260 tokens; the lossy WebP uploaded with the
 // official Cloud Storage client and sent as file_data with no mime_type is
-// the inline vector; and AVIF and broken HEIC and HEIF are INVALID_ARGUMENT
+// the inline vector; and broken HEIC, HEIF and AVIF are INVALID_ARGUMENT
 // naming the part (#1724 serves HEIC, HEIF and animated WebP:
-// embedheic_test.go).
+// embedheic_test.go; #1729 AVIF: embedavif_test.go).
 func TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)

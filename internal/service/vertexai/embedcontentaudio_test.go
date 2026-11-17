@@ -134,7 +134,7 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	// audio is refused as a type the model does not embed.
 	s.SwapModelEmbedder(localai.EmbeddingGemma2ONNXID, &multimodalEmbedder{}, nil)
 	rec = postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, `{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"`+b64+`"}}]}}`)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "audio, AVIF, VP9 and AV1 input are not served") {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "audio, VP9 and AV1 input are not served") {
 		t.Fatalf("no audio encoder: status %d: %s", rec.Code, rec.Body)
 	}
 }
