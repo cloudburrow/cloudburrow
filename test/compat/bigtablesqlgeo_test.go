@@ -23,7 +23,8 @@ import (
 // FLOAT64 parameters, the point-set operations, buffers and ST_SIMPLIFY
 // (#1728: ST_UNION, ST_UNION_AGG over rows, ST_INTERSECTION, ST_DIFFERENCE,
 // ST_BUFFER, ST_BUFFERWITHTOLERANCE, ST_SIMPLIFY, to the references'
-// printed results), and the refusals: a GEOGRAPHY result column, which
+// printed results; #1735: touching and crossing shapes as S2's
+// S2BooleanOperation gives them), and the refusals: a GEOGRAPHY result column, which
 // Bigtable's Type cannot carry (INVALID_ARGUMENT), and ST_REGIONSTATS
 // (UNIMPLEMENTED).
 //
@@ -160,6 +161,20 @@ func TestBigtableSQLGeography(t *testing.T) {
 	tri := "ST_GEOGFROMTEXT('POLYGON((0 0, 0.1 0, 0.1 0.1, 0 0))')"
 	expect("SELECT ST_ASTEXT(ST_SIMPLIFY("+tri+", 1000)) AS a, ST_ASTEXT(ST_SIMPLIFY("+tri+", 10000)) AS b, ST_ASTEXT(ST_SIMPLIFY("+tri+", 100000)) AS c",
 		"POLYGON((0 0, 0.1 0, 0.1 0.1, 0 0)) LINESTRING(0 0, 0.1 0.1) POINT(0 0)")
+	// #1735: S2BooleanOperation's closed models where shapes touch or
+	// cross, which the reference prints no result for: touching squares
+	// intersect in their shared edge or corner, crossing linestrings are
+	// split at the crossing, MULTIPOINT members come in S2Builder's order,
+	// and ST_SIMPLIFY snaps a line through a neighbouring point rather than
+	// across it.
+	sq0, sqR, sqC := "ST_GEOGFROMTEXT('POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))')", "ST_GEOGFROMTEXT('POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))')", "ST_GEOGFROMTEXT('POLYGON((1 1, 2 1, 2 2, 1 2, 1 1))')"
+	expect("SELECT ST_ASTEXT(ST_INTERSECTION("+sq0+", "+sqR+")) AS edge, ST_ASTEXT(ST_INTERSECTION("+sq0+", "+sqC+")) AS corner, ST_ASTEXT(ST_UNION("+sq0+", "+sqR+")) AS u",
+		"LINESTRING(1 0, 1 1) POINT(1 1) POLYGON((1 1, 0 1, 0 0, 1 0, 2 0, 2 1, 1 1))")
+	x1, x2 := "ST_GEOGFROMTEXT('LINESTRING(0 0, 2 2)')", "ST_GEOGFROMTEXT('LINESTRING(0 2, 2 0)')"
+	expect("SELECT ST_ASTEXT(ST_UNION("+x1+", "+x2+")) AS u, ST_ASTEXT(ST_INTERSECTION("+x1+", "+x2+")) AS i",
+		"MULTILINESTRING((0 0, 1 1.00045705372412), (1 1.00045705372412, 2 2), (1 1.00045705372412, 2 0), (0 2, 1 1.00045705372412)) POINT(1 1.00045705372412)")
+	expect("SELECT ST_ASTEXT(ST_UNION(ST_GEOGFROMTEXT('MULTIPOINT(30 3, -100 1, 5 60)'), ST_GEOGPOINT(2, -2))) AS mp", "MULTIPOINT(30 3, 2 -2, 5 60, -100 1)")
+	expect("SELECT ST_ASTEXT(ST_SIMPLIFY(ST_GEOGFROMTEXT('GEOMETRYCOLLECTION(POINT(0.25 0.002), LINESTRING(0 0, 0.5 0.03, 1 0))'), 4000)) AS s", "LINESTRING(0 0, 0.25 0.002, 1 0)")
 
 	for sql, code := range map[string]codes.Code{
 		"SELECT ST_GEOGPOINT(1, 2) AS g":                      codes.InvalidArgument,
