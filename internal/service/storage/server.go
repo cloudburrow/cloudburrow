@@ -199,7 +199,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.notifications.get"] = s.notificationsGet
 	s.handlers["storage.notifications.list"] = s.notificationsList
 	s.handlers["storage.notifications.delete"] = s.notificationsDelete
-	s.handlers["storage.channels.stop"] = s.channelsStop
+	s.handlers["storage.objects.viewFullContext"] = s.objectsViewFullContext
 	s.registerACL()
 	s.grpc = newGRPCServer(s)
 	for id := range s.handlers {
@@ -307,9 +307,14 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 // serveJSON routes a JSON API request by the discovery document. upload
 // restricts the match to methods that take media.
 func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, upload bool) {
-	// objects.watchAll is no longer in the discovery document (channels.go).
+	// objects.watchAll and channels.stop are no longer in the discovery
+	// document (channels.go).
 	if !upload && r.Method == http.MethodPost && watchAllRE.MatchString(rest) {
 		s.objectsWatchAll(w, r)
+		return
+	}
+	if !upload && r.Method == http.MethodPost && rest == channelsStopPath {
+		s.channelsStop(w, r)
 		return
 	}
 	for _, m := range s.methods {

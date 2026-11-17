@@ -14,6 +14,7 @@ import (
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
+	storagev1 "google.golang.org/api/storage/v1"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -272,3 +273,77 @@ func TestGcloudStorageObjectContexts(t *testing.T) {
 		t.Errorf("after --clear-custom-contexts: %v", v)
 	}
 }
+
+// TestStorageViewFullContext (#1700): objects.viewFullContext, through the
+// generated JSON API client's Objects.ViewFullContext, returns one context
+// of an object, or of the version Generation names, as an ObjectFullContext
+// (kind storage#objectFullContext, type CUSTOM, key, value, createTime,
+// updateTime). Extended data is attached only by Google's own services,
+// under google: keys a client cannot write, so a context made here has no
+// extendedData, and get answers no extendedDataTypeUrl; one sent in a patch
+// is the server's to set and is ignored. A key the object has not is 404, a
+// missing contextKey 400.
+//
+// The generated client takes contextKey as a call option
+// (googleapi.QueryParameter): the discovery document marks it required but
+// leaves it out of parameterOrder, so ViewFullContext has no argument for it.
+//
+// covers: storage.objects.viewFullContext
+// unverified: storage.objects.viewFullContext 404: a contextKey the object has no context for
+// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/objects/viewFullContext
+func TestStorageViewFullContext(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	svc := storageJSON(t, h)
+	b := bucket(t, h, storageClient(t, h)).BucketName()
+	name := "dir/viewed.txt"
+	o, err := svc.Objects.Insert(b, &storagev1.Object{Name: name, Contexts: &storagev1.ObjectContexts{
+		Custom: map[string]storagev1.ObjectCustomContextPayload{"team": {Value: "blue"}}}}).
+		Media(strings.NewReader("x")).Context(ctx).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Objects.Delete(b, name).Do() })
+
+	got, err := svc.Objects.ViewFullContext(b, name).Context(ctx).Do(contextKey("team"))
+	if err != nil {
+		t.Fatalf("ViewFullContext: %v", err)
+	}
+	if got.Kind != "storage#objectFullContext" || got.Type != "CUSTOM" || got.Key != "team" || got.Value != "blue" ||
+		got.CreateTime == "" || got.UpdateTime == "" || len(got.ExtendedData) != 0 {
+		t.Errorf("ViewFullContext = %+v", got)
+	}
+	if got.CreateTime != o.Contexts.Custom["team"].CreateTime {
+		t.Errorf("createTime %s, but the object's context says %s", got.CreateTime, o.Contexts.Custom["team"].CreateTime)
+	}
+	if _, err := svc.Objects.ViewFullContext(b, name).Generation(o.Generation).Context(ctx).Do(contextKey("team")); err != nil {
+		t.Errorf("ViewFullContext with the object's generation: %v", err)
+	}
+
+	p, err := svc.Objects.Patch(b, name, &storagev1.Object{Contexts: &storagev1.ObjectContexts{
+		Custom: map[string]storagev1.ObjectCustomContextPayload{"team": {Value: "red",
+			ExtendedDataTypeUrl: "type.googleapis.com/google.protobuf.Struct"}}}}).Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("Patch with extendedDataTypeUrl: %v", err)
+	}
+	if c := p.Contexts.Custom["team"]; c.Value != "red" || c.ExtendedDataTypeUrl != "" {
+		t.Errorf("after the patch, contexts.custom.team = %+v; want red, with no extendedDataTypeUrl", c)
+	}
+	if got, err := svc.Objects.ViewFullContext(b, name).Context(ctx).Do(contextKey("team")); err != nil || got.Value != "red" || len(got.ExtendedData) != 0 {
+		t.Errorf("ViewFullContext after the patch = %+v, %v", got, err)
+	}
+
+	if _, err := svc.Objects.ViewFullContext(b, name).Context(ctx).Do(contextKey("zone")); httpCode(err) != http.StatusNotFound {
+		t.Errorf("ViewFullContext of a key the object has not = %v, want 404", err)
+	}
+	if _, err := svc.Objects.ViewFullContext(b, "missing.txt").Context(ctx).Do(contextKey("team")); httpCode(err) != http.StatusNotFound {
+		t.Errorf("ViewFullContext of a missing object = %v, want 404", err)
+	}
+	if _, err := svc.Objects.ViewFullContext(b, name).Context(ctx).Do(); httpCode(err) != http.StatusBadRequest {
+		t.Errorf("ViewFullContext with no contextKey = %v, want 400", err)
+	}
+}
+
+// contextKey is viewFullContext's contextKey query parameter, as the
+// generated client sends one it has no setter for.
+func contextKey(k string) googleapi.CallOption { return googleapi.QueryParameter("contextKey", k) }

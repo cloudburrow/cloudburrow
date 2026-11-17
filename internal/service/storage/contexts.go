@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -27,7 +28,16 @@ import (
 //     request body gives contexts (which override them all) or
 //     dropContextGroups contains "custom" (which drops them);
 //   - a listing's filter is one of contexts."KEY":*, contexts."KEY"="VALUE",
-//     or either negated by NOT or a leading -.
+//     or either negated by NOT or a leading -;
+//   - extended data (Preview, #1700) is a structured payload only Google's
+//     own services attach, under google: keys a client cannot write ("You
+//     can't attach extended data to user-defined contexts"); get and list
+//     then name its type in extendedDataTypeUrl, and objects.viewFullContext
+//     returns it. CloudBurrow runs no such service, so no context here has
+//     extended data: extendedDataTypeUrl is never returned, and in a request
+//     body it is accepted and ignored, as createTime and updateTime are,
+//     since it is the server's to set; viewFullContext returns a context's
+//     key, value and times with no extendedData.
 
 // objectContext is one entry of contexts.custom.
 type objectContext struct {
@@ -97,7 +107,7 @@ func checkContextsBody(v any) error {
 		}
 		for f := range p {
 			switch f {
-			case "value", "createTime", "updateTime":
+			case "value", "createTime", "updateTime", "extendedDataTypeUrl":
 			default:
 				return badRequest("Invalid argument: contexts.custom.%s.%s is not an ObjectCustomContextPayload field", k, f)
 			}
@@ -170,6 +180,35 @@ func contextsJSON(o objectRecord) map[string]any {
 		custom[k] = map[string]any{"value": c.Value, "createTime": rfc3339(c.Created), "updateTime": rfc3339(c.Updated)}
 	}
 	return map[string]any{"custom": custom}
+}
+
+// objectsViewFullContext is objects.viewFullContext: GET
+// b/{bucket}/o/{object}/viewFullContext?contextKey=KEY, one context of the
+// object (or of the version generation names) as an ObjectFullContext. A key
+// the object has not is 404 (UNVERIFIED: Google's reference lists no errors
+// for it; docs re-read 2026-11-17:
+// https://docs.cloud.google.com/storage/docs/json_api/v1/objects/viewFullContext).
+func (s *Server) objectsViewFullContext(w http.ResponseWriter, r *http.Request) {
+	bucket, name := pathVar(r, jsonPrefix, 1), pathVar(r, jsonPrefix, 3)
+	key := r.URL.Query().Get("contextKey")
+	if key == "" {
+		writeError(w, required("contextKey"))
+		return
+	}
+	o, err := s.lookupObject(r, bucket, name, false)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	c, ok := o.Contexts[key]
+	if !ok {
+		writeError(w, notFound("No such object context: %s on %s/%s", key, bucket, name))
+		return
+	}
+	writeResponse(w, r, http.StatusOK, map[string]any{
+		"kind": "storage#objectFullContext", "type": "CUSTOM", "key": key, "value": c.Value,
+		"createTime": rfc3339(c.Created), "updateTime": rfc3339(c.Updated),
+	})
 }
 
 // mergeContexts is the contexts a compose carries over: every source's, a

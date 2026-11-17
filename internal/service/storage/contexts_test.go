@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,6 +70,41 @@ func TestApplyContexts(t *testing.T) {
 	} {
 		if err := checkContextsBody(bad); err == nil {
 			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
+// objects.viewFullContext returns one context as an ObjectFullContext, with
+// no extendedData, since no context here has any; extendedDataTypeUrl in a
+// patch is the server's to set and is ignored (#1700).
+func TestViewFullContext(t *testing.T) {
+	h := newTestServer(t)
+	raw(t, "POST", h.URL+"/storage/v1/b?project=p", `{"name":"vfc"}`)
+	if code, body := raw(t, "POST", h.URL+"/upload/storage/v1/b/vfc/o?uploadType=media&name=a%2Fb.txt", "hi"); code != 200 {
+		t.Fatalf("upload = %d %s", code, body)
+	}
+	if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/vfc/o/a%2Fb.txt",
+		`{"contexts":{"custom":{"team":{"value":"blue","extendedDataTypeUrl":"type.googleapis.com/google.protobuf.Struct"}}}}`); code != 200 ||
+		strings.Contains(body, "extendedDataTypeUrl") {
+		t.Fatalf("patch = %d %s", code, body)
+	}
+	code, body := raw(t, "GET", h.URL+"/storage/v1/b/vfc/o/a%2Fb.txt/viewFullContext?contextKey=team", "")
+	var got map[string]any
+	if code != 200 || json.Unmarshal([]byte(body), &got) != nil {
+		t.Fatalf("viewFullContext = %d %s", code, body)
+	}
+	if got["kind"] != "storage#objectFullContext" || got["type"] != "CUSTOM" || got["key"] != "team" || got["value"] != "blue" ||
+		got["createTime"] == nil || got["updateTime"] == nil || got["extendedData"] != nil {
+		t.Errorf("viewFullContext = %s", body)
+	}
+	for path, want := range map[string]int{
+		"/storage/v1/b/vfc/o/a%2Fb.txt/viewFullContext":                              400,
+		"/storage/v1/b/vfc/o/a%2Fb.txt/viewFullContext?contextKey=zone":              404,
+		"/storage/v1/b/vfc/o/nope/viewFullContext?contextKey=team":                   404,
+		"/storage/v1/b/vfc/o/a%2Fb.txt/viewFullContext?contextKey=team&generation=1": 404,
+	} {
+		if code, body := raw(t, "GET", h.URL+path, ""); code != want {
+			t.Errorf("GET %s = %d %s, want %d", path, code, body, want)
 		}
 	}
 }

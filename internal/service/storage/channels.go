@@ -7,9 +7,12 @@ package storage
 // channels.stop ends it.
 //
 // Google removed objects.watchAll from the discovery document (revision
-// 20260821, the one pinned here, has channels.stop alone), so it is routed by
-// its documented path, POST b/{bucket}/o/watch, ahead of the discovery
-// methods, and is not in methodStatus.
+// 20260821 had channels.stop alone), and then channels.stop (revision
+// 20261009, the one pinned here, has neither; the generated Go client no
+// longer has a Channels service, and the reference pages for both now
+// redirect to Pub/Sub notifications). Older clients still send them, so both
+// are routed by their paths, POST b/{bucket}/o/watch and POST channels/stop,
+// ahead of the discovery methods, and neither is in methodStatus (#1700).
 //
 // Every message carries X-Goog-Channel-ID, X-Goog-Channel-Token (when the
 // channel has one), X-Goog-Channel-Expiration (when it has one),
@@ -60,6 +63,9 @@ const (
 )
 
 var watchAllRE = pathRE("b/{bucket}/o/watch")
+
+// channelsStopPath is channels.stop's path under /storage/v1/.
+const channelsStopPath = "channels/stop"
 
 // channelRecord is one registered channel.
 type channelRecord struct {
