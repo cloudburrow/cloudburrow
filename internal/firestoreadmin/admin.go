@@ -524,7 +524,11 @@ func (a *Admin) CreateIndex(_ context.Context, req *adminpb.CreateIndexRequest) 
 		if f.GetValueMode() == nil {
 			return nil, status.Errorf(codes.InvalidArgument, "index field %q needs one of order, array_config or vector_config", f.GetFieldPath())
 		}
-		if f.GetVectorConfig() != nil {
+		if f.GetVectorConfig() != nil || f.GetSearchConfig() != nil {
+			// A vector index, or a search index (#1738: a text index
+			// of Firestore with MongoDB compatibility, as gcloud's
+			// --field-config=...,search-config= makes it), may have
+			// one field and no __name__.
 			vector = true
 		}
 		if f.GetFieldPath() != "__name__" {

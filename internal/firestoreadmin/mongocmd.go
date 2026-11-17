@@ -7,6 +7,7 @@ package firestoreadmin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -101,10 +102,8 @@ func (s *MongoServer) command(ctx context.Context, mc *mongoConn, lname, name st
 		return s.listIndexes(mc, cmd)
 	case "dropindexes":
 		return s.dropIndexes(mc, cmd)
-	case "committransaction", "aborttransaction":
-		return nil, mql.Errorf(251, "NoSuchTransaction", "Transactions are not supported by CloudBurrow's Firestore with MongoDB compatibility endpoint.")
 	case "explain":
-		return nil, mql.Errorf(115, "CommandNotSupported", "explain is not supported by CloudBurrow's Firestore with MongoDB compatibility endpoint.")
+		return s.explain(ctx, mc, cmd)
 	}
 	return nil, mql.Errorf(59, "CommandNotFound", "no such command: '%s'", name)
 }
@@ -129,6 +128,9 @@ func fsErr(err error) error {
 
 // load is every document of a collection, in document ID order.
 func (s *MongoServer) load(ctx context.Context, mc *mongoConn, coll string) ([]bson.D, []*firestorepb.Document, error) {
+	if mc.tx != nil {
+		return s.txnLoad(ctx, mc, mc.tx, coll)
+	}
 	c, err := s.docs()
 	if err != nil {
 		return nil, nil, fsErr(err)
@@ -177,6 +179,20 @@ func intField(cmd bson.D, key string) int {
 // query is the documents of a collection that filter matches, sorted,
 // skipped and limited.
 func (s *MongoServer) query(ctx context.Context, mc *mongoConn, coll string, filter bson.D, sortV any, skip, limit int) ([]bson.D, []*firestorepb.Document, error) {
+	docs, raw, err := s.queryScored(ctx, mc, coll, filter, sortV, skip, limit)
+	for i := range docs {
+		docs[i] = mql.StripTextScore(docs[i])
+	}
+	return docs, raw, err
+}
+
+// queryScored is query, a $text's matches carrying their text score
+// (mql.TextScoreKey).
+func (s *MongoServer) queryScored(ctx context.Context, mc *mongoConn, coll string, filter bson.D, sortV any, skip, limit int) ([]bson.D, []*firestorepb.Document, error) {
+	text, err := s.textMatcher(mc, coll, filter, sortV)
+	if err != nil {
+		return nil, nil, err
+	}
 	docs, raw, err := s.load(ctx, mc, coll)
 	if err != nil {
 		return nil, nil, err
@@ -188,7 +204,15 @@ func (s *MongoServer) query(ctx context.Context, mc *mongoConn, coll string, fil
 	var out []bson.D
 	var outRaw []*firestorepb.Document
 	for i, d := range docs {
-		m, err := mql.Matches(d, filter)
+		f := filter
+		if text != nil {
+			tm, score := text(d)
+			f = mql.ReplaceText(filter, tm)
+			if tm {
+				d = append(append(bson.D{}, d...), bson.E{Key: mql.TextScoreKey, Value: score})
+			}
+		}
+		m, err := mql.Matches(d, f)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -236,16 +260,23 @@ func (s *MongoServer) find(ctx context.Context, mc *mongoConn, cmd bson.D) (bson
 	if limit < 0 {
 		limit, single = -limit, true
 	}
-	docs, _, err := s.query(ctx, mc, coll, filter, mql.Lookup(cmd, "sort"), intField(cmd, "skip"), limit)
+	if _, hint := mql.LookupE(cmd, "hint"); hint {
+		if _, isText, _ := mql.FindText(filter); isText {
+			return nil, mql.BadValue("$text cannot be used with hints.")
+		}
+	}
+	docs, _, err := s.queryScored(ctx, mc, coll, filter, mql.Lookup(cmd, "sort"), intField(cmd, "skip"), limit)
 	if err != nil {
 		return nil, err
 	}
-	if proj, ok := mql.Lookup(cmd, "projection").(bson.D); ok {
-		for i, d := range docs {
-			if docs[i], err = mql.Project(d, proj); err != nil {
+	proj, _ := mql.Lookup(cmd, "projection").(bson.D)
+	for i, d := range docs {
+		if len(proj) > 0 {
+			if d, err = mql.ProjectQuery(d, proj, filter); err != nil {
 				return nil, err
 			}
 		}
+		docs[i] = mql.StripTextScore(d)
 	}
 	bs := defaultBatch
 	if v, ok := mql.LookupE(cmd, "batchSize"); ok {
@@ -378,27 +409,43 @@ func (s *MongoServer) distinct(ctx context.Context, mc *mongoConn, cmd bson.D) (
 }
 
 func (s *MongoServer) aggregate(ctx context.Context, mc *mongoConn, cmd bson.D) (bson.D, error) {
-	coll, ok := cmd[0].Value.(string)
-	if !ok {
-		return nil, mql.Errorf(115, "CommandNotSupported", "Collection-less aggregations ({aggregate: 1}) are not supported by CloudBurrow.")
-	}
-	if err := mql.CheckCollectionName(coll); err != nil {
-		return nil, err
-	}
 	pipeline, ok := mql.Lookup(cmd, "pipeline").(bson.A)
 	if !ok {
 		return nil, mql.Errorf(14, "TypeMismatch", "'pipeline' option must be specified as an array")
 	}
+	coll, named := cmd[0].Value.(string)
+	if !named {
+		// A collection-less aggregation ({aggregate: 1}), whose first
+		// stage is $documents: the one such stage Google supports.
+		if n, isNum := mql.NumberOf(cmd[0].Value); !isNum || n != 1 {
+			return nil, mql.Errorf(73, "InvalidNamespace", "Invalid {aggregate: %v} command: the aggregate must name a collection, or be 1", cmd[0].Value)
+		}
+	} else if err := mql.CheckCollectionName(coll); err != nil {
+		return nil, err
+	}
 	if mql.Truthy(mql.Lookup(cmd, "explain")) {
-		return nil, mql.Errorf(115, "CommandNotSupported", "explain is not supported by CloudBurrow's Firestore with MongoDB compatibility endpoint.")
+		return nil, mql.Errorf(115, "CommandNotSupported", "Query Explain does not support commands which return a cursor: use the explain command, {explain: {aggregate: ...}}, not aggregate's explain option.")
 	}
 	cur, hasCursor := mql.Lookup(cmd, "cursor").(bson.D)
 	if !hasCursor {
 		return nil, mql.Errorf(9, "FailedToParse", "The 'cursor' option is required, except for aggregate with the explain argument")
 	}
-	docs, _, err := s.load(ctx, mc, coll)
-	if err != nil {
-		return nil, err
+	var docs []bson.D
+	var err error
+	if named {
+		if docs, _, err = s.load(ctx, mc, coll); err != nil {
+			return nil, err
+		}
+	} else {
+		if docs, pipeline, err = mql.DocumentsInput(pipeline); err != nil {
+			return nil, err
+		}
+		coll = "$cmd.aggregate"
+	}
+	if named {
+		if docs, pipeline, err = s.textStage(mc, coll, docs, pipeline); err != nil {
+			return nil, err
+		}
 	}
 	env := mql.NewEnv(func(other string) ([]bson.D, error) {
 		if err := mql.CheckCollectionName(other); err != nil {
@@ -410,6 +457,9 @@ func (s *MongoServer) aggregate(ctx context.Context, mc *mongoConn, cmd bson.D) 
 	out, err := mql.RunPipeline(env, docs, pipeline)
 	if err != nil {
 		return nil, err
+	}
+	for i := range out {
+		out[i] = mql.StripTextScore(out[i])
 	}
 	bs := defaultBatch
 	if v, ok := mql.LookupE(cur, "batchSize"); ok {
@@ -429,8 +479,8 @@ func (s *MongoServer) aggregate(ctx context.Context, mc *mongoConn, cmd bson.D) 
 
 // writeErr is a write command's error for statement i.
 func writeErr(i int, err error) bson.D {
-	me, ok := err.(*mql.Error)
-	if !ok {
+	var me *mql.Error
+	if !errors.As(err, &me) {
 		me = mql.Errorf(1, "InternalError", "%v", err)
 	}
 	return bson.D{{Key: "index", Value: int32(i)}, {Key: "code", Value: me.Code}, {Key: "errmsg", Value: me.Msg}}
@@ -441,6 +491,9 @@ func dupKey(db, coll, index string, key any) *mql.Error {
 }
 
 func (s *MongoServer) exists(ctx context.Context, mc *mongoConn, name string) (bool, error) {
+	if mc.tx != nil {
+		return s.txnExists(ctx, mc.tx, name)
+	}
 	c, err := s.docs()
 	if err != nil {
 		return false, fsErr(err)
@@ -544,6 +597,17 @@ func (s *MongoServer) write(ctx context.Context, mc *mongoConn, coll string, doc
 	if err := s.checkUnique(ctx, mc, coll, doc); err != nil {
 		return err
 	}
+	if mc.tx != nil {
+		name := mc.docName(coll, did)
+		if updated == nil {
+			if ex, err := s.txnExists(ctx, mc.tx, name); err != nil {
+				return err
+			} else if ex {
+				return dupKey(mc.db.id, coll, "_id_", bson.D{{Key: "_id", Value: id}})
+			}
+		}
+		return s.txnPut(ctx, mc.tx, name, &firestorepb.Document{Name: name, Fields: fields})
+	}
 	pre := &firestorepb.Precondition{ConditionType: &firestorepb.Precondition_Exists{Exists: false}}
 	if updated != nil {
 		pre = &firestorepb.Precondition{ConditionType: &firestorepb.Precondition_UpdateTime{UpdateTime: updated}}
@@ -573,6 +637,9 @@ func (s *MongoServer) write(ctx context.Context, mc *mongoConn, coll string, doc
 }
 
 func (s *MongoServer) remove(ctx context.Context, mc *mongoConn, name string) error {
+	if mc.tx != nil {
+		return s.txnPut(ctx, mc.tx, name, nil)
+	}
 	c, err := s.docs()
 	if err != nil {
 		return fsErr(err)
@@ -677,10 +744,11 @@ func (s *MongoServer) updateOne(ctx context.Context, mc *mongoConn, coll string,
 	if _, ok := mql.LookupE(st, "collation"); ok {
 		return 0, 0, nil, mql.Errorf(115, "CommandNotSupported", "The collation field of an update statement is not supported.")
 	}
-	if _, ok := mql.LookupE(st, "arrayFilters"); ok {
-		return 0, 0, nil, mql.BadValue("arrayFilters are not supported by CloudBurrow.")
-	}
 	q, err := filterOf(st, "q")
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	uc, err := updateContext(q, st)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -698,7 +766,7 @@ func (s *MongoServer) updateOne(ctx context.Context, mc *mongoConn, coll string,
 		return 0, 0, nil, err
 	}
 	for i, d := range docs {
-		nd, err := mql.ApplyUpdate(d, u, false)
+		nd, err := mql.ApplyUpdateWith(d, u, false, uc)
 		if err != nil {
 			return matched, modified, nil, err
 		}
@@ -712,7 +780,7 @@ func (s *MongoServer) updateOne(ctx context.Context, mc *mongoConn, coll string,
 		modified++
 	}
 	if matched == 0 && mql.Truthy(mql.Lookup(st, "upsert")) {
-		nd, err := upsertDoc(q, u)
+		nd, err := upsertDoc(q, u, uc)
 		if err != nil {
 			return 0, 0, nil, err
 		}
@@ -722,6 +790,20 @@ func (s *MongoServer) updateOne(ctx context.Context, mc *mongoConn, coll string,
 		return 0, 0, mql.Lookup(nd, "_id"), nil
 	}
 	return matched, modified, nil, nil
+}
+
+// updateContext is what an update statement's positional operators read:
+// its query and its arrayFilters.
+func updateContext(q bson.D, st bson.D) (*mql.UpdateContext, error) {
+	uc := &mql.UpdateContext{Query: q}
+	if v, ok := mql.LookupE(st, "arrayFilters"); ok {
+		af, ok := v.(bson.A)
+		if !ok {
+			return nil, mql.Errorf(14, "TypeMismatch", "BSON field 'arrayFilters' is the wrong type '%s', expected type 'array'", mql.TypeName(v))
+		}
+		uc.ArrayFilters = af
+	}
+	return uc, nil
 }
 
 func sameOrder(a, b bson.D) bool {
@@ -734,7 +816,7 @@ func sameOrder(a, b bson.D) bool {
 }
 
 // upsertDoc is the document an upsert inserts.
-func upsertDoc(q bson.D, u any) (bson.D, error) {
+func upsertDoc(q bson.D, u any, uc *mql.UpdateContext) (bson.D, error) {
 	if ud, ok := u.(bson.D); ok && !mql.IsOperatorUpdate(ud) {
 		nd := mql.CloneDoc(ud)
 		if _, ok := mql.LookupE(nd, "_id"); !ok {
@@ -744,7 +826,7 @@ func upsertDoc(q bson.D, u any) (bson.D, error) {
 		}
 		return withID(nd), nil
 	}
-	nd, err := mql.ApplyUpdate(mql.UpsertBase(q), u, true)
+	nd, err := mql.ApplyUpdateWith(mql.UpsertBase(q), u, true, uc)
 	if err != nil {
 		return nil, err
 	}
@@ -800,10 +882,11 @@ func (s *MongoServer) findAndModify(ctx context.Context, mc *mongoConn, cmd bson
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := mql.LookupE(cmd, "arrayFilters"); ok {
-		return nil, mql.BadValue("arrayFilters are not supported by CloudBurrow.")
-	}
 	q, err := filterOf(cmd, "query")
+	if err != nil {
+		return nil, err
+	}
+	uc, err := updateContext(q, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -824,12 +907,12 @@ func (s *MongoServer) findAndModify(ctx context.Context, mc *mongoConn, cmd bson
 		if d == nil {
 			return nil, nil
 		}
-		return mql.Project(d, fields)
+		return mql.ProjectQuery(d, fields, q)
 	}
 	lastErr := bson.D{{Key: "n", Value: int32(0)}}
 	if len(docs) == 0 {
 		if !remove && mql.Truthy(mql.Lookup(cmd, "upsert")) {
-			nd, err := upsertDoc(q, u)
+			nd, err := upsertDoc(q, u, uc)
 			if err != nil {
 				return nil, err
 			}
@@ -861,7 +944,7 @@ func (s *MongoServer) findAndModify(ctx context.Context, mc *mongoConn, cmd bson
 		}
 		return bson.D{{Key: "lastErrorObject", Value: bson.D{{Key: "n", Value: int32(1)}}}, {Key: "value", Value: v}}, nil
 	}
-	nd, err := mql.ApplyUpdate(d, u, false)
+	nd, err := mql.ApplyUpdateWith(d, u, false, uc)
 	if err != nil {
 		return nil, err
 	}

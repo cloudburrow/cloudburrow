@@ -352,7 +352,9 @@ func matchTop(doc bson.D, e bson.E) (bool, error) {
 		return truthy(v), nil
 	case "$comment":
 		return false, badValue("unknown top level operator: $comment. The $comment operator is not supported.")
-	case "$text", "$where", "$jsonSchema":
+	case "$text":
+		return false, merr(27, "IndexNotFound", "text index required for $text query")
+	case "$where", "$jsonSchema":
 		return false, badValue("unknown top level operator: %s. The %s operator is not supported.", e.Key, e.Key)
 	}
 	if strings.HasPrefix(e.Key, "$") {
@@ -757,8 +759,16 @@ func parseSort(v any) (sortSpec, error) {
 	}
 	var out sortSpec
 	for _, e := range d {
-		if _, ok := e.Value.(bson.D); ok {
-			return nil, badValue("$meta sorts are not supported by CloudBurrow: %s", e.Key)
+		if md, ok := e.Value.(bson.D); ok {
+			if len(md) != 1 || md[0].Key != "$meta" || md[0].Value != "textScore" {
+				return nil, badValue("Illegal key in $sort specification: %s: %v", e.Key, md)
+			}
+			// The text score, the highest first.
+			out = append(out, struct {
+				path string
+				desc bool
+			}{TextScoreKey, true})
+			continue
 		}
 		n, ok := numberOf(e.Value)
 		if !ok || (n != 1 && n != -1) {
@@ -804,7 +814,7 @@ func project(doc bson.D, proj bson.D) (bson.D, error) {
 		}
 		switch x := e.Value.(type) {
 		case bson.D:
-			if len(x) == 1 && (x[0].Key == "$slice" || x[0].Key == "$elemMatch") {
+			if len(x) == 1 && (x[0].Key == "$slice" || x[0].Key == "$elemMatch" || x[0].Key == "$meta") {
 				exprs = append(exprs, e)
 				if include == -1 && x[0].Key == "$elemMatch" {
 					include = 1
@@ -830,6 +840,10 @@ func project(doc bson.D, proj bson.D) (bson.D, error) {
 			return nil, merr(31254, "Location31254", "Cannot do exclusion on field %s in inclusion projection", e.Key)
 		}
 		include = inc
+	}
+	if include == -1 && len(proj) == 1 && proj[0].Key == "_id" && idIncluded {
+		// {_id: 1} alone is an inclusion of _id.
+		include = 1
 	}
 	var out bson.D
 	if include == 1 {
