@@ -310,3 +310,125 @@ func TestStorageSoftDeleteOfNoncurrent(t *testing.T) {
 		t.Errorf("versions = %d, want only the live one", len(got))
 	}
 }
+
+// A bucket's softDeletePolicy.hardDeletePause (#1702) keeps its soft-deleted
+// objects past their hardDeleteTime: reads, softDeleted listings,
+// objects.restore and bulkRestore still see them, and Sweep leaves them.
+// Disabling the pause resumes the hard delete.
+func TestStorageHardDeletePauseHoldsSweep(t *testing.T) {
+	clock := sched.NewFakeClock(time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
+	s, err := NewServer(Options{Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(s)
+	t.Cleanup(h.Close)
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
+		`{"name":"paused","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`); code != 200 {
+		t.Fatal(body)
+	}
+	gens := map[string]string{}
+	for _, name := range []string{"a", "b", "c", "d"} {
+		code, body := raw(t, "POST", h.URL+"/upload/storage/v1/b/paused/o?uploadType=media&name="+name, name)
+		var obj struct {
+			Generation string `json:"generation"`
+		}
+		if code != 200 || json.Unmarshal([]byte(body), &obj) != nil {
+			t.Fatalf("upload %s = %d %s", name, code, body)
+		}
+		gens[name] = obj.Generation
+		if code, _ := raw(t, "DELETE", h.URL+"/storage/v1/b/paused/o/"+name, ""); code != http.StatusNoContent {
+			t.Fatalf("delete %s = %d", name, code)
+		}
+	}
+	clock.Advance(30 * 24 * time.Hour)
+	if next, err := s.Sweep(); err != nil || !next.IsZero() {
+		t.Fatalf("Sweep past the hardDeleteTime under the pause = %v, %v; want nothing scheduled", next, err)
+	}
+	if code, body := raw(t, "GET", h.URL+"/storage/v1/b/paused/o/a?softDeleted=true&generation="+gens["a"], ""); code != 200 {
+		t.Errorf("a paused object past its hardDeleteTime = %d %s; want it still soft-deleted", code, body)
+	}
+	if code, body := raw(t, "GET", h.URL+"/storage/v1/b/paused/o?softDeleted=true", ""); code != 200 ||
+		strings.Count(body, `"kind": "storage#object"`) != 4 {
+		t.Errorf("softDeleted listing under the pause = %d %s; want all four", code, body)
+	}
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b/paused/o/a/restore?generation="+gens["a"], ""); code != 200 {
+		t.Errorf("objects.restore under the pause = %d %s", code, body)
+	}
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b/paused/o/bulkRestore", `{"matchGlobs":["b"]}`); code != 200 ||
+		!strings.Contains(body, `"succeededCount": "1"`) {
+		t.Errorf("bulkRestore under the pause = %d %s; want b restored", code, body)
+	}
+	for _, name := range []string{"a", "b"} {
+		if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/paused/o/"+name, ""); code != 200 {
+			t.Errorf("%s after its restore = %d; want it live", name, code)
+		}
+	}
+
+	// Disabling the pause: c and d are past their hardDeleteTime, so gone.
+	if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/paused", `{"softDeletePolicy":{"hardDeletePause":{"enabled":false}}}`); code != 200 {
+		t.Fatal(body)
+	}
+	if code, _ := raw(t, "GET", h.URL+"/storage/v1/b/paused/o/c?softDeleted=true&generation="+gens["c"], ""); code != http.StatusNotFound {
+		t.Errorf("c once the pause is disabled = %d; want 404", code)
+	}
+	if code, _ := raw(t, "POST", h.URL+"/storage/v1/b/paused/o/d/restore?generation="+gens["d"], ""); code != http.StatusNotFound {
+		t.Errorf("restoring d once the pause is disabled = %d; want 404", code)
+	}
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.meta.View(func(tx Tx) error {
+		if keys := tx.List(softObjectPrefix); len(keys) != 0 {
+			t.Errorf("Sweep after the pause left %v", keys)
+		}
+		return nil
+	})
+}
+
+// A bucket deleted while its policy pauses hard deletion is kept, with its
+// soft-deleted objects, past its hardDeleteTime (#1702): buckets.restore
+// still brings it back, and its objects are still restorable.
+func TestStorageHardDeletePauseDeletedBucket(t *testing.T) {
+	clock := sched.NewFakeClock(time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
+	s, err := NewServer(Options{Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(s)
+	t.Cleanup(h.Close)
+	code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
+		`{"name":"pbk","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`)
+	var bucket struct {
+		Generation string `json:"generation"`
+	}
+	if code != 200 || json.Unmarshal([]byte(body), &bucket) != nil || bucket.Generation == "" {
+		t.Fatalf("insert = %d %s", code, body)
+	}
+	code, body = raw(t, "POST", h.URL+"/upload/storage/v1/b/pbk/o?uploadType=media&name=o", "x")
+	var obj struct {
+		Generation string `json:"generation"`
+	}
+	if code != 200 || json.Unmarshal([]byte(body), &obj) != nil {
+		t.Fatalf("upload = %d %s", code, body)
+	}
+	if code, _ := raw(t, "DELETE", h.URL+"/storage/v1/b/pbk/o/o", ""); code != http.StatusNoContent {
+		t.Fatalf("delete object = %d", code)
+	}
+	if code, body := raw(t, "DELETE", h.URL+"/storage/v1/b/pbk", ""); code != http.StatusNoContent {
+		t.Fatalf("delete bucket = %d %s", code, body)
+	}
+	clock.Advance(30 * 24 * time.Hour)
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := raw(t, "GET", h.URL+"/storage/v1/b?project=p&softDeleted=true", ""); code != 200 || !strings.Contains(body, `"pbk"`) {
+		t.Errorf("softDeleted bucket listing = %d %s; want pb", code, body)
+	}
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b/pbk/restore?generation="+bucket.Generation, ""); code != 200 {
+		t.Fatalf("buckets.restore of a paused bucket past its hardDeleteTime = %d %s", code, body)
+	}
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b/pbk/o/o/restore?generation="+obj.Generation, ""); code != 200 {
+		t.Errorf("objects.restore in the restored bucket = %d %s", code, body)
+	}
+}

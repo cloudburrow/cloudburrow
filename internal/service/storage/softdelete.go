@@ -62,19 +62,23 @@ func numberString(v any) string {
 }
 
 // checkSoftDeletePolicy validates softDeletePolicy.retentionDurationSeconds:
-// 0, or 7 to 90 days (soft-delete docs). hardDeletePause (discovery revision
-// 20261009, #1700) with enabled true would keep soft-deleted objects past
-// their hardDeleteTime until it is disabled; nothing here pauses the sweep
-// or the reads that treat such an object as gone, so it is 501 rather than
-// stored and ignored. enabled false is taken, and effectiveTime is output.
+// 0, or 7 to 90 days (soft-delete docs), and hardDeletePause.enabled, a
+// boolean (discovery revision 20261009, #1702).
 func checkSoftDeletePolicy(f map[string]any) error {
 	p, ok := f["softDeletePolicy"].(map[string]any)
 	if !ok {
 		return nil
 	}
-	if hp, _ := p["hardDeletePause"].(map[string]any); hp != nil && hp["enabled"] == true {
-		return errorf(http.StatusNotImplemented, "notImplemented",
-			"softDeletePolicy.hardDeletePause is not implemented: soft-deleted objects are always permanently deleted at their hardDeleteTime")
+	if v, ok := p["hardDeletePause"]; ok && v != nil {
+		hp, isMap := v.(map[string]any)
+		if !isMap {
+			return badRequest("Invalid argument: softDeletePolicy.hardDeletePause must be an object")
+		}
+		if e, ok := hp["enabled"]; ok && e != nil {
+			if _, isBool := e.(bool); !isBool {
+				return badRequest("Invalid argument: softDeletePolicy.hardDeletePause.enabled must be a boolean")
+			}
+		}
 	}
 	if p["retentionDurationSeconds"] == nil {
 		return nil
@@ -89,14 +93,60 @@ func checkSoftDeletePolicy(f map[string]any) error {
 	return nil
 }
 
+// hardDeletePaused reports whether the bucket's soft delete policy pauses
+// hard deletion (softDeletePolicy.hardDeletePause, #1702). While it holds,
+// the bucket's soft-deleted objects are "retained indefinitely, regardless
+// of the retention duration" (soft-delete docs, Pricing): their
+// hardDeleteTime is left as it was, but neither the sweep nor a read treats
+// them as gone past it. Disabling the pause resumes the sweep, which then
+// removes what is past its hardDeleteTime (the docs: until "you resume hard
+// deletions for the bucket and the original retention period expires").
+// A soft-deleted bucket whose policy held the pause when it was deleted is
+// kept the same way (UNVERIFIED: the docs say only that pausing gives "more
+// time to restore a soft-deleted bucket and its objects").
+// Docs re-read 2026-11-17: https://docs.cloud.google.com/storage/docs/soft-delete
+func hardDeletePaused(b bucketRecord) bool {
+	p, _ := b.Fields["softDeletePolicy"].(map[string]any)
+	hp, _ := p["hardDeletePause"].(map[string]any)
+	return hp["enabled"] == true
+}
+
+// pastHardDelete is whether t, a hardDeleteTime under bucket b, is gone at
+// now: past it, and b does not pause hard deletion.
+func pastHardDelete(b bucketRecord, t, now time.Time) bool {
+	return !now.Before(t) && !hardDeletePaused(b)
+}
+
+// stampHardDeletePause sets hardDeletePause.effectiveTime (output only) to
+// when the pause was enabled, kept while it stays enabled, and drops it
+// once the pause is disabled.
+func stampHardDeletePause(p, prev map[string]any, now time.Time) {
+	hp, _ := p["hardDeletePause"].(map[string]any)
+	if hp == nil {
+		return
+	}
+	if hp["enabled"] != true {
+		delete(hp, "effectiveTime")
+		return
+	}
+	php, _ := prev["hardDeletePause"].(map[string]any)
+	if php["enabled"] == true && php["effectiveTime"] != nil {
+		hp["effectiveTime"] = php["effectiveTime"]
+		return
+	}
+	hp["effectiveTime"] = rfc3339(now)
+}
+
 // stampSoftDeletePolicy sets effectiveTime when the retention is new or
-// changed; the client never sets it (it is output only).
+// changed, and the hard delete pause's; the client never sets them (they
+// are output only).
 func stampSoftDeletePolicy(next, old map[string]any, now time.Time) {
 	p, ok := next["softDeletePolicy"].(map[string]any)
 	if !ok {
 		return
 	}
 	prev, _ := old["softDeletePolicy"].(map[string]any)
+	stampHardDeletePause(p, prev, now)
 	if prev != nil && numberString(prev["retentionDurationSeconds"]) == numberString(p["retentionDurationSeconds"]) && prev["effectiveTime"] != nil {
 		p["effectiveTime"] = prev["effectiveTime"]
 		return
@@ -168,7 +218,7 @@ func discard(tx Tx, b bucketRecord, o objectRecord, now time.Time) error {
 
 // softVersions are the soft-deleted versions of bucket/name that are still
 // restorable: deleted from this generation of the bucket, and not past their
-// hardDeleteTime.
+// hardDeleteTime unless the bucket pauses hard deletion.
 func softVersions(tx Tx, b bucketRecord, name string, now time.Time) ([]objectRecord, error) {
 	vs, err := getSoftDeleted(tx, b.Name, name)
 	if err != nil {
@@ -176,7 +226,7 @@ func softVersions(tx Tx, b bucketRecord, name string, now time.Time) ([]objectRe
 	}
 	out := vs[:0]
 	for _, v := range vs {
-		if v.BucketGeneration == b.Generation && now.Before(v.HardDelete) {
+		if v.BucketGeneration == b.Generation && !pastHardDelete(b, v.HardDelete, now) {
 			out = append(out, v)
 		}
 	}
@@ -360,7 +410,7 @@ func (s *Server) getSoftBucket(tx Tx, name, gen string) (bucketRecord, bool, err
 	if err := json.Unmarshal(raw, &b); err != nil {
 		return b, false, err
 	}
-	return b, s.now().Before(b.HardDelete), nil
+	return b, !pastHardDelete(b, b.HardDelete, s.now()), nil
 }
 
 // bucketsGetSoftDeleted is buckets.get with softDeleted=true, which needs
@@ -400,7 +450,7 @@ func (s *Server) softBuckets(tx Tx, project, prefix string) ([]bucketRecord, err
 		if err := json.Unmarshal(raw, &b); err != nil {
 			return nil, err
 		}
-		if b.Project == project && now.Before(b.HardDelete) {
+		if b.Project == project && !pastHardDelete(b, b.HardDelete, now) {
 			out = append(out, b)
 		}
 	}
@@ -454,7 +504,9 @@ func (s *Server) bucketsRestore(w http.ResponseWriter, r *http.Request) {
 
 // Sweep permanently removes the soft-deleted objects and buckets whose
 // hardDeleteTime has passed, and returns the next hardDeleteTime, or zero
-// if nothing is waiting.
+// if nothing is waiting. It skips what a bucket's hardDeletePause holds
+// (#1702): those wait for the pause to be disabled, which is a bucket
+// update, not a time, so they set no next sweep.
 func (s *Server) Sweep() (time.Time, error) {
 	now := s.now()
 	var next time.Time
@@ -464,23 +516,54 @@ func (s *Server) Sweep() (time.Time, error) {
 		}
 	}
 	err := s.meta.Update(func(tx Tx) error {
+		// The bucket each soft-deleted object was deleted from: the live
+		// bucket of that name and generation, or the soft-deleted one.
+		owners := map[string]bucketRecord{}
+		owner := func(name string, gen int64) (bucketRecord, error) {
+			key := softBucketKey(name, gen)
+			if b, ok := owners[key]; ok {
+				return b, nil
+			}
+			b, ok, err := s.getBucket(tx, name)
+			if err != nil {
+				return b, err
+			}
+			if !ok || b.Generation != gen {
+				b = bucketRecord{}
+				if raw, ok := tx.Get(key); ok {
+					if err := json.Unmarshal(raw, &b); err != nil {
+						return b, err
+					}
+				}
+			}
+			owners[key] = b
+			return b, nil
+		}
 		for _, key := range tx.List(softObjectPrefix) {
 			raw, _ := tx.Get(key)
 			var vs []objectRecord
 			if err := json.Unmarshal(raw, &vs); err != nil {
 				return err
 			}
+			bucket, name, _ := strings.Cut(strings.TrimPrefix(key, softObjectPrefix), "/")
 			kept := vs[:0]
 			for _, v := range vs {
 				if now.Before(v.HardDelete) {
 					kept = append(kept, v)
 					later(v.HardDelete)
+					continue
+				}
+				b, err := owner(bucket, v.BucketGeneration)
+				if err != nil {
+					return err
+				}
+				if hardDeletePaused(b) {
+					kept = append(kept, v)
 				}
 			}
 			if len(kept) == len(vs) {
 				continue
 			}
-			bucket, name, _ := strings.Cut(strings.TrimPrefix(key, softObjectPrefix), "/")
 			if err := putSoftDeleted(tx, bucket, name, kept); err != nil {
 				return err
 			}
@@ -493,6 +576,9 @@ func (s *Server) Sweep() (time.Time, error) {
 			}
 			if now.Before(b.HardDelete) {
 				later(b.HardDelete)
+				continue
+			}
+			if hardDeletePaused(b) {
 				continue
 			}
 			tx.Delete(key)

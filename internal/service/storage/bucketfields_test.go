@@ -136,21 +136,46 @@ func TestStorageManagedFoldersListEmpty(t *testing.T) {
 	}
 }
 
-// softDeletePolicy.hardDeletePause (#1700): enabled is 501 naming it, since
-// nothing pauses the hard delete; disabled is taken.
+// softDeletePolicy.hardDeletePause (#1702): enabled is taken with an output
+// effectiveTime, which a client cannot set, is kept while the pause holds,
+// and is dropped when it is disabled; a non-boolean enabled is 400.
 func TestStorageHardDeletePause(t *testing.T) {
 	h := newTestServer(t)
-	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
-		`{"name":"hdp-on","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`); code != 501 ||
-		!strings.Contains(body, "hardDeletePause") {
-		t.Errorf("hardDeletePause enabled on insert = %d %s, want 501 naming it", code, body)
+	pause := func(body string) map[string]any {
+		t.Helper()
+		var b struct {
+			SoftDeletePolicy struct {
+				HardDeletePause map[string]any `json:"hardDeletePause"`
+			} `json:"softDeletePolicy"`
+		}
+		if err := json.Unmarshal([]byte(body), &b); err != nil {
+			t.Fatalf("%v: %s", err, body)
+		}
+		return b.SoftDeletePolicy.HardDeletePause
+	}
+	code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
+		`{"name":"hdp-on","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true,"effectiveTime":"2000-01-01T00:00:00Z"}}}`)
+	on := pause(body)
+	if code != 200 || on["enabled"] != true || on["effectiveTime"] == nil || on["effectiveTime"] == "2000-01-01T00:00:00Z" {
+		t.Errorf("hardDeletePause enabled on insert = %d %s, want it taken with a server effectiveTime", code, body)
+	}
+	code, body = raw(t, "PATCH", h.URL+"/storage/v1/b/hdp-on", `{"labels":{"a":"b"}}`)
+	if got := pause(body); code != 200 || got["effectiveTime"] != on["effectiveTime"] {
+		t.Errorf("an unrelated patch moved the pause's effectiveTime: %d %s", code, body)
+	}
+	code, body = raw(t, "PATCH", h.URL+"/storage/v1/b/hdp-on", `{"softDeletePolicy":{"hardDeletePause":{"enabled":false}}}`)
+	if got := pause(body); code != 200 || got["enabled"] == true || got["effectiveTime"] != nil {
+		t.Errorf("hardDeletePause disabled on patch = %d %s, want it off without effectiveTime", code, body)
 	}
 	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
 		`{"name":"hdp-off","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":false}}}`); code != 200 {
 		t.Errorf("hardDeletePause disabled on insert = %d %s, want it taken", code, body)
 	}
-	if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/hdp-off",
-		`{"softDeletePolicy":{"hardDeletePause":{"enabled":true}}}`); code != 501 || !strings.Contains(body, "hardDeletePause") {
-		t.Errorf("hardDeletePause enabled on patch = %d %s, want 501 naming it", code, body)
+	code, body = raw(t, "PATCH", h.URL+"/storage/v1/b/hdp-off", `{"softDeletePolicy":{"hardDeletePause":{"enabled":true}}}`)
+	if got := pause(body); code != 200 || got["enabled"] != true || got["effectiveTime"] == nil || !strings.Contains(body, `"retentionDurationSeconds": "604800"`) {
+		t.Errorf("hardDeletePause enabled on patch = %d %s, want it on with effectiveTime and the retention kept", code, body)
+	}
+	if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/hdp-off", `{"softDeletePolicy":{"hardDeletePause":{"enabled":"yes"}}}`); code != 400 {
+		t.Errorf("a string enabled = %d %s, want 400", code, body)
 	}
 }

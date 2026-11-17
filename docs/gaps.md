@@ -20,7 +20,7 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 3 | 1 | 1 | 1 | 0 |
+| Cloud Storage | 2 | 0 | 1 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 1 | 1 | 1 |
 | Cloud Tasks | 0 | 0 | 0 | 0 | 0 |
 | Cloud Run | 2 | 0 | 1 | 0 | 1 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 8 | 2 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **52** | **5** | **17** | **24** | **6** |
+| **Total** | **51** | **4** | **17** | **24** | **6** |
 
 ## Cloud Storage
 
@@ -44,14 +44,13 @@ and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel d
 instance (#1290), the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), the gRPC
 `google.storage.v2` API (#1321), and its customer-supplied encryption keys, ACLs, managed-folder
 IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345),
-`objects.viewFullContext` (#1700). ACLs
+`objects.viewFullContext` (#1700), `softDeletePolicy.hardDeletePause` (#1702). ACLs
 and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) (#1505); rechecked (#1521): the notifications insert reference lists no error, only the `storage.buckets.update` permission, and the Pub/Sub notifications guides describe a missing topic or publisher grant only as a delivery failure, so no documented error replaces the 501 (#1577) | no emulator support (needs Pub/Sub) | S |
-| `softDeletePolicy.hardDeletePause` with `enabled` true is 501: nothing pauses the hard delete of soft-deleted objects (#1702) | not built yet | S |
-| UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
+| UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints, a bucket deleted under a hard delete pause and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
 
