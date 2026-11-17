@@ -1,0 +1,932 @@
+CloudBurrow patch 84 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1661). Needs 0080 and 0083, and googlesqlite
+patch 0019.
+
+The bug: every request finds its project (withProjectMiddleware), and
+FindProject (0080) read and JSON-decoded the metadata of every table,
+model and routine of every dataset of the project, while it held the
+emulator's one request lock (sequentialAccessMiddleware). The CloudBurrow
+front keeps each query's result as a table, so every request cost more
+with every result kept: findDatasetsRaw took 8% of the emulator's CPU
+with about 440 result tables and 17% with 610, and garbage collection a
+fifth more.
+
+The patch reads a dataset found by FindProject, FindAllProjects or
+FindDataset with its own metadata alone. Its tables, models and routines
+are read, as SQLite SQL keyed by the dataset and in the order they were
+stored, when a handler first asks for every one of a kind (TableIDs,
+Tables: tables.list, a dataset's deletion), and one of them by its
+primary key when a handler asks for it by ID (Table, Model, Routine:
+tables.get, a query's or a load's destination table, AddTable's check).
+A read inside a transaction of the request goes through the connection
+of that transaction (BindTx, 0083), the newest when the handler did not
+name one: another connection to the shared-cache database could not read
+a table the transaction has written. The datasets row's tableIDs,
+modelIDs and routineIDs, which nothing reads, are written from the rows
+the transaction sees when the dataset has not read them.
+FindProjectWithConn, which has only a transaction, reads as before.
+
+Dataset.DeleteModel held the dataset's lock while it wrote the dataset's
+row, which reads its IDs under the same lock, and so waited for itself,
+holding the request lock, forever; it releases the lock first.
+
+The regression tests hold FindProject to no table, model or routine
+decoded, and to the same allocations with 10 tables or 600.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+diff --git a/internal/metadata/cloudburrow_dataset_lazy.go b/internal/metadata/cloudburrow_dataset_lazy.go
+new file mode 100644
+index 0000000..686dc75
+--- /dev/null
++++ b/internal/metadata/cloudburrow_dataset_lazy.go
+@@ -0,0 +1,379 @@
++package metadata
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1661): every request finds its
++// project (withProjectMiddleware), which read and JSON-decoded the metadata
++// of every table, model and routine of every dataset of the project, while
++// it held the emulator's one request lock: the CloudBurrow front keeps each
++// query's result as a table, so every request was slower with each result
++// it kept (findDatasetsRaw took 17% of the emulator's CPU with 610 result
++// tables, and garbage collection a fifth more). A dataset read by
++// FindProject, FindAllProjects or FindDataset now holds its own metadata
++// alone; its tables, models and routines are read, as SQLite SQL keyed by
++// the dataset, when a handler first asks for all of one kind (tables.list,
++// a dataset's deletion), and one of them by its primary key when a handler
++// asks for it by ID (tables.get, a query's destination table, a load's).
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"sync"
++	"sync/atomic"
++
++	"github.com/goccy/go-json"
++	"github.com/goccy/googlesqlite"
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// openTxs are the transactions BindTx bound and UnbindTx has not
++// forgotten, oldest first. A dataset reads its tables when a handler asks
++// for them, which may be inside a transaction of the request that has
++// written rows; another connection to the shared-cache database could not
++// read the tables the transaction locked, so the read goes through the
++// connection of the request's newest transaction, when it has one. The
++// emulator answers one request at a time (sequentialAccessMiddleware).
++var (
++	openTxsMu sync.Mutex
++	openTxs   []boundTx
++)
++
++type boundTx struct {
++	tx   *sql.Tx
++	conn *sql.Conn
++}
++
++func trackTx(tx *sql.Tx, conn *sql.Conn) {
++	openTxsMu.Lock()
++	defer openTxsMu.Unlock()
++	openTxs = append(openTxs, boundTx{tx: tx, conn: conn})
++}
++
++func untrackTx(tx *sql.Tx) {
++	openTxsMu.Lock()
++	defer openTxsMu.Unlock()
++	for i := len(openTxs) - 1; i >= 0; i-- {
++		if openTxs[i].tx == tx {
++			openTxs = append(openTxs[:i], openTxs[i+1:]...)
++			return
++		}
++	}
++}
++
++// newestTxConn is the connection of the newest open bound transaction, or
++// nil.
++func newestTxConn() *sql.Conn {
++	openTxsMu.Lock()
++	defer openTxsMu.Unlock()
++	if len(openTxs) == 0 {
++		return nil
++	}
++	return openTxs[len(openTxs)-1].conn
++}
++
++// childrenDecoded counts the table, model and routine metadata rows read
++// and JSON-decoded, for the regression test, which holds a request's cost
++// to what it asks for.
++var childrenDecoded atomic.Int64
++
++// The reads, as SQLite SQL, of a dataset's tables, models or routines (%s)
++// and of one of them, by the table's primary key (projectID, datasetID,
++// id). Each is in the order the rows were stored, which is the order
++// findDatasets' GoogleSQL scan, and so the eager datasets, had them.
++const (
++	childrenOfDataset   = "SELECT `id`, `metadata` FROM `%s` WHERE `projectID` = ? AND `datasetID` = ? ORDER BY rowid"
++	childIDsOfDataset   = "SELECT `id` FROM `%s` WHERE `projectID` = ? AND `datasetID` = ? ORDER BY rowid"
++	childOfDatasetByKey = "SELECT `id`, `metadata` FROM `%s` WHERE `projectID` = ? AND `datasetID` = ? AND `id` = ?"
++)
++
++// readChildRows runs query, SQLite SQL selecting n STRING columns, with
++// keys its STRING arguments, and calls each with every row's columns
++// decoded. It runs on tx's connection when tx is bound, else on the
++// connection of the newest open bound transaction, else on a connection
++// of its own.
++func (r *Repository) readChildRows(ctx context.Context, tx *sql.Tx, query string, n int, each func(cols []string) error, keys ...string) error {
++	var conn *sql.Conn
++	if tx != nil {
++		if v, ok := txConns.Load(tx); ok {
++			conn = v.(*sql.Conn)
++		}
++	}
++	if conn == nil {
++		conn = newestTxConn()
++	}
++	if conn == nil {
++		own, err := r.getConnection(ctx)
++		if err != nil {
++			return err
++		}
++		defer own.Close()
++		conn = own
++	}
++	args := make([]any, len(keys))
++	for i, k := range keys {
++		enc, err := googlesqlite.EncodeString(k)
++		if err != nil {
++			return err
++		}
++		args[i] = enc
++	}
++	return conn.Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		rows, err := gsqlConn.QueryRawContext(ctx, query, args...)
++		if err != nil {
++			return err
++		}
++		defer rows.Close()
++		vals := make([]sql.NullString, n)
++		ptrs := make([]any, n)
++		for i := range vals {
++			ptrs[i] = &vals[i]
++		}
++		cols := make([]string, n)
++		for rows.Next() {
++			if err := rows.Scan(ptrs...); err != nil {
++				return err
++			}
++			for i, v := range vals {
++				cols[i] = v.String
++			}
++			dec, err := decodeRawStrings(cols)
++			if err != nil {
++				return err
++			}
++			if err := each(dec); err != nil {
++				return err
++			}
++		}
++		return rows.Err()
++	})
++}
++
++// readChildren reads the tables, models or routines (kind) of a dataset,
++// or the one of them id names when id is not "", and calls add with each.
++func (r *Repository) readChildren(ctx context.Context, tx *sql.Tx, kind, projectID, datasetID, id string, add func(id string, content map[string]interface{})) error {
++	query, keys := fmt.Sprintf(childrenOfDataset, kind), []string{projectID, datasetID}
++	if id != "" {
++		query, keys = fmt.Sprintf(childOfDatasetByKey, kind), append(keys, id)
++	}
++	return r.readChildRows(ctx, tx, query, 2, func(cols []string) error {
++		var content map[string]interface{}
++		if err := json.Unmarshal([]byte(cols[1]), &content); err != nil {
++			return err
++		}
++		childrenDecoded.Add(1)
++		add(cols[0], content)
++		return nil
++	}, keys...)
++}
++
++// storedChildIDs are the IDs of a dataset's tables, models or routines
++// (kind) as tx sees them, for the dataset's row, when the dataset has not
++// read them: its datasets row keeps them (nothing reads them back).
++func (r *Repository) storedChildIDs(ctx context.Context, tx *sql.Tx, kind, projectID, datasetID string) ([]string, error) {
++	ids := []string{}
++	if _, bound := txConns.Load(tx); !bound {
++		rows, err := tx.QueryContext(ctx,
++			"SELECT id FROM "+kind+" WHERE projectID = @projectID AND datasetID = @datasetID",
++			sql.Named("projectID", projectID),
++			sql.Named("datasetID", datasetID),
++		)
++		if err != nil {
++			return nil, err
++		}
++		defer rows.Close()
++		for rows.Next() {
++			var id string
++			if err := rows.Scan(&id); err != nil {
++				return nil, err
++			}
++			ids = append(ids, id)
++		}
++		return ids, rows.Err()
++	}
++	err := r.readChildRows(ctx, tx, fmt.Sprintf(childIDsOfDataset, kind), 1, func(cols []string) error {
++		ids = append(ids, cols[0])
++		return nil
++	}, projectID, datasetID)
++	return ids, err
++}
++
++// newLazyDataset is a dataset of its metadata alone, whose tables, models
++// and routines are read when they are asked for.
++func newLazyDataset(repo *Repository, projectID, datasetID string, content *bigqueryv2.Dataset) *Dataset {
++	return &Dataset{
++		ID:         datasetID,
++		ProjectID:  projectID,
++		tableMap:   map[string]*Table{},
++		modelMap:   map[string]*Model{},
++		routineMap: map[string]*Routine{},
++		content:    content,
++		repo:       repo,
++		lazy:       true,
++	}
++}
++
++// lazyReadFailed is a read of a dataset's tables, models or routines that
++// failed: the accessors that read them return no error, and the request,
++// which the eager read failed with a 500, fails the same way
++// (recoveryMiddleware).
++func lazyReadFailed(d *Dataset, kind string, err error) {
++	panic(fmt.Errorf("failed to read the %s of dataset %s.%s: %w", kind, d.ProjectID, d.ID, err))
++}
++
++// loadTables reads every table of d, once. Tables d already holds (read by
++// their ID, or added) are kept as they are.
++func (d *Dataset) loadTables() {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if !d.lazy || d.tablesLoaded {
++		return
++	}
++	var tables []*Table
++	if err := d.repo.readChildren(context.Background(), nil, "tables", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
++		t := d.tableMap[id]
++		if t == nil {
++			t = NewTable(d.repo, d.ProjectID, d.ID, id, content)
++		}
++		tables = append(tables, t)
++	}); err != nil {
++		lazyReadFailed(d, "tables", err)
++	}
++	d.tables = tables
++	d.tableMap = make(map[string]*Table, len(tables))
++	for _, t := range tables {
++		d.tableMap[t.ID] = t
++	}
++	d.tablesLoaded = true
++}
++
++func (d *Dataset) loadModels() {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if !d.lazy || d.modelsLoaded {
++		return
++	}
++	var models []*Model
++	if err := d.repo.readChildren(context.Background(), nil, "models", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
++		m := d.modelMap[id]
++		if m == nil {
++			m = NewModel(d.repo, d.ProjectID, d.ID, id, content)
++		}
++		models = append(models, m)
++	}); err != nil {
++		lazyReadFailed(d, "models", err)
++	}
++	d.models = models
++	d.modelMap = make(map[string]*Model, len(models))
++	for _, m := range models {
++		d.modelMap[m.ID] = m
++	}
++	d.modelsLoaded = true
++}
++
++func (d *Dataset) loadRoutines() {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if !d.lazy || d.routinesLoaded {
++		return
++	}
++	var routines []*Routine
++	if err := d.repo.readChildren(context.Background(), nil, "routines", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
++		f := d.routineMap[id]
++		if f == nil {
++			f = NewRoutine(d.repo, d.ProjectID, d.ID, id, content)
++		}
++		routines = append(routines, f)
++	}); err != nil {
++		lazyReadFailed(d, "routines", err)
++	}
++	d.routines = routines
++	d.routineMap = make(map[string]*Routine, len(routines))
++	for _, f := range routines {
++		d.routineMap[f.ID] = f
++	}
++	d.routinesLoaded = true
++}
++
++// tableByID is d's table id, read by its key when d has not read its
++// tables and holds no table of that ID, in tx if it is not nil.
++func (d *Dataset) tableByID(tx *sql.Tx, id string) *Table {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if t, ok := d.tableMap[id]; ok || !d.lazy || d.tablesLoaded {
++		return t
++	}
++	var found *Table
++	if err := d.repo.readChildren(context.Background(), tx, "tables", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
++		found = NewTable(d.repo, d.ProjectID, d.ID, id, content)
++	}); err != nil {
++		lazyReadFailed(d, "tables", err)
++	}
++	if found != nil {
++		d.tableMap[id] = found
++	}
++	return found
++}
++
++func (d *Dataset) modelByID(tx *sql.Tx, id string) *Model {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if m, ok := d.modelMap[id]; ok || !d.lazy || d.modelsLoaded {
++		return m
++	}
++	var found *Model
++	if err := d.repo.readChildren(context.Background(), tx, "models", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
++		found = NewModel(d.repo, d.ProjectID, d.ID, id, content)
++	}); err != nil {
++		lazyReadFailed(d, "models", err)
++	}
++	if found != nil {
++		d.modelMap[id] = found
++	}
++	return found
++}
++
++func (d *Dataset) routineByID(tx *sql.Tx, id string) *Routine {
++	d.mu.Lock()
++	defer d.mu.Unlock()
++	if f, ok := d.routineMap[id]; ok || !d.lazy || d.routinesLoaded {
++		return f
++	}
++	var found *Routine
++	if err := d.repo.readChildren(context.Background(), tx, "routines", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
++		found = NewRoutine(d.repo, d.ProjectID, d.ID, id, content)
++	}); err != nil {
++		lazyReadFailed(d, "routines", err)
++	}
++	if found != nil {
++		d.routineMap[id] = found
++	}
++	return found
++}
++
++// storedIDs are the IDs of d's tables, models and routines, for its row in
++// tx: those d holds, when it has read them all (or was made with them),
++// else those tx sees.
++func (d *Dataset) storedIDs(ctx context.Context, tx *sql.Tx) (tableIDs, modelIDs, routineIDs []string, err error) {
++	d.mu.RLock()
++	lazy, tablesLoaded, modelsLoaded, routinesLoaded := d.lazy, d.tablesLoaded, d.modelsLoaded, d.routinesLoaded
++	d.mu.RUnlock()
++	if !lazy || tablesLoaded {
++		tableIDs = d.TableIDs()
++	} else if tableIDs, err = d.repo.storedChildIDs(ctx, tx, "tables", d.ProjectID, d.ID); err != nil {
++		return nil, nil, nil, err
++	}
++	if !lazy || modelsLoaded {
++		modelIDs = d.ModelIDs()
++	} else if modelIDs, err = d.repo.storedChildIDs(ctx, tx, "models", d.ProjectID, d.ID); err != nil {
++		return nil, nil, nil, err
++	}
++	if !lazy || routinesLoaded {
++		routineIDs = d.RoutineIDs()
++	} else if routineIDs, err = d.repo.storedChildIDs(ctx, tx, "routines", d.ProjectID, d.ID); err != nil {
++		return nil, nil, nil, err
++	}
++	return tableIDs, modelIDs, routineIDs, nil
++}
+diff --git a/internal/metadata/cloudburrow_dataset_lazy_test.go b/internal/metadata/cloudburrow_dataset_lazy_test.go
+new file mode 100644
+index 0000000..6b5fab2
+--- /dev/null
++++ b/internal/metadata/cloudburrow_dataset_lazy_test.go
+@@ -0,0 +1,210 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"fmt"
++	"reflect"
++	"sort"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// CloudBurrow regression tests (cloudburrow/cloudburrow#1661): every
++// request finds its project, which read and decoded the metadata of every
++// table, model and routine of the project, so each request cost more with
++// every result table the CloudBurrow front kept. A request now reads a
++// dataset's tables only when it asks for them, and one table by its key.
++
++// lazyFixture makes project p, of dataset "results", of n tables r0...,
++// a model and a routine, and dataset "other", of one table.
++func lazyFixture(t *testing.T, n int) *Repository {
++	t.Helper()
++	r, _ := testRepository(t)
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		p := NewProject(r, "p", nil, nil)
++		if err := p.Insert(ctx, tx); err != nil {
++			return err
++		}
++		for _, datasetID := range []string{"results", "other"} {
++			if err := p.AddDataset(ctx, tx, NewDataset(r, "p", datasetID, &bigqueryv2.Dataset{FriendlyName: datasetID}, nil, nil, nil)); err != nil {
++				return err
++			}
++		}
++		addTables(ctx, t, r, tx, "results", 0, n)
++		other := p.Dataset("other")
++		if err := other.AddTable(ctx, tx, NewTable(r, "p", "other", "o", map[string]interface{}{"id": "o"})); err != nil {
++			return err
++		}
++		if err := NewModel(r, "p", "results", "m", map[string]interface{}{"modelType": "LINEAR_REG"}).Insert(ctx, tx); err != nil {
++			return err
++		}
++		return r.AddRoutine(ctx, tx, NewRoutine(r, "p", "results", "f", map[string]interface{}{"routineType": "SCALAR_FUNCTION"}))
++	})
++	return r
++}
++
++// addTables adds tables r<from>... r<to-1> to dataset datasetID of p, as
++// rows alone (the dataset's row is not the test's concern here).
++func addTables(ctx context.Context, t *testing.T, r *Repository, tx *sql.Tx, datasetID string, from, to int) {
++	t.Helper()
++	for i := from; i < to; i++ {
++		id := fmt.Sprintf("r%d", i)
++		if err := NewTable(r, "p", datasetID, id, map[string]interface{}{
++			"id":     id,
++			"schema": map[string]interface{}{"fields": []interface{}{map[string]interface{}{"name": "x", "type": "INT64"}}},
++		}).Insert(ctx, tx); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
++func findP(t *testing.T, r *Repository) *Project {
++	t.Helper()
++	p, err := r.FindProject(context.Background(), "p")
++	if err != nil || p == nil {
++		t.Fatalf("FindProject(p) = %v, %v", p, err)
++	}
++	return p
++}
++
++func TestFindProjectReadsNoTables(t *testing.T) {
++	const n = 300
++	r := lazyFixture(t, n)
++
++	before := childrenDecoded.Load()
++	p := findP(t, r)
++	if got := childrenDecoded.Load() - before; got != 0 {
++		t.Fatalf("FindProject decoded %d tables, models and routines; want none", got)
++	}
++	if got, want := p.DatasetIDs(), []string{"results", "other"}; !reflect.DeepEqual(got, want) {
++		t.Fatalf("datasets %v, want %v", got, want)
++	}
++	d := p.Dataset("results")
++	if d.Content().FriendlyName != "results" {
++		t.Errorf("dataset metadata %+v", d.Content())
++	}
++
++	// One table, by its key.
++	before = childrenDecoded.Load()
++	tbl := d.Table("r17")
++	if tbl == nil || tbl.ID != "r17" || tbl.metadata["id"] != "r17" {
++		t.Fatalf("Table(r17) = %+v", tbl)
++	}
++	if d.Table("r17") != tbl {
++		t.Error("Table(r17) read again is another table")
++	}
++	if d.Table("missing") != nil || d.Table("o") != nil {
++		t.Error("Table of an ID the dataset does not have is not nil")
++	}
++	if d.Model("m") == nil || d.Routine("f") == nil || d.Model("f") != nil {
++		t.Error("Model(m), Routine(f) by key, or Model(f), not as stored")
++	}
++	if got := childrenDecoded.Load() - before; got != 3 {
++		t.Errorf("reads by key decoded %d rows; want 3 (r17, m, f)", got)
++	}
++
++	// Every table, in the order they were added, the one read by key kept.
++	ids := d.TableIDs()
++	if len(ids) != n || ids[0] != "r0" || ids[n-1] != fmt.Sprintf("r%d", n-1) || ids[100] != "r100" {
++		t.Fatalf("TableIDs() = %d IDs, from %v", len(ids), ids[:3])
++	}
++	if d.Table("r17") != tbl || len(d.Tables()) != n {
++		t.Error("Tables() lost the table read by key, or is not every table")
++	}
++	if got := p.Dataset("other").TableIDs(); !reflect.DeepEqual(got, []string{"o"}) {
++		t.Errorf("other's TableIDs() = %v", got)
++	}
++	if got := d.ModelIDs(); !reflect.DeepEqual(got, []string{"m"}) {
++		t.Errorf("ModelIDs() = %v", got)
++	}
++	if got := d.RoutineIDs(); !reflect.DeepEqual(got, []string{"f"}) {
++		t.Errorf("RoutineIDs() = %v", got)
++	}
++}
++
++// A request's allocations do not grow with the tables of the project: the
++// guard of #1661, which counts work rather than time.
++func TestFindProjectCostDoesNotGrowWithTables(t *testing.T) {
++	r := lazyFixture(t, 10)
++	ctx := context.Background()
++	find := func() {
++		if p, err := r.FindProject(ctx, "p"); err != nil || p.Dataset("results") == nil {
++			t.Fatalf("FindProject(p) = %v, %v", p, err)
++		}
++	}
++	few := testing.AllocsPerRun(20, find)
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		addTables(ctx, t, r, tx, "results", 10, 600)
++		return nil
++	})
++	many := testing.AllocsPerRun(20, find)
++	// The eager read allocated hundreds of objects per table; allow a
++	// little noise, far below one table's worth.
++	if many > few+20 {
++		t.Errorf("FindProject allocated %.0f times with 600 tables, %.0f with 10; want no growth", many, few)
++	}
++	t.Logf("FindProject allocations: %.0f with 10 tables, %.0f with 600", few, many)
++}
++
++// A dataset read without its tables adds a table, finds one by its key
++// and lists them inside a transaction that has written tables, through
++// that transaction's connection (another would wait for its lock), and
++// its row keeps every table ID.
++func TestLazyDatasetInATransaction(t *testing.T) {
++	r := lazyFixture(t, 50)
++	p := findP(t, r)
++	d := p.Dataset("results")
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		err := d.AddTable(ctx, tx, NewTable(r, "p", "results", "r3", map[string]interface{}{"id": "r3"}))
++		if !errors.Is(err, ErrDuplicatedTable) {
++			return fmt.Errorf("AddTable(r3), a table it has: %v; want ErrDuplicatedTable", err)
++		}
++		if err := d.AddTable(ctx, tx, NewTable(r, "p", "results", "new", map[string]interface{}{"id": "new"})); err != nil {
++			return err
++		}
++		if d.Table("new") == nil || d.Table("r42") == nil {
++			return fmt.Errorf("Table(new) or Table(r42) not found in the transaction")
++		}
++		if err := d.DeleteModel(ctx, tx, "m"); err != nil {
++			return err
++		}
++		if ids := d.TableIDs(); len(ids) != 51 || ids[50] != "new" {
++			return fmt.Errorf("TableIDs() in the transaction: %d, last %q", len(ids), ids[len(ids)-1])
++		}
++		return nil
++	})
++
++	var tableIDs, modelIDs []string
++	conn, err := r.getConnection(context.Background())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	if err := rawRows(context.Background(), conn, "SELECT `projectID`, `id`, `tableIDs`, `modelIDs` FROM `datasets`", 4, func(cols []string) error {
++		dec, err := decodeRawStrings(cols[1:2])
++		if err != nil || dec[0] != "results" {
++			return err
++		}
++		if tableIDs, _, err = googlesqlite.DecodeStringArray(cols[2]); err != nil {
++			return err
++		}
++		if cols[3] != "" {
++			modelIDs, _, err = googlesqlite.DecodeStringArray(cols[3])
++		}
++		return err
++	}); err != nil {
++		t.Fatal(err)
++	}
++	sort.Strings(tableIDs)
++	if len(tableIDs) != 51 || tableIDs[0] != "new" || len(modelIDs) != 0 {
++		t.Errorf("dataset row: %d table IDs, from %v; model IDs %v; want 51 with new, no model", len(tableIDs), tableIDs[:1], modelIDs)
++	}
++	q := findP(t, r).Dataset("results")
++	if q.Table("new") == nil || q.Model("m") != nil || len(q.Tables()) != 51 {
++		t.Error("the transaction's table or model deletion not found after it")
++	}
++}
+diff --git a/internal/metadata/cloudburrow_job_by_key.go b/internal/metadata/cloudburrow_job_by_key.go
+index 6cfcf77..114e20c 100644
+--- a/internal/metadata/cloudburrow_job_by_key.go
++++ b/internal/metadata/cloudburrow_job_by_key.go
+@@ -25,10 +25,16 @@ var txConns sync.Map // *sql.Tx -> *sql.Conn
+ 
+ // BindTx records that tx runs on conn, until UnbindTx; a transaction not
+ // bound is written to with GoogleSQL, as before.
+-func BindTx(tx *sql.Tx, conn *sql.Conn) { txConns.Store(tx, conn) }
++func BindTx(tx *sql.Tx, conn *sql.Conn) {
++	txConns.Store(tx, conn)
++	trackTx(tx, conn) // CloudBurrow patch (cloudburrow/cloudburrow#1661)
++}
+ 
+ // UnbindTx forgets tx, once it is committed or rolled back.
+-func UnbindTx(tx *sql.Tx) { txConns.Delete(tx) }
++func UnbindTx(tx *sql.Tx) {
++	txConns.Delete(tx)
++	untrackTx(tx) // CloudBurrow patch (cloudburrow/cloudburrow#1661)
++}
+ 
+ // rawByKey runs query, SQLite SQL, on tx's connection, with each of strs a
+ // STRING argument in googlesqlite's stored encoding, and calls each (if not
+diff --git a/internal/metadata/cloudburrow_project_raw.go b/internal/metadata/cloudburrow_project_raw.go
+index ba0eaf6..2343c3e 100644
+--- a/internal/metadata/cloudburrow_project_raw.go
++++ b/internal/metadata/cloudburrow_project_raw.go
+@@ -119,7 +119,8 @@ func (r *Repository) findProjectsRaw(ctx context.Context, conn *sql.Conn, ids []
+ 	return projects, nil
+ }
+ 
+-// findDatasetsRaw is findDatasets, reading the rows as SQLite SQL on conn.
++// findDatasetsRaw is findDatasets, reading the rows as SQLite SQL on conn,
++// without the datasets' tables, models and routines (#1661).
+ func (r *Repository) findDatasetsRaw(ctx context.Context, conn *sql.Conn, projectID string, datasetIDs []string) ([]*Dataset, error) {
+ 	encProject, err := googlesqlite.EncodeString(projectID)
+ 	if err != nil {
+@@ -154,59 +155,12 @@ func (r *Repository) findDatasetsRaw(ctx context.Context, conn *sql.Conn, projec
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if len(order) == 0 {
+-		return []*Dataset{}, nil
+-	}
+-	inOrder := make(map[string]struct{}, len(order))
+-	for _, id := range order {
+-		inOrder[id] = struct{}{}
+-	}
+-	// The tables, models and routines of those datasets, each kind with
+-	// one read, by dataset.
+-	children := func(table string, add func(datasetID, id string, content map[string]interface{})) error {
+-		return rawRows(ctx, conn, "SELECT `projectID`, `datasetID`, `id`, `metadata` FROM `"+table+"`", 4, func(cols []string) error {
+-			if cols[0] != encProject {
+-				return nil
+-			}
+-			dec, err := decodeRawStrings(cols[1:])
+-			if err != nil {
+-				return err
+-			}
+-			if _, ok := inOrder[dec[0]]; !ok {
+-				return nil
+-			}
+-			var content map[string]interface{}
+-			if err := json.Unmarshal([]byte(dec[2]), &content); err != nil {
+-				return err
+-			}
+-			add(dec[0], dec[1], content)
+-			return nil
+-		})
+-	}
+-	tablesByDataset := map[string][]*Table{}
+-	if err := children("tables", func(datasetID, id string, content map[string]interface{}) {
+-		tablesByDataset[datasetID] = append(tablesByDataset[datasetID], NewTable(r, projectID, datasetID, id, content))
+-	}); err != nil {
+-		return nil, err
+-	}
+-	modelsByDataset := map[string][]*Model{}
+-	if err := children("models", func(datasetID, id string, content map[string]interface{}) {
+-		modelsByDataset[datasetID] = append(modelsByDataset[datasetID], NewModel(r, projectID, datasetID, id, content))
+-	}); err != nil {
+-		return nil, err
+-	}
+-	routinesByDataset := map[string][]*Routine{}
+-	if err := children("routines", func(datasetID, id string, content map[string]interface{}) {
+-		routinesByDataset[datasetID] = append(routinesByDataset[datasetID], NewRoutine(r, projectID, datasetID, id, content))
+-	}); err != nil {
+-		return nil, err
+-	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): each dataset holds
++	// its metadata alone, and reads its tables, models and routines when
++	// they are asked for (cloudburrow_dataset_lazy.go).
+ 	datasets := make([]*Dataset, 0, len(order))
+ 	for _, datasetID := range order {
+-		datasets = append(datasets, NewDataset(
+-			r, projectID, datasetID, contentByID[datasetID],
+-			tablesByDataset[datasetID], modelsByDataset[datasetID], routinesByDataset[datasetID],
+-		))
++		datasets = append(datasets, newLazyDataset(r, projectID, datasetID, contentByID[datasetID]))
+ 	}
+ 	return datasets, nil
+ }
+diff --git a/internal/metadata/dataset.go b/internal/metadata/dataset.go
+index 4b474d9..bd9e47c 100644
+--- a/internal/metadata/dataset.go
++++ b/internal/metadata/dataset.go
+@@ -24,9 +24,16 @@ type Dataset struct {
+ 	mu         sync.RWMutex
+ 	content    *bigqueryv2.Dataset
+ 	repo       *Repository
++	// lazy is whether the dataset was read without its tables, models
++	// and routines, which it reads when they are asked for; each loaded
++	// is whether it has read all of that kind. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1661).
++	lazy                                       bool
++	tablesLoaded, modelsLoaded, routinesLoaded bool
+ }
+ 
+ func (d *Dataset) TableIDs() []string {
++	d.loadTables()
+ 	d.mu.RLock()
+ 	defer d.mu.RUnlock()
+ 	tableIDs := make([]string, 0, len(d.tables))
+@@ -37,6 +44,7 @@ func (d *Dataset) TableIDs() []string {
+ }
+ 
+ func (d *Dataset) ModelIDs() []string {
++	d.loadModels()
+ 	d.mu.RLock()
+ 	defer d.mu.RUnlock()
+ 	modelIDs := make([]string, 0, len(d.models))
+@@ -47,6 +55,7 @@ func (d *Dataset) ModelIDs() []string {
+ }
+ 
+ func (d *Dataset) RoutineIDs() []string {
++	d.loadRoutines()
+ 	d.mu.RLock()
+ 	defer d.mu.RUnlock()
+ 	routineIDs := make([]string, 0, len(d.routines))
+@@ -114,13 +123,19 @@ func (d *Dataset) Delete(ctx context.Context, tx *sql.Tx) error {
+ }
+ 
+ func (d *Dataset) DeleteModel(ctx context.Context, tx *sql.Tx, id string) error {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): the model read by
++	// its key when the dataset has not read its models, and the lock
++	// released before the dataset's row is written, which reads its IDs
++	// under the lock (it waited for itself, forever).
++	d.modelByID(tx, id)
+ 	d.mu.Lock()
+-	defer d.mu.Unlock()
+ 	model, exists := d.modelMap[id]
+ 	if !exists {
++		d.mu.Unlock()
+ 		return fmt.Errorf("model '%s' is not found in dataset '%s'", id, d.ID)
+ 	}
+ 	if err := model.Delete(ctx, tx); err != nil {
++		d.mu.Unlock()
+ 		return err
+ 	}
+ 	newModels := make([]*Model, 0, len(d.models))
+@@ -132,6 +147,7 @@ func (d *Dataset) DeleteModel(ctx context.Context, tx *sql.Tx, id string) error
+ 	}
+ 	d.models = newModels
+ 	delete(d.modelMap, id)
++	d.mu.Unlock()
+ 	if err := d.repo.UpdateDataset(ctx, tx, d); err != nil {
+ 		return err
+ 	}
+@@ -139,6 +155,10 @@ func (d *Dataset) DeleteModel(ctx context.Context, tx *sql.Tx, id string) error
+ }
+ 
+ func (d *Dataset) AddTable(ctx context.Context, tx *sql.Tx, table *Table) error {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): a table of the ID,
++	// read by its key when the dataset has not read its tables; the
++	// table added is appended to them only when it has.
++	d.tableByID(tx, table.ID)
+ 	d.mu.Lock()
+ 	if _, exists := d.tableMap[table.ID]; exists {
+ 		d.mu.Unlock()
+@@ -148,7 +168,9 @@ func (d *Dataset) AddTable(ctx context.Context, tx *sql.Tx, table *Table) error
+ 		d.mu.Unlock()
+ 		return err
+ 	}
+-	d.tables = append(d.tables, table)
++	if !d.lazy || d.tablesLoaded {
++		d.tables = append(d.tables, table)
++	}
+ 	d.tableMap[table.ID] = table
+ 	d.mu.Unlock()
+ 
+@@ -159,36 +181,39 @@ func (d *Dataset) AddTable(ctx context.Context, tx *sql.Tx, table *Table) error
+ }
+ 
+ func (d *Dataset) Table(id string) *Table {
+-	d.mu.RLock()
+-	defer d.mu.RUnlock()
+-	return d.tableMap[id]
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): read by its key
++	// when the dataset has not read its tables.
++	return d.tableByID(nil, id)
+ }
+ 
+ func (d *Dataset) Model(id string) *Model {
+-	d.mu.RLock()
+-	defer d.mu.RUnlock()
+-	return d.modelMap[id]
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): read by its key
++	// when the dataset has not read its models.
++	return d.modelByID(nil, id)
+ }
+ 
+ func (d *Dataset) Routine(id string) *Routine {
+-	d.mu.RLock()
+-	defer d.mu.RUnlock()
+-	return d.routineMap[id]
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): read by its key
++	// when the dataset has not read its routines.
++	return d.routineByID(nil, id)
+ }
+ 
+ func (d *Dataset) Tables() []*Table {
++	d.loadTables()
+ 	d.mu.RLock()
+ 	defer d.mu.RUnlock()
+ 	return d.tables
+ }
+ 
+ func (d *Dataset) Models() []*Model {
++	d.loadModels()
+ 	d.mu.RLock()
+ 	defer d.mu.RUnlock()
+ 	return d.models
+ }
+ 
+ func (d *Dataset) Routines() []*Routine {
++	d.loadRoutines()
+ 	d.mu.RLock()
+ 	defer d.mu.RUnlock()
+ 	return d.routines
+diff --git a/internal/metadata/repository.go b/internal/metadata/repository.go
+index 098d97f..d358aa5 100644
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -1381,13 +1381,20 @@ func (r *Repository) AddDataset(ctx context.Context, tx *sql.Tx, dataset *Datase
+ 	if err != nil {
+ 		return err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): the IDs of a
++	// dataset that has not read its tables, models or routines, as tx
++	// sees them.
++	tableIDs, modelIDs, routineIDs, err := dataset.storedIDs(ctx, tx)
++	if err != nil {
++		return err
++	}
+ 	if _, err := tx.Exec(
+ 		"INSERT datasets (id, projectID, tableIDs, modelIDs, routineIDs, metadata) VALUES (@id, @projectID, @tableIDs, @modelIDs, @routineIDs, @metadata)",
+ 		sql.Named("id", dataset.ID),
+ 		sql.Named("projectID", dataset.ProjectID),
+-		sql.Named("tableIDs", dataset.TableIDs()),
+-		sql.Named("modelIDs", dataset.ModelIDs()),
+-		sql.Named("routineIDs", dataset.RoutineIDs()),
++		sql.Named("tableIDs", tableIDs),
++		sql.Named("modelIDs", modelIDs),
++		sql.Named("routineIDs", routineIDs),
+ 		sql.Named("metadata", string(metadata)),
+ 	); err != nil {
+ 		return err
+@@ -1400,13 +1407,20 @@ func (r *Repository) UpdateDataset(ctx context.Context, tx *sql.Tx, dataset *Dat
+ 	if err != nil {
+ 		return err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1661): the IDs of a
++	// dataset that has not read its tables, models or routines, as tx
++	// sees them.
++	tableIDs, modelIDs, routineIDs, err := dataset.storedIDs(ctx, tx)
++	if err != nil {
++		return err
++	}
+ 	if _, err := tx.Exec(
+ 		"UPDATE datasets SET tableIDs = @tableIDs, modelIDs = @modelIDs, routineIDs = @routineIDs, metadata = @metadata WHERE projectID = @projectID AND id = @id",
+ 		sql.Named("id", dataset.ID),
+ 		sql.Named("projectID", dataset.ProjectID),
+-		sql.Named("tableIDs", dataset.TableIDs()),
+-		sql.Named("modelIDs", dataset.ModelIDs()),
+-		sql.Named("routineIDs", dataset.RoutineIDs()),
++		sql.Named("tableIDs", tableIDs),
++		sql.Named("modelIDs", modelIDs),
++		sql.Named("routineIDs", routineIDs),
+ 		sql.Named("metadata", string(metadata)),
+ 	); err != nil {
+ 		return err

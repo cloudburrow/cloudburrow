@@ -273,6 +273,8 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
 | `replicationCluster.failoverDrReplicaName` | Applied on a MySQL primary: see DR replicas and switchover. 501 on a PostgreSQL one; `drReplica` and `psaWriteEndpoint` are output fields. |
 | `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |
+| `databaseCenterIntegration` `ENABLED` | 501, as `databaseCenterIntegrationEnabled` `true` is: Database Center is not served. `DISABLED` and `DATABASE_CENTER_INTEGRATION_UNSPECIFIED` are taken (#1700). |
+| `skipPrecheck` | Taken. A major version upgrade here has no separate precheck step to skip: what `preCheckMajorVersionUpgrade` reports is the validation `instances.patch` makes either way (#1700). |
 | `connectionName`, `ipAddresses`, `state`, `gceZone`, `serverCaCert`, `selfLink` and the other output fields | Ignored, as Cloud SQL ignores them. |
 | `users`: `databaseRoles`, `passwordPolicy`, `dualPasswordType` (other than `NO_DUAL_PASSWORD`), `iamEmail` | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). |
 | `databases`: `sqlserverDatabaseDetails` | 400 (SQL Server). |
