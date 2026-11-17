@@ -66,11 +66,11 @@ func TestDemote(t *testing.T) {
 				DemoteMasterContext: &sqladmin.DemoteMasterContext{MasterInstanceName: "ext"}}).Do()
 			return err
 		}(), "400"},
-		{"demote of PostgreSQL", func() error {
+		{"demote of PostgreSQL from a MySQL source", func() error {
 			_, err := svc.Instances.Demote("proj", "pgdb", &sqladmin.InstancesDemoteRequest{
 				DemoteContext: &sqladmin.DemoteContext{SourceRepresentativeInstanceName: "ext"}}).Do()
 			return err
-		}(), "501"},
+		}(), "not the engine of its source"},
 	} {
 		if c.err == nil || !strings.Contains(c.err.Error(), c.want) {
 			t.Errorf("demoteMaster with %s: %v; want %s", c.what, c.err, c.want)

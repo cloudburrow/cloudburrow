@@ -33,7 +33,7 @@ import (
 // pgSwitchoverWhy is why a PostgreSQL replication cluster is not served.
 const pgSwitchoverWhy = "the old primary would have to become a replica of the new one, and a PostgreSQL server becomes a standby " +
 	"of another only by a rebuild of its data directory (pg_rewind or a new base backup), which is not built (demote of a PostgreSQL instance " +
-	"is 501 for the same reason); a MySQL primary's DR replica and switchover are served, and a PostgreSQL replica is promoted with promoteReplica " +
+	"makes it a logical replica of an external server, not a standby); a MySQL primary's DR replica and switchover are served, and a PostgreSQL replica is promoted with promoteReplica " +
 	"(docs/cloudsql.md)"
 
 // drReplicateFlags are the flags a DR replica must not have set

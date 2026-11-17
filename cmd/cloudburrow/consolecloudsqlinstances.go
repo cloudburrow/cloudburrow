@@ -556,9 +556,18 @@ func externalSyncActions(in *sqladminapi.DatabaseInstance, external bool) []cons
 // external server, or instances.demote, after which Start external sync
 // copies the server's databases.
 func demoteActions(in *sqladminapi.DatabaseInstance) []console.Action {
-	if in.MasterInstanceName != "" || !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") ||
-		(in.InstanceType != "" && in.InstanceType != "CLOUD_SQL_INSTANCE") || len(in.ReplicaNames) > 0 {
+	if in.MasterInstanceName != "" || (in.InstanceType != "" && in.InstanceType != "CLOUD_SQL_INSTANCE") || len(in.ReplicaNames) > 0 {
 		return nil
+	}
+	if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		// A PostgreSQL instance is demoted only by demote (#1614).
+		return []console.Action{{ID: "demote", Label: "Demote", Destructive: true, Fields: []console.Field{
+			{Name: "source", Label: "Source representation instance", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,93}[a-z0-9]$",
+				Help: "An ON_PREMISES_INSTANCE recording the external PostgreSQL server this instance becomes a replica of."},
+			{Name: "method", Label: "Method", Type: "select", Options: []string{"demote"}, Default: "demote",
+				Help: "demote leaves the instance waiting for Start external sync, which copies the server's databases into it, " +
+					"dropping first this instance's databases of the same names, and goes on replicating."}},
+			Confirm: "This instance becomes a read replica of the external server; Start external sync replaces its databases named as the migrated ones."}}
 	}
 	return []console.Action{{ID: "demote", Label: "Demote", Destructive: true, Fields: []console.Field{
 		{Name: "source", Label: "Source representation instance", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,93}[a-z0-9]$",

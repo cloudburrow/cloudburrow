@@ -566,8 +566,11 @@ whose GTIDs are the instance's own (so the GTID consistency check is not made):
 (the guide gives the calls); `USE_SSL_CLIENT_AUTH` is refused and `mysql.skipReplicationError` is
 not installed. The console's Demote has **Skip replication setup**.
 
-501, naming why: `demote` of a PostgreSQL instance (the subscription's first copy of the source's
-tables collides with the rows the instance has).
+`demote` of a PostgreSQL instance (#1614) leaves it a replica of the source representation
+instance's server, waiting for `startExternalSync`, which first drops the instance's databases
+named as the migrated ones, as Database Migration Service documents for an existing destination,
+then copies and subscribes as for any PostgreSQL replica of an external server; its other
+databases stay. The console's Demote is on a PostgreSQL instance's page too.
 
 ### Database versions and major version upgrades (#1381)
 
