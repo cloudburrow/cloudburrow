@@ -40,10 +40,10 @@ func TestPhysicalSyncJobAndSetup(t *testing.T) {
 	if !strings.Contains(strings.Join(p.backend(spec).Args, " "), "--init-file=/var/lib/mysql/"+physicalInitFile) {
 		t.Errorf("a restored replica's args: %v", p.backend(spec).Args)
 	}
-	// An ephemeral instance's replica (#1614): served, on an emptyDir its
-	// container's restart keeps, started by physicalWrapper, which passes
-	// the init file itself, so the restore changes nothing in its pod's
-	// template.
+	// An ephemeral instance's replica (#1614): served, on its volume (a
+	// created server has one in either mode, #1740), started by
+	// physicalWrapper, which passes the init file itself, so the restore
+	// changes nothing in its pod's template.
 	eph := &sqlProvisioner{}
 	if why := eph.PhysicalUnsupported(spec); why != "" {
 		t.Errorf("an ephemeral instance's physical sync: %q", why)
@@ -52,15 +52,15 @@ func TestPhysicalSyncJobAndSetup(t *testing.T) {
 		spec.External.PhysicalRestored = restored
 		b := eph.backend(spec)
 		m := b.Manifest("cloudburrow", "w")
-		if !b.ScratchData || b.Persistent || !strings.Contains(m, "emptyDir: {}") || !strings.Contains(m, "mountPath: /var/lib/mysql") ||
-			strings.Contains(m, "persistentVolumeClaim") || strings.Contains(strings.Join(b.Args, " "), "--init-file") ||
+		if !b.Persistent || !strings.Contains(m, "claimName: sqlinst-") || !strings.Contains(m, "mountPath: /var/lib/mysql") ||
+			strings.Contains(m, "emptyDir") || strings.Contains(strings.Join(b.Args, " "), "--init-file") ||
 			len(b.Command) != 4 || b.Command[2] != physicalWrapper {
 			t.Errorf("an ephemeral physical replica (restored %v): command %q args %v\n%s", restored, b.Command, b.Args, m)
 		}
 	}
 	other := spec
 	other.External = &sqladmin.ExternalSource{Host: "h", Instance: "src"}
-	if b := eph.backend(other); b.ScratchData || len(b.Command) != 0 {
+	if b := eph.backend(other); len(b.Command) != 0 {
 		t.Errorf("an ephemeral logical replica has the physical start: %+v", b.Command)
 	}
 	for _, want := range []string{"mv " + physicalRestoredDir + " data", `--init-file=/var/lib/mysql/` + physicalInitFile, `exec docker-entrypoint.sh "$@"`} {

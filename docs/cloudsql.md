@@ -596,14 +596,13 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
   `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
   and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
   password back to the instance's (the copy has the source's accounts), unlogged.
-- **On an ephemeral instance** (`--mode ephemeral`, #1614) a server keeps its data in its
-  container's writable layer, with no volume, so neither that Job nor a restore that stops mysqld
-  (whose container then starts again on a fresh layer) works. Instead the replica's server, idle
-  and empty until the sync, is started again with an `emptyDir` at `/var/lib/mysql`, which
-  outlives a restart of its container and goes with its pod (nothing of it survives `down`, as
-  nothing of an ephemeral instance does), and a start that swaps a restored data directory in
+- **On an ephemeral instance** (`--mode ephemeral`, #1614) the server `up` runs for
+  `--services cloudsql-mysql` keeps its data in its container's writable layer, with no volume,
+  so that Job, which mounts the source's volume, cannot take its backup. Instead the replica's
+  server, idle and empty until the sync, is started again on its volume (a created instance's
+  server has one in either mode, #1740) with a start that swaps a restored data directory in
   before mysqld starts and passes the `--init-file`. XtraBackup runs in an ephemeral container
-  (Kubernetes' debug containers) added to the replica's pod with that `emptyDir` mounted: it
+  (Kubernetes' debug containers) added to the replica's pod with that volume mounted: it
   prepares the backup and copies it back beside the live data directory, then mysqld is stopped
   and its container, started again, swaps the copy in. When the sync takes the backup, a second
   ephemeral container is added to the source server's pod, in its process namespace: the
@@ -611,8 +610,8 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
   `/var/lib/mysql` so the paths the server reports hold, and `xtrabackup --backup
   --stream=xbstream` over the pod's loopback streams the backup through the host into the
   replica's ephemeral container, which unpacks it (`xbstream -x`). Ephemeral containers stay in
-  their pod's spec, ended, until the pod goes. If the replica's pod is replaced (not its
-  container), its data goes with it, as an ephemeral instance's does.
+  their pod's spec, ended, until the pod goes. The restored data is on the replica's volume, so
+  it is there after the replica's server restarts, as any created instance's is.
 - **`verifyExternalSyncSettings`** with `migrationType` `PHYSICAL` answers
   `UNSUPPORTED_MIGRATION_TYPE` (a PostgreSQL replica, or `syncMode` `OFFLINE`),
   `CONNECTION_FAILURE`, `INCOMPATIBLE_DATABASE_VERSION` (the source's or the backup's
@@ -733,10 +732,16 @@ Create instance form's version picker lists every served version.
 restarted or deleted through the API; each answers 400 naming the `--services` flag that
 starts and stops it.
 
-**Persistence follows the instance's mode.** In persistent mode a created instance's server
-has a volume, and the instance's record is kept in `cloudsql-instances.json` in the instance
-directory, so it is there, with its data, after `stop` and `up`. In ephemeral mode neither is
-kept, and the next `up` removes what an earlier run created.
+**A created instance keeps its data while it exists, in either mode** (#1740). Its server has
+a volume (a PersistentVolumeClaim of its own, deleted with the instance), so its users,
+databases, procedures and rows are there after every restart Google makes without losing them:
+a database-flag change, a tier or edition change, `instances.restart`, a failover, a demotion
+or promotion. **What lasts past `stop` follows the instance's mode.** In persistent mode the
+instance's record is kept in `cloudsql-instances.json` in the instance directory, so the
+instance is there, with its data, after `stop` and `up`. In ephemeral mode no record is kept:
+the next `up` removes every server an earlier run created, with its volume, and `delete`
+removes the cluster and every volume in it. `TestCloudSQLInstanceWrites` checks that a user,
+a database and a row are there after a flag change and after a restart, on both engines.
 
 The console's **Cloud SQL instances** page lists every instance, with Create instance,
 Delete and Restart; a created instance's page has **Edit instance** (tier, labels, database
@@ -840,8 +845,8 @@ instance holding the source's databases as they were at that time, to the micros
 - **The recovery window** is reported by `projects.instances.getLatestRecoveryTime` as
   Google documents it: `earliestRecoveryTime` is the oldest base's time, and
   `latestRecoveryTime` is the server's clock now. A `pointInTime` outside it is 400, naming the
-  window. The log lives on the server's volume, so deleting the instance deletes it, and in
-  ephemeral mode a restart of the server's pod loses it with the data.
+  window. The log lives on the server's volume, so a restart of the server keeps it, in either
+  mode, and deleting the instance deletes it.
 - **Retention:** `transactionLogRetentionDays` is applied as Google documents it: 1 to 7 days
   on the Enterprise edition, 1 to 35 on Enterprise Plus (out of range is 400), 7 or 14 days
   by default, and returned with the default when it is not set. A sweep, each minute, after
@@ -936,9 +941,8 @@ wait for the standby, as on Google. The design:
 - **Not built:** automatic failover when the primary's pod fails (a pod that fails is restarted
   in place, as for a `ZONAL` instance; fail over with `instances.failover`), and the
   point-in-time recovery log of the old primary is not carried to the new one (a recovery to a
-  time before the failover recovers from a base taken after it, or is 400). A MySQL standby
-  whose server restarts without its volume (an ephemeral instance) starts empty and is filled
-  again only by the next failover or `REGIONAL` patch; until then its primary's commits wait.
+  time before the failover recovers from a base taken after it, or is 400). The standby has a
+  volume of its own in either mode, so a restart of its server keeps its data.
 
 `TestCloudSQLHighAvailability` checks it on both engines through the official client and
 connector: rows written before a failover are all there after it, through the same connection
