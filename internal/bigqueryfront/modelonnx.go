@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -20,6 +19,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/onnxmodel"
+	"github.com/cloudburrow/cloudburrow/internal/onnxrunner"
 )
 
 // Imported ONNX models (#1711): CREATE MODEL … OPTIONS (MODEL_TYPE='ONNX',
@@ -60,13 +60,16 @@ import (
 // writes ML.PREDICT as the input LEFT JOINed with the predictions, on the
 // same key, so every input row is answered where it is read.
 //
-// NOT YET REACHABLE (#1711): the front runs in the cluster, from the
-// storage image's CGO-less Linux cloudburrow-storage binary, which is never
-// built with the onnx tag, so onnxmodel.Available is false there and every
-// MODEL_TYPE='ONNX' is refused 501 (onnxRefusal). Serving it needs ONNX
-// Runtime where the front can call it: a runner in the `-tags onnx` CLI
-// published to the front through cloudburrow-host, as Resource Manager is
-// (#1392). Everything here is unit-tested under -tags onnx.
+// Where it runs (#1711): the front runs in the cluster, from the storage
+// image's CGO-less Linux cloudburrow-storage binary, which cannot load ONNX
+// Runtime. The CLI of the opt-in onnx build (make build-onnx) serves an
+// ONNX runner (internal/onnxrunner) on --port-onnx, published to the
+// cluster through cloudburrow-host as Resource Manager is (#1392), and
+// `up` gives the front its address with --onnx. The front sends the
+// runner a model's bytes when it is created (and again whenever the
+// runner no longer holds them), and runs it there. Without --onnx, as
+// from the default build, every MODEL_TYPE='ONNX' is refused 501
+// (onnxRefusal), naming the build that runs it.
 
 // maxONNXModelBytes is BigQuery's "Maximum model size is 450 MB".
 const maxONNXModelBytes = 450 << 20
@@ -82,18 +85,38 @@ type onnxImport struct {
 	Outputs   []onnxmodel.Port `json:"outputs"`
 }
 
-// onnxRefusal is the 501 of an ONNX model in a build without the runtime.
+// onnxRunner runs imported ONNX models: *onnxrunner.Client, the runner of
+// the onnx build's CLI.
+type onnxRunner interface {
+	// Load sends the model, whose hex SHA-256 is sum, and returns its
+	// inputs and outputs.
+	Load(ctx context.Context, sum string, model []byte) (inputs, outputs []onnxmodel.Port, err error)
+	// Run runs the model whose hex SHA-256 is sum, asking model for its
+	// bytes when the runner no longer holds them.
+	Run(ctx context.Context, sum string, model func() ([]byte, error), inputs []onnxmodel.Port, in []onnxmodel.Tensor,
+		outputs []onnxmodel.Port) ([]onnxmodel.Tensor, error)
+}
+
+// onnxRefusal is the 501 of an ONNX model on an instance with no ONNX
+// runner: one started from the default build.
 func onnxRefusal() string {
-	return "Not implemented here: model_type ONNX: an imported ONNX model runs on ONNX Runtime, which CloudBurrow's BigQuery " +
-		"front does not load: it runs in the cluster, and only the CLI of the opt-in `-tags onnx` build loads ONNX Runtime, for " +
-		"Vertex AI embeddings (#1711). Nothing was run."
+	return "Not implemented here: model_type ONNX: an imported ONNX model runs on ONNX Runtime, which only CloudBurrow's " +
+		"opt-in onnx build runs: build it with `make build-onnx` and start the instance with bin/cloudburrow-onnx up, " +
+		"ONNXRUNTIME_LIB set to libonnxruntime (docs/embeddings.md, #1711). Nothing was run."
+}
+
+// onnxRunnerFailed is the answer to a runner's failure that is not the
+// model's: code and message.
+func onnxRunnerFailed(err error) (int, string) {
+	if onnxrunner.IsUnavailable(err) {
+		return 501, "Not implemented here: model_type ONNX: the instance's ONNX runner cannot run ONNX Runtime: " + err.Error() +
+			" (docs/embeddings.md, #1711). Nothing was run."
+	}
+	return 500, "cloudburrow: " + err.Error()
 }
 
 // parseONNXOptions reads an ONNX model's OPTIONS list into d.
 func parseONNXOptions(toks []token, d *modelDDL) (int, string) {
-	if !onnxmodel.Available {
-		return 501, onnxRefusal()
-	}
 	d.opts = mlOptions{ModelType: "ONNX"}
 	for i := 0; i < len(toks); {
 		if toks[i].kind != tokWord || i+2 >= len(toks) || !toks[i+1].punct("=") {
@@ -198,6 +221,9 @@ func (o *onnxImport) outputNames() []string {
 // importONNX reads and checks the model MODEL_PATH names. code and msg
 // are a refusal.
 func (f front) importONNX(ctx context.Context, path string) (*onnxImport, []byte, int, string) {
+	if f.onnx == nil {
+		return nil, nil, 501, onnxRefusal()
+	}
 	if f.storage == nil {
 		return nil, nil, 404, "Not found: URI " + path + ": CloudBurrow was given no Cloud Storage to read it from; is Cloud Storage enabled? Nothing was run."
 	}
@@ -280,12 +306,14 @@ func (f front) importONNX(ctx context.Context, path string) (*onnxImport, []byte
 	if len(data) > maxONNXModelBytes {
 		return nil, nil, 400, fmt.Sprintf("The ONNX model %s is larger than the maximum model size, 450 MB", o.uri())
 	}
-	in, out, err := onnxmodel.Inspect(data)
-	if errors.Is(err, onnxmodel.ErrNotCompiled) {
-		return nil, nil, 501, onnxRefusal()
+	sum := sha256.Sum256(data)
+	in, out, err := f.onnx.Load(ctx, hex.EncodeToString(sum[:]), data)
+	if onnxrunner.IsModelError(err) {
+		return nil, nil, 400, "Failed to load the ONNX model " + o.uri() + ": " + err.Error()
 	}
 	if err != nil {
-		return nil, nil, 400, "Failed to load the ONNX model " + o.uri() + ": " + err.Error()
+		code, msg := onnxRunnerFailed(err)
+		return nil, nil, code, msg
 	}
 	for _, p := range in {
 		if _, why := onnxColumnOf(p, "input"); why != "" {
@@ -297,7 +325,6 @@ func (f front) importONNX(ctx context.Context, path string) (*onnxImport, []byte
 			return nil, nil, 400, why
 		}
 	}
-	sum := sha256.Sum256(data)
 	return &onnxImport{URI: o.uri(), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data)), Inputs: in, Outputs: out}, data, 0, ""
 }
 
@@ -342,10 +369,16 @@ func (f front) onnxSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 	if len(c.struc) > 0 {
 		return "", 400, "ML.PREDICT of an imported ONNX model takes no STRUCT of options"
 	}
+	if f.onnx == nil {
+		return "", 501, onnxRefusal()
+	}
 	imp := md.ONNX
-	data, err := f.models.blob(imp.SHA256)
-	if err != nil {
-		return "", 500, "cloudburrow: the model's ONNX file is missing from the state directory: " + err.Error()
+	data := func() ([]byte, error) {
+		b, err := f.models.blob(imp.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("the model's ONNX file is missing from the state directory: %w", err)
+		}
+		return b, nil
 	}
 	cols, _, code, msg := f.queryAllRows(r, q, "SELECT * FROM ("+c.input+") LIMIT 0")
 	if code != 0 {
@@ -384,7 +417,7 @@ func (f front) onnxSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 			keys = append(keys, *row[0])
 		}
 	}
-	preds, code, msg := runONNX(data, imp, ins, keys)
+	preds, code, msg := runONNX(r.Context(), f.onnx, data, imp, ins, keys)
 	if code != 0 {
 		return "", code, msg
 	}
@@ -449,7 +482,8 @@ func onnxConvertible(t string, c onnxColumn) bool {
 // runONNX runs the model on each key's input values (a key is
 // TO_JSON_STRING of the STRUCT c0, c1, ... of the inputs' columns) and
 // returns each key's outputs as SQL literals.
-func runONNX(model []byte, imp *onnxImport, ins []onnxColumn, keys []string) ([][]string, int, string) {
+func runONNX(ctx context.Context, runner onnxRunner, model func() ([]byte, error), imp *onnxImport, ins []onnxColumn,
+	keys []string) ([][]string, int, string) {
 	out := make([][]string, len(keys))
 	if len(keys) == 0 {
 		return out, 0, ""
@@ -517,12 +551,13 @@ func runONNX(model []byte, imp *onnxImport, ins []onnxColumn, keys []string) ([]
 			t.Shape = shape
 			tensors[i] = t
 		}
-		res, err := onnxmodel.Run(model, imp.Inputs, tensors, imp.Outputs)
-		if errors.Is(err, onnxmodel.ErrNotCompiled) {
-			return nil, 501, onnxRefusal()
+		res, err := runner.Run(ctx, imp.SHA256, model, imp.Inputs, tensors, imp.Outputs)
+		if onnxrunner.IsModelError(err) {
+			return nil, 400, "The ONNX model failed to run: " + err.Error()
 		}
 		if err != nil {
-			return nil, 400, "The ONNX model failed to run: " + err.Error()
+			code, msg := onnxRunnerFailed(err)
+			return nil, code, msg
 		}
 		for o, p := range imp.Outputs {
 			oc, _ := onnxColumnOf(p, "output")

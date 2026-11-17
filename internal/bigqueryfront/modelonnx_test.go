@@ -9,18 +9,12 @@ import (
 )
 
 // TestParseONNXModel (#1711): CREATE MODEL of model_type ONNX takes
-// model_path, and no query or TRANSFORM; the default build refuses it 501,
-// naming the build that runs it.
+// model_path, and no query or TRANSFORM. Whether the instance can run it
+// is asked when it is created (TestONNXWithoutARunner).
 func TestParseONNXModel(t *testing.T) {
 	ok := "CREATE OR REPLACE MODEL ds.m OPTIONS(model_type='ONNX', model_path='gs://b/models/*')"
 	toks, _ := lex(ok)
 	d, is, code, msg := parseModelDDL(toks, ok)
-	if !onnxmodel.Available {
-		if !is || code != 501 || !strings.Contains(msg, "-tags onnx") {
-			t.Fatalf("default build: %v %d %s", is, code, msg)
-		}
-		return
-	}
 	if !is || code != 0 || d.onnxPath != "gs://b/models/*" || d.opts.ModelType != "ONNX" || !d.replace {
 		t.Fatalf("%v %d %s %+v", is, code, msg, d)
 	}

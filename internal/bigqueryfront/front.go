@@ -397,7 +397,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
-				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models}
+				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models,
+				onnx: o.onnx}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -628,6 +629,9 @@ type front struct {
 	dropped *droppedStore
 	// models are the BigQuery ML models (models.go, #1465), or nil.
 	models *bqModels
+	// onnx runs imported ONNX models (modelonnx.go, #1711): the runner
+	// of the onnx build's CLI, or nil, and every ONNX model is 501.
+	onnx onnxRunner
 }
 
 // Option is an option of Wrap.
@@ -663,6 +667,8 @@ type options struct {
 	// resourceManager is the instance's Resource Manager
 	// (http://host:port), or "" (infoschemahierarchy.go, #1392).
 	resourceManager string
+	// onnx runs imported ONNX models, or nil (modelonnx.go, #1711).
+	onnx onnxRunner
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
