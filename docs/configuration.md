@@ -764,6 +764,7 @@ promise that everything survives:
 | `pubsub` | **Never survives a restart** |
 | `datastore` | Survives restart in persistent mode: the emulator's store is on a volume (#307) |
 | `firestore` | Survives restart in persistent mode: the front exports the documents to a volume every 30 seconds while calls write, when `cloudburrow stop` starts (measured at 2.1 seconds for 100,000 documents of 1 KB) and when the pod stops, and imports them when the emulator starts, with the Admin API's databases and backups beside them; an emulator crash loses at most the last 30 seconds' writes, in ephemeral mode too, where the exports are on the pod's emptyDir and go with it (#1615) |
+| `cloudsql`, `cloudsql-mysql` | The servers `up` runs survive restart in persistent mode, on a volume. An instance created through the Cloud SQL Admin API keeps its data on a volume of its own in either mode, across every restart of its server (a flag, tier or edition change, `instances.restart`, a failover) while it exists (#1740); in persistent mode it is there after `stop` and `up` too, and in ephemeral mode the next `up` removes it, with its volume. See [cloudsql.md](cloudsql.md) |
 
 Pub/Sub is not an oversight. The [upstream audit](upstream-evaluation.md) measured Google's
 emulator losing a topic across a restart *even when given `--data-dir`*. CloudBurrow cannot

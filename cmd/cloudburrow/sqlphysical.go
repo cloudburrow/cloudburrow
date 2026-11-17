@@ -263,23 +263,20 @@ echo 'SET sql_log_bin = 0;' > /var/lib/mysql/` + physicalInitFile + `
 touch "$marker"
 `
 
-// An ephemeral instance's physical sync (#1614). Its servers keep their
-// data in their containers' writable layer, with no volume, so neither the
-// Job above (which mounts the replica's and the source's volumes) nor a
-// restore that stops mysqld (whose container then starts again with a
-// fresh layer) works. Instead:
+// An ephemeral instance's physical sync (#1614). The server `up` runs for
+// --services cloudsql-mysql keeps its data in its container's writable
+// layer, with no volume, so the Job above, which mounts the source's
+// volume, cannot take its backup. Instead:
 //
-//   - the replica's server, idle and empty until the sync, is given an
-//     emptyDir at /var/lib/mysql (components.Backend.ScratchData), which
-//     outlives a restart of its container and goes with its pod, as the
-//     rest of an ephemeral instance's state goes with `down`, and a start
-//     (physicalWrapper) that swaps a restored data directory in before
-//     mysqld starts;
+//   - the replica's server, idle and empty until the sync, is started on
+//     its volume (a created instance's server has one in either mode,
+//     #1740) with a start (physicalWrapper) that swaps a restored data
+//     directory in before mysqld starts;
 //   - XtraBackup runs in an ephemeral container (kubectl's debug
-//     containers) added to the replica's pod with that emptyDir mounted:
+//     containers) added to the replica's pod with that volume mounted:
 //     it prepares the backup and copies it back beside the live data
 //     directory, then the replica's mysqld is stopped, and its container,
-//     started again on the same emptyDir, swaps the copy in and starts
+//     started again on the same volume, swaps the copy in and starts
 //     mysqld on it with the --init-file;
 //   - when the sync takes the backup, a second ephemeral container is added
 //     to the source server's pod, sharing its process namespace
@@ -315,8 +312,7 @@ exec docker-entrypoint.sh "$@"
 `
 
 // scratchPhysical is whether spec's server is an ephemeral instance's
-// physically synced MySQL replica, which physicalWrapper starts on an
-// emptyDir.
+// physically synced MySQL replica, which physicalWrapper starts.
 func (p *sqlProvisioner) scratchPhysical(spec sqladmin.Spec) bool {
 	ext := spec.External
 	return !p.persistent && spec.MySQL() && ext != nil && ext.Physical
@@ -469,7 +465,7 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 		}
 		srcApp = strings.TrimSpace(app)
 	}
-	// The replica's server, started on an emptyDir with physicalWrapper.
+	// The replica's server, started on its volume with physicalWrapper.
 	if err := p.inst.Apply(ctx, p.nodeBackend(spec, spec.PrimaryNode()).Manifest(p.inst.Namespace, p.inst.Instance)); err != nil {
 		return err
 	}
@@ -540,7 +536,7 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 	if err := p.execContainer(ctx, pod, xb, nil, &out, append(env, "bash", "-c", physicalEphemeralScript)...); err != nil {
 		return fmt.Errorf("prepare the backup: %w %s", err, strings.TrimSpace(tail(out.String(), 2000)))
 	}
-	// mysqld stops; its container starts again on the same emptyDir and
+	// mysqld stops; its container starts again on the same volume and
 	// swaps the restored copy in.
 	out.Reset()
 	if err := p.execContainer(ctx, pod, server, nil, &out, "sh", "-c", "kill -TERM 1"); err != nil {

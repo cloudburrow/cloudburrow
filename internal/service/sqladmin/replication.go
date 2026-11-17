@@ -165,10 +165,16 @@ func (m *MySQL) PrepareReplicationSource(ctx context.Context, password string) e
 // Promote stops replication, forgets the source, and makes the server
 // writable, across restarts.
 func (m *MySQL) Promote(ctx context.Context) error {
+	if err := m.exec(ctx, "STOP REPLICA", "RESET REPLICA ALL", "SET PERSIST super_read_only = OFF", "SET PERSIST read_only = OFF"); err != nil {
+		return err
+	}
 	// The stored procedures demoteMaster with skipReplicationSetup
-	// installed are removed, as Cloud SQL removes them (#1614).
-	return m.exec(ctx, append([]string{"STOP REPLICA", "RESET REPLICA ALL", "SET PERSIST super_read_only = OFF", "SET PERSIST read_only = OFF"},
-		dropDemoteProceduresStmts()...)...)
+	// installed are removed, as Cloud SQL removes them (#1614), unlogged:
+	// Cloud SQL's own procedures are not the instance's data, and a DROP
+	// PROCEDURE IF EXISTS is written to the binary log, so each would give
+	// the promoted server a GTID of its own, which a later demoteMaster's
+	// GTID check refuses.
+	return m.execUnlogged(ctx, dropDemoteProceduresStmts()...)
 }
 
 // PauseReplication stops or starts the replica's threads.

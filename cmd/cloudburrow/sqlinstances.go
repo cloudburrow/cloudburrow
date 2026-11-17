@@ -19,8 +19,13 @@ import (
 // sqlProvisioner runs the Cloud SQL instances created through the Admin
 // API (#1330) in the cluster: each is a Deployment of the image and
 // component code `up` runs for --services cloudsql or cloudsql-mysql
-// (components.CloudSQLInstanceBackend), with a volume when the instance is
-// persistent, and its own host tunnel.
+// (components.CloudSQLInstanceBackend), with a volume, and its own host
+// tunnel. The volume is there in either mode (#1740): a restart of the
+// server (a flag, tier or edition change, instances.restart, a failover)
+// replaces its pod, and Google keeps an instance's data across those. In
+// ephemeral mode it goes with the instance's record: the next `up` keeps no
+// record and prunes the server with its volume, and `delete` takes the
+// cluster, and every volume in it, away.
 type sqlProvisioner struct {
 	cfg        config.Config
 	inst       *components.Installer
@@ -137,7 +142,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	for _, f := range spec.Flags {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
-	b := components.CloudSQLInstanceBackend(spec.ServerName(), spec.DatabaseVersion, p.persistent, spec.RootPassword, flags)
+	b := components.CloudSQLInstanceBackend(spec.ServerName(), spec.DatabaseVersion, true, spec.RootPassword, flags)
 	if spec.PITREnabled() && !spec.MySQL() {
 		if len(b.Args) == 0 {
 			b.Args = []string{"postgres"}
@@ -157,9 +162,8 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), src)
 		if p.scratchPhysical(spec) {
 			// An ephemeral instance's physically synced replica (#1614):
-			// its data on an emptyDir, swapped in and given its --init-file
-			// at start (sqlphysical.go).
-			b.ScratchData = true
+			// a restored copy swapped in and given its --init-file at start
+			// (sqlphysical.go).
 			b.Command = []string{"sh", "-c", physicalWrapper, "sh"}
 		} else if ext := spec.External; ext != nil && ext.Physical && ext.PhysicalRestored && spec.MySQL() {
 			// The restored copy has the source's accounts (#1570).

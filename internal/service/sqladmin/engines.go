@@ -315,6 +315,29 @@ func (m *MySQL) exec(ctx context.Context, stmts ...string) error {
 	return nil
 }
 
+// execUnlogged runs stmts on one connection with sql_log_bin off, so they
+// are not in the binary log and take no GTID.
+func (m *MySQL) execUnlogged(ctx context.Context, stmts ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
+	defer cancel()
+	db, err := m.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return myError(err)
+	}
+	defer conn.Close()
+	for _, s := range append([]string{"SET SESSION sql_log_bin = 0"}, stmts...) {
+		if _, err := conn.ExecContext(ctx, s); err != nil {
+			return myError(err)
+		}
+	}
+	return nil
+}
+
 func (m *MySQL) InstalledVersion(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
 	defer cancel()
