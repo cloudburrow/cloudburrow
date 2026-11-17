@@ -282,7 +282,14 @@ their pod addresses (bus port 16379). A client inside the Kubernetes cluster the
 addresses from `CLUSTER SLOTS`, which it cannot reach: in the cluster, reach the nodes by pod
 address. Valkey announces one client address per address family (`cluster-announce-client-ipv4`,
 `-ipv6`), and both the host's tunnels and the pods reach a node over IPv4, so no setting
-serves both (#1549); the discovery endpoint is the host's too.
+serves both (#1549); the discovery endpoint is the host's too. Measured again 2026-11-17 (#1614)
+on the Valkey 8.1.10 the nodes run: the announce settings are `cluster-announce-ip`,
+`-client-ipv4`, `-client-ipv6`, `-hostname`, `-human-nodename`, `-port`, `-tls-port`, `-bus-port`
+and one `cluster-preferred-endpoint-type` for every client, so a node answers every IPv4 client
+alike. A hostname both sides resolve was tried: a `*.localhost` name resolves to 127.0.0.1 through
+macOS's resolver, but Go's own resolver (the default of a `CGO_ENABLED=0` client, and Linux's)
+answers "no such host", so host clients would break; and announcing a name would also need the
+cluster's DNS to answer it. Serving both stays not built (docs/gaps.md).
 
 `UpdateCluster` of `shard_count` adds primaries and moves slots, keys and all, to them (or moves
 them off the primaries removed), as `redis-cli --cluster reshard` does; `replica_count` adds or
