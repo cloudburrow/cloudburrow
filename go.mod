@@ -43,6 +43,7 @@ require (
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/prometheus/client_model v0.6.3

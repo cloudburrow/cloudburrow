@@ -5093,6 +5093,7 @@
           "test/compat/embedaudio_test.go:71 TestEmbedContentEmbedsAudioThroughThePredictionClient",
           "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient",
           "test/compat/embedimages_test.go:111 TestEmbedContentEmbedsImagesThroughThePredictionClient",
+          "test/compat/embedmp3_test.go:39 TestEmbedContentEmbedsMP3ThroughThePredictionClient",
           "test/compat/embedwebp_test.go:41 TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient"
         ]
       },

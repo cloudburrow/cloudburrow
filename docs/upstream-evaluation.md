@@ -662,3 +662,32 @@ ORC's tools print for them (`TestORCExamples`). A corrupt file's panic in a deco
 as a 400. `govulncheck ./...` reports nothing for it, and adding it added no other module to the
 graph (`golang/protobuf` moved from the graph into `go.mod`'s list because the module has no
 `go.mod`).
+
+## Amendment: an MP3 decoder module for Vertex AI EmbedContent audio (#1721)
+
+Google documents "MP3, WAV" as `gemini-embedding-2`'s audio formats, and its samples send
+`mime_type` `audio/mpeg`. Go's standard library has no MP3 decoder, and none was in `go.mod`. The
+user approved adding one module (2026-11-17). The candidates on the Go module proxy, compared on
+2026-11-17:
+
+| Module | Last version | Licence | CGO | Its own dependencies | Verdict |
+|---|---|---|---|---|---|
+| `github.com/hajimehoshi/go-mp3` | v0.3.4 (2022-11) | Apache 2.0 | none | none in the decoder's packages (`go.mod` names `hajimehoshi/oto/v2`, used only by its example, so `go.sum` gains that module's `go.mod` hash and one of an old `golang.org/x/sys`, and no code) | **Adopted** |
+| `github.com/gopxl/beep/v2` (`mp3`) | v2.1.1 (2025-01) | MIT | none | wraps `hajimehoshi/go-mp3`, and brings `oto/v3`, `tcell`, an Ogg Vorbis and a FLAC decoder | Rejected: the same decoder behind a playback library |
+| `github.com/tosone/minimp3` | v1.1.0 (2026-10) | MIT (minimp3: CC0) | yes | none | Rejected: cgo binding of the C minimp3 |
+| `github.com/kvark128/minimp3` | 2022-04 pseudo-version | MIT | yes | none | Rejected: cgo binding of the C minimp3 |
+
+`go-mp3` is the pure Go MP3 decoder the Ebitengine game library ships (its author's), and the one
+the other Go audio libraries wrap. It decodes MPEG-1 and MPEG-2 Layer III (16 to 48 kHz; mono,
+stereo, joint and intensity stereo) to 16-bit stereo PCM, and scans the frames first, so a clip's
+length is known before it is decoded. It is quiet since 2022, so CloudBurrow uses only its
+`NewDecoder`, `SampleRate`, `Length` and `Read`, and does itself what it leaves out
+(`internal/embedding/mp3.go`): it reads the first frame's header for the channel mode (the decoder
+copies a mono stream to both channels; a mono stream is read back as one channel, a stereo one
+downmixed as a stereo WAV is), and the Info/Xing frame's LAME tag for the encoder's delay and
+padding, trimmed as ffmpeg trims them (the Info frame, then the delay plus the decoder's 529
+samples, and the padding at the end), so an MP3 lines up sample for sample with the WAV it was
+encoded from. A panic of the decoder on a corrupt frame is recovered as `INVALID_ARGUMENT`.
+MPEG-2.5 (8, 11.025 and 12 kHz), which `go-mp3` refuses, is refused naming it. Checked against
+ffmpeg 8: the same 16 kHz mono MP3 decodes to the same samples within one 16-bit step
+(`TestDecodeMP3`). `govulncheck ./...` (v1.8.0) reports nothing in it.
