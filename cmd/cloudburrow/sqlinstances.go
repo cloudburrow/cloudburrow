@@ -145,7 +145,8 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	}
 	if spec.MasterInstanceName != "" {
 		src := components.SQLReplicaSource{
-			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000}
+			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000,
+			Epoch: spec.RebuildEpoch}
 		if ext := spec.External; ext != nil {
 			src.Password, src.User, src.Logical = ext.Password, ext.User, !spec.MySQL()
 			if ext.Instance == "" {

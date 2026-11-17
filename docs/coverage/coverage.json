@@ -10496,6 +10496,7 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
@@ -10520,6 +10521,7 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
@@ -10703,8 +10705,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
@@ -10795,8 +10798,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -10854,8 +10858,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -10902,8 +10907,9 @@
           "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
@@ -10944,6 +10950,7 @@
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
@@ -11014,8 +11021,9 @@
         "method": "sql.instances.switchover",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
-          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover"
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres"
         ]
       },
       {
@@ -11069,8 +11077,9 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
-          "test/compat/cloudsqlswitchover_test.go:194 TestGcloudSQLSwitchover",
+          "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
+          "test/compat/cloudsqlswitchoverpg_test.go:34 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",

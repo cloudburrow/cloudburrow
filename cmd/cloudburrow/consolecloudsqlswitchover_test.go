@@ -16,7 +16,8 @@ import (
 // DR replica, both through instances.patch's replicationCluster; the DR
 // replica's page shows its role and offers Switchover, which is refused
 // unless the primary's instance ID is typed, and then calls
-// instances.switchover with the timeout as dbTimeout.
+// instances.switchover with the timeout as dbTimeout. A PostgreSQL
+// primary and its DR replica (#1524) have the same actions.
 func TestCloudSQLConsoleSwitchover(t *testing.T) {
 	var mu sync.Mutex
 	calls := map[string]string{}
@@ -34,6 +35,14 @@ func TestCloudSQLConsoleSwitchover(t *testing.T) {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/dr"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": "dr", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
 				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:prim",
+				"replicationCluster": map[string]any{"drReplica": true}, "settings": map[string]any{"tier": "t", "databaseReplicationEnabled": true}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/pgprim"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "pgprim", "state": "RUNNABLE", "databaseVersion": "POSTGRES_17",
+				"instanceType": "CLOUD_SQL_INSTANCE", "replicaNames": []string{"pgdr"},
+				"replicationCluster": map[string]any{"failoverDrReplicaName": "proj:pgdr"}, "settings": map[string]any{"tier": "t"}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/pgdr"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "pgdr", "state": "RUNNABLE", "databaseVersion": "POSTGRES_17",
+				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:pgprim",
 				"replicationCluster": map[string]any{"drReplica": true}, "settings": map[string]any{"tier": "t", "databaseReplicationEnabled": true}})
 		case r.Method == http.MethodGet:
 			_, _ = io.WriteString(w, `{}`)
@@ -89,5 +98,18 @@ func TestCloudSQLConsoleSwitchover(t *testing.T) {
 	}
 	if q := calls["POST /v1/projects/proj/instances/dr/switchover"]; !strings.Contains(q, "dbTimeout=900s") {
 		t.Errorf("switchover: %q", q)
+	}
+	// PostgreSQL (#1524).
+	if sum, acts := page("pgprim"); sum["DR replica"] != "proj:pgdr" || !acts["designate-dr-replica"] || !acts["clear-dr-replica"] {
+		t.Errorf("a PostgreSQL primary: %v %v", sum, acts)
+	}
+	if sum, acts := page("pgdr"); sum["Disaster recovery role"] != "DR replica of proj:pgprim" || !acts["switchover"] {
+		t.Errorf("a PostgreSQL DR replica: %v %v", sum, acts)
+	}
+	if err := p.ActAt(ctx, "proj", []string{"pgdr"}, "switchover", map[string]string{"primary": "pgprim", "dbTimeout": "600"}); err != nil {
+		t.Fatal(err)
+	}
+	if q, ok := calls["POST /v1/projects/proj/instances/pgdr/switchover"]; !ok || !strings.Contains(q, "dbTimeout=600s") {
+		t.Errorf("PostgreSQL switchover: %q", q)
 	}
 }

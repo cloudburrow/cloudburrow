@@ -697,19 +697,22 @@ func drRole(in *sqladminapi.DatabaseInstance) string {
 	return ""
 }
 
-// drActions are, on a MySQL primary with read replicas, Designate DR
-// replica (and Remove DR replica once one is), and, on its DR replica,
-// Switchover (#1614): the replica becomes the primary, and the primary its
-// replica, with no data lost.
+// drActions are, on a MySQL (#1614) or PostgreSQL (#1524) primary with
+// read replicas, Designate DR replica (and Remove DR replica once one is),
+// and, on its DR replica, Switchover: the replica becomes the primary, and
+// the primary its replica, with no data lost.
 func drActions(in *sqladminapi.DatabaseInstance) []console.Action {
-	if !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
-		return nil
-	}
 	if rc := in.ReplicationCluster; rc != nil && rc.DrReplica {
 		_, primary, _ := strings.Cut(in.MasterInstanceName, ":")
+		confirm := "This DR replica becomes the primary and " + primary + " its read replica: the primary stops taking writes " +
+			"until this replica has applied every transaction it has."
+		if strings.HasPrefix(in.DatabaseVersion, "POSTGRES_") {
+			confirm = "This DR replica becomes the primary and " + primary + " its read replica: the primary stops taking writes, " +
+				"its sessions are ended, this replica replays all of its WAL and is promoted, and " + primary +
+				" is rebuilt from a base backup of this one."
+		}
 		return []console.Action{{ID: "switchover", Label: "Switchover", Destructive: true,
-			Confirm: "This DR replica becomes the primary and " + primary + " its read replica: the primary stops taking writes " +
-				"until this replica has applied every transaction it has.",
+			Confirm: confirm,
 			Fields: []console.Field{{Name: "primary", Label: "Primary instance ID", Type: "text", Required: true,
 				Help: "Type the primary's instance ID, " + primary + ", to confirm."},
 				{Name: "dbTimeout", Label: "Timeout (seconds)", Type: "text", Default: "600", Pattern: "^[0-9]+$",
