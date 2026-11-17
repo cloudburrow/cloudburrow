@@ -1,6 +1,6 @@
 module github.com/cloudburrow/cloudburrow/test/oracle/fakekms
 
-go 1.26.0
+go 1.26.4
 
 require (
 	cloud.google.com/go/kms v1.35.0

@@ -462,7 +462,7 @@
     },
     "toolchain": {
       "go": {
-        "version": "1.26.0",
+        "version": "1.26.4",
         "source": "https://go.dev",
         "license": "BSD-3-Clause",
         "updateFeed": "go-release-feed",
@@ -616,6 +616,13 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Vertex AI EmbedContent's WebP and BMP images (#1651, internal/embedding/image.go), approved by the maintainer 2026-10-19: its webp and bmp decoders. Promoted from indirect (v0.25.0, in the module graph only) to direct. It needs golang.org/x/sys and golang.org/x/text, already required at the same versions; no new dependency was added. Lossy WebP colours are converted as libwebp converts them (internal/embedding/webp.go), not by image.YCbCr."
+      },
+      "goH265": {
+        "module": "github.com/gen2brain/h265",
+        "version": "v0.2.5",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's HEIC and HEIF images (#1724, internal/embedding/heic.go), approved by the maintainer 2026-11-17: a pure Go HEVC decoder and HEIF container reader, no cgo and no dependencies. Its go.mod needs go 1.26.4, which raised CloudBurrow's go line. Chosen over gen2brain/heic and gen2brain/avif, which import purego and so link libc dynamically into a CGO_ENABLED=0 Linux binary (docs/upstream-evaluation.md, #1724); AVIF stays refused."
       }
     },
     "apiContracts": {

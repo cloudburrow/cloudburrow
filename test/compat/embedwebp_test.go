@@ -30,14 +30,14 @@ import (
 // BMP images through the official aiplatform PredictionClient's
 // EmbedContent, as Google lists them for gemini-embedding-2. testdata holds
 // shapeImage's shapes made by cwebp 1.6 (triangle-lossless.webp with
-// -lossless -exact, circle-lossy.webp with -q 80), a 1000 x 600 scene
-// (scene-lossy.webp, -q 80, resized by the processor) and a two-frame
-// animated WebP (img2webp). A lossless WebP and a BMP of a shape's pixels
+// -lossless -exact, circle-lossy.webp with -q 80) and a 1000 x 600 scene
+// (scene-lossy.webp, -q 80, resized by the processor). A lossless WebP and a BMP of a shape's pixels
 // are the PNG's vector; a lossy WebP is within 0.98 of it (0.989 in Transformers.js too) and nearest its
 // own description; each is 260 tokens; the lossy WebP uploaded with the
 // official Cloud Storage client and sent as file_data with no mime_type is
-// the inline vector; and an animated WebP, HEIC, HEIF and AVIF are
-// INVALID_ARGUMENT naming the part.
+// the inline vector; and AVIF and broken HEIC and HEIF are INVALID_ARGUMENT
+// naming the part (#1724 serves HEIC, HEIF and animated WebP:
+// embedheic_test.go).
 func TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -169,10 +169,9 @@ func TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient(t *testing.T) {
 		part *aiplatformpb.Part
 		want string
 	}{
-		"animated WebP": {inline("image/webp", read("animated.webp")), "content.parts[0].inline_data: animated WebP images are not supported"},
-		"HEIC":          {inline("image/heic", []byte{0}), "image/heic"},
-		"HEIF":          {inline("image/heif", []byte{0}), "image/heif"},
-		"AVIF":          {inline("image/avif", []byte{0}), "image/avif"},
+		"HEIC": {inline("image/heic", []byte{0}), "image/heic"},
+		"HEIF": {inline("image/heif", []byte{0}), "image/heif"},
+		"AVIF": {inline("image/avif", []byte{0}), "image/avif"},
 	} {
 		_, err := embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_DOCUMENT, c.part)
 		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), c.want) {

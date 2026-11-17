@@ -134,8 +134,27 @@
 >   and 0.999502 for a 1000 × 600 lossy WebP and BMP, which are resized (the PNG of that scene gives
 >   0.999502: sharp's resampling against PIL's).
 > - Not served: an animated WebP (`golang.org/x/image` decodes no animation; refused with
->   `INVALID_ARGUMENT` saying so), and HEIC, HEIF and AVIF, for which neither Go's standard library
->   nor `golang.org/x/image` has a decoder.
+>   `INVALID_ARGUMENT` saying so; served as its first frame since #1724), and HEIC, HEIF and AVIF,
+>   for which neither Go's standard library nor `golang.org/x/image` has a decoder (HEIC and HEIF
+>   served since #1724).
+>
+> **Update 2026-11-17 (#1724): HEIC, HEIF and animated WebP.** With the maintainer's approval
+> (2026-11-17), `github.com/gen2brain/h265` v0.2.5 joins go.mod: a pure Go HEVC decoder and HEIF
+> reader, MIT, no cgo and no dependencies ([upstream-evaluation.md](upstream-evaluation.md#amendment-heic-heif-avif-and-animated-webp-decoders-for-vertex-ai-embedcontent-1724)
+> compares the candidates).
+>
+> - Use: an `inline_data` or `file_data` part with `mime_type` `image/heic` or `image/heif`, decoded
+>   with the container's crop, rotation and mirror applied (as libheif applies them), then prepared
+>   as PNG is; an image sequence gives its first frame. Chroma is upsampled bilinearly, as
+>   `heif-dec -C bilinear` does (libheif's default is nearest-neighbour). The console's **Images**
+>   picker accepts `.heic` and `.heif` files.
+> - An animated WebP is embedded as its first frame, pixel-identical to libwebp's `dwebp` of that
+>   frame, placed on a transparent canvas. Google's page says nothing of animation and documents no
+>   refusal, so it is not refused.
+> - Not checked against Transformers.js: the sharp it bundles reads no HEVC-coded HEIC.
+> - Not served: AVIF, still `INVALID_ARGUMENT`. Its cgo-free decoder (`github.com/gen2brain/avif`)
+>   would link libc dynamically into the static Linux CLI through `purego` unless every build sets
+>   `-tags nodynamic`; that choice is the maintainer's.
 >
 > Everything below records why the official LiteRT route is still blocked.
 
