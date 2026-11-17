@@ -66,7 +66,7 @@ func fetchJFK(t *testing.T, ctx context.Context) []byte {
 // object's content type stands in), is the same vector, as is a PNG image
 // there; text with the clip is one vector; the console's Embeddings API
 // gives the same vector for the same file_data part; and what is not served
-// (MP3, video, PDF, audio_track_extraction, a missing object) is refused
+// (MP3, video, PDF, audio_track_extraction, a missing object or bucket) is refused
 // naming it.
 func TestEmbedContentEmbedsAudioThroughThePredictionClient(t *testing.T) {
 	h := New(t)
@@ -208,6 +208,7 @@ func TestEmbedContentEmbedsAudioThroughThePredictionClient(t *testing.T) {
 		"audio track": {[]*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{AudioTrackExtraction: &yes}, codes.InvalidArgument, "audio_track_extraction"},
 		"ocr":         {[]*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &yes}, codes.InvalidArgument, "document_ocr"},
 		"missing":     {[]*aiplatformpb.Part{fileData("audio/wav", "gs://"+bucket+"/none.wav")}, nil, codes.NotFound, "none.wav"},
+		"no bucket":   {[]*aiplatformpb.Part{fileData("audio/wav", "gs://"+bucket+"-none/jfk.wav")}, nil, codes.NotFound, `bucket "` + bucket + `-none" not found`},
 	} {
 		_, err := embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_DOCUMENT, c.cfg, c.parts...)
 		if status.Code(err) != c.code || !strings.Contains(err.Error(), c.field) {

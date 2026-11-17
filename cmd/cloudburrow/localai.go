@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -263,13 +265,31 @@ func localModelsFor(cfg config.Config, srv *vertexai.Server) *localai.Manager {
 }
 
 // embedObjects reads EmbedContent's file_data objects (#1651) from this
-// instance's Cloud Storage, with their content type.
+// instance's Cloud Storage, with their content type. It reads only that
+// local endpoint: with none bound it refuses, and it never falls back to
+// Google's.
 type embedObjects struct{ f storageSourceFetcher }
 
+// hasEndpoint reports whether this instance's Cloud Storage endpoint is
+// known: the tunnel's bound address, or a configured port.
+func (o embedObjects) hasEndpoint() bool {
+	if o.f.addr != nil && o.f.addr() != "" {
+		return true
+	}
+	return o.f.cfg.Endpoints.Storage > 0
+}
+
 func (o embedObjects) Read(ctx context.Context, bucket, object string, limit int64) ([]byte, string, error) {
+	if !o.hasEndpoint() {
+		return nil, "", apierror.FailedPrecondition(
+			"file_data gs://%s/%s: this instance's Cloud Storage has no endpoint; start it with the storage service, or send the bytes as inline_data", bucket, object)
+	}
 	rc, ct, err := o.f.fetchTyped(ctx, bucket, object)
 	if err != nil {
 		if e := apierror.From(err); e.Code == codes.NotFound {
+			if o.bucketMissing(ctx, bucket) {
+				return nil, "", apierror.NotFound("gs://%s/%s: bucket %q not found", bucket, object, bucket)
+			}
 			return nil, "", apierror.NotFound("gs://%s/%s not found", bucket, object)
 		}
 		return nil, "", err
@@ -283,4 +303,19 @@ func (o embedObjects) Read(ctx context.Context, bucket, object string, limit int
 		return nil, "", apierror.InvalidArgument("gs://%s/%s is larger than %d MiB, the most file_data reads", bucket, object, limit>>20)
 	}
 	return data, ct, nil
+}
+
+// bucketMissing reports whether this instance's Cloud Storage answers 404
+// for the bucket itself, so a missing bucket is told from a missing object.
+func (o embedObjects) bucketMissing(ctx context.Context, bucket string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.f.base()+"/storage/v1/b/"+url.PathEscape(bucket), nil)
+	if err != nil {
+		return false
+	}
+	resp, err := o.f.client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusNotFound
 }
