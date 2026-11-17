@@ -118,8 +118,9 @@ func refusedValues(why string, ok ...string) fieldRule {
 }
 
 const (
-	maintenanceWhy = "no Google-managed maintenance is ever done here: an instance's server is the image's version, and it has no maintenance versions"
-	readPoolWhy    = "read pools (READ_POOL_INSTANCE, Enterprise Plus) are not served; create read replicas with masterInstanceName"
+	databaseCenterWhy = "Database Center is not served: no instance metadata is sent anywhere"
+	maintenanceWhy    = "no Google-managed maintenance is ever done here: an instance's server is the image's version, and it has no maintenance versions"
+	readPoolWhy       = "read pools (READ_POOL_INSTANCE, Enterprise Plus) are not served; create read replicas with masterInstanceName"
 )
 
 // instanceFields are DatabaseInstance's properties, as instances.insert,
@@ -128,6 +129,13 @@ var instanceFields = map[string]fieldRule{
 	"name": kept, "databaseVersion": kept, "rootPassword": kept, "masterInstanceName": kept,
 	"instanceType": kept, "region": kept, "replicaConfiguration": kept, "settings": kept,
 	"includeReplicasForMajorVersionUpgrade": kept, "onPremisesConfiguration": kept,
+	// skipPrecheck (#1700), input only, skips the precheck step of a major
+	// version upgrade. An upgrade here has no separate precheck step: what
+	// instances.preCheckMajorVersionUpgrade reports is checkUpgrade, the
+	// validation instances.patch makes either way, so it is taken and
+	// changes nothing, as it would change nothing for an upgrade the
+	// precheck passes.
+	"skipPrecheck": kept,
 	// A legacy failover replica is 400 (#1462), in instanceBody.unsupported.
 	"failoverReplica": kept,
 	// A customer-managed encryption key (#1538): diskencryption.go.
@@ -143,10 +151,14 @@ var instanceFields = map[string]fieldRule{
 	"sqlNetworkArchitecture": output, "state": output, "suspensionReason": output,
 	"upgradableDatabaseVersions": output, "writeEndpoint": output,
 
-	"databaseCenterIntegrationEnabled": refused501("Database Center is not served: no instance metadata is sent anywhere"),
-	"geminiConfig":                     refused501("Gemini in Databases is not served"),
-	"maintenanceVersion":               refused501(maintenanceWhy),
-	"nodeCount":                        refused501(readPoolWhy),
+	"databaseCenterIntegrationEnabled": refused501(databaseCenterWhy),
+	// databaseCenterIntegration (#1700) is the enum form of the same: ENABLED
+	// is refused as true is above; DISABLED, and UNSPECIFIED (Cloud SQL's
+	// default, enabled), are taken as an unset databaseCenterIntegrationEnabled is.
+	"databaseCenterIntegration": refusedValues(databaseCenterWhy, "DATABASE_CENTER_INTEGRATION_UNSPECIFIED", "DISABLED"),
+	"geminiConfig":              refused501("Gemini in Databases is not served"),
+	"maintenanceVersion":        refused501(maintenanceWhy),
+	"nodeCount":                 refused501(readPoolWhy),
 	// A MySQL primary's DR replica (#1614): switchover.go.
 	"replicationCluster": kept,
 	"switchTransactionLogsToCloudStorageEnabled": refused501("point-in-time recovery logs are kept with the instance's backups, " +

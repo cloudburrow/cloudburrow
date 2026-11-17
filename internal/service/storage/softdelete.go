@@ -62,10 +62,21 @@ func numberString(v any) string {
 }
 
 // checkSoftDeletePolicy validates softDeletePolicy.retentionDurationSeconds:
-// 0, or 7 to 90 days (soft-delete docs).
+// 0, or 7 to 90 days (soft-delete docs). hardDeletePause (discovery revision
+// 20261009, #1700) with enabled true would keep soft-deleted objects past
+// their hardDeleteTime until it is disabled; nothing here pauses the sweep
+// or the reads that treat such an object as gone, so it is 501 rather than
+// stored and ignored. enabled false is taken, and effectiveTime is output.
 func checkSoftDeletePolicy(f map[string]any) error {
 	p, ok := f["softDeletePolicy"].(map[string]any)
-	if !ok || p["retentionDurationSeconds"] == nil {
+	if !ok {
+		return nil
+	}
+	if hp, _ := p["hardDeletePause"].(map[string]any); hp != nil && hp["enabled"] == true {
+		return errorf(http.StatusNotImplemented, "notImplemented",
+			"softDeletePolicy.hardDeletePause is not implemented: soft-deleted objects are always permanently deleted at their hardDeleteTime")
+	}
+	if p["retentionDurationSeconds"] == nil {
 		return nil
 	}
 	s := numberString(p["retentionDurationSeconds"])

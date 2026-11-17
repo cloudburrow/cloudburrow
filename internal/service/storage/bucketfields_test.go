@@ -135,3 +135,22 @@ func TestStorageManagedFoldersListEmpty(t *testing.T) {
 		t.Errorf("an absent bucket's managed folders = %d, want 404", code)
 	}
 }
+
+// softDeletePolicy.hardDeletePause (#1700): enabled is 501 naming it, since
+// nothing pauses the hard delete; disabled is taken.
+func TestStorageHardDeletePause(t *testing.T) {
+	h := newTestServer(t)
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
+		`{"name":"hdp-on","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":true}}}`); code != 501 ||
+		!strings.Contains(body, "hardDeletePause") {
+		t.Errorf("hardDeletePause enabled on insert = %d %s, want 501 naming it", code, body)
+	}
+	if code, body := raw(t, "POST", h.URL+"/storage/v1/b?project=p",
+		`{"name":"hdp-off","softDeletePolicy":{"retentionDurationSeconds":"604800","hardDeletePause":{"enabled":false}}}`); code != 200 {
+		t.Errorf("hardDeletePause disabled on insert = %d %s, want it taken", code, body)
+	}
+	if code, body := raw(t, "PATCH", h.URL+"/storage/v1/b/hdp-off",
+		`{"softDeletePolicy":{"hardDeletePause":{"enabled":true}}}`); code != 501 || !strings.Contains(body, "hardDeletePause") {
+		t.Errorf("hardDeletePause enabled on patch = %d %s, want 501 naming it", code, body)
+	}
+}

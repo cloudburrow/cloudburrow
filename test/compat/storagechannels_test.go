@@ -18,25 +18,54 @@ import (
 	storagev1 "google.golang.org/api/storage/v1"
 )
 
+// channel is the older generated client's storage.Channel, the body of
+// objects.watchAll, its response and the body of channels.stop.
+type channel struct {
+	Address     string            `json:"address,omitempty"`
+	Expiration  int64             `json:"expiration,omitempty,string"`
+	Id          string            `json:"id,omitempty"`
+	Kind        string            `json:"kind,omitempty"`
+	Params      map[string]string `json:"params,omitempty"`
+	Payload     bool              `json:"payload,omitempty"`
+	ResourceId  string            `json:"resourceId,omitempty"`
+	ResourceUri string            `json:"resourceUri,omitempty"`
+	Token       string            `json:"token,omitempty"`
+	Type        string            `json:"type,omitempty"`
+}
+
+// stopChannel sends channels.stop for ch, as the older generated client's
+// Channels.Stop did, and returns the status.
+func stopChannel(t *testing.T, svc *storagev1.Service, ch channel) int {
+	t.Helper()
+	in, _ := json.Marshal(channel{Id: ch.Id, ResourceId: ch.ResourceId})
+	resp, err := http.Post(svc.BasePath+"channels/stop", "application/json", bytes.NewReader(in))
+	if err != nil {
+		t.Errorf("channels.stop: %v", err)
+		return 0
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
 // TestStorageObjectChangeChannels: object change notification (#1281). A
 // channel registered with objects.watchAll gets the documented sync message,
 // then one POST per change (exists for an upload, not_exists for a delete)
 // with the X-Goog-Channel-ID, -Token, Resource-State, -Resource-ID,
 // -Resource-URI and -Message-Number headers and the object resource as its
-// body; channels.stop, through the generated client's Channels.Stop, ends it.
+// body; channels.stop ends it.
 //
-// The pinned google.golang.org/api (discovery revision 20260821) no longer
-// generates Objects.WatchAll, since Google removed it from the discovery
-// document, so watchAll is sent as the older client sent it: POST
-// b/{bucket}/o/watch with the Channel as the body, decoded into the
-// generated client's storagev1.Channel.
+// The pinned google.golang.org/api (discovery revision 20261009) generates
+// neither Objects.WatchAll nor Channels.Stop, since Google removed both from
+// the discovery document (#1700), so both are sent as the older generated
+// client sent them: POST b/{bucket}/o/watch and POST channels/stop, with
+// the Channel (channel below, the older client's storage.Channel) as the
+// body.
 //
 // The receiver is an httptest server on this machine's loopback. It passes
 // against the builtin `cloudburrow storage-server` on this machine, as CI's
 // Builtin Cloud Storage step runs it, and on an `up` instance, as CI's
 // storage shard runs it, where the in-cluster server keeps the messages and
 // the CLI takes them through the tunnel and POSTs them from here (#1290).
-// covers: storage.channels.stop
 func TestStorageObjectChangeChannels(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -65,13 +94,13 @@ func TestStorageObjectChangeChannels(t *testing.T) {
 	}))
 	t.Cleanup(hook.Close)
 
-	in, _ := json.Marshal(storagev1.Channel{Id: "compat-channel", Type: "web_hook", Address: hook.URL + "/notify",
+	in, _ := json.Marshal(channel{Id: "compat-channel", Type: "web_hook", Address: hook.URL + "/notify",
 		Token: "compat-token", Expiration: time.Now().Add(time.Hour).UnixMilli()})
 	resp, err := http.Post(svc.BasePath+"b/"+bucket+"/o/watch", "application/json", bytes.NewReader(in))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ch storagev1.Channel
+	var ch channel
 	err = json.NewDecoder(resp.Body).Decode(&ch)
 	resp.Body.Close()
 	if err != nil || resp.StatusCode != http.StatusOK || ch.Kind != "api#channel" || ch.Id != "compat-channel" || ch.ResourceId == "" {
@@ -116,11 +145,11 @@ func TestStorageObjectChangeChannels(t *testing.T) {
 		t.Errorf("the not_exists message's body is not the object: %s", m.body)
 	}
 
-	if err := svc.Channels.Stop(&storagev1.Channel{Id: ch.Id, ResourceId: ch.ResourceId}).Context(ctx).Do(); err != nil {
-		t.Fatalf("Channels.Stop: %v", err)
+	if code := stopChannel(t, svc, ch); code != http.StatusNoContent {
+		t.Fatalf("channels.stop = %d, want 204", code)
 	}
-	if err := svc.Channels.Stop(&storagev1.Channel{Id: ch.Id, ResourceId: ch.ResourceId}).Context(ctx).Do(); httpCode(err) != http.StatusNotFound {
-		t.Errorf("a second Channels.Stop = %v, want 404", err)
+	if code := stopChannel(t, svc, ch); code != http.StatusNotFound {
+		t.Errorf("a second channels.stop = %d, want 404", code)
 	}
 	w = c.Bucket(bucket).Object("after-stop.txt").NewWriter(ctx)
 	_, _ = w.Write([]byte("x"))
@@ -198,15 +227,15 @@ func TestStorageObjectChangeChannelSelection(t *testing.T) {
 		"glob": {url.Values{"matchGlob": {"**.json"}},
 			func(c *storagev1.ObjectsListCall) *storagev1.ObjectsListCall { return c.MatchGlob("**.json") }},
 	}
-	var stops []*storagev1.Channel
+	var stops []*channel
 	watch := func(id string, q url.Values) {
 		t.Helper()
-		in, _ := json.Marshal(storagev1.Channel{Id: id, Type: "web_hook", Address: hook.URL + "/" + id})
+		in, _ := json.Marshal(channel{Id: id, Type: "web_hook", Address: hook.URL + "/" + id})
 		resp, err := http.Post(svc.BasePath+"b/"+bucket+"/o/watch?"+q.Encode(), "application/json", bytes.NewReader(in))
 		if err != nil {
 			t.Fatal(err)
 		}
-		var ch storagev1.Channel
+		var ch channel
 		err = json.NewDecoder(resp.Body).Decode(&ch)
 		resp.Body.Close()
 		if err != nil || resp.StatusCode != http.StatusOK || ch.Id != id {
@@ -216,7 +245,7 @@ func TestStorageObjectChangeChannelSelection(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, ch := range stops {
-			_ = svc.Channels.Stop(&storagev1.Channel{Id: ch.Id, ResourceId: ch.ResourceId}).Do()
+			stopChannel(t, svc, *ch)
 		}
 	})
 	for id, c := range cases {

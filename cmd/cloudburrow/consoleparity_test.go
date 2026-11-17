@@ -957,10 +957,15 @@ var parityRows = []parityRow{
 		Methods:  []string{"storage.notifications.insert", "storage.notifications.get", "storage.notifications.list", "storage.notifications.delete"},
 		Provider: "storage", Offers: "Notifications tab on a bucket's page (topic, event types, object name prefix, payload format, custom attributes); a notification's own page; Create notification, its topic chosen from the project's Pub/Sub topics, offered only where the storage server delivers to Pub/Sub; Delete on each row and page, confirmed by name (#791)",
 		Tests: []string{"TestConsoleStorageNotifications", "TestStorageNotificationsThroughTheForm", "TestStorageNotificationsThroughTheAPI", "TestStorageNotificationsWithoutPubSub"}},
-	{Resource: "Cloud Storage object change notification channels", Service: "storage",
-		Methods:  []string{"storage.channels.stop"},
+	// channels.stop and objects.watchAll are routed outside the discovery
+	// document, so neither is a coverage method (#1700).
+	{Resource: "Cloud Storage object change notification channels (objects.watchAll and channels.stop, outside the discovery document)", Service: "storage",
 		Provider: "storage", Offers: "Channels tab on a bucket's page listing its active objects.watchAll channels (channel ID, address, the objects.list selection it watches (#1393), expiry, messages, created); Stop on each row, through channels.stop (#1281)",
 		Tests: []string{"TestConsoleStorageChannels"}},
+	{Resource: "Cloud Storage object context full view", Service: "storage",
+		Methods: []string{"storage.objects.viewFullContext"},
+		Excluded: "what viewFullContext returns here, a context's key, value and creation and update times, is what an object's page shows under Object contexts " +
+			"from objects.get: extended data is attached only by Google's own services, so no context here has any (#1700)"},
 	{Resource: "Cloud Storage ACLs", Service: "storage",
 		Methods: []string{"storage.bucketAccessControls.list", "storage.bucketAccessControls.update", "storage.bucketAccessControls.delete",
 			"storage.defaultObjectAccessControls.list", "storage.defaultObjectAccessControls.update", "storage.defaultObjectAccessControls.delete",

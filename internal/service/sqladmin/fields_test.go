@@ -172,6 +172,7 @@ var instanceSamples = map[string][2]string{
 	"region":                                {`"europe-west1"`, "echo"},
 	"settings":                              {`{"tier":"db-custom-1-3840"}`, "echo"},
 	"includeReplicasForMajorVersionUpgrade": {`true`, "accept"},
+	"skipPrecheck":                          {`true`, "accept"},
 	"diskEncryptionConfiguration":           {`{"kmsKeyName":"` + testKey + `"}`, "echo"},
 	"failoverReplica":                       {`{"name":"f"}`, "refuse:failover replica"},
 	"masterInstanceName":                    {"", "elsewhere"},
@@ -179,6 +180,7 @@ var instanceSamples = map[string][2]string{
 	"onPremisesConfiguration":               {"", "elsewhere"},
 
 	"databaseCenterIntegrationEnabled":           {`true`, "refuse"},
+	"databaseCenterIntegration":                  {`"ENABLED"`, "refuse"},
 	"geminiConfig":                               {`{"entitled":true}`, "refuse"},
 	"maintenanceVersion":                         {`"POSTGRES_17_11.R20260101.00_00"`, "refuse"},
 	"nodeCount":                                  {`2`, "refuse"},

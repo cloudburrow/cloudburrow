@@ -548,7 +548,7 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 	contexts := make([]console.Property, 0)
 	if a.Contexts != nil {
 		for k, v := range a.Contexts.Custom {
-			contexts = append(contexts, console.Property{Label: k, Value: v.Value + " (updated " + stamp(v.UpdateTime) + ")"})
+			contexts = append(contexts, console.Property{Label: k, Value: v.Value + " (created " + stamp(v.CreateTime) + ", updated " + stamp(v.UpdateTime) + ")"})
 		}
 	}
 	sort.Slice(contexts, func(i, j int) bool { return contexts[i].Label < contexts[j].Label })

@@ -10,8 +10,8 @@ import (
 )
 
 // storageAPI is Google's discovery document for the Cloud Storage JSON API,
-// copied unchanged from google.golang.org/api v0.298.0 (storage/v1,
-// revision 20260821; BSD-3-Clause, the module's licence).
+// copied unchanged from google.golang.org/api v0.307.0 (storage/v1,
+// revision 20261009; BSD-3-Clause, the module's licence).
 // TestStorageDiscoveryDrift keeps it equal to the pinned module's copy.
 //
 //go:embed storage-api.json
