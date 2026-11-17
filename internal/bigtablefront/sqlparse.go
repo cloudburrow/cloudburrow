@@ -126,7 +126,7 @@ func lex(src string) ([]token, error) {
 			out = append(out, token{"ident", string(r[i:j])})
 			i = j
 		default:
-			for _, op := range []string{"=>", "<=", ">=", "!=", "<>", "||", "<<", ">>", "=", "<", ">", ",", "(", ")", "[", "]", "*", ";", "+", "-", "/", ".", "&", "|", "^", "~"} {
+			for _, op := range []string{"->", "=>", "<=", ">=", "!=", "<>", "||", "<<", ">>", "=", "<", ">", ",", "(", ")", "[", "]", "*", ";", "+", "-", "/", ".", "&", "|", "^", "~"} {
 				if strings.HasPrefix(string(r[i:]), op) {
 					out = append(out, token{"op", op})
 					i += len([]rune(op))
@@ -162,6 +162,32 @@ func quoted(r []rune, isBytes bool) (string, int, error) {
 				b.WriteByte('\r')
 			case '0':
 				b.WriteByte(0)
+			case 'a':
+				b.WriteByte('\a')
+			case 'b':
+				b.WriteByte('\b')
+			case 'f':
+				b.WriteByte('\f')
+			case 'v':
+				b.WriteByte('\v')
+			case 'u', 'U':
+				// \uhhhh and \Uhhhhhhhh, a Unicode code point (lexical#escape_sequences).
+				n := 4
+				if r[i] == 'U' {
+					n = 8
+				}
+				if isBytes {
+					return "", 0, fmt.Errorf("Syntax error: Illegal escape sequence: Unicode escape sequence \\%c cannot be used in bytes literals", r[i])
+				}
+				if i+n >= len(r) {
+					return "", 0, fmt.Errorf("Syntax error: Illegal escape sequence: \\%c must be followed by %d hex digits", r[i], n)
+				}
+				cp, err := strconv.ParseUint(string(r[i+1:i+1+n]), 16, 32)
+				if err != nil || cp > unicode.MaxRune || cp >= 0xD800 && cp <= 0xDFFF {
+					return "", 0, fmt.Errorf("Syntax error: Illegal escape sequence: \\%c%s", r[i], string(r[i+1:i+1+n]))
+				}
+				b.WriteRune(rune(cp))
+				i += n
 			case 'x', 'X':
 				if i+2 < len(r) {
 					n, err := strconv.ParseUint(string(r[i+1:i+3]), 16, 8)
@@ -996,6 +1022,20 @@ func (p *parser) primary() (expr, error) {
 				} else if a := p.peek(); partFn && a.kind == "ident" && datePart[strings.ToUpper(a.text)] && (p.peekAt(1).text == ")" || p.peekAt(1).text == ",") {
 					p.pos++
 					c.args = append(c.args, &literal{v: strings.ToUpper(a.text), t: datePartType})
+				} else if l, ok, err := p.lambda(); ok || err != nil {
+					if err != nil {
+						return nil, err
+					}
+					c.args = append(c.args, l)
+				} else if a := p.peek(); a.kind == "ident" && (p.peekAt(1).text == ")" || p.peekAt(1).text == ",") && (normModes[strings.ToUpper(a.text)] && strings.HasPrefix(up, "NORMALIZE") || up == "ARRAY_OFFSET" && len(c.args) == 2 && (strings.EqualFold(a.text, "FIRST") || strings.EqualFold(a.text, "LAST"))) {
+					// NORMALIZE's mode (NFC, NFKC, NFD, NFKD) and ARRAY_OFFSET's
+					// FIRST or LAST are bare names.
+					p.pos++
+					t := normModeType
+					if up == "ARRAY_OFFSET" {
+						t = stringType
+					}
+					c.args = append(c.args, &literal{v: strings.ToUpper(a.text), t: t})
 				} else {
 					a, err := p.expr()
 					if err != nil {

@@ -395,3 +395,59 @@ func TestSQLArrayAndCodePointFunctions(t *testing.T) {
 		}
 	}
 }
+
+// TestSQLLambdasAndNormalize runs array_functions' examples of the lambda
+// functions and string_functions' of NORMALIZE and NORMALIZE_AND_CASEFOLD;
+// GROUPING, MIN_BY and MAX_BY, which GoogleSQL for Bigtable does not list,
+// are refused saying so.
+func TestSQLLambdasAndNormalize(t *testing.T) {
+	run, prepare := sqlFixture(t)
+	for sql, want := range map[string]string{
+		"SELECT ARRAY_FILTER([1 ,2, 3], e -> e > 1) AS a1, ARRAY_FILTER([0, 2, 3], (e, i) -> e > i) AS a2":                                          "[2,3] [2,3]",
+		"SELECT ARRAY_TRANSFORM([1, 4, 3], e -> e + 1) AS a1, ARRAY_TRANSFORM([1, 4, 3], (e, i) -> e + i) AS a2":                                    "[2,5,4] [1,5,5]",
+		"SELECT ARRAY_OFFSET([1, 4, 4, 4, 6], 4), ARRAY_OFFSET([1, 4, 4, 4, 6], 4, 'FIRST'), ARRAY_OFFSET([1, 4, 4, 4, 6], 4, 'LAST')":              "1 1 3",
+		"SELECT ARRAY_OFFSET([1, 4, 4, 4, 6], e -> e = 4, 'LAST'), ARRAY_OFFSET([1, 4, 4, 4, 6], e -> e > 2 AND e < 5, 'LAST')":                     "3 3",
+		"SELECT ARRAY_OFFSET([1, 4, 4, 4, 6], 5), ARRAY_OFFSET([1, 4, 4, 4, 6], e -> e > 7), ARRAY_OFFSET([1, 4, 6], 4, LAST)":                      "NULL NULL 1",
+		"SELECT ARRAY_OFFSETS([1, 4, 4, 4, 6, 4], 4), ARRAY_OFFSETS([1, 4, 7, 3, 6, 4], e -> e > 2 AND e < 5)":                                      "[1,2,3,5] [1,3,5]",
+		"SELECT ARRAY_OFFSETS([1, 4, 4, 4, 6], 5), ARRAY_OFFSETS([1, 4, 4, 4, 6], e -> e > 7), ARRAY_FILTER(CAST(NULL AS ARRAY<INT64>), e -> true)": "[] [] NULL",
+		// a lambda's alias shadows a column; its body reads the row's columns.
+		"SELECT ARRAY_TRANSFORM(['a', 'b'], _key -> CONCAT(_key, '!')), ARRAY_FILTER([_key, 'x'], e -> e = _key) FROM report WHERE _key = 'Dept1'":                          "[a!,b!] [Dept1]",
+		"SELECT ARRAY_TRANSFORM([STRUCT(1 AS a), STRUCT(2 AS a)], s -> s.a * 10), ARRAY_TRANSFORM([[1, 2], [3]], x -> ARRAY_LENGTH(ARRAY_FILTER(x, y -> y > 1)))":           "[10,20] [1,1]",
+		"SELECT NORMALIZE('\\u00ea') = NORMALIZE('\\u0065\\u0302'), NORMALIZE('Raha\\u2004Mahan', NFKC), NORMALIZE('Raha Mahan', NFKC)":                                     "true Raha Mahan Raha Mahan",
+		"SELECT NORMALIZE('The red barn') = NORMALIZE('The Red Barn'), NORMALIZE_AND_CASEFOLD('The red barn') = NORMALIZE_AND_CASEFOLD('The Red Barn')":                     "false true",
+		"SELECT NORMALIZE_AND_CASEFOLD('\\u2168', NFD) = NORMALIZE_AND_CASEFOLD('IX', NFD), NORMALIZE_AND_CASEFOLD('\\u2168', NFC) = NORMALIZE_AND_CASEFOLD('IX', NFC)":     "false false",
+		"SELECT NORMALIZE_AND_CASEFOLD('\\u2168', NFKD) = NORMALIZE_AND_CASEFOLD('IX', NFKD), NORMALIZE_AND_CASEFOLD('\\u2168', NFKC) = NORMALIZE_AND_CASEFOLD('IX', NFKC)": "true true",
+		"SELECT NORMALIZE('\\u0041\\u030A', NFD) = NORMALIZE('\\u00C5', NFD), NORMALIZE_AND_CASEFOLD('\\u0041\\u030A', NFKC) = NORMALIZE_AND_CASEFOLD('\\u00C5', NFKC)":     "true true",
+	} {
+		got := run(sql, nil, nil)
+		if len(got) != 1 || strings.Join(got[0], " ") != want {
+			t.Errorf("%s =\n%v\nwant\n%s", sql, got, want)
+		}
+	}
+	for sql, want := range map[string]codes.Code{
+		"SELECT ARRAY_FILTER([1, 2], e -> e + 1)":               codes.InvalidArgument,
+		"SELECT ARRAY_OFFSET([1, 2], (e, i) -> e > i)":          codes.InvalidArgument,
+		"SELECT ARRAY_FILTER([1, 2], (e, e) -> true)":           codes.InvalidArgument,
+		"SELECT ARRAY_LENGTH(e -> e)":                           codes.InvalidArgument,
+		"SELECT ARRAY_OFFSET([1, 2], 'a')":                      codes.InvalidArgument,
+		"SELECT NORMALIZE('a', 'NFC')":                          codes.InvalidArgument,
+		"SELECT NORMALIZE('a', NFX)":                            codes.InvalidArgument,
+		"SELECT ARRAY_FILTER([1, 2], e -> COUNT(e) > 0)":        codes.InvalidArgument,
+		"SELECT MIN_BY(_key, _key) FROM report":                 codes.Unimplemented,
+		"SELECT MAX_BY(_key, _key) FROM report":                 codes.Unimplemented,
+		"SELECT _key, GROUPING(_key) FROM report GROUP BY _key": codes.Unimplemented,
+		"SELECT ST_GEOGPOINT(1, 2)":                             codes.Unimplemented,
+		"SELECT S2_CELLIDFROMPOINT(1)":                          codes.Unimplemented,
+	} {
+		err := prepare(sql)
+		if status.Code(err) != want {
+			t.Errorf("%s = %v, want %v", sql, err, want)
+		}
+		if strings.Contains(sql, "_BY") && !strings.Contains(fmt.Sprint(err), "not in GoogleSQL for Bigtable") {
+			t.Errorf("%s = %v, want it to say it is not in GoogleSQL for Bigtable", sql, err)
+		}
+	}
+	if err := prepare("SELECT ARRAY_OFFSET([1], 1, 'MIDDLE')"); !strings.Contains(fmt.Sprint(err), "'FIRST' or 'LAST'") {
+		t.Errorf("ARRAY_OFFSET 'MIDDLE' = %v", err)
+	}
+}
