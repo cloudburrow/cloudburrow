@@ -254,7 +254,6 @@ func TestBigQueryMLRefusals(t *testing.T) {
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
 	for _, sql := range []string{
-		"CREATE MODEL `%s.km` OPTIONS(model_type='dnn_linear_combined_regressor', input_label_cols=['amount']) AS SELECT id, amount FROM `%s.orders`",
 		"CREATE MODEL `%s.km` OPTIONS(model_type='automl_regressor', input_label_cols=['amount']) AS SELECT id, amount FROM `%s.orders`",
 		"CREATE MODEL `%s.km` OPTIONS(model_type='pca', num_principal_components=1, pca_solver='randomized') AS SELECT id, amount FROM `%s.orders`",
 		"CREATE MODEL `%s.km` REMOTE WITH CONNECTION `us.conn` OPTIONS(endpoint='gemini-2.0-flash') -- %s",

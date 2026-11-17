@@ -102,6 +102,13 @@ type mlOptions struct {
 	Dropout     float64 `json:"dropout,omitempty"`
 	BatchSize   int     `json:"batchSize,omitempty"`
 	Optimizer   string  `json:"optimizer,omitempty"`
+	// DNN_LINEAR_COMBINED_* (#1562, modeldnn.go): the linear part's
+	// optimizer and learn rate; Optimizer and LearnRate are the DNN
+	// part's. PerPart are the options given as an ARRAY of STRUCT values
+	// a part, which only those model types take.
+	LinearOptimizer string   `json:"linearOptimizer,omitempty"`
+	LinearLearnRate float64  `json:"linearLearnRate,omitempty"`
+	PerPart         []string `json:"-"`
 	// #1562: class_weights by label, auto_class_weights, and an
 	// AUTOENCODER's l1_reg_activation (modeldnn.go).
 	ClassWeights     map[string]float64 `json:"classWeights,omitempty"`
