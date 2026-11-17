@@ -370,6 +370,17 @@ func importedMaterial(a algo, key []byte) ([]byte, error) {
 		}
 		return key, nil
 	}
+	if spec.secp256k1 {
+		k, err := parseSecp256k1(key)
+		if err != nil {
+			return nil, bad(err.Error())
+		}
+		der, err := marshalSecp256k1(k)
+		if err != nil {
+			return nil, apierror.Wrap(apierror.Internal(err, "encode the imported %s key", a))
+		}
+		return der, nil
+	}
 	parsed, err := x509.ParsePKCS8PrivateKey(key)
 	if err != nil {
 		return nil, bad("it must be PKCS #8 DER")

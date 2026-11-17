@@ -8458,8 +8458,9 @@ async function renderEmbeddings(view) {
   audio.addEventListener("change", () => { if (audio.files.length) toMultimodal(); });
   gcs.addEventListener("input", () => { if (gcs.value.trim()) toMultimodal(); });
   // A media type from a file name's extension, for a gs:// URI or a file
-  // the browser gives no type (#1651: WebP and BMP; #1724: HEIC and HEIF).
-  const mediaTypeOf = (name) => ({ wav: "audio/wav", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  // the browser gives no type (#1651: WebP and BMP; #1721: MP3; #1724: HEIC
+  // and HEIF).
+  const mediaTypeOf = (name) => ({ wav: "audio/wav", mp3: "audio/mpeg", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
     webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
   const readBase64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -8519,7 +8520,7 @@ async function renderEmbeddings(view) {
           lines.push("[image] " + file.name);
         }
         const media = [
-          ...clips.map((file) => ["[audio] " + file.name, async () => ({ inlineData: { mimeType: file.type || "audio/wav", data: await readBase64(file) } })]),
+          ...clips.map((file) => ["[audio] " + file.name, async () => ({ inlineData: { mimeType: file.type || mediaTypeOf(file.name) || "audio/wav", data: await readBase64(file) } })]),
           // Google's file_data carries a mime_type; it is named from the
           // object's extension when known, else the object's content type is used.
           ...uris.map((uri) => ["[file_data] " + uri, async () => {

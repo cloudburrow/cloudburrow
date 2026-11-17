@@ -13,6 +13,10 @@
 >   builds it on every push to main and nightly, never on pull requests. Run with
 >   `ONNXRUNTIME_LIB=/path/to/libonnxruntime.{so,dylib}`. The default build has no ONNX
 >   Runtime and answers every `:predict` 501.
+> - The same `bin/cloudburrow-onnx` also runs BigQuery ML's imported ONNX models
+>   (`CREATE MODEL … OPTIONS (MODEL_TYPE='ONNX')`, #1711) with BigQuery enabled: its ONNX
+>   runner listens on `--port-onnx` (default 9025) and is published to the BigQuery front
+>   through `cloudburrow-host`. No model download is involved; the default build answers 501.
 > - Enable: `cloudburrow up -local-ai-embeddings`. The pinned files (~330 MB) are fetched
 >   over HTTPS into `<state-dir>/models` and verified before use.
 > - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`
@@ -88,8 +92,8 @@
 >   track ("Video frames go through the vision encoder"). Decoding those frames needs an MP4/MOV
 >   demuxer and an H.264, H.265, VP9 or AV1 decoder, none of which is in Go's standard library or
 >   the approved modules, so video stays refused, and with it `audio_track_extraction`, which
->   Google defines as extracting a video's audio. PDF (and `document_ocr`) needs a renderer, and MP3
->   a decoder, neither of which is available either.
+>   Google defines as extracting a video's audio. PDF (and `document_ocr`) needs a renderer, which
+>   is not available either. (MP3 is served since #1721, below.)
 > - Audio is prepared as Transformers.js 4.3.1's `EmbeddingGemma2Processor` prepares it: stereo
 >   downmixed as its `load_audio` does, resampled to 16 kHz with a Kaiser-windowed sinc (the
 >   reference expects 16 kHz input and leaves resampling to the browser or ffmpeg), then
@@ -100,6 +104,15 @@
 >   stereo file against ffmpeg's resampling. The reference truncates a clip at 30 seconds by
 >   default (the feature extractor's `max_length`, inherited from Gemma 3n); CloudBurrow embeds up
 >   to Google's 180 seconds, which the model card's "~327 seconds" of context allows.
+>
+> **Update 2026-11-17 (#1721): MP3 audio.** An `inline_data` or `file_data` part of `mime_type`
+> `audio/mpeg` (the type Google's samples send, or `audio/mp3`) is decoded with
+> `github.com/hajimehoshi/go-mp3` (pure Go, Apache 2.0; see
+> [upstream-evaluation.md](upstream-evaluation.md)): MPEG-1 and MPEG-2 Layer III, mono read as one
+> channel and stereo downmixed as a stereo WAV is, the encoder delay and padding a LAME or Lavc
+> Info frame records trimmed as ffmpeg trims them, then resampled and prepared as WAV is, within
+> the same 180 seconds a request. The model card's `jfk.wav` encoded at 64 kbit/s gives the WAV's
+> 279 tokens and a vector at cosine 0.999290 to the WAV's. MPEG-2.5 (8 to 12 kHz) is refused.
 >
 > **Update 2026-10-19 (#1651): WebP and BMP images.** Google's
 > [Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)

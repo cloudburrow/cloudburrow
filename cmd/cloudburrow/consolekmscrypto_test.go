@@ -73,7 +73,7 @@ func TestConsoleKMSCreateKeyOffersEveryPurpose(t *testing.T) {
 			t.Errorf("purpose options %v lack %s", purpose, want)
 		}
 	}
-	for _, want := range []string{"EC_SIGN_P256_SHA256", "RSA_SIGN_PSS_2048_SHA256", "RSA_DECRYPT_OAEP_2048_SHA256", "HMAC_SHA256", "AES_256_GCM", "ML_KEM_768"} {
+	for _, want := range []string{"EC_SIGN_P256_SHA256", "RSA_SIGN_PSS_2048_SHA256", "RSA_DECRYPT_OAEP_2048_SHA256", "HMAC_SHA256", "AES_256_GCM", "ML_KEM_768", "EC_SIGN_SECP256K1_SHA256"} {
 		if !slices.Contains(alg, want) {
 			t.Errorf("algorithm options lack %s", want)
 		}
@@ -89,6 +89,37 @@ func TestConsoleKMSCreateKeyOffersEveryPurpose(t *testing.T) {
 	if _, err := p.ActAtResult(context.Background(), "demo-proj", []string{ring}, "createkey",
 		map[string]string{"cryptoKeyId": "noalg", "purpose": "MAC"}); err == nil {
 		t.Error("a MAC key with no algorithm was created")
+	}
+}
+
+// secp256k1 (#1719) is created from the console at HSM, refused at
+// SOFTWARE as Google refuses it, and its version signs and verifies.
+func TestConsoleKMSSecp256k1(t *testing.T) {
+	p, c, ring := kmsConsole(t)
+	ctx := context.Background()
+	if _, err := p.ActAtResult(ctx, "demo-proj", []string{ring}, "createkey",
+		map[string]string{"cryptoKeyId": "sw", "purpose": "ASYMMETRIC_SIGN", "algorithm": "EC_SIGN_SECP256K1_SHA256", "protectionLevel": "SOFTWARE"}); err == nil {
+		t.Error("a SOFTWARE secp256k1 key was created")
+	}
+	if _, err := p.ActAtResult(ctx, "demo-proj", []string{ring}, "createkey",
+		map[string]string{"cryptoKeyId": "k1", "purpose": "ASYMMETRIC_SIGN", "algorithm": "EC_SIGN_SECP256K1_SHA256", "protectionLevel": "HSM"}); err != nil {
+		t.Fatal(err)
+	}
+	k, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: ring + "/cryptoKeys/k1"})
+	if err != nil || k.GetVersionTemplate().GetAlgorithm() != kmspb.CryptoKeyVersion_EC_SIGN_SECP256K1_SHA256 || k.GetVersionTemplate().GetProtectionLevel() != kmspb.ProtectionLevel_HSM {
+		t.Fatalf("GetCryptoKey = %v, %v", k, err)
+	}
+	v := []string{ring, "k1", "1"}
+	sig := kmsActResult(t, p, v, "sign", map[string]string{"data": "hello"})["Signature"]
+	if got := kmsActResult(t, p, v, "verify", map[string]string{"data": "hello", "signature": sig})["Signature"]; got != "Valid" {
+		t.Errorf("verify = %s", got)
+	}
+	if got := kmsActResult(t, p, v, "verify", map[string]string{"data": "other", "signature": sig})["Signature"]; got != "Invalid" {
+		t.Errorf("verify of other data = %s", got)
+	}
+	pk, err := c.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: ring + "/cryptoKeys/k1/cryptoKeyVersions/1"})
+	if err != nil || kmsActResult(t, p, v, "publickey", map[string]string{"format": "PEM"})["Public key (PEM)"] != pk.GetPem() {
+		t.Errorf("Get public key is not the SDK's PEM (%v)", err)
 	}
 }
 

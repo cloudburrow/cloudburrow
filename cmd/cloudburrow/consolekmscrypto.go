@@ -258,7 +258,7 @@ func kmsAlgorithmField() console.Field {
 	}
 	return console.Field{Name: "algorithm", Label: "Algorithm", Type: "select", Options: opts,
 		Help: "Empty is GOOGLE_SYMMETRIC_ENCRYPTION, for ENCRYPT_DECRYPT. Another purpose needs one of its own: " +
-			"EC_SIGN_* and RSA_SIGN_* sign, RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* key encapsulation, AES_256_KWP (AES_WRAPPING, HSM_SINGLE_TENANT only) trusted key wrapping."}
+			"EC_SIGN_* and RSA_SIGN_* sign (EC_SIGN_SECP256K1_SHA256 at HSM or HSM_SINGLE_TENANT only, as on Google), RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* key encapsulation, AES_256_KWP (AES_WRAPPING, HSM_SINGLE_TENANT only) trusted key wrapping."}
 }
 
 // Import jobs and retired resources (#1219). An import job's page is

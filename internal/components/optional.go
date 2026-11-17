@@ -23,8 +23,11 @@ const (
 	SpannerImage = "gcr.io/cloud-spanner-emulator/emulator@sha256:c6f3402f2599684f295a0fdefb6fbbbfb18a0e43e309ff5456ccb452a4570a79"
 
 	FirestorePort = 8080
-	DatastorePort = 8081
-	BigtablePort  = 8086
+	// FirestoreMongoDBPort is Firestore with MongoDB compatibility's wire
+	// protocol (#1703), which the Firestore pod's call front serves.
+	FirestoreMongoDBPort = 27017
+	DatastorePort        = 8081
+	BigtablePort         = 8086
 	// BigtableEmulatorPort is the Bigtable emulator's own port, on its
 	// pod's loopback alone: its front serves BigtablePort (#1206).
 	BigtableEmulatorPort = 8096
@@ -300,7 +303,7 @@ func firestoreBackend(persistent bool) Backend {
 	stopped := FirestoreDocumentsDir + "/stopped-$HOSTNAME"
 	script := `trap '' TERM; ` +
 		`java -Duser.language=en -cp ` + firestoreEmulator + `/cloud-firestore-emulator.jar com.google.cloud.datastore.emulator.firestore.CloudFirestore start ` +
-		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=standard & pid=$!; `, FirestoreEmulatorPort) +
+		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=enterprise & pid=$!; `, FirestoreEmulatorPort) +
 		`trap 'i=0; while [ ! -e ` + stopped + ` ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -KILL $pid 2>/dev/null; wait $pid; exit 0' TERM; ` +
 		`wait $pid`
 	b := Backend{
@@ -312,6 +315,8 @@ func firestoreBackend(persistent bool) Backend {
 		JVM:       true,
 		RunAsUser: FirestoreUser,
 		Front:     firestoreFront(),
+		// Firestore with MongoDB compatibility (#1703), the front's own.
+		ExtraPorts: []NamedPort{{Name: "mongodb", Port: FirestoreMongoDBPort}},
 	}
 	if persistent {
 		b.Persistent, b.OwnsClaim = true, true
@@ -330,7 +335,11 @@ func firestoreBackend(persistent bool) Backend {
 func firestoreFront() *Front {
 	f := callFront("firestore", FirestorePort, FirestoreEmulatorPort)
 	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore",
-		"--firestore-documents", FirestoreDocumentsDir, "--firestore-export-interval", FirestoreExportInterval)
+		"--firestore-documents", FirestoreDocumentsDir, "--firestore-export-interval", FirestoreExportInterval,
+		"--mongodb-listen", fmt.Sprintf("0.0.0.0:%d", FirestoreMongoDBPort))
+	// The front serves the port itself; the emulator's container
+	// declares a port nothing listens on, as the others' fronts do.
+	f.Extra = []FrontPort{{Port: FirestoreMongoDBPort, Upstream: FirestoreMongoDBPort + 1}}
 	withState(f)
 	f.ShareState = true
 	return f

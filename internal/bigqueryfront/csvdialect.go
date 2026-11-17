@@ -190,6 +190,8 @@ type csvDialect struct {
 	// FLOAT64, whose values the front reads (#1065, #1066,
 	// storedvalues.go).
 	values bool
+	// hive is a hive-partitioned load's keys (#1547, csvhive.go), or nil.
+	hive *csvHive
 }
 
 // plain reports whether the emulator's own reading of the data is
@@ -201,7 +203,7 @@ type csvDialect struct {
 func (d csvDialect) plain() bool {
 	return d.delim == ',' && d.quote == '"' && !d.jagged && !d.nullIsSet && !d.markersSet && d.quotedNewlines &&
 		!d.latin1 && d.wide == "" && d.times == nil && !d.ignoreUnknown && d.maxBad == 0 && d.keepControl && !d.byName &&
-		!d.required && !d.values
+		!d.required && !d.values && d.hive == nil
 }
 
 // optionsSet reports whether d has any option the load set, beyond the
@@ -555,6 +557,8 @@ type csvState struct {
 	rows  int64
 	loc   string
 	errs  []rowError
+	// keyVals are the file's partition keys' values, with d.hive (#1547).
+	keyVals []string
 }
 
 // dialectRecords writes the records of data, read by d, without its first
@@ -600,6 +604,9 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 		if order != nil {
 			width = len(order)
 		}
+		if d.hive != nil {
+			width -= d.hive.keys() // the file's columns (#1547, csvhive.go)
+		}
 		var bad string
 		given := len(rec)
 		switch {
@@ -616,6 +623,9 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 		}
 		for len(rec) < width {
 			rec, quoted = append(rec, ""), append(quoted, false)
+		}
+		if d.hive != nil {
+			rec, quoted, isGiven = d.hive.merge(rec, quoted, isGiven, st.keyVals)
 		}
 		if bad == "" && order != nil {
 			out, q, g := make([]string, len(order)), make([]bool, len(order)), make([]bool, len(order))

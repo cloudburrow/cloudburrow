@@ -23,7 +23,22 @@ import (
 // Indexes and field overrides are stored and READY at once, and change
 // nothing about queries: the emulator answers any query without an index and
 // deletes no expired document. The pages say so.
-type firestoreDatabasesProvider struct{ endpoint string }
+type firestoreDatabasesProvider struct {
+	endpoint string
+	// mongo is Firestore with MongoDB compatibility's host address
+	// (#1703), shown in an Enterprise database's connection string.
+	mongo string
+}
+
+// mongoConnectionString is the connection string Google documents for
+// SCRAM ("Authenticate and connect to a database"), for an Enterprise
+// edition database on this instance's endpoint: cleartext, so tls=false.
+func mongoConnectionString(addr, user, dbID string) string {
+	if addr == "" {
+		return ""
+	}
+	return "mongodb://" + user + ":PASSWORD@" + addr + "/" + dbID + "?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false"
+}
 
 func (firestoreDatabasesProvider) ID() string    { return "firestore-databases" }
 func (firestoreDatabasesProvider) Title() string { return "Firestore databases" }
@@ -135,6 +150,9 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 	// User credentials and pipelines are Enterprise edition features
 	// (#1500, consolefirestorepipeline.go).
 	if db.DatabaseEdition == adminpb.Database_ENTERPRISE {
+		if cs := mongoConnectionString(p.mongo, "USERNAME", path[0]); cs != "" {
+			summary = append(summary, console.Property{Label: "MongoDB connection string", Value: cs})
+		}
 		sections = append(sections, console.Section{ID: "usercreds", Label: "User credentials", Listing: p.userCreds(ctx, c, name, path[0])})
 	}
 	return console.Detail{Summary: summary, Sections: sections}, nil

@@ -251,7 +251,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceFirestore, func(a string) console.Provider { return firestoreProvider{endpoint: a} }},
 		// Databases, indexes and field overrides, through the Admin API the
 		// call front serves (#1331).
-		{config.ServiceFirestore, func(a string) console.Provider { return firestoreDatabasesProvider{endpoint: a} }},
+		{config.ServiceFirestore, func(a string) console.Provider {
+			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb")}
+		}},
 		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		// Instances, clusters, app profiles and instance IAM, through the

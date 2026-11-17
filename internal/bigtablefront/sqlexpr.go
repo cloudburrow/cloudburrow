@@ -89,6 +89,10 @@ func kind(t *btpb.Type) string {
 		return "TIMESTAMP"
 	case *btpb.Type_DateType:
 		return "DATE"
+	case *btpb.Type_ProtoType:
+		if isGeography(t) {
+			return "GEOGRAPHY"
+		}
 	case *btpb.Type_ArrayType:
 		return "ARRAY<" + kind(k.ArrayType.GetElementType()) + ">"
 	case *btpb.Type_MapType:
@@ -535,7 +539,7 @@ func (b *binaryOp) check(s *scope) (*btpb.Type, error) {
 		}
 		b.t = boolType
 	case "=", "!=", "<", "<=", ">", ">=":
-		if _, ok := unify(lt, rt); !ok || isKind(lt, "MAP<", "STRUCT<") || (b.op != "=" && b.op != "!=" && isKind(lt, "ARRAY<")) {
+		if _, ok := unify(lt, rt); !ok || isKind(lt, "MAP<", "STRUCT<", "GEOGRAPHY") || (b.op != "=" && b.op != "!=" && isKind(lt, "ARRAY<")) {
 			return bad()
 		}
 		b.t = boolType
@@ -1151,7 +1155,7 @@ func groupKey(v any) string {
 
 // groupable is whether GROUP BY and DISTINCT take a value of type t.
 func groupable(t *btpb.Type) bool {
-	return !isKind(t, "MAP<", "FLOAT32", "FLOAT64") && (!isKind(t, "ARRAY<") || groupable(t.GetArrayType().GetElementType())) &&
+	return !isKind(t, "MAP<", "GEOGRAPHY", "FLOAT32", "FLOAT64") && (!isKind(t, "ARRAY<") || groupable(t.GetArrayType().GetElementType())) &&
 		(!isKind(t, "STRUCT<") || func() bool {
 			for _, f := range t.GetStructType().GetFields() {
 				if !groupable(f.GetType()) {

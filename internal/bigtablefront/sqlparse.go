@@ -1037,9 +1037,23 @@ func (p *parser) primary() (expr, error) {
 					}
 					c.args = append(c.args, &literal{v: strings.ToUpper(a.text), t: t})
 				} else {
+					name := ""
+					if a := p.peek(); a.kind == "ident" && p.peekAt(1).text == "=>" {
+						// a named argument: level => 10 (#1720).
+						name = strings.ToLower(a.text)
+						p.pos += 2
+					} else if len(c.names) > 0 {
+						return nil, fmt.Errorf("Syntax error: a positional argument of %s follows a named one", up)
+					}
 					a, err := p.expr()
 					if err != nil {
 						return nil, err
+					}
+					if name != "" && len(c.names) == 0 {
+						c.names = make([]string, len(c.args))
+					}
+					if name != "" || len(c.names) > 0 {
+						c.names = append(c.names, name)
 					}
 					c.args = append(c.args, a)
 				}

@@ -4,12 +4,12 @@ package firestoreadmin
 // Google authenticate MongoDB drivers to a Firestore with MongoDB
 // compatibility database, an Enterprise edition feature. They are stored
 // and served as Google documents them, on an Enterprise edition database
-// alone, and refused FAILED_PRECONDITION on a Standard one. The MongoDB
-// wire protocol itself is not served, so nothing authenticates with them:
-// they are records for the tools and Terraform configurations that manage
-// them. A server-generated password is returned once, by CreateUserCreds
-// and ResetUserPassword, as on Google, and never stored: only its SHA-256
-// digest is kept.
+// alone, and refused FAILED_PRECONDITION on a Standard one. MongoDB
+// drivers authenticate with them, by SCRAM-SHA-256, on the front's MongoDB
+// wire-protocol endpoint (mongoserver.go, #1703). A server-generated
+// password is returned once, by CreateUserCreds and ResetUserPassword, as
+// on Google, and never stored: only its SHA-256 digest and its SCRAM
+// stored and server keys are kept.
 
 import (
 	"context"
@@ -35,6 +35,9 @@ var (
 type creds struct {
 	UserCreds *adminpb.UserCreds
 	Digest    []byte
+	// Scram is the password's SCRAM-SHA-256 verifier; nil for credentials
+	// kept before #1703, which authenticate once their password is reset.
+	Scram *scramKeys
 }
 
 // enterprise is the live Enterprise edition database name. a.mu is held.
@@ -49,11 +52,12 @@ func (a *Admin) enterprise(name string) (*adminpb.Database, error) {
 	return db, nil
 }
 
-// newPassword is a server-generated password and its digest.
-func newPassword() (string, []byte) {
+// newPassword is a server-generated password, its digest and its SCRAM
+// verifier.
+func newPassword() (string, []byte, *scramKeys) {
 	pw := randomID(24)
 	d := sha256.Sum256([]byte(pw))
-	return pw, d[:]
+	return pw, d[:], newScramKeys(pw)
 }
 
 // principal is the identity Google names a user's credentials by.
@@ -96,10 +100,10 @@ func (a *Admin) CreateUserCreds(_ context.Context, req *adminpb.CreateUserCredsR
 		return nil, status.Errorf(codes.AlreadyExists, "User creds %s already exists.", name)
 	}
 	now := timestamppb.New(a.now())
-	pw, digest := newPassword()
+	pw, digest, keys := newPassword()
 	uc := &adminpb.UserCreds{Name: name, CreateTime: now, UpdateTime: now, State: adminpb.UserCreds_ENABLED,
 		UserCredsIdentity: &adminpb.UserCreds_ResourceIdentity_{ResourceIdentity: &adminpb.UserCreds_ResourceIdentity{Principal: principal(name)}}}
-	a.userCreds[name] = &creds{UserCreds: uc, Digest: digest}
+	a.userCreds[name] = &creds{UserCreds: uc, Digest: digest, Scram: keys}
 	out := proto.Clone(uc).(*adminpb.UserCreds)
 	out.SecurePassword = pw
 	return out, nil
@@ -160,8 +164,8 @@ func (a *Admin) ResetUserPassword(_ context.Context, req *adminpb.ResetUserPassw
 	if err != nil {
 		return nil, err
 	}
-	pw, digest := newPassword()
-	c.Digest = digest
+	pw, digest, keys := newPassword()
+	c.Digest, c.Scram = digest, keys
 	c.UserCreds.UpdateTime = timestamppb.New(a.now())
 	out := proto.Clone(c.UserCreds).(*adminpb.UserCreds)
 	out.SecurePassword = pw

@@ -122,7 +122,7 @@ onnx-compile: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
 		go build -tags onnx -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-onnx ./cmd/$(BINARY)
 	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
-		go vet -tags onnx ./internal/embedding/ ./internal/localai/ ./cmd/$(BINARY)/
+		go vet -tags onnx ./internal/embedding/ ./internal/localai/ ./internal/onnxmodel/... ./internal/onnxrunner/ ./internal/bigqueryfront/ ./cmd/$(BINARY)/
 
 $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/%/libtokenizers.a:
 	@test -n "$(TOKENIZERS_ASSET_$*)" -a -n "$(TOKENIZERS_SHA256_$*)" || { echo "build-onnx: no pinned libtokenizers for $$(go env GOOS)/$$(go env GOARCH); set TOKENIZERS_LIB_DIR to a directory holding libtokenizers.a"; exit 1; }

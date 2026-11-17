@@ -31,10 +31,10 @@ import (
 // PNG, JPEG, WebP or BMP (#1651), or HEIC or HEIF (#1724) image (an
 // animated WebP as its first frame), up to embedding.MaxImages of them,
 // alone or between text parts, into one vector, as Google's
-// gemini-embedding-2 embeds a Content's parts. It embeds a WAV audio clip the
-// same way (#1651), and reads a file_data part's gs:// object from this
-// instance's Cloud Storage as if its bytes were inline_data. Video, PDF, MP3,
-// AVIF, document_ocr and audio_track_extraction are refused, naming the
+// gemini-embedding-2 embeds a Content's parts. It embeds a WAV (#1651) or MP3
+// (#1721) audio clip the same way, and reads a file_data part's gs:// object
+// from this instance's Cloud Storage as if its bytes were inline_data. Video,
+// PDF, AVIF, document_ocr and audio_track_extraction are refused, naming the
 // field.
 
 // embedContentRequestBytes bounds a REST :embedContent body, which may carry
@@ -287,7 +287,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 			}
 		default:
 			types := append(append([]string(nil), embedding.ImageMIMETypes...), embedding.AudioMIMETypes...)
-			notServed := "video, MP3 and PDF input are not served"
+			notServed := "video and PDF input are not served"
 			if !m.audio {
 				types, notServed = embedding.ImageMIMETypes, "video, audio and PDF input are not served"
 			}
