@@ -63,6 +63,8 @@ type BufferOptions struct {
 	ErrorFraction float64
 	EndCap        EndCap
 	Side          Side
+	// SnapFunction is Options::snap_function (nil: IdentitySnapFunction(0)).
+	SnapFunction s2.Snapper
 }
 
 // ErrorFractionForSegments is Options::set_circle_segments' conversion.
@@ -398,11 +400,12 @@ var ErrNegativeLayers = errors.New("Negative buffer radius requires at most one 
 
 // Buffer buffers points, polylines and one polygon (its loops with the
 // interior on their left; containsRef whether it contains s2.OriginPoint())
-// as S2BufferOperation does, and returns the buffered region's loops (the
-// region on their left), or full for the whole sphere. unchanged reports a
-// radius within the permitted error, for which S2BufferOperation returns its
-// input, degeneracies included.
-func Buffer(opt BufferOptions, points []s2.Point, lines [][]s2.Point, polygon [][]s2.Point, containsRef bool) (loops [][]s2.Point, full, unchanged bool, err error) {
+// as S2BufferOperation does: the offset paths go to an S2WindingOperation
+// (positive winding rule, the snap function of S2BufferOperation::Options,
+// IdentitySnapFunction(0) by default) whose result S2PolygonLayer builds.
+// unchanged reports a radius within the permitted error, for which
+// S2BufferOperation returns its input, degeneracies included.
+func Buffer(opt BufferOptions, points []s2.Point, lines [][]s2.Point, polygon [][]s2.Point, containsRef bool) (out *s2.Polygon, unchanged bool, err error) {
 	b := newBuffer(opt)
 	for _, p := range points {
 		b.addPoint(p)
@@ -417,11 +420,18 @@ func Buffer(opt BufferOptions, points []s2.Point, lines [][]s2.Point, polygon []
 		b.refWinding++
 	}
 	if b.sign == 0 && opt.Radius >= 0 {
-		return nil, false, true, nil
+		return nil, true, nil
 	}
-	if b.sign < 0 && len(polygon) == 0 {
-		return nil, false, false, nil
+	snap := opt.SnapFunction
+	if snap == nil {
+		snap = s2.NewIdentitySnapper(0)
 	}
-	loops, full, err = Overlay(b.loops, b.ref, b.refWinding, 1)
-	return loops, full, false, err
+	op := NewWindingOperation(NewPolygonLayer(&out, PolygonLayerOptions{}), WindingOptions{SnapFunction: snap})
+	for _, l := range b.loops {
+		op.AddLoop(l)
+	}
+	if err := op.Build(b.ref, b.refWinding, WindingPositive); err != nil {
+		return nil, false, err
+	}
+	return out, false, nil
 }

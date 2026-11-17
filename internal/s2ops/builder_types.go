@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/golang/geo/s1"
 	"github.com/golang/geo/s2"
 )
 
@@ -197,8 +198,16 @@ func (l *IDSetLexicon) Clear() {
 	l.index = map[string]int32{}
 }
 
-// pointLessThan is S2Point's operator< (lexicographic on x, y, z).
-func pointLessThan(a, b s2.Point) bool { return pointLess(a, b) }
+// pointLess is S2Point's operator< (lexicographic on x, y, z).
+func pointLess(a, b s2.Point) bool {
+	if a.X != b.X {
+		return a.X < b.X
+	}
+	if a.Y != b.Y {
+		return a.Y < b.Y
+	}
+	return a.Z < b.Z
+}
 
 // Graph is S2Builder::Graph (its methods are in builder_graph.go).
 type Graph struct {
@@ -212,3 +221,6 @@ type Graph struct {
 	labelSetLexicon        *IDSetLexicon
 	isFullPolygonPredicate IsFullPolygonPredicate
 }
+
+// MaxSnapRadius is S2Builder::SnapFunction::kMaxSnapRadius (70 degrees).
+const MaxSnapRadius = s1.Angle(70 * math.Pi / 180)
