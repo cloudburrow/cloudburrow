@@ -332,6 +332,8 @@ behaviour in Google's docs and protos, finishing the draft on the `feat/309-kms`
 
 **Revisit** if floci-gcp's KMS module gains version-state and CRC32C checks on Decrypt and
 can be shown to run KMS-only, or if Google publishes a KMS emulator.
+gcp-kms-emulator was re-read at v0.10.2 on 2026-11-17
+([amendment](#amendment-gcp-kms-emulator-v0102-re-evaluated-1712)).
 
 ### fakekms as a differential oracle (#419)
 
@@ -447,3 +449,183 @@ process gets none of that, as Pub/Sub and the opt-in emulators show (status.md).
 service alone with its state reachable by the rest of CloudBurrow. floci-gcp is the one to
 re-read first. A probe in `test/upstream/`, as for Pub/Sub, would turn this record into
 measured evidence.
+
+---
+
+## Amendment: gcp-kms-emulator v0.10.2 re-evaluated (#1712)
+
+Recorded 2026-11-17. **This records evidence and a recommendation; the decision is the
+user's, and the [Cloud KMS amendment](#amendment-cloud-kms-is-built-not-reused-309) stands
+until the user changes it.**
+
+**Why.** The KMS amendment's only recorded departure for `blackwell-systems/gcp-kms-emulator`
+was that caller errors became INTERNAL. Its maintainer fixed that in v0.10.1 and v0.10.2
+([#1690](https://github.com/cloudburrow/cloudburrow/issues/1690)), so its row no longer
+supported the claim that every third-party emulator departs from Google. The user asked for
+a fresh evaluation ([#1712](https://github.com/cloudburrow/cloudburrow/issues/1712)).
+
+**Method: read, not run.** The release notes, README, `docs/FEATURES.md`, `CHANGELOG.md`
+and source were read at tag `v0.10.2`, commit
+[`5372c004`][kmsemu], through the GitHub API. Nothing of theirs was downloaded as a
+module, built or run: executing third-party code needs the user's approval. Every
+behaviour below is read from their code. Where only running it would settle a claim, the
+row says **not measured**. CloudBurrow's side comes from [coverage/kms.md](coverage/kms.md),
+the KMS rows of [compatibility.md](compatibility.md#cloud-kms--googlecloudkmsv1), and the
+tests named.
+
+### Comparison
+
+| Criterion | gcp-kms-emulator v0.10.2 | CloudBurrow built-in |
+|---|---|---|
+| Services served | `KeyManagementService` only ([register.go:31][kmsemu-register], [server-dual main.go:96][kmsemu-dual]). No `IAMPolicy`, `Locations`, `EkmService`, `Autokey`, `AutokeyAdmin` or `HsmManagement`: a client calling them gets UNIMPLEMENTED for an unknown service. | 63 methods over all seven services, every one Verified ([coverage/kms.md](coverage/kms.md)). |
+| `KeyManagementService` methods | 28 of the 33 in the `cloud.google.com/go/kms` v1.27.0 it pins ([README.md:117][kmsemu-readme-ops]). `Decapsulate` returns UNIMPLEMENTED ([server.go:463-470][kmsemu-decap]). Missing: `DeleteCryptoKey`, `DeleteCryptoKeyVersion`, `GetRetiredResource`, `ListRetiredResources`. `DeleteKeyRing` and the trusted-wrapping pair are not in v1.27.0 at all (33 methods in its [service_grpc.pb.go][g-kms127]). | All 36 at v1.35.0, those three included. |
+| Algorithms | `GOOGLE_SYMMETRIC_ENCRYPTION`; `RSA_SIGN_PKCS1_*` (4); `EC_SIGN_P256_SHA256`, `EC_SIGN_P384_SHA384`, **`EC_SIGN_SECP256K1_SHA256`**, `EC_SIGN_ED25519`; `RSA_DECRYPT_OAEP_*` (8); `HMAC_*` (5); `AES_128_GCM`, `AES_256_GCM` ([keymaterial.go:45-146][kmsemu-keymat]). | All of those except secp256k1 (UNIMPLEMENTED: Go's standard library has no secp256k1), plus `RSA_SIGN_PSS_*`, `RSA_SIGN_RAW_PKCS1_*`, AES CBC and CTR for raw encryption, `ML_KEM_768` decapsulation and `AES_256_KWP` wrapping. |
+| Protection levels | Every version and response says SOFTWARE, even when `version_template.protection_level` asks for HSM ([storage.go:266-281][kmsemu-createkey], [server.go:278][kmsemu-encrypt]). | SOFTWARE; HSM and HSM_SINGLE_TENANT (*no HSM*); EXTERNAL and EXTERNAL_VPC (*the instance acts as the EKM*). |
+| `CreateCryptoKey` fields | Only `purpose`, `version_template` and `labels` reach storage ([server.go:224-227][kmsemu-server-create]). `rotation_period`, `next_rotation_time`, `destroy_scheduled_duration`, `skip_initial_version_creation`, `import_only`, `crypto_key_backend` and `key_access_justifications_policy` are dropped and the call succeeds. Purpose and algorithm are not checked against each other: `ASYMMETRIC_SIGN` with no algorithm gets an AES key ([storage.go:225-231][kmsemu-createkey]). Every key gets a primary, though resources.proto says only ENCRYPT_DECRYPT keys have one ([storage.go:751-768][kmsemu-keyproto]; [resources.proto:130-133][g-primary]). | Each field is stored and validated, or refused as UNIMPLEMENTED by name (`TestKMSCreateCryptoKeyFields`, `TestKMSRotationSchedule`, `TestKMSOutOfScopeKeyOptionsAreUnimplemented`). |
+| Version states and destroy scheduling | `DestroyCryptoKeyVersion` sets `destroy_time` to now plus a fixed 30 days, whatever the key's `destroy_scheduled_duration` ([storage.go:653][kmsemu-destroy]). **Nothing ever moves a version to DESTROYED**: the only use of that state is a check ([storage.go:635][kmsemu-destroy]), so key material is never removed. Destroying a version already DESTROY_SCHEDULED succeeds ([storage.go:639-650][kmsemu-destroy]). `RestoreCryptoKeyVersion` does not look at `destroy_time` ([storage.go:682-686][kmsemu-restore]), and Get and List omit it ([storage.go:530-537][kmsemu-getversion]). New versions, asymmetric ones included, are ENABLED at once. | `destroy_time` comes from the key's duration; the state is computed from the clock and a sweep removes the material at `destroy_time` (`TestAScheduledVersionIsDestroyedAtItsDestroyTime`, on a fake clock); asymmetric versions start PENDING_GENERATION (`TestKMSAsymmetricVersionsStartPendingGeneration`). |
+| `Encrypt` and `Decrypt` | `Encrypt` looks the name up as a CryptoKey only, so a CryptoKeyVersion name, which [service.proto:1324-1330][g-encrypt] allows, is NOT_FOUND ([storage.go:304-313][kmsemu-encrypt-storage]). `Decrypt` tries every ENABLED version and skips the rest, so a ciphertext of a DISABLED or DESTROY_SCHEDULED version is INVALID_ARGUMENT "the ciphertext is invalid" ([storage.go:371-382][kmsemu-decrypt]). CRC32C is checked on both. | Encrypt by key or version name; Decrypt refuses a version that is not ENABLED with FAILED_PRECONDITION (`TestKMSEncrypt`, `TestKMSDecryptFollowsTheVersionLifecycle`). |
+| MAC, raw, random | `MacSign`/`MacVerify` with a purpose and state check. `RawEncrypt` is GCM only and ignores a caller's IV ([storage/raw.go][kmsemu-raw]). `GenerateRandomBytes` takes 1 to 1024 bytes and ignores `protection_level` ([random.go:12][kmsemu-random]). | MAC the same; raw GCM, CBC and CTR (`TestKMSRawEncryptAndDecrypt`); random 8 to 1024 at HSM only (`TestKMSGenerateRandomBytes`). |
+| Import jobs | `CreateImportJob`, `GetImportJob`, `ListImportJobs`, `ImportCryptoKeyVersion` with RSA-OAEP wrapping; asymmetric key import is listed as not implemented ([FEATURES.md][kmsemu-features]). | Verified (`TestKMSImportManuallyWrappedKeys`). Whether their wrapping accepts the AES-KWP envelope Google's sample builds is **not measured**. |
+| EKM, Autokey, single-tenant HSM | Not served. | Verified (`TestKMSEkmConnectionsAreStored`, `TestKMSExternalKeys`, `TestKMSAutokeyProvisionsKeysOnDemand`, `TestKMSSingleTenantHsm`). |
+| IAM | Optional *enforcement* against their separate IAM emulator, chosen by `IAM_MODE` and `IAM_EMULATOR_HOST`, with the principal in an `x-emulator-principal` header ([server.go:103-147][kmsemu-iam]). No `GetIamPolicy`, `SetIamPolicy` or `TestIamPermissions`. | The three IAM RPCs on key rings, keys, EKM connections and `ekmConfig`: *stored, not enforced* ([ADR-0006](adr/0006-iam-policy-surface.md)). |
+| Locations | Not served. | `ListLocations`, `GetLocation` (`TestKMSLocations`). |
+| `key_access_justifications_policy` | Dropped at create; `UpdateCryptoKey` ignores the path ([storage.go:722-737][kmsemu-updatekey]). | Stored, and enforced for a call's own reason (`TestKMSHSMKeysAndKeyAccessJustifications`). |
+| Lists and names | `page_size` and an integer-offset `page_token`; `filter`, `order_by` and `view` are ignored ([storage.go:55-82][kmsemu-paginate]). Names are only checked for being non-empty, so a malformed name is NOT_FOUND, and `CreateKeyRing` stores whatever `parent` it is given ([server.go:150-167][kmsemu-createring]). | `filter` (partial), `order_by` and `view`; every name parsed before lookup, INVALID_ARGUMENT when malformed (`TestKMSNamesAreValidatedBeforeLookup`). |
+| Persistence | In memory by default. With `GCP_KMS_DATA_DIR`, the whole state is rewritten to one `state.json` (temp file and rename) after every change, with private keys in plaintext ([persistence.go:91-160][kmsemu-persist]). No reset API. | Kubernetes Secrets in the managed namespace; restart durability Verified and measured (`TestKMSAcrossRestart`); `/admin/reset`, per project; `state save`/`load`. |
+| REST and gRPC | gRPC on 9090 and REST on 8080: two ports, the REST side a grpc-gateway that dials the gRPC port ([gateway.go:58][kmsemu-gateway]). REST errors use Google's shape since v0.10.2. | One port for both, as `cloudkms.googleapis.com` (`TestKMSJSONIsServedOnTheSamePort`), through the shared transcoder. |
+| Licence | Apache-2.0. | Compatible; a port would keep their header, as fakekms code does. |
+| Maintenance | 107 commits; 2 contributors (the maintainer 105, `baktun14` 2, for doc comments); 17 releases from v0.1.0 (2026-01-26) to v0.10.2 (2026-11-04), four of them since June; 9 stars, 3 forks, 0 open issues. Answered #1690 with a fix within weeks. One maintainer in practice. | — |
+| Architectures | Images for `linux/amd64` and `linux/arm64` on `ghcr.io`, from [docker-publish.yml:60][kmsemu-docker]; no binaries attached to releases; otherwise `go install`. Image size, idle RSS and start time are **not measured**. | Part of the CloudBurrow binary. |
+| How it would be embedded | Its root package exports only `Register(*grpc.Server)` and `NewGatewayHandler(grpcAddr)` ([register.go][kmsemu-register], [gateway.go][kmsemu-gw-root]); storage and server are under `internal/`. Configuration is environment variables, and the clock is `time.Now`. In-process it would mean a **new Go module** in `go.mod`, with `gcp-emulator-auth`, `dcrd/secp256k1` and `grpc-gateway` behind it ([go.mod:5-13][kmsemu-gomod]); out of process, a **new container**. Either needs the user's approval. Neither form gives CloudBurrow reset, state save/load, Kubernetes-backed storage, an injectable clock, fault injection or the in-process access the console and the CMEK users (Secret Manager, Memorystore) have today. | In the CLI process; `cmd/cloudburrow/kms.go`, the console and the CMEK services call it directly. |
+
+### Error codes against CloudBurrow's rows
+
+Where the two agree: NOT_FOUND and ALREADY_EXISTS for missing and duplicate resources;
+FAILED_PRECONDITION for `Encrypt` on a primary that is not ENABLED or missing, for the wrong
+key purpose, and for `UpdateCryptoKeyPrimaryVersion` to a version that is not ENABLED; INVALID_ARGUMENT for a tampered
+ciphertext, a wrong AAD and a CRC32C mismatch; FAILED_PRECONDITION for restoring an ENABLED
+version. Their messages say "`<version>` is not enabled, current state is: DISABLED." and
+"`<key>` has incorrect key purpose …" ([errors.go:46-56][kmsemu-errors]), which the
+changelog calls Cloud KMS's wording; CloudBurrow's are its own. No recorded observation
+shows which is Google's verbatim.
+
+Where they differ. † marks a code that Google does not document either: CloudBurrow's tests
+assert it, and it is listed, with its dated annotation, under "Unverified error codes" in
+[coverage/kms.md](coverage/kms.md#unverified-error-codes).
+
+| Case | gcp-kms-emulator v0.10.2 | CloudBurrow |
+|---|---|---|
+| `UpdateCryptoKeyVersion` mask without `state`, or a target of DESTROYED | FAILED_PRECONDITION ([storage.go:592-606][kmsemu-updateversion]) | INVALID_ARGUMENT † |
+| `DestroyCryptoKeyVersion` on a DESTROY_SCHEDULED version | succeeds | FAILED_PRECONDITION † |
+| `Decrypt` of a DISABLED or DESTROY_SCHEDULED version's ciphertext | INVALID_ARGUMENT | FAILED_PRECONDITION † |
+| `Decrypt` given a CryptoKeyVersion name | NOT_FOUND | INVALID_ARGUMENT † |
+| `Encrypt` given a CryptoKeyVersion name | NOT_FOUND | succeeds, as service.proto documents |
+| A malformed name | NOT_FOUND | INVALID_ARGUMENT † |
+| `AsymmetricDecrypt` of a ciphertext that does not decrypt | **INTERNAL**: the `rsa.DecryptOAEP` error is returned untyped ([asymmetric.go:276][kmsemu-asymdecrypt]) | INVALID_ARGUMENT † |
+| `AsymmetricSign` with a digest of another hash | signed: the digest's hash is never compared with the algorithm's ([asymmetric.go:187-210][kmsemu-asymsign]); for RSA, a digest of the wrong length is **INTERNAL** | INVALID_ARGUMENT † |
+| `CreateCryptoKey` with an algorithm it lacks (PSS, raw PKCS#1, CBC, ML-KEM) | **INTERNAL** "failed to generate key material: unsupported algorithm" ([keymaterial.go:146][kmsemu-keymat], [storage.go:231-234][kmsemu-createkey]) | created, or UNIMPLEMENTED naming the algorithm |
+| `CreateCryptoKey` `ASYMMETRIC_SIGN` with no algorithm | succeeds, with an AES key | INVALID_ARGUMENT † |
+| `UpdateCryptoKey` with `destroy_scheduled_duration`, IMMUTABLE in [resources.proto:199-200][g-dsd], or an unknown path | applied, or silently ignored ([storage.go:722-737][kmsemu-updatekey]) | INVALID_ARGUMENT † |
+| `GenerateRandomBytes` of 1 to 7 bytes, or not at HSM | succeeds | INVALID_ARGUMENT † |
+
+### What CloudBurrow would lose
+
+Read from their code, not run; behind CloudBurrow's endpoint these tests would fail:
+
+- **Services it does not serve:** `TestKMSEkmConnectionsAreStored`, `TestKMSExternalKeys`,
+  `TestKMSEkmIamPolicyIsStoredNotEnforced`, `TestKMSAutokeyProvisionsKeysOnDemand`,
+  `TestKMSSingleTenantHsm`, `TestKMSIamPolicyIsStoredNotEnforced`, `TestKMSLocations`, and
+  their gcloud and Terraform counterparts.
+- **Methods it does not serve:** `TestKMSDecapsulateMLKEM`, `TestKMSTrustedKeyWrapping`,
+  `TestKMSDeleteCryptoKeyLeavesARetiredResource`, `TestKMSDeleteKeyRing`.
+- **Behaviour above:** `TestKMSHSMKeysAndKeyAccessJustifications`, `TestKMSRotationSchedule`,
+  `TestKMSCreateCryptoKeyFields`, `TestKMSNamesAreValidatedBeforeLookup`,
+  `TestKMSUpdateCryptoKeyVersion`, `TestKMSDestroyCryptoKeyVersion`, `TestKMSEncrypt`,
+  `TestKMSDecryptFollowsTheVersionLifecycle`, `TestKMSUpdateCryptoKey`, `TestKMSOrderByName`,
+  `TestKMSVersionStateFilter`, `TestKMSNameAndLabelFilters`,
+  `TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM` (PSS),
+  `TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted`, `TestKMSRawEncryptAndDecrypt`
+  (CBC, CTR), `TestKMSGenerateRandomBytes`, `TestKMSAsymmetricVersionsStartPendingGeneration`,
+  `TestKMSJSONIsServedOnTheSamePort`.
+- **State:** `TestKMSResources` (Secrets in the namespace), `TestKMSAcrossRestart`,
+  `TestKMSProjectResetClearsOnlyThatProject`.
+- **In-process users:** the console's KMS pages and the Secret Manager and Memorystore CMEK
+  paths import `internal/service/kms`, and its 81 unit tests (fake-clock destroy, filters,
+  names, the durable store) have no counterpart to run against.
+
+Likely to pass, **not measured**: `TestKMSTinkEnvelopeEncryption` (it needs both CRC32C
+flags, which they set) and the plain create, get, list, encrypt and decrypt path of
+`TestKMSResources`.
+
+### Recommendation: keep the built-in
+
+1. **It serves a subset.** One service of seven and 28 of CloudBurrow's 63 methods. EKM,
+   Autokey, IAM policies, locations, single-tenant HSM, deletion, retired resources,
+   trusted wrapping and ML-KEM would have to stay CloudBurrow's anyway, so adoption would
+   mean two KMS stores side by side, not one fewer.
+2. **It still departs from Google's documented behaviour where users would inherit it:**
+   `destroy_scheduled_duration` is ignored, DESTROYED is never reached, `Encrypt` refuses a
+   CryptoKeyVersion name, asymmetric keys report a primary, HSM keys report SOFTWARE, and
+   create fields are dropped with success. Three caller errors are still INTERNAL. The KMS
+   amendment's claim holds again, on new evidence.
+3. **Embedding costs more than it saves.** A new module or container (user approval either
+   way), configuration by environment variable, a second port for REST, and none of
+   reset, save/load, the Kubernetes store, the fake clock or fault injection.
+4. **The project is healthy for its size but has one maintainer**, as at #309.
+
+**Parts worth taking, without adopting the server** (each is the user's call):
+
+- **`EC_SIGN_SECP256K1_SHA256`**, the one algorithm it has and CloudBurrow lacks. It uses
+  `github.com/decred/dcrd/dcrec/secp256k1/v4` with low-S normalisation
+  ([secp256k1.go][kmsemu-secp]). Serving it would mean adding that module to CloudBurrow's
+  `go.mod`, which needs the user's approval; it would be a new ticket, written against
+  Google's docs, not a port.
+- **Error wording.** If the user wants it, a recorded observation of Cloud KMS's
+  "is not enabled, current state is:" and "has incorrect key purpose" messages would settle
+  whether CloudBurrow should match them.
+
+**Not measured, for the user:** whether their server behaves as read here when driven by
+the official client (only running it would show); image size, idle RSS and start time;
+whether their import accepts Google's AES-KWP envelope. All three need their code run, with
+the user's approval.
+
+**Revisit** if a later release serves the other six services, honours
+`destroy_scheduled_duration` and reaches DESTROYED, and exposes its store for reset and
+snapshots.
+
+[kmsemu]: https://github.com/blackwell-systems/gcp-kms-emulator/tree/5372c0046ce0c253717a0d77a127b01e70a9658d
+[kmsemu-register]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/register.go#L31
+[kmsemu-gw-root]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/gateway.go
+[kmsemu-dual]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/cmd/server-dual/main.go#L96
+[kmsemu-readme-ops]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/README.md?plain=1#L117
+[kmsemu-features]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/docs/FEATURES.md
+[kmsemu-gomod]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/go.mod#L5-L13
+[kmsemu-docker]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/.github/workflows/docker-publish.yml#L60
+[kmsemu-decap]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/server/server.go#L463-L470
+[kmsemu-iam]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/server/server.go#L103-L147
+[kmsemu-createring]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/server/server.go#L150-L167
+[kmsemu-server-create]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/server/server.go#L224-L227
+[kmsemu-encrypt]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/server/server.go#L272-L279
+[kmsemu-gateway]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/gateway/gateway.go#L58
+[kmsemu-paginate]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L55-L82
+[kmsemu-createkey]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L202-L282
+[kmsemu-encrypt-storage]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L304-L313
+[kmsemu-decrypt]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L370-L382
+[kmsemu-getversion]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L527-L540
+[kmsemu-updateversion]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L583-L607
+[kmsemu-destroy]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L627-L672
+[kmsemu-restore]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L674-L703
+[kmsemu-updatekey]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L722-L737
+[kmsemu-keyproto]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L751-L768
+[kmsemu-errors]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/errors.go#L46-L56
+[kmsemu-keymat]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/keymaterial.go#L45-L146
+[kmsemu-asymsign]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/asymmetric.go#L187-L210
+[kmsemu-asymdecrypt]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/asymmetric.go#L276
+[kmsemu-raw]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/raw.go
+[kmsemu-random]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/random.go#L12
+[kmsemu-persist]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/persistence.go#L91-L160
+[kmsemu-secp]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/secp256k1.go
+[g-encrypt]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/service.proto#L1324-L1330
+[g-primary]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/resources.proto#L130-L133
+[g-dsd]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/resources.proto#L199-L200
+[g-kms127]: https://github.com/googleapis/google-cloud-go/blob/kms/v1.27.0/kms/apiv1/kmspb/service_grpc.pb.go
