@@ -26,12 +26,14 @@ import (
 // and decoded as ffmpeg decodes it: the samples of the first sound track, the
 // edit list's leading media time (an AAC encoder's priming) dropped and its
 // duration kept. The codecs: AAC-LC (mp4a, the audio of nearly every MP4 and
-// MOV) with github.com/arabian9ts/aac-go (pure Go, Apache 2.0), MP3 (mp4a
+// MOV) with github.com/arabian9ts/aac-go (pure Go, Apache 2.0; copied into
+// third_party/aac-go, where #1739 added HE-AAC v1 and v2), MP3 (mp4a
 // with the MPEG-1/2 audio object types, or .mp3) with third_party/go-mp3, and
 // QuickTime linear PCM (lpcm, sowt, twos, in24, in32, fl32, fl64), and
 // (#1739) Opus with github.com/kazzmir/opus-go (libopus transpiled to Go,
-// BSD 3-Clause); the audio formats Google lists are MP3 and WAV. Other
-// codecs (AC-3, ALAC, HE-AAC...) are refused naming them.
+// BSD 3-Clause), and AC-3 and E-AC-3 with internal/ac3 (written from ATSC
+// A/52); the audio formats Google lists are MP3 and WAV. Other codecs
+// (ALAC, FLAC...) are refused naming them.
 
 // DecodeVideoAudio decodes the audio track of an MP4 or MOV video to mono
 // samples at AudioSampleRate, between opt's start and end offsets. A video
@@ -213,66 +215,51 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 	return downmix(pcm[start*channels:end*channels], channels), rate, nil
 }
 
-// decodeAACTrack decodes an AAC-LC track's access units, each wrapped in
-// the ADTS header its AudioSpecificConfig gives.
+// decodeAACTrack decodes an AAC track's raw access units with
+// third_party/aac-go: AAC-LC, and (#1739) HE-AAC, SBR (v1) and SBR with
+// parametric stereo (v2), signalled in the AudioSpecificConfig or only in
+// the stream, as ffmpeg decodes them (SBR at twice the core rate, PS to
+// stereo).
 func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []float32, channels, rate int, err error) {
-	objectType := byte(aac.AAClc)
-	var asc *aac.AudioSpecificConfig
-	if dcd.ObjectType == 0x40 {
-		if dcd.DecSpecificInfo == nil || len(dcd.DecSpecificInfo.DecConfig) == 0 {
-			return nil, 0, 0, fmt.Errorf("the AAC track has no AudioSpecificConfig")
-		}
-		if asc, err = aac.DecodeAudioSpecificConfig(bytes.NewReader(dcd.DecSpecificInfo.DecConfig)); err != nil {
-			return nil, 0, 0, fmt.Errorf("the AAC track's AudioSpecificConfig: %v", err)
-		}
-		switch {
-		case asc.ObjectType == aac.HEAACv1 || asc.ObjectType == aac.HEAACv2 || asc.SBRPresentFlag || asc.PSPresentFlag:
-			return nil, 0, 0, errors.New("it is HE-AAC (SBR), which is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are")
-		case asc.ObjectType != aac.AAClc:
-			return nil, 0, 0, fmt.Errorf("its AAC audio object type %d is not decoded; AAC-LC is", asc.ObjectType)
-		case asc.FrameLengthFlag:
-			return nil, 0, 0, errors.New("its AAC frames are 960 samples, which are not decoded")
-		}
-	} else if dcd.ObjectType != 0x67 {
+	if dcd.ObjectType != 0x40 && dcd.ObjectType != 0x67 {
 		return nil, 0, 0, fmt.Errorf("its MPEG-2 AAC profile (object type 0x%02x) is not decoded; AAC-LC is", dcd.ObjectType)
 	}
-	if asc == nil {
-		return nil, 0, 0, errors.New("the MPEG-2 AAC track has no AudioSpecificConfig")
+	if dcd.DecSpecificInfo == nil || len(dcd.DecSpecificInfo.DecConfig) == 0 {
+		return nil, 0, 0, fmt.Errorf("the AAC track has no AudioSpecificConfig")
 	}
-	if asc.ChannelConfiguration != 1 && asc.ChannelConfiguration != 2 {
+	asc, err := aac.DecodeAudioSpecificConfig(bytes.NewReader(dcd.DecSpecificInfo.DecConfig))
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("the AAC track's AudioSpecificConfig: %v", err)
+	}
+	switch {
+	case asc.ObjectType != aac.AAClc && asc.ObjectType != aac.HEAACv1 && asc.ObjectType != aac.HEAACv2:
+		return nil, 0, 0, fmt.Errorf("its AAC audio object type %d is not decoded; AAC-LC and HE-AAC (v1, v2) are", asc.ObjectType)
+	case asc.FrameLengthFlag:
+		return nil, 0, 0, errors.New("its AAC frames are 960 samples, which are not decoded")
+	case asc.ChannelConfiguration != 1 && asc.ChannelConfiguration != 2:
 		return nil, 0, 0, fmt.Errorf("its AAC channel configuration %d is not decoded; mono and stereo are", asc.ChannelConfiguration)
 	}
-	d, err := aacdec.NewDecoder()
+	d, err := aacdec.NewDecoderASC(dcd.DecSpecificInfo.DecConfig)
 	if err != nil {
-		return nil, 0, 0, err
+		if errors.Is(err, aacdec.ErrUnsupported) {
+			return nil, 0, 0, fmt.Errorf("its AAC uses a feature that is not decoded (%v)", err)
+		}
+		return nil, 0, 0, fmt.Errorf("the AAC track's AudioSpecificConfig: %v", err)
 	}
-	var out []int16
 	for i, au := range tr.samples {
-		h, err := aac.NewADTSHeader(asc.SamplingFrequency, asc.ChannelConfiguration, objectType, uint16(min(len(au), 1<<13)))
-		if err != nil {
-			return nil, 0, 0, fmt.Errorf("the AAC track: %v", err)
-		}
-		if len(au)+7 >= 1<<13 {
-			return nil, 0, 0, fmt.Errorf("the AAC track's access unit %d is %d bytes, too long for a frame", i, len(au))
-		}
-		frame := append(h.Encode(), au...)
-		p, err := d.Decode(frame)
+		p, err := d.DecodeAU(au)
 		if err != nil {
 			if errors.Is(err, aacdec.ErrUnsupported) {
 				return nil, 0, 0, fmt.Errorf("its AAC uses a feature that is not decoded (%v)", err)
 			}
 			return nil, 0, 0, fmt.Errorf("the AAC track's access unit %d: %v", i, err)
 		}
-		out = append(out, p...)
-		if len(out) > (MaxAudioSeconds+60)*asc.SamplingFrequency*int(asc.ChannelConfiguration) {
-			return nil, 0, 0, &tooLongError{float64(len(out)) / float64(asc.SamplingFrequency) / float64(asc.ChannelConfiguration)}
+		pcm = append(pcm, p...)
+		if r, c := d.OutputSampleRate(), d.OutputChannels(); r > 0 && c > 0 && len(pcm) > (MaxAudioSeconds+60)*r*c {
+			return nil, 0, 0, &tooLongError{float64(len(pcm)) / float64(r) / float64(c)}
 		}
 	}
-	pcm = make([]float32, len(out))
-	for i, v := range out {
-		pcm[i] = float32(v) / 32768
-	}
-	return pcm, int(asc.ChannelConfiguration), asc.SamplingFrequency, nil
+	return pcm, d.OutputChannels(), d.OutputSampleRate(), nil
 }
 
 // decodeAC3Track decodes an AC-3 (ac-3) or E-AC-3 (ec-3) track with
