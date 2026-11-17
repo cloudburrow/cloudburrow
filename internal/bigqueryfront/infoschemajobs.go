@@ -2,6 +2,8 @@ package bigqueryfront
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -38,7 +40,7 @@ import (
 //
 // The region-qualified forms of the dataset views (regionViews, #1329) are
 // the union of every dataset's rows, and region TABLE_STORAGE a row per
-// table but its physical byte counts (storageColumns). Measured first: each was 400 "Table not found". The
+// table, its physical byte counts estimates (storageColumns). Measured first: each was 400 "Table not found". The
 // JOBS columns of statistics the emulator never makes are empty or NULL
 // (jobsStatisticsColumns, #1458);
 // bi_engine_statistics, session_info, continuous_query_info and
@@ -69,7 +71,8 @@ const jobsStatisticsColumns = ", job_stages ARRAY<STRUCT<name STRING, id INT64, 
 	"object_storage_stats ARRAY<STRUCT<cloud_provider STRING, object_storage_bytes_read INT64, cache_bytes_read INT64>>, " +
 	"timeline ARRAY<STRUCT<elapsed_ms INT64, total_slot_ms INT64, pending_units INT64, completed_units INT64, " +
 	"active_units INT64, estimated_runnable_units INT64>>, " +
-	"query_info STRUCT<resource_warning STRING, performance_insights STRUCT<avg_previous_execution_ms INT64>>, " +
+	"query_info STRUCT<resource_warning STRING, query_hashes STRUCT<normalized_literals STRING>, " +
+	"performance_insights STRUCT<avg_previous_execution_ms INT64>>, " +
 	"materialized_view_statistics STRUCT<materialized_view ARRAY<STRUCT<table_reference " + jobsTableRef +
 	", chosen BOOL, estimated_bytes_saved INT64, rejected_reason STRING>>>, " +
 	"metadata_cache_statistics STRUCT<table_metadata_cache_usage ARRAY<STRUCT<table_reference " + jobsTableRef +
@@ -148,7 +151,9 @@ const jobsColumns = "STRUCT<cache_hit BOOL, creation_time TIMESTAMP, " +
 	"principal_subject STRING, transferred_bytes INT64, query_dialect STRING, continuous BOOL, " +
 	"bi_engine_statistics STRUCT<bi_engine_mode STRING, acceleration_mode STRING, " +
 	"bi_engine_reasons ARRAY<STRUCT<code STRING, message STRING>>>, session_info STRUCT<session_id STRING>, " +
-	"continuous_query_info STRUCT<output_watermark TIMESTAMP>, ml_statistics STRUCT<model_type STRING>" +
+	"continuous_query_info STRUCT<output_watermark TIMESTAMP>, ml_statistics STRUCT<model_type STRING>, " +
+	"global_query_info STRUCT<parent_job_id STRING, parent_job_location STRING, remote_regions ARRAY<STRING>>, " +
+	"copy_job_statistics STRUCT<copied_rows INT64, copied_logical_bytes INT64>" +
 	jobsStatisticsColumns + ">"
 
 // int64Or is a resource's int64 (a string or number) as SQL, or NULL.
@@ -295,7 +300,93 @@ func jobRow(project string, job map[string]any, settings *projectOptions) []stri
 		// job is continuous (continuous FALSE). ml_statistics.model_type:
 		// "For all other jobs" than a model's creation "the value is NULL"
 		// (#1458).
-		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs)}, jobsStatisticsValues...)
+		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs),
+		// global_query_info: "Information about a global query"; an
+		// instance runs every query in the region it names, so no job is
+		// one (NULL, UNVERIFIED that BigQuery gives NULL, 2026-11-17).
+		"NULL", copyStatisticsSQL(stats)}, statisticsValues(job, qc, qs, cache)...)
+}
+
+// statisticsValues are a job's values of jobsStatisticsColumns: those of
+// jobsStatisticsValues, but query_info, which holds query_hashes for "a
+// successful GoogleSQL query that is not a cache hit" (#1458).
+func statisticsValues(job, qc, qs map[string]any, cache string) []string {
+	v := append([]string(nil), jobsStatisticsValues...)
+	status, _ := job["status"].(map[string]any)
+	legacy, _ := qc["useLegacySql"].(bool)
+	if qc == nil || legacy || jobStateOf(job) != "DONE" || status["errorResult"] != nil || cache == "TRUE" {
+		return v
+	}
+	if h := normalizedLiteralsHash(str(qc, "query")); h != "" {
+		v[3] = "STRUCT(CAST(NULL AS STRING) AS resource_warning, STRUCT(" + sqlString(h) +
+			" AS normalized_literals) AS query_hashes, CAST(NULL AS STRUCT<avg_previous_execution_ms INT64>) AS performance_insights)"
+	}
+	return v
+}
+
+// normalizedLiteralsHash is JOBS' query_info.query_hashes.normalized_literals
+// of a query's text: "a hexadecimal STRING hash that ignores comments,
+// parameter values, UDFs, and literals" (information-schema-jobs, read
+// 2026-11-17), so that queries alike but for those hash the same (the
+// page's example finds "the job IDs with the same query hash as a
+// specific job"). The page names neither the hash function nor how the
+// text is normalized, so CloudBurrow's is its own: the SHA-256, in hex, of
+// the query's tokens (comments and spacing gone, by the front's lexer),
+// with each string, bytes, number, TRUE, FALSE and NULL literal and each
+// query parameter written ?, keywords in capitals. UNVERIFIED, 2026-11-17:
+// BigQuery's value differs; it is "ignores UDFs" and "will differ when
+// underlying views change" that CloudBurrow does not follow (a view's or
+// a table's schema plays no part). "" when the text does not lex.
+func normalizedLiteralsHash(sql string) string {
+	t, ok := lex(sql)
+	if !ok || len(t) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i := 0; i < len(t); i++ {
+		x := t[i]
+		w := x.text
+		switch {
+		case x.kind == tokString:
+			w = "?"
+		case x.kind == tokWord && (w[0] >= '0' && w[0] <= '9' || x.is("TRUE") || x.is("FALSE") || x.is("NULL")):
+			w = "?"
+			// A number's fraction (3.5) lexes as three tokens.
+			if w0 := x.text[0]; w0 >= '0' && w0 <= '9' && i+2 < len(t) && t[i+1].punct(".") && t[i+1].pos == x.end &&
+				t[i+2].kind == tokWord && t[i+2].pos == t[i+1].end && t[i+2].text[0] >= '0' && t[i+2].text[0] <= '9' {
+				i += 2
+			}
+		case x.kind == tokPunct && (w == "@" || w == "?"):
+			w = "?"
+			if x.text == "@" && i+1 < len(t) && t[i+1].kind == tokWord && t[i+1].pos == x.end {
+				i++
+			}
+		case x.kind == tokWord && reservedWords[strings.ToUpper(w)]:
+			w = strings.ToUpper(w)
+		case x.kind == tokQuoted:
+			w = "`" + w + "`"
+		}
+		b.WriteString(w)
+		b.WriteByte(' ')
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+// copyStatisticsSQL is JOBS' copy_job_statistics of a job's statistics,
+// "Statistics for a copy job" typed by REST CopyJobStatistics (copiedRows,
+// copiedLogicalBytes, in snake case); NULL for a job that is not a copy.
+func copyStatisticsSQL(stats map[string]any) string {
+	c, _ := stats["copy"].(map[string]any)
+	if c == nil {
+		return "NULL"
+	}
+	return "STRUCT(" + castInt64(c["copiedRows"]) + " AS copied_rows, " + castInt64(c["copiedLogicalBytes"]) + " AS copied_logical_bytes)"
+}
+
+// castInt64 is int64Or typed, so a NULL is an INT64 in a STRUCT literal.
+func castInt64(v any) string {
+	return "CAST(" + int64Or(v) + " AS INT64)"
 }
 
 // sessionInfoSQL is JOBS' session_info of a job's statistics: its
@@ -696,10 +787,11 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 }
 
 // storageColumns are region-qualified TABLE_STORAGE's columns
-// (https://cloud.google.com/bigquery/docs/information-schema-table-storage)
-// but the physical byte columns, which are compressed sizes no value
-// defines (left out). The logical ones and storage_last_modified_time:
-// storageBytes (#1458). project_number is NULL: an instance has none.
+// (https://cloud.google.com/bigquery/docs/information-schema-table-storage,
+// read again 2026-11-17), in the page's order. The logical ones and
+// storage_last_modified_time: storageBytes (#1458). The physical ones are
+// estimates (physicalBytes, #1458): BigQuery's are compressed sizes, which
+// no value defines and the engine does not keep (UNVERIFIED, 2026-11-17). project_number is NULL: an instance has none.
 // total_partitions, "the number of partitions present in the table" (0
 // for a table not partitioned), counts the partitions PARTITIONS has a
 // row for (#1458): those holding rows, with __NULL__ and
@@ -708,9 +800,11 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-table-storage
 const storageColumns = "STRUCT<project_id STRING, project_number INT64, table_catalog STRING, table_schema STRING, " +
 	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, total_partitions INT64, total_logical_bytes INT64, " +
-	"active_logical_bytes INT64, long_term_logical_bytes INT64, storage_last_modified_time TIMESTAMP, deleted BOOL, table_type STRING, " +
-	"managed_table_type STRING, last_metadata_index_refresh_time TIMESTAMP, table_deletion_reason STRING, " +
-	"table_deletion_time TIMESTAMP>"
+	"active_logical_bytes INT64, long_term_logical_bytes INT64, current_physical_bytes INT64, total_physical_bytes INT64, " +
+	"active_physical_bytes INT64, long_term_physical_bytes INT64, time_travel_physical_bytes INT64, " +
+	"storage_last_modified_time TIMESTAMP, deleted BOOL, table_type STRING, " +
+	"managed_table_type STRING, fail_safe_physical_bytes INT64, last_metadata_index_refresh_time TIMESTAMP, " +
+	"table_deletion_reason STRING, table_deletion_time TIMESTAMP>"
 
 // totalPartitions is TABLE_STORAGE's total_partitions of table t (above):
 // the distinct partition IDs of its rows, as PARTITIONS reads them
@@ -748,20 +842,21 @@ func (f front) totalPartitions(r *http.Request, project, dataset string, t infoT
 // written to the table", the latest change in the engine's change table
 // (changeWrites), and NULL "if no data exists", or when that table holds
 // no change (none in the last seven days, or none kept).
-func (f front) storageBytes(r *http.Request, project, dataset string, t infoTable) (logical, active, long, modified string, st int, msg string) {
+func (f front) storageBytes(r *http.Request, project, dataset string, t infoTable, hours int64) (logical, active, long, modified, travel string, st int, msg string) {
 	raw, err := json.Marshal(t)
 	var pm partitionMeta
 	if err != nil || json.Unmarshal(raw, &pm) != nil {
-		return "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not read a table's schema"
+		return "", "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not read a table's schema"
 	}
 	name := str(t, "tableId")
 	path := quotePath([]string{project, dataset, name})
-	logical, active, long, modified = "NULL", "NULL", "NULL", "NULL"
+	logical, active, long, modified, travel = "NULL", "NULL", "NULL", "NULL", "NULL"
 	n := int64(0)
-	if e := f.tableBytesExpr(r, path, pm.Schema.Fields); e != "" {
+	e := f.tableBytesExpr(r, path, pm.Schema.Fields)
+	if e != "" {
 		var m string
 		if n, m = f.scalar(r, "SELECT IFNULL(SUM("+e+"), 0) FROM "+path); m != "" {
-			return "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
+			return "", "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
 		}
 		logical = strconv.FormatInt(n, 10)
 	}
@@ -773,8 +868,54 @@ func (f front) storageBytes(r *http.Request, project, dataset string, t infoTabl
 		if us, m := f.scalar(r, "SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+c); m == "" && us >= 0 {
 			modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
 		}
+		if e != "" && e == logicalBytesExpr(pm.Schema.Fields) {
+			if b, m := f.scalar(r, "SELECT "+timeTravelBytesExpr(pm.Schema.Fields, hours)+" FROM "+c); m == "" {
+				travel = strconv.FormatInt(b, 10)
+			}
+		}
 	}
-	return logical, active, long, modified, 0, ""
+	return logical, active, long, modified, travel, 0, ""
+}
+
+// timeTravelBytesExpr is the SQL, over a table's change table, of the
+// logical bytes of its rows deleted or replaced within the last hours of
+// time travel (#1458): a change's DELETE row holds the row as it was
+// (googlesqlite patch 0036), what BigQuery keeps for time travel
+// ("deleted or changed data").
+func timeTravelBytesExpr(fields []field, hours int64) string {
+	return "IFNULL(SUM(IF(_CHANGE_TYPE = 'DELETE' AND _CHANGE_TIMESTAMP >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL " +
+		strconv.FormatInt(hours, 10) + " HOUR), " + logicalBytesExpr(fields) + ", 0)), 0)"
+}
+
+// physicalBytes are TABLE_STORAGE's current_physical_bytes,
+// total_physical_bytes, active_physical_bytes, long_term_physical_bytes,
+// time_travel_physical_bytes and fail_safe_physical_bytes, as SQL, of a
+// table's logical bytes (logical, active, long) and the logical bytes of
+// its rows held for time travel (travel), each NULL when unknown (#1458).
+// BigQuery's physical bytes are compressed sizes, which no value defines
+// and the engine does not keep; CloudBurrow estimates them as the logical
+// bytes, uncompressed, as tables.get's numBytes is (logicalbytes.go):
+// current the table's, time travel its deleted and replaced rows' within
+// the dataset's time travel window, total and active the two added ("including
+// time-travel (deleted or changed data) bytes"), long-term the long-term
+// logical bytes, and fail-safe 0, the front letting go of every change
+// older than the window (changehistoryretention.go), so the instance keeps
+// none past it. UNVERIFIED, 2026-11-17: estimates, not BigQuery's
+// compressed sizes (https://docs.cloud.google.com/bigquery/docs/information-schema-table-storage).
+func physicalBytes(logical, active, long, travel string) []string {
+	sum := func(a, b string) string {
+		x, err1 := strconv.ParseInt(a, 10, 64)
+		y, err2 := strconv.ParseInt(b, 10, 64)
+		if err1 != nil || err2 != nil {
+			return "NULL"
+		}
+		return strconv.FormatInt(x+y, 10)
+	}
+	failSafe := "0"
+	if logical == "NULL" {
+		failSafe = "NULL"
+	}
+	return []string{logical, sum(logical, travel), sum(active, travel), long, travel, failSafe}
 }
 
 // storageAtOnce is totalPartitions and storageBytes of table t read by
@@ -782,30 +923,32 @@ func (f front) storageBytes(r *http.Request, project, dataset string, t infoTabl
 // bytes and its change table's last change. ok is false when that query
 // fails, a column the engine keeps under another name or a table with no
 // change table, and the two are read one by one, as they say.
-func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTable) (parts int64, logical, active, long, modified string, ok bool) {
+func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTable, hours int64) (parts int64, logical, active, long, modified, travel string, ok bool) {
 	raw, err := json.Marshal(t)
 	var pm partitionMeta
 	if err != nil || json.Unmarshal(raw, &pm) != nil {
-		return 0, "", "", "", "", false
+		return 0, "", "", "", "", "", false
 	}
 	name := str(t, "tableId")
 	id, ok := partitionIDExpr(pm)
 	if !ok {
-		return 0, "", "", "", "", false
+		return 0, "", "", "", "", "", false
 	}
 	path := quotePath([]string{project, dataset, name})
 	count := "0"
 	if id != "" {
 		count = "(SELECT COUNT(DISTINCT " + id + ") FROM " + path + ")"
 	}
+	changes := quotePath([]string{project, dataset, name + changeTableSuffix})
 	got, msg := f.scalars(r, "SELECT "+count+", (SELECT IFNULL(SUM("+logicalBytesExpr(pm.Schema.Fields)+"), 0) FROM "+path+"), "+
-		"(SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+quotePath([]string{project, dataset, name + changeTableSuffix})+
-		" WHERE _CHANGE_TYPE != 'START')", 3)
+		"(SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+changes+" WHERE _CHANGE_TYPE != 'START'), "+
+		"(SELECT "+timeTravelBytesExpr(pm.Schema.Fields, hours)+" FROM "+changes+")", 4)
 	if msg != "" {
-		return 0, "", "", "", "", false
+		return 0, "", "", "", "", "", false
 	}
 	n := got[1]
 	logical, active, long, modified = strconv.FormatInt(n, 10), "NULL", "NULL", "NULL"
+	travel = strconv.FormatInt(got[3], 10)
 	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
 		active, long = logical, "0"
 	}
@@ -813,7 +956,7 @@ func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTab
 	if us := got[2]; us >= 0 && (rows > 0 || n > 0) {
 		modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
 	}
-	return got[0], logical, active, long, modified, true
+	return got[0], logical, active, long, modified, travel, true
 }
 
 // storageRows are a dataset's TABLE_STORAGE rows: its tables, snapshots
@@ -824,6 +967,10 @@ func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (str
 		return "", st, msg
 	}
 	project := projectOf(f.base)
+	hours, _, ok := f.timeTravelHours(r, dataset)
+	if !ok {
+		hours = 168
+	}
 	var rows [][]string
 	for _, t := range tables {
 		typ := str(t, "type")
@@ -836,20 +983,22 @@ func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (str
 		} else if t["cloneDefinition"] != nil {
 			tt = "CLONE"
 		}
-		parts, logical, active, long, modified, ok := f.storageAtOnce(r, project, dataset, t)
+		parts, logical, active, long, modified, travel, ok := f.storageAtOnce(r, project, dataset, t, hours)
 		if !ok {
 			var st int
 			var msg string
 			if parts, st, msg = f.totalPartitions(r, project, dataset, t); st != 0 {
 				return "", st, msg
 			}
-			if logical, active, long, modified, st, msg = f.storageBytes(r, project, dataset, t); st != 0 {
+			if logical, active, long, modified, travel, st, msg = f.storageBytes(r, project, dataset, t, hours); st != 0 {
 				return "", st, msg
 			}
 		}
-		rows = append(rows, []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
-			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), logical, active, long, modified,
-			"FALSE", sqlString(tt), managed, "NULL", "NULL", "NULL"})
+		phys := physicalBytes(logical, active, long, travel)
+		row := []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
+			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), logical, active, long}
+		row = append(row, phys[:5]...)
+		rows = append(rows, append(row, modified, "FALSE", sqlString(tt), managed, phys[5], "NULL", "NULL", "NULL"))
 	}
 	return rowsSubquery(storageColumns, rows), 0, ""
 }
