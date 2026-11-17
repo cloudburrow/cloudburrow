@@ -1,0 +1,11 @@
+TestOrcFile.test1.orc and decimal.orc are Apache ORC's example files
+(https://github.com/apache/orc/tree/main/examples), written by ORC's Java
+writer for its own tests, Copyright The Apache Software Foundation, under
+the Apache License, Version 2.0. They are copied unchanged from the
+examples directory of github.com/scritchley/orc
+v0.0.0-20210513144143-06dddf1ad665, which ships them with the rows ORC's
+tools print for each (examples/expected; orcload_test.go compares them).
+
+sha256:
+03827180c09f7d3933f7e5d3d504f5b60d93958651473d60ee220c9aace8bea0  TestOrcFile.test1.orc
+5b9715d9674bcb83ab4939ddfd0bf99eda611b84dc07e3321b8529445c12c496  decimal.orc
