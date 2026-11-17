@@ -1,12 +1,14 @@
 package bigtablefront
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	btpb "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -33,6 +35,7 @@ type plan struct {
 	items    []selectItem
 	cols     []*btpb.ColumnMetadata
 	aggs     []*call
+	wins     []*call // the window function calls, evaluated after aggregation
 	grouped  bool
 	groupBy  []expr
 	keyIndex int // the _key column of the source, or -1
@@ -61,6 +64,7 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 	}
 	inner := *s
 	inner.inAgg = true
+	inner.wins = nil // "Analytic functions cannot be arguments to aggregate functions"
 	var ts []*btpb.Type
 	for _, a := range c.args {
 		t, err := a.check(&inner)
@@ -71,7 +75,11 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 	}
 	c.argTypes = ts
 	n := len(ts)
-	if c.star {
+	if moreAggregates[c.name] {
+		if err := c.checkMoreAgg(ts); err != nil {
+			return nil, err
+		}
+	} else if c.star {
 		c.t = int64Type
 	} else {
 		bad := func() (*btpb.Type, error) { return nil, sigErr(c, ts) }
@@ -141,16 +149,20 @@ func (c *call) checkAgg(s *scope) (*btpb.Type, error) {
 }
 
 // aggregate computes c over rows.
-func (c *call) aggregate(rows [][]any, base env) (any, error) {
+// envs are the rows (or, for a window over a grouped query, the groups)
+// it aggregates, each as its expressions are evaluated.
+func (c *call) aggregate(envs []env) (any, error) {
 	if c.star {
-		return int64(len(rows)), nil
+		return int64(len(envs)), nil
+	}
+	if moreAggregates[c.name] {
+		return c.aggregateMore(envs)
 	}
 	var vals []any
 	seen := map[string]bool{}
 	var sep any
-	for _, r := range rows {
-		e := base
-		e.row = r
+	for _, e0 := range envs {
+		e := e0
 		v, err := c.args[0].eval(&e)
 		if err != nil {
 			return nil, err
@@ -297,6 +309,10 @@ func walk(e expr, f func(expr) bool) {
 		for _, a := range x.elems {
 			walk(a, f)
 		}
+	case *structLit:
+		for _, a := range x.elems {
+			walk(a, f)
+		}
 	case *interval:
 		walk(x.n, f)
 	case *unaryOp:
@@ -323,6 +339,14 @@ func walk(e expr, f func(expr) bool) {
 		for _, a := range x.args {
 			walk(a, f)
 		}
+		if x.win != nil {
+			for _, a := range x.win.partition {
+				walk(a, f)
+			}
+			for _, o := range x.win.order {
+				walk(o.e, f)
+			}
+		}
 	case *cast:
 		walk(x.x, f)
 	case *extract:
@@ -339,7 +363,7 @@ func constant(e expr) bool {
 		case *colRef:
 			ok = false
 		case *call:
-			if c.isAgg || aggregates[c.name] {
+			if c.isAgg || aggregates[c.name] || c.win != nil {
 				ok = false
 			}
 		}
@@ -426,6 +450,8 @@ func build(q *query, src *source, params map[string]*btpb.Type) (*plan, error) {
 	}
 	aggScope := *base
 	aggScope.aggs = &p.aggs
+	aggScope.wins = &p.wins
+	aggScope.windows = q.windows
 	for i := range p.items {
 		if err := refusedCheck(p.items[i].e); err != nil {
 			return nil, err
@@ -567,85 +593,102 @@ func (p *plan) run(base env) ([][]any, error) {
 		}
 		return out, nil
 	}
-	var out [][]any
-	seen := map[string]bool{}
-	emit := func(r []any) bool {
-		if p.q.distinct {
-			k := groupKey(r)
-			if seen[k] {
-				return true
-			}
-			seen[k] = true
-		}
-		out = append(out, r)
-		return limit < 0 || int64(len(out)) < limit
-	}
 	if limit == 0 {
 		return nil, nil
 	}
+	// inputs are the rows the SELECT list is evaluated on: the source's
+	// rows, or one per group with its aggregates.
+	var inputs []env
 	if !p.grouped {
 		for _, r := range rows {
 			e := base
 			e.row = r
-			v, err := project(e)
+			inputs = append(inputs, e)
+		}
+	} else {
+		type group struct{ rows [][]any }
+		var order []string
+		groups := map[string]*group{}
+		for _, r := range rows {
+			e := base
+			e.row = r
+			var kv []any
+			for _, g := range p.groupBy {
+				v, err := g.eval(&e)
+				if err != nil {
+					return nil, err
+				}
+				kv = append(kv, v)
+			}
+			k := groupKey(kv)
+			gr, ok := groups[k]
+			if !ok {
+				gr = &group{}
+				groups[k] = gr
+				order = append(order, k)
+			}
+			gr.rows = append(gr.rows, r)
+		}
+		if len(p.groupBy) == 0 && len(order) == 0 {
+			// Aggregates over no rows: one row.
+			order = []string{""}
+			groups[""] = &group{}
+		}
+		for _, k := range order {
+			gr := groups[k]
+			e := base
+			if len(gr.rows) > 0 {
+				e.row = gr.rows[0]
+			} else {
+				e.row = make([]any, len(p.src.cols))
+			}
+			envs := make([]env, len(gr.rows))
+			for i, r := range gr.rows {
+				envs[i] = base
+				envs[i].row = r
+			}
+			e.aggs = make([]any, len(p.aggs))
+			for i, a := range p.aggs {
+				v, err := a.aggregate(envs)
+				if err != nil {
+					return nil, err
+				}
+				e.aggs[i] = v
+			}
+			inputs = append(inputs, e)
+		}
+	}
+	// Window functions are evaluated after aggregation (window-function-calls).
+	if len(p.wins) > 0 {
+		for i := range inputs {
+			inputs[i].wins = make([]any, len(p.wins))
+		}
+		for w, c := range p.wins {
+			vals, err := c.window(inputs)
 			if err != nil {
 				return nil, err
 			}
-			if !emit(v) {
-				break
+			for i := range inputs {
+				inputs[i].wins[w] = vals[i]
 			}
 		}
-		return out, nil
 	}
-	type group struct{ rows [][]any }
-	var order []string
-	groups := map[string]*group{}
-	for _, r := range rows {
-		e := base
-		e.row = r
-		var kv []any
-		for _, g := range p.groupBy {
-			v, err := g.eval(&e)
-			if err != nil {
-				return nil, err
-			}
-			kv = append(kv, v)
-		}
-		k := groupKey(kv)
-		gr, ok := groups[k]
-		if !ok {
-			gr = &group{}
-			groups[k] = gr
-			order = append(order, k)
-		}
-		gr.rows = append(gr.rows, r)
-	}
-	if len(p.groupBy) == 0 && len(order) == 0 {
-		// Aggregates over no rows: one row.
-		order = []string{""}
-		groups[""] = &group{}
-	}
-	for _, k := range order {
-		gr := groups[k]
-		e := base
-		if len(gr.rows) > 0 {
-			e.row = gr.rows[0]
-		} else {
-			e.row = make([]any, len(p.src.cols))
-		}
-		e.aggs = make([]any, len(p.aggs))
-		for i, a := range p.aggs {
-			v, err := a.aggregate(gr.rows, base)
-			if err != nil {
-				return nil, err
-			}
-			e.aggs[i] = v
-		}
+	var out [][]any
+	seen := map[string]bool{}
+	for _, e := range inputs {
 		v, err := project(e)
 		if err != nil {
 			return nil, err
 		}
-		if !emit(v) {
+		if p.q.distinct {
+			k := groupKey(v)
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+		}
+		out = append(out, v)
+		if limit >= 0 && int64(len(out)) >= limit {
 			break
 		}
 	}
@@ -769,6 +812,7 @@ func decode(v *btpb.Value, t *btpb.Type) (any, error) {
 type temporal struct {
 	history                      bool
 	asOf, after, afterEq, before *time.Time
+	beforeEq                     *time.Time
 	latestN                      int64
 }
 
@@ -786,9 +830,9 @@ func temporalArgs(args []tableArg, params map[string]*btpb.Type, base env) (temp
 			return t, err
 		}
 		want := map[string]string{"with_history": "BOOL", "as_of": "TIMESTAMP", "after": "TIMESTAMP",
-			"after_or_equal": "TIMESTAMP", "before": "TIMESTAMP", "latest_n": "INT64"}[a.name]
+			"after_or_equal": "TIMESTAMP", "before": "TIMESTAMP", "before_or_equal": "TIMESTAMP", "latest_n": "INT64"}[a.name]
 		if want == "" {
-			return t, fmt.Errorf("Unknown named argument %s: the table arguments are with_history, as_of, after, after_or_equal, before and latest_n", a.name)
+			return t, fmt.Errorf("Unknown named argument %s: the table arguments are with_history, as_of, after, after_or_equal, before, before_or_equal and latest_n", a.name)
 		}
 		if !isKind(at, want) {
 			return t, fmt.Errorf("The named argument %s takes %s, not %s", a.name, want, kind(at))
@@ -827,11 +871,16 @@ func temporalArgs(args []tableArg, params map[string]*btpb.Type, base env) (temp
 				t.afterEq = &ts
 			case "before":
 				t.before = &ts
+			case "before_or_equal":
+				t.beforeEq = &ts
 			}
 		}
 	}
+	if t.history && seen["as_of"] {
+		return t, fmt.Errorf("The table argument as_of must not be used with with_history => TRUE")
+	}
 	if !t.history {
-		for _, n := range []string{"after", "after_or_equal", "before", "latest_n"} {
+		for _, n := range []string{"after", "after_or_equal", "before", "before_or_equal", "latest_n"} {
 			if seen[n] {
 				return t, fmt.Errorf("The table argument %s requires with_history => TRUE", n)
 			}
@@ -854,15 +903,58 @@ func tableColumns(families map[string]*familyInfo, t temporal) ([]column, map[st
 		if t.history {
 			ft = historyType
 		}
-		if families[id].typed {
-			refused[id] = "reading the aggregate column family " + id
+		if f := families[id]; f.typed {
+			// An aggregate family's values are typed (#1704): "When you
+			// query the data in aggregate cells using SQL, SQL automatically
+			// incorporates type information"
+			// (https://cloud.google.com/bigtable/docs/data-types).
+			if f.value == nil {
+				refused[id] = "reading the column family " + id + " of value type " + f.why
+			} else {
+				ft = mapType(bytesType, f.value)
+				if t.history {
+					ft = mapType(bytesType, arrayType(structType([]string{"timestamp", "value"}, []*btpb.Type{timestampType, f.value})))
+				}
+			}
 		}
 		cols = append(cols, column{id, ft})
 	}
 	return cols, refused
 }
 
-type familyInfo struct{ typed bool }
+// familyInfo is what the SQL reads of a column family: whether it has a
+// value type, and if so the SQL type of its values (nil, with why, when the
+// emulator's SQL cannot read them).
+type familyInfo struct {
+	typed bool
+	value *btpb.Type
+	why   string
+}
+
+// familyValue is the SQL type of a family's value type: an aggregate of
+// INT64 inputs (Sum, Min, Max) is INT64, whose cells hold the big-endian
+// value; an HLL++ unique count's state is BYTES, read as stored.
+func familyValue(vt *btapb.Type) (*btpb.Type, string) {
+	agg := vt.GetAggregateType()
+	if agg == nil {
+		return nil, fmt.Sprintf("%T", vt.GetKind())
+	}
+	if agg.GetHllppUniqueCount() != nil {
+		return bytesType, ""
+	}
+	if agg.GetInputType().GetInt64Type() != nil {
+		return int64Type, ""
+	}
+	return nil, "an aggregate of " + fmt.Sprintf("%T", agg.GetInputType().GetKind())
+}
+
+// cellValue is a cell's value as a column of type t holds it.
+func cellValue(b []byte, t *btpb.Type) any {
+	if isKind(t, "INT64") && len(b) == 8 {
+		return int64(binary.BigEndian.Uint64(b))
+	}
+	return b
+}
 
 // tableRows is the table's rows as the columns tableColumns names.
 func tableRows(rows []row, cols []column, t temporal) [][]any {
@@ -883,7 +975,8 @@ func tableRows(rows []row, cols []column, t temporal) [][]any {
 		for _, c := range r.cells {
 			ts := time.UnixMicro(c.ts).UTC()
 			if t.asOf != nil && ts.After(*t.asOf) || t.after != nil && !ts.After(*t.after) ||
-				t.afterEq != nil && ts.Before(*t.afterEq) || t.before != nil && !ts.Before(*t.before) {
+				t.afterEq != nil && ts.Before(*t.afterEq) || t.before != nil && !ts.Before(*t.before) ||
+				t.beforeEq != nil && ts.After(*t.beforeEq) {
 				continue
 			}
 			qs := byFam[c.family]
@@ -901,13 +994,17 @@ func tableRows(rows []row, cols []column, t temporal) [][]any {
 		}
 		for i := 1; i < len(cols); i++ {
 			m := &mapValue{}
+			vt := cols[i].t.GetMapType().GetValueType()
+			if t.history {
+				vt = vt.GetArrayType().GetElementType().GetStructType().GetFields()[1].GetType()
+			}
 			qs := byFam[cols[i].name]
 			sort.Slice(qs, func(a, b int) bool { return string(qs[a].q) < string(qs[b].q) })
 			for _, q := range qs {
 				sort.SliceStable(q.cells, func(a, b int) bool { return q.cells[a].ts > q.cells[b].ts })
 				m.keys = append(m.keys, q.q)
 				if !t.history {
-					m.vals = append(m.vals, q.cells[0].value)
+					m.vals = append(m.vals, cellValue(q.cells[0].value, vt))
 					continue
 				}
 				cs := q.cells
@@ -916,7 +1013,7 @@ func tableRows(rows []row, cols []column, t temporal) [][]any {
 				}
 				hist := make([]any, len(cs))
 				for j, c := range cs {
-					hist[j] = []any{time.UnixMicro(c.ts).UTC(), c.value}
+					hist[j] = []any{time.UnixMicro(c.ts).UTC(), cellValue(c.value, vt)}
 				}
 				m.vals = append(m.vals, hist)
 			}

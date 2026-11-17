@@ -17,7 +17,8 @@ import (
 //
 // Statements the reference does not have (DML, DDL, joins, subqueries, set
 // operations) are refused INVALID_ARGUMENT, and documented features the
-// emulator's SQL lacks (UNPACK, window functions) UNIMPLEMENTED.
+// emulator's SQL lacks UNIMPLEMENTED; UNPACK is unpack.go's, window
+// function calls and the WINDOW clause sqlwindow.go's.
 
 type token struct {
 	kind string // "ident", "qident", "string", "bytes", "param", "int", "float", "op"
@@ -210,6 +211,11 @@ type query struct {
 	groupBy  []expr
 	orderBy  bool
 	limit    expr
+	// unpack is the input of FROM UNPACK(...): its query, whose rows are
+	// expanded one per timestamp (unpack.go).
+	unpack *query
+	// windows are the WINDOW clause's named windows, by lower-case name.
+	windows map[string]*windowSpec
 }
 
 type parser struct {
@@ -276,7 +282,8 @@ var reserved = map[string]bool{
 	"WHEN": true, "THEN": true, "ELSE": true, "END": true, "BY": true, "HAVING": true, "JOIN": true, "UNION": true,
 	"ON": true, "CROSS": true, "INNER": true, "LEFT": true, "RIGHT": true, "FULL": true, "WINDOW": true,
 	"WITH": true, "OFFSET": true, "ASC": true, "DESC": true, "DISTINCT": true, "INTERVAL": true, "EXCEPT": true,
-	"INTERSECT": true, "QUALIFY": true, "UNNEST": true, "OVER": true,
+	"INTERSECT": true, "QUALIFY": true, "UNNEST": true, "OVER": true, "PARTITION": true, "ROWS": true, "RANGE": true,
+	"PRECEDING": true, "FOLLOWING": true, "UNBOUNDED": true, "CURRENT": true,
 }
 
 // unsupportedErr is an error the front answers UNIMPLEMENTED: a part of
@@ -292,6 +299,12 @@ func parseQuery(src string) (*query, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseTokens(toks)
+}
+
+// parseTokens parses one SELECT statement, the whole of toks.
+func parseTokens(toks []token) (*query, error) {
+	var err error
 	p := &parser{toks: toks}
 	for _, k := range []string{"INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "MERGE"} {
 		if p.isKeyword(k) {
@@ -353,9 +366,6 @@ func parseQuery(src string) (*query, error) {
 			}
 			return nil, fmt.Errorf("Syntax error: expected a table name after FROM")
 		}
-		if p.isKeyword("UNPACK") {
-			return nil, unsupportedErr{"UNPACK"}
-		}
 		if p.isKeyword("UNNEST") {
 			return nil, unsupportedErr{"UNNEST"}
 		}
@@ -364,7 +374,12 @@ func parseQuery(src string) (*query, error) {
 			return nil, fmt.Errorf("Syntax error: expected a table name after FROM")
 		}
 		q.from = t.text
-		if p.op("(") {
+		if t.kind == "ident" && strings.EqualFold(t.text, "UNPACK") && p.peek().text == "(" {
+			if q.unpack, err = p.unpackInput(); err != nil {
+				return nil, err
+			}
+			q.from = "UNPACK"
+		} else if p.op("(") {
 			for !p.op(")") {
 				n := p.next()
 				if n.kind != "ident" {
@@ -423,8 +438,13 @@ func parseQuery(src string) (*query, error) {
 	if p.isKeyword("HAVING") {
 		return nil, fmt.Errorf("Syntax error: HAVING is not part of GoogleSQL for Bigtable")
 	}
-	if p.isKeyword("WINDOW") || p.isKeyword("QUALIFY") {
-		return nil, unsupportedErr{strings.ToUpper(p.peek().text)}
+	if p.keyword("WINDOW") {
+		if err := p.windowClause(q); err != nil {
+			return nil, err
+		}
+	}
+	if p.isKeyword("QUALIFY") {
+		return nil, fmt.Errorf("Syntax error: QUALIFY is not part of GoogleSQL for Bigtable")
 	}
 	if p.keyword("ORDER") {
 		if !p.keyword("BY") {
@@ -827,6 +847,22 @@ func (p *parser) primary() (expr, error) {
 			if err != nil {
 				return nil, err
 			}
+			if p.op(",") {
+				// (expr1, expr2 [, ...]): a STRUCT in tuple syntax.
+				st := &structLit{elems: []expr{e}, names: []string{""}}
+				for {
+					x, err := p.expr()
+					if err != nil {
+						return nil, err
+					}
+					st.elems = append(st.elems, x)
+					st.names = append(st.names, "")
+					if !p.op(",") {
+						break
+					}
+				}
+				return st, p.expect(")")
+			}
 			return e, p.expect(")")
 		case "[":
 			return p.arrayLiteral()
@@ -869,7 +905,7 @@ func (p *parser) primary() (expr, error) {
 			return nil, fmt.Errorf("Syntax error: subqueries are not supported by GoogleSQL for Bigtable")
 		}
 	case "STRUCT":
-		return nil, unsupportedErr{"STRUCT constructors"}
+		return p.structCtor()
 	case "INTERVAL":
 		n, err := p.additive()
 		if err != nil {
@@ -949,7 +985,15 @@ func (p *parser) primary() (expr, error) {
 		if !p.op(")") {
 			for {
 				// date parts are bare identifiers in the timestamp functions.
-				if a := p.peek(); a.kind == "ident" && datePart[strings.ToUpper(a.text)] && (p.peekAt(1).text == ")" || p.peekAt(1).text == ",") && (strings.HasPrefix(up, "TIMESTAMP_") || up == "DATE_TRUNC") {
+				partFn := strings.HasPrefix(up, "TIMESTAMP_") || up == "DATE_TRUNC" || up == "DATE_DIFF" || up == "LAST_DAY"
+				if a := p.peek(); partFn && a.kind == "ident" && strings.EqualFold(a.text, "WEEK") && p.peekAt(1).text == "(" && p.peekAt(2).kind == "ident" && p.peekAt(3).text == ")" {
+					// WEEK(<WEEKDAY>), the date functions' weeks beginning on WEEKDAY.
+					if _, ok := weekdays[strings.ToUpper(p.peekAt(2).text)]; !ok {
+						return nil, fmt.Errorf("Syntax error: WEEK takes a weekday, SUNDAY to SATURDAY, not %s", p.peekAt(2).text)
+					}
+					c.args = append(c.args, &literal{v: "WEEK(" + strings.ToUpper(p.peekAt(2).text) + ")", t: datePartType})
+					p.pos += 4
+				} else if a := p.peek(); partFn && a.kind == "ident" && datePart[strings.ToUpper(a.text)] && (p.peekAt(1).text == ")" || p.peekAt(1).text == ",") {
 					p.pos++
 					c.args = append(c.args, &literal{v: strings.ToUpper(a.text), t: datePartType})
 				} else {
@@ -980,15 +1024,11 @@ func (p *parser) primary() (expr, error) {
 		}
 		return c.over(p)
 	}
-	return &colRef{name: t.text}, nil
-}
-
-// over refuses window functions: an OVER clause after a call.
-func (c *call) over(p *parser) (expr, error) {
-	if p.isKeyword("OVER") {
-		return nil, unsupportedErr{"window function calls (OVER)"}
+	if up == "CURRENT_DATE" || up == "CURRENT_TIMESTAMP" {
+		// "Parentheses are optional when called with no arguments."
+		return &call{name: up}, nil
 	}
-	return c, nil
+	return &colRef{name: t.text}, nil
 }
 
 func (p *parser) arrayLiteral() (expr, error) {

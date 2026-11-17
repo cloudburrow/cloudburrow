@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
+	"cloud.google.com/go/civil"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -74,6 +76,10 @@ func (p bigtableProvider) bigtableSQL(ctx context.Context, project, sql string) 
 			text := "NULL"
 			if err := r.GetByIndex(i, &v); err == nil {
 				text = sqlText(v)
+			} else {
+				// The official client cannot read some values (a STRUCT
+				// with an anonymous field): say so rather than show NULL.
+				text = "unreadable by the client: " + err.Error()
 			}
 			if i == 0 {
 				res.Name = text
@@ -92,7 +98,10 @@ func (p bigtableProvider) bigtableSQL(ctx context.Context, project, sql string) 
 	return out, nil
 }
 
-// sqlText is how a SQL value reads on the console.
+// sqlText is how a SQL value reads on the console: bytes as the cell
+// view shows them, a TIMESTAMP in RFC 3339, a DATE as YYYY-MM-DD, an ARRAY
+// as [a, b], a STRUCT as (a, b) as FORMAT's %t writes it, and a MAP as
+// key: value pairs in key order (#1704).
 func sqlText(v any) string {
 	switch x := v.(type) {
 	case nil:
@@ -103,20 +112,53 @@ func sqlText(v any) string {
 		return x
 	case int64:
 		return strconv.FormatInt(x, 10)
-	case map[string][]byte:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(x), 'g', -1, 32)
+	case bool:
+		return strconv.FormatBool(x)
+	case time.Time:
+		return x.UTC().Format(time.RFC3339Nano)
+	case civil.Date:
+		return x.String()
+	case bigtable.Struct:
+		parts := make([]string, 0, x.Len())
+		for i := 0; i < x.Len(); i++ {
+			var f any
+			if err := x.GetByIndex(i, &f); err != nil {
+				parts = append(parts, "?")
+				continue
+			}
+			parts = append(parts, sqlText(f))
 		}
-		sort.Strings(keys)
+		return "(" + strings.Join(parts, ", ") + ")"
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return "NULL"
+		}
+		return sqlText(rv.Elem().Interface())
+	case reflect.Slice:
+		parts := make([]string, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			parts = append(parts, sqlText(rv.Index(i).Interface()))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case reflect.Map:
+		// The client keys a BYTES-keyed map by the keys' base64.
+		keys := rv.MapKeys()
 		parts := make([]string, 0, len(keys))
 		for _, k := range keys {
-			name := k
-			if b, err := base64.StdEncoding.DecodeString(k); err == nil {
+			name := fmt.Sprint(k.Interface())
+			if b, err := base64.StdEncoding.DecodeString(name); err == nil {
 				name = string(b)
 			}
-			parts = append(parts, name+": "+summarise(bigtableCellValue(x[k])))
+			parts = append(parts, name+": "+summarise(sqlText(rv.MapIndex(k).Interface())))
 		}
+		sort.Strings(parts)
 		return strings.Join(parts, ", ")
 	}
 	return fmt.Sprint(v)

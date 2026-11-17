@@ -218,8 +218,8 @@ func TestBigtableSQLLanguage(t *testing.T) {
 	for sql, want := range map[string]codes.Code{
 		"SELECT _key FROM orders ORDER BY o":                    codes.InvalidArgument,
 		"SELECT _key FROM orders ORDER BY _key DESC":            codes.InvalidArgument,
-		"SELECT * FROM UNPACK((SELECT * FROM orders))":          codes.Unimplemented,
-		"SELECT SOUNDEX('x')":                                   codes.Unimplemented,
+		"SELECT * FROM UNPACK(orders)":                          codes.InvalidArgument,
+		"SELECT ST_AREA(_key) FROM orders":                      codes.Unimplemented,
 		"SELECT NOPE(1)":                                        codes.InvalidArgument,
 		"SELECT _key, COUNT(*) FROM orders":                     codes.InvalidArgument,
 		"SELECT _key FROM orders(after => CURRENT_TIMESTAMP())": codes.InvalidArgument,

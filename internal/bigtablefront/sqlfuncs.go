@@ -43,7 +43,9 @@ JSON_EXTRACT JSON_EXTRACT_SCALAR JSON_QUERY JSON_QUERY_ARRAY JSON_VALUE TO_JSON_
 ARRAY_FILTER ARRAY_FIRST ARRAY_INCLUDES ARRAY_INCLUDES_ALL ARRAY_INCLUDES_ANY ARRAY_IS_DISTINCT ARRAY_LAST
 ARRAY_LAST_N ARRAY_LENGTH ARRAY_OFFSET ARRAY_OFFSETS ARRAY_REVERSE ARRAY_SLICE ARRAY_TO_STRING ARRAY_TRANSFORM
 GENERATE_ARRAY GENERATE_DATE_ARRAY GENERATE_TIMESTAMP_ARRAY IF IFNULL NULLIF COALESCE CURRENT_DATE DATE
-UNIX_DATE DATE_ADD DATE_SUB DATE_DIFF DATE_TRUNC FORMAT_DATE PARSE_DATE DATE_FROM_UNIX_DATE`)
+UNIX_DATE DATE_ADD DATE_SUB DATE_DIFF DATE_TRUNC FORMAT_DATE PARSE_DATE DATE_FROM_UNIX_DATE LAST_DAY
+IFERROR ISERROR NULLIFERROR PERCENTILE_CONT PERCENTILE_DISC CUME_DIST DENSE_RANK FIRST_VALUE LAG LAST_VALUE LEAD
+NTH_VALUE NTILE PERCENT_RANK RANK ROW_NUMBER`)
 
 var aggregates = map[string]bool{"COUNT": true, "COUNTIF": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
 	"ANY_VALUE": true, "LOGICAL_AND": true, "LOGICAL_OR": true, "ARRAY_AGG": true, "STRING_AGG": true,
@@ -61,6 +63,8 @@ type call struct {
 	agg         int // the aggregate's slot, for an aggregate
 	isAgg       bool
 	re          *regexp.Regexp // a constant regular expression argument
+	win         *windowSpec    // the OVER clause of a window function call
+	winSlot     int            // its slot in env.wins
 }
 
 // fnDef is a scalar function: sig types a call, run evaluates it. Unless
@@ -69,6 +73,9 @@ type fnDef struct {
 	sig   func(c *call, ts []*btpb.Type) (*btpb.Type, error)
 	run   func(c *call, vs []any, e *env) (any, error)
 	nulls bool
+	// lazy, when set, evaluates the call itself, its arguments unevaluated
+	// (IFERROR and the other debugging functions catch their errors).
+	lazy func(c *call, e *env) (any, error)
 }
 
 func (c *call) String() string {
@@ -80,6 +87,9 @@ func (c *call) String() string {
 }
 
 func (c *call) check(s *scope) (*btpb.Type, error) {
+	if c.win != nil {
+		return c.checkWindow(s)
+	}
 	if aggregates[c.name] {
 		return c.checkAgg(s)
 	}
@@ -92,6 +102,10 @@ func (c *call) check(s *scope) (*btpb.Type, error) {
 			if d == c.name {
 				return nil, unsupportedErr{"the function " + c.name}
 			}
+		}
+		if strings.HasPrefix(c.name, "ST_") {
+			// The geography functions (functions-all lists ST_ACCUM to ST_WITHIN).
+			return nil, unsupportedErr{"the geography function " + c.name}
 		}
 		return nil, fmt.Errorf("Function not found: %s", c.name)
 	}
@@ -123,8 +137,14 @@ func (c *call) check(s *scope) (*btpb.Type, error) {
 }
 
 func (c *call) eval(e *env) (any, error) {
+	if c.win != nil {
+		return e.wins[c.winSlot], nil
+	}
 	if c.isAgg {
 		return e.aggs[c.agg], nil
+	}
+	if c.fn.lazy != nil {
+		return c.fn.lazy(c, e)
 	}
 	vs := make([]any, len(c.args))
 	for i, a := range c.args {
@@ -1174,6 +1194,10 @@ func addInterval(t time.Time, iv intervalValue, sign int64) (any, error) {
 func truncTimestamp(t time.Time, part string) (any, error) {
 	y, m, d := t.Date()
 	loc := t.Location()
+	if wd, ok := weekStart(part); ok {
+		// WEEK (Sundays), WEEK(<WEEKDAY>) and ISOWEEK (Mondays).
+		return time.Date(y, m, d-(int(t.Weekday())-int(wd)+7)%7, 0, 0, 0, 0, loc).UTC(), nil
+	}
 	switch part {
 	case "MICROSECOND":
 		return t.Truncate(time.Microsecond).UTC(), nil
@@ -1185,8 +1209,10 @@ func truncTimestamp(t time.Time, part string) (any, error) {
 		return shifted.Add(-time.Duration(off) * time.Second).UTC(), nil
 	case "DAY":
 		return time.Date(y, m, d, 0, 0, 0, 0, loc).UTC(), nil
-	case "WEEK":
-		return time.Date(y, m, d-int(t.Weekday()), 0, 0, 0, 0, loc).UTC(), nil
+	case "ISOYEAR":
+		iy, _ := t.ISOWeek()
+		s := isoYearStart(iy)
+		return time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, loc).UTC(), nil
 	case "MONTH":
 		return time.Date(y, m, 1, 0, 0, 0, 0, loc).UTC(), nil
 	case "QUARTER":
