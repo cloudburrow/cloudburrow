@@ -31,11 +31,11 @@ tracks it; a closed issue is named only where it says what was built.
 | Resource Manager | 1 | 0 | 0 | 1 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 6 | 2 | 0 | 3 | 1 |
+| Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **50** | **3** | **17** | **24** | **6** |
+| **Total** | **50** | **2** | **18** | **24** | **6** |
 
 ## Cloud Storage
 
@@ -229,7 +229,7 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 
 ## Spanner, Bigtable, Firestore, Datastore
 
-Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405); Spanner `AddSplitPoints` and `FetchCacheUpdate`, Bigtable change streams (with garbage collection and `DropRowRange` records) and the session data plane, and Firestore pipelines' stages and functions (#1523, #1613); Bigtable SQL's `UNPACK`, window functions, `STRUCT` constructors and the documented functions the ticket named (#1704).
+Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405); Spanner `AddSplitPoints` and `FetchCacheUpdate`, Bigtable change streams (with garbage collection and `DropRowRange` records) and the session data plane, and Firestore pipelines' stages and functions (#1523, #1613); Bigtable SQL's `UNPACK`, window functions, `STRUCT` constructors and the documented functions the ticket named (#1704); Bigtable SQL's geography `ST_` and `S2_` functions (#1720).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -238,7 +238,7 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 | Firestore: `ExecutePipeline` runs on Enterprise edition databases since #1500, its stages and functions since #1523 and #1613 ([compatibility.md](compatibility.md)); left: full-text search (`document_matches`, `score`) is `UNIMPLEMENTED`, Google's reference defining neither its tokenization nor its score, and the explain stats' text is CloudBurrow's own (#1577) | not documented by Google | M |
 | Spanner: 1 RPC refused, naming why: `InternalUpdateGraphOperation`, which Google documents as "an internal API called by Spanner Graph jobs. You should never need to call this API directly", every field "Internal field, do not use directly", so there is no behaviour to serve ([spanner.md](coverage/spanner.md)). `AddSplitPoints` is a stored no-op of the call front since #1523 (the emulator never splits), and `FetchCacheUpdate` answers an empty location-aware routing cache since #1523 (one server, nothing to route). Backups and restores, backup schedules, instance configurations (Google's and custom), `MoveInstance`, partition updates, database roles, the operation listings and IAM on backups and roles are served by the call front since #1498 (#1577) | not documented by Google | S |
 | Bigtable: `OpenMaterializedView`'s sessions open but their `ReadRow` is refused `UNIMPLEMENTED`, as `ReadRows` of a materialized view is: Google documents reading a continuous materialized view with `ReadRows`, but neither the column family its aggregate columns are stored in nor how its row key is encoded without a `_key` column (docs re-read 2026-11-17: <https://docs.cloud.google.com/bigtable/docs/continuous-materialized-view-queries>), so its rows are read with SQL and the client falls back to the classic path ([bigtable.md](coverage/bigtable.md)). Change streams (since #1523) have one partition, which the API allows, and a collected cell's `GARBAGE_COLLECTION` record names the cell's millisecond as its time range, UNVERIFIED (docs re-read 2026-11-17: <https://docs.cloud.google.com/bigtable/docs/change-streams-overview> names none) (#1577) | not documented by Google | M |
-| Bigtable: SQL runs GoogleSQL for Bigtable's `SELECT` with views (#1499, #1511), and since #1704 `UNPACK` and `_timestamp`, window functions, `STRUCT` constructors, the statistical and approximate aggregates, `FORMAT`, `SOUNDEX`, the vector, date, array (with the lambda functions `ARRAY_FILTER`, `ARRAY_TRANSFORM`, `ARRAY_OFFSET`, `ARRAY_OFFSETS`) and JSON functions, `NORMALIZE` and `NORMALIZE_AND_CASEFOLD` and an aggregate family's typed values; left, refused `UNIMPLEMENTED` naming them ([compatibility.md](compatibility.md)): the geography `ST_` and `S2_` functions, which need S2 spherical geometry (`GEOGRAPHY` values, WKT/GeoJSON/WKB, geodesic measures): no module CloudBurrow has computes them, and adding one (such as github.com/golang/geo) needs approval. `GROUPING`, `MIN_BY` and `MAX_BY` are refused saying GoogleSQL for Bigtable does not list them (#1704) | not built yet | M |
+| Bigtable: SQL runs GoogleSQL for Bigtable's `SELECT` with views (#1499, #1511), and since #1704 `UNPACK` and `_timestamp`, window functions, `STRUCT` constructors, the statistical and approximate aggregates, `FORMAT`, `SOUNDEX`, the vector, date, array (with the lambda functions `ARRAY_FILTER`, `ARRAY_TRANSFORM`, `ARRAY_OFFSET`, `ARRAY_OFFSETS`) and JSON functions, `NORMALIZE` and `NORMALIZE_AND_CASEFOLD` and an aggregate family's typed values, and since #1720 the geography `ST_` and `S2_` functions, on S2 (github.com/golang/geo); left, refused `UNIMPLEMENTED` naming the reason ([compatibility.md](compatibility.md)): `ST_UNION`, `ST_UNION_AGG`, `ST_INTERSECTION`, `ST_DIFFERENCE`, `ST_BUFFER`, `ST_BUFFERWITHTOLERANCE` and `ST_SIMPLIFY`, which need S2's `S2BooleanOperation`, `S2BufferOperation` and `S2Builder` simplification, which golang/geo does not port, and `ST_REGIONSTATS`, which reads Earth Engine rasters (#1728). `GROUPING`, `MIN_BY` and `MAX_BY` are refused saying GoogleSQL for Bigtable does not list them (#1704) | no emulator support | L |
 
 ## Cloud SQL, Memorystore
 
