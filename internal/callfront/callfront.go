@@ -281,7 +281,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 		}
 		fa.Start(ctx)
-		icpts = append(icpts, fa)
+		// The emulator runs as an Enterprise edition one (#1703); the
+		// guard keeps a Standard database's writes to Standard's values.
+		icpts = append(icpts, fa, fa.EditionGuard())
 		if *mongoListen != "" {
 			ml, err := net.Listen("tcp", *mongoListen)
 			if err != nil {
