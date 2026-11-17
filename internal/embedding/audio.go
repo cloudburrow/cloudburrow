@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/cmplx"
@@ -19,11 +20,11 @@ import (
 // clip is zeroed and masked out. The encoder keeps every fourth frame: one
 // soft token per 40 ms, 25 per second.
 //
-// Only WAV is decoded: Go's standard library has no MP3 decoder, the other
-// format Google documents for gemini-embedding-2.
+// WAV and MP3 (mp3.go) are decoded, the formats Google documents for
+// gemini-embedding-2.
 
 // AudioMIMETypes are the audio types decoded here.
-var AudioMIMETypes = []string{"audio/wav"}
+var AudioMIMETypes = []string{"audio/wav", "audio/mpeg"}
 
 // wavMIMETypes are the names WAV goes by.
 var wavMIMETypes = map[string]bool{"audio/wav": true, "audio/x-wav": true, "audio/wave": true, "audio/vnd.wave": true}
@@ -66,23 +67,41 @@ const (
 // AudioSampleRate.
 func DecodeAudio(mimeType string, data []byte) ([]float32, error) {
 	mt := baseMIME(mimeType)
-	if !wavMIMETypes[mt] {
-		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s (Go's standard library has no decoder for it)",
+	if !wavMIMETypes[mt] && !mp3MIMETypes[mt] {
+		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s",
 			mimeType, strings.Join(AudioMIMETypes, ", "))
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("the audio data is empty")
 	}
-	w, err := decodeWAV(data)
-	if err != nil {
-		return nil, fmt.Errorf("the data is not a valid WAV file: %v", err)
+	var (
+		mono []float32
+		rate int
+	)
+	if mp3MIMETypes[mt] {
+		var err error
+		if mono, rate, err = decodeMP3(data); err != nil {
+			var long *tooLongError
+			if errors.As(err, &long) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("the data is not a valid MP3 file: %v", err)
+		}
+	} else {
+		w, err := decodeWAV(data)
+		if err != nil {
+			return nil, fmt.Errorf("the data is not a valid WAV file: %v", err)
+		}
+		if secs := float64(len(w.samples)) / float64(w.channels) / float64(w.rate); secs > MaxAudioSeconds {
+			return nil, &tooLongError{secs}
+		}
+		mono, rate = downmix(w.samples, w.channels), w.rate
 	}
-	if secs := float64(len(w.samples)) / float64(w.channels) / float64(w.rate); secs > MaxAudioSeconds {
-		return nil, fmt.Errorf("the clip is %.1f seconds; at most %d seconds are embedded", secs, MaxAudioSeconds)
+	if secs := float64(len(mono)) / float64(rate); secs > MaxAudioSeconds {
+		return nil, &tooLongError{secs}
 	}
-	mono := downmix(w.samples, w.channels)
-	if w.rate != AudioSampleRate {
-		mono = resample(mono, w.rate, AudioSampleRate)
+	if rate != AudioSampleRate {
+		mono = resample(mono, rate, AudioSampleRate)
 	}
 	if len(mono) == 0 {
 		return nil, fmt.Errorf("the clip has no samples")

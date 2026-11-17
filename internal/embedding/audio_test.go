@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"image"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -195,5 +197,88 @@ func TestMultimodalPromptWithAudio(t *testing.T) {
 	}
 	if got, n, err := MultimodalPrompt(Input{Parts: []Part{{Audio: clip}, {Image: image.NewRGBA(image.Rect(0, 0, 1, 1))}, {Audio: clip}}}); err != nil || got != "<|audio|> <|image|> <|audio|>" || n != 3 {
 		t.Errorf("two clips and an image: %q %d %v", got, n, err)
+	}
+}
+
+// TestDecodeMP3 decodes MP3s of a one-second 440 Hz tone at half scale
+// that ffmpeg 8's libmp3lame made (testdata/tone-*.mp3, with its Info
+// frame and LAME tag): stereo at 44.1 kHz (MPEG-1,
+// downmixed as a stereo WAV is) and mono at 16 kHz (MPEG-2, read as one
+// channel). Each trims the Info frame and LAME's delay and padding as
+// ffmpeg does, to the source's 16,000 samples at 16 kHz, in phase with the
+// tone.
+func TestDecodeMP3(t *testing.T) {
+	for file, amp := range map[string]float64{"tone-stereo-44k.mp3": 0.5 * math.Sqrt2, "tone-mono-16k.mp3": 0.5} {
+		b, err := os.ReadFile(filepath.Join("testdata", file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, mt := range []string{"audio/mpeg", "audio/mp3", "AUDIO/MPEG; codecs=mp3"} {
+			got, err := DecodeAudio(mt, b)
+			if err != nil {
+				t.Fatalf("%s as %s: %v", file, mt, err)
+			}
+			if len(got) != AudioSampleRate {
+				t.Fatalf("%s: %d samples, want %d", file, len(got), AudioSampleRate)
+			}
+			want := tone(len(got), AudioSampleRate, 440, amp)
+			var xy, xx, yy float64
+			for i := 1600; i < len(got)-1600; i++ {
+				xy += float64(got[i]) * want[i]
+				xx += float64(got[i]) * float64(got[i])
+				yy += want[i] * want[i]
+			}
+			if c := xy / math.Sqrt(xx*yy); c < 0.999 {
+				t.Errorf("%s: correlation with the tone %.5f", file, c)
+			}
+			// ffmpeg 8 decodes these files to 0.950 of the source's level too
+			// (the encoder's), the mono one within one 16-bit step of this.
+			if r := math.Sqrt(xx / yy); math.Abs(r-0.95) > 0.01 {
+				t.Errorf("%s: level %.3f of the tone's, want 0.950", file, r)
+			}
+		}
+	}
+}
+
+// TestDecodeMP3Refusals: what is not an MP3 the decoder reads is refused
+// naming why, never a panic.
+func TestDecodeMP3Refusals(t *testing.T) {
+	read := func(f string) []byte {
+		b, err := os.ReadFile(filepath.Join("testdata", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	stereo := read("tone-stereo-44k.mp3")
+	// 181 copies of a 1.08-second MP3 without an Info frame (nothing
+	// trimmed) are 195 seconds; 166 are 179.3.
+	long := bytes.Repeat(read("tone-notag-16k.mp3"), 181)
+	cut := append([]byte(nil), stereo[:len(stereo)/2]...)
+	for i := 600; i < len(cut); i += 7 {
+		cut[i] ^= 0x5a // corrupt the frames after the first few
+	}
+	for what, c := range map[string]struct {
+		data []byte
+		want string
+	}{
+		"empty":    {nil, "the audio data is empty"},
+		"text":     {[]byte("this is not audio at all"), "not a valid MP3 file: no MPEG audio frame"},
+		"a WAV":    {wavFile(t, tone(1600, 16000, 440, 0.5), 1, 16000, 1, 16), "not a valid MP3 file"},
+		"MPEG-2.5": {read("tone-mpeg25-8k.mp3"), "MPEG-2.5"},
+		"layer II": {[]byte{0xff, 0xfd, 0x90, 0x00, 0, 0, 0, 0}, "layer II"},
+		"too long": {long, "at most 180 seconds are embedded"},
+		"id3 only": {append([]byte("ID3\x04\x00\x00\x00\x00\x00\x0a"), make([]byte, 10)...), "no MPEG audio frame"},
+	} {
+		_, err := DecodeAudio("audio/mpeg", c.data)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want an error naming %q", what, err, c.want)
+		}
+	}
+	// A corrupt stream decodes to something or fails; it never panics.
+	_, _ = DecodeAudio("audio/mpeg", cut)
+	// Up to 180 seconds are embedded.
+	if got, err := DecodeAudio("audio/mpeg", bytes.Repeat(read("tone-notag-16k.mp3"), 166)); err != nil || len(got) < 179*AudioSampleRate {
+		t.Errorf("166 copies: %d samples, %v", len(got), err)
 	}
 }

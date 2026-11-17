@@ -1497,13 +1497,13 @@ var parityRows = []parityRow{
 			"and the token count and truncated flag as the API returns them (#1396); Images sends each chosen PNG, JPEG, " +
 			"WebP or BMP (#1651) " +
 			"as one inline_data part to embeddinggemma-2-onnx-community, once it is loaded on Local models, so its " +
-			"vector is compared with the texts' (#1454); Audio sends each chosen WAV clip the same way, and Cloud Storage " +
-			"objects sends each gs:// URI as one file_data part, read from this instance's Cloud Storage (#1651)",
+			"vector is compared with the texts' (#1454); Audio sends each chosen WAV or MP3 (#1721) clip the same way, and " +
+			"Cloud Storage objects sends each gs:// URI as one file_data part, read from this instance's Cloud Storage (#1651)",
 		Tests: []string{"TestEmbeddingsScreenSendsBothMethods", "TestEmbeddingsScreenSendsTheNamedModel", "TestEmbedContentThroughThePredictionClient",
 			"TestStudioManagesLocalModelsAndTestsEmbeddings", "TestEmbeddingsPageEmbedsAnImage",
 			"TestEmbeddingsPageEmbedsAudioAndCloudStorage",
 			"TestEmbedContentEmbedsImagesThroughThePredictionClient", "TestEmbedContentEmbedsAudioThroughThePredictionClient",
-			"TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient",
+			"TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient", "TestEmbedContentEmbedsMP3ThroughThePredictionClient",
 			"TestGRPCEmbedContent", "TestEmbedContentREST", "TestEmbedContentImagesOnEmbeddingGemma2",
 			"TestEmbedContentAudioAndFileDataOnEmbeddingGemma2", "TestEmbedContentWebPAndBMPOnEmbeddingGemma2"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
