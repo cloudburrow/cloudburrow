@@ -332,7 +332,9 @@ func replicaSetup(spec sqladmin.Spec) string {
 	switch {
 	case spec.MasterInstanceName == "":
 		return ""
-	case ext != nil && !spec.ExternalSyncStarted:
+	case ext != nil && (!spec.ExternalSyncStarted || ext.ManualSetup):
+		// demoteMaster with skipReplicationSetup (#1614): set up by hand
+		// with the mysql.* stored procedures.
 		return ""
 	case ext != nil && !spec.MySQL():
 		return "export CLOUDSQL_SYNC_MODE=" + shellQuote(ext.SyncMode) + " CLOUDSQL_DATABASES=" + shellQuote(strings.Join(ext.Databases, " ")) +

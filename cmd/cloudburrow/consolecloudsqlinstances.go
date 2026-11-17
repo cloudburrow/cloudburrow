@@ -568,7 +568,10 @@ func demoteActions(in *sqladminapi.DatabaseInstance) []console.Action {
 		{Name: "username", Label: "Replication user", Type: "text", Help: "demoteMaster: the user on the external server; empty takes the source representation instance's."},
 		{Name: "password", Label: "Replication password", Type: "password"},
 		{Name: "skipGtidCheck", Label: "Skip the GTID consistency check", Type: "checkbox",
-			Help: "demoteMaster: demote even if this instance has transactions the external server has not."}},
+			Help: "demoteMaster: demote even if this instance has transactions the external server has not."},
+		{Name: "skipReplicationSetup", Label: "Skip replication setup", Type: "checkbox",
+			Help: "demoteMaster: install Cloud SQL's mysql.* stored procedures instead of setting up the replication; set it up with " +
+				"CALL mysql.setupExternalSourceAutoPosition(...) and CALL mysql.startReplication() (Run SQL, or any client). promoteReplica removes them."}},
 		Confirm: "This instance becomes a read replica of the external server and takes no more writes."}}
 }
 
@@ -972,7 +975,7 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			break
 		}
 		dc := &sqladminapi.DemoteMasterContext{MasterInstanceName: src, VerifyGtidConsistency: v["skipGtidCheck"] != "true",
-			ForceSendFields: []string{"VerifyGtidConsistency"}}
+			SkipReplicationSetup: v["skipReplicationSetup"] == "true", ForceSendFields: []string{"VerifyGtidConsistency"}}
 		if u := strings.TrimSpace(v["username"]); u != "" {
 			dc.ReplicaConfiguration = &sqladminapi.DemoteMasterConfiguration{MysqlReplicaConfiguration: &sqladminapi.DemoteMasterMySqlReplicaConfiguration{
 				Username: u, Password: v["password"]}}

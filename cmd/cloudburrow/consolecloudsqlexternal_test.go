@@ -243,6 +243,14 @@ func TestCloudSQLConsoleDemote(t *testing.T) {
 		!strings.Contains(b, `"verifyGtidConsistency":false`) || !strings.Contains(b, `"username":"repl"`) {
 		t.Errorf("demoteMaster body %s", b)
 	}
+	// Skip replication setup (#1614).
+	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demoteMaster",
+		"skipReplicationSetup": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/solo/demoteMaster"]; !strings.Contains(b, `"skipReplicationSetup":true`) {
+		t.Errorf("demoteMaster body with Skip replication setup %s", b)
+	}
 	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demote"}); err != nil {
 		t.Fatal(err)
 	}

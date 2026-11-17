@@ -554,10 +554,20 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
 - In the console, a MySQL replica's **Verify external sync settings** and **Start external sync**
   have a **Migration type**, `LOGICAL` or `PHYSICAL`.
 
-501, naming why: `demoteMaster` with `skipReplicationSetup` (the replication is then set up by hand with Cloud
-SQL's `mysql.*` stored procedures, `mysql.setupExternalSourceAutoPosition` and the rest, which a
-stock MySQL server has not), and `demote` of a PostgreSQL instance (the subscription's first copy
-of the source's tables collides with the rows the instance has).
+`demoteMaster` with `skipReplicationSetup` (#1614) demotes the instance with its data but sets up
+no replication: it installs Cloud SQL's stored procedures in the server's `mysql` schema instead,
+and the replication is set up with them as Cloud SQL's custom import guide does, after an import
+whose GTIDs are the instance's own (so the GTID consistency check is not made):
+`CALL mysql.resetMaster()`, `CALL mysql.skipTransactionWithGtid('<the source's executed GTIDs>')`,
+`CALL mysql.setupExternalSourceAutoPosition('host', 3306, 'user', 'password', 1, false, false)`
+(or `mysql.setupExternalSource` with a binary log file and position) and
+`CALL mysql.startReplication()`, which also makes the replica `super_read_only`;
+`mysql.stopReplication()` stops it. `promoteReplica` removes them. The bodies are CloudBurrow's
+(the guide gives the calls); `USE_SSL_CLIENT_AUTH` is refused and `mysql.skipReplicationError` is
+not installed. The console's Demote has **Skip replication setup**.
+
+501, naming why: `demote` of a PostgreSQL instance (the subscription's first copy of the source's
+tables collides with the rows the instance has).
 
 ### Database versions and major version upgrades (#1381)
 

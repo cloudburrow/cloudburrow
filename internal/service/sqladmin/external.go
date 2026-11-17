@@ -85,6 +85,10 @@ type ExternalSource struct {
 	// and replicates from the source by GTID auto-positioning, with no
 	// dump.
 	Demoted bool `json:"demoted,omitempty"`
+	// ManualSetup is demoteMaster's skipReplicationSetup (#1614): the
+	// replica's replication is set up with the mysql.* stored procedures
+	// demoteMaster installed, not by CloudBurrow.
+	ManualSetup bool `json:"manualSetup,omitempty"`
 	// Physical is a startExternalSync with migrationType PHYSICAL (#1570):
 	// the replica is given an XtraBackup backup of the source, from
 	// DumpFile's folder or taken by the sync, and PhysicalRestored is set

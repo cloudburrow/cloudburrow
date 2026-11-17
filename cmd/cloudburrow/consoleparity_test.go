@@ -519,7 +519,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestCloudSQLConsoleExternalPrimary", "TestCloudSQLExternalPrimaryThroughThePage"}},
 	{Resource: "Cloud SQL demotion to an external replica", Service: "sqladmin",
 		Methods:  []string{"sql.instances.demoteMaster", "sql.instances.demote"},
-		Provider: "cloudsql-instances", Offers: "Demote, confirmed, on a standalone MySQL instance's page: demoteMaster with the source representation instance, the replication user and the GTID consistency check, or demote, after which the replica's page offers Start external sync (#1524)",
+		Provider: "cloudsql-instances", Offers: "Demote, confirmed, on a standalone MySQL instance's page: demoteMaster with the source representation instance, the replication user, the GTID consistency check and Skip replication setup (which installs the mysql.* stored procedures, #1614), or demote, after which the replica's page offers Start external sync (#1524)",
 		Tests: []string{"TestCloudSQLConsoleDemote", "TestCloudSQLDemoteThroughThePage"}},
 	{Resource: "Cloud SQL DR replicas and switchover", Service: "sqladmin",
 		Methods:  []string{"sql.instances.switchover"},

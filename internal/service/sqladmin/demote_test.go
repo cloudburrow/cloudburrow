@@ -58,7 +58,7 @@ func TestDemote(t *testing.T) {
 		want string
 	}{
 		{"no masterInstanceName", master(&sqladmin.DemoteMasterContext{}), "400"},
-		{"skipReplicationSetup", master(&sqladmin.DemoteMasterContext{MasterInstanceName: "ext", SkipReplicationSetup: true}), "mysql.* stored procedures"},
+		{"skipReplicationSetup and an unreachable source", master(&sqladmin.DemoteMasterContext{MasterInstanceName: "ext", SkipReplicationSetup: true}), "CONNECTION_FAILURE"},
 		{"a master that is no source representation instance", master(&sqladmin.DemoteMasterContext{MasterInstanceName: "solo2"}), "400"},
 		{"an unreachable source", master(&sqladmin.DemoteMasterContext{MasterInstanceName: "ext"}), "CONNECTION_FAILURE"},
 		{"demoteMaster of PostgreSQL", func() error {

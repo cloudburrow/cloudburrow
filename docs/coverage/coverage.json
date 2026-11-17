@@ -10472,7 +10472,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
@@ -10493,7 +10494,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
@@ -10662,7 +10664,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
@@ -10704,14 +10707,15 @@
         "method": "sql.instances.demote",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote"
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote"
         ]
       },
       {
         "method": "sql.instances.demoteMaster",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote"
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote"
         ]
       },
       {
@@ -10746,7 +10750,8 @@
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
@@ -10805,7 +10810,8 @@
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
@@ -10911,7 +10917,8 @@
         "method": "sql.instances.promoteReplica",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
@@ -11024,7 +11031,8 @@
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
@@ -11103,7 +11111,7 @@
         "method": "sql.projects.instances.startExternalSync",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqldemote_test.go:25 TestCloudSQLDemote",
+          "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
