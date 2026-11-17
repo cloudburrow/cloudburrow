@@ -646,7 +646,7 @@
         "version": "v1.12.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723); an indirect requirement, no cgo and no dependencies."
+        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723), and that runs the vendored AVIF decoder (#1729, internal/avif), which made it a direct requirement; no cgo and no dependencies beyond golang.org/x/sys, already required at the same version."
       },
       "goH265": {
         "module": "github.com/gen2brain/h265",
@@ -674,14 +674,7 @@
           "internal/avif/lib/LICENSE.aom": "sha256:4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2"
         },
         "verification": "file-checksums",
-        "notes": "Vertex AI EmbedContent's AVIF images (#1729, internal/embedding/avif.go), the user's decision of 2026-11-17: NOT a go.mod dependency. Its WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, lib/avif.wasm.gz, and the Go glue that runs it on wazero) is vendored into internal/avif from the module zip of v0.6.0 (commit 1fd2a9a51895ca03a192dd49917840794c8a77a1), without its purego loader of a system libavif, so the CGO_ENABLED=0 Linux CLI stays statically linked (test/repo TestLinuxCLILinksNoPurego). Files, hashes and the deletions made: third_party/avif/PROVENANCE.md (checked by test/repo TestVendoredAVIFMatchesProvenance)."
-      },
-      "goWazero": {
-        "module": "github.com/tetratelabs/wazero",
-        "version": "v1.12.0",
-        "license": "Apache-2.0",
-        "verification": "go.sum",
-        "notes": "The pure Go WebAssembly runtime that runs the vendored AVIF decoder (#1729, internal/avif), approved with the media decoders 2026-11-17. No cgo; it compiles the module to native code on amd64 and arm64 and interprets it elsewhere. Its only dependency, golang.org/x/sys, is already required at the same version."
+        "notes": "Vertex AI EmbedContent's AVIF images (#1729, internal/embedding/avif.go), the user's decision of 2026-11-17: NOT a go.mod dependency. Its WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, lib/avif.wasm.gz, and the Go glue that runs it on wazero) is vendored into internal/avif from the module zip of v0.6.0 (commit 1fd2a9a51895ca03a192dd49917840794c8a77a1), without its purego loader of a system libavif, so the CGO_ENABLED=0 Linux CLI stays statically linked (test/repo TestLinuxBinariesNeverImportPurego). Files, hashes and the deletions made: third_party/avif/PROVENANCE.md (checked by test/repo TestVendoredAVIFMatchesProvenance)."
       },
       "goOrc": {
         "module": "github.com/scritchley/orc",

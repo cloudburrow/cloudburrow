@@ -731,12 +731,13 @@ texts are copied into `internal/avif`, unmodified but for deletions: the `if dyn
 called the `purego` loader (whose files, `avif_dynamic.go` and `purego_*.go`, are not copied), the
 exported `Dynamic()`, and `avif_wazero.go`'s `!wasm2go` build constraint.
 [third_party/avif/PROVENANCE.md](../third_party/avif/PROVENANCE.md) records every file's upstream
-and committed SHA-256, and `TestVendoredAVIFMatchesProvenance` checks them. The one new module is
-`github.com/tetratelabs/wazero` v1.12.0 (Apache-2.0, approved with the media decoders; its only
-dependency, `golang.org/x/sys`, was already required at the same version). `TestLinuxCLILinksNoPurego`
+and committed SHA-256, and `TestVendoredAVIFMatchesProvenance` checks them. No module is added:
+`github.com/tetratelabs/wazero` v1.12.0 (Apache-2.0), already required for go-pdfium (#1723, below),
+becomes a direct requirement. `TestLinuxBinariesNeverImportPurego` (#1722)
 asserts that `CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/cloudburrow` names no
 `github.com/ebitengine/purego`, and the linux/amd64 and linux/arm64 CLIs build "statically linked"
-(`file`, 2026-11-17). The binary grows by the 1.3 MB blob and wazero's compiler. The blob also
+(`file`, 2026-11-17). The stripped linux/amd64 CLI grows by 1,335,296 bytes (348.0 to 349.4 MB) and the linux/arm64 one by
+1,376,256 bytes (340.5 to 341.9 MB; the 1.3 MB blob and the glue; wazero was already linked for PDFium). The blob also
 holds aom's encoder, unused here, and links libyuv, whose BSD-3-Clause text the module does not
 ship (NOTICE names it). A 10- or 12-bit AVIF over 13312 × 13312 does not fit the module's 4 GiB of
 memory (#1736). `govulncheck ./...` reports nothing for wazero or the vendored code.

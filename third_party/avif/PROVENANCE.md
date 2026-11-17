@@ -13,7 +13,7 @@ not a dependency.
 `CGO_ENABLED=0`, purego links its `fakecgo` shim and imports libc dynamically, so a Linux CLI that
 requires the module is dynamically linked (docs/upstream-evaluation.md, #1724). The user decided on
 2026-11-17 to vendor only the WebAssembly path, without purego, so no build tag is needed and the
-CGO_ENABLED=0 Linux CLI stays statically linked; `test/repo`'s `TestLinuxCLILinksNoPurego` checks
+CGO_ENABLED=0 Linux CLI stays statically linked; `test/repo`'s `TestLinuxBinariesNeverImportPurego` checks
 it.
 
 ## Where each file comes from
