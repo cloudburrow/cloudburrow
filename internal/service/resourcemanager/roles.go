@@ -31,8 +31,19 @@ package resourcemanager
 //
 // Every permission check CloudBurrow makes (Firestore with MongoDB
 // compatibility's, Memorystore's IAM auth) evaluates a custom role through
-// RolePermissions. Predefined roles (roles/...) are not served by GetRole or
-// ListRoles: UNIMPLEMENTED.
+// RolePermissions.
+//
+// Predefined roles (#1746): GetRole and ListRoles (no parent, or "roles")
+// serve Google's predefined roles from internal/iamroles' embedded catalog,
+// with the etag Google gives every one ("AA==") and their permissions in
+// the FULL view; QueryGrantableRoles answers the predefined and custom
+// roles grantable on a project, folder or the organization. Google's
+// "Create and manage custom roles" page documents the deletion timeline:
+// a deleted role stops counting toward the 300-role limit once it is
+// scheduled for permanent deletion (here when the 7 days to undelete it
+// end), its bindings are removed from every policy during the 30-day
+// permanent deletion that follows (here at its end, 37 days after the
+// deletion), and its ID is free "up to 44 days" after the deletion.
 
 import (
 	"context"
@@ -63,8 +74,13 @@ const (
 	maxRolePermissions  = 3000
 	maxRoleBytes        = 64 << 10
 	roleUndeletePeriod  = 7 * 24 * time.Hour
+	roleBindingsRemoved = 37 * 24 * time.Hour
 	roleDeletionProcess = 44 * 24 * time.Hour
 )
+
+// predefinedRoleEtag is the etag Google gives every predefined role
+// (base64 "AA==", as gcloud iam roles describe roles/viewer shows it).
+var predefinedRoleEtag = []byte{0}
 
 var roleIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_.]{3,64}$`)
 
@@ -78,6 +94,19 @@ type customRole struct {
 	Etag        []byte    `json:"etag"`
 	Deleted     bool      `json:"deleted,omitempty"`
 	DeleteTime  time.Time `json:"deleteTime,omitempty"`
+	// BindingsRemoved is set once the role's bindings were taken out of
+	// every policy, 37 days after its deletion.
+	BindingsRemoved bool `json:"bindingsRemoved,omitempty"`
+}
+
+// predefinedProto is a predefined role as the API returns it.
+func predefinedProto(p *iamroles.Role, full bool) *adminpb.Role {
+	out := &adminpb.Role{Name: p.Name, Title: p.Title, Description: p.Description,
+		Stage: adminpb.Role_RoleLaunchStage(adminpb.Role_RoleLaunchStage_value[p.Stage]), Etag: predefinedRoleEtag}
+	if full {
+		out.IncludedPermissions = append([]string(nil), p.Permissions...)
+	}
+	return out
 }
 
 func (c *customRole) proto(full bool) *adminpb.Role {
@@ -128,7 +157,7 @@ func (r *Registry) roleParentLocked(parent string) (string, bool, error) {
 // parent and ID.
 func (r *Registry) splitRoleNameLocked(name string) (parent, id string, project bool, err error) {
 	if strings.HasPrefix(name, "roles/") {
-		return "", "", false, apierror.Unimplemented("predefined role %s: only custom roles (projects/*/roles/*, organizations/*/roles/*) are served", name)
+		return "", "", false, apierror.Unimplemented("predefined role %s cannot be changed: only custom roles (projects/*/roles/*, organizations/*/roles/*) can", name)
 	}
 	p, id, ok := strings.Cut(name, "/roles/")
 	if !ok || id == "" || strings.Contains(id, "/") {
@@ -148,6 +177,15 @@ func (r *Registry) loadRoleLocked(parent, id string) (*customRole, error) {
 	var c customRole
 	if err := json.Unmarshal(b, &c); err != nil {
 		return nil, apierror.Internal(err, "decode role %s/roles/%s", parent, id)
+	}
+	if c.Deleted && !c.BindingsRemoved && !r.now().Before(c.DeleteTime.Add(roleBindingsRemoved)) {
+		if err := r.removeRoleBindingsLocked(c.Name); err != nil {
+			return nil, err
+		}
+		c.BindingsRemoved = true
+		if err := r.putRoleLocked(parent, id, &c); err != nil {
+			return nil, err
+		}
 	}
 	if c.Deleted && !r.now().Before(c.DeleteTime.Add(roleDeletionProcess)) {
 		_ = r.st.Delete(rolePrefix + parent + "/" + id)
@@ -253,7 +291,9 @@ func (r *Registry) CreateRole(parent, id string, role *adminpb.Role) (*adminpb.R
 	}
 	if existing != nil {
 		if existing.Deleted {
-			return nil, apierror.AlreadyExists("A role named %s in %s was deleted and cannot be created again until its deletion completes, 44 days after it was deleted; undelete it instead.", id, canon)
+			// Google's Python sample for roles.create catches
+			// FailedPrecondition as "already exists and in deleted state".
+			return nil, apierror.FailedPrecondition("A role named %s in %s was deleted and cannot be created again until its deletion completes, 44 days after it was deleted; undelete it instead.", id, canon)
 		}
 		return nil, apierror.AlreadyExists("A role named %s in %s already exists.", id, canon)
 	}
@@ -261,7 +301,15 @@ func (r *Registry) CreateRole(parent, id string, role *adminpb.Role) (*adminpb.R
 	if err != nil {
 		return nil, err
 	}
-	if len(all) >= maxRolesPerParent {
+	counted := 0
+	for _, c := range all {
+		// A deleted role stops counting once it is scheduled for
+		// permanent deletion, when it can no longer be undeleted.
+		if !c.Deleted || r.now().Before(c.DeleteTime.Add(roleUndeletePeriod)) {
+			counted++
+		}
+	}
+	if counted >= maxRolesPerParent {
 		return nil, apierror.FailedPrecondition("%s already has %d custom roles, the most a project or organization can have.", canon, maxRolesPerParent)
 	}
 	c := &customRole{Name: canon + "/roles/" + id, Title: role.GetTitle(), Description: role.GetDescription(),
@@ -272,8 +320,16 @@ func (r *Registry) CreateRole(parent, id string, role *adminpb.Role) (*adminpb.R
 	return c.proto(true), nil
 }
 
-// GetRole reads a custom role, a deleted one included.
+// GetRole reads a predefined role, or a custom role, a deleted one
+// included.
 func (r *Registry) GetRole(name string) (*adminpb.Role, error) {
+	if strings.HasPrefix(name, "roles/") {
+		p := iamroles.Predefined(name)
+		if p == nil {
+			return nil, apierror.NotFound("The role named %s was not found.", name)
+		}
+		return predefinedProto(p, true), nil
+	}
 	r.mu.Lock()
 	defer r.unlock()
 	c, err := r.roleLocked(name)
@@ -300,11 +356,11 @@ func (r *Registry) roleLocked(name string) (*customRole, error) {
 
 // ListRoles lists parent's custom roles.
 func (r *Registry) ListRoles(req *adminpb.ListRolesRequest) (*adminpb.ListRolesResponse, error) {
-	if req.GetParent() == "" || strings.HasPrefix(req.GetParent(), "roles") {
-		return nil, apierror.Unimplemented("listing predefined roles is not served: give a parent, projects/{project} or organizations/{organization}")
-	}
 	if req.GetPageSize() < 0 || req.GetPageSize() > 1000 {
 		return nil, apierror.InvalidArgument("page_size %d must be between 0 and 1000", req.GetPageSize())
+	}
+	if req.GetParent() == "" || req.GetParent() == "roles" {
+		return listPredefined(req), nil
 	}
 	r.mu.Lock()
 	defer r.unlock()
@@ -335,6 +391,169 @@ func (r *Registry) ListRoles(req *adminpb.ListRolesRequest) (*adminpb.ListRolesR
 		out.Roles = append(out.Roles, c.proto(req.GetView() == adminpb.RoleView_FULL))
 	}
 	return out, nil
+}
+
+// listPredefined lists the predefined roles, a page at a time.
+func listPredefined(req *adminpb.ListRolesRequest) *adminpb.ListRolesResponse {
+	size := int(req.GetPageSize())
+	if size == 0 {
+		size = 300
+	}
+	out := &adminpb.ListRolesResponse{}
+	for _, n := range iamroles.PredefinedNames() {
+		if req.GetPageToken() != "" && n <= req.GetPageToken() {
+			continue
+		}
+		if len(out.Roles) == size {
+			out.NextPageToken = out.Roles[len(out.Roles)-1].GetName()
+			break
+		}
+		out.Roles = append(out.Roles, predefinedProto(iamroles.Predefined(n), req.GetView() == adminpb.RoleView_FULL))
+	}
+	return out
+}
+
+// removeRoleBindingsLocked takes the bindings of role out of every policy
+// Resource Manager keeps, when its deletion completes. The caller holds
+// r.mu.
+func (r *Registry) removeRoleBindingsLocked(role string) error {
+	keys, err := r.st.List(iamPrefix)
+	if err != nil {
+		return apierror.Internal(err, "list IAM policies")
+	}
+	for _, k := range keys {
+		resource := strings.TrimPrefix(k, iamPrefix)
+		p, err := r.loadIAMLocked(resource)
+		if err != nil || p == nil {
+			continue
+		}
+		kept := p.Bindings[:0]
+		for _, b := range p.Bindings {
+			if b.Role != role {
+				kept = append(kept, b)
+			}
+		}
+		if len(kept) == len(p.Bindings) {
+			continue
+		}
+		p.Bindings = kept
+		p.Etag = newRoleEtag()
+		b, err := json.Marshal(p)
+		if err != nil {
+			return apierror.Internal(err, "encode the IAM policy")
+		}
+		if err := r.st.Put(k, b); err != nil {
+			return apierror.Internal(err, "store the IAM policy")
+		}
+	}
+	return nil
+}
+
+// sweepDeletedRolesLocked runs the deletion timeline of every deleted
+// custom role, so bindings go when their roles' deletions complete even
+// when nothing reads those roles. The caller holds r.mu.
+func (r *Registry) sweepDeletedRolesLocked() {
+	keys, _ := r.st.List(rolePrefix)
+	for _, k := range keys {
+		rest := strings.TrimPrefix(k, rolePrefix)
+		i := strings.LastIndex(rest, "/")
+		if i < 0 {
+			continue
+		}
+		_, _ = r.loadRoleLocked(rest[:i], rest[i+1:])
+	}
+}
+
+// QueryGrantableRoles lists the roles grantable on a project, folder or
+// the organization: the predefined roles iamroles.Role.GrantableOn
+// admits, and the custom roles of the resource's project and of the
+// organization, deleted ones left out, sorted by name.
+func (r *Registry) QueryGrantableRoles(req *adminpb.QueryGrantableRolesRequest) (*adminpb.QueryGrantableRolesResponse, error) {
+	full := req.GetFullResourceName()
+	if full == "" {
+		return nil, apierror.InvalidArgument("full_resource_name is required, such as //cloudresourcemanager.googleapis.com/projects/PROJECT")
+	}
+	if req.GetPageSize() < 0 || req.GetPageSize() > 1000 {
+		return nil, apierror.InvalidArgument("page_size %d must be between 0 and 1000", req.GetPageSize())
+	}
+	// As for queryTestablePermissions, any host is taken (gcloud names the
+	// resource by its override's host): the path says what it is.
+	_, rest, ok := strings.Cut(strings.TrimPrefix(full, "//"), "/")
+	if !ok || !strings.HasPrefix(full, "//") {
+		return nil, apierror.InvalidArgument("full_resource_name %q is not a full resource name, such as //cloudresourcemanager.googleapis.com/projects/PROJECT", full)
+	}
+	r.mu.Lock()
+	r.sweepDeletedRolesLocked()
+	var kind string
+	var parents []string
+	switch {
+	case strings.HasPrefix(rest, "projects/") && !strings.Contains(strings.TrimPrefix(rest, "projects/"), "/"):
+		canon, _, err := r.roleParentLocked(rest)
+		if err != nil {
+			r.unlock()
+			return nil, err
+		}
+		kind, parents = "Project", []string{canon}
+		if p, err := r.load(strings.TrimPrefix(canon, "projects/")); err == nil && p.Parent != "" {
+			parents = append(parents, OrganizationName)
+		}
+	case strings.HasPrefix(rest, "folders/") && !strings.Contains(strings.TrimPrefix(rest, "folders/"), "/"):
+		if _, err := r.loadFolder(rest); err != nil {
+			r.unlock()
+			return nil, err
+		}
+		kind, parents = "Folder", []string{OrganizationName}
+	case strings.HasPrefix(rest, "organizations/") && !strings.Contains(strings.TrimPrefix(rest, "organizations/"), "/"):
+		if err := checkOrg(rest); err != nil {
+			r.unlock()
+			return nil, err
+		}
+		kind, parents = "Organization", []string{OrganizationName}
+	default:
+		r.unlock()
+		return nil, apierror.Unimplemented("full_resource_name %q: only a project's, a folder's or the organization's grantable roles are served", full)
+	}
+	var custom []*customRole
+	for _, parent := range parents {
+		all, err := r.rolesLocked(parent)
+		if err != nil {
+			r.unlock()
+			return nil, err
+		}
+		for _, c := range all {
+			if !c.Deleted {
+				custom = append(custom, c)
+			}
+		}
+	}
+	r.unlock()
+	fullView := req.GetView() == adminpb.RoleView_FULL
+	var out []*adminpb.Role
+	for _, c := range custom {
+		out = append(out, c.proto(fullView))
+	}
+	for _, n := range iamroles.PredefinedNames() {
+		if p := iamroles.Predefined(n); p.GrantableOn(kind) {
+			out = append(out, predefinedProto(p, fullView))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	size := int(req.GetPageSize())
+	if size == 0 {
+		size = 300
+	}
+	resp := &adminpb.QueryGrantableRolesResponse{}
+	for _, role := range out {
+		if req.GetPageToken() != "" && role.Name <= req.GetPageToken() {
+			continue
+		}
+		if len(resp.Roles) == size {
+			resp.NextPageToken = resp.Roles[len(resp.Roles)-1].GetName()
+			break
+		}
+		resp.Roles = append(resp.Roles, role)
+	}
+	return resp, nil
 }
 
 // UpdateRole changes the fields of a custom role that mask names (every
@@ -557,7 +776,7 @@ func (r *Registry) QueryTestablePermissions(req *adminpb.QueryTestablePermission
 }
 
 // IAMAdminServer serves google.iam.admin.v1.IAM's role and permission
-// methods; the rest (service accounts, keys, grantable roles, lint) are
+// methods; the rest (service accounts, keys, lint) are
 // UNIMPLEMENTED.
 type IAMAdminServer struct {
 	adminpb.UnimplementedIAMServer
@@ -589,6 +808,10 @@ func (s *IAMAdminServer) DeleteRole(_ context.Context, req *adminpb.DeleteRoleRe
 
 func (s *IAMAdminServer) UndeleteRole(_ context.Context, req *adminpb.UndeleteRoleRequest) (*adminpb.Role, error) {
 	return s.reg.UndeleteRole(req.GetName(), req.GetEtag())
+}
+
+func (s *IAMAdminServer) QueryGrantableRoles(_ context.Context, req *adminpb.QueryGrantableRolesRequest) (*adminpb.QueryGrantableRolesResponse, error) {
+	return s.reg.QueryGrantableRoles(req)
 }
 
 func (s *IAMAdminServer) QueryTestablePermissions(_ context.Context, req *adminpb.QueryTestablePermissionsRequest) (*adminpb.QueryTestablePermissionsResponse, error) {
@@ -641,6 +864,7 @@ var iamAdminDesc = &grpc.ServiceDesc{
 		unaryMethod("DeleteRole", (*IAMAdminServer).DeleteRole),
 		unaryMethod("UndeleteRole", (*IAMAdminServer).UndeleteRole),
 		unaryMethod("QueryTestablePermissions", (*IAMAdminServer).QueryTestablePermissions),
+		unaryMethod("QueryGrantableRoles", (*IAMAdminServer).QueryGrantableRoles),
 	},
 }
 
