@@ -333,11 +333,11 @@ func edgeWindingDelta(a, b s2.Point, chain []s2.Point) int {
 
 // connector is GetConnector.
 func connector(b0, b1, b1Snapped s2.Point) s2.Point {
-	if b1Snapped.Dot(b1.Vector) >= 0 {
+	if dotNF(b1Snapped.Vector, b1.Vector) >= 0 {
 		return b1
 	}
-	x := s2.Point{Vector: RobustCrossProd(b0, b1).Cross(b1Snapped.Vector).Normalize()}
-	if x.Dot(s2.Interpolate(0.5, b0, b1).Vector) >= 0 {
+	x := s2.Point{Vector: normalizeNF(crossNF(RobustCrossProd(b0, b1).Vector, b1Snapped.Vector))}
+	if dotNF(x.Vector, s2.Interpolate(0.5, b0, b1).Vector) >= 0 {
 		return x
 	}
 	return s2.Point{Vector: x.Mul(-1)}
@@ -395,12 +395,12 @@ func GetSnappedWindingDelta(refIn s2.Point, refV VertexID, filter InputEdgeFilte
 			continue
 		}
 		n := len(chainIn)
-		za := s2.Point{Vector: RobustCrossProd(chainIn[0], chainIn[1]).Normalize()}
-		zb := s2.Point{Vector: RobustCrossProd(chainIn[n-2], chainIn[n-1]).Normalize()}
-		if za.Dot(refOut.Vector) > 0 {
+		za := s2.Point{Vector: normalizeNF(RobustCrossProd(chainIn[0], chainIn[1]).Vector)}
+		zb := s2.Point{Vector: normalizeNF(RobustCrossProd(chainIn[n-2], chainIn[n-1]).Vector)}
+		if dotNF(za.Vector, refOut.Vector) > 0 {
 			za = s2.Point{Vector: za.Mul(-1)}
 		}
-		if zb.Dot(refOut.Vector) > 0 {
+		if dotNF(zb.Vector, refOut.Vector) > 0 {
 			zb = s2.Point{Vector: zb.Mul(-1)}
 		}
 		a0c := connector(chainIn[1], chainIn[0], chainOut[0])

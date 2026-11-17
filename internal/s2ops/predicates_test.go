@@ -55,7 +55,11 @@ func TestPredicateCompareEdgeDistance(t *testing.T) {
 		{pp(1, 1, 1e-15), pp(1, 0, 0), pp(0, 1, 0), caRadians(1e-15 + eps), -1, precLongDouble},
 		{pp(1, 1, 1e-40), pp(1, 0, 0), pp(0, 1, 0), caRadians(1e-40), -1, precExact},
 		{pp(1, 1, 0), pp(1, 0, 0), pp(0, 1, 0), 0, 0, precExact},
-		{pp(1e-15, 0, 1), pp(1, 0, 0), pp(0, 1, 0), caRadians(math.Pi/2 - 1e-15 - 3*eps), 1, precDouble},
+		// S1ChordAngle::Radians(M_PI_2 - 1e-15 - 3 * DBL_EPSILON) with the C
+		// library's sin (1.9999999999999964); Go's math.Sin is one ulp off
+		// here and gives 1.9999999999999971, which the double stage cannot
+		// decide.
+		{pp(1e-15, 0, 1), pp(1, 0, 0), pp(0, 1, 0), s1.ChordAngleFromSquaredLength(1.9999999999999964), 1, precDouble},
 		{pp(1e-15, 0, 1), pp(1, 0, 0), pp(0, 1, 0), caRadians(math.Pi/2 - 1e-15 - eps), 1, precLongDouble},
 		{pp(1e-40, 0, 1), pp(1, 0, 0), pp(0, 1, 0), s1.RightChordAngle, -1, precExact},
 		{pp(0, 0, 1), pp(1, 0, 0), pp(0, 1, 0), s1.RightChordAngle, 0, precExact},

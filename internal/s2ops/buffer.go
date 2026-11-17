@@ -26,6 +26,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/golang/geo/r3"
 	"github.com/golang/geo/s1"
 	"github.com/golang/geo/s2"
 )
@@ -132,14 +133,27 @@ func maxEdgeSpan(radius, requested s1.Angle) s1.Angle {
 	return step
 }
 
-// pointOnRay is S2::GetPointOnRay with an S1ChordAngle.
+// pointOnRay is S2::GetPointOnRay with an S1ChordAngle:
+// (cos(r) * origin + sin(r) * dir).Normalize(), every product rounded as
+// upstream (compiled without floating-point contraction) rounds it.
 func pointOnRay(origin, dir s2.Point, r s1.ChordAngle) s2.Point {
-	return s2.Point{Vector: origin.Mul(r.Cos()).Add(dir.Mul(r.Sin())).Normalize()}
+	l2 := float64(r)
+	cos := 1 - float64(0.5*l2)
+	sin := math.Sqrt(float64(l2 * float64(1-float64(0.25*l2))))
+	v := r3.Vector{
+		X: float64(cos*origin.X) + float64(sin*dir.X),
+		Y: float64(cos*origin.Y) + float64(sin*dir.Y),
+		Z: float64(cos*origin.Z) + float64(sin*dir.Z),
+	}
+	return s2.Point{Vector: normalizeNF(v)}
 }
 
-func unit(v s2.Point) s2.Point { return s2.Point{Vector: v.Normalize()} }
+func unit(v s2.Point) s2.Point { return s2.Point{Vector: normalizeNF(v.Vector)} }
 
-func cross(a, b s2.Point) s2.Point { return s2.Point{Vector: a.Cross(b.Vector)} }
+func cross(a, b s2.Point) s2.Point { return s2.Point{Vector: crossNF(a.Vector, b.Vector)} }
+
+// signed is sign * v.
+func signed(sign int, v r3.Vector) s2.Point { return s2.Point{Vector: v.Mul(float64(sign))} }
 
 func (b *buffer) setInputVertex(a s2.Point) {
 	if b.haveInputStart {
@@ -229,11 +243,11 @@ func (b *buffer) addPoint(p s2.Point) {
 }
 
 func (b *buffer) edgeAxis(p, q s2.Point) s2.Point {
-	return s2.Point{Vector: q.PointCross(p).Normalize().Mul(float64(b.sign))}
+	return signed(b.sign, normalizeNF(RobustCrossProd(q, p).Vector))
 }
 
 func (b *buffer) addVertexArc(v, start, end s2.Point) {
-	rotate := s2.Point{Vector: v.Cross(start.Vector).Normalize().Mul(float64(b.sign))}
+	rotate := signed(b.sign, normalizeNF(crossNF(v.Vector, start.Vector)))
 	angle, span := s1.ChordAngle(0), s2.ChordAngleBetweenPoints(start, end)
 	for {
 		dir := pointOnRay(start, rotate, angle)
@@ -252,7 +266,7 @@ func (b *buffer) addEdgeArc(p, q s2.Point) {
 	if b.edgeStep == 0 {
 		b.addOffsetVertex(axis)
 	} else {
-		rotate := s2.Point{Vector: p.Cross(axis.Vector).Normalize().Mul(float64(b.sign))}
+		rotate := signed(b.sign, normalizeNF(crossNF(p.Vector, axis.Vector)))
 		angle, span := s1.ChordAngle(0), s2.ChordAngleBetweenPoints(p, q)
 		for {
 			x := pointOnRay(p, rotate, angle)

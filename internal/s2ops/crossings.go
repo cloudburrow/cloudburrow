@@ -106,7 +106,7 @@ func RobustCrossProd(a, b s2.Point) s2.Point {
 func stableCrossProd(a, b r3.Vector) (r3.Vector, bool) {
 	const tErr = dblErrS2
 	kMinNorm := (32 * math.Sqrt(3) * dblErrS2) / (RobustCrossProdError/tErr - (1 + 2*math.Sqrt(3)))
-	r := a.Sub(b).Cross(a.Add(b))
+	r := crossNF(a.Sub(b), a.Add(b))
 	return r, r.Norm2() >= kMinNorm*kMinNorm
 }
 

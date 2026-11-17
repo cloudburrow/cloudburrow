@@ -525,3 +525,81 @@ func TestBuilderSimplifyAvoidsBacktrackingVertices(t *testing.T) {
 	testPolylineLayersBothEdgeTypes(t, []string{"0:0, 1:0.1, 1:2", "0:1.05, -10:1.05"},
 		[]string{"0:0, 1:0.1, 1:2", "0:1.05, -10:1.05"}, o)
 }
+
+func vp(x, y, z float64) s2.Point { return s2.Point{Vector: r3.Vector{X: x, Y: y, Z: z}} }
+
+func TestBuilderSeparationSitesRegressionBug(t *testing.T) {
+	b := NewBuilder(BuilderOptions{SnapFunction: s2.NewIdentitySnapper(0), SplitCrossingEdges: true, Idempotent: true})
+	lo := DefaultPolylineVectorLayerOptions()
+	lo.PolylineType = PolylineTypeWalk
+	var out []*s2.Polyline
+	b.StartLayer(NewPolylineVectorLayer(&out, lo))
+	in := [][]s2.Point{
+		{vp(0.99482894039096326, 0.087057485575229562, 0.05231035811301657),
+			vp(0.19008255728509718, 0.016634125542513145, 0.98162718344766398)},
+		{vp(0.99802098666373784, 0.052325259429907504, 0.034873735164620751),
+			vp(0.99585181570926085, 0.087146997393412709, 0.026164135641767797),
+			vp(0.99939172130835197, 6.9770704216017258e-20, 0.034873878194564757),
+			vp(0.99939172130835197, 1.7442676054004314e-202, 0.034873878194564757),
+			vp(0.99939172130835197, 2.4185105853059967e-57, 0.034873878194564757),
+			vp(0.99939091697091686, 0, 0.034896920724182809),
+			vp(0.99543519482327569, 0.088840224357046416, 0.034873879097925588)},
+		{vp(-0.86549861898490243, 0.49969586065415578, 0.034873878194564757),
+			vp(0.99939172130835197, 1.542605867912342e-181, 0.034873878194564757),
+			vp(0.99939172130835197, 1.5426058679123417e-281, 0.034873878194564757),
+			vp(0.99939172130835197, 1.5426058504696658e-231, 0.034873878194564757),
+			vp(0.19080899537654492, 3.3302452117433465e-113, 0.98162718344766398)},
+		{vp(0.99802098660295513, 0.052325259426720727, 0.034873736908888363),
+			vp(0.99558688908226523, 0.08712381366290145, 0.034873878194564757),
+			vp(0.99939172130835197, 1.0221039496805218e-23, 0.034873878194564757),
+			vp(0.99939172127682907, 3.4885352106908273e-20, 0.034873879097925602),
+			vp(0.99391473614090387, 0.10448593114531293, 0.03487387954694085)},
+	}
+	for _, l := range in {
+		for i := 0; i+1 < len(l); i++ {
+			b.AddEdge(l[i], l[i+1])
+		}
+	}
+	if err := b.Build(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuilderVoronoiSiteExclusionBugs(t *testing.T) {
+	for _, c := range []struct {
+		radius        float64
+		line          string
+		forced        []string
+		want, wantAlt string
+	}{
+		{64.83, "29.40:173.03, -18.02:-5.83", []string{"25.84:131.46", "-29.23:-166.58"}, "25.84:131.46, -18.02:-5.83", ""},
+		// Upstream expects ...374 except on Windows, whose C library
+		// rounds to ...373.
+		{67.75, "47.06:-175.17, -47.59:10.57", []string{"36.36:47.63", "-28.34:-72.46"},
+			"47.06:-175.17, -34.4968065428191:69.7125289482374", "47.06:-175.17, -34.4968065428191:69.7125289482373"},
+	} {
+		got := buildPolylines(t, BuilderOptions{SnapFunction: s2.NewIdentitySnapper(s1.Angle(c.radius) * s1.Degree), Idempotent: true},
+			polylineLayerOptions(), []string{c.line}, c.forced)
+		if got[0] != c.want && got[0] != c.wantAlt {
+			t.Errorf("radius %v: got %q, want %q", c.radius, got[0], c.want)
+		}
+	}
+}
+
+func TestBuilderIncorrectSeparationSiteBug(t *testing.T) {
+	b := NewBuilder(BuilderOptions{SnapFunction: s2.NewIdentitySnapper(0), SplitCrossingEdges: true, Idempotent: false})
+	var out []*s2.Polyline
+	b.StartLayer(NewPolylineVectorLayer(&out, polylineLayerOptions()))
+	b.AddEdge(vp(-0.50094438964076704, -0.86547947317509455, 0), vp(1, 1.7786363250284876e-322, 4.7729929394856611e-65))
+	b.ForceVertex(vp(1, 0, -4.7729929394856611e-65))
+	b.ForceVertex(vp(1, 2.2603503297237029e-320, 4.7729929394856619e-65))
+	if err := b.Build(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuilderMaxSnapRadiusCanSnapAtLevel0(t *testing.T) {
+	if r := s2.CellIDSnapperForLevel(0).SnapRadius(); r > MaxSnapRadius {
+		t.Errorf("level 0 snap radius %v exceeds %v", r, MaxSnapRadius)
+	}
+}
