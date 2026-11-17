@@ -328,6 +328,9 @@ func (p *sqlProvisioner) scratchPhysical(spec sqladmin.Spec) bool {
 const physicalEphemeralScript = `set -euo pipefail
 B=/replica/` + physicalBackupDir + `
 R=/replica/` + physicalRestoredDir + `
+if [ -n "${CLOUDSQL_TAKEN:-}" ] && [ -f "$B/xtrabackup_tablespaces" ]; then
+  ` + physicalUnexternal + `
+fi
 if [ -n "$(find "$B" -name '*.zst' -print -quit)" ]; then
   xtrabackup --decompress --remove-original --target-dir="$B"
 fi
@@ -344,6 +347,17 @@ chown -R 999:999 "$R" /replica/` + physicalGTIDFile + ` /replica/` + physicalIni
 touch /replica/` + physicalSwapMarker + `
 echo "restored the backup at GTIDs $gtid"
 `
+
+// physicalUnexternal drops, from a backup the sync took through the
+// source's /proc/PID/root, the tablespaces XtraBackup listed as external:
+// it resolves each file's real path to tell the data directory's own
+// tablespaces from external ones, and a path through another container's
+// root does not resolve (realpath loops on the /proc link), so every
+// file-per-table tablespace is listed under its absolute path, which
+// --copy-back would write outside the data directory. Measured 2026-11-17
+// (#1614): the restored server then answers "Tablespace is missing". A
+// CloudBurrow server has no tablespace outside its data directory.
+const physicalUnexternal = `sed -i -E 's#\{"file_name":"/var/lib/mysql/data/[^"]*","tablespace_name":"[^"]*","tablespace_type":"[^"]*"\},?##g; s#,\]#]#g' "$B/xtrabackup_tablespaces"`
 
 // physicalStreamScript takes the backup in the source's ephemeral
 // container, onto stdout as an xbstream.
@@ -519,8 +533,11 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 		}
 	}
 	out.Reset()
-	if err := p.execContainer(ctx, pod, xb, nil, &out, "env", "CLOUDSQL_INIT_SQL="+physicalInitSQL(spec.RootPassword),
-		"bash", "-c", physicalEphemeralScript); err != nil {
+	env := []string{"env", "CLOUDSQL_INIT_SQL=" + physicalInitSQL(spec.RootPassword)}
+	if take {
+		env = append(env, "CLOUDSQL_TAKEN=1")
+	}
+	if err := p.execContainer(ctx, pod, xb, nil, &out, append(env, "bash", "-c", physicalEphemeralScript)...); err != nil {
 		return fmt.Errorf("prepare the backup: %w %s", err, strings.TrimSpace(tail(out.String(), 2000)))
 	}
 	// mysqld stops; its container starts again on the same emptyDir and

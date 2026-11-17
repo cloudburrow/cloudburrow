@@ -262,7 +262,12 @@ spec:
 		}
 		script := `pid=; for d in /proc/[0-9]*; do [ "$(cat $d/comm 2>/dev/null)" = mysqld ] && pid=${d#/proc/} && break; done; ` +
 			`rm -rf /var/lib/mysql && mkdir -p /var/lib && ln -s /proc/$pid/root/var/lib/mysql /var/lib/mysql && ` +
-			backup + ` --host=127.0.0.1 && touch /done || touch /failed; sleep 3600`
+			backup + ` --host=127.0.0.1 && ` +
+			// The data directory's tablespaces, read through another
+			// container's root, are listed as external (realpath does not
+			// resolve there); on a server's host they are its own.
+			`sed -i -E 's#\{"file_name":"/var/lib/mysql/data/[^"]*","tablespace_name":"[^"]*","tablespace_type":"[^"]*"\},?##g; s#,\]#]#g' /backup/xtrabackup_tablespaces && ` +
+			`touch /done || touch /failed; sleep 3600`
 		patch := fmt.Sprintf(`{"spec":{"ephemeralContainers":[{"name":%q,"image":%q,"targetContainerName":%q,"command":["bash","-c",%q],`+
 			`"securityContext":{"runAsUser":0,"capabilities":{"add":["SYS_PTRACE","DAC_READ_SEARCH"]}}}]}}`,
 			pod, components.XtraBackup84Image, f[1], script)
