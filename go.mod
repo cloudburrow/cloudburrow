@@ -1,6 +1,6 @@
 module github.com/cloudburrow/cloudburrow
 
-go 1.26.0
+go 1.26.4
 
 require (
 	cloud.google.com/go v0.123.0
@@ -30,12 +30,14 @@ require (
 	cloud.google.com/go/securesourcemanager v1.12.0
 	cloud.google.com/go/spanner v1.96.1
 	cloud.google.com/go/storage v1.70.0
+	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
 	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
+	github.com/gen2brain/h265 v0.2.5
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/golang/protobuf v1.5.4
 	github.com/google/differential-privacy/go/v4 v4.1.0
@@ -43,7 +45,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/linkedin/goavro/v2 v2.15.0
+	github.com/oops1/go.264 v1.14.0
 	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.72.1
 	github.com/redis/go-redis/v9 v9.23.0
@@ -85,12 +89,14 @@ require (
 	github.com/docker/cli v29.6.0+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
 	github.com/golang/glog v1.2.5 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
@@ -101,6 +107,7 @@ require (
 	github.com/substrait-io/substrait v0.87.0 // indirect
 	github.com/substrait-io/substrait-go/v8 v8.1.1 // indirect
 	github.com/substrait-io/substrait-protobuf/go v0.85.0 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/twmb/avro v1.8.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
