@@ -173,7 +173,9 @@ func verifySecp256k1(pub *secp256k1.PublicKey, digest, sig []byte) bool {
 }
 
 // secp256k1Level refuses a protection level the algorithms page does not
-// list EC_SIGN_SECP256K1_SHA256 under. The code is UNVERIFIED.
+// list EC_SIGN_SECP256K1_SHA256 under. The code is UNVERIFIED: the page
+// names no error for it. Docs re-read 2026-11-17, still unanswered:
+// https://cloud.google.com/kms/docs/algorithms
 func secp256k1Level(level kmspb.ProtectionLevel) error {
 	if level == kmspb.ProtectionLevel_HSM || level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
 		return nil
