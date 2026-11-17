@@ -104,6 +104,7 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 		{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
 			Options: []string{"ZONAL", "REGIONAL"}, Default: "ZONAL", Help: availabilityHelp},
 		{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox"},
+		serverCAModeField(internalCAMode),
 		{Name: "kmsKeyName", Label: "Customer-managed encryption key (Cloud KMS)", Type: "text",
 			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the instance's region (needs kms in --services). " +
 				"The instance is SUSPENDED while the key's version is disabled or destroyed. The key cannot be changed later, and the server's data volume is not encrypted with it."},
@@ -190,6 +191,7 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	in := &sqladminapi.DatabaseInstance{
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}
+	withServerCAMode(st, nil, v["serverCaMode"])
 	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
 		in.DiskEncryptionConfiguration = &sqladminapi.DiskEncryptionConfiguration{KmsKeyName: k}
 	}
@@ -312,6 +314,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "DR replica", Value: drReplicaOf(in)}, {Label: "Disaster recovery role", Value: drRole(in)},
 		{Label: "Encryption key (CMEK)", Value: cmekKey(in)}, {Label: "Encryption key version", Value: cmekVersion(in)},
 		{Label: "Suspension reason", Value: strings.Join(in.SuspensionReason, ", ")},
+		{Label: "Server CA mode", Value: serverCAMode(in)}, {Label: "DNS name", Value: in.DnsName},
 	} {
 		if pr.Value != "" {
 			d.Summary = append(d.Summary, pr)
@@ -357,6 +360,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		}
 		d.Summary = append(d.Summary, console.Property{Label: "Server CAs", Value: strings.Join(fps, ", ")})
 	}
+	otherServerCerts := serverCertSummary(ctx, svc, project, in, &d)
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
 		{ID: "project-backups", Label: "Project backups", Kind: console.KindListing, Listing: projectBackupsListing(ctx, svc, project, name)},
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
@@ -366,7 +370,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		d.Sections = append(secs, d.Sections...)
 		dbUserActs = databaseUserActions(in, dbNames, userRefs)
 	}
-	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
+	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps, serverCAMode(in) == casCAMode)...)
+	d.Actions = append(d.Actions, serverCertActions(in, otherServerCerts)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, drActions(in)...)
@@ -398,6 +403,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 			{Name: "flags", Label: "Database flags", Type: "text", Default: formatFlags(st.DatabaseFlags),
 				Help: "name=value pairs, separated by commas, passed to the server, which restarts with them."},
 			{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(st.DeletionProtectionEnabled)},
+			serverCAModeField(serverCAMode(in)),
 			{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
 				Options: []string{"ZONAL", "REGIONAL"}, Default: availabilityOr(st.AvailabilityType),
 				Help: availabilityHelp + " Changing it adds or removes the standby."},
@@ -487,6 +493,7 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 		return sqlAPIError(err)
 	}
 	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
+	withServerCAMode(st, in, v["serverCaMode"])
 	if err := retentionConfig(st.BackupConfiguration, v["retainedBackups"], v["logRetentionDays"]); err != nil {
 		return err
 	}
@@ -770,7 +777,7 @@ func consoleThreads(v string) (int64, error) {
 // certActions are Create client certificate, Delete client certificate and
 // Reset SSL configuration (#1380), through sslCerts.insert, sslCerts.delete
 // and instances.resetSslConfig.
-func certActions(fps []string) []console.Action {
+func certActions(fps []string, cas bool) []console.Action {
 	acts := []console.Action{{ID: "create-client-cert", Label: "Create client certificate", Fields: []console.Field{{Name: "commonName",
 		Label: "Common name", Type: "text", Required: true, Help: "A name no other client certificate of the instance has."}}}}
 	if len(fps) > 0 {
@@ -778,8 +785,13 @@ func certActions(fps []string) []console.Action {
 			Confirm: "The certificate is deleted.", Fields: []console.Field{{Name: "fingerprint", Label: "SHA-1 fingerprint",
 				Type: "select", Required: true, Options: fps, Default: fps[0]}}})
 	}
-	return append(acts, console.Action{ID: "reset-ssl", Label: "Reset SSL configuration", Destructive: true,
-		Confirm: "Every client certificate of the instance is deleted, and the server's certificate is issued anew."},
+	acts = append(acts, console.Action{ID: "reset-ssl", Label: "Reset SSL configuration", Destructive: true,
+		Confirm: "Every client certificate of the instance is deleted, and the server's certificate is issued anew."})
+	if cas {
+		// A CAS instance's server CA is its region's (serverCertActions).
+		return acts
+	}
+	return append(acts,
 		console.Action{ID: "add-server-ca", Label: "Add server CA",
 			Confirm: "A new upcoming server CA is made; one added before and never rotated in is replaced."},
 		console.Action{ID: "rotate-server-ca", Label: "Rotate server CA",
@@ -853,6 +865,13 @@ func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project stri
 		}
 		out, _, err := storageResult(ctx, svc, project, path[0], action)
 		return out, err
+	}
+	if action == "resolve-dns" && len(path) == 1 {
+		svc, err := p.api(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return resolveDNSResult(ctx, svc, v)
 	}
 	if (action == "run-sql" || action == "precheck-upgrade") && len(path) == 1 {
 		svc, err := p.api(ctx)
@@ -1035,6 +1054,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		_, err = svc.Instances.RotateServerCa(project, name, &sqladminapi.InstancesRotateServerCaRequest{}).Context(ctx).Do()
 	default:
 		if ok, err := databaseUserAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
+		if ok, err := serverCertAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}
 		if ok, err := dataAPIAct(ctx, svc, project, name, action, v); ok {

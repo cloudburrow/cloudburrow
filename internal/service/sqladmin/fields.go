@@ -322,16 +322,18 @@ func checkInstanceFields(body []byte) error {
 	return checkIPConfiguration(st["ipConfiguration"])
 }
 
-// checkIPConfiguration refuses a server CA other than the internal one:
-// instances here are GOOGLE_MANAGED_INTERNAL_CA, and per-instance CAs are
-// issued by Certificate Authority Service, which is not served.
+// checkIPConfiguration refuses a customer-managed server CA: its CA pool
+// is the customer's in Certificate Authority Service, which is not served.
+// GOOGLE_MANAGED_CAS_CA is served since #1614 (servercerts.go).
 func checkIPConfiguration(v any) error {
 	ic, _ := v.(map[string]any)
 	switch m, _ := ic["serverCaMode"].(string); m {
-	case "", "GOOGLE_MANAGED_INTERNAL_CA", "CA_MODE_UNSPECIFIED":
+	case "", "GOOGLE_MANAGED_INTERNAL_CA", "CA_MODE_UNSPECIFIED", "GOOGLE_MANAGED_CAS_CA":
+	case "CUSTOMER_MANAGED_CAS_CA":
+		return unimplemented("settings.ipConfiguration.serverCaMode "+m, "a CUSTOMER_MANAGED_CAS_CA instance's server certificates are issued by "+
+			"the customer's CA pool in Certificate Authority Service, which is not served; GOOGLE_MANAGED_INTERNAL_CA and GOOGLE_MANAGED_CAS_CA are")
 	default:
-		return unimplemented("settings.ipConfiguration.serverCaMode "+m, "per-instance server certificates are issued by "+
-			"Certificate Authority Service, which is not served; instances here are GOOGLE_MANAGED_INTERNAL_CA")
+		return Errorf(http.StatusBadRequest, "Invalid value for settings.ipConfiguration.serverCaMode: %s.", m)
 	}
 	if p, _ := ic["serverCaPool"].(string); p != "" {
 		return unimplemented("settings.ipConfiguration.serverCaPool", "a CUSTOMER_MANAGED_CAS_CA pool is Certificate Authority Service's, which is not served")

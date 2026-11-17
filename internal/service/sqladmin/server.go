@@ -295,8 +295,6 @@ const (
 	BlueGreenWhy = "a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, " +
 		"which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector. " +
 		"Read replicas and promoteReplica are served (docs/cloudsql.md)"
-	ResolveWhy = "resolving a DNS name needs the instance's Cloud DNS records (the dnsNames of Private Service Connect and write endpoints), " +
-		"Google-managed networking that is not served; instances are reached by connection name through connectSettings"
 )
 
 // verbWhy is why an instance method other than restart is not served.
@@ -306,10 +304,6 @@ func verbWhy(verb string) string {
 		return "SQL Server Reporting Services leases: " + sqlServerWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
 		return "Microsoft Entra ID authentication: " + sqlServerWhy
-	case "listServerCertificates", "addServerCertificate", "rotateServerCertificate":
-		return "per-instance server certificates are for instances whose serverCaMode is GOOGLE_MANAGED_CAS_CA or CUSTOMER_MANAGED_CAS_CA, " +
-			"issued by Certificate Authority Service, which is not served; instances here are GOOGLE_MANAGED_INTERNAL_CA, " +
-			"whose server CA is rotated with addServerCa and rotateServerCa"
 	case "rescheduleMaintenance":
 		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), " +
 			"so there is none to reschedule"
@@ -332,7 +326,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.instances.pointInTimeRestore", out, err
 	}
 	if len(p) == 4 && p[0] == "locations" && p[2] == "dns" && strings.HasSuffix(p[3], ":resolveConnectSettings") {
-		return "sql.connect.resolve", nil, unimplemented("connect.resolve", ResolveWhy)
+		if r.Method != http.MethodGet {
+			return "sql.connect.resolve", nil, Errorf(http.StatusNotFound, "method %s is not served on resolveConnectSettings", r.Method)
+		}
+		out, err := s.resolveConnectSettings(r, p[1], strings.TrimSuffix(p[3], ":resolveConnectSettings"))
+		return "sql.connect.resolve", out, err
 	}
 	if len(p) >= 5 && p[0] == "projects" && p[2] == "locations" && p[4] == "blueGreenDeployments" {
 		return "sql.blueGreenDeployments", nil, unimplemented("blueGreenDeployments", BlueGreenWhy)
@@ -466,6 +464,21 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return s.backupRuns(r, base, project, e, rest[3:])
 	case "sslCerts":
 		return s.sslCerts(r, base, project, e, rest[3:])
+	case "listServerCertificates":
+		if len(rest) == 3 && r.Method == http.MethodGet {
+			out, err := s.listServerCertificates(project, e)
+			return "sql.instances.ListServerCertificates", out, err
+		}
+	case "addServerCertificate":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.addServerCertificate(base, project, e)
+			return "sql.instances.addServerCertificate", out, err
+		}
+	case "rotateServerCertificate":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.rotateServerCertificate(r, base, project, e)
+			return "sql.instances.RotateServerCertificate", out, err
+		}
 	case "listServerCas":
 		if len(rest) == 3 && r.Method == http.MethodGet {
 			out, err := s.listServerCas(project, e)
