@@ -88,3 +88,27 @@ func TestBigQueryLoadFormSendsHiveAndGeoJSONOptions(t *testing.T) {
 		t.Errorf("the upload's data: %q", data)
 	}
 }
+
+// TestBigQueryLoadFormSendsFileSetSpecType (#1547): the load form's "Source
+// URIs are" reaches the job's configuration.load as fileSetSpecType; the
+// default sends nothing, and a manifest of a file is refused.
+func TestBigQueryLoadFormSendsFileSetSpecType(t *testing.T) {
+	const spec = "FILE_SET_SPEC_TYPE_NEW_LINE_DELIMITED_MANIFEST"
+	x, err := loadExtrasOf(map[string]string{"format": "CSV", "fileSetSpecType": spec}, true)
+	if err != nil || x == nil {
+		t.Fatalf("loadExtrasOf: %v %v", x, err)
+	}
+	out, err := x.edit("application/json", []byte(`{"configuration":{"load":{"sourceFormat":"CSV"}}}`))
+	if err != nil || !strings.Contains(string(out), `"fileSetSpecType":"`+spec+`"`) {
+		t.Errorf("the job: %s %v", out, err)
+	}
+	if x, err := loadExtrasOf(map[string]string{"format": "CSV", "fileSetSpecType": "FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH"}, true); x != nil || err != nil {
+		t.Errorf("the default: %v %v", x, err)
+	}
+	if _, err := loadExtrasOf(map[string]string{"format": "CSV", "fileSetSpecType": spec}, false); err == nil {
+		t.Error("a manifest of a file was not refused")
+	}
+	if _, err := loadExtrasOf(map[string]string{"format": "CSV", "fileSetSpecType": "X"}, true); err == nil {
+		t.Error("an unknown fileSetSpecType was not refused")
+	}
+}

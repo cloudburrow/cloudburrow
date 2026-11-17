@@ -66,7 +66,7 @@ func fetchJFK(t *testing.T, ctx context.Context) []byte {
 // object's content type stands in), is the same vector, as is a PNG image
 // there; text with the clip is one vector; the console's Embeddings API
 // gives the same vector for the same file_data part; and what is not served
-// (MP3, video, PDF, audio_track_extraction, a missing object or bucket) is refused
+// (video, PDF, audio_track_extraction, a missing object or bucket) is refused
 // naming it.
 func TestEmbedContentEmbedsAudioThroughThePredictionClient(t *testing.T) {
 	h := New(t)
@@ -202,7 +202,6 @@ func TestEmbedContentEmbedsAudioThroughThePredictionClient(t *testing.T) {
 		code  codes.Code
 		field string
 	}{
-		"mp3":         {[]*aiplatformpb.Part{inline("audio/mpeg", []byte{0xff, 0xfb, 0x90, 0})}, nil, codes.InvalidArgument, "audio/mpeg"},
 		"video":       {[]*aiplatformpb.Part{inline("video/mp4", []byte{0})}, nil, codes.InvalidArgument, "inline_data.mime_type"},
 		"pdf":         {[]*aiplatformpb.Part{fileData("application/pdf", uri)}, nil, codes.InvalidArgument, "file_data.mime_type"},
 		"audio track": {[]*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{AudioTrackExtraction: &yes}, codes.InvalidArgument, "audio_track_extraction"},

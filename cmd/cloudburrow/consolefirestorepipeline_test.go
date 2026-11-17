@@ -27,7 +27,7 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 	srv := callfront.Server(callfront.HandlerWith(docsAddr, &calllog.Ring{}, t.Logf, a), t.Logf)
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
-	p := firestoreDatabasesProvider{endpoint: l.Addr().String(), mongo: "127.0.0.1:9025"}
+	p := firestoreDatabasesProvider{endpoint: l.Addr().String(), mongo: "127.0.0.1:9026"}
 	ctx := context.Background()
 
 	if _, err := p.Create(ctx, "p", map[string]string{"database": "entdb", "location": "nam5", "concurrency": "PESSIMISTIC", "edition": "ENTERPRISE"}); err != nil {
@@ -82,7 +82,7 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 	}
 	first := res.Items[0].Fields["Password"]
 	// #1703: the connection string a MongoDB driver authenticates with.
-	const wantCS = "mongodb://app-user:PASSWORD@127.0.0.1:9025/entdb?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false"
+	const wantCS = "mongodb://app-user:PASSWORD@127.0.0.1:9026/entdb?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false"
 	if cs := res.Items[0].Fields["Connection string"]; cs != wantCS {
 		t.Errorf("Create user credentials' connection string = %q, want %q", cs, wantCS)
 	}

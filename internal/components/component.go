@@ -45,6 +45,9 @@ type LifecycleComponent struct {
 	// from (#1392), and the storage server a project's and a folder's
 	// parents (#1532), or "".
 	resourceManager string
+	// onnxRunner is the ONNX runner's in-cluster address (host:port),
+	// which BigQuery's front runs imported ONNX models on (#1711), or "".
+	onnxRunner string
 	// knative is the Knative install running in the background, nil
 	// before it starts; knativeJoined says KnativeReady waits for it
 	// rather than Start (#1588).
@@ -90,6 +93,10 @@ func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStor
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
 func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
+
+// SetONNXRunner records the in-cluster address of the onnx build's ONNX
+// runner, for BigQuery's front (#1711).
+func (c *LifecycleComponent) SetONNXRunner(addr string) { c.onnxRunner = addr }
 
 // SetStorageSigningKeys records the PEM public keys, by service account
 // email, the builtin storage server accepts RSA signed URLs from.
@@ -189,6 +196,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// (#1392).
 					if c.resourceManager != "" {
 						b.Front.Args = append(b.Front.Args, "--resourcemanager", "http://"+c.resourceManager)
+					}
+					// Imported ONNX models run on the onnx build's
+					// runner, through cloudburrow-host (#1711).
+					if c.onnxRunner != "" {
+						b.Front.Args = append(b.Front.Args, "--onnx", "http://"+c.onnxRunner)
 					}
 				}
 				out = append(out, b)

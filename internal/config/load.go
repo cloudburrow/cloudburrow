@@ -199,6 +199,7 @@ type rawFlags struct {
 	logging          int
 	sqladmin         int
 	backupdr         int
+	onnx             int
 	firestore        int
 	datastore        int
 	bigtable         int
@@ -275,11 +276,12 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.logging, "port-logging", 0, "Cloud Logging host port (0 = OS-assigned; default 9009)")
 	fs.IntVar(&r.sqladmin, "port-sqladmin", 0, "Cloud SQL Admin API host port (0 = OS-assigned; default 9020)")
 	fs.IntVar(&r.backupdr, "port-backupdr", 0, "Backup and DR Service API host port (0 = OS-assigned; default 9024)")
+	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
 	fs.IntVar(&r.bigtable, "port-bigtable", 0, "Bigtable emulator host port (0 = OS-assigned; default 9012)")
 	fs.IntVar(&r.spanner, "port-spanner", 0, "Spanner emulator host port (0 = OS-assigned; default 9013)")
-	fs.IntVar(&r.firestoreMongoDB, "port-firestore-mongodb", 0, "Firestore with MongoDB compatibility host port, the MongoDB wire protocol (0 = OS-assigned; default 9025)")
+	fs.IntVar(&r.firestoreMongoDB, "port-firestore-mongodb", 0, "Firestore with MongoDB compatibility host port, the MongoDB wire protocol (0 = OS-assigned; default 9026)")
 	fs.IntVar(&r.spannerREST, "port-spanner-rest", 0, "Spanner emulator REST API host port, which Terraform uses (0 = OS-assigned; default 9022)")
 	fs.IntVar(&r.bigquery, "port-bigquery", 0, "BigQuery emulator REST host port (0 = OS-assigned; default 9014)")
 	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
@@ -476,6 +478,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_LOGGING", &cfg.Endpoints.Logging},
 		{"PORT_SQLADMIN", &cfg.Endpoints.SQLAdmin},
 		{"PORT_BACKUPDR", &cfg.Endpoints.BackupDR},
+		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
@@ -604,6 +607,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-logging", raw.logging, &cfg.Endpoints.Logging},
 		{"port-sqladmin", raw.sqladmin, &cfg.Endpoints.SQLAdmin},
 		{"port-backupdr", raw.backupdr, &cfg.Endpoints.BackupDR},
+		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},

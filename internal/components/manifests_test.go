@@ -421,6 +421,32 @@ func TestStorageServerReachesResourceManager(t *testing.T) {
 	t.Fatal("no storage backend")
 }
 
+// Given the ONNX runner's in-cluster address, BigQuery's front is told it
+// (#1711); without one, nothing is.
+func TestBigQueryFrontReachesTheONNXRunner(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery}
+	for _, addr := range []string{"cloudburrow-host.cloudburrow.svc.cluster.local:9025", ""} {
+		c := NewLifecycleComponent("kc", cfg, io.Discard)
+		c.SetBuiltinStorageImage("img")
+		c.SetONNXRunner(addr)
+		found := false
+		for _, b := range c.Backends() {
+			if b.Name != "bigquery" || b.Front == nil {
+				continue
+			}
+			found = true
+			args := strings.Join(b.Front.Args, " ")
+			if addr != "" && !strings.Contains(args, "--onnx http://"+addr) || addr == "" && strings.Contains(args, "--onnx") {
+				t.Errorf("runner %q: front args %q", addr, args)
+			}
+		}
+		if !found {
+			t.Fatal("no BigQuery front")
+		}
+	}
+}
+
 // TestMemorystoreNodeDir (#1557): a Redis Cluster or Valkey node keeps its
 // files in its formation's directory on its volume, made before the server
 // starts, with the node's own persistence; ephemeral mode has none.

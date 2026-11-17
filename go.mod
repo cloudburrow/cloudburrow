@@ -36,12 +36,15 @@ require (
 	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/golang/geo v0.0.0-20261029132150-f51d36688936
 	github.com/golang/protobuf v1.5.4
 	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.26.2
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/prometheus/client_model v0.6.3
@@ -62,7 +65,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.0
 	golang.org/x/image v0.47.0
 	golang.org/x/mod v0.42.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
 	google.golang.org/api v0.307.0

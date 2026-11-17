@@ -199,3 +199,27 @@ func TestPortBaseCollisionWithAnExplicitPortIsNamed(t *testing.T) {
 		}
 	}
 }
+
+// TestPortBaseFirestoreMongoDBClashIsNamed (#1703): the Firestore MongoDB
+// endpoint took base+26, after the ONNX runner's base+25 (#1711). A config
+// written before it that sets a port to base+26 now fails validation, and the
+// error names both endpoints so the user knows which port to move.
+func TestPortBaseFirestoreMongoDBClashIsNamed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := writeFile(t, dir, "old.json", `{"portBase":26200,"endpoints":{"storage":26226}}`)
+	_, err := Load(Options{Args: []string{"--config", file}, Getenv: envMap(nil), WorkDir: dir})
+	if err == nil {
+		t.Fatal("Load = nil, want a duplicate-port error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"endpoints.storage", "endpoints.firestore-mongodb", "26226", "portBase 26200"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error = %q, want it to contain %q", msg, want)
+		}
+	}
+	d := Default().Endpoints
+	if d.FirestoreMongoDB != DefaultPortBase+26 || d.ONNX != DefaultPortBase+25 {
+		t.Errorf("firestore-mongodb, onnx = %d, %d; want base+26, base+25", d.FirestoreMongoDB, d.ONNX)
+	}
+}

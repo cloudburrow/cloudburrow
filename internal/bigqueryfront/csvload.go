@@ -100,6 +100,16 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 			"to 1 for a file with a header, or leave autodetect off for one without.")
 		return r, next, nil, false
 	}
+	if h, why := csvHiveOf(hiveFilesOf(r), cols, opts.Configuration.Load); why != "" { // #1547, csvhive.go
+		code, reason := http.StatusBadRequest, "invalid"
+		if strings.HasPrefix(why, "!") {
+			code, reason, why = http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why[1:]
+		}
+		writeError(w, code, reason, why+". Nothing was loaded.")
+		return r, next, nil, false
+	} else if h != nil {
+		d.hive = h
+	}
 	skipFirst, skipRest := skip, skip
 	switch {
 	case len(cols) > 0:
@@ -280,6 +290,9 @@ func csvStream(srcs []func() (io.ReadCloser, error), locs []string, d csvDialect
 			}
 			if i < len(locs) {
 				st.loc = locs[i]
+				if d.hive != nil {
+					st.keyVals = d.hive.values(locs[i]) // #1547, csvhive.go
+				}
 			}
 			src, err := open()
 			if err != nil {

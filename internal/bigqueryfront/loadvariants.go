@@ -167,14 +167,13 @@ func (f front) loadVariant(w http.ResponseWriter, r *http.Request) (*http.Reques
 	if h := l.Hive; h != nil {
 		switch format {
 		case "NEWLINE_DELIMITED_JSON":
-		case "PARQUET", "AVRO", "ORC":
+		case "PARQUET", "AVRO":
+		case "ORC":
 			if l.Schema != nil && len(l.Schema.Fields) > 0 {
 				return fail(http.StatusNotImplemented, "a hive-partitioned "+format+" load with a schema: CloudBurrow "+
 					"reads the file by its own schema, with the keys after its columns.")
 			}
-		case "CSV":
-			return fail(http.StatusNotImplemented, "a hive-partitioned "+format+" load: CloudBurrow adds the partition "+
-				"keys to NEWLINE_DELIMITED_JSON records and Parquet, Avro and ORC rows only.")
+		case "CSV": // csvLoad adds the keys to each record (#1547, csvhive.go)
 		default:
 			return fail(http.StatusBadRequest, "Hive partitioning is not supported for sourceFormat "+l.SourceFormat+
 				": \"Currently supported formats are: JSON, CSV, ORC, Avro and Parquet.\"")
@@ -313,13 +312,29 @@ func (f front) loadVariant(w http.ResponseWriter, r *http.Request) (*http.Reques
 		}
 	}
 
-	if format == "PARQUET" || format == "AVRO" || format == "ORC" {
+	if format == "PARQUET" || format == "AVRO" || format == "ORC" || format == "CSV" {
 		// The Parquet, Avro or ORC load the front carries out adds the keys
 		// to each file's rows (parquet.go, parquetload.go, avroload.go,
-		// orcload.go).
+		// orcload.go), and the CSV load to each record (csvhive.go), whose
+		// job is sent on with its schema's keys and without
+		// hivePartitioningOptions.
 		h := &hiveFiles{keys: keys, vals: map[string][]string{}}
 		for _, s := range srcs {
 			h.vals[s.loc] = s.vals
+		}
+		if format == "CSV" {
+			delete(load, "hivePartitioningOptions")
+			if !editJob(r, func(j map[string]any) bool {
+				c, _ := j["configuration"].(map[string]any)
+				if c == nil {
+					return false
+				}
+				c["load"] = load
+				return true
+			}) {
+				return fail(http.StatusInternalServerError, "cloudburrow: could not rewrite the load.")
+			}
+			return r.WithContext(context.WithValue(r.Context(), hiveFilesKey{}, h)), kept, nil, true
 		}
 		return r.WithContext(context.WithValue(r.Context(), hiveFilesKey{}, h)), nil, nil, true
 	}

@@ -171,6 +171,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 	}
+	if onnxRunnerEnabled(cfg) && cfg.Endpoints.ONNX > 0 {
+		// The onnx build's ONNX runner, through cloudburrow-host, runs
+		// BigQuery ML's imported ONNX models for the front (#1711).
+		comps.SetONNXRunner(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.ONNX))
+	}
 	var mysqlCreds components.MySQLCredentials
 	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) {
 		if mysqlCreds, err = loadOrCreateMySQLCredentials(cfg); err != nil {
@@ -660,6 +666,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if localAISrv != nil {
 		coord.Register(localAISrv)
 	}
+	// The onnx build's ONNX runner (#1711), for BigQuery's front; nil in
+	// the default build.
+	onnxRunner := newONNXRunner(cfg, stdout)
+	if onnxRunner != nil {
+		coord.Register(onnxRunner)
+	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
 	// without Cloud Run or BigQuery.
@@ -700,6 +712,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := ingressAddr(); a != "" {
 			live["ingress"] = a
 		}
+		if a := onnxRunner.Addr(); a != "" {
+			live["onnx"] = a
+		}
 		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, hostComp) {
 			live[e.Service] = e.Host
 		}
@@ -712,16 +727,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// With BigQuery or Cloud Storage and no Cloud Run, Resource Manager
 	// alone is published: the BigQuery front reads a project's ancestry
 	// from it (#1392), and the storage server a project's and a folder's
-	// parents (#1532).
+	// parents (#1532). So is the onnx build's ONNX runner, which the
+	// BigQuery front runs imported ONNX models on (#1711).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
-			"sqladmin": true, "cloudsql-connector": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true}
 		if !runEnabled {
-			published = map[string]bool{"resourcemanager": true}
+			published = map[string]bool{"resourcemanager": true, "onnx": true}
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
