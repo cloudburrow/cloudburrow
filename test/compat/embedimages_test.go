@@ -216,15 +216,14 @@ func TestEmbedContentEmbedsImagesThroughThePredictionClient(t *testing.T) {
 		t.Errorf("console: cosine with the SDK's %.6f, %d tokens", cosine(got.Embedding.Values, images[2]), got.UsageMetadata.PromptTokenCount)
 	}
 
-	ocr := true
 	for what, c := range map[string]struct {
 		model string
 		parts []*aiplatformpb.Part
 		cfg   *aiplatformpb.EmbedContentRequest_EmbedContentConfig
 		field string
 	}{
-		"video": {name, []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: "video/mp4", Data: []byte{0}}}}}, nil, "inline_data.mime_type"},
-		"ocr":   {name, []*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &ocr}, "document_ocr"},
+		"video": {name, []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: "video/mp4", Data: []byte{0}}}}}, nil, "not a valid MP4"},
+		"webm":  {name, []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: "video/webm", Data: []byte{0}}}}}, nil, "video/webm"},
 		"text-only model": {"projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel,
 			[]*aiplatformpb.Part{imagePart(pngs[0])}, nil, "content.parts[0]"},
 	} {

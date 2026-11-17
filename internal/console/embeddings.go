@@ -92,6 +92,9 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		"imageMaxPerItem": embedding.MaxImages,
 		// Audio clips (#1651) are sent the same way.
 		"audioMimeTypes": embedding.AudioMIMETypes,
+		"videoMimeTypes": embedding.VideoMIMETypes,
+		// PDF (#1723), whose pages are embedded as images.
+		"documentMimeTypes": []string{embedding.PDFMIMEType},
 		"taskTypes": []string{"RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
 			"CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING", "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY"},
 		"dimensions": []int{768, 512, 256, 128},

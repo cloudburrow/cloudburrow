@@ -5095,6 +5095,7 @@
           "test/compat/embedheic_test.go:45 TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient",
           "test/compat/embedimages_test.go:111 TestEmbedContentEmbedsImagesThroughThePredictionClient",
           "test/compat/embedmp3_test.go:39 TestEmbedContentEmbedsMP3ThroughThePredictionClient",
+          "test/compat/embedvideo_test.go:83 TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient",
           "test/compat/embedwebp_test.go:41 TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient"
         ]
       },
