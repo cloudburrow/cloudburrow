@@ -33,7 +33,8 @@ package firestoreadmin
 // refusal is the same in both editions. Queries are not refused: the
 // Standard emulator answers a filter on such a value, matching nothing.
 // The Write stream (the Firebase client SDKs' channel) is checked request
-// by request (editionstream.go, #1738).
+// by request, over gRPC (editionstream.go, #1738) and over the browser's
+// WebChannel transport (editionchannel.go, #1744).
 
 import (
 	"bytes"
@@ -219,8 +220,9 @@ const maxGuardedBody = 32 << 20
 // EditionGuard refuses Enterprise-only values in a Standard database's
 // documents calls. It is an intercept of the call front.
 type EditionGuard struct {
-	a    *Admin
-	grpc *grpc.Server
+	a        *Admin
+	grpc     *grpc.Server
+	channels channels // the WebChannel Write sessions (editionchannel.go)
 }
 
 // EditionGuard is the guard over a's databases.
@@ -306,13 +308,18 @@ func grpcMessage(b []byte, encoding string) ([]byte, bool) {
 
 // Claims reports whether r is a documents call on a Standard database
 // carrying an Enterprise-only value, or a Write stream, which the guard
-// passes on itself (editionstream.go, #1738).
+// passes on itself: over gRPC (editionstream.go, #1738), and over
+// WebChannel on a Standard database (editionchannel.go, #1744).
 func (g *EditionGuard) Claims(r *http.Request) bool {
-	return claimsWriteStream(r) || g.refusal(r) != nil
+	return claimsWriteStream(r) || g.claimsWriteChannel(r) || g.refusal(r) != nil
 }
 
 // ServeHTTP answers a call Claims claimed with its refusal.
 func (g *EditionGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == writeChannelPath {
+		g.serveWriteChannel(w, r)
+		return
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		g.grpc.ServeHTTP(w, r)
 		return
