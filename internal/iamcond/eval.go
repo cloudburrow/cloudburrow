@@ -31,14 +31,15 @@ type ident struct {
 func (n *ident) check() (ty, error) {
 	switch n.name {
 	case "api", "destination", "principal", "request", "resource", "compute":
-		return "", fmt.Errorf("%s is not supported here as written (column %d); IAM Conditions are evaluated on resource.name, resource.type, resource.service and request.time", n.name, n.pos+1)
+		return "", fmt.Errorf("%s is not an attribute by itself (column %d); name one of its fields or functions", n.name, n.pos+1)
 	}
 	return "", fmt.Errorf("undeclared reference to %q (column %d)", n.name, n.pos+1)
 }
 func (n *ident) eval(*Attributes) (any, error) { return nil, errUnset }
 
-// selectN is an attribute: resource.name, resource.type, resource.service
-// or request.time.
+// selectN is an attribute: resource.name, resource.type, resource.service,
+// request.time, request.path, request.host, request.auth.access_levels,
+// destination.ip or destination.port.
 type selectN struct {
 	x     node
 	field string
@@ -46,23 +47,44 @@ type selectN struct {
 }
 
 func (n *selectN) attr() string {
-	if id, ok := n.x.(*ident); ok {
-		return id.name + "." + n.field
+	switch x := n.x.(type) {
+	case *ident:
+		return x.name + "." + n.field
+	case *selectN:
+		if a := x.attr(); a != "" {
+			return a + "." + n.field
+		}
 	}
 	return ""
 }
 
+// attrTypes are the attributes a role binding's condition may read.
+var attrTypes = map[string]ty{
+	"resource.name":              tyString,
+	"resource.type":              tyString,
+	"resource.service":           tyString,
+	"request.time":               tyTimestamp,
+	"request.path":               tyString,
+	"request.host":               tyString,
+	"request.auth.access_levels": tyList,
+	"destination.ip":             tyString,
+	"destination.port":           tyInt,
+}
+
 func (n *selectN) check() (ty, error) {
-	switch a := n.attr(); a {
-	case "resource.name", "resource.type", "resource.service":
-		return tyString, nil
-	case "request.time":
-		return tyTimestamp, nil
-	case "":
-		return "", fmt.Errorf("unsupported field selection .%s (column %d)", n.field, n.pos+1)
-	default:
-		return "", fmt.Errorf("the attribute %s is not supported here; IAM Conditions are evaluated on resource.name, resource.type, resource.service and request.time", a)
+	a := n.attr()
+	if t, ok := attrTypes[a]; ok {
+		return t, nil
 	}
+	switch {
+	case a == "request.auth":
+		return "", fmt.Errorf("request.auth has no value of its own (column %d); the attribute is request.auth.access_levels", n.pos+1)
+	case a == "principal.type" || a == "principal.subject":
+		return "", fmt.Errorf("%s is a Principal Access Boundary policy attribute; an allow policy's role binding cannot use it (column %d)", a, n.pos+1)
+	case a == "":
+		return "", fmt.Errorf("unsupported field selection .%s (column %d)", n.field, n.pos+1)
+	}
+	return "", fmt.Errorf("undefined field '%s' (column %d): %s is not an IAM Conditions attribute", n.field, n.pos+1, a)
 }
 
 func (n *selectN) eval(a *Attributes) (any, error) {
@@ -79,6 +101,22 @@ func (n *selectN) eval(a *Attributes) (any, error) {
 			return time.Now().UTC(), nil
 		}
 		return a.RequestTime.UTC(), nil
+	case "request.path":
+		s = a.RequestPath
+	case "request.host":
+		s = a.RequestHost
+	case "destination.ip":
+		s = a.DestinationIP
+	case "destination.port":
+		if a.DestinationPort == 0 {
+			return nil, errUnset
+		}
+		return a.DestinationPort, nil
+	case "request.auth.access_levels":
+		if a.AccessLevels == nil {
+			return nil, errUnset
+		}
+		return strList(a.AccessLevels), nil
 	}
 	if s == "" {
 		return nil, errUnset
@@ -348,9 +386,76 @@ var timeGetters = map[string]func(t time.Time) int64{
 	"getSeconds":      func(t time.Time) int64 { return int64(t.Second()) },
 }
 
+// namespaceFn is the function a call on a bare namespace names
+// (resource.matchTag, api.getAttribute, compute.*), or "".
+func (n *call) namespaceFn() string {
+	if id, ok := n.recv.(*ident); ok {
+		return id.name + "." + n.fn
+	}
+	return ""
+}
+
+// checkNamespace types a call on a bare namespace; api.getAttribute is
+// its default's type.
+func (n *call) checkNamespace(ns string, ats []ty, sig func() error) (ty, error) {
+	strs := func(k int) bool {
+		if len(ats) != k {
+			return false
+		}
+		for _, t := range ats {
+			if t != tyString {
+				return false
+			}
+		}
+		return true
+	}
+	switch ns {
+	case "resource.hasTagKey", "resource.hasTagKeyId":
+		if !strs(1) {
+			return "", sig()
+		}
+		return tyBool, nil
+	case "resource.matchTag", "resource.matchTagId":
+		if !strs(2) {
+			return "", sig()
+		}
+		return tyBool, nil
+	case "api.getAttribute":
+		if len(ats) != 2 || ats[0] != tyString {
+			return "", sig()
+		}
+		if l, ok := n.args[1].(*list); ok && len(l.elems) != 0 && n.argString(0) == "iam.googleapis.com/modifiedGrantsByRole" {
+			return "", fmt.Errorf("api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', ...)'s default must be [] (column %d)", n.pos+1)
+		}
+		return ats[1], nil
+	case "compute.isForwardingRuleCreationOperation":
+		if len(ats) != 0 {
+			return "", sig()
+		}
+		return tyBool, nil
+	case "compute.matchLoadBalancingSchemes":
+		if len(ats) != 1 || ats[0] != tyList {
+			return "", sig()
+		}
+		return tyBool, nil
+	}
+	return "", fmt.Errorf("undeclared reference to '%s' (column %d)", ns, n.pos+1)
+}
+
+// argString is the i'th argument when it is a string literal.
+func (n *call) argString(i int) string {
+	if l, ok := n.args[i].(*lit); ok {
+		if s, ok := l.v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 func (n *call) check() (ty, error) {
 	var rt ty
-	if n.recv != nil {
+	ns := n.namespaceFn()
+	if n.recv != nil && ns == "" {
 		t, err := n.recv.check()
 		if err != nil {
 			return "", err
@@ -376,6 +481,9 @@ func (n *call) check() (ty, error) {
 		return fmt.Errorf("found no matching overload for '%s' applied to (%s) (column %d)", n.fn, strings.Join(parts, ", "), n.pos+1)
 	}
 	one := func(t ty) bool { return len(ats) == 1 && ats[0] == t }
+	if ns != "" {
+		return n.checkNamespace(ns, ats, sig)
+	}
 	switch {
 	case n.recv == nil && (n.fn == "timestamp" || n.fn == "date"):
 		if !one(tyString) {
@@ -402,6 +510,11 @@ func (n *call) check() (ty, error) {
 			}
 		}
 		return tyString, nil
+	case n.recv != nil && n.fn == "hasOnly":
+		if rt != tyList || !one(tyList) {
+			return "", sig()
+		}
+		return tyBool, nil
 	case n.recv != nil && timeGetters[n.fn] != nil:
 		if rt != tyTimestamp || len(ats) > 1 || (len(ats) == 1 && ats[0] != tyString) {
 			return "", sig()
@@ -415,6 +528,9 @@ func (n *call) check() (ty, error) {
 }
 
 func (n *call) eval(a *Attributes) (any, error) {
+	if ns := n.namespaceFn(); ns != "" {
+		return n.evalNamespace(ns, a)
+	}
 	var recv any
 	if n.recv != nil {
 		v, err := n.recv.eval(a)
@@ -444,6 +560,20 @@ func (n *call) eval(a *Attributes) (any, error) {
 		return strings.HasSuffix(recv.(string), args[0].(string)), nil
 	case "extract":
 		return extract(recv.(string), args[0].(string))
+	case "hasOnly":
+		for _, v := range recv.([]any) {
+			found := false
+			for _, w := range args[0].([]any) {
+				if equal(v, w) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, nil
+			}
+		}
+		return true, nil
 	}
 	t := recv.(time.Time)
 	if len(args) == 1 {
@@ -521,4 +651,74 @@ func extract(name, tpl string) (string, error) {
 		return "", nil
 	}
 	return rest[:e], nil
+}
+
+// evalNamespace evaluates resource.*, api.* and compute.* functions.
+func (n *call) evalNamespace(ns string, a *Attributes) (any, error) {
+	args := make([]any, len(n.args))
+	for i, x := range n.args {
+		v, err := x.eval(a)
+		if err != nil {
+			return nil, err
+		}
+		args[i] = v
+	}
+	switch ns {
+	case "resource.hasTagKey", "resource.hasTagKeyId", "resource.matchTag", "resource.matchTagId":
+		if !a.TagsKnown {
+			return nil, errUnset
+		}
+		for _, t := range a.Tags {
+			var ok bool
+			switch ns {
+			case "resource.hasTagKey":
+				ok = t.NamespacedKey == args[0]
+			case "resource.hasTagKeyId":
+				ok = t.KeyID == args[0]
+			case "resource.matchTag":
+				ok = t.NamespacedKey == args[0] && t.ShortValue == args[1]
+			case "resource.matchTagId":
+				ok = t.KeyID == args[0] && t.ValueID == args[1]
+			}
+			if ok {
+				return true, nil
+			}
+		}
+		return false, nil
+	case "api.getAttribute":
+		v, ok := a.API[args[0].(string)]
+		if !ok {
+			return args[1], nil
+		}
+		if l, ok := v.([]string); ok {
+			return strList(l), nil
+		}
+		return v, nil
+	case "compute.isForwardingRuleCreationOperation":
+		if a.ForwardingRule == nil {
+			return nil, errUnset
+		}
+		return a.ForwardingRule.Creation, nil
+	case "compute.matchLoadBalancingSchemes":
+		if a.ForwardingRule == nil {
+			return nil, errUnset
+		}
+		for _, s := range a.ForwardingRule.Schemes {
+			for _, w := range args[0].([]any) {
+				if s == w {
+					return true, nil
+				}
+			}
+		}
+		return false, nil
+	}
+	return nil, fmt.Errorf("no function %s", ns)
+}
+
+func strList(l []string) []any {
+	out := make([]any, len(l))
+	for i, s := range l {
+		out[i] = s
+	}
+	return out
 }

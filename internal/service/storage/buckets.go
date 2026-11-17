@@ -679,6 +679,7 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			}
 			// The merge below edits b.Fields in place: read the pause first.
 			prior := pauseStateOf(b)
+			wasUniform := uniformAccess(b)
 			next := kept(body)
 			old := map[string]any{"softDeletePolicy": copySoftDeletePolicy(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"])}
 			if loc, ok := next["location"].(string); ok && !strings.EqualFold(loc, b.Fields["location"].(string)) {
@@ -723,6 +724,9 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			}
 			if err := checkHierarchical(next); err != nil {
 				return err
+			}
+			if b.Policy.conditional() && wasUniform && !uniformAccess(bucketRecord{Fields: next}) {
+				return badRequest("Invalid argument: uniform bucket-level access cannot be disabled while the bucket's IAM policy has conditional role bindings.")
 			}
 			toggled, err := prior.check(b.Name, next, s.now())
 			if err != nil {

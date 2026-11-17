@@ -597,6 +597,14 @@ func (s *Server) managedFoldersSetIamPolicy(w http.ResponseWriter, r *http.Reque
 		if f, err = s.existingManagedFolder(tx, bucket, name); err != nil {
 			return err
 		}
+		if err := resolveHashes(&p, f.Policy); err != nil {
+			return err
+		}
+		// Google does not list managed folders among the resources whose
+		// allow policies accept conditions (#1745).
+		if p.conditional() {
+			return badRequest("Invalid argument: a managed folder's IAM policy does not accept conditional role bindings; set the condition on the bucket's policy instead.")
+		}
 		next, err := nextPolicy(f.Policy, p, sentETag)
 		if err != nil {
 			return err

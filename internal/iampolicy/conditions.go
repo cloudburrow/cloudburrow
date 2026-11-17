@@ -54,6 +54,10 @@ const MaxConditionsPerRoleAndPrincipal = 20
 // roles/iam.securityReviewer_withcond_58e135cabb940ad9346c.
 const withCond = "_withcond_"
 
+// modifiedGrantsByRole is the API attribute Google accepts only in
+// project, folder and organization policies.
+const modifiedGrantsByRole = "iam.googleapis.com/modifiedGrantsByRole"
+
 func (c *Condition) proto() *expr.Expr {
 	return &expr.Expr{Title: c.Title, Description: c.Description, Expression: c.Expression}
 }
@@ -72,7 +76,7 @@ func (b Binding) Grants(attrs iamcond.Attributes) bool {
 
 // checkConditions applies the policy-wide rules: conditions only where
 // they are served, version 3 for them, and no mix of conditions and hashes.
-func checkConditions(p *iampb.Policy, allowed bool) error {
+func checkConditions(p *iampb.Policy, sc scope) error {
 	cond, hash := -1, -1
 	for i, b := range p.GetBindings() {
 		if b.GetCondition() != nil && cond < 0 {
@@ -83,8 +87,8 @@ func checkConditions(p *iampb.Policy, allowed bool) error {
 		}
 	}
 	switch {
-	case cond >= 0 && !allowed:
-		return apierror.Unimplemented("policy.bindings[%d].condition: IAM Conditions are not supported on this resource", cond)
+	case cond >= 0 && sc == scopeNoConditions:
+		return apierror.InvalidArgument("policy.bindings[%d].condition: this resource type does not accept conditional role bindings; grant the role under a condition on its project, folder or organization instead", cond)
 	case cond >= 0 && hash >= 0:
 		return apierror.InvalidArgument("Policy cannot contain both conditions and condition hashes")
 	case cond >= 0 && p.GetVersion() != 3:
@@ -95,7 +99,7 @@ func checkConditions(p *iampb.Policy, allowed bool) error {
 
 // binding validates the i'th binding and returns it to store, its
 // condition restored from current when its role carries a condition hash.
-func binding(i int, b *iampb.Binding, current *Stored) (Binding, error) {
+func binding(i int, b *iampb.Binding, current *Stored, sc scope) (Binding, error) {
 	out := Binding{Role: b.GetRole(), Members: slices.Clone(b.GetMembers())}
 	if c := b.GetCondition(); c != nil {
 		if c.GetTitle() == "" {
@@ -106,6 +110,9 @@ func binding(i int, b *iampb.Binding, current *Stored) (Binding, error) {
 		}
 		if _, err := iamcond.Compile(c.GetExpression()); err != nil {
 			return Binding{}, apierror.InvalidArgument("policy.bindings[%d].condition.expression is invalid: %v", i, err)
+		}
+		if sc != scopeHierarchy && strings.Contains(c.GetExpression(), modifiedGrantsByRole) {
+			return Binding{}, apierror.InvalidArgument("policy.bindings[%d].condition.expression: the API attribute %s is accepted only in the allow policies of projects, folders and organizations", i, modifiedGrantsByRole)
 		}
 		out.Condition = &Condition{Title: c.GetTitle(), Description: c.GetDescription(), Expression: c.GetExpression()}
 		return out, nil

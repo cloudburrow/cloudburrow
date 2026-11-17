@@ -23,7 +23,7 @@ func TestIAMUsers(t *testing.T) {
 				{Hash: "ee", Email: "dev@example.com"},
 			}
 		},
-		Members: func(project, role string) []string {
+		Members: func(project, _, role string) []string {
 			asked = append(asked, project+" "+role)
 			return []string{"serviceAccount:ok@p.iam.gserviceaccount.com", "user:dev@example.com", "group:g@example.com"}
 		},

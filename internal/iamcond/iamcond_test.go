@@ -60,20 +60,29 @@ func TestEval(t *testing.T) {
 
 func TestCompileErrors(t *testing.T) {
 	for src, want := range map[string]string{
-		``:                                      "unexpected",
-		`resource.name ==`:                      "unexpected",
-		`resource.name == "a`:                   "unterminated",
-		`resource.name`:                         "must be a boolean",
-		`request.path == "/x"`:                  "not supported",
-		`api.getAttribute("x", "") == "y"`:      "not supported",
-		`foo == 1`:                              "undeclared",
-		`resource.name == 1`:                    "no matching overload",
-		`resource.name.contains("a")`:           "no matching overload",
-		`request.time < "2026"`:                 "no matching overload",
-		`resource.name.extract("a/b") == ""`:    "placeholder",
-		`unknownFn("a")`:                        "undeclared",
-		`resource.name == "a" $`:                "unexpected character",
-		strings.Repeat(`true && `, 13) + `true`: "logical operators",
+		``:                    "unexpected",
+		`resource.name ==`:    "unexpected",
+		`resource.name == "a`: "unterminated",
+		`resource.name`:       "must be a boolean",
+		`principal.type == "iam.googleapis.com/ServiceAccount"`: "Principal Access Boundary",
+		`principal.subject.startsWith("a")`:                     "Principal Access Boundary",
+		`request.foo == "x"`:                                    "undefined field",
+		`resource.hasTagKey(1)`:                                 "no matching overload",
+		`resource.matchTag("k")`:                                "no matching overload",
+		`api.getAttribute("x") == "y"`:                          "no matching overload",
+		`api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', ['a']).hasOnly(['a'])`: "must be []",
+		`compute.isForwardingRuleCreationOperation(1)`:                                      "no matching overload",
+		`destination.port == "22"`:                                                          "no matching overload",
+		`request.auth == "x"`:                                                               "request.auth.access_levels",
+		`resource.unknownTagFn("a")`:                                                        "undeclared",
+		`foo == 1`:                                                                          "undeclared",
+		`resource.name == 1`:                                                                "no matching overload",
+		`resource.name.contains("a")`:                                                       "no matching overload",
+		`request.time < "2026"`:                                                             "no matching overload",
+		`resource.name.extract("a/b") == ""`:                                                "placeholder",
+		`unknownFn("a")`:                                                                    "undeclared",
+		`resource.name == "a" $`:                                                            "unexpected character",
+		strings.Repeat(`true && `, 13) + `true`:                                             "logical operators",
 	} {
 		_, err := Compile(src)
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -82,5 +91,66 @@ func TestCompileErrors(t *testing.T) {
 	}
 	if _, err := Compile(strings.Repeat(`true && `, 12) + `true`); err != nil {
 		t.Errorf("12 logical operators: %v", err)
+	}
+}
+
+func TestEvalRemainingAttributes(t *testing.T) {
+	a := Attributes{
+		Tags:          []Tag{{NamespacedKey: "123456789012/env", ShortValue: "prod", KeyID: "tagKeys/111", ValueID: "tagValues/222"}},
+		TagsKnown:     true,
+		RequestPath:   "/admin/users",
+		RequestHost:   "app.example.com",
+		AccessLevels:  []string{"accessPolicies/1/accessLevels/corp"},
+		DestinationIP: "10.0.0.5", DestinationPort: 22,
+		API:            map[string]any{"iam.googleapis.com/modifiedGrantsByRole": []string{"roles/pubsub.editor"}},
+		ForwardingRule: &ForwardingRule{Creation: true, Schemes: []string{"INTERNAL"}},
+	}
+	for _, c := range []struct {
+		src  string
+		want bool
+	}{
+		{`resource.hasTagKey("123456789012/env")`, true},
+		{`resource.hasTagKey("123456789012/team")`, false},
+		{`resource.hasTagKeyId("tagKeys/111")`, true},
+		{`resource.matchTag("123456789012/env", "prod")`, true},
+		{`resource.matchTag("123456789012/env", "dev")`, false},
+		{`resource.matchTagId("tagKeys/111", "tagValues/222")`, true},
+		{`request.path.startsWith("/admin/")`, true},
+		{`request.path == "/admin"`, false},
+		{`request.host.endsWith(".example.com")`, true},
+		{`"accessPolicies/1/accessLevels/corp" in request.auth.access_levels`, true},
+		{`"accessPolicies/1/accessLevels/home" in request.auth.access_levels`, false},
+		{`destination.ip == "10.0.0.5" && destination.port < 1024`, true},
+		{`api.getAttribute("iam.googleapis.com/modifiedGrantsByRole", []).hasOnly(["roles/pubsub.editor", "roles/pubsub.publisher"])`, true},
+		{`api.getAttribute("iam.googleapis.com/modifiedGrantsByRole", []).hasOnly(["roles/pubsub.publisher"])`, false},
+		{`api.getAttribute("mcp.googleapis.com/tool.name", "") == ""`, true},
+		{`api.getAttribute("mcp.googleapis.com/tool.isReadOnly", false)`, false},
+		{`!compute.isForwardingRuleCreationOperation() || (compute.isForwardingRuleCreationOperation() && compute.matchLoadBalancingSchemes(["INTERNAL", "INTERNAL_MANAGED"]))`, true},
+		{`compute.matchLoadBalancingSchemes(["EXTERNAL"])`, false},
+	} {
+		e, err := Compile(c.src)
+		if err != nil {
+			t.Errorf("Compile(%s): %v", c.src, err)
+			continue
+		}
+		if got := e.Eval(a); got != c.want {
+			t.Errorf("Eval(%s) = %v, want %v", c.src, got, c.want)
+		}
+	}
+	// Where the check does not supply an attribute, its part grants nothing.
+	for _, src := range []string{
+		`resource.hasTagKey("123456789012/env")`,
+		`!resource.hasTagKey("123456789012/env")`,
+		`request.path.startsWith("/")`,
+		`"x" in request.auth.access_levels || !("x" in request.auth.access_levels)`,
+		`destination.port > 0`,
+		`compute.isForwardingRuleCreationOperation()`,
+	} {
+		if Eval(src, Attributes{}) {
+			t.Errorf("Eval(%s) without the attribute granted", src)
+		}
+	}
+	if !Eval(`api.getAttribute("iam.googleapis.com/modifiedGrantsByRole", []).hasOnly([])`, Attributes{}) {
+		t.Error("an undefined API attribute did not return its default")
 	}
 }

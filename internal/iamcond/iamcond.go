@@ -1,8 +1,8 @@
 // Package iamcond compiles and evaluates the condition of an IAM policy
-// binding (#1742): the subset of CEL Google's IAM Conditions accept, with
-// the attributes and functions Google's "Attribute reference for IAM
-// Conditions" documents for resource.name, resource.type, resource.service
-// and request.time.
+// binding (#1742, #1745): the subset of CEL Google's IAM Conditions accept,
+// with every attribute and function Google's "Attribute reference for IAM
+// Conditions" (docs.cloud.google.com/iam/docs/conditions-attribute-reference,
+// read 2026-11-17) documents for an allow policy's role binding.
 //
 // Supported, as that page lists them:
 //
@@ -11,6 +11,10 @@
 //     binding's condition expression");
 //   - resource.name: ==, !=, startsWith(), endsWith(), extract();
 //   - resource.type and resource.service: == and !=;
+//   - resource tags: resource.hasTagKey(key), resource.hasTagKeyId(id),
+//     resource.matchTag(key, value) and resource.matchTagId(keyID,
+//     valueID), over the resource's effective tags (its own bindings and
+//     those it inherits);
 //   - request.time: <, <=, >, >=, == and !=, against timestamp("RFC 3339"),
 //     date("YYYY-MM-DD"), and either of them plus or minus duration("Ns");
 //     getDate, getDayOfMonth, getDayOfWeek, getDayOfYear, getFullYear,
@@ -18,21 +22,30 @@
 //     with an optional time zone (UTC by default), with the ranges the
 //     page gives (getDate is 1-based, getDayOfMonth 0-based, Sunday is 0,
 //     January is 0);
+//   - request.path and request.host (strings: IAP for App Engine and
+//     Cloud Run), request.auth.access_levels (a list of strings: IAP),
+//     destination.ip (a string) and destination.port (an integer: IAP TCP
+//     forwarding);
+//   - api.getAttribute(name, default), whose type is its default's, and a
+//     list's hasOnly(list);
+//   - compute.isForwardingRuleCreationOperation() and
+//     compute.matchLoadBalancingSchemes(list);
 //   - string, integer and boolean literals, parentheses, and `in` against
-//     a list literal.
+//     a list.
 //
-// Compile refuses anything else: another attribute (request.path,
-// request.host, resource tags, api.getAttribute, destination.*,
-// principal.*), which a resource here never supplies, and so a condition
-// naming it could never be evaluated as Google evaluates it; another
-// function; and an expression that is not a boolean.
+// principal.type and principal.subject are Principal Access Boundary
+// attributes: the page documents them for that policy's bindings only,
+// and Compile refuses them in a role binding. Compile also refuses
+// another attribute or function, and an expression that is not a boolean.
 //
 // Evaluation follows Google's allow policies: a role is granted only when
 // its condition evaluates to true. An expression that cannot be evaluated
 // (an invalid timestamp() argument, an unknown time zone, an attribute the
-// checked resource does not have) grants nothing ("If the input parameter
-// is invalid, then the condition will never allow access to any
-// resource").
+// checked request or resource does not have: request.path on a request
+// that is not IAP's, tags where the check does not know them) grants
+// nothing ("If the input parameter is invalid, then the condition will
+// never allow access to any resource"; "the part of the expression using
+// it never grants access").
 package iamcond
 
 import (
@@ -55,6 +68,46 @@ type Attributes struct {
 	ResourceType    string
 	ResourceService string
 	RequestTime     time.Time
+
+	// Tags are the resource's effective tags, read only when TagsKnown:
+	// a check that does not know them grants nothing on a tag condition.
+	Tags      []Tag
+	TagsKnown bool
+
+	// RequestPath and RequestHost are an IAP request's URL path and host.
+	RequestPath string
+	RequestHost string
+	// AccessLevels are the Access Context Manager levels an IAP request
+	// satisfies; nil when the request is not IAP's.
+	AccessLevels []string
+	// DestinationIP and DestinationPort are an IAP TCP forwarding
+	// tunnel's destination; 0 is no port.
+	DestinationIP   string
+	DestinationPort int64
+
+	// API are the request's API attributes (api.getAttribute): a list of
+	// strings is a []string; a key absent here returns the default.
+	API map[string]any
+
+	// ForwardingRule is set on a Compute Engine request: whether it
+	// creates a forwarding rule, and the load balancing schemes it
+	// affects.
+	ForwardingRule *ForwardingRule
+}
+
+// Tag is one effective tag of a resource: its namespaced key and short
+// value (resource.matchTag), and their permanent IDs (resource.matchTagId).
+type Tag struct {
+	NamespacedKey string // "123456789012/env"
+	ShortValue    string // "prod"
+	KeyID         string // "tagKeys/123"
+	ValueID       string // "tagValues/456"
+}
+
+// ForwardingRule is what compute.* conditions read.
+type ForwardingRule struct {
+	Creation bool
+	Schemes  []string
 }
 
 // Expr is a compiled condition.

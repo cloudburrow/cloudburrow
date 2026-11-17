@@ -17,6 +17,7 @@ import (
 	"time"
 
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
@@ -664,7 +665,7 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 			}
 			return out
 		},
-		Members: func(project, role string) []string {
+		Members: func(project, resource, role string) []string {
 			var reg *resourcemanager.Registry
 			if registry != nil {
 				reg = registry()
@@ -677,12 +678,21 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 				return nil
 			}
 			var out []string
-			// A conditional binding (#1742) counts where its condition
-			// holds now without resource attributes: a condition on
-			// request.time is evaluated, one that reads resource.* is not
-			// (the sign-in does not say which instance), and grants
-			// nothing.
-			attrs := iamcond.Attributes{RequestTime: time.Now()}
+			// A conditional binding (#1742, #1745) counts where its
+			// condition holds now for this cluster or instance: request.time
+			// and its effective tags are evaluated; resource.* is not
+			// (Google: Memorystore does not recognize resource
+			// attributes), and grants nothing.
+			attrs := iamcond.Attributes{RequestTime: time.Now(), TagsKnown: true}
+			service := "//redis.googleapis.com/"
+			if strings.Contains(resource, "/instances/") {
+				service = "//memorystore.googleapis.com/"
+			}
+			if tags, err := reg.EffectiveTags(service + resource); err == nil {
+				attrs.Tags = condTags(tags)
+			} else {
+				attrs.TagsKnown = false
+			}
 			for _, b := range p.Bindings {
 				if b.Role == role && b.Grants(attrs) {
 					out = append(out, b.Members...)
@@ -691,4 +701,17 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 			return out
 		},
 	}
+}
+
+// condTags are effective tags as internal/iamcond reads them.
+func condTags(tags []*rmpb.EffectiveTag) []iamcond.Tag {
+	out := make([]iamcond.Tag, 0, len(tags))
+	for _, t := range tags {
+		short := t.GetNamespacedTagValue()
+		if i := strings.LastIndex(short, "/"); i >= 0 {
+			short = short[i+1:]
+		}
+		out = append(out, iamcond.Tag{NamespacedKey: t.GetNamespacedTagKey(), ShortValue: short, KeyID: t.GetTagKey(), ValueID: t.GetTagValue()})
+	}
+	return out
 }

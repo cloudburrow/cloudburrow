@@ -463,7 +463,7 @@ func (kmsEkmProvider) PolicyOn(_ context.Context, path []string) *console.Policy
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "cloud-kms--googlecloudkmsv1",
-		RoleHelp: roleHelp("Cloud KMS", "roles/cloudkms.ekmConnectionsAdmin")}
+		RoleHelp: roleHelp("Cloud KMS", "roles/cloudkms.ekmConnectionsAdmin"), Conditions: true}
 }
 
 func (p kmsEkmProvider) ekmIAM(project string, path []string) (iamServer, string, error) {

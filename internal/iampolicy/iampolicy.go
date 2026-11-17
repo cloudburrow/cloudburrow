@@ -10,8 +10,10 @@
 //   - IAM Conditions (#1742) are stored on the resources whose policies
 //     Resource Manager keeps (projects, folders and the organization,
 //     through SetWithAuditConfigs), with Google's policy version rules
-//     (conditions.go); every other service refuses them UNIMPLEMENTED,
-//     with the field named. Audit configs are UNIMPLEMENTED too, except through
+//     (conditions.go), and (#1745) on the resources of the services Google
+//     lists as allowing conditions (SetConditional); every other service
+//     refuses them INVALID_ARGUMENT, with the field named, as Google refuses
+//     a condition where it does not accept one. Audit configs are UNIMPLEMENTED too, except through
 //     SetWithAuditConfigs, which the resources Google keeps them on (projects,
 //     folders and the organization, #1486) call: there they are stored, as
 //     update_mask says, and, as everything here, configure nothing. A version 3 policy without
@@ -131,9 +133,23 @@ func Get(current *Stored, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
 
 // Set applies a SetIamPolicy request to the current policy and returns the
 // policy to store. The caller stores it only when this returns no error.
-// Audit configs are UNIMPLEMENTED, naming the field.
+// Audit configs are UNIMPLEMENTED, naming the field. It is for a resource
+// whose service Google does not list under "Services that allow
+// conditions" (docs.cloud.google.com/iam/docs/resource-types-with-conditional-roles):
+// a conditional binding is INVALID_ARGUMENT, naming it (#1745).
 func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
-	return apply(current, req, false)
+	return apply(current, req, scopeNoConditions)
+}
+
+// SetConditional is Set for a resource whose service Google lists as
+// allowing conditions in its resources' allow policies (#1745): Bigtable,
+// BigQuery, Cloud KMS, Cloud Logging, Cloud Run, Secret Manager, Spanner,
+// and Cloud Storage buckets with uniform bucket-level access. Conditional
+// bindings are stored with the version rules of conditions.go, except the
+// iam.googleapis.com/modifiedGrantsByRole API attribute, which Google's
+// attribute reference accepts on projects, folders and organizations only.
+func SetConditional(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
+	return apply(current, req, scopeResource)
 }
 
 // SetWithAuditConfigs also stores conditions (#1742): the resources that
@@ -146,10 +162,20 @@ func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
 // whose mask does not name audit_configs, keeps the stored audit configs.
 // They are stored, never acted on: no audit log is written or withheld.
 func SetWithAuditConfigs(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
-	return apply(current, req, true)
+	return apply(current, req, scopeHierarchy)
 }
 
-func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored, error) {
+// scope is what a resource's policy accepts.
+type scope int
+
+const (
+	scopeNoConditions scope = iota // no conditions, no audit configs
+	scopeResource                  // conditions, no audit configs
+	scopeHierarchy                 // conditions and audit configs
+)
+
+func apply(current *Stored, req *iampb.SetIamPolicyRequest, sc scope) (Stored, error) {
+	audit := sc == scopeHierarchy
 	masked := map[string]bool{}
 	for _, path := range req.GetUpdateMask().GetPaths() {
 		switch path {
@@ -185,7 +211,7 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		return Stored{}, apierror.Unimplemented("policy.audit_configs: audit configs are not supported")
 	}
 	var bindings []Binding
-	if err := checkConditions(p, audit); err != nil {
+	if err := checkConditions(p, sc); err != nil {
 		return Stored{}, err
 	}
 	for i, b := range p.GetBindings() {
@@ -196,7 +222,7 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		if len(b.GetMembers()) == 0 {
 			continue
 		}
-		nb, err := binding(i, b, current)
+		nb, err := binding(i, b, current, sc)
 		if err != nil {
 			return Stored{}, err
 		}

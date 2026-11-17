@@ -48,7 +48,7 @@ func (spannerProvider) PolicyOn(_ context.Context, path []string) *console.Polic
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "optional-services",
-		RoleHelp: roleHelp("Spanner", "roles/spanner.databaseReader")}
+		RoleHelp: roleHelp("Spanner", "roles/spanner.databaseReader"), Conditions: true}
 }
 
 // withSpannerIAM calls fn with the instance or database admin client and
