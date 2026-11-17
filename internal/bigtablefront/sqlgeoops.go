@@ -15,7 +15,7 @@ import (
 // ST_SIMPLIFY, as https://cloud.google.com/bigtable/docs/reference/sql/geography_functions
 // documents them (read 2026-11-17).
 //
-// UNVERIFIED (2026-11-17, https://cloud.google.com/bigtable/docs/reference/sql/geography_functions):
+// UNVERIFIED (docs re-read 2026-11-17: https://cloud.google.com/bigtable/docs/reference/sql/geography_functions):
 // the reference prints results for its examples only. Beyond them, which
 // lower-dimensional pieces survive where boundaries merely touch (two
 // polygons sharing only an edge intersect in a line in GoogleSQL; here in
