@@ -48,8 +48,20 @@ func describeChangeMutation(m *bigtablepb.Mutation) string {
 	return fmt.Sprintf("%T", m.GetMutation())
 }
 
+// changeType is a DataChange's type as the section shows it: a write or
+// delete a client sent, or a cell garbage collection removed.
+func changeType(t bigtablepb.ReadChangeStreamResponse_DataChange_Type) string {
+	switch t {
+	case bigtablepb.ReadChangeStreamResponse_DataChange_USER:
+		return "User"
+	case bigtablepb.ReadChangeStreamResponse_DataChange_GARBAGE_COLLECTION:
+		return "Garbage collection"
+	}
+	return t.String()
+}
+
 func (p bigtableProvider) changeStreamSection(ctx context.Context, project, table string) console.Section {
-	out := console.Listing{Columns: []string{"Commit time", "Mutations"}, NameColumn: "Row key", Noun: "changes"}
+	out := console.Listing{Columns: []string{"Commit time", "Type", "Mutations"}, NameColumn: "Row key", Noun: "changes"}
 	sec := console.Section{ID: "changestream", Label: "Change stream", Listing: out}
 	if project == "" {
 		return sec
@@ -129,7 +141,8 @@ func (p bigtableProvider) changeStreamSection(ctx context.Context, project, tabl
 		}
 		if cur == nil {
 			cur = &console.Resource{Name: bigtableCellValue(dc.GetRowKey()), Fields: map[string]string{
-				"Commit time": dc.GetCommitTimestamp().AsTime().UTC().Format(time.RFC3339Nano)}}
+				"Commit time": dc.GetCommitTimestamp().AsTime().UTC().Format(time.RFC3339Nano),
+				"Type":        changeType(dc.GetType())}}
 			muts = nil
 		}
 		for _, ch := range dc.GetChunks() {

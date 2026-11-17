@@ -1201,7 +1201,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleBigtableSQLSnapshotsBundlesAndViews", "TestBigtableLogicalViewAndSnapshotThroughTheBrowser"}},
 	{Resource: "Bigtable change streams", Service: "bigtable",
 		Methods:  []string{"Bigtable/GenerateInitialChangeStreamPartitions", "Bigtable/ReadChangeStream"},
-		Provider: "bigtable", Offers: "Edit change stream on a table's page (its retention in days or as a duration, 0 to disable, prefilled from the table) and the table's Change stream section: the changes of the last hour, newest first, each row key with its commit time and mutations, read from the stream's partition (#1523)",
+		Provider: "bigtable", Offers: "Edit change stream on a table's page (its retention in days or as a duration, 0 to disable, prefilled from the table) and the table's Change stream section: the changes of the last hour, newest first, each row key with its commit time, its type (User or Garbage collection) and mutations, read from the stream's partition (#1523)",
 		Tests: []string{"TestBigtableConsoleEditsTheChangeStream", "TestConsoleBigtableChangeStream", "TestBigtableChangeStreamThroughThePage"}},
 	{Resource: "Bigtable undelete table", Service: "bigtable",
 		Methods:  []string{"BigtableTableAdmin/UndeleteTable"},

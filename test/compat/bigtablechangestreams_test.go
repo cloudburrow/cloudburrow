@@ -210,7 +210,7 @@ func TestBigtableChangeStreams(t *testing.T) {
 		}
 		last = at
 	}
-	want := []string{`r1: set f:q="v1"`, `r2: set f:q="a"`, `r3: set g:x="b"`, `r2: delcol f:q`, `r3: delfam f, delfam g`, `r1: set f:q="v1+"`, `r1: set f:c="matched"`}
+	want := []string{`r1: set f:q="v1"`, `r2: set f:q="a"`, `r3: set g:x="b"`, `r2: delcol f:q`, `r3: delfam g`, `r1: set f:q="v1+"`, `r1: set f:c="matched"`}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("the change stream holds\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -277,6 +277,115 @@ func TestBigtableChangeStreams(t *testing.T) {
 	}
 	if after := restarts(); after != before {
 		t.Errorf("the Bigtable pod's restarts went from %s to %s", before, after)
+	}
+}
+
+// TestBigtableChangeStreamGarbageCollectionAndDropRowRange (#1523): on a
+// table created with garbage collection rules and a change stream through
+// the official admin client, the cells the rules collect are read back
+// from the change stream as GARBAGE_COLLECTION records with no source
+// cluster, a DeleteFromColumn of each collected cell, and DropRowRange
+// (the official admin client's DropRowRange) as a USER record of each row
+// it deleted, a DeleteFromFamily of each family where the row had data, as
+// Google's change stream overview lists both among the changes recorded.
+//
+// covers: google.bigtable.v2.Bigtable/ReadChangeStream
+func TestBigtableChangeStreamGarbageCollectionAndDropRowRange(t *testing.T) {
+	h := New(t)
+	t.Setenv("BIGTABLE_EMULATOR_HOST", h.Endpoint(EnvBigtable))
+	ctx := h.Context()
+	admin, err := bigtable.NewAdminClient(ctx, h.Project(), bigtableInstance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	if err := admin.CreateTableFromConf(ctx, &bigtable.TableConf{TableID: "collected", ChangeStreamRetention: 24 * time.Hour,
+		Families: map[string]bigtable.GCPolicy{"v": bigtable.MaxVersionsPolicy(1), "a": bigtable.MaxAgePolicy(time.Hour), "n": bigtable.NoGcPolicy()}}); err != nil {
+		t.Fatalf("CreateTable with rules and a change stream: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.DeleteTable(context.Background(), "collected") })
+	c, err := bigtable.NewClient(ctx, h.Project(), bigtableInstance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	d := bigtableStreamStub(t, h)
+	name := fmt.Sprintf("projects/%s/instances/%s/tables/collected", h.Project(), bigtableInstance)
+	tbl := c.Open("collected")
+	start := time.Now().Add(-5 * time.Second) // the front's clock may trail (TestBigtableChangeStreams)
+	m := bigtable.NewMutation()
+	m.Set("v", "q", bigtable.Timestamp(1000), []byte("old"))
+	m.Set("v", "q", bigtable.Timestamp(2000), []byte("new"))
+	m.Set("n", "q", bigtable.Timestamp(1000), []byte("kept"))
+	m.Set("n", "q", bigtable.Timestamp(2000), []byte("kept too"))
+	m.Set("a", "q", bigtable.Timestamp(3000), []byte("aged"))
+	if err := tbl.Apply(ctx, "r", m); err != nil {
+		t.Fatal(err)
+	}
+	read := func() []*bigtablepb.ReadChangeStreamResponse_DataChange {
+		t.Helper()
+		dcs, _, err := readBigtableStream(ctx, d, &bigtablepb.ReadChangeStreamRequest{TableName: name, Partition: &bigtablepb.StreamPartition{
+			RowRange: &bigtablepb.RowRange{}}, StartFrom: &bigtablepb.ReadChangeStreamRequest_StartTime{StartTime: timestamppb.New(start)},
+			EndTime: timestamppb.New(time.Now().Add(-time.Second))})
+		if err != nil {
+			t.Fatalf("ReadChangeStream: %v", err)
+		}
+		return dcs
+	}
+	var got []string
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(time.Second) {
+		got = nil
+		for _, dc := range read() {
+			if dc.GetType() != bigtablepb.ReadChangeStreamResponse_DataChange_GARBAGE_COLLECTION {
+				continue
+			}
+			if dc.GetSourceClusterId() != "" {
+				t.Errorf("GARBAGE_COLLECTION record from cluster %q, want none", dc.GetSourceClusterId())
+			}
+			for _, ch := range dc.GetChunks() {
+				dfc := ch.GetMutation().GetDeleteFromColumn()
+				if dfc == nil {
+					t.Fatalf("GARBAGE_COLLECTION mutation %v, want a DeleteFromColumn", ch.GetMutation())
+				}
+				got = append(got, fmt.Sprintf("%s %s:%s %d", dc.GetRowKey(), dfc.GetFamilyName(), dfc.GetColumnQualifier(), dfc.GetTimeRange().GetStartTimestampMicros()))
+			}
+		}
+		if len(got) >= 2 {
+			break
+		}
+	}
+	if want := "r a:q 3000\nr v:q 1000"; strings.Join(got, "\n") != want {
+		t.Fatalf("GARBAGE_COLLECTION records:\n%s\nwant\n%s", strings.Join(got, "\n"), want)
+	}
+	if r, err := tbl.ReadRow(ctx, "r"); err != nil || len(r["v"]) != 1 || len(r["n"]) != 2 || len(r["a"]) != 0 {
+		t.Fatalf("the row after garbage collection = %v, %v", r, err)
+	}
+
+	for row, fams := range map[string][]string{"p1": {"n", "v"}, "p2": {"n"}, "q1": {"n"}} {
+		m := bigtable.NewMutation()
+		for _, fam := range fams {
+			m.Set(fam, "c", bigtable.Now(), []byte("x"))
+		}
+		if err := tbl.Apply(ctx, row, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := admin.DropRowRange(ctx, "collected", "p"); err != nil {
+		t.Fatalf("DropRowRange: %v", err)
+	}
+	time.Sleep(2500 * time.Millisecond) // past the read's end time
+	var drops []string
+	for _, dc := range read() {
+		if dc.GetType() == bigtablepb.ReadChangeStreamResponse_DataChange_USER && strings.HasPrefix(string(dc.GetRowKey()), "p") &&
+			dc.GetChunks()[0].GetMutation().GetDeleteFromFamily() != nil {
+			drops = append(drops, bigtableChange(dc))
+		}
+	}
+	if want := "p1: delfam n, delfam v\np2: delfam n"; strings.Join(drops, "\n") != want {
+		t.Fatalf("DropRowRange records:\n%s\nwant\n%s", strings.Join(drops, "\n"), want)
+	}
+	if r, err := tbl.ReadRow(ctx, "q1"); err != nil || len(r["n"]) != 1 {
+		t.Fatalf("q1, outside the range, = %v, %v", r, err)
 	}
 }
 

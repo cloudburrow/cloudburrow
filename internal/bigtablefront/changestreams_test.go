@@ -131,7 +131,7 @@ func TestChangeStreamRecordsTheWrites(t *testing.T) {
 	if err := tbl.Apply(ctx, "r1", bigtable.NewCondMutation(bigtable.FamilyFilter("f"), yes, no)); err != nil {
 		t.Fatal(err)
 	}
-	// DropRowRange is not recorded.
+	// DropRowRange of no row records nothing.
 	if err := ac.DropRowRange(ctx, "cs", "zz"); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestChangeStreamRecordsTheWrites(t *testing.T) {
 		`r2: set f:q="a"`,
 		`r3: set g:x="b"`,
 		`r2: delcol f:q`,
-		`r3: delfam f, delfam g`,
+		`r3: delfam g`,
 		`r1: set f:q="v1+"`,
 		`r1: set f:c="matched"`,
 	}
