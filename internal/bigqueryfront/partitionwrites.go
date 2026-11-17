@@ -52,7 +52,10 @@ import (
 // `$__UNPARTITIONED__` of a column- or range-partitioned table take the
 // rows of that partition only. 501: `$__UNPARTITIONED__` of an
 // ingestion-time partitioned table (its streaming buffer,
-// streamingbuffer.go; BigQuery documents no write to it), a destination
+// streamingbuffer.go; BigQuery documents no write to it: re-read
+// 2026-11-17, managing-partitioned-tables says only that __NULL__ and
+// __UNPARTITIONED__ cannot be deleted, managing-partitioned-table-data
+// that they can be exported), a destination
 // of another project or that does not exist. A query that is not one
 // SELECT is refused, as BigQuery refuses a destination for a DML statement
 // ("You cannot specify a destination table for the query",
