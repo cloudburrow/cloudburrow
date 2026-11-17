@@ -40,7 +40,9 @@ import (
 // The nodes gossip on their pod addresses; each serves its clients on a
 // port that is the same in the cluster and on the host, and announces the
 // host's address to clients (cluster-announce-client-ipv4), so a cluster
-// client on the host follows CLUSTER SLOTS and MOVED to the right node.
+// client on the host follows CLUSTER SLOTS and MOVED to the right node; a
+// runtime that is ClientAddrsByFamily gives in-cluster clients addresses of
+// their own (#1614).
 // discovery_endpoints is the first primary's address.
 //
 // The slots are spread evenly over the primaries at create; a change of
@@ -59,6 +61,16 @@ import (
 // AUTH_MODE_IAM_AUTH a client sends an access token as its AUTH string,
 // which the nodes take only when this instance minted it for a principal
 // the project grants roles/redis.dbConnectionUser (iamauth.go, #1614).
+
+// ClientAddrsByFamily is a ClusterRuntime whose nodes serve host clients
+// and in-cluster clients each an address of their own (#1614): ClientAddrs
+// is what a node announces to clients connecting over IPv4, its Service's
+// cluster IP, which the pods reach, and over IPv6, ::1, the host's
+// loopback its tunnel listens on too, which the tunnel's connections come
+// in over. "" and "" when the node announces the host's address alone.
+type ClientAddrsByFamily interface {
+	ClientAddrs(server string) (ipv4, ipv6 string)
+}
 
 // ClusterRuntime runs the nodes of a cluster.
 type ClusterRuntime interface {
@@ -992,7 +1004,16 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 	for _, n := range nodes {
 		cl := c.dial(n.addr, r.password(), r.TransitCA)
 		host, _ := splitAddr(n.addr, "", 0)
-		_, err := cl.Do(ctx, "CONFIG", "SET", "cluster-announce-client-ipv4", host)
+		v4, v6 := host, ""
+		if fa, ok := c.rt.(ClientAddrsByFamily); ok {
+			if a4, a6 := fa.ClientAddrs(n.Server); a4 != "" && a6 != "" {
+				v4, v6 = a4, a6
+			}
+		}
+		_, err := cl.Do(ctx, "CONFIG", "SET", "cluster-announce-client-ipv4", v4)
+		if err == nil && v6 != "" {
+			_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-announce-client-ipv6", v6)
+		}
 		if err != nil && strings.Contains(err.Error(), "nknown option") {
 			// Valkey 7.2 (#1557) has no cluster-announce-client-ipv4:
 			// clients are given the host's address as the node's hostname.

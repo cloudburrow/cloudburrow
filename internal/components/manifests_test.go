@@ -463,3 +463,22 @@ func TestMemorystoreNodeDir(t *testing.T) {
 		t.Errorf("ephemeral node args = %q", e.Args)
 	}
 }
+
+// A cluster node of an instance bound to 127.0.0.1 binds its pod's address
+// and ::1 alone (#1614), whichever way the image's entrypoint is started.
+func TestMemorystoreNodePodAndLoopback6(t *testing.T) {
+	for _, s := range []MemorystoreSettings{
+		{Name: "n", MaxMemory: 1 << 30, PodAndLoopback6: true},
+		{Name: "n", Persistent: true, MaxMemory: 1 << 30, Dir: "/data/g3", PodAndLoopback6: true},
+		{Name: "n", MaxMemory: 1 << 30, TLSCert: "c", TLSKey: "k", TLSCA: "a", PodAndLoopback6: true},
+	} {
+		b := MemorystoreServerOf(s)
+		if b.Args[0] != "sh" || b.Args[1] != "-c" || strings.Count(b.Args[2], `--bind "$(hostname -i)" ::1`) != 1 ||
+			!strings.HasSuffix(b.Args[2], `exec docker-entrypoint.sh "$@"`+memorystoreBindPodAndLoopback6) {
+			t.Errorf("args of %+v = %q", s.Dir+s.TLSCert, b.Args)
+		}
+	}
+	if b := MemorystoreServerOf(MemorystoreSettings{Name: "n", MaxMemory: 1 << 30}); strings.Contains(strings.Join(b.Args, " "), "--bind") {
+		t.Errorf("a server bound as before has args %q", b.Args)
+	}
+}

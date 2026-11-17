@@ -244,12 +244,15 @@ type memorystoreProvisioner struct {
 	// roleServices are the role Services applied, by base, and their port
 	// (#1614).
 	roleServices map[string]int
+	// clusterIPs are the cluster nodes' Services' cluster IPs, by server,
+	// the address a node announces to in-cluster clients (#1614).
+	clusterIPs map[string]string
 }
 
 func newMemorystoreProvisioner(cfg config.Config, bg context.Context) *memorystoreProvisioner {
 	return &memorystoreProvisioner{cfg: cfg, bg: bg, ready: make(chan struct{}), tunnels: map[string]*netfwd.Forwarder{},
-		roleServices: map[string]int{},
-		installer:    &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
+		roleServices: map[string]int{}, clusterIPs: map[string]string{},
+		installer: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
 }
 
 // waitCluster returns once the server `up` runs is reachable through its
@@ -347,7 +350,20 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		cfg[k] = v
 	}
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version], Dir: spec.Dir}
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version], Dir: spec.Dir,
+		PodAndLoopback6: p.byFamily()}
+	clusterIP := ""
+	if settings.PodAndLoopback6 {
+		// The node's Service first, for its cluster IP, which the node
+		// announces to in-cluster clients, and which its certificate names.
+		b := components.MemorystoreServerOf(settings)
+		b.Port, b.PortName = port, spec.PortName
+		ip, err := p.applyNodeService(ctx, b)
+		if err != nil {
+			return "", "", 0, err
+		}
+		clusterIP = ip
+	}
 	if spec.TransitCA != "" {
 		// In-transit encryption (#1549): TLS only, on the node's one port,
 		// with a certificate of the cluster's CA for the host's address,
@@ -362,6 +378,9 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 			services = append(services, base+"-primary", base+"-reader")
 		}
 		names := []string{p.cfg.BindAddress}
+		if clusterIP != "" {
+			names = append(names, "::1", clusterIP)
+		}
 		for _, n := range services {
 			names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
 		}
@@ -382,19 +401,64 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 	if err != nil || strings.TrimSpace(ip) == "" {
 		return "", "", 0, fmt.Errorf("pod IP of %s: %v", spec.Server, err)
 	}
-	f = netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: port, HostPort: port},
-		p.cfg.KubeconfigPath(), p.cfg.BindAddress)
+	f = netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: port, HostPort: port,
+		Loopback6: settings.PodAndLoopback6}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
 	if err := f.Start(p.bg); err != nil {
 		return "", "", 0, fmt.Errorf("tunnel to %s: %w", spec.Server, err)
 	}
 	p.mu.Lock()
 	old := p.tunnels[spec.Server]
 	p.tunnels[spec.Server] = f
+	if clusterIP != "" {
+		p.clusterIPs[spec.Server] = clusterIP
+	}
 	p.mu.Unlock()
 	if old != nil {
 		_ = old.Stop(ctx)
 	}
 	return f.HostAddr(), strings.TrimSpace(ip), port, nil
+}
+
+// byFamily is whether cluster nodes serve host clients and in-cluster
+// clients each an address of their own (#1614): when the instance binds
+// 127.0.0.1, its tunnels also listen on ::1, which the nodes announce to
+// the clients the tunnels bring in, over IPv6, and the nodes announce their
+// Services' cluster IPs to the pods' clients, over IPv4. Neither address
+// is on any network. An instance bound elsewhere (--allow-remote) announces
+// that address to every client, as before.
+func (p *memorystoreProvisioner) byFamily() bool {
+	return p.cfg.BindAddress == "127.0.0.1"
+}
+
+// ClientAddrs is redisadmin.ClientAddrsByFamily.
+func (p *memorystoreProvisioner) ClientAddrs(server string) (string, string) {
+	if !p.byFamily() {
+		return "", ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if ip := p.clusterIPs[server]; ip != "" {
+		return ip, "::1"
+	}
+	return "", ""
+}
+
+// applyNodeService applies b's Service alone and returns its cluster IP.
+func (p *memorystoreProvisioner) applyNodeService(ctx context.Context, b components.Backend) (string, error) {
+	m := b.Manifest(p.cfg.Cluster.Namespace, p.cfg.Name)
+	const sep = "---\napiVersion: v1\nkind: Service\n"
+	i := strings.Index(m, sep)
+	if i < 0 {
+		return "", fmt.Errorf("node %s: no Service in its manifest", b.Name)
+	}
+	if err := p.installer.Apply(ctx, m[i+4:]); err != nil {
+		return "", err
+	}
+	ip, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "get", "service", b.Name, "-o", "jsonpath={.spec.clusterIP}")
+	if err != nil || net.ParseIP(strings.TrimSpace(ip)) == nil {
+		return "", fmt.Errorf("the cluster IP of node %s: %v %q", b.Name, err, ip)
+	}
+	return strings.TrimSpace(ip), nil
 }
 
 // memorystoreNodeNumber ends a Memorystore for Valkey node's server name

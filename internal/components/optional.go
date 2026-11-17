@@ -632,7 +632,19 @@ type MemorystoreSettings struct {
 	// appendonly, it is the node's persistence and the mode's own
 	// append-only file is not added.
 	Dir string
+	// PodAndLoopback6 binds the server to its pod's address and to ::1
+	// only, not to 127.0.0.1 (#1614): a host tunnel (kubectl port-forward)
+	// then reaches it over IPv6, as the kubelet's port forwarding dials
+	// localhost over IPv4 first and over IPv6 when nothing listens there,
+	// while pods reach it over IPv4; a Redis Cluster node announces a
+	// client address per family (cluster-announce-client-ipv4, -ipv6), so
+	// host clients and in-cluster clients are each given one they reach.
+	PodAndLoopback6 bool
 }
+
+// memorystoreBindPodAndLoopback6 is the bind PodAndLoopback6 adds:
+// hostname -i is the pod's address, from the hosts file the kubelet writes.
+const memorystoreBindPodAndLoopback6 = ` --bind "$(hostname -i)" ::1`
 
 // MemorystoreTLSPort is the port a Memorystore server with in-transit
 // encryption serves TLS on, as Memorystore's does (#1413).
@@ -759,6 +771,14 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
 		b.Port = tlsPort
 		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
+	}
+	if o.PodAndLoopback6 {
+		if len(b.Args) > 2 && b.Args[0] == "sh" {
+			b.Args = append([]string{}, b.Args...)
+			b.Args[2] = strings.Replace(b.Args[2], `exec docker-entrypoint.sh "$@"`, `exec docker-entrypoint.sh "$@"`+memorystoreBindPodAndLoopback6, 1)
+		} else {
+			b.Args = append([]string{"sh", "-c", `exec docker-entrypoint.sh "$@"` + memorystoreBindPodAndLoopback6, "sh"}, b.Args...)
+		}
 	}
 	return b
 }
