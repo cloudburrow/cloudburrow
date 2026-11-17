@@ -357,6 +357,9 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
+
+		// A group of its own, so its long name leaves the others' alignment.
+		"MEMORYSTORE_RESOURCEMANAGER": "127.0.0.1:9007",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {

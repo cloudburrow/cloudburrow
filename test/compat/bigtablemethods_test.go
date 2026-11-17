@@ -363,9 +363,17 @@ func TestBigtableSessions(t *testing.T) {
 
 	closed = true
 	_ = c.Close()
+	// A session is logged when its stream ends, which the front sees only
+	// after Close has returned (measured 1.5 to 4 ms later): main run
+	// 44100175052 read the log first and found no OpenTable session yet.
 	for _, method := range []string{"OpenTable", "OpenAuthorizedView"} {
-		if bigtableCalls(t, endpoint, start, "/google.bigtable.v2.Bigtable/"+method, "") == 0 {
-			t.Errorf("no %s session is logged", method)
+		deadline := time.Now().Add(10 * time.Second)
+		for bigtableCalls(t, endpoint, start, "/google.bigtable.v2.Bigtable/"+method, "") == 0 {
+			if time.Now().After(deadline) {
+				t.Errorf("no %s session is logged 10s after Close", method)
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 

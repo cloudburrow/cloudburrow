@@ -385,7 +385,7 @@ default credentials resolve to the fixture rather than to your own login; the su
 |---|---|---|
 | Pub/Sub | `PUBSUB_EMULATOR_HOST`, read by the client | none: a plaintext channel |
 | Firestore | `FIRESTORE_EMULATOR_HOST`, read by the client | the emulator's `Bearer owner` token |
-| Cloud Storage | `apiEndpoint` set to the value of `STORAGE_EMULATOR_HOST`, **with the variable unset** | none, with a custom endpoint |
+| Cloud Storage | `apiEndpoint` set to the value of `STORAGE_EMULATOR_HOST`, **with the variable unset** | none: `authClient: new PassThroughClient()` (`@google-cloud/storage` 9 authenticates a custom endpoint too) |
 | Cloud Tasks | `apiEndpoint` and `port` from `CLOUDBURROW_TASKS_ENDPOINT`, and `sslCreds: grpc.credentials.createInsecure()` | none: a plaintext channel |
 | Secret Manager | the same, from `CLOUDBURROW_SECRETMANAGER_ENDPOINT` | none: a plaintext channel |
 
@@ -394,12 +394,22 @@ uses the variable verbatim as the JSON API's base URL, so `POST /b` reaches the 
 501; it would need `/storage/v1` appended. It also uses the same value as the upload URL, which
 must not have that path, so no single value works for both. Pass it as `apiEndpoint`, as the
 client's own source advises, and take it out of the environment, where the client would still
-read it:
+read it. Since `@google-cloud/storage` 9 the client authenticates every request, custom endpoint
+or not, and ignores `useAuthWithCustomEndpoint`
+([googleapis/google-cloud-node#9873](https://github.com/googleapis/google-cloud-node/issues/9873)):
+with application default credentials it would fetch a token from `oauth2.googleapis.com`. Give it
+google-auth-library's `PassThroughClient`, which sends none:
 
 ```js
+import { PassThroughClient } from 'google-auth-library';
+
 const apiEndpoint = process.env.STORAGE_EMULATOR_HOST;
 delete process.env.STORAGE_EMULATOR_HOST;
-const storage = new Storage({ apiEndpoint, projectId: process.env.GOOGLE_CLOUD_PROJECT });
+const storage = new Storage({
+  apiEndpoint,
+  projectId: process.env.GOOGLE_CLOUD_PROJECT,
+  authClient: new PassThroughClient(),
+});
 ```
 
 Setting `apiEndpoint` alone is not enough for Cloud Tasks and Secret Manager: the client still

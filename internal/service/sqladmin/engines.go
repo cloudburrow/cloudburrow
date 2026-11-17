@@ -315,6 +315,31 @@ func (m *MySQL) exec(ctx context.Context, stmts ...string) error {
 	return nil
 }
 
+// execUnlogged runs statements, in order, on one connection with
+// sql_log_bin off: Cloud SQL's own housekeeping, which neither writes to
+// the binary log nor gives the server a GTID, so neither a replica nor a
+// GTID consistency check sees it.
+func (m *MySQL) execUnlogged(ctx context.Context, stmts ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
+	defer cancel()
+	db, err := m.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return myError(err)
+	}
+	defer conn.Close()
+	for _, s := range append([]string{"SET SESSION sql_log_bin = 0"}, stmts...) {
+		if _, err := conn.ExecContext(ctx, s); err != nil {
+			return myError(err)
+		}
+	}
+	return nil
+}
+
 func (m *MySQL) InstalledVersion(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
 	defer cancel()

@@ -5217,7 +5217,7 @@
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
           "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
-          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:149 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
@@ -5451,7 +5451,7 @@
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:266 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption",
-          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:149 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
@@ -5642,7 +5642,7 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
-          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:149 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
