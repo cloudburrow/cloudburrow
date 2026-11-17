@@ -392,3 +392,115 @@ func TestDNNOptionsOneStepByHand(t *testing.T) {
 		}
 	})
 }
+
+// TestWideDeepOneStepByHand (#1562): a DNN_LINEAR_COMBINED_REGRESSOR's
+// output is the network's plus its linear part's on the input columns,
+// trained jointly: one step of each part's own optimizer on the gradient
+// of the batch's mean squared error, against central differences of the
+// loss written out here (SGD, each part its learn rate), and the linear
+// part's documented default, FTRL, against TensorFlow's update in closed
+// form from its zero start: z = g, n = 0.1 + g², w = -z·lr/√n.
+func TestWideDeepOneStepByHand(t *testing.T) {
+	X := [][]float64{{1, -0.5, 0.25}, {1, 1.5, -1}, {1, 0.75, 0.5}}
+	Y := []float64{1, -2, 0.5}
+	o := defaultMLOptions()
+	o.ModelType, o.Activation, o.MaxIterations, o.HiddenUnits = "DNN_LINEAR_COMBINED_REGRESSOR", "TANH", 1, []int{2}
+	o.Optimizer, o.LearnRate, o.LinearOptimizer, o.LinearLearnRate = "SGD", 0.1, "SGD", 0.05
+	var tr mlTrained
+	if fe := tr.trainDNN(o, X, Y, nil, nil, false, 1); fe != nil {
+		t.Fatal(fe.msg)
+	}
+	if tr.DNN.Wide == nil {
+		t.Fatal("no linear part")
+	}
+	deep := dnnInitByHand("TANH", []int{2, 2, 1})
+	wide := []float64{0, 0, 0} // the linear part's weights, then its bias
+	loss := func() float64 {
+		var s float64
+		for i, x := range X {
+			l0, l1 := deep.Layers[0], deep.Layers[1]
+			z := l1.B[0] + wide[2] + wide[0]*x[1] + wide[1]*x[2]
+			for j := range l0.B {
+				z += l1.W[0][j] * math.Tanh(l0.B[j]+dot(l0.W[j], x[1:]))
+			}
+			s += (z - Y[i]) * (z - Y[i])
+		}
+		return s / float64(len(X))
+	}
+	const h = 1e-6
+	grad := func(p *float64) float64 {
+		w0 := *p
+		*p = w0 + h
+		up := loss()
+		*p = w0 - h
+		down := loss()
+		*p = w0
+		return (up - down) / (2 * h)
+	}
+	eachWeight(deep, tr.DNN, func(name string, p, q *float64) {
+		if want := *p - o.LearnRate*grad(p); math.Abs(*q-want) > 1e-7 {
+			t.Errorf("deep weight %s: %v, want %v", name, *q, want)
+		}
+	})
+	got := []float64{tr.DNN.Wide.W[0][0], tr.DNN.Wide.W[0][1], tr.DNN.Wide.B[0]}
+	for i := range wide {
+		if want := -o.LinearLearnRate * grad(&wide[i]); math.Abs(got[i]-want) > 1e-7 {
+			t.Errorf("linear weight %d: %v, want %v", i, got[i], want)
+		}
+	}
+	// The forward pass and its SQL agree on the linear part.
+	if z := tr.DNN.forward(X[0][1:])[0]; math.IsNaN(z) {
+		t.Errorf("forward: %v", z)
+	}
+	if from, _ := tr.DNN.dnnFrom("src", []string{"a", "b"}); !strings.Contains(from, sqlF(tr.DNN.Wide.W[0][0])+" * a") {
+		t.Errorf("dnnFrom has no linear part: %s", from)
+	}
+
+	// FTRL on the linear part, its one step from zero.
+	o.LinearOptimizer = "FTRL"
+	var tf mlTrained
+	_ = tf.trainDNN(o, X, Y, nil, nil, false, 1)
+	for i := range wide {
+		g := grad(&wide[i])
+		if want := -g * o.LinearLearnRate / math.Sqrt(0.1+g*g); math.Abs([]float64{tf.DNN.Wide.W[0][0], tf.DNN.Wide.W[0][1], tf.DNN.Wide.B[0]}[i]-want) > 1e-7 {
+			t.Errorf("FTRL linear weight %d: want %v", i, want)
+		}
+	}
+}
+
+// TestParseWideDeepOptions (#1562): the wide-and-deep page's defaults
+// (optimizer [STRUCT('dnn', 'ADAM'), STRUCT('linear', 'FTRL')], learn_rate
+// 0.001 for both), a value a part, a single value for both, and what it
+// refuses.
+func TestParseWideDeepOptions(t *testing.T) {
+	parse := func(sql string) (mlOptions, int) {
+		toks, _ := lex(sql)
+		d, _, code, _ := parseModelDDL(toks, sql)
+		return d.opts, code
+	}
+	o, code := parse("CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor') AS SELECT 1")
+	if code != 0 || o.Optimizer != "ADAM" || o.LinearOptimizer != "FTRL" || o.LearnRate != 0.001 || o.LinearLearnRate != 0.001 {
+		t.Errorf("defaults: %d %+v", code, o)
+	}
+	o, code = parse("CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_classifier', optimizer=[STRUCT('dnn', 'adagrad'), STRUCT('linear', 'sgd')], " +
+		"learn_rate=[STRUCT('dnn', 0.001), STRUCT('linear', 0.01)], l1_reg=0.1) AS SELECT 1")
+	if code != 0 || o.Optimizer != "ADAGRAD" || o.LinearOptimizer != "SGD" || o.LearnRate != 0.001 || o.LinearLearnRate != 0.01 {
+		t.Errorf("a value a part: %d %+v", code, o)
+	}
+	o, code = parse("CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor', optimizer='sgd', learn_rate=0.2) AS SELECT 1")
+	if code != 0 || o.Optimizer != "SGD" || o.LinearOptimizer != "SGD" || o.LearnRate != 0.2 || o.LinearLearnRate != 0.2 {
+		t.Errorf("one value for both: %d %+v", code, o)
+	}
+	for _, bad := range []string{
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor', l1_reg=0.1) AS SELECT 1", // ADAM's DNN part
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor', optimizer=[STRUCT('wide', 'SGD')]) AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor', learn_rate=[STRUCT('dnn', -1)]) AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_linear_combined_regressor', category_encoding_method='ONE_HOT_ENCODING') AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_regressor', optimizer=[STRUCT('dnn', 'SGD')]) AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='dnn_regressor', enable_global_explain=TRUE) AS SELECT 1",
+	} {
+		if _, code := parse(bad); code != 400 {
+			t.Errorf("%s: %d, want 400", bad, code)
+		}
+	}
+}

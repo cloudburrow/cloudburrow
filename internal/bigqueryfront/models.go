@@ -263,7 +263,8 @@ func (md bqModel) resource(full bool) map[string]any {
 			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION", "BOOSTED_TREE_REGRESSOR": "BOOSTED_TREE_REGRESSOR",
 			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS",
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
-			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER"}[md.Options.ModelType],
+			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
+			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -686,17 +687,24 @@ type modelDDL struct {
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
 // why.
 var unsupportedModelTypes = map[string]string{
-	"DNN_LINEAR_COMBINED_REGRESSOR":  "its wide-and-deep network's split of the features between the linear and the deep part is Google's, undocumented in the detail a faithful result needs",
-	"DNN_LINEAR_COMBINED_CLASSIFIER": "its wide-and-deep network's split of the features between the linear and the deep part is Google's, undocumented in the detail a faithful result needs",
-	"AUTOML_REGRESSOR":               "AutoML is Google's service (Vertex AI)",
-	"AUTOML_CLASSIFIER":              "AutoML is Google's service (Vertex AI)",
-	"ARIMA_PLUS_XREG":                "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
-	"TENSORFLOW":                     "an imported TensorFlow model runs on Google's infrastructure",
-	"TENSORFLOW_LITE":                "an imported TensorFlow Lite model runs on Google's infrastructure",
-	"ONNX":                           "an imported ONNX model runs on Google's infrastructure",
-	"XGBOOST":                        "an imported XGBoost model runs on Google's infrastructure",
-	"CONTRIBUTION_ANALYSIS":          "its analysis is Google's",
-	"TRANSFORM_ONLY":                 "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
+	"AUTOML_REGRESSOR":  "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
+	"AUTOML_CLASSIFIER": "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
+	"ARIMA_PLUS_XREG":   "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
+	// An imported model (#1562, measured): no CloudBurrow build has a
+	// TensorFlow or XGBoost runtime, and the ONNX Runtime is loaded only
+	// by the opt-in `-tags onnx` build, for Vertex AI embeddings.
+	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
+	"TENSORFLOW_LITE":       "an imported TensorFlow Lite model needs the TensorFlow Lite runtime, which CloudBurrow's BigQuery does not have",
+	"ONNX":                  "an imported ONNX model needs the ONNX Runtime, which only CloudBurrow's opt-in `-tags onnx` build loads, for Vertex AI embeddings, not its BigQuery",
+	"XGBOOST":               "an imported XGBoost model needs the XGBoost runtime, which CloudBurrow does not have",
+	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
+	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
+}
+
+// refusedModelType is the 501 of a model type CloudBurrow refuses.
+func refusedModelType(typ, why string) string {
+	return "Not implemented here: model_type " + typ + ": " + why +
+		". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, DNN_LINEAR_COMBINED_REGRESSOR / DNN_LINEAR_COMBINED_CLASSIFIER, AUTOENCODER and ARIMA_PLUS models. Nothing was run."
 }
 
 // parseModelDDL reads stmt as CREATE MODEL or DROP MODEL. isModel is
@@ -757,8 +765,8 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 			d.transform = items
 			i = end + 1
 		case stmt[i].is("INPUT"), stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
-			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Vertex AI or Cloud AI endpoint through a " +
-				"Cloud resource connection, which CloudBurrow has none of. Nothing was run."
+			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Google-hosted Vertex AI or Cloud AI endpoint through a " +
+				"Cloud resource connection of the BigQuery Connection API, which CloudBurrow does not serve. Nothing was run."
 		}
 	}
 	d.opts = defaultMLOptions()
@@ -770,7 +778,19 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		if end < 0 {
 			return d, true, 400, "Syntax error: unclosed OPTIONS"
 		}
-		if c, m := parseModelOptions(stmt[i+2:end], &d.opts); c != 0 {
+		opts := stmt[i+2 : end]
+		// A refused model type's reason comes before that of an option
+		// only it takes, such as an imported model's model_path (#1562).
+		for k := 0; k+2 < len(opts); k++ {
+			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
+				if typ, ok := unquoteString(opts[k+2].text); ok {
+					if why, refused := unsupportedModelTypes[strings.ToUpper(typ)]; refused {
+						return d, true, 501, refusedModelType(strings.ToUpper(typ), why)
+					}
+				}
+			}
+		}
+		if c, m := parseModelOptions(opts, &d.opts); c != 0 {
 			return d, true, c, m
 		}
 		i = end + 1
@@ -779,8 +799,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		return d, true, 400, "CREATE MODEL requires the model_type option"
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
-		return d, true, 501, "Not implemented here: model_type " + d.opts.ModelType + ": " + why +
-			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, AUTOENCODER and ARIMA_PLUS models. Nothing was run."
+		return d, true, 501, refusedModelType(d.opts.ModelType, why)
 	}
 	if c, m := checkModelOptions(d.opts); c != 0 {
 		return d, true, c, m
@@ -1395,7 +1414,12 @@ var modelTypeOptions = map[string][]string{
 		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},
 	"DNN_REGRESSOR": {"input_label_cols", "optimizer", "l1_reg", "l2_reg", "max_iterations", "learn_rate", "early_stop", "min_rel_progress",
 		"data_split_method", "data_split_eval_fraction", "data_split_col", "category_encoding_method", "hidden_units", "activation_fn",
-		"batch_size", "dropout", "warm_start", "enable_global_explain"},
+		"batch_size", "dropout", "warm_start"},
+	// The wide-and-deep page's option list (#1562), which has no
+	// category_encoding_method.
+	"DNN_LINEAR_COMBINED_REGRESSOR": {"input_label_cols", "optimizer", "l1_reg", "l2_reg", "max_iterations", "learn_rate", "early_stop",
+		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col", "hidden_units", "activation_fn",
+		"batch_size", "dropout", "warm_start"},
 	"AUTOENCODER": {"optimizer", "learn_rate", "activation_fn", "batch_size", "dropout", "hidden_units", "early_stop", "min_rel_progress",
 		"max_iterations", "warm_start", "l1_reg_activation"},
 	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
@@ -1405,7 +1429,7 @@ var modelTypeOptions = map[string][]string{
 // checkModelOptions refuses an option the model type does not take, and
 // a combination BigQuery documents as invalid.
 func checkModelOptions(o mlOptions) (int, string) {
-	if o.AutoClassWeights && o.ModelType != "DNN_CLASSIFIER" {
+	if o.AutoClassWeights && o.ModelType != "DNN_CLASSIFIER" && o.ModelType != "DNN_LINEAR_COMBINED_CLASSIFIER" {
 		return 501, "Not implemented here: CREATE MODEL option auto_class_weights = TRUE. Nothing was run."
 	}
 	allowed, ok := modelTypeOptions[o.ModelType]
@@ -1420,6 +1444,13 @@ func checkModelOptions(o mlOptions) (int, string) {
 	}
 	if o.ModelType == "DNN_CLASSIFIER" {
 		allowed, ok = append(append([]string(nil), modelTypeOptions["DNN_REGRESSOR"]...), "auto_class_weights", "class_weights"), true
+	}
+	if o.ModelType == "DNN_LINEAR_COMBINED_CLASSIFIER" {
+		allowed, ok = append(append([]string(nil), modelTypeOptions["DNN_LINEAR_COMBINED_REGRESSOR"]...), "auto_class_weights", "class_weights"), true
+	}
+	if len(o.PerPart) > 0 && !isWideDeep(o.ModelType) {
+		// Only the wide-and-deep page documents a value a part (#1562).
+		return 400, "Invalid value for option " + o.PerPart[0] + " for model type " + o.ModelType
 	}
 	if c, m := checkTreeSampling(o); c != 0 {
 		return c, m

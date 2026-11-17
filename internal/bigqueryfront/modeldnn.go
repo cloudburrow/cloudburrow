@@ -65,10 +65,13 @@ import (
 // documentation of each lists the model types it takes.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-dnn-models
 
-// dnnTrained is a network's layers, the hidden ones then the output.
+// dnnTrained is a network's layers, the hidden ones then the output;
+// Wide, a wide-and-deep model's linear part (#1562), a unit an output on
+// the input columns, its value added to that output's.
 type dnnTrained struct {
 	Activation string     `json:"activation"`
 	Layers     []dnnLayer `json:"layers"`
+	Wide       *dnnLayer  `json:"wide,omitempty"`
 }
 
 // dnnLayer is one layer: W[j] are unit j's weights on the layer's inputs,
@@ -78,7 +81,29 @@ type dnnLayer struct {
 	B []float64   `json:"b"`
 }
 
-func isDNN(typ string) bool { return typ == "DNN_REGRESSOR" || typ == "DNN_CLASSIFIER" }
+// isDNN reports whether typ is a DNN or a wide-and-deep model: a
+// network with a label.
+func isDNN(typ string) bool {
+	return typ == "DNN_REGRESSOR" || typ == "DNN_CLASSIFIER" || isWideDeep(typ)
+}
+
+// isWideDeep reports whether typ is a wide-and-deep model (#1562,
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-wnd-models,
+// read 2026-11-17): "All columns referenced by the query_statement are
+// used as input features", so every encoded column feeds both a DNN (as
+// above) and a linear part, and the output is their sum, trained jointly,
+// as in the wide-and-deep paper the page links
+// (https://dl.acm.org/doi/10.1145/2988450.2988454). optimizer and
+// learn_rate take a value a part, [STRUCT('dnn', ...), STRUCT('linear',
+// ...)], defaults ADAM and FTRL at 0.001.
+// UNVERIFIED (docs re-read 2026-11-17, the page above): the linear part
+// starts at 0, as TensorFlow's linear model does, and l1_reg and l2_reg
+// need both parts' optimizers to be ADAGRAD, FTRL or SGD. Neither it nor
+// a DNN takes the explain functions: BigQuery's explainability table
+// lists neither (https://docs.cloud.google.com/bigquery/docs/xai-overview).
+func isWideDeep(typ string) bool {
+	return typ == "DNN_LINEAR_COMBINED_REGRESSOR" || typ == "DNN_LINEAR_COMBINED_CLASSIFIER"
+}
 
 // isNetwork reports whether typ is trained as a network here: a DNN or
 // an AUTOENCODER.
@@ -233,6 +258,10 @@ func (d *dnnTrained) forwardActs(x []float64) ([]float64, [][]float64) {
 		if l < len(d.Layers)-1 {
 			a = dnnActVec(d.Activation, a)
 			acts = append(acts, a)
+		} else if d.Wide != nil {
+			for j := range a {
+				a[j] += d.Wide.B[j] + dot(d.Wide.W[j], x)
+			}
 		}
 		h = a
 	}
@@ -253,6 +282,15 @@ func (d *dnnTrained) dnnFrom(from string, enc []string) (string, []string) {
 			for i, e := range in {
 				if ly.W[j][i] != 0 {
 					terms = append(terms, sqlF(ly.W[j][i])+" * "+e)
+				}
+			}
+			if last && d.Wide != nil {
+				// The linear part's on the input columns (#1562).
+				terms = append(terms, sqlF(d.Wide.B[j]))
+				for i, e := range enc {
+					if d.Wide.W[j][i] != 0 {
+						terms = append(terms, sqlF(d.Wide.W[j][i])+" * "+e)
+					}
 				}
 			}
 			a := "(" + strings.Join(terms, " + ") + ")"
@@ -290,7 +328,9 @@ func (d *dnnTrained) dnnFrom(from string, enc []string) (string, []string) {
 }
 
 // applyDNNDefaults sets a DNN model's documented defaults that differ
-// from a linear model's.
+// from a linear model's; a wide-and-deep model's linear part's too: its
+// learn_rate 0.001 and its optimizer FTRL, or the value given for both
+// parts (#1562).
 func applyDNNDefaults(o *mlOptions) {
 	if !o.given("learn_rate") {
 		o.LearnRate = 0.001
@@ -301,20 +341,75 @@ func applyDNNDefaults(o *mlOptions) {
 	if o.Activation == "" {
 		o.Activation = "RELU"
 	}
+	if !isWideDeep(o.ModelType) {
+		return
+	}
+	perPart := func(name string) bool {
+		for _, p := range o.PerPart {
+			if p == name {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case o.given("learn_rate") && !perPart("learn_rate"):
+		o.LinearLearnRate = o.LearnRate
+	case o.LinearLearnRate == 0:
+		o.LinearLearnRate = 0.001
+	}
+	switch {
+	case o.given("optimizer") && !perPart("optimizer"):
+		o.LinearOptimizer = o.Optimizer
+	case o.LinearOptimizer == "":
+		o.LinearOptimizer = "FTRL"
+	}
 }
 
 // checkDNNOptions refuses what BigQuery documents as invalid for a DNN.
 func checkDNNOptions(o mlOptions) (int, string) {
-	if o.GlobalExplain {
-		return 501, "Not implemented here: enable_global_explain of a DNN model: its integrated gradients attributions are not carried out. Nothing was run."
-	}
-	if (o.L1 != 0 || o.L2 != 0) && o.Optimizer != "ADAGRAD" && o.Optimizer != "SGD" && o.Optimizer != "FTRL" {
+	prox := func(opt string) bool { return opt == "ADAGRAD" || opt == "SGD" || opt == "FTRL" }
+	if (o.L1 != 0 || o.L2 != 0) && (!prox(o.Optimizer) || (isWideDeep(o.ModelType) && !prox(o.LinearOptimizer))) {
 		return 400, "l1_reg and l2_reg are only supported with optimizer ADAGRAD, FTRL or SGD"
 	}
 	if o.AutoClassWeights && o.ClassWeights != nil {
 		return 400, "class_weights cannot be set when auto_class_weights is TRUE"
 	}
 	return 0, ""
+}
+
+// parsePerPart reads a wide-and-deep model's ARRAY of STRUCT values a
+// part, [STRUCT('dnn', v), STRUCT('linear', v)], into each part's value
+// tokens; ok is false for anything else.
+func parsePerPart(val []token) (map[string][]token, bool) {
+	if len(val) < 2 || !val[0].punct("[") || !val[len(val)-1].punct("]") {
+		return nil, false
+	}
+	parts := map[string][]token{}
+	in := val[1 : len(val)-1]
+	for i := 0; i < len(in); {
+		if len(parts) > 0 {
+			if !in[i].punct(",") {
+				return nil, false
+			}
+			i++
+		}
+		if i+5 >= len(in) || !in[i].is("STRUCT") || !in[i+1].punct("(") || in[i+2].kind != tokString || !in[i+3].punct(",") {
+			return nil, false
+		}
+		part, ok := unquoteString(in[i+2].text)
+		part = strings.ToLower(part)
+		if !ok || (part != "dnn" && part != "linear") || parts[part] != nil {
+			return nil, false
+		}
+		end := matchParen(in, i+1)
+		if end < 0 || end == i+4 {
+			return nil, false
+		}
+		parts[part] = in[i+4 : end]
+		i = end + 1
+	}
+	return parts, len(parts) > 0
 }
 
 // trainDNN fits the network on X (each row's encoded columns, the
@@ -401,6 +496,14 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 		}
 		d.Layers = append(d.Layers, ly)
 	}
+	if isWideDeep(o.ModelType) {
+		// The linear part: a unit an output, on the input columns, its
+		// weights and bias first 0, as TensorFlow's linear model's (#1562).
+		d.Wide = &dnnLayer{W: make([][]float64, K), B: make([]float64, K)}
+		for j := range d.Wide.W {
+			d.Wide.W[j] = make([]float64, in)
+		}
+	}
 	t.DNN = d
 	// The optimizer's state, laid out as the weights: a W and B per layer.
 	type moments struct{ m, v [][][]float64 }
@@ -417,11 +520,28 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 		}
 		return out
 	}
-	acc := 0.0
-	if o.Optimizer == "ADAGRAD" || o.Optimizer == "FTRL" {
-		acc = 0.1
+	accOf := func(opt string) float64 {
+		if opt == "ADAGRAD" || opt == "FTRL" {
+			return 0.1
+		}
+		return 0
 	}
-	st := moments{m: zeros(0), v: zeros(acc)}
+	st := moments{m: zeros(0), v: zeros(accOf(o.Optimizer))}
+	// The linear part's state and gradient: its weights, then its bias.
+	wideZeros := func(fill float64) [][]float64 {
+		if d.Wide == nil {
+			return nil
+		}
+		out := make([][]float64, K)
+		for j := range out {
+			out[j] = make([]float64, in+1)
+			for i := range out[j] {
+				out[j][i] = fill
+			}
+		}
+		return out
+	}
+	wst := struct{ m, v [][]float64 }{wideZeros(0), wideZeros(accOf(o.LinearOptimizer))}
 	step := 0
 	lossOf := func(z []float64, y float64, x []float64) float64 {
 		switch {
@@ -468,6 +588,7 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 		for b0 := 0; b0 < n; b0 += batch {
 			rowsIn := order[b0:min(b0+batch, n)]
 			grad := zeros(0)
+			wgrad := wideZeros(0)
 			for _, ri := range rowsIn {
 				// Forward, keeping each layer's input and pre-activation.
 				inputs := make([][]float64, L)
@@ -523,6 +644,12 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 						delta[k] *= rw[ri]
 					}
 				}
+				for j := range wgrad {
+					for i, v := range X[ri] {
+						wgrad[j][i] += delta[j] * v
+					}
+					wgrad[j][in] += delta[j]
+				}
 				for l := L - 1; l >= 0; l-- {
 					ly := d.Layers[l]
 					for j := range ly.B {
@@ -553,6 +680,33 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 			}
 			step++
 			bn := float64(len(rowsIn))
+			// update moves weight w by optimizer opt at learn rate lr, g its
+			// gradient, m and v its state.
+			update := func(opt string, lr float64, w, m, v *float64, g float64) {
+				switch opt {
+				case "SGD":
+					*w -= lr * g
+				case "ADAGRAD":
+					*v += g * g
+					*w -= lr * g / (math.Sqrt(*v) + 1e-7)
+				case "FTRL":
+					// TensorFlow's FtrlOptimizer, learning_rate_power
+					// -0.5: m the linear term z, v the accumulator n.
+					nv := *v + g*g
+					*m += g - (math.Sqrt(nv)-math.Sqrt(*v))/lr*(*w)
+					*v = nv
+					*w = -(*m) * lr / math.Sqrt(nv)
+				case "RMSPROP":
+					*v = 0.9*(*v) + 0.1*g*g
+					*w -= lr * g / (math.Sqrt(*v) + 1e-7)
+				default: // ADAM
+					*m = 0.9*(*m) + 0.1*g
+					*v = 0.999*(*v) + 0.001*g*g
+					mh := *m / (1 - math.Pow(0.9, float64(step)))
+					vh := *v / (1 - math.Pow(0.999, float64(step)))
+					*w -= lr * mh / (math.Sqrt(vh) + 1e-7)
+				}
+			}
 			for l, ly := range d.Layers {
 				for j := range ly.B {
 					for i := 0; i <= len(ly.W[j]); i++ {
@@ -564,31 +718,21 @@ func (t *mlTrained) trainDNN(o mlOptions, X [][]float64, Y []float64, EX [][]flo
 						} else {
 							w = &ly.B[j]
 						}
-						m, v := &st.m[l][j][i], &st.v[l][j][i]
-						switch o.Optimizer {
-						case "SGD":
-							*w -= o.LearnRate * g
-						case "ADAGRAD":
-							*v += g * g
-							*w -= o.LearnRate * g / (math.Sqrt(*v) + 1e-7)
-						case "FTRL":
-							// TensorFlow's FtrlOptimizer, learning_rate_power
-							// -0.5: m the linear term z, v the accumulator n.
-							nv := *v + g*g
-							*m += g - (math.Sqrt(nv)-math.Sqrt(*v))/o.LearnRate*(*w)
-							*v = nv
-							*w = -(*m) * o.LearnRate / math.Sqrt(nv)
-						case "RMSPROP":
-							*v = 0.9*(*v) + 0.1*g*g
-							*w -= o.LearnRate * g / (math.Sqrt(*v) + 1e-7)
-						default: // ADAM
-							*m = 0.9*(*m) + 0.1*g
-							*v = 0.999*(*v) + 0.001*g*g
-							mh := *m / (1 - math.Pow(0.9, float64(step)))
-							vh := *v / (1 - math.Pow(0.999, float64(step)))
-							*w -= o.LearnRate * mh / (math.Sqrt(vh) + 1e-7)
-						}
+						update(o.Optimizer, o.LearnRate, w, &st.m[l][j][i], &st.v[l][j][i], g)
 					}
+				}
+			}
+			for j := range wgrad {
+				for i := 0; i <= in; i++ {
+					g := wgrad[j][i] / bn
+					var w *float64
+					if i < in {
+						w = &d.Wide.W[j][i]
+						g += 2*o.L2*(*w) + o.L1*sign(*w)
+					} else {
+						w = &d.Wide.B[j]
+					}
+					update(o.LinearOptimizer, o.LinearLearnRate, w, &wst.m[j][i], &wst.v[j][i], g)
 				}
 			}
 		}
@@ -671,6 +815,42 @@ func parseDNNOption(name string, val []token, o *mlOptions) (code int, msg strin
 		}
 		v, err := strconv.ParseFloat(s, 64)
 		return v, err == nil
+	}
+	if (name == "learn_rate" || name == "optimizer") && len(val) > 0 && val[0].punct("[") {
+		// A wide-and-deep model's value a part (#1562): checked against
+		// the model type in checkModelOptions.
+		parts, okp := parsePerPart(val)
+		if !okp {
+			return 400, "Invalid value for option " + name + ": an ARRAY of STRUCT('dnn' or 'linear', value)", true
+		}
+		o.PerPart = append(o.PerPart, name)
+		for part, pv := range parts {
+			var v mlOptions
+			if c, m, _ := parseDNNOption(name, pv, &v); c != 0 {
+				return c, m, true
+			}
+			if name == "optimizer" && part == "dnn" {
+				o.Optimizer = v.Optimizer
+			} else if name == "optimizer" {
+				o.LinearOptimizer = v.Optimizer
+			}
+			if name == "learn_rate" {
+				txt := ""
+				for _, t := range pv {
+					txt += t.text
+				}
+				f, err := strconv.ParseFloat(txt, 64)
+				if err != nil || f <= 0 {
+					return bad()
+				}
+				if part == "dnn" {
+					o.LearnRate = f
+				} else {
+					o.LinearLearnRate = f
+				}
+			}
+		}
+		return 0, "", true
 	}
 	switch name {
 	case "hidden_units":
