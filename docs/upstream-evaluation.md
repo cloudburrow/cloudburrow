@@ -688,9 +688,23 @@ downmixed as a stereo WAV is), and the Info/Xing frame's LAME tag for the encode
 padding, trimmed as ffmpeg trims them (the Info frame, then the delay plus the decoder's 529
 samples, and the padding at the end), so an MP3 lines up sample for sample with the WAV it was
 encoded from. A panic of the decoder on a corrupt frame is recovered as `INVALID_ARGUMENT`.
-MPEG-2.5 (8, 11.025 and 12 kHz), which `go-mp3` refuses, is refused naming it. Checked against
-ffmpeg 8: the same 16 kHz mono MP3 decodes to the same samples within one 16-bit step
-(`TestDecodeMP3`). `govulncheck ./...` (v1.8.0) reports nothing in it.
+MPEG-2.5 (8, 11.025 and 12 kHz), which `go-mp3` refuses, was refused naming it until #1734
+(below). Checked against ffmpeg 8: the same 16 kHz mono MP3 decodes to the same samples within one
+16-bit step (`TestDecodeMP3`). `govulncheck ./...` (v1.8.0) reports nothing in it.
+
+### MPEG-2.5 (#1734): go-mp3 copied into third_party and extended
+
+MPEG-2.5 is the unofficial extension of MPEG-2's low sample rates that LAME uses below 16 kHz (8,
+11.025 and 12 kHz, for low bit rates). No other decoder on the Go module proxy fits (the table
+above: the others are cgo bindings or wrap `go-mp3`), and `go-mp3` is quiet since 2022, so its
+decoder is copied into `third_party/go-mp3` (Apache 2.0 allows it; the changed files say so) and
+extended there, and the module leaves `go.mod`. MPEG-2.5 differs from MPEG-2 only in its sample
+rates (MPEG-1's quartered), its scalefactor band tables and, at 8 kHz, the wider bands where a short
+block's first Huffman region and a mixed block's long part end; ffmpeg's decoder is the reference
+for each ([PROVENANCE.md](../third_party/go-mp3/PROVENANCE.md)). Checked against ffmpeg 9 on
+libmp3lame streams with start and short blocks: 8 kHz mono within one 16-bit step, 11.025 and 12
+kHz joint stereo within two a channel (`TestDecodeMPEG25MP3`), and through the official SDK
+(`TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient`).
 
 ## Amendment: HEIC, HEIF, AVIF and animated WebP decoders for Vertex AI EmbedContent (#1724)
 

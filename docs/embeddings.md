@@ -112,7 +112,8 @@
 > channel and stereo downmixed as a stereo WAV is, the encoder delay and padding a LAME or Lavc
 > Info frame records trimmed as ffmpeg trims them, then resampled and prepared as WAV is, within
 > the same 180 seconds a request. The model card's `jfk.wav` encoded at 64 kbit/s gives the WAV's
-> 279 tokens and a vector at cosine 0.999290 to the WAV's. MPEG-2.5 (8 to 12 kHz) is refused.
+> 279 tokens and a vector at cosine 0.999290 to the WAV's. MPEG-2.5 (8 to 12 kHz) is decoded too
+> (#1734): `go-mp3` is copied into `third_party/go-mp3` and extended to it, checked against ffmpeg.
 >
 > **Update 2026-10-19 (#1651): WebP and BMP images.** Google's
 > [Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)

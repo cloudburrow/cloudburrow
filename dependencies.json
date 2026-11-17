@@ -679,9 +679,12 @@
       "goMP3": {
         "module": "github.com/hajimehoshi/go-mp3",
         "version": "v0.3.4",
+        "sum": "h1:NUP7pBYH8OguP4diaTZ9wJbUbk3tC0KlfzsEpWmYj68=",
+        "pinnedCommit": "26f0b17459ab4b2b3d9d2b484a27a4eab3cca17b",
+        "source": "https://github.com/hajimehoshi/go-mp3",
         "license": "Apache-2.0",
-        "verification": "go.sum",
-        "notes": "Vertex AI EmbedContent's MP3 audio (#1721, internal/embedding/mp3.go), approved by the maintainer 2026-11-17: a pure Go MPEG-1/2 Layer III decoder, no cgo. go.sum gains go.mod-only hashes for github.com/hajimehoshi/oto/v2 (its example only) and an old golang.org/x/sys; neither is compiled in (docs/upstream-evaluation.md)."
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's MP3 audio (#1721, internal/embedding/mp3.go), approved by the maintainer 2026-11-17: a pure Go MPEG-1/2 Layer III decoder, no cgo. Copied into third_party/go-mp3 (import path github.com/cloudburrow/cloudburrow/third_party/go-mp3; the module's non-test sources, fetched through the go command at this sum, imports rewritten) and extended there to MPEG-2.5, 8 to 12 kHz (#1734: its sample rates, scalefactor bands and short-block regions, checked against ffmpeg), which upstream refuses and has not released since 2022 (third_party/go-mp3/PROVENANCE.md). No longer required in go.mod (docs/upstream-evaluation.md)."
       },
       "goMongoDriver": {
         "module": "go.mongodb.org/mongo-driver/v2",

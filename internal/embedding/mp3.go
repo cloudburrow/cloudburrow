@@ -8,13 +8,14 @@ import (
 	"io"
 	"math"
 
-	"github.com/hajimehoshi/go-mp3"
+	mp3 "github.com/cloudburrow/cloudburrow/third_party/go-mp3"
 )
 
 // MP3 (#1721), the other audio format Google documents for
 // gemini-embedding-2 ("MP3, WAV"; its samples send mime_type audio/mpeg),
 // decoded with github.com/hajimehoshi/go-mp3 (pure Go, Apache 2.0; chosen in
-// docs/upstream-evaluation.md). The decoder gives 16-bit stereo PCM at the
+// docs/upstream-evaluation.md), copied into third_party/go-mp3 and extended
+// there to MPEG-2.5 (8, 11.025 and 12 kHz; #1734). The decoder gives 16-bit stereo PCM at the
 // stream's rate, a mono stream copied to both channels; here a mono stream is
 // read back as one channel, a stereo one downmixed as a stereo WAV is, and
 // the encoder's delay and padding a LAME or Lavc "Info"/"Xing" frame records
@@ -89,10 +90,6 @@ func parseMP3Stream(b []byte) (mp3Stream, error) {
 		return mp3Stream{}, errors.New("no MPEG audio frame")
 	}
 	h := b[p:]
-	if h[1]>>3&3 == 0 {
-		// go-mp3 decodes MPEG-1 and MPEG-2, not MPEG-2.5.
-		return mp3Stream{}, errors.New("the stream is MPEG-2.5 (8, 11.025 or 12 kHz), which is not decoded here; MPEG-1 and MPEG-2 MP3 (16 to 48 kHz) are embedded")
-	}
 	mpeg1 := h[1]>>3&3 == 3
 	s := mp3Stream{mono: h[3]>>6 == 3, samplesPerFrame: 576}
 	sideInfo := 17
