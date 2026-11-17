@@ -48,6 +48,7 @@ const (
 	sinpi3_9 = 13377
 	sinpi4_9 = 15212
 )
+
 func idct4(input, output []int32) {
 	var step [4]int32
 	in0 := int64(input[0])

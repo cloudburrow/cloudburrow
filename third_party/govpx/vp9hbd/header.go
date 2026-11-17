@@ -167,6 +167,11 @@ func (d *Decoder) readUncompressedHeader(r *bitReader) error {
 				if ref.bitDepth != h.bitDepth || ref.ssX != h.ssX || ref.ssY != h.ssY {
 					return fmt.Errorf("vp9hbd: a reference frame's format differs from the frame's")
 				}
+				// 7.2's conformance requirement on reference scaling.
+				if 2*h.width < ref.width || 2*h.height < ref.height ||
+					h.width > 16*ref.width || h.height > 16*ref.height {
+					return fmt.Errorf("vp9hbd: a reference frame's size is out of the scaling range")
+				}
 			}
 		}
 	}
@@ -178,6 +183,10 @@ func (d *Decoder) readUncompressedHeader(r *bitReader) error {
 		h.frameParallel = true
 	}
 	h.frameContextIdx = r.f(2)
+	// VP9 level 6.2's limits (the largest) bound the memory a header can ask for.
+	if h.width > 16384 || h.height > 16384 || h.width*h.height > 35651584 {
+		return fmt.Errorf("vp9hbd: frame size %dx%d is beyond VP9 level 6.2", h.width, h.height)
+	}
 	// compute_image_size's side effects (spec 7.2.6) need the frame size,
 	// which every path above has set.
 	d.computeImageSize()

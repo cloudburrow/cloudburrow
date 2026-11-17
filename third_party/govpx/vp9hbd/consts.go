@@ -91,21 +91,6 @@ var (
 		{blockInv, blockInv, blockInv, 1, blockInv, blockInv, 4, blockInv, blockInv, 7, blockInv, blockInv, 10},
 		{blockInv, blockInv, blockInv, 0, blockInv, blockInv, 3, blockInv, blockInv, 6, blockInv, blockInv, 9},
 	}
-	ssSizeLookup = [13][2][2]int{
-		{{0, blockInv}, {blockInv, blockInv}},
-		{{1, 0}, {blockInv, blockInv}},
-		{{2, blockInv}, {0, blockInv}},
-		{{3, 2}, {1, 0}},
-		{{4, 3}, {blockInv, 1}},
-		{{5, blockInv}, {3, 2}},
-		{{6, 5}, {4, 3}},
-		{{7, 6}, {blockInv, 4}},
-		{{8, blockInv}, {6, 5}},
-		{{9, 8}, {7, 6}},
-		{{10, 9}, {blockInv, 7}},
-		{{11, blockInv}, {9, 8}},
-		{{12, 11}, {10, 9}},
-	}
 	mode2Txfm         = [14]int{dctDct, adstDct, dctAdst, dctDct, adstAdst, adstDct, dctAdst, dctAdst, adstDct, adstAdst, dctDct, dctDct, dctDct, dctDct}
 	energyClass       = [11]uint8{0, 1, 2, 3, 3, 4, 4, 5, 5, 5, 5}
 	segFeatureBits    = [4]int{8, 6, 2, 0}

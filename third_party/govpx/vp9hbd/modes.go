@@ -25,15 +25,15 @@ type block struct {
 	leftSingle, aboveSingle     bool
 
 	// motion vector prediction
-	refListMv     [2]mv
-	refMvCount    int
-	candidateMv   [2]mv
-	candidateFrm  [2]int
-	modeContext   [4]int
-	nearestMv     [2]mv
-	nearMv        [2]mv
-	bestMv        [2]mv
-	mv            [2]mv
+	refListMv       [2]mv
+	refMvCount      int
+	candidateMv     [2]mv
+	candidateFrm    [2]int
+	modeContext     [4]int
+	nearestMv       [2]mv
+	nearMv          [2]mv
+	bestMv          [2]mv
+	mv              [2]mv
 	leftMi, aboveMi *modeInfo
 }
 

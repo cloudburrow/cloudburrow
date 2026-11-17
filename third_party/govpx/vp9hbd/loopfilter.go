@@ -219,7 +219,7 @@ func wideFilter(pl []uint16, pos, step int, log2Size uint) {
 	for i := -n; i < n; i++ {
 		t := int(pl[pos+i*step])
 		for j := -n; j <= n; j++ {
-			p := min(max(i+j, -(n + 1)), n)
+			p := min(max(i+j, -(n+1)), n)
 			t += int(pl[pos+p*step])
 		}
 		f[i+n] = (t + (1 << (log2Size - 1))) >> log2Size
