@@ -55,6 +55,7 @@ require (
 	github.com/tink-crypto/tink-go-gcpkms/v2 v2.4.0
 	github.com/tink-crypto/tink-go/v2 v2.9.0
 	github.com/yalue/onnxruntime_go v1.36.0
+	go.mongodb.org/mongo-driver/v2 v2.10.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.47.0
@@ -108,6 +109,9 @@ require (
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/vbatts/tar-split v0.12.1 // indirect
+	github.com/xdg-go/scram v1.4.0 // indirect
+	github.com/xdg-go/stringprep v1.0.4 // indirect
+	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
 )
@@ -145,7 +149,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/klauspost/compress v1.20.2
+	github.com/klauspost/compress v1.20.3
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pierrec/lz4/v4 v4.1.29
