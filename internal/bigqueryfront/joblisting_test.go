@@ -199,6 +199,18 @@ func TestJobsQueryByIDListsThoseJobs(t *testing.T) {
 // value, which in the pod was most of its heap at its peak. Measured
 // (arm64, 2026-10-19): 41.0 times the answer decoded whole, 5.8 times
 // its references alone.
+//
+// #1699: the answer was then written back with json.Marshal, which
+// re-encodes every json.RawMessage. Under Go 1.27 (encoding/json is
+// json/v2 underneath) that cost one to three more copies of the answer
+// through pooled buffers, which the race detector drops at random, so the
+// arm64 nightly's go test -race measured 7.0 to 10.5 times on one commit.
+// The answer is now written from its raw members (rawObject). Measured
+// (darwin/arm64, 2026-11-17, -count=20): 4.1 times on Go 1.26.8 and
+// 1.27.4, 6.1 times on both with -race (bytes.Buffer's growth allocates
+// twice under the race detector), and 38 to 40 times decoded whole. The
+// 4.1 is four copies: the recorded answer, its members decoded raw, the
+// answer written, and this test's recorder.
 func TestJobLocationsDecodeOnlyReferences(t *testing.T) {
 	var rows []any
 	for i := 0; i < 5000; i++ {

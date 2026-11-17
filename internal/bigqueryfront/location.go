@@ -331,12 +331,8 @@ func withJobLocations(w http.ResponseWriter, loc string, serve func(http.Respons
 		if json.Unmarshal(raw, &job) != nil || job == nil || !located(job) {
 			return raw
 		}
-		b, err := json.Marshal(job)
-		if err != nil {
-			return raw
-		}
 		changed = true
-		return b
+		return rawObject(job)
 	}
 	if located(resp) {
 		changed = true
@@ -353,9 +349,7 @@ func withJobLocations(w http.ResponseWriter, loc string, serve func(http.Respons
 				jobs[i] = fill(j)
 			}
 			if changed {
-				if b, err := json.Marshal(jobs); err == nil {
-					resp["jobs"] = b
-				}
+				resp["jobs"] = rawArray(jobs)
 			}
 			changed = changed || was
 		}
@@ -364,7 +358,69 @@ func withJobLocations(w http.ResponseWriter, loc string, serve func(http.Respons
 		rec.copyTo(w)
 		return
 	}
-	writeRecorded(w, rec, resp)
+	rec.body = *bytes.NewBuffer(rawObject(resp))
+	rec.copyTo(w)
+}
+
+// rawObject is the JSON object of m's members, their keys sorted as
+// json.Marshal sorts them, each value written as it was decoded (#1699).
+// json.Marshal of a json.RawMessage re-encodes it, and under Go 1.27's
+// encoding/json (json/v2 underneath) that took about two more copies of
+// the answer, through pooled buffers the race detector drops at random:
+// go test -race measured 7.0 to 10.5 times the answer (the arm64 nightly
+// failed at 10.5). Members are written as the engine wrote them, and the
+// result is sized once, so the answer is copied once.
+func rawObject(m map[string]json.RawMessage) []byte {
+	keys := make([]string, 0, len(m))
+	names := make(map[string][]byte, len(m))
+	n := 2 // {}
+	for k, v := range m {
+		name, err := json.Marshal(k)
+		if err != nil {
+			continue // a string always marshals
+		}
+		keys = append(keys, k)
+		names[k] = name
+		n += len(name) + 1 + len(v) + 1 // "k":v,
+	}
+	sort.Strings(keys)
+	out := make([]byte, 0, n)
+	out = append(out, '{')
+	for i, k := range keys {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, names[k]...)
+		out = append(out, ':')
+		out = append(out, rawOrNull(m[k])...)
+	}
+	return append(out, '}')
+}
+
+// rawArray is the JSON array of vs, each written as it was decoded.
+func rawArray(vs []json.RawMessage) []byte {
+	n := 2
+	for _, v := range vs {
+		n += len(v) + 1
+	}
+	out := make([]byte, 0, n)
+	out = append(out, '[')
+	for i, v := range vs {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, rawOrNull(v)...)
+	}
+	return append(out, ']')
+}
+
+// rawOrNull is v, or null for an empty value (as json.Marshal writes a nil
+// json.RawMessage).
+func rawOrNull(v json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(v)) == 0 {
+		return json.RawMessage("null")
+	}
+	return v
 }
 
 // serveJobLocations wraps the front's handling of a jobs request (jobs.insert,
