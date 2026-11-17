@@ -24,8 +24,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -50,8 +52,13 @@ type memorystoreAdminService struct {
 	db     store.Store
 	prov   *memorystoreProvisioner
 	// kms is Cloud KMS, for customer_managed_key (#1463); nil without it.
-	kms    *kmsService
-	cancel context.CancelFunc
+	kms *kmsService
+	// creds and registry are what IAM auth (#1614) checks a token
+	// against: the access tokens the instance minted, and the project's
+	// IAM policy; nil refuses every token.
+	creds    *metadata.Credentials
+	registry func() *resourcemanager.Registry
+	cancel   context.CancelFunc
 }
 
 func newMemorystoreAdminService(cfg config.Config, tunnel func() *netfwd.Forwarder) *memorystoreAdminService {
@@ -138,6 +145,12 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	// this instance's Cloud KMS, in process.
 	if s.kms != nil {
 		s.api.UseKMS(memorystoreKMS{svc: s.kms})
+	}
+	if s.creds != nil {
+		s.api.UseIAM(memorystoreIAM(s.creds, s.registry))
+		s.creds.OnIssue(func(t metadata.IssuedToken) {
+			s.api.TokenIssued(redisadmin.IssuedToken{Hash: t.Hash, Email: t.Email, Expires: t.Expires})
+		})
 	}
 	if err := s.api.Restore(); err != nil {
 		return fmt.Errorf("Memorystore instances: %w", err)
@@ -634,5 +647,41 @@ func (p *memorystoreProvisioner) stopTunnels(ctx context.Context) {
 	for name, f := range p.tunnels {
 		_ = f.Stop(ctx)
 		delete(p.tunnels, name)
+	}
+}
+
+// memorystoreIAM is IAM auth's token source (#1614): the access tokens
+// creds minted, and the members of a project's bindings of a role in the
+// registry's policies (none while the registry is not open).
+func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanager.Registry) redisadmin.IAMSource {
+	return redisadmin.IAMSource{
+		Tokens: func(now time.Time) []redisadmin.IssuedToken {
+			live := creds.LiveTokens(now)
+			out := make([]redisadmin.IssuedToken, len(live))
+			for i, t := range live {
+				out[i] = redisadmin.IssuedToken{Hash: t.Hash, Email: t.Email, Expires: t.Expires}
+			}
+			return out
+		},
+		Members: func(project, role string) []string {
+			var reg *resourcemanager.Registry
+			if registry != nil {
+				reg = registry()
+			}
+			if reg == nil {
+				return nil
+			}
+			p, err := reg.IAMPolicy("projects/" + project)
+			if err != nil || p == nil {
+				return nil
+			}
+			var out []string
+			for _, b := range p.Bindings {
+				if b.Role == role {
+					out = append(out, b.Members...)
+				}
+			}
+			return out
+		},
 	}
 }

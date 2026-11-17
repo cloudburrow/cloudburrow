@@ -212,6 +212,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if msg == "" && !f.avroLoad(w, r, &job) { // #1457, avroload.go
 			return
 		}
+		if msg == "" && !f.orcLoad(w, r, &job) { // #1713, orcload.go
+			return
+		}
 		if msg == "" && c.Load.Schema != nil {
 			msg = checkSchema(c.Load.Schema.Fields, "")
 		}

@@ -101,16 +101,16 @@ func TestBigQueryLoadFormBecomesTheLoadsSource(t *testing.T) {
 	}
 	for values, why := range map[*map[string]string]string{
 		ptr(with(map[string]string{"format": "NEWLINE_DELIMITED_JSON", "fieldDelimiter": "|", "allowJaggedRows": "true"})): "allowJaggedRows, fieldDelimiter applies to CSV only",
-		ptr(with(map[string]string{"format": "ORC"})):                                    `not "ORC"`,
-		ptr(with(map[string]string{"format": "PARQUET", "useAvroLogicalTypes": "true"})): "useAvroLogicalTypes applies to Avro only",
-		ptr(with(map[string]string{"skipLeadingRows": "-1"})):                            "whole number",
-		ptr(with(map[string]string{"maxBadRecords": "two"})):                             "whole number",
-		ptr(with(map[string]string{"encoding": "UTF-7"})):                                `not "UTF-7"`,
-		ptr(with(map[string]string{"format": "PARQUET", "timeZone": "UTC"})):             "timeZone applies to CSV only",
-		ptr(with(map[string]string{"uris": " \n "})):                                     "at least one gs:// URI",
-		ptr(with(map[string]string{"schema": "not json"})):                               "JSON array",
-		ptr(with(map[string]string{"sourceColumnMatch": "WHATEVER"})):                    `not "WHATEVER"`,
-		ptr(with(map[string]string{"format": "PARQUET", "quote": "'"})):                  "quote applies to CSV only",
+		ptr(with(map[string]string{"format": "DATASTORE_BACKUP"})):                                                         `not "DATASTORE_BACKUP"`,
+		ptr(with(map[string]string{"format": "PARQUET", "useAvroLogicalTypes": "true"})):                                   "useAvroLogicalTypes applies to Avro only",
+		ptr(with(map[string]string{"skipLeadingRows": "-1"})):                                                              "whole number",
+		ptr(with(map[string]string{"maxBadRecords": "two"})):                                                               "whole number",
+		ptr(with(map[string]string{"encoding": "UTF-7"})):                                                                  `not "UTF-7"`,
+		ptr(with(map[string]string{"format": "PARQUET", "timeZone": "UTC"})):                                               "timeZone applies to CSV only",
+		ptr(with(map[string]string{"uris": " \n "})):                                                                       "at least one gs:// URI",
+		ptr(with(map[string]string{"schema": "not json"})):                                                                 "JSON array",
+		ptr(with(map[string]string{"sourceColumnMatch": "WHATEVER"})):                                                      `not "WHATEVER"`,
+		ptr(with(map[string]string{"format": "PARQUET", "quote": "'"})):                                                    "quote applies to CSV only",
 	} {
 		if _, err := loadSource(*values); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("%v = %v, want %q", *values, err, why)

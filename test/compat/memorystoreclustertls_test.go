@@ -35,10 +35,6 @@ func trustCA(t *testing.T, certs []string) *tls.Config {
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 }
 
-// iamToken is an access token of the form CloudBurrow's credentials issue,
-// which a client of an IAM_AUTH cluster sends as its AUTH string.
-const iamToken = "cbl_compatcompatcompatcompatcompatcomp"
-
 // covers: google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster, google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority
 //
 // TestMemorystoreRedisClusterInTransitEncryption (#1549), with
@@ -46,13 +42,16 @@ const iamToken = "cbl_compatcompatcompatcompatcompatcomp"
 // replica created with transit_encryption_mode SERVER_AUTHENTICATION and
 // AUTH_MODE_IAM_AUTH comes back with both; GetClusterCertificateAuthority
 // returns its CA as managed_server_ca, which a go-redis ClusterClient
-// trusts, sending an access token as its AUTH string, to set and get keys
+// trusts, sending a granted principal's access token as its AUTH string, to set and get keys
 // in every shard over TLS (the replicas replicate over TLS). A plain TCP
 // client and a TLS client trusting no CA are refused; transit_encryption_mode
 // cannot be updated.
 func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 	h := New(t)
 	c, project := redisClusterAdminClient(t, h)
+	// The client's AUTH is an access token of a principal granted the
+	// connect role (#1614: it is checked).
+	iamToken := newIAMPrincipal(t, h, project, "cltls", redisConnectRole).token
 	parent := "projects/" + project + "/locations/us-central1"
 	id := fmt.Sprintf("compat-cltls-%d", time.Now().UnixNano()%1e8)
 	name := parent + "/clusters/" + id
@@ -131,6 +130,7 @@ func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 func TestMemorystoreValkeyInTransitEncryption(t *testing.T) {
 	h := New(t)
 	c, project := valkeyAdminClient(t, h)
+	iamToken := newIAMPrincipal(t, h, project, "vktls", valkeyConnectRole).token
 	parent := "projects/" + project + "/locations/us-central1"
 	net0 := []*memorystorepb.PscAutoConnection{{ProjectId: project, Network: "projects/" + project + "/global/networks/default"}}
 	create := func(id string, in *memorystorepb.Instance) (*memorystorepb.Instance, string) {

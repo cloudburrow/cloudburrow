@@ -11,7 +11,8 @@ import (
 
 // TestConsoleRedisClusterServerCA (#1591): a cluster created on the
 // Memorystore Redis Cluster page with Enable in-transit encryption and IAM
-// authentication shows both modes and a Server CA tab with the CA
+// authentication shows both modes, the IAM connect role (#1614), an Edit
+// with IAM authentication, and a Server CA tab with the CA
 // GetClusterCertificateAuthority returns; a cluster without in-transit
 // encryption has no such tab, as its CA is FAILED_PRECONDITION.
 func TestConsoleRedisClusterServerCA(t *testing.T) {
@@ -47,7 +48,22 @@ func TestConsoleRedisClusterServerCA(t *testing.T) {
 			if !strings.Contains(props["In-transit encryption"], "SERVER_AUTHENTICATION") || !strings.Contains(props["Authorization"], "IAM_AUTH") {
 				t.Errorf("%s with in-transit encryption and IAM auth: page shows %v", tc.id, props)
 			}
-		} else if ca != nil {
+			// IAM auth checks the token (#1614): the page names the role
+			// to grant, and Edit turns IAM auth off or on.
+			if !strings.Contains(props["IAM connect role"], "roles/redis.dbConnectionUser") {
+				t.Errorf("%s with IAM auth: IAM connect role = %q", tc.id, props["IAM connect role"])
+			}
+		}
+		iam := false
+		for _, f := range d.Edit.Fields {
+			if f.Name == "iamAuth" {
+				iam = f.Default == boolWord(tc.tls)
+			}
+		}
+		if !iam {
+			t.Errorf("%s: Edit has no IAM authentication set to %v", tc.id, tc.tls)
+		}
+		if !tc.tls && ca != nil {
 			t.Errorf("%s without in-transit encryption has a Server CA tab", tc.id)
 		}
 	}
