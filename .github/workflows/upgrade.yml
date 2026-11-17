@@ -15,6 +15,10 @@ on:
     # 05:37 UTC, off the hour and clear of the other nightlies.
     - cron: "37 5 * * *"
   workflow_dispatch:
+  # TEMPORARY (#1714): the first run, on this branch only; workflow_dispatch
+  # needs the file on main. Removed in the next commit.
+  push:
+    branches: [ci/1714-upgrade-test]
 
 permissions:
   contents: read
