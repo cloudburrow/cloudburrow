@@ -370,3 +370,25 @@ Dept2 5 1 4 14 5 NULL 9 1 0.25 9.5 1`)
 		}
 	}
 }
+
+// TestSQLArrayAndCodePointFunctions runs the reference's examples of the
+// array and code point functions #1704 adds.
+func TestSQLArrayAndCodePointFunctions(t *testing.T) {
+	run, _ := sqlFixture(t)
+	for sql, want := range map[string]string{
+		"SELECT ARRAY_INCLUDES_ALL([1, 2, 3, 4, 5], [3, 4, 7]), ARRAY_INCLUDES_ALL([1, 2, 3, 4, 5], [4, 3]), ARRAY_INCLUDES_ANY([1, 2, 3, 4, 5], [3, 4, 7]), ARRAY_INCLUDES_ANY([1, 2, 3, 4, 5], [9, 7])":                                                  "false true true false",
+		"SELECT ARRAY_IS_DISTINCT([1, 2, 3]), ARRAY_IS_DISTINCT([1, 1, 1]), ARRAY_LAST_N([1, 2, 3, 4, 5], 2), ARRAY_LAST_N([1, 2], 5)":                                                                                                                     "true false [4,5] [1,2]",
+		"SELECT ARRAY_SLICE(['a', 'b', 'c', 'd', 'e'], 1, 3), ARRAY_SLICE(['a', 'b', 'c', 'd', 'e'], -1, 3), ARRAY_SLICE(['a', 'b', 'c', 'd', 'e'], 1, -3), ARRAY_SLICE(['a', 'b', 'c', 'd', 'e'], -20, 2), ARRAY_SLICE(['a', 'b', 'c', 'd', 'e'], 1, 30)": "[b,c,d] [] [b,c] [a,b,c] [b,c,d,e]",
+		"SELECT GENERATE_ARRAY(1, 5), GENERATE_ARRAY(0, 10, 3), GENERATE_ARRAY(10, 0, -3), GENERATE_ARRAY(0, 1, 0.25), GENERATE_ARRAY(4, 4), GENERATE_ARRAY(4, 3)":                                                                                         "[1,2,3,4,5] [0,3,6,9] [10,7,4,1] [0,0.25,0.5,0.75,1] [4] []",
+		"SELECT GENERATE_DATE_ARRAY(DATE '2016-10-05', DATE '2016-10-08'), GENERATE_DATE_ARRAY(DATE '2016-01-01', DATE '2016-12-31', INTERVAL 2 MONTH)":                                                                                                    "[2016-10-05,2016-10-06,2016-10-07,2016-10-08] [2016-01-01,2016-03-01,2016-05-01,2016-07-01,2016-09-01,2016-11-01]",
+		"SELECT GENERATE_TIMESTAMP_ARRAY(TIMESTAMP '2016-10-05 00:00:00+00', TIMESTAMP '2016-10-07 00:00:00+00', INTERVAL 1 DAY)":                                                                                                                          "[2016-10-05T00:00:00Z,2016-10-06T00:00:00Z,2016-10-07T00:00:00Z]",
+		"SELECT TO_CODE_POINTS('foo'), TO_CODE_POINTS(b'\\x66\\x6f'), CODE_POINTS_TO_STRING([65, 255, 513, 1024]), CODE_POINTS_TO_BYTES([65, 98, 67, 100]), OCTET_LENGTH('абв'), CHARACTER_LENGTH('абв')":                                                  "[102,111,111] [102,111] AÿȁЀ AbCd 6 3",
+		"SELECT IFERROR(1, 0), IFERROR(1 / 0, -1), ISERROR(1 / 0), ISERROR(1), NULLIFERROR(1 / 0), NULLIFERROR(2)":                                                                                                                                         "1 -1 true false NULL 2",
+		"SELECT TO_BASE32(b'abcde\\xFF'), FROM_BASE32('MFRGGZDF74======')":                                                                                                                                                                                 "MFRGGZDF74====== abcde\xff",
+	} {
+		got := run(sql, nil, nil)
+		if len(got) != 1 || strings.Join(got[0], " ") != want {
+			t.Errorf("%s =\n%v\nwant\n%s", sql, got, want)
+		}
+	}
+}

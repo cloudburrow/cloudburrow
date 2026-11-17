@@ -161,6 +161,9 @@ Dept2 2025-04-01T18:00:00Z NULL`)
 	expect("SELECT SAFE_ADD(9223372036854775807, 1), SAFE_NEGATE(1), ROUND(ATAN2(1, 1) * 4, 6), CURRENT_DATE = CURRENT_DATE()",
 		"NULL -1 3.141593 true")
 
+	expect("SELECT ARRAY_INCLUDES_ALL([1, 2, 3], [3, 1]), ARRAY_SLICE(['a', 'b', 'c', 'd', 'e'], 1, -3), GENERATE_ARRAY(0, 10, 3), GENERATE_DATE_ARRAY(DATE '2016-10-05', DATE '2016-10-07'), TO_CODE_POINTS('foo'), TO_BASE32(b'abcde\\xFF'), IFERROR(1 / 0, -1), ISERROR(1 / 0)",
+		"true [b,c] [0,3,6,9] [2016-10-05,2016-10-06,2016-10-07] [102,111,111] MFRGGZDF74====== -1 true")
+
 	// Aggregates, over the latest sales (12, 9).
 	expect("SELECT ROUND(STDDEV(CAST(CAST(report['sales'] AS STRING) AS INT64)), 6), VAR_POP(CAST(CAST(report['sales'] AS STRING) AS INT64)), APPROX_COUNT_DISTINCT(_key), APPROX_QUANTILES(CAST(CAST(report['sales'] AS STRING) AS INT64), 2) FROM report",
 		"2.12132 2.25 2 [9,9,12]")

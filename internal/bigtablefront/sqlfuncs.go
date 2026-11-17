@@ -73,6 +73,9 @@ type fnDef struct {
 	sig   func(c *call, ts []*btpb.Type) (*btpb.Type, error)
 	run   func(c *call, vs []any, e *env) (any, error)
 	nulls bool
+	// lazy, when set, evaluates the call itself, its arguments unevaluated
+	// (IFERROR and the other debugging functions catch their errors).
+	lazy func(c *call, e *env) (any, error)
 }
 
 func (c *call) String() string {
@@ -139,6 +142,9 @@ func (c *call) eval(e *env) (any, error) {
 	}
 	if c.isAgg {
 		return e.aggs[c.agg], nil
+	}
+	if c.fn.lazy != nil {
+		return c.fn.lazy(c, e)
 	}
 	vs := make([]any, len(c.args))
 	for i, a := range c.args {
