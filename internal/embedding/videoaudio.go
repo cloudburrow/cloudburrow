@@ -9,6 +9,7 @@ import (
 
 	"github.com/Eyevinn/mp4ff/aac"
 	"github.com/Eyevinn/mp4ff/mp4"
+	"github.com/cloudburrow/cloudburrow/internal/ac3"
 	aacdec "github.com/cloudburrow/cloudburrow/third_party/aac-go"
 	"github.com/kazzmir/opus-go/opus"
 )
@@ -173,8 +174,11 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 			pcm, channels, rate, err = decodeAACTrack(tr, dcd)
 		case 0x69, 0x6b: // MPEG-2 and MPEG-1 audio
 			pcm, channels, rate, err = decodeMP3Track(tr)
+		case 0xa5, 0xa6: // AC-3 and E-AC-3 (ISO/IEC 14496-1's registered object types)
+			pcm, rate, err = decodeAC3Track(tr)
+			channels = 1
 		default:
-			return nil, 0, fmt.Errorf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC-LC, MP3, Opus and PCM audio tracks are", dcd.ObjectType)
+			return nil, 0, fmt.Errorf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are", dcd.ObjectType)
 		}
 	case ".mp3":
 		pcm, channels, rate, err = decodeMP3Track(tr)
@@ -182,8 +186,11 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 		pcm, channels, rate, err = decodePCMTrack(tr, st.Stsd.QtPcm)
 	case "Opus":
 		pcm, channels, rate, err = decodeOpusTrack(tr, st.Stsd.Opus, trak.Edts != nil && len(trak.Edts.Elst) > 0)
+	case "ac-3", "ec-3":
+		pcm, rate, err = decodeAC3Track(tr)
+		channels = 1
 	default:
-		return nil, 0, fmt.Errorf("its codec %q is not decoded; AAC-LC, MP3, Opus and PCM audio tracks are", entry.Type())
+		return nil, 0, fmt.Errorf("its codec %q is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are", entry.Type())
 	}
 	if err != nil {
 		return nil, 0, err
@@ -220,7 +227,7 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 		}
 		switch {
 		case asc.ObjectType == aac.HEAACv1 || asc.ObjectType == aac.HEAACv2 || asc.SBRPresentFlag || asc.PSPresentFlag:
-			return nil, 0, 0, errors.New("it is HE-AAC (SBR), which is not decoded; AAC-LC, MP3, Opus and PCM audio tracks are")
+			return nil, 0, 0, errors.New("it is HE-AAC (SBR), which is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are")
 		case asc.ObjectType != aac.AAClc:
 			return nil, 0, 0, fmt.Errorf("its AAC audio object type %d is not decoded; AAC-LC is", asc.ObjectType)
 		case asc.FrameLengthFlag:
@@ -266,6 +273,60 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 		pcm[i] = float32(v) / 32768
 	}
 	return pcm, int(asc.ChannelConfiguration), asc.SamplingFrequency, nil
+}
+
+// decodeAC3Track decodes an AC-3 (ac-3) or E-AC-3 (ec-3) track with
+// internal/ac3, written for CloudBurrow from ATSC A/52 (#1739), and downmixes
+// it to mono as ffmpeg's resampler does for this layout: the front pair at
+// √½ each, the centre at the bitstream's centre mix level times √2, each
+// surround at its surround mix level times √½, the LFE dropped.
+func decodeAC3Track(tr *soundTrack) (mono []float32, rate int, err error) {
+	d := ac3.NewDecoder()
+	var pcm []float32
+	channels := 0
+	for i, s := range tr.samples {
+		p, ch, r, err := d.Decode(s)
+		if err != nil {
+			return nil, 0, fmt.Errorf("the AC-3 track's sample %d: %v", i+1, err)
+		}
+		if channels == 0 {
+			channels, rate = ch, r
+		} else if ch != channels || r != rate {
+			return nil, 0, fmt.Errorf("the AC-3 track changes from %d channels at %d Hz to %d at %d at sample %d", channels, rate, ch, r, i+1)
+		}
+		pcm = append(pcm, p...)
+		if len(pcm) > (MaxAudioSeconds+60)*rate*channels {
+			return nil, 0, &tooLongError{float64(len(pcm)) / float64(rate) / float64(channels)}
+		}
+	}
+	if channels == 0 {
+		return nil, 0, errors.New("the AC-3 track has no audio")
+	}
+	center, surround := d.MixLevels()
+	weights := make([]float32, channels)
+	for c, name := range d.Layout() {
+		switch name {
+		case "FC":
+			weights[c] = float32(center * math.Sqrt2)
+		case "LFE":
+		case "FL", "FR":
+			weights[c] = math.Sqrt2 / 2
+		default: // the surrounds
+			weights[c] = float32(surround * math.Sqrt2 / 2)
+		}
+	}
+	if channels == 1 {
+		weights[0] = 1
+	}
+	mono = make([]float32, len(pcm)/channels)
+	for i := range mono {
+		var v float32
+		for c, w := range weights {
+			v += w * pcm[i*channels+c]
+		}
+		mono[i] = v
+	}
+	return mono, rate, nil
 }
 
 // decodeMP3Track decodes an MP3 track's frames as one MP3 stream, without

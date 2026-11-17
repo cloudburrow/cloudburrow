@@ -147,3 +147,60 @@ func TestDecodeVideoAudioRefuses(t *testing.T) {
 		t.Error("not a video: no error")
 	}
 }
+
+// TestDecodeVideoAudioTrackCodecs (#1739): HE-AAC (SBR, and SBR with
+// parametric stereo), AC-3 and E-AC-3 tracks, through DecodeVideoAudio,
+// are ffmpeg 9's decode, downmix and resampling to 16 kHz mono
+// (testdata/va-*.ffmpeg-16k.f32, `ffmpeg -i f -vn -ac 1 -ar 16000 -f
+// f32le`) within the stated tolerance: the 5.1 AC-3 and E-AC-3 tracks
+// downmixed with the bitstream's centre and surround mix levels as ffmpeg's
+// resampler is given them. The files, 1.5 seconds each:
+//
+//	S="aevalsrc=0.3*sin(2*PI*440*t)+0.1*sin(2*PI*7000*t)+0.05*sin(2*PI*(3000+4000*t)*t)|0.3*sin(2*PI*660*t)+0.08*sin(2*PI*9500*t):s=44100:d=1.5"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S" -c:v libx264 -c:a aac_at -profile:a 4 -b:a 48k -shortest -map_metadata -1 va-heaac.mp4
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S" -c:v libx264 -c:a aac_at -profile:a 28 -b:a 32k -shortest -map_metadata -1 va-heaacv2.mp4
+//	S6="aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*660*t)|0.25*sin(2*PI*330*t)|0.2*sin(2*PI*60*t)|0.15*sin(2*PI*1500*t)*sin(2*PI*2*t)|0.15*sin(2*PI*2500*t):s=48000:d=1.5:channel_layout=5.1"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a ac3 -b:a 192k -shortest -map_metadata -1 va-ac3.mp4
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a eac3 -b:a 192k -shortest -map_metadata -1 va-eac3.mp4
+func TestDecodeVideoAudioTrackCodecs(t *testing.T) {
+	for _, c := range []struct {
+		file    string
+		maxDiff float64 // per 16 kHz sample, full scale 1
+	}{
+		{"va-ac3.mp4", 1e-3},  // measured 5.7e-4 (RMS 7.7e-5): ffmpeg's dither differs from ours
+		{"va-eac3.mp4", 1e-3}, // measured 2.7e-4 (RMS 3.3e-5)
+	} {
+		b, err := os.ReadFile(filepath.Join("testdata", c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := DecodeVideoAudio("video/mp4", b, VideoOptions{})
+		if err != nil {
+			t.Fatalf("%s: %v", c.file, err)
+		}
+		ref, err := os.ReadFile(filepath.Join("testdata", strings.TrimSuffix(c.file, ".mp4")+".ffmpeg-16k.f32"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := make([]float32, len(ref)/4)
+		for i := range want {
+			want[i] = math.Float32frombits(binary.LittleEndian.Uint32(ref[4*i:]))
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d samples, ffmpeg %d", c.file, len(got), len(want))
+		}
+		// The first and last 32 samples (the resampling filter's
+		// half-length), where libswresample's handling of the stream's
+		// ends differs from resample's, are left out.
+		var maxDiff, ss float64
+		for i := resampleZeros; i < len(got)-resampleZeros; i++ {
+			d := math.Abs(float64(got[i] - want[i]))
+			maxDiff = max(maxDiff, d)
+			ss += d * d
+		}
+		t.Logf("%s: max %.2e, RMS %.2e from ffmpeg", c.file, maxDiff, math.Sqrt(ss/float64(len(got)-2*resampleZeros)))
+		if maxDiff > c.maxDiff {
+			t.Errorf("%s: %.2e from ffmpeg's decode, want at most %.0e", c.file, maxDiff, c.maxDiff)
+		}
+	}
+}
