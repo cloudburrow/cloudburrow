@@ -290,8 +290,22 @@ func decodeAC3Track(tr *soundTrack) (mono []float32, rate int, err error) {
 		return nil, 0, errors.New("the AC-3 track has no audio")
 	}
 	center, surround := d.MixLevels()
+	return downmixLayout(pcm, d.Layout(), center, surround), rate, nil
+}
+
+// downmixLayout downmixes interleaved samples of the named channels (ffmpeg's
+// names: FL, FR, FC, LFE, BL, BR, SL, SR, BC...) to mono as ffmpeg's
+// resampler does (measured with `-ac 1`): the front pair at √½ each, the
+// centre at the centre mix level times √2, each surround at the surround
+// mix level times √½, the LFE dropped; the default levels (√½, √½) give
+// 1 and ½. A single channel is itself.
+func downmixLayout(pcm []float32, names []string, center, surround float64) []float32 {
+	channels := len(names)
+	if channels == 1 {
+		return pcm
+	}
 	weights := make([]float32, channels)
-	for c, name := range d.Layout() {
+	for c, name := range names {
 		switch name {
 		case "FC":
 			weights[c] = float32(center * math.Sqrt2)
@@ -302,10 +316,7 @@ func decodeAC3Track(tr *soundTrack) (mono []float32, rate int, err error) {
 			weights[c] = float32(surround * math.Sqrt2 / 2)
 		}
 	}
-	if channels == 1 {
-		weights[0] = 1
-	}
-	mono = make([]float32, len(pcm)/channels)
+	mono := make([]float32, len(pcm)/channels)
 	for i := range mono {
 		var v float32
 		for c, w := range weights {
@@ -313,7 +324,7 @@ func decodeAC3Track(tr *soundTrack) (mono []float32, rate int, err error) {
 		}
 		mono[i] = v
 	}
-	return mono, rate, nil
+	return mono
 }
 
 // decodeMP3Track decodes an MP3 track's frames as one MP3 stream, without
@@ -412,22 +423,45 @@ func decodePCMTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32, 
 	return pcm, channels, rate, nil
 }
 
-// decodeOpusTrack decodes a mono or stereo Opus track (ISO/IEC 14496-12
-// Opus sample entry, its dOps box) at 48 kHz, as ffmpeg's libopus decoder
-// does: the output gain applied, and the pre-skip dropped when no edit list
-// stands for it.
+// vorbisLayouts are the channels of Opus's mapping family 1 (RFC 7845
+// 5.1.1.2, the Vorbis order), by count, in ffmpeg's names.
+var vorbisLayouts = [9][]string{
+	3: {"FL", "FC", "FR"},
+	4: {"FL", "FR", "BL", "BR"},
+	5: {"FL", "FC", "FR", "BL", "BR"},
+	6: {"FL", "FC", "FR", "BL", "BR", "LFE"},
+	7: {"FL", "FC", "FR", "SL", "SR", "BC", "LFE"},
+	8: {"FL", "FC", "FR", "SL", "SR", "BL", "BR", "LFE"},
+}
+
+// decodeOpusTrack decodes an Opus track (ISO/IEC 14496-12 Opus sample
+// entry, its dOps box), mono, stereo or (#1739) surround, at 48 kHz, as
+// ffmpeg's libopus decoder does: the output gain applied, and the pre-skip
+// dropped when no edit list stands for it. Surround is downmixed to mono
+// with ffmpeg's default levels.
 func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (pcm []float32, channels, rate int, err error) {
 	if e == nil || e.Dops == nil {
 		return nil, 0, 0, errors.New("the Opus track has no dOps box")
 	}
 	dops := e.Dops
 	channels = int(dops.OutputChannelCount)
-	if dops.ChannelMappingFamily != 0 || channels < 1 || channels > 2 {
-		return nil, 0, 0, fmt.Errorf("its Opus has %d channels (mapping family %d), which are not decoded; mono and stereo are",
+	const opusRate = 48000
+	var d *opus.Decoder
+	switch {
+	case dops.ChannelMappingFamily == 0 && channels >= 1 && channels <= 2:
+		d, err = opus.NewDecoder(opusRate, channels)
+	case dops.ChannelMappingFamily == 1 && channels >= 1 && channels <= 8:
+		// #1739: surround (RFC 7845's Vorbis channel order), several
+		// streams through libopus's multistream decoder.
+		if len(dops.ChannelMapping) != channels || int(dops.StreamCount) < 1 || dops.CoupledCount > dops.StreamCount {
+			return nil, 0, 0, fmt.Errorf("the Opus track's channel mapping (%d streams, %d coupled, %d entries) does not fit its %d channels",
+				dops.StreamCount, dops.CoupledCount, len(dops.ChannelMapping), channels)
+		}
+		d, err = opus.NewMultistreamDecoder(opusRate, channels, int(dops.StreamCount), int(dops.CoupledCount), dops.ChannelMapping)
+	default:
+		return nil, 0, 0, fmt.Errorf("its Opus has %d channels (mapping family %d), which are not decoded; families 0 and 1 (mono to 7.1) are",
 			channels, dops.ChannelMappingFamily)
 	}
-	const opusRate = 48000
-	d, err := opus.NewDecoder(opusRate, channels)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("the Opus track: %v", err)
 	}
@@ -448,6 +482,9 @@ func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (p
 	}
 	if !edited {
 		pcm = pcm[min(len(pcm), int(dops.PreSkip)*channels):]
+	}
+	if channels > 2 {
+		return downmixLayout(pcm, vorbisLayouts[channels], math.Sqrt2/2, math.Sqrt2/2), 1, opusRate, nil
 	}
 	return pcm, channels, opusRate, nil
 }

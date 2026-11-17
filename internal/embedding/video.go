@@ -14,6 +14,7 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 	go264 "github.com/cloudburrow/cloudburrow/third_party/go264"
 	"github.com/cloudburrow/cloudburrow/third_party/govpx"
+	"github.com/cloudburrow/cloudburrow/third_party/govpx/vp9hbd"
 	"github.com/gen2brain/gav1d/av1"
 	"github.com/gen2brain/h265/hevc"
 )
@@ -32,7 +33,8 @@ import (
 // decoded with github.com/oops1/go.264 (copied into third_party/go264,
 // BSD 2-Clause; High profile, progressive, 8-bit 4:2:0) and H.265 with
 // github.com/gen2brain/h265 (MIT), VP9 (#1731) with github.com/thesyncim/govpx
-// (copied into third_party/govpx, BSD 3-Clause; profile 0, 8-bit 4:2:0)
+// (copied into third_party/govpx, BSD 3-Clause; profile 0, 8-bit 4:2:0;
+// profiles 1 to 3 with its vp9hbd, #1739)
 // and AV1 (#1731) with github.com/gen2brain/gav1d (BSD 2-Clause, a port of
 // dav1d; 8 to 12 bits, every chroma format, film grain), all pure Go and
 // bit-exact against ffmpeg here (docs/upstream-evaluation.md).
@@ -217,10 +219,6 @@ func videoTrackOf(f *mp4.File, trak *mp4.TrakBox, data []byte) (*videoTrack, err
 	case "vp09":
 		if st.Stsd.VpXX != nil {
 			tr.vpcC = st.Stsd.VpXX.VppC
-		}
-		if tr.vpcC != nil && tr.vpcC.Profile != 0 {
-			return nil, fmt.Errorf("%w: VP9 profile %d (%d-bit or 4:2:2/4:4:4) is not decoded; VP9 profile 0 (8-bit 4:2:0) is",
-				ErrVideoCodec, tr.vpcC.Profile, tr.vpcC.BitDepth)
 		}
 	case "av01":
 		if st.Stsd.Av01 != nil && st.Stsd.Av01.Av1C != nil {
@@ -590,11 +588,15 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 	if c := tr.vpcC; c != nil {
 		full, declared, mc = c.VideoFullRangeFlag != 0, c.MatrixCoefficients != 2, int(c.MatrixCoefficients)
 	}
+	if tr.vpcC != nil && tr.vpcC.Profile != 0 {
+		return decodeVP9Profiles(tr, from, stop, declared, mc, full)
+	}
 	pics = make(map[int]image.Image, stop-from)
 	for s := from; s < stop; s++ {
 		if err := d.Decode(tr.samples[s]); err != nil {
 			if errors.Is(err, govpx.ErrVP9NotImplemented) {
-				return nil, fmt.Errorf("%w: this VP9 stream uses a profile that is not decoded (%v); VP9 profile 0 (8-bit 4:2:0) is", ErrVideoCodec, err)
+				// A profile 1 to 3 frame with no vpcC to say so.
+				return decodeVP9Profiles(tr, from, stop, declared, mc, full)
 			}
 			return nil, fmt.Errorf("decoding the VP9 video's sample %d: %v", s+1, err)
 		}
@@ -612,6 +614,54 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			colourMatrix(declared, mc, img.Height), full)
 	}
 	return pics, nil
+}
+
+// decodeVP9Profiles decodes samples from to stop (exclusive) of a VP9
+// track in any profile with govpx's vp9hbd (#1739), written for CloudBurrow
+// from the VP9 bitstream specification: 8, 10 and 12 bits, 4:2:0, 4:2:2,
+// 4:4:0 and 4:4:4, each frame bit-exact against ffmpeg's decode.
+func decodeVP9Profiles(tr *videoTrack, from, stop int, declared bool, mc int, full bool) (map[int]image.Image, error) {
+	d := vp9hbd.NewDecoder()
+	pics := make(map[int]image.Image, stop-from)
+	for s := from; s < stop; s++ {
+		frames, err := d.Decode(tr.samples[s])
+		if err != nil {
+			return nil, fmt.Errorf("decoding the VP9 video's sample %d: %v", s+1, err)
+		}
+		if len(frames) == 0 {
+			continue
+		}
+		f := frames[len(frames)-1]
+		if f.Width*f.Height > maxVideoPixels {
+			return nil, fmt.Errorf("the video is %dx%d; at most %d pixels a frame are decoded", f.Width, f.Height, maxVideoPixels)
+		}
+		if f.ColorSpace == 7 { // CS_RGB: 4:4:4 planes of G, B and R
+			pics[s] = vp9RGB(f)
+			continue
+		}
+		pics[s] = yuvToNRGBA(yuvPlanes{w: f.Width, h: f.Height, y16: f.Planes[0], cb16: f.Planes[1], cr16: f.Planes[2],
+			strideY: f.Strides[0], strideC: f.Strides[1], ssX: f.SubsamplingX, ssY: f.SubsamplingY, depth: f.BitDepth},
+			colourMatrix(declared, mc, f.Height), full || f.FullRange)
+	}
+	return pics, nil
+}
+
+// vp9RGB is a CS_RGB VP9 frame (profile 1 or 3, no subsampling; its planes
+// G, B, R) as 8-bit RGB, deeper samples scaled to 0 to 255 and rounded.
+func vp9RGB(f *vp9hbd.Frame) image.Image {
+	img := image.NewNRGBA(image.Rect(0, 0, f.Width, f.Height))
+	maxV := uint32(1)<<f.BitDepth - 1
+	to8 := func(v uint16) uint8 { return uint8((min(uint32(v), maxV)*255 + maxV/2) / maxV) }
+	for y := range f.Height {
+		for x := range f.Width {
+			o := img.PixOffset(x, y)
+			img.Pix[o] = to8(f.Planes[2][y*f.Strides[2]+x])
+			img.Pix[o+1] = to8(f.Planes[0][y*f.Strides[0]+x])
+			img.Pix[o+2] = to8(f.Planes[1][y*f.Strides[1]+x])
+			img.Pix[o+3] = 255
+		}
+	}
+	return img
 }
 
 // decodeAV1 decodes samples from to stop (exclusive) of an AV1 track. A

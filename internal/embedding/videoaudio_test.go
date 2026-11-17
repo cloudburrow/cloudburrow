@@ -155,8 +155,8 @@ func TestDecodeVideoAudioRefuses(t *testing.T) {
 }
 
 // TestDecodeVideoAudioTrackCodecs (#1739): HE-AAC (SBR, and SBR with
-// parametric stereo), AC-3 and E-AC-3 tracks decode as ffmpeg 9 decodes
-// them, within the stated tolerance. The HE-AAC tracks are compared at
+// parametric stereo), AC-3, E-AC-3 and surround Opus tracks decode as
+// ffmpeg 9 decodes them, within the stated tolerance. The HE-AAC tracks are compared at
 // their own rate, downmixed (testdata/va-heaac*.ffmpeg-mono.s16: `ffmpeg -i
 // f -vn -ac 1 -f f32le`, then rounded to 16 bits by `ffmpeg -f f32le -ar
 // 44100 -ac 1 -i x.f32 -f s16le`, since a 16-bit -ac 1 normalises the
@@ -176,7 +176,11 @@ func TestDecodeVideoAudioRefuses(t *testing.T) {
 //	S6="aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*660*t)|0.25*sin(2*PI*330*t)|0.2*sin(2*PI*60*t)|0.15*sin(2*PI*1500*t)*sin(2*PI*2*t)|0.15*sin(2*PI*2500*t):s=48000:d=1.5:channel_layout=5.1"
 //	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a ac3 -b:a 192k -shortest -map_metadata -1 va-ac3.mp4
 //	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a eac3 -b:a 192k -shortest -map_metadata -1 va-eac3.mp4
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a libopus -b:a 192k -shortest -map_metadata -1 va-opus51.mp4
 //
+// The 5.1 Opus one (mapping family 1, #1739) is compared with ffmpeg's
+// libopus decode (`ffmpeg -c:a libopus -i f -vn -t 1.5 -ac 1 -ar 16000 -f f32le`),
+// downmixed with the default levels.//
 // (aac_at is macOS's AudioToolbox encoder: profile 4 is HE-AAC, 28 HE-AACv2.)
 func TestDecodeVideoAudioTrackCodecs(t *testing.T) {
 	for _, c := range []struct {
@@ -187,6 +191,7 @@ func TestDecodeVideoAudioTrackCodecs(t *testing.T) {
 		{"va-heaacv2.mp4", 1e-3}, // measured 5.8e-4, RMS 7.1e-5
 		{"va-ac3.mp4", 1e-3},     // measured 5.7e-4 (RMS 7.7e-5): ffmpeg's dither differs from ours
 		{"va-eac3.mp4", 1e-3},    // measured 2.7e-4 (RMS 3.3e-5)
+		{"va-opus51.mp4", 1e-4},  // libopus transpiled: measured 3.6e-5, RMS 9.2e-6
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", c.file))
 		if err != nil {

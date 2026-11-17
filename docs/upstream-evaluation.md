@@ -898,3 +898,20 @@ CloudBurrow (AC-3 from ATSC A/52, SBR and PS on the copied aac-go, high-bit-dept
 reconstruction in the copied govpx). `arabian9ts/aac-go` is copied into `third_party/aac-go`
 ([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)): it has one release and no activity since,
 and SBR would be added there. `govulncheck ./...` reports nothing for `opus-go`.
+
+**Follow-up (#1739, 2026-11-17): the decoders written here.** With no permissive module to adopt,
+each is written for CloudBurrow, standard library only, from a public specification:
+
+- **VP9 profiles 1 to 3**: `third_party/govpx/vp9hbd`, a VP9 decoder following the VP9 bitstream
+  specification's decoding process for every profile (8, 10 and 12 bits; 4:2:0, 4:2:2, 4:4:0,
+  4:4:4), reusing govpx's tables; bit-exact against ffmpeg 9 on 180-frame clips of each profile
+  ([PROVENANCE.md](../third_party/govpx/PROVENANCE.md)). govpx's own decoder still decodes profile 0.
+- **HE-AAC**: SBR and parametric stereo added to `third_party/aac-go` from ISO/IEC 14496-3, with
+  PacketVideo's OpenCORE AAC decoder (Apache 2.0) as a reference for the PS Huffman tables and the
+  QMF window's even coefficients ([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)). Parametric
+  stereo with 34 bands, IPD/OPD or mixing procedure B stays refused naming the tool: their
+  normative tables are printed only in ISO/IEC 14496-3 itself and in LGPL code (not read), and
+  AudioToolbox, the only HE-AACv2 encoder at hand, never emits them.
+- **AC-3 and E-AC-3**: `internal/ac3`, from ATSC A/52 as ETSI TS 102 366 V1.4.1 publishes it
+  (with Annex E), within 3e-5 of ffmpeg 9's float decode at high bit rates.
+- **Surround Opus**: `opus-go`'s multistream decoder, mapping family 1.
