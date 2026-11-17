@@ -46,14 +46,19 @@ func TestBigQueryInformationSchemaRegionViews(t *testing.T) {
 		}
 		if want := "project_id STRING, project_number INTEGER, table_catalog STRING, table_schema STRING, table_name STRING, " +
 			"creation_time TIMESTAMP, total_rows INTEGER, total_partitions INTEGER, total_logical_bytes INTEGER, active_logical_bytes INTEGER, " +
-			"long_term_logical_bytes INTEGER, storage_last_modified_time TIMESTAMP, deleted BOOLEAN, table_type STRING, managed_table_type STRING, " +
-			"last_metadata_index_refresh_time TIMESTAMP, table_deletion_reason STRING, table_deletion_time TIMESTAMP"; infoSchemaColumns(schema) != want {
+			"long_term_logical_bytes INTEGER, current_physical_bytes INTEGER, total_physical_bytes INTEGER, active_physical_bytes INTEGER, " +
+			"long_term_physical_bytes INTEGER, time_travel_physical_bytes INTEGER, storage_last_modified_time TIMESTAMP, deleted BOOLEAN, " +
+			"table_type STRING, managed_table_type STRING, fail_safe_physical_bytes INTEGER, last_metadata_index_refresh_time TIMESTAMP, " +
+			"table_deletion_reason STRING, table_deletion_time TIMESTAMP"; infoSchemaColumns(schema) != want {
 			t.Errorf("TABLE_STORAGE columns:\n got %s\nwant %s", infoSchemaColumns(schema), want)
 		}
-		if len(rows) != 2 || rows[0][4] != "t" || rows[0][6] != int64(3) || rows[0][7] != int64(0) || rows[0][12] != false ||
-			rows[0][13] != "BASE TABLE" || rows[1][4] != "p" || rows[1][6] != int64(3) || rows[1][7] != int64(2) ||
-			rows[0][8] != int64(24) || rows[0][9] != int64(24) || rows[0][10] != int64(0) || rows[0][11] == nil ||
-			rows[1][8] != int64(24) || rows[1][9] != int64(24) || rows[1][10] != int64(0) || rows[1][11] == nil {
+		// #1458: the physical byte estimates (columns 11 to 15) follow the
+		// logical ones, storage_last_modified_time is column 16.
+		if len(rows) != 2 || rows[0][4] != "t" || rows[0][6] != int64(3) || rows[0][7] != int64(0) || rows[0][17] != false ||
+			rows[0][18] != "BASE TABLE" || rows[1][4] != "p" || rows[1][6] != int64(3) || rows[1][7] != int64(2) ||
+			rows[0][8] != int64(24) || rows[0][9] != int64(24) || rows[0][10] != int64(0) || rows[0][16] == nil ||
+			rows[1][8] != int64(24) || rows[1][9] != int64(24) || rows[1][10] != int64(0) || rows[1][16] == nil ||
+			rows[0][11] != int64(24) || rows[0][15] != int64(0) || rows[0][20] != int64(0) {
 			t.Errorf("insert=%v: TABLE_STORAGE rows %v", insert, rows)
 		}
 	}
