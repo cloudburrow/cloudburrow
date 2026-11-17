@@ -177,7 +177,7 @@
 > WebAssembly decode path (libavif 1.4.2 and dav1d 1.5.3 compiled to WASM, and its Go glue) into
 > `internal/avif` without its `purego` loader, run on `github.com/tetratelabs/wazero` v1.12.0 (pure
 > Go, Apache 2.0), so no build tag is needed and the Linux CLI stays statically linked
-> ([third_party/avif/PROVENANCE.md](../third_party/avif/PROVENANCE.md) records the files, their
+> (`third_party/avif/PROVENANCE.md` (deleted with the decoder in #1736; in git history) records the files, their
 > hashes and the deletions).
 >
 > - Use: an `inline_data` or `file_data` part with `mime_type` `image/avif`, 8 to 12 bits, with or
@@ -190,7 +190,17 @@
 > - The first AVIF compiles the 3.5 MB module (about half a second on an M4 Max); each decode
 >   instantiates it afresh. A 10- or 12-bit AVIF over 13312 × 13312 does not fit the module's 4 GiB
 >   of memory and is `UNIMPLEMENTED` saying so (#1736); 8-bit AVIFs decode up to 16384 × 16384.
+>   (Both superseded by #1736, below.)
 > - Not checked against Transformers.js.
+>
+> **Update 2026-11-17 (#1736): AVIF on gav1d.** AVIF is now decoded with `github.com/gen2brain/gav1d`
+> (already required for AV1 video, #1731): a pure Go port of dav1d with an AVIF reader, so the
+> WebAssembly module, its 4 GiB memory ceiling and `internal/avif` are gone, and every AVIF Google
+> takes decodes, a 10-bit 16384 × 16384 one at a peak RSS of 3.8 GB in 1.2 s on an M4 Max (avifdec:
+> 2.9 GB, 10 s). An 8-bit image's YUV is converted as libavif with libyuv converts it (nearest
+> chroma), a deeper one with gav1d's converter, bilinear like libavif's own; on the #1729 fixtures
+> both are pixel-identical to libavif 1.4.2's references, crop, rotation, mirror, alpha and an AVIS
+> sequence's first frame included.
 >
 > Everything below records why the official LiteRT route is still blocked.
 

@@ -2,7 +2,6 @@ package embedding
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -29,7 +28,7 @@ import (
 // standard library, WebP (lossy, lossless, with or without alpha) and BMP
 // with golang.org/x/image (#1651), an animated WebP as its first frame and
 // HEIC and HEIF with github.com/gen2brain/h265 (#1724), and AVIF with
-// libavif and dav1d in WebAssembly (#1729, avif.go): the image types Google's
+// github.com/gen2brain/gav1d (#1729, #1736, avif.go): the image types Google's
 // gemini-embedding-2 takes (re-read 2026-11-17).
 var ImageMIMETypes = []string{"image/png", "image/jpeg", "image/webp", "image/bmp", "image/heic", "image/heif", "image/avif"}
 
@@ -91,9 +90,6 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 		img, err = decodeWebP(data)
 	} else {
 		img, err = dec.decode(bytes.NewReader(data))
-	}
-	if errors.Is(err, ErrImageTooLarge) {
-		return nil, err
 	}
 	if err != nil {
 		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)

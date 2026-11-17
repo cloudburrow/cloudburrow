@@ -744,7 +744,7 @@ libyuv, built upstream with wasi-sdk; CloudBurrow compiles no C) and the MIT, li
 texts are copied into `internal/avif`, unmodified but for deletions: the `if dynamic` branches that
 called the `purego` loader (whose files, `avif_dynamic.go` and `purego_*.go`, are not copied), the
 exported `Dynamic()`, and `avif_wazero.go`'s `!wasm2go` build constraint.
-[third_party/avif/PROVENANCE.md](../third_party/avif/PROVENANCE.md) records every file's upstream
+`third_party/avif/PROVENANCE.md` (deleted with the decoder in #1736; in git history) records every file's upstream
 and committed SHA-256, and `TestVendoredAVIFMatchesProvenance` checks them. No module is added:
 `github.com/tetratelabs/wazero` v1.12.0 (Apache-2.0), already required for go-pdfium (#1723, below),
 becomes a direct requirement. `TestLinuxBinariesNeverImportPurego` (#1722)
@@ -853,3 +853,24 @@ VP9 profiles 1 to 3 (4:2:2, 4:4:4, 10 and 12 bits), which `govpx` does not decod
 naming the profile; libvpx and every browser's encoder default to profile 0. Neither copy imports
 `ebitengine/purego`, so the `CGO_ENABLED=0` Linux CLI stays statically linked. `govulncheck ./...`
 reports nothing for either.
+
+## Amendment: AVIF on gav1d instead of the WebAssembly decoder (#1736)
+
+The vendored WebAssembly build of `gen2brain/avif` (#1729) could not decode a 10- or 12-bit AVIF
+over 13312 × 13312 in its 4 GiB of memory, while Google takes 16384 × 16384. `gen2brain/gav1d`
+v0.2.7, required since #1731 for AV1 video, has an `avif` package of its own: an ISOBMFF reader
+(grids, clap, irot, imir, alpha items, AVIS sequences, nclx and ICC), dav1d's decoder ported to
+Go, and a YUV-to-RGB converter, with no cgo, no WebAssembly, no `purego` and no dependencies. It
+decodes every #1729 fixture pixel-identically to libavif 1.4.2's references: a lossless AVIF (the
+PNG exactly), 4:2:0 (against `avifdec -u nearest`, with CloudBurrow converting 8-bit planes as
+libyuv does, nearest chroma), 10-bit 4:4:4 (against `avifdec -d 16`, gav1d's own 16-bit
+conversion), alpha, an AVIS sequence's first frame and a clap + irot + imir transform. A 10-bit
+16384 × 16384 AVIF (a 2 × 2 grid written by `avifenc`; libaom cannot encode one 16384 × 16384 frame,
+"Failed to allocate lag buffers") decodes in 1.2 s at a peak RSS of 3.8 GB on an M4 Max, two
+512 × 512 regions identical to `avifdec -d 16`'s (which peaked at 2.9 GB). So `internal/avif`, its
+3.5 MB blob and `third_party/avif` are deleted, `UNIMPLEMENTED` for deep AVIFs is gone, and
+`tetratelabs/wazero` is again only go-pdfium's (indirect) requirement. One deep 4:2:0 or 4:2:2
+difference remains: gav1d upsamples its chroma bilinearly, as libavif's own converter does, where
+libavif with libyuv would take the nearest sample; 8-bit images, nearly every AVIF, convert as
+before. Upstream nit: `avif.DecodeConfig` reports a deep grid as 8-bit (the grid item has no
+`av1C`); CloudBurrow does not use the colour model. `govulncheck ./...` reports nothing for it.

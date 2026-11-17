@@ -3,45 +3,36 @@ package embedding
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"image/draw"
 	"io"
+	"math"
 
-	"github.com/cloudburrow/cloudburrow/internal/avif"
+	"github.com/gen2brain/gav1d/avif"
 )
 
-// AVIF images (#1729) are decoded with libavif 1.4.2 and dav1d, compiled to
-// WebAssembly by github.com/gen2brain/avif v0.6.0 and run on wazero: its
-// WASM decode path is vendored in internal/avif without the purego loader
-// of a system libavif, so the build stays cgo-free and the Linux CLI
-// statically linked (third_party/avif/PROVENANCE.md).
+// AVIF images (#1729) are decoded with github.com/gen2brain/gav1d (#1736):
+// a pure Go port of dav1d with an AVIF reader, BSD 2-Clause, no cgo, no
+// WebAssembly and no dependencies, so the Linux CLI stays statically linked
+// and every AVIF Google takes decodes, 8 to 12 bits up to 16384 x 16384.
 //
-// The picture is the one a viewer shows, as for HEIC (heic.go): the primary
-// item's clean aperture, rotation and mirror (clap, irot, imir) are applied
-// in that order (MIAF 7.3.6.7), as libheif's heif-dec and ImageMagick apply
-// them; libavif itself only reports them. An image sequence (AVIS) gives its
-// first frame, as a HEIC sequence or an animated WebP does (webpanim.go).
+// The picture is libavif's (with libyuv, its default build): an 8-bit
+// image's YUV is converted here, 4:2:0 and 4:2:2 chroma upsampled
+// nearest-neighbour as libyuv does for libavif's default (AUTOMATIC)
+// upsampling; a 10- or 12-bit image is gav1d's 16-bit RGB, whose 4:2:0 and
+// 4:2:2 chroma is upsampled bilinearly, as libavif's own converter does.
+// The primary item's clean aperture, rotation and mirror (clap, irot, imir)
+// are applied in that order (MIAF 7.3.6.7), as libheif's heif-dec and
+// ImageMagick apply them, as for HEIC (heic.go). An image sequence (AVIS)
+// gives its first frame, as a HEIC sequence or an animated WebP does
+// (webpanim.go).
 
-// ErrImageTooLarge is a valid image this build cannot decode for its size:
-// a 10- or 12-bit AVIF larger than avifMaxDeepPixels (#1729). Google
-// decodes it, so it is UNIMPLEMENTED, not INVALID_ARGUMENT.
-var ErrImageTooLarge = errors.New("the image is too large for this build's decoder")
-
-// avifMaxDeepPixels is the largest 10- or 12-bit AVIF decoded, measured on
-// 2026-11-17: libavif in WebAssembly has 4 GiB of memory, which holds the
-// 16-bit RGB of 13312 x 13312 pixels (the glue's copy and libavif's own)
-// but not of 14336 x 14336. 8-bit AVIFs decode up to Google's 16384 x 16384.
-const avifMaxDeepPixels = 13312 * 13312
+// avifOptions bound a frame at Google's largest image.
+var avifOptions = avif.Options{ToYCbCr: true, FrameSizeLimit: MaxImageSide * MaxImageSide}
 
 func avifConfig(r io.Reader) (image.Config, error) {
-	cfg, err := avif.DecodeConfig(r)
-	if err != nil {
-		return image.Config{}, avifError(err)
-	}
-	return cfg, nil
+	return avif.DecodeConfig(r)
 }
 
 func avifDecode(r io.Reader) (img image.Image, err error) {
@@ -49,34 +40,121 @@ func avifDecode(r io.Reader) (img image.Image, err error) {
 	if err != nil {
 		return nil, err
 	}
-	// The decoder runs in a WebAssembly sandbox; a trap is an error, but
-	// guard the glue too, so no input can take the server down.
+	// Guard the decoder, so no input can take the server down.
 	defer func() {
 		if p := recover(); p != nil {
 			img, err = nil, fmt.Errorf("the AVIF decoder failed: %v", p)
 		}
 	}()
-	img, err = avif.Decode(bytes.NewReader(data))
+	img, ci, err := avif.DecodeColor(bytes.NewReader(data), avifOptions)
 	if err != nil {
-		if cfg, cerr := avif.DecodeConfig(bytes.NewReader(data)); cerr == nil &&
-			cfg.ColorModel == color.RGBA64Model && cfg.Width*cfg.Height > avifMaxDeepPixels {
-			return nil, fmt.Errorf("%w: a %dx%d AVIF of more than 8 bits a channel needs more than the 4 GiB of WebAssembly memory its decoder has (up to 13312x13312 pixels decode)",
-				ErrImageTooLarge, cfg.Width, cfg.Height)
-		}
-		return nil, avifError(err)
+		return nil, err
 	}
 	if b := img.Bounds(); b.Dx() <= 0 || b.Dy() <= 0 || b.Dx() > MaxImageSide || b.Dy() > MaxImageSide {
 		return nil, fmt.Errorf("the image is %dx%d; each side must be 1 to %d pixels", b.Dx(), b.Dy(), MaxImageSide)
 	}
+	img = avifRGB(img, ci)
 	return avifTransform(img, avifPrimaryProps(data))
 }
 
-// avifError rewords the decoder's errors, which say only "decode failed".
-func avifError(err error) error {
-	if err == avif.ErrDecode {
-		return fmt.Errorf("libavif could not parse or decode it")
+// avifRGB converts gav1d's native 8-bit planes to RGB as libyuv does for
+// libavif: nearest-neighbour chroma, the matrix and range the file signals
+// (unspecified is BT.601, as libavif reads it). A deep image is already RGB.
+func avifRGB(img image.Image, ci avif.ColorInfo) image.Image {
+	var (
+		yc    *image.YCbCr
+		alpha []uint8
+		astr  int
+	)
+	switch m := img.(type) {
+	case *image.YCbCr:
+		yc = m
+	case *image.NYCbCrA:
+		yc, alpha, astr = &m.YCbCr, m.A, m.AStride
+	case *image.Gray:
+		b := m.Bounds()
+		out := image.NewNRGBA(b)
+		conv := newAVIFConv(ci)
+		for y := 0; y < b.Dy(); y++ {
+			for x := 0; x < b.Dx(); x++ {
+				r, g, bb := conv.rgb(m.Pix[y*m.Stride+x], 128, 128)
+				o := out.Pix[y*out.Stride+4*x:]
+				o[0], o[1], o[2], o[3] = r, g, bb, 255
+			}
+		}
+		return out
+	default: // *image.NRGBA64 above 8 bits
+		return img
 	}
-	return err
+	b := yc.Bounds()
+	out := image.NewNRGBA(b)
+	conv := newAVIFConv(ci)
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			yi, ci := yc.YOffset(x, y), yc.COffset(x, y)
+			r, g, bb := conv.rgb(yc.Y[yi], yc.Cb[ci], yc.Cr[ci])
+			o := out.Pix[(y-b.Min.Y)*out.Stride+4*(x-b.Min.X):]
+			o[0], o[1], o[2], o[3] = r, g, bb, 255
+			if alpha != nil {
+				o[3] = alpha[(y-b.Min.Y)*astr+(x-b.Min.X)]
+			}
+		}
+	}
+	return out
+}
+
+// avifConv is one file's YUV to RGB conversion.
+type avifConv struct {
+	identity, ycgco bool
+	full            bool
+	kr, kb          float64
+}
+
+func newAVIFConv(ci avif.ColorInfo) avifConv {
+	c := avifConv{full: ci.FullRange, kr: 0.299, kb: 0.114}
+	switch ci.Matrix {
+	case 0:
+		c.identity = true
+	case 1:
+		c.kr, c.kb = 0.2126, 0.0722
+	case 4:
+		c.kr, c.kb = 0.30, 0.11
+	case 7:
+		c.kr, c.kb = 0.212, 0.087
+	case 8:
+		c.ycgco = true
+	case 9, 10:
+		c.kr, c.kb = 0.2627, 0.0593
+	}
+	return c
+}
+
+func (c avifConv) rgb(y8, cb8, cr8 uint8) (uint8, uint8, uint8) {
+	yy, cb, cr := float64(y8), float64(cb8)-128, float64(cr8)-128
+	if !c.full {
+		yy, cb, cr = (yy-16)*255/219, cb*255/224, cr*255/224
+	}
+	var r, g, b float64
+	switch {
+	case c.identity:
+		g, b, r = float64(y8), float64(cb8), float64(cr8)
+		if !c.full {
+			g, b, r = (g-16)*255/219, (b-16)*255/219, (r-16)*255/219
+		}
+	case c.ycgco:
+		t := yy - cb
+		g, b, r = yy+cb, t-cr, t+cr
+	default:
+		kg := 1 - c.kr - c.kb
+		r = yy + 2*(1-c.kr)*cr
+		b = yy + 2*(1-c.kb)*cb
+		g = yy - (2*c.kr*(1-c.kr)*cr+2*c.kb*(1-c.kb)*cb)/kg
+	}
+	return clamp8(r), clamp8(g), clamp8(b)
+}
+
+func clamp8(v float64) uint8 {
+	return uint8(math.Round(min(max(v, 0), 255)))
 }
 
 // avifProps are the transformative properties of the primary item.
@@ -86,7 +164,7 @@ type avifProps struct {
 }
 
 // avifPrimaryProps reads the primary item's clap, irot and imir from the
-// meta box. A file it cannot follow has none: libavif has already parsed
+// meta box. A file it cannot follow has none: the decoder has already parsed
 // and decoded it, so the picture stands untransformed.
 func avifPrimaryProps(data []byte) avifProps {
 	p := avifProps{irot: -1, imir: -1}
@@ -282,10 +360,10 @@ func cropImage(img image.Image, r image.Rectangle) image.Image {
 }
 
 // newLike is a w x h image of img's kind: 16 bits a channel for a deep
-// image, 8 otherwise, both premultiplied as the decoder's are.
+// image, 8 otherwise, both unpremultiplied as the decoder's are.
 func newLike(img image.Image, w, h int) draw.Image {
-	if _, deep := img.(*image.RGBA64); deep {
-		return image.NewRGBA64(image.Rect(0, 0, w, h))
+	if _, deep := img.(*image.NRGBA64); deep {
+		return image.NewNRGBA64(image.Rect(0, 0, w, h))
 	}
-	return image.NewRGBA(image.Rect(0, 0, w, h))
+	return image.NewNRGBA(image.Rect(0, 0, w, h))
 }

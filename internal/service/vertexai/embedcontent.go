@@ -270,9 +270,6 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		switch {
 		case strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/"):
 			img, err := embedding.DecodeImage(mt, data)
-			if errors.Is(err, embedding.ErrImageTooLarge) {
-				return nil, 0, apierror.Unimplemented("content.parts[%d].%s: %v", i, field, err)
-			}
 			if err != nil {
 				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
 			}
