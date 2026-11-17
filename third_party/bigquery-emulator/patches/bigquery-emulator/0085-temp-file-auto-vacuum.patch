@@ -1,0 +1,131 @@
+CloudBurrow patch 85 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1662).
+
+The emulator keeps its tables, and the results of its jobs (patch 0002),
+in a temporary SQLite file (server.TempStorage), which never shrank:
+SQLite reuses the pages a DROP TABLE or a dropped result frees, but in its
+default auto_vacuum mode, NONE, never gives them back to the filesystem.
+Measured in TestBigQueryInformationSchemaJobs -count=200 after the
+BigQuery compat suite and 6,000 more jobs (arm64, Docker Desktop): the
+file reached 1.01 GB in 23 minutes, on the container's writable layer, so
+on the node's disk.
+
+The file is now opened with auto_vacuum=FULL, which a new file takes
+before its first table, so each commit truncates the pages it freed; the
+file holds what the emulator keeps, not the most it ever kept. Setting a
+PRAGMA through the SQLite driver's DSN (_pragma) drops the busy timeout of
+one minute the driver sets when none is given, so that one is named
+first, as the driver orders them. cloudburrow_auto_vacuum_test.go fails
+without the patch (auto_vacuum 0) and passes with it: a 4 MB table's DROP
+shrinks the file. Independent of the other patches.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/server.go
++++ b/server/server.go
+@@ -50,7 +50,12 @@
+ 		if err != nil {
+ 			return nil, fmt.Errorf("failed to create temporary file: %w", err)
+ 		}
+-		storage = Storage(fmt.Sprintf("file:%s?cache=shared", f.Name()))
++		// CloudBurrow patch (cloudburrow/cloudburrow#1662): the file gives
++		// back the pages a deleted table or result freed, at each commit
++		// (auto_vacuum=FULL, set before the first table is made); without
++		// it, it only ever grew. The busy timeout is the one the SQLite
++		// driver sets when no _pragma is given.
++		storage = Storage(fmt.Sprintf("file:%s?cache=shared&%s", f.Name(), cloudburrowTempPragmas))
+ 		server.storage = storage
+ 		server.fileCleanup = func() error {
+ 			return os.Remove(f.Name())
+--- /dev/null
++++ b/server/cloudburrow_auto_vacuum.go
+@@ -0,0 +1,8 @@
++package server
++
++// cloudburrowTempPragmas are the PRAGMAs of TempStorage's file
++// (CloudBurrow patch, cloudburrow/cloudburrow#1662): busy_timeout first, as
++// the driver orders them, at the minute it sets when given none, then
++// auto_vacuum=FULL, which a new file takes before its first table, so that
++// each commit gives back to the filesystem the pages it freed.
++const cloudburrowTempPragmas = "_pragma=busy_timeout(60000)&_pragma=auto_vacuum(full)"
+--- /dev/null
++++ b/server/cloudburrow_auto_vacuum_test.go
+@@ -0,0 +1,74 @@
++package server
++
++import (
++	"context"
++	"database/sql"
++	"os"
++	"strings"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestTempStorageGivesBackFreedPages (CloudBurrow patch,
++// cloudburrow/cloudburrow#1662): TempStorage's file is in auto_vacuum FULL
++// mode with the driver's busy timeout, and shrinks when a table is dropped.
++// Without the patch the file kept its size (auto_vacuum NONE).
++func TestTempStorageGivesBackFreedPages(t *testing.T) {
++	s, err := New(TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer s.Close()
++	ctx := context.Background()
++	path := strings.TrimPrefix(string(s.storage), "file:")
++	path = path[:strings.IndexByte(path, '?')]
++	conn, err := s.db.Conn(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	raw := func(query string, dest ...any) {
++		t.Helper()
++		err := conn.Raw(func(c interface{}) error {
++			rows, err := c.(*googlesqlite.Conn).QueryRawContext(ctx, query)
++			if err != nil {
++				return err
++			}
++			defer rows.Close()
++			if len(dest) > 0 {
++				if !rows.Next() {
++					return sql.ErrNoRows
++				}
++				return rows.Scan(dest...)
++			}
++			for rows.Next() {
++			}
++			return rows.Err()
++		})
++		if err != nil {
++			t.Fatalf("%s: %v", query, err)
++		}
++	}
++	var mode, timeout int
++	raw("PRAGMA auto_vacuum", &mode)
++	raw("PRAGMA busy_timeout", &timeout)
++	if mode != 1 || timeout != 60000 {
++		t.Fatalf("auto_vacuum %d (want 1, FULL), busy_timeout %d (want 60000)", mode, timeout)
++	}
++	size := func() int64 {
++		t.Helper()
++		fi, err := os.Stat(path)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return fi.Size()
++	}
++	raw("CREATE TABLE cloudburrow_vacuum_test (b BLOB)")
++	raw("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 4000) INSERT INTO cloudburrow_vacuum_test SELECT randomblob(1000) FROM n")
++	full := size()
++	raw("DROP TABLE cloudburrow_vacuum_test")
++	if after := size(); full < 4_000_000 || after > full/4 {
++		t.Errorf("the file was %d bytes with the table and is %d after its DROP; want it to shrink", full, after)
++	}
++}

@@ -55,6 +55,19 @@ import (
 // answers the job, which still names its destination table, as BigQuery's
 // does.
 //
+// Since #1662 the tables are bounded by what they hold too: past
+// resultsMaxRows rows or resultsMaxBytes bytes in all (resultsadopt.go
+// says how they are read), the oldest are deleted, as past
+// resultsMaxTables, and past resultsHardRows or resultsHardBytes, as past
+// resultsHardCap, while busy too. The newest table is kept whatever its
+// size, so a client can read the query it has just run. Each table of
+// TestBigQueryInformationSchemaJobs's JOBS_BY_ORGANIZATION query held
+// about 9,000 rows, two per run, which the count caps alone let fill the
+// emulator's SQLite file to 1 GB (#1662).
+//
+// The front adopts, when it starts, the tables made before it
+// (resultsadopt.go, #1660).
+//
 // ExpireResultsPath does the same at once, for a test or to free the
 // engine before a long run: a POST with ?job=ID (repeated) deletes those
 // jobs' tables, else ?keep=N (default 0) all but the newest N; it answers
@@ -69,9 +82,16 @@ const (
 	resultsMaxTables = 200
 	// resultsHardCap is how many tables make the front delete while busy.
 	resultsHardCap = 300
-	resultsBatch   = 20
-	resultsIdle    = 30 * time.Second
-	resultsTick    = 5 * time.Second
+	// resultsMaxRows and resultsMaxBytes are the rows and bytes kept in
+	// all, while idle; resultsHardRows and resultsHardBytes make the front
+	// delete while busy (#1662, above).
+	resultsMaxRows   = 250_000
+	resultsMaxBytes  = 64 << 20
+	resultsHardRows  = 1_000_000
+	resultsHardBytes = 256 << 20
+	resultsBatch     = 20
+	resultsIdle      = 30 * time.Second
+	resultsTick      = 5 * time.Second
 	// resultsForgetAfter bounds the expired jobs remembered, per front.
 	resultsForgetAfter = 100000
 )
@@ -84,6 +104,10 @@ type resultTable struct {
 	scratch            bool
 	// drop is the statement that drops a scratch function, or "".
 	drop string
+	// rows and bytes are a job's table's size, once sized
+	// (resultsadopt.go).
+	rows, bytes int64
+	sized       bool
 }
 
 // resultsExpiry is what queryResults keeps to expire its tables.
@@ -95,6 +119,9 @@ type resultsExpiry struct {
 	hardCap   int
 	batch     int
 	idle      time.Duration
+	// maxRows, maxBytes, hardRows and hardBytes bound the tables' sizes
+	// (above).
+	maxRows, maxBytes, hardRows, hardBytes int64
 	// tables are the tables made, oldest first.
 	tables []resultTable
 	// expired are the jobs whose table was deleted, by project and job,
@@ -124,6 +151,18 @@ func (e *resultsExpiry) init() {
 	if e.idle == 0 {
 		e.idle = resultsIdle
 	}
+	if e.maxRows == 0 {
+		e.maxRows = resultsMaxRows
+	}
+	if e.maxBytes == 0 {
+		e.maxBytes = resultsMaxBytes
+	}
+	if e.hardRows == 0 {
+		e.hardRows = max(resultsHardRows, e.maxRows)
+	}
+	if e.hardBytes == 0 {
+		e.hardBytes = max(resultsHardBytes, e.maxBytes)
+	}
 }
 
 func expiryKey(project, job string) string { return project + "\x00" + job }
@@ -152,11 +191,10 @@ func (e *resultsExpiry) made(project, job, base string, scratch bool) {
 	e.init()
 	if !scratch {
 		delete(e.expired, expiryKey(project, job))
-	} else {
-		for _, t := range e.tables {
-			if t.scratch && t.project == project && t.job == job {
-				return // deleted twice
-			}
+	}
+	for _, t := range e.tables {
+		if t.scratch == scratch && t.project == project && t.job == job {
+			return // deleted twice, or adopted (resultsadopt.go)
 		}
 	}
 	e.tables = append(e.tables, resultTable{project: project, job: job, base: base, made: e.now(), scratch: scratch})
@@ -191,8 +229,9 @@ func (e *resultsExpiry) reset() {
 
 // due returns the tables to delete now, oldest first, at most batch:
 // with keep >= 0, all but the newest keep, at once (force); else, when the
-// instance is idle, or has more than hardCap, the scratch tables
-// and those past maxAge or beyond maxTables.
+// instance is idle, or is over hardCap, hardRows or hardBytes, the
+// scratch tables and those past maxAge, beyond maxTables, or beyond
+// maxRows or maxBytes.
 func (e *resultsExpiry) due(keep int, force bool) []resultTable {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -203,15 +242,16 @@ func (e *resultsExpiry) due(keep int, force bool) []resultTable {
 	}
 	now := e.now()
 	idle := e.inflight == 0 && now.Sub(e.last) >= e.idle
-	if !(force || idle || n > e.hardCap) {
+	if !(force || idle || e.overCapLocked()) {
 		return nil
 	}
+	cut := e.overBudget()
 	var out []resultTable
 	for i, t := range e.tables {
 		if len(out) == e.batch {
 			break
 		}
-		if t.scratch || now.Sub(t.made) >= e.maxAge || i < n-e.maxTables {
+		if t.scratch || now.Sub(t.made) >= e.maxAge || i < n-e.maxTables || i < cut {
 			out = append(out, t)
 		}
 	}
@@ -235,12 +275,37 @@ func (e *resultsExpiry) jobs(ids []string) []resultTable {
 	return out
 }
 
-// overCap reports whether there are more than hardCap tables.
+// overCap reports whether there are more than hardCap tables, or they
+// hold more than hardRows rows or hardBytes bytes.
 func (e *resultsExpiry) overCap() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.init()
-	return len(e.tables) > e.hardCap
+	return e.overCapLocked()
+}
+
+func (e *resultsExpiry) overCapLocked() bool {
+	if len(e.tables) > e.hardCap {
+		return true
+	}
+	var rows, bytes int64
+	for _, t := range e.tables {
+		rows, bytes = rows+t.rows, bytes+t.bytes
+	}
+	return rows > e.hardRows || bytes > e.hardBytes
+}
+
+// overBudget returns how many of the oldest tables are beyond maxRows or
+// maxBytes, counted from the newest, which is always kept.
+func (e *resultsExpiry) overBudget() int {
+	var rows, bytes int64
+	for i := len(e.tables) - 1; i >= 0; i-- {
+		rows, bytes = rows+e.tables[i].rows, bytes+e.tables[i].bytes
+		if i < len(e.tables)-1 && (rows > e.maxRows || bytes > e.maxBytes) {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // busy reports whether a request came in since started.
@@ -314,15 +379,21 @@ func (q *queryResults) deleteTables(ctx context.Context, tables []resultTable, s
 	return deleted
 }
 
-// expire deletes the tables due (above) every resultsTick until ctx ends.
+// expire adopts the tables made before the front started, then sizes the
+// tables and deletes those due (above) every resultsTick until ctx ends.
 func (q *queryResults) expire(ctx context.Context) {
 	tick := time.NewTicker(resultsTick)
 	defer tick.Stop()
+	adopted := q.adopt(ctx) == nil // resultsadopt.go, #1660
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			if !adopted {
+				adopted = q.adopt(ctx) == nil
+			}
+			q.sizeTables(ctx) // #1662
 			if due := q.expiry.due(-1, false); len(due) > 0 {
 				// Past the hard cap, a batch goes on while busy.
 				q.deleteTables(ctx, due, !q.expiry.overCap())
