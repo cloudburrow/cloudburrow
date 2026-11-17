@@ -580,7 +580,8 @@ whose GTIDs are the instance's own (so the GTID consistency check is not made):
 `CALL mysql.setupExternalSourceAutoPosition('host', 3306, 'user', 'password', 1, false, false)`
 (or `mysql.setupExternalSource` with a binary log file and position) and
 `CALL mysql.startReplication()`, which also makes the replica `super_read_only`;
-`mysql.stopReplication()` stops it. `promoteReplica` removes them. The bodies are CloudBurrow's
+`mysql.stopReplication()` stops it. `promoteReplica` removes them. Both are made outside the
+binary log, so they give the instance no GTIDs of its own. The bodies are CloudBurrow's
 (the guide gives the calls); `USE_SSL_CLIENT_AUTH` is refused and `mysql.skipReplicationError` is
 not installed. The console's Demote has **Skip replication setup**.
 
