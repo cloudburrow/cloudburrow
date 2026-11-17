@@ -126,7 +126,7 @@ func TestRefusedVerbsSayWhy(t *testing.T) {
 			return err
 		},
 		"SQL Server": func() error { _, err := svc.Instances.AcquireSsrsLease("proj", "pg", nil).Do(); return err },
-		"Google-managed networking": func() error {
+		"without instance writes": func() error {
 			_, err := svc.BlueGreenDeployments.List("projects/proj/locations/us-central1").Do()
 			return err
 		},

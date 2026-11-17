@@ -35,12 +35,12 @@ func (p *sqlProvisioner) Upgrade(ctx context.Context, from, to sqladmin.Spec) er
 	if err := p.dumpAll(ctx, from, dump); err != nil {
 		return fmt.Errorf("dump %s before its upgrade: %w", from.Name, err)
 	}
-	if err := p.Remove(ctx, from.Name); err != nil {
+	if err := p.Remove(ctx, from.ServerName()); err != nil {
 		return err
 	}
 	if err := p.startAndLoad(ctx, to, dump); err != nil {
 		p.logf("upgrade of Cloud SQL instance %s to %s failed (%v); starting %s again", from.Name, to.DatabaseVersion, err, from.DatabaseVersion)
-		_ = p.Remove(ctx, to.Name)
+		_ = p.Remove(ctx, to.ServerName())
 		if rerr := p.startAndLoad(ctx, from, dump); rerr != nil {
 			return fmt.Errorf("upgrade to %s: %w; and restoring %s failed: %v", to.DatabaseVersion, err, from.DatabaseVersion, rerr)
 		}
@@ -68,7 +68,7 @@ func (p *sqlProvisioner) dumpAll(ctx context.Context, spec sqladmin.Spec, path s
 	if err != nil {
 		return err
 	}
-	exec := podExec(p.cfg, components.SQLInstancePrefix+spec.Name)
+	exec := podExec(p.cfg, components.SQLInstancePrefix+spec.ServerName())
 	if spec.MySQL() {
 		err = exec(ctx, nil, f, "sh", "-c", mysqlAccounts)
 	} else {
@@ -97,7 +97,7 @@ func (p *sqlProvisioner) startAndLoad(ctx context.Context, spec sqladmin.Spec, p
 		return err
 	}
 	defer f.Close()
-	exec := podExec(p.cfg, components.SQLInstancePrefix+spec.Name)
+	exec := podExec(p.cfg, components.SQLInstancePrefix+spec.ServerName())
 	if spec.MySQL() {
 		load := `exec mysql $MYSQL_LOCAL`
 		if spec.DatabaseVersion != "MYSQL_8_0" {

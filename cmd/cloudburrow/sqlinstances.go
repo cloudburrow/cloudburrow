@@ -71,13 +71,14 @@ func (p *sqlProvisioner) port(spec sqladmin.Spec) int {
 func (p *sqlProvisioner) forwarder(spec sqladmin.Spec) *netfwd.Forwarder {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if f := p.fwds[spec.Name]; f != nil {
+	srv := spec.ServerName()
+	if f := p.fwds[srv]; f != nil {
 		return f
 	}
-	f := netfwd.New(netfwd.Target{Name: components.SQLInstancePrefix + spec.Name, Namespace: p.inst.Namespace,
-		ServicePort: p.port(spec), Label: "cloudsql-instance-" + spec.Name}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
+	f := netfwd.New(netfwd.Target{Name: components.SQLInstancePrefix + srv, Namespace: p.inst.Namespace,
+		ServicePort: p.port(spec), Label: "cloudsql-instance-" + srv}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
 	f.Logf = p.logf
-	p.fwds[spec.Name] = f
+	p.fwds[srv] = f
 	return f
 }
 
@@ -95,7 +96,7 @@ func (p *sqlProvisioner) hostAddr(name string) func() string {
 func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 	if spec.MySQL() {
 		return &sqladmin.MySQL{Name: spec.Name, Version: spec.DatabaseVersion,
-			RootPassword: spec.RootPassword, HostAddr: p.hostAddr(spec.Name)}
+			RootPassword: spec.RootPassword, HostAddr: p.hostAddr(spec.ServerName())}
 	}
 	user := "postgres"
 	if spec.MasterUp {
@@ -103,7 +104,7 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 		user = components.CloudSQLUser
 	}
 	return &sqladmin.Postgres{Name: spec.Name, Version: spec.DatabaseVersion,
-		User: user, Database: user, HostAddr: p.hostAddr(spec.Name), Logical: spec.External != nil}
+		User: user, Database: user, HostAddr: p.hostAddr(spec.ServerName()), Logical: spec.External != nil}
 }
 
 // primaryHost is the Service a replica's server replicates from: for a
@@ -120,11 +121,11 @@ func primaryHost(spec sqladmin.Spec) string {
 		case ext.InstanceUp:
 			return string(config.ServiceCloudSQL)
 		}
-		return components.SQLInstancePrefix + ext.Instance
+		return components.SQLInstancePrefix + sqlServerOf(ext.Instance)
 	}
 	switch {
 	case !spec.MasterUp:
-		return components.SQLInstancePrefix + spec.MasterInstanceName
+		return components.SQLInstancePrefix + sqlServerOf(spec.MasterInstanceName)
 	case spec.MySQL():
 		return string(config.ServiceCloudSQLMySQL)
 	}
@@ -136,7 +137,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	for _, f := range spec.Flags {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
-	b := components.CloudSQLInstanceBackend(spec.Name, spec.DatabaseVersion, p.persistent, spec.RootPassword, flags)
+	b := components.CloudSQLInstanceBackend(spec.ServerName(), spec.DatabaseVersion, p.persistent, spec.RootPassword, flags)
 	if spec.PITREnabled() && !spec.MySQL() {
 		if len(b.Args) == 0 {
 			b.Args = []string{"postgres"}
@@ -145,7 +146,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	}
 	if spec.MasterInstanceName != "" {
 		src := components.SQLReplicaSource{
-			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000,
+			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.ServerName()))%1000000,
 			Epoch: spec.RebuildEpoch}
 		if ext := spec.External; ext != nil {
 			src.Password, src.User, src.Logical = ext.Password, ext.User, !spec.MySQL()
@@ -231,20 +232,20 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 		// A replica of a source representation instance runs idle until
 		// startExternalSync (#1501).
 		var out strings.Builder
-		if err := podExec(p.cfg, components.SQLInstancePrefix+spec.Name)(ctx, nil, &out, "sh", "-c", script); err != nil {
+		if err := podExec(p.cfg, components.SQLInstancePrefix+spec.ServerName())(ctx, nil, &out, "sh", "-c", script); err != nil {
 			return fmt.Errorf("start replication of %s from %s: %w %s", spec.Name, spec.MasterInstanceName, err, strings.TrimSpace(out.String()))
 		}
 	}
 	f := p.forwarder(spec)
 	p.mu.Lock()
-	started := p.up[spec.Name]
+	started := p.up[spec.ServerName()]
 	p.mu.Unlock()
 	if !started {
 		if err := f.Start(ctx); err != nil {
 			return fmt.Errorf("the tunnel of instance %s: %w", spec.Name, err)
 		}
 		p.mu.Lock()
-		p.up[spec.Name] = true
+		p.up[spec.ServerName()] = true
 		p.mu.Unlock()
 	}
 	if err := p.serves(ctx, spec); err != nil {
@@ -254,7 +255,7 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 }
 
 func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error {
-	d := nodeName(spec.Name, spec.PrimaryNode())
+	d := nodeName(spec.ServerName(), spec.PrimaryNode())
 	if _, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "rollout", "restart", "deployment/"+d); err != nil {
 		return err
 	}
@@ -264,6 +265,12 @@ func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error 
 	return p.serves(ctx, spec)
 }
 
+// sqlServerOf is the name of a created instance's server in the cluster
+// (sqladmin.Server.ServerOf): its own, unless a blue-green switchover
+// moved it (#1614).
+var sqlServerOf = func(name string) string { return name }
+
+// Remove deletes server name (a Spec's ServerName) and its volume.
 func (p *sqlProvisioner) Remove(ctx context.Context, name string) error {
 	p.mu.Lock()
 	f := p.fwds[name]
