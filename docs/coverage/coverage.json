@@ -5216,7 +5216,8 @@
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
-          "test/compat/memorystoreclustertls_test.go:131 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
@@ -5305,7 +5306,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
-          "test/compat/memorystoreclustertls_test.go:131 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals"
         ]
       },
@@ -5449,7 +5450,8 @@
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:266 TestMemorystoreRedisClusterRefusals",
-          "test/compat/memorystoreclustertls_test.go:53 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
@@ -5554,7 +5556,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclustertls_test.go:53 TestMemorystoreRedisClusterInTransitEncryption"
+          "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption"
         ]
       },
       {
@@ -5640,6 +5642,7 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
+          "test/compat/memorystoreiam1614_test.go:147 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -9461,9 +9464,10 @@
           "test/compat/bigqueryjsonunknown_test.go:34 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigqueryloadgaps_test.go:190 TestBigQueryLoadBadValuesUnderMaxBadRecords",
-          "test/compat/bigqueryloadtable_test.go:29 TestBigQueryLoadMakesItsTableWithItsProperties",
+          "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:33 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
+          "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
           "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionrest_test.go:145 TestBigQueryPartitionDestinationsRest",
@@ -9488,6 +9492,7 @@
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
@@ -9613,7 +9618,7 @@
           "test/compat/bigqueryloadgaps_test.go:67 TestBigQueryCSVNameMatchAfterSkippedRows",
           "test/compat/bigqueryloadgaps_test.go:90 TestBigQueryCSVDelimiterAndQuoteBytes",
           "test/compat/bigqueryloadtable_test.go:199 TestConsoleBigQueryAvroLoadIntoAPartitionedTable",
-          "test/compat/bigqueryloadtable_test.go:29 TestBigQueryLoadMakesItsTableWithItsProperties",
+          "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:220 TestConsoleBigQueryHiveAndGeoJSONLoads",
           "test/compat/bigqueryloadvariants_test.go:33 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:120 TestBqCopyFromADatasetWithoutLocation",
@@ -9646,6 +9651,7 @@
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryoneclock_test.go:22 TestBigQueryWriteTimesByTheInstanceClock",
+          "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
           "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
@@ -9701,6 +9707,7 @@
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
@@ -9828,7 +9835,7 @@
           "test/compat/bigqueryloadgaps_test.go:243 TestBigQueryJSONLoadMixedTypesIntoJSONColumn",
           "test/compat/bigqueryloadgaps_test.go:67 TestBigQueryCSVNameMatchAfterSkippedRows",
           "test/compat/bigqueryloadgaps_test.go:90 TestBigQueryCSVDelimiterAndQuoteBytes",
-          "test/compat/bigqueryloadtable_test.go:29 TestBigQueryLoadMakesItsTableWithItsProperties",
+          "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:33 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
@@ -9864,6 +9871,7 @@
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryoneclock_test.go:22 TestBigQueryWriteTimesByTheInstanceClock",
+          "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
@@ -9913,6 +9921,7 @@
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
+          "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
@@ -10240,7 +10249,7 @@
           "test/compat/bigqueryloadgaps_test.go:161 TestBigQueryParquetLoadNaNAndUnlistedTypes",
           "test/compat/bigqueryloadgaps_test.go:21 TestBigQueryCSVAutodetectHeaderRows",
           "test/compat/bigqueryloadtable_test.go:199 TestConsoleBigQueryAvroLoadIntoAPartitionedTable",
-          "test/compat/bigqueryloadtable_test.go:29 TestBigQueryLoadMakesItsTableWithItsProperties",
+          "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:220 TestConsoleBigQueryHiveAndGeoJSONLoads",
           "test/compat/bigqueryloadvariants_test.go:33 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:120 TestBqCopyFromADatasetWithoutLocation",
@@ -10251,6 +10260,7 @@
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryoneclock_test.go:22 TestBigQueryWriteTimesByTheInstanceClock",
+          "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
           "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",

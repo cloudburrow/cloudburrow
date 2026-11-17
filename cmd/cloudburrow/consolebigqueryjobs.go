@@ -10,7 +10,7 @@ package main
 // (docs/compatibility.md, the BigQuery rows of #919, #931, #939, #944, #945,
 // #952, #957, #960, #966, #970):
 //
-//   - a load: CSV, NEWLINE_DELIMITED_JSON, Parquet or Avro from gs:// URIs, a
+//   - a load: CSV, NEWLINE_DELIMITED_JSON, Parquet, Avro or ORC (#1713) from gs:// URIs, a
 //     wildcard included; WRITE_APPEND or WRITE_TRUNCATE; a schema, autodetect
 //     or neither (a table that exists keeps its own); for CSV,
 //     skipLeadingRows, fieldDelimiter, quote, allowJaggedRows, nullMarker,
@@ -22,9 +22,9 @@ package main
 //     and, for a table the load makes, time partitioning by a column or
 //     by ingestion time, and clustering columns (#1457); jsonExtension
 //     GEOJSON and hivePartitioningOptions (mode and sourceUriPrefix), for
-//     newline-delimited JSON (and hive partitioning for Parquet and Avro) (#1547,
-//     consolebigqueryloadextras.go).
-//     WRITE_EMPTY and ORC are not offered (the front refuses ORC, 501).
+//     newline-delimited JSON (and hive partitioning for Parquet, Avro and
+//     ORC) (#1547, consolebigqueryloadextras.go).
+//     WRITE_EMPTY is not offered.
 //   - an export: a URI and More URIs (the front shares the rows out
 //     between them), CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET (the front
 //     writes the Avro object container and Parquet files,
@@ -73,7 +73,7 @@ import (
 
 // The choices the load and export forms offer.
 var (
-	bigqueryLoadFormats   = []string{"CSV", "NEWLINE_DELIMITED_JSON", "PARQUET", "AVRO"}
+	bigqueryLoadFormats   = []string{"CSV", "NEWLINE_DELIMITED_JSON", "PARQUET", "AVRO", "ORC"}
 	bigqueryPartitionings = []string{"DAY", "HOUR", "MONTH", "YEAR"}
 	bigqueryWriteModes    = []string{"WRITE_APPEND", "WRITE_TRUNCATE"}
 	bigqueryEncodings     = []string{"UTF-8", "ISO-8859-1", "UTF-16BE", "UTF-16LE", "UTF-32BE", "UTF-32LE"}

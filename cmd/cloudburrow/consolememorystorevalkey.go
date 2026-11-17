@@ -133,7 +133,7 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
 			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
 		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
-			Help: "IAM_AUTH: clients send an access token as the AUTH string. IAM is not enforced here, so any token is taken."},
+			Help: "IAM_AUTH: clients send an access token as the AUTH string, taken only when this instance minted it for a principal granted roles/memorystore.dbConnectionUser on the project (IAM & Admin). It cannot be changed later."},
 		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
 			Help: "TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the instance's page adds and shows."},
 		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
@@ -279,6 +279,9 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		console.Property{Label: "Engine version", Value: i.GetEngineVersion()},
 		console.Property{Label: "Persistence", Value: i.GetPersistenceConfig().GetMode().String()},
 		console.Property{Label: "Authorization", Value: i.GetAuthorizationMode().String()},
+		// IAM auth checks the token (#1614): who may connect is the
+		// project's IAM policy, granted on the IAM page.
+		console.Property{Label: "IAM connect role", Value: valkeyIAMRole(i)},
 		console.Property{Label: "In-transit encryption", Value: i.GetTransitEncryptionMode().String()},
 		console.Property{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
 		console.Property{Label: "Engine configs", Value: orDash(memorystorePairs(i.GetEngineConfigs()))},
@@ -490,4 +493,13 @@ func valkeyReplicationAct(ctx context.Context, api *redisadmin.MemorystoreServer
 		return op, true, err
 	}
 	return nil, false, nil
+}
+
+// valkeyIAMRole is, for an instance with IAM auth, the role Google
+// documents a principal needs to connect (#1614), and where it is granted.
+func valkeyIAMRole(i *memorystorepb.Instance) string {
+	if i.GetAuthorizationMode() != memorystorepb.Instance_IAM_AUTH {
+		return "-"
+	}
+	return "roles/memorystore.dbConnectionUser on the project, granted on IAM & Admin; a client's AUTH is an access token minted for the principal"
 }

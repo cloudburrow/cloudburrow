@@ -629,3 +629,33 @@ snapshots.
 [g-primary]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/resources.proto#L130-L133
 [g-dsd]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/resources.proto#L199-L200
 [g-kms127]: https://github.com/googleapis/google-cloud-go/blob/kms/v1.27.0/kms/apiv1/kmspb/service_grpc.pb.go
+
+## Amendment: an ORC reader module for BigQuery's ORC loads (#1713)
+
+BigQuery's ORC loads needed a Go reader of ORC files, and none was in `go.mod` (Apache Arrow's
+Go module reads Parquet and Avro, not ORC). The user approved adding one module (2026-11-17).
+The candidates on the Go module proxy, compared on 2026-11-17:
+
+| Module | Last version | Licence | CGO | Its own dependencies | Verdict |
+|---|---|---|---|---|---|
+| `github.com/scritchley/orc` | v0.0.0-20210513144143-06dddf1ad665 | MIT | none | `golang/protobuf`, `golang/snappy`, both already in CloudBurrow's module graph | **Adopted** |
+| `github.com/crphang/orc` | v0.0.6 (2021-03) | MIT | none | the same | A fork of the above, pinning old versions in its `go.mod`; no reason to prefer it |
+| `github.com/Max-Cheng/orc` | 2024-10 pseudo-version | MIT | none | imports `github.com/scritchley/orc/proto`, so it needs that module too, and `klauspost/compress` | Rejected: two new modules, no `go.mod` of its own |
+| `github.com/arussellsaw/orc`, `github.com/graphaelli/gorc`, `github.com/athum/orc` | 2017–2019 | various | none | — | Older forks or stubs |
+
+No Apache-maintained Go ORC reader exists (Apache ORC ships Java and C++). `scritchley/orc` is the
+most complete and the original the forks derive from. It is inactive since 2021, so CloudBurrow
+relies on its stable parts and works round its known faults rather than its high-level reader:
+it uses the module's protocol buffer messages and column decoders (run-length integers v1 and v2,
+byte and boolean run lengths, direct and dictionary strings, floats, timestamps), and reads the
+file's tail, decompresses each stream and puts the column readers together itself
+(`internal/bigqueryfront/orcfile.go`). That avoids the module's reader's limits: it reads only
+NONE, ZLIB and SNAPPY (CloudBurrow adds ZSTD with `klauspost/compress`, LZ4 with
+`pierrec/lz4/v4`, both already in the graph, and LZO with a decoder of its own), reads a NULL DATE
+as 1970-01-01, reads a decimal past 63 bits wrongly, reads map entries one ahead after the first
+row, fails an empty BINARY at a stream's end, and counts timestamps from 2015-01-01 UTC rather than
+in the writer's zone. Each workaround is checked against Apache ORC's example files and the rows
+ORC's tools print for them (`TestORCExamples`). A corrupt file's panic in a decoder is recovered
+as a 400. `govulncheck ./...` reports nothing for it, and adding it added no other module to the
+graph (`golang/protobuf` moved from the graph into `go.mod`'s list because the module has no
+`go.mod`).

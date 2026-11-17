@@ -6,7 +6,8 @@
 // which *insist* on having credentials — gcloud, Terraform, the Google SDKs —
 // can be run offline without a real Google account. A token minted here is
 // accepted by CloudBurrow because CloudBurrow accepts everything, not because
-// it was verified. See docs/credentials.md.
+// it was verified, with one exception: Memorystore's IAM auth checks a token
+// against the ones minted here (issued.go, #1614). See docs/credentials.md.
 package metadata
 
 import (
@@ -21,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,6 +49,10 @@ type Credentials struct {
 	// TokenURI is where a client exchanges a signed assertion for a token.
 	// It points at CloudBurrow's own endpoint, so nothing leaves the machine.
 	TokenURI string
+
+	// log is the minted access tokens (issued.go).
+	issuedOnce sync.Once
+	log        *issuedLog
 }
 
 // adcFile is the JSON layout Google's clients expect for a service account.
@@ -81,7 +87,9 @@ func LoadOrCreate(dir, project, tokenURI string) (*Credentials, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", keyPath, err)
 		}
-		return newCredentials(project, key, tokenURI), nil
+		c := newCredentials(project, key, tokenURI)
+		c.log = newIssuedLog(dir)
+		return c, nil
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read %s: %w", keyPath, err)
 	}
@@ -103,7 +111,9 @@ func LoadOrCreate(dir, project, tokenURI string) (*Credentials, error) {
 	if err := os.WriteFile(keyPath, pemBytes, 0o600); err != nil {
 		return nil, fmt.Errorf("write credentials key: %w", err)
 	}
-	return newCredentials(project, key, tokenURI), nil
+	c := newCredentials(project, key, tokenURI)
+	c.log = newIssuedLog(dir)
+	return c, nil
 }
 
 func newCredentials(project string, key *rsa.PrivateKey, tokenURI string) *Credentials {
@@ -185,7 +195,8 @@ func (c *Credentials) WriteADC(dir string) (string, error) {
 	return path, nil
 }
 
-// MintAccessToken returns an opaque bearer token.
+// MintAccessToken returns an opaque bearer token, not recorded: a token
+// handed to a client goes through MintAccessTokenFor (issued.go).
 //
 // It is deliberately not a JWT: an access token is opaque on Google too, and
 // making it look verifiable would invite someone to try to verify it.
