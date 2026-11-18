@@ -20,10 +20,15 @@ import (
 
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/iam"
+	admin "cloud.google.com/go/iam/admin/apiv1"
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/jws"
+	iamv1 "google.golang.org/api/iam/v1"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -69,18 +74,39 @@ func accountCerts(t *testing.T, h *Harness, email string) map[string]*rsa.Public
 // signJwt's token verifies with golang.org/x/oauth2/jws against the same
 // certificates. A payload without exp gets one 1 hour ahead; an exp in the
 // past or more than 12 hours ahead is INVALID_ARGUMENT, as Google's
-// reference says; a disabled account is FAILED_PRECONDITION and a deleted
-// one NOT_FOUND.
+// reference says; a disabled account is FAILED_PRECONDITION.
+//
+// The caller is checked as IAM Credentials checks it: a call without an
+// access token this instance minted is UNAUTHENTICATED, and the caller
+// (the ADC fixture's account, its token from the instance's token
+// endpoint) needs iam.serviceAccounts.signBlob / signJwt, here through
+// roles/iam.serviceAccountTokenCreator on the account; without it, and on
+// a deleted account, the call is PERMISSION_DENIED "Permission 'P' denied
+// on resource (or it may not exist).". Over REST too
+// (google.golang.org/api/iam/v1).
 func TestIAMLegacySignBlobAndSignJwt(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager)
 	h.Endpoint(EnvMetadata)
-	adm := iamAdmin(t, h)
+	anon := iamAdmin(t, h)
+	me, ts := instanceAccount(t)
+	adm := iamAdminAs(t, h, ts)
 	ctx := h.Context()
 	project := iamProject(t, h, "lsg-")
 	sa := newServiceAccount(t, h, project, "legacy")
 
 	blob := []byte("cloudburrow legacy signBlob")
+	if _, err := anon.SignBlob(ctx, &adminpb.SignBlobRequest{Name: sa.GetName(), BytesToSign: blob}); status.Code(err) != codes.Unauthenticated {
+		t.Errorf("SignBlob without credentials = %v, want UNAUTHENTICATED", err)
+	}
+	_, err := adm.SignBlob(ctx, &adminpb.SignBlobRequest{Name: sa.GetName(), BytesToSign: blob})
+	if status.Code(err) != codes.PermissionDenied || !strings.Contains(err.Error(), "Permission 'iam.serviceAccounts.signBlob' denied on resource (or it may not exist).") {
+		t.Errorf("SignBlob without the role = %v, want PERMISSION_DENIED", err)
+	}
+	if _, err := adm.SignJwt(ctx, &adminpb.SignJwtRequest{Name: sa.GetName(), Payload: "{}"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("SignJwt without the role = %v, want PERMISSION_DENIED", err)
+	}
+	grantOn(t, h, sa.GetName(), "roles/iam.serviceAccountTokenCreator", "serviceAccount:"+me)
 	sb, err := adm.SignBlob(ctx, &adminpb.SignBlobRequest{Name: sa.GetName(), BytesToSign: blob})
 	if err != nil {
 		t.Fatalf("SignBlob: %v", err)
@@ -151,10 +177,54 @@ func TestIAMLegacySignBlobAndSignJwt(t *testing.T) {
 	if err := adm.DeleteServiceAccount(ctx, &adminpb.DeleteServiceAccountRequest{Name: sa.GetName()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adm.SignJwt(ctx, &adminpb.SignJwtRequest{Name: sa.GetName(), Payload: "{}"}); status.Code(err) != codes.NotFound {
-		t.Errorf("SignJwt on a deleted account = %v, want NOT_FOUND", err)
+	// Over REST, with the caller's token.
+	rest, err := iamv1.NewService(ctx, option.WithEndpoint("http://"+strings.TrimPrefix(h.Endpoint(EnvResourceManager), "http://")+"/"),
+		option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: ts}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adm.EnableServiceAccount(ctx, &adminpb.EnableServiceAccountRequest{Name: sa.GetName()}); err != nil {
+		t.Fatal(err)
+	}
+	//nolint:staticcheck // the deprecated method
+	rb, err := rest.Projects.ServiceAccounts.SignBlob(sa.GetName(), &iamv1.SignBlobRequest{BytesToSign: base64.StdEncoding.EncodeToString(blob)}).Do()
+	if err != nil || certs[rb.KeyId] == nil {
+		t.Errorf("SignBlob over REST = %+v, %v", rb, err)
+	}
+	if err := adm.DeleteServiceAccount(ctx, &adminpb.DeleteServiceAccountRequest{Name: sa.GetName()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adm.SignJwt(ctx, &adminpb.SignJwtRequest{Name: sa.GetName(), Payload: "{}"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("SignJwt on a deleted account = %v, want PERMISSION_DENIED", err)
 	}
 }
+
+// iamAdminAs is the official admin gRPC client calling with ts's tokens
+// (over the instance's plaintext port, so the token is attached per call
+// without the transport-security requirement).
+func iamAdminAs(t *testing.T, h *Harness, ts oauth2.TokenSource) *admin.IamClient {
+	t.Helper()
+	opts := append(rmOptionsAt(h.Endpoint(EnvResourceManager)), option.WithGRPCDialOption(grpc.WithPerRPCCredentials(plainTokenCreds{ts})))
+	c, err := admin.NewIamClient(h.Context(), opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+// plainTokenCreds sends ts's access token as a call's authorization.
+type plainTokenCreds struct{ ts oauth2.TokenSource }
+
+func (c plainTokenCreds) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	tok, err := c.ts.Token()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"authorization": "Bearer " + tok.AccessToken}, nil
+}
+
+func (plainTokenCreds) RequireTransportSecurity() bool { return false }
 
 // covers: google.iam.admin.v1.IAM/QueryAuditableServices
 //

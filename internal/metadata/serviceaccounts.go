@@ -158,3 +158,14 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, d ServiceAcco
 	}
 	return target, true
 }
+
+// TokenAccount is the account a live access token this instance minted
+// names: how the IAM API's deprecated SignBlob and SignJwt (#1751) know
+// their caller, as IAM Credentials does.
+func (c *Credentials) TokenAccount(tok string, now time.Time) (string, bool) {
+	return c.tokenAccount(tok, now)
+}
+
+// Member is an email's IAM principal: serviceAccount: for a service
+// account, user: for anyone else.
+func Member(email string) string { return member(email) }

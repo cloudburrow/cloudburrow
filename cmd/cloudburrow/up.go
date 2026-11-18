@@ -514,6 +514,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// resolve accounts and keys in the registry.
 		projects.SetServiceAccountTokenURI(tokenURI(cfg))
 		creds.SetServiceAccounts(serviceAccountDirectory{reg: projects})
+		projects.SetSignAuthorizer(signAuthorizer(creds, serviceAccountDirectory{reg: projects}))
 		wireProjectNumbers(ctx, projects, map[string]func() *netfwd.Forwarder{
 			"storage":  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
 			"bigquery": func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, // #1551

@@ -20,10 +20,16 @@ package resourcemanager
 //     (docs.cloud.google.com/logging/docs/audit/services) lists as writing
 //     audit logs, for a project, a folder or the organization.
 //
-// Like the rest of the IAM admin API here, the signing methods do not read
-// the caller's grants (nothing in this API knows its caller); the account
-// must be live and enabled. Their signatures verify against the account's
-// public certificates (internal/metadata/serviceaccountcerts.go).
+// The caller is checked as IAM Credentials checks it (#1751): with a sign
+// authorizer set (cmd/cloudburrow wires the metadata server's), the
+// caller is the account a live access token this instance minted names
+// (any other bearer, or none, is UNAUTHENTICATED), and it needs
+// iam.serviceAccounts.signBlob or signJwt on the account, its project, a
+// folder above or the organization ("Permission 'P' denied on resource
+// (or it may not exist)." otherwise, and for an account that does not
+// exist); the account must then be enabled. Their signatures verify
+// against the account's public certificates
+// (internal/metadata/serviceaccountcerts.go).
 
 import (
 	"context"
@@ -38,6 +44,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -45,11 +52,47 @@ import (
 // maxSignJwtLifetime is how far in the future signJwt's exp may be.
 const maxSignJwtLifetime = 12 * time.Hour
 
-// legacySigner is the live, enabled account name names and its signing key.
-func (r *Registry) legacySigner(name string) (*rsa.PrivateKey, string, error) {
+// SignAuthorizer checks a legacy signing call: bearer is the request's
+// access token ("" for none), account the target's email ("" when no live
+// account has the name), permission what the method needs. It returns
+// UNAUTHENTICATED or PERMISSION_DENIED.
+type SignAuthorizer func(bearer, account, permission string) error
+
+// SetSignAuthorizer sets the caller check of SignBlob and SignJwt; nil
+// signs for any caller.
+func (r *Registry) SetSignAuthorizer(f SignAuthorizer) {
+	r.mu.Lock()
+	r.signAuthz = f
+	r.mu.Unlock()
+}
+
+// bearerToken is the access token of a call's Authorization.
+func bearerToken(ctx context.Context) string {
+	md, _ := metadata.FromIncomingContext(ctx)
+	for _, v := range md.Get("authorization") {
+		if tok, ok := strings.CutPrefix(v, "Bearer "); ok {
+			return strings.TrimSpace(tok)
+		}
+	}
+	return ""
+}
+
+// legacySigner is the live, enabled account name names and its signing
+// key, once the caller is authorized for permission.
+func (r *Registry) legacySigner(name, bearer, permission string) (*rsa.PrivateKey, string, error) {
 	r.mu.Lock()
 	a, err := r.findSALocked(name, false)
+	authz := r.signAuthz
 	r.unlock()
+	if authz != nil {
+		email := ""
+		if err == nil {
+			email = a.email()
+		}
+		if aerr := authz(bearer, email, permission); aerr != nil {
+			return nil, "", aerr
+		}
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -60,11 +103,11 @@ func (r *Registry) legacySigner(name string) (*rsa.PrivateKey, string, error) {
 }
 
 // SignBlob is the IAM API's deprecated projects.serviceAccounts.signBlob.
-func (r *Registry) SignBlob(name string, blob []byte) (*adminpb.SignBlobResponse, error) {
+func (r *Registry) SignBlob(name, bearer string, blob []byte) (*adminpb.SignBlobResponse, error) {
 	if len(blob) == 0 {
 		return nil, apierror.InvalidArgument("bytes_to_sign is required.")
 	}
-	key, kid, err := r.legacySigner(name)
+	key, kid, err := r.legacySigner(name, bearer, "iam.serviceAccounts.signBlob")
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +121,7 @@ func (r *Registry) SignBlob(name string, blob []byte) (*adminpb.SignBlobResponse
 }
 
 // SignJwt is the IAM API's deprecated projects.serviceAccounts.signJwt.
-func (r *Registry) SignJwt(name, payload string) (*adminpb.SignJwtResponse, error) {
+func (r *Registry) SignJwt(name, bearer, payload string) (*adminpb.SignJwtResponse, error) {
 	if payload == "" {
 		return nil, apierror.InvalidArgument("payload is required.")
 	}
@@ -104,7 +147,7 @@ func (r *Registry) SignJwt(name, payload string) (*adminpb.SignJwtResponse, erro
 	} else {
 		claims["exp"] = now.Add(time.Hour).Unix()
 	}
-	key, kid, err := r.legacySigner(name)
+	key, kid, err := r.legacySigner(name, bearer, "iam.serviceAccounts.signJwt")
 	if err != nil {
 		return nil, err
 	}
@@ -241,14 +284,14 @@ func (r *Registry) QueryAuditableServices(full string) (*adminpb.QueryAuditableS
 	return out, nil
 }
 
-func (s *IAMAdminServer) SignBlob(_ context.Context, req *adminpb.SignBlobRequest) (*adminpb.SignBlobResponse, error) {
+func (s *IAMAdminServer) SignBlob(ctx context.Context, req *adminpb.SignBlobRequest) (*adminpb.SignBlobResponse, error) {
 	//nolint:staticcheck // the deprecated method's own fields
-	return wrap(s.reg.SignBlob(req.GetName(), req.GetBytesToSign()))
+	return wrap(s.reg.SignBlob(req.GetName(), bearerToken(ctx), req.GetBytesToSign()))
 }
 
-func (s *IAMAdminServer) SignJwt(_ context.Context, req *adminpb.SignJwtRequest) (*adminpb.SignJwtResponse, error) {
+func (s *IAMAdminServer) SignJwt(ctx context.Context, req *adminpb.SignJwtRequest) (*adminpb.SignJwtResponse, error) {
 	//nolint:staticcheck // the deprecated method's own fields
-	return wrap(s.reg.SignJwt(req.GetName(), req.GetPayload()))
+	return wrap(s.reg.SignJwt(req.GetName(), bearerToken(ctx), req.GetPayload()))
 }
 
 func (s *IAMAdminServer) QueryAuditableServices(_ context.Context, req *adminpb.QueryAuditableServicesRequest) (*adminpb.QueryAuditableServicesResponse, error) {

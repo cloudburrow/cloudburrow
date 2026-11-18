@@ -123,6 +123,24 @@ type Expr struct{ root node }
 // Compile parses and type-checks a condition expression.
 func Compile(src string) (*Expr, error) {
 	p := &parser{src: src}
+	n, err := p.parse()
+	if err != nil {
+		return nil, err
+	}
+	if p.logical > MaxLogicalOperators {
+		return nil, fmt.Errorf("the expression has %d logical operators; a condition allows at most %d", p.logical, MaxLogicalOperators)
+	}
+	if err := checkBool(n); err != nil {
+		return nil, err
+	}
+	if pos, ok := drgDefault(n); ok {
+		return nil, fmt.Errorf("api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', ...)'s default must be [] (column %d)", pos+1)
+	}
+	return &Expr{root: n}, nil
+}
+
+// parse lexes and parses p.src into its tree.
+func (p *parser) parse() (node, error) {
 	if err := p.lex(); err != nil {
 		return nil, err
 	}
@@ -132,19 +150,53 @@ func Compile(src string) (*Expr, error) {
 	}
 	if p.peek().kind != tEOF {
 		t := p.peek()
-		return nil, fmt.Errorf("syntax error at column %d: unexpected %q", t.pos+1, t.text)
+		return nil, p.errAt(t.pos, fmt.Sprintf("mismatched input %s expecting <EOF>", t.antlr()),
+			"syntax error at column %d: unexpected %q", t.pos+1, t.text)
 	}
-	if p.logical > MaxLogicalOperators {
-		return nil, fmt.Errorf("the expression has %d logical operators; a condition allows at most %d", p.logical, MaxLogicalOperators)
-	}
+	return n, nil
+}
+
+// checkBool type-checks n, which must be a boolean.
+func checkBool(n node) error {
 	ty, err := n.check()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if ty != tyBool {
-		return nil, fmt.Errorf("the expression is a %s; a condition must be a boolean", ty)
+		return fmt.Errorf("the expression is a %s; a condition must be a boolean", ty)
 	}
-	return &Expr{root: n}, nil
+	return nil
+}
+
+// SyntaxError is an expression that does not parse: Pos is the byte
+// offset of the error in the expression, and ANTLR the message Google's
+// CEL parser (an ANTLR grammar) gives for it, which LintPolicy reports.
+type SyntaxError struct {
+	Pos   int
+	ANTLR string
+	msg   string
+}
+
+func (e *SyntaxError) Error() string { return e.msg }
+
+// errAt is a syntax error at byte pos: antlr is ANTLR's message, the rest
+// this package's own.
+func (p *parser) errAt(pos int, antlr, format string, args ...any) error {
+	return &SyntaxError{Pos: pos, ANTLR: antlr, msg: fmt.Sprintf(format, args...)}
+}
+
+// primaryExpected is what ANTLR's CEL grammar expects where an operand is
+// missing (Google's linting page: "mismatched input '<EOF>' expecting
+// {...}").
+const primaryExpected = "{'[', '{', '(', '.', '-', '!', 'true', 'false', 'null', NUM_FLOAT, NUM_INT, NUM_UINT, STRING, BYTES, IDENTIFIER}"
+
+// antlr is the token as ANTLR names it in a message: '<EOF>' or its text,
+// quoted.
+func (t token) antlr() string {
+	if t.kind == tEOF {
+		return "'<EOF>'"
+	}
+	return "'" + t.text + "'"
 }
 
 // Eval is whether the condition grants under attrs: false when it
@@ -269,7 +321,7 @@ func (p *parser) lex() error {
 			}
 			n, err := strconv.ParseInt(s[i:j], 10, 64)
 			if err != nil {
-				return fmt.Errorf("syntax error at column %d: integer %s out of range", i+1, s[i:j])
+				return p.errAt(i, "invalid int literal", "syntax error at column %d: integer %s out of range", i+1, s[i:j])
 			}
 			p.toks = append(p.toks, token{kind: tInt, text: s[i:j], num: n, pos: i})
 			i = j
@@ -278,7 +330,7 @@ func (p *parser) lex() error {
 			var b strings.Builder
 			for {
 				if j >= len(s) {
-					return fmt.Errorf("syntax error at column %d: unterminated string", i+1)
+					return p.errAt(i, "token recognition error at: '"+s[i:]+"'", "syntax error at column %d: unterminated string", i+1)
 				}
 				if s[j] == c {
 					j++
@@ -293,7 +345,7 @@ func (p *parser) lex() error {
 					case '\\', '"', '\'':
 						b.WriteByte(s[j+1])
 					default:
-						return fmt.Errorf("syntax error at column %d: invalid escape \\%c", j+1, s[j+1])
+						return p.errAt(i, "token recognition error at: '"+s[i:j+2]+"'", "syntax error at column %d: invalid escape \\%c", j+1, s[j+1])
 					}
 					j += 2
 					continue
@@ -312,7 +364,14 @@ func (p *parser) lex() error {
 				}
 			}
 			if op == "" {
-				return fmt.Errorf("syntax error at column %d: unexpected character %q", i+1, c)
+				// ANTLR's lexer reads '=', '&' and '|' as the start of
+				// "==", "&&" and "||", and names the two characters it
+				// could not match.
+				bad := s[i : i+1]
+				if (c == '=' || c == '&' || c == '|') && i+1 < len(s) {
+					bad = s[i : i+2]
+				}
+				return p.errAt(i, "token recognition error at: '"+bad+"'", "syntax error at column %d: unexpected character %q", i+1, c)
 			}
 			p.toks = append(p.toks, token{kind: tOp, text: op, pos: i})
 			i += len(op)
@@ -333,7 +392,11 @@ func (p *parser) isOp(op string) bool {
 func (p *parser) expect(op string) error {
 	if !p.isOp(op) {
 		t := p.peek()
-		return fmt.Errorf("syntax error at column %d: expected %q, found %q", t.pos+1, op, t.text)
+		antlr := fmt.Sprintf("mismatched input %s expecting '%s'", t.antlr(), op)
+		if t.kind == tEOF {
+			antlr = fmt.Sprintf("missing '%s' at '<EOF>'", op)
+		}
+		return p.errAt(t.pos, antlr, "syntax error at column %d: expected %q, found %q", t.pos+1, op, t.text)
 	}
 	p.i++
 	return nil
@@ -347,13 +410,13 @@ func (p *parser) parseOr() (node, error) {
 		return nil, err
 	}
 	for p.isOp("||") {
-		p.i++
+		opPos := p.next().pos
 		p.logical++
 		r, err := p.parseAnd()
 		if err != nil {
 			return nil, err
 		}
-		l = &logical{op: "||", l: l, r: r}
+		l = &logical{op: "||", l: l, r: r, pos: opPos}
 	}
 	return l, nil
 }
@@ -364,13 +427,13 @@ func (p *parser) parseAnd() (node, error) {
 		return nil, err
 	}
 	for p.isOp("&&") {
-		p.i++
+		opPos := p.next().pos
 		p.logical++
 		r, err := p.parseRel()
 		if err != nil {
 			return nil, err
 		}
-		l = &logical{op: "&&", l: l, r: r}
+		l = &logical{op: "&&", l: l, r: r, pos: opPos}
 	}
 	return l, nil
 }
@@ -415,21 +478,24 @@ func (p *parser) parseAdd() (node, error) {
 
 func (p *parser) parseUnary() (node, error) {
 	if p.isOp("!") {
-		p.i++
+		t := p.next()
 		p.logical++
 		x, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
-		return &not{x: x}, nil
+		return &not{x: x, pos: t.pos}, nil
 	}
 	if p.isOp("-") {
 		t := p.next()
 		if p.peek().kind != tInt {
+			if p.peek().kind == tEOF {
+				return nil, p.errAt(len(p.src), "mismatched input '<EOF>' expecting "+primaryExpected, "syntax error at column %d: unary minus applies only to an integer here", t.pos+1)
+			}
 			return nil, fmt.Errorf("syntax error at column %d: unary minus applies only to an integer here", t.pos+1)
 		}
 		n := p.next()
-		return &lit{v: -n.num, t: tyInt}, p.postfixCheck()
+		return &lit{v: -n.num, t: tyInt, pos: t.pos}, p.postfixCheck()
 	}
 	return p.parsePostfix()
 }
@@ -437,7 +503,7 @@ func (p *parser) parseUnary() (node, error) {
 // postfixCheck refuses a member access on a negated literal.
 func (p *parser) postfixCheck() error {
 	if p.isOp(".") {
-		return fmt.Errorf("syntax error at column %d: unexpected \".\"", p.peek().pos+1)
+		return p.errAt(p.peek().pos, "mismatched input '.' expecting <EOF>", "syntax error at column %d: unexpected \".\"", p.peek().pos+1)
 	}
 	return nil
 }
@@ -460,20 +526,21 @@ func (p *parser) parsePostfix() (node, error) {
 			x = &index{x: x, key: k, pos: t.pos}
 			continue
 		}
-		p.i++
+		dot := p.next().pos
 		t := p.next()
 		if t.kind != tIdent {
-			return nil, fmt.Errorf("syntax error at column %d: expected a name after \".\", found %q", t.pos+1, t.text)
+			return nil, p.errAt(t.pos, fmt.Sprintf("mismatched input %s expecting IDENTIFIER", t.antlr()), "syntax error at column %d: expected a name after \".\", found %q", t.pos+1, t.text)
 		}
 		if p.isOp("(") {
+			open := p.peek().pos
 			args, err := p.parseArgs()
 			if err != nil {
 				return nil, err
 			}
-			x = &call{fn: t.text, recv: x, args: args, pos: t.pos}
+			x = &call{fn: t.text, recv: x, args: args, pos: t.pos, open: open}
 			continue
 		}
-		x = &selectN{x: x, field: t.text, pos: t.pos}
+		x = &selectN{x: x, field: t.text, pos: t.pos, dot: dot}
 	}
 	return x, nil
 }
@@ -505,22 +572,23 @@ func (p *parser) parsePrimary() (node, error) {
 	t := p.next()
 	switch t.kind {
 	case tString:
-		return &lit{v: t.str, t: tyString}, nil
+		return &lit{v: t.str, t: tyString, pos: t.pos}, nil
 	case tInt:
-		return &lit{v: t.num, t: tyInt}, nil
+		return &lit{v: t.num, t: tyInt, pos: t.pos}, nil
 	case tIdent:
 		switch t.text {
 		case "true":
-			return &lit{v: true, t: tyBool}, nil
+			return &lit{v: true, t: tyBool, pos: t.pos}, nil
 		case "false":
-			return &lit{v: false, t: tyBool}, nil
+			return &lit{v: false, t: tyBool, pos: t.pos}, nil
 		}
 		if p.isOp("(") {
+			open := p.peek().pos
 			args, err := p.parseArgs()
 			if err != nil {
 				return nil, err
 			}
-			return &call{fn: t.text, args: args, pos: t.pos}, nil
+			return &call{fn: t.text, args: args, pos: t.pos, open: open}, nil
 		}
 		return &ident{name: t.text, pos: t.pos}, nil
 	case tOp:
@@ -535,7 +603,7 @@ func (p *parser) parsePrimary() (node, error) {
 			var elems []node
 			if p.isOp("]") {
 				p.i++
-				return &list{elems: elems}, nil
+				return &list{elems: elems, pos: t.pos}, nil
 			}
 			for {
 				e, err := p.parseOr()
@@ -547,7 +615,7 @@ func (p *parser) parsePrimary() (node, error) {
 					p.i++
 					continue
 				}
-				return &list{elems: elems}, p.expect("]")
+				return &list{elems: elems, pos: t.pos}, p.expect("]")
 			}
 		case "{":
 			m := &mapLit{pos: t.pos}
@@ -581,5 +649,5 @@ func (p *parser) parsePrimary() (node, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("syntax error at column %d: unexpected %q", t.pos+1, t.text)
+	return nil, p.errAt(t.pos, fmt.Sprintf("mismatched input %s expecting %s", t.antlr(), primaryExpected), "syntax error at column %d: unexpected %q", t.pos+1, t.text)
 }

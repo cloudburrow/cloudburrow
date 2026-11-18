@@ -101,6 +101,9 @@ const keyPrefix = "resourcemanager/projects/"
 type Registry struct {
 	mu sync.Mutex
 	st store.Store
+	// signAuthz checks the caller of the deprecated SignBlob and SignJwt
+	// (iamlegacy.go); nil signs for any caller.
+	signAuthz SignAuthorizer
 	// onPurge are the OnPurge hooks, and purged the projects purged since
 	// r.mu was taken, whose hooks unlock runs (purge.go).
 	onPurge []func(projectID string) error

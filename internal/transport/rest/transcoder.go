@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -318,7 +319,13 @@ func (t *Transcoder) serve(w http.ResponseWriter, r *http.Request, rt *Route, ca
 		q, err = t.decode(r, rt, captures, msg)
 		return err
 	}
-	resp, err := md.Handler(svc.impl, r.Context(), dec, nil)
+	// The request's credentials reach the method as a gRPC call's do, in
+	// its incoming metadata.
+	ctx := r.Context()
+	if a := r.Header.Get("Authorization"); a != "" {
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", a))
+	}
+	resp, err := md.Handler(svc.impl, ctx, dec, nil)
 	if err != nil {
 		writeStatusError(w, err)
 		return

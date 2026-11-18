@@ -5,6 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -99,4 +102,24 @@ func (d serviceAccountDirectory) PublicCerts(account string) ([]metadata.PublicC
 		out = append(out, metadata.PublicCert{ID: c.ID, CertPEM: c.CertPEM, Key: c.Key})
 	}
 	return out, ok
+}
+
+// signAuthorizer checks the caller of the IAM API's deprecated SignBlob
+// and SignJwt (#1751) as IAM Credentials checks its own: the account a
+// live access token this instance minted names, holding the permission on
+// the account or above it.
+func signAuthorizer(creds *metadata.Credentials, d serviceAccountDirectory) resourcemanager.SignAuthorizer {
+	return func(bearer, account, permission string) error {
+		caller, ok := "", false
+		if bearer != "" {
+			caller, ok = creds.TokenAccount(bearer, time.Now())
+		}
+		if !ok {
+			return status.Error(codes.Unauthenticated, "Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential.")
+		}
+		if account == "" || !d.Granted(metadata.Member(caller), account, permission) {
+			return status.Errorf(codes.PermissionDenied, "Permission '%s' denied on resource (or it may not exist).", permission)
+		}
+		return nil
+	}
 }

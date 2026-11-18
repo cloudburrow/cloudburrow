@@ -16,8 +16,9 @@ type node interface {
 var errUnset = errors.New("attribute not available on this resource")
 
 type lit struct {
-	v any
-	t ty
+	v   any
+	t   ty
+	pos int
 }
 
 func (n *lit) check() (ty, error)            { return n.t, nil }
@@ -44,6 +45,7 @@ type selectN struct {
 	x     node
 	field string
 	pos   int
+	dot   int // the "." before field
 }
 
 func (n *selectN) attr() string {
@@ -124,7 +126,10 @@ func (n *selectN) eval(a *Attributes) (any, error) {
 	return s, nil
 }
 
-type list struct{ elems []node }
+type list struct {
+	elems []node
+	pos   int // the "["
+}
 
 func (n *list) check() (ty, error) {
 	for _, e := range n.elems {
@@ -259,7 +264,10 @@ func (n *index) eval(a *Attributes) (any, error) {
 	return nil, fmt.Errorf("no such overload: _[_] on %T", x)
 }
 
-type not struct{ x node }
+type not struct {
+	x   node
+	pos int
+}
 
 func (n *not) check() (ty, error) {
 	t, err := n.x.check()
@@ -283,6 +291,7 @@ func (n *not) eval(a *Attributes) (any, error) {
 type logical struct {
 	op   string
 	l, r node
+	pos  int
 }
 
 func (n *logical) check() (ty, error) {
@@ -526,6 +535,7 @@ type call struct {
 	recv node
 	args []node
 	pos  int
+	open int // the "(" after fn
 }
 
 // timeGetters are request.time's extraction functions, with what each
@@ -583,9 +593,6 @@ func (n *call) checkNamespace(ns string, ats []ty, sig func() error) (ty, error)
 			return "", sig()
 		}
 		name := n.argString(0)
-		if l, ok := n.args[1].(*list); ok && len(l.elems) != 0 && name == "iam.googleapis.com/modifiedGrantsByRole" {
-			return "", fmt.Errorf("api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', ...)'s default must be [] (column %d)", n.pos+1)
-		}
 		if t, ok := apiAttrTypes[name]; ok {
 			if !assignable(ats[1], t) {
 				return "", fmt.Errorf("api.getAttribute('%s', ...)'s default is a %s; the attribute is a %s (column %d)", name, ats[1], t, n.pos+1)

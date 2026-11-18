@@ -359,8 +359,14 @@ func TestCustomRolesOverREST(t *testing.T) {
 	if err != nil || len(q.Permissions) != 1000 || q.NextPageToken == "" {
 		t.Fatalf("QueryTestablePermissions = %d, %q, %v", len(q.Permissions), q.NextPageToken, err)
 	}
-	if _, err := svc.IamPolicies.QueryAuditableServices(&iamv1.QueryAuditableServicesRequest{
-		FullResourceName: "//cloudresourcemanager.googleapis.com/projects/rest-roles"}).Do(); code(err) != 501 {
-		t.Errorf("QueryAuditableServices = %v, want 501", err)
+	if a, err := svc.IamPolicies.QueryAuditableServices(&iamv1.QueryAuditableServicesRequest{
+		FullResourceName: "//cloudresourcemanager.googleapis.com/projects/rest-roles"}).Do(); err != nil || len(a.Services) == 0 {
+		t.Errorf("QueryAuditableServices over REST = %v, %v", a, err)
+	}
+	// LintPolicy over REST (#1751).
+	l, err := svc.IamPolicies.LintPolicy(&iamv1.LintPolicyRequest{Condition: &iamv1.Expr{Expression: "resource.type == 'resourcemanager.projects'"}}).Do()
+	if err != nil || len(l.LintResults) != 1 || l.LintResults[0].ValidationUnitName != "LintValidationUnits/ResourceTypeLiteralCheck" ||
+		l.LintResults[0].Severity != "WARNING" || l.LintResults[0].LocationOffset != 17 {
+		t.Errorf("LintPolicy over REST = %+v, %v", l, err)
 	}
 }
