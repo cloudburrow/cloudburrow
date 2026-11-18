@@ -51,6 +51,10 @@ const internalJobPrefix = "_cloudburrow_"
 // jobIDPrefixHeader is the header bigquery-emulator patch 0057 reads.
 const jobIDPrefixHeader = "X-Cloudburrow-Job-Id-Prefix"
 
+// jobIDHeader is the header bigquery-emulator patch 0097 reads: the ID of
+// the job a jobs.query makes.
+const jobIDHeader = "X-Cloudburrow-Job-Id"
+
 // internalJobKey marks a request's context as the front's own (above).
 type internalJobKey struct{}
 
@@ -87,9 +91,19 @@ func JobIDPrefix(next http.Handler) http.Handler {
 		if isInternalRequest(r.Context()) {
 			r = r.Clone(r.Context())
 			r.Header.Set(jobIDPrefixHeader, internalJobPrefix)
-		} else if r.Header.Get(jobIDPrefixHeader) != "" {
+			r.Header.Del(jobIDHeader)
+		} else if r.Header.Get(jobIDPrefixHeader) != "" || r.Header.Get(jobIDHeader) != "" {
 			r = r.Clone(r.Context())
 			r.Header.Del(jobIDPrefixHeader)
+			r.Header.Del(jobIDHeader)
+		}
+		// A client's jobs.query's job takes the ID asyncjobs.go gave it
+		// (bigquery-emulator patch 0097, #1819).
+		if !isInternalRequest(r.Context()) && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/queries") {
+			if id := takeQueryJobID(r.Context()); id != "" {
+				r = r.Clone(r.Context())
+				r.Header.Set(jobIDHeader, id)
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

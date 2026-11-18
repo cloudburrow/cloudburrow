@@ -11,6 +11,16 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ## [Unreleased]
 
+### Added
+
+- BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
+  most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
+  reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and
+  `jobs.list` and `INFORMATION_SCHEMA.JOBS` list it; `jobs.cancel` ends a running job, which then
+  fails with reason `stopped`. Every kind of job runs this way, `CREATE MODEL`, loads, copies and
+  extracts included. bigquery-emulator patch 0097 gives a `jobs.query`'s job the ID the front
+  answered with.
+
 ## [0.3.0] - 2026-11-18
 
 A fix release for v0.2.0, with one new BigQuery function. The generated coverage is unchanged:

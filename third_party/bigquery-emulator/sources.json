@@ -62,7 +62,8 @@
         "patches/bigquery-emulator/0091-known-projects-on-first-use.patch",
         "patches/bigquery-emulator/0092-writes-into-another-projects-table.patch",
         "patches/bigquery-emulator/0094-repeated-json-column-insert.patch",
-        "patches/bigquery-emulator/0096-names-in-the-default-datasets-project.patch"
+        "patches/bigquery-emulator/0096-names-in-the-default-datasets-project.patch",
+        "patches/bigquery-emulator/0097-exact-query-job-id.patch"
       ]
     },
     {
