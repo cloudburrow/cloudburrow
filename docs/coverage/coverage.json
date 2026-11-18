@@ -5959,8 +5959,8 @@
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
-          "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
+          "test/compat/memorystoreha_test.go:173 TestGcloudRedisFailover",
+          "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
           "test/compat/memorystoreupgrade_test.go:27 TestMemorystoreVersionsAndUpgrade",
@@ -6003,8 +6003,8 @@
         "method": "google.cloud.redis.v1.CloudRedis/FailoverInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover"
+          "test/compat/memorystoreha_test.go:173 TestGcloudRedisFailover",
+          "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover"
         ]
       },
       {
@@ -6070,7 +6070,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
+          "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
