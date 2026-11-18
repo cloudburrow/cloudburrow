@@ -138,6 +138,21 @@ const (
 	CloudSQLMySQL80Image    = "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"           // 8.0.46
 )
 
+// CloudSQLMySQL57Image is MYSQL_5_7's server (#1524): the official
+// mysql:5.7, last built 2023-12 at 5.7.44, which is linux/amd64 only. It
+// is pinned by its linux/amd64 manifest's digest, not the index's, so a
+// linux/arm64 node that runs amd64 binaries through binfmt_misc (Rosetta
+// or qemu-x86_64) pulls it too: measured 2026-11-18 on a kind node of
+// Docker Desktop on Apple silicon, where the CRI pulled it by this digest
+// and the pod served 5.7.44.
+const CloudSQLMySQL57Image = "mysql:5.7@sha256:dab0a802b44617303694fb17d166501de279c3031ddeb28c56ecf7fcab5ef0da" // 5.7.44
+
+// cloudSQLMySQL57Command starts MySQL 5.7's entrypoint with a lower
+// open-files limit: mysqld 5.7 sizes its tables from RLIMIT_NOFILE, and
+// containerd's default of 2^30 made the server OOMKilled at its first
+// start (measured 2026-11-18); 1048576 is Docker's own default.
+var cloudSQLMySQL57Command = []string{"bash", "-c", `ulimit -n 1048576 && exec docker-entrypoint.sh "$@"`, "bash"}
+
 // The Percona XtraBackup images a Cloud SQL for MySQL instance's physical
 // external sync (#1570) runs as a Job, the official percona/percona-xtrabackup
 // of the instance's major version, pinned by the index digest, which
@@ -174,6 +189,7 @@ var CloudSQLVersionImages = map[string]string{
 	"POSTGRES_16":  CloudSQLPostgres16Image,
 	"POSTGRES_17":  CloudSQLImage,
 	"POSTGRES_18":  CloudSQLPostgres18Image,
+	"MYSQL_5_7":    CloudSQLMySQL57Image,
 	"MYSQL_8_0":    CloudSQLMySQL80Image,
 	"MYSQL_8_4":    CloudSQLMySQLImage,
 }
@@ -1000,6 +1016,9 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 	}
 	if img, ok := CloudSQLVersionImages[version]; ok {
 		b.Image = img
+	}
+	if version == "MYSQL_5_7" {
+		b.Command = cloudSQLMySQL57Command
 	}
 	b.Name = SQLInstancePrefix + name
 	return b

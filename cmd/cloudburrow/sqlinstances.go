@@ -36,6 +36,11 @@ type sqlProvisioner struct {
 	// fwds are the tunnels, by instance name; up is which have started.
 	fwds map[string]*netfwd.Forwarder
 	up   map[string]bool
+
+	// legacyOnce asks the node once whether it runs linux/amd64
+	// binaries; legacyWhy is why not, or "" (sqllegacy.go, #1524).
+	legacyOnce sync.Once
+	legacyWhy  string
 }
 
 func newSQLProvisioner(cfg config.Config, logw io.Writer) *sqlProvisioner {

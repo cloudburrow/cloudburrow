@@ -116,6 +116,9 @@ type Upgrader interface {
 // with no read replicas that is not one.
 func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) error {
 	cur := c.spec.DatabaseVersion
+	if legacyMySQL(cur) {
+		return legacyUnimplemented("a major version upgrade")
+	}
 	if !SupportedVersions[version] {
 		if strings.HasPrefix(version, "POSTGRES_") || strings.HasPrefix(version, "MYSQL_") {
 			return unimplemented("upgrading to databaseVersion "+version, unservedVersionWhy(version))

@@ -606,6 +606,9 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 	s.emu.RUnlock()
 	spec.Name, spec.Project, spec.DatabaseVersion = dest, project, e.DatabaseVersion()
 	spec.CreateTime, spec.SettingsVersion, spec.DeletionProtection = time.Now().UTC().Format(time.RFC3339Nano), 1, false
+	if legacyMySQL(spec.DatabaseVersion) {
+		return nil, legacyUnimplemented("instances.clone")
+	}
 	if !SupportedVersions[spec.DatabaseVersion] {
 		return nil, unimplemented("cloning a "+spec.DatabaseVersion+" instance", unservedVersionWhy(spec.DatabaseVersion))
 	}

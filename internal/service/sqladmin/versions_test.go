@@ -91,3 +91,48 @@ func TestReplicaUpgradeOnItsOwn(t *testing.T) {
 type upgraderProv struct{ *fakeProv }
 
 func (upgraderProv) Upgrade(context.Context, Spec, Spec) error { return nil }
+
+// legacyProv is a provisioner whose node runs, or does not run, MySQL
+// 5.7's linux/amd64 image.
+type legacyProv struct {
+	*fakeProv
+	why string
+}
+
+func (p legacyProv) LegacyUnrunnable(string) string { return p.why }
+
+// MYSQL_5_7 is served where the node runs its image (#1524), and its
+// replicas, high availability, point-in-time recovery and upgrades are
+// 501; MYSQL_5_6 is never served.
+func TestLegacyMySQLServed(t *testing.T) {
+	runs := &Server{writes: &instances{prov: legacyProv{}, byName: map[string]*created{}}}
+	if ok, why := runs.versionServed("MYSQL_5_7"); !ok {
+		t.Errorf("MYSQL_5_7 on a node that runs it: %q", why)
+	}
+	if ok, _ := runs.versionServed("MYSQL_5_6"); ok {
+		t.Error("MYSQL_5_6 is served")
+	}
+	cannot := &Server{writes: &instances{prov: legacyProv{why: "the node is aarch64"}, byName: map[string]*created{}}}
+	if ok, why := cannot.versionServed("MYSQL_5_7"); ok || why != "the node is aarch64" {
+		t.Errorf("MYSQL_5_7 on a node that cannot run it: %v %q", ok, why)
+	}
+	plain := &Server{writes: &instances{prov: &fakeProv{}, byName: map[string]*created{}}}
+	if ok, why := plain.versionServed("MYSQL_5_7"); ok || !strings.Contains(why, "linux/amd64 only") {
+		t.Errorf("MYSQL_5_7 with no LegacyRunner: %v %q", ok, why)
+	}
+	base := Spec{Name: "a", DatabaseVersion: "MYSQL_5_7"}
+	if err := legacyRefusal(base); err != nil {
+		t.Errorf("a standalone ZONAL MYSQL_5_7 instance: %v", err)
+	}
+	replica, regional := base, base
+	replica.MasterInstanceName, regional.AvailabilityType = "p", "REGIONAL"
+	for _, sp := range []Spec{replica, regional} {
+		if err := legacyRefusal(sp); err == nil || !strings.Contains(errStatus(err), "501") {
+			t.Errorf("%+v: %v, want 501", sp, err)
+		}
+	}
+	c := &created{spec: base}
+	if err := runs.checkUpgrade(c, "MYSQL_8_0", false); err == nil || !strings.Contains(errStatus(err), "501") {
+		t.Errorf("upgrading MYSQL_5_7: %v, want 501", err)
+	}
+}
