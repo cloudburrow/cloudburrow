@@ -67,6 +67,9 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 		for _, m := range components.KnativeManifests() {
 			plan.Knative = append(plan.Knative, prefetch.KnativeManifest{Name: m.Name, URL: m.URL, SHA256: m.SHA256})
 		}
+		ms := components.MetricsServerManifest()
+		plan.Knative = append(plan.Knative, prefetch.KnativeManifest{Name: ms.Name, URL: ms.URL, SHA256: ms.SHA256})
+		plan.Images[components.MetricsServerImage] = append(plan.Images[components.MetricsServerImage], "run")
 	}
 	if cfg.Endpoints.Console >= 0 {
 		plan.Terminal = terminal.Image

@@ -34,15 +34,17 @@ import (
 // read-modify-write over gRPC keeps them).
 //
 // What AUTOMATIC does locally: the pool runs minInstanceCount instances,
-// divided among revisions by instanceSplits as manualInstanceCount is.
-// Google's worker pool docs (re-read 2026-11-18:
+// divided among revisions by instanceSplits as manualInstanceCount is, and
+// with a cpuUtilization the CPU driver (cpuscaling.go, #1789) grows each
+// revision's share toward its share of maxInstanceCount while its CPU is
+// above the target, and back once it is below. Google's worker pool docs
+// (re-read 2026-11-18:
 // https://docs.cloud.google.com/run/docs/configuring/workerpools/manual-scaling,
 // https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.workerPools)
-// describe manual counts and external autoscalers only, and do not say what
-// signal grows an AUTOMATIC pool above its minimum or how a CPU target is
-// measured; growing on CPU is not implemented (the kind cluster has no
-// metrics pipeline) and is #1789's open work. UNVERIFIED (docs re-read
-// 2026-11-18, URLs above).
+// describe manual counts and external autoscalers only, and do not say how
+// the CPU target is measured; the driver measures it as Cloud Run measures
+// a service's (about-instance-autoscaling). UNVERIFIED for worker pools
+// (docs re-read 2026-11-18, URLs above).
 
 // The overlay's own field numbers for the added fields: far above any
 // number Google uses in vendor_settings.proto, never stored as wire bytes.

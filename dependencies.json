@@ -92,6 +92,25 @@
         "manifests": {
           "kourier.yaml": "sha256:cded0c3c1d7669b1aa9f7484234b454ff3940a2b54a27d5ec4825c2d4003d01d"
         }
+      },
+      "metricsServer": {
+        "image": "registry.k8s.io/metrics-server/metrics-server",
+        "version": "v0.9.1",
+        "digest": "sha256:9b0ba1926e1d3089673f45461c3c1416109dea33b3ba3434048defd380df329b",
+        "source": "https://github.com/kubernetes-sigs/metrics-server",
+        "license": "Apache-2.0",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "The release components.yaml is downloaded from the GitHub release and checked against the sha256 below; the image is pulled from registry.k8s.io by digest. Nothing is vendored.",
+        "updateFeed": "github-releases",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "manifests": {
+          "metrics-server-components.yaml": "sha256:3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1"
+        },
+        "notes": "Third-party (Kubernetes SIG Instrumentation), used because Google offers no component for a cluster's CPU signal (#1789, #1800). Installed by up only when Cloud Run is on; the image is rewritten to this digest and given --kubelet-insecure-tls for kind's self-signed kubelet certificates. Cloud Run's CPU-target scaling reads metrics.k8s.io from it."
       }
     },
     "emulatorBackends": {
@@ -544,7 +563,7 @@
       },
       "goCloudRun": {
         "module": "cloud.google.com/go/run",
-        "version": "v1.22.0",
+        "version": "v1.25.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Generated contract types for the Cloud Run v2 adapter."
@@ -1065,7 +1084,7 @@
         "license": "MPL-2.0",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl",
+        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl, except TestTerraformRunServiceScalingControls, which requires 8.5.0 (the first release with google_cloud_run_v2_service template.scaling cpu_utilization and concurrency_utilization, #1802) and inits against test/compat/testdata/terraform-8.5.0/.terraform.lock.hcl",
         "updateFeed": "github-releases",
         "verification": "lock-file-hashes",
         "digest": null,

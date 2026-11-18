@@ -444,6 +444,8 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
+      "Implemented": 3,
+      "Unimplemented": 2,
       "Verified": 41
     },
     "rows": [
@@ -502,6 +504,11 @@
         ]
       },
       {
+        "method": "google.cloud.run.v2.Instances/GetIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "google.cloud.run.v2.Instances/GetInstance",
         "status": "Verified",
         "tests": [
@@ -518,6 +525,11 @@
         ]
       },
       {
+        "method": "google.cloud.run.v2.Instances/SetIamPolicy",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
         "method": "google.cloud.run.v2.Instances/StartInstance",
         "status": "Verified",
         "tests": [
@@ -530,6 +542,16 @@
         "tests": [
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/TestIamPermissions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.run.v2.Instances/UpdateInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/CreateJob",
@@ -661,6 +683,7 @@
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:89 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:53 TestRunServiceCloudSQLMySQLVolume",
+          "test/compat/runcpuscaling_test.go:100 TestRunServiceCPUUtilizationScaling",
           "test/compat/rungcsfuse_test.go:215 TestTerraformRunCloudStorageVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
@@ -668,6 +691,8 @@
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
+          "test/compat/runscalinggaps_test.go:255 TestRunServiceCPUOnlyScaling",
+          "test/compat/runscalinggaps_test.go:348 TestTerraformRunServiceScalingControls",
           "test/compat/runsecretcmek_test.go:28 TestRunMountsASecretUnderACustomerManagedKey",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
@@ -707,6 +732,8 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:89 TestRunServiceCloudSQLVolume",
+          "test/compat/runcpuscaling_test.go:100 TestRunServiceCPUUtilizationScaling",
+          "test/compat/rundisabled_test.go:51 TestRunServiceDisabledByManualZero",
           "test/compat/rungcsfuse_test.go:215 TestTerraformRunCloudStorageVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
@@ -714,6 +741,9 @@
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
+          "test/compat/runscalinggaps_test.go:120 TestRunServiceDisabledAnswersUnavailable",
+          "test/compat/runscalinggaps_test.go:255 TestRunServiceCPUOnlyScaling",
+          "test/compat/runscalinggaps_test.go:348 TestTerraformRunServiceScalingControls",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
@@ -753,10 +783,20 @@
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:227 TestRunUpdateService",
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
+          "test/compat/rundisabled_test.go:51 TestRunServiceDisabledByManualZero",
+          "test/compat/runscalinggaps_test.go:120 TestRunServiceDisabledAnswersUnavailable",
+          "test/compat/runscalinggaps_test.go:184 TestRunServiceManualSplitLeavesOneAtZero",
+          "test/compat/runscalinggaps_test.go:348 TestTerraformRunServiceScalingControls",
+          "test/compat/runservicescaling_test.go:54 TestRunServiceLevelScaling",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
+      },
+      {
+        "method": "google.cloud.run.v2.SourceUpload/UploadSource",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Tasks/GetTask",
@@ -776,6 +816,7 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
@@ -814,6 +855,7 @@
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
