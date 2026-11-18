@@ -9494,6 +9494,7 @@
           "test/compat/bigqueryloadvariants_test.go:34 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
+          "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
           "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
@@ -9677,6 +9678,7 @@
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
           "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
+          "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -9899,8 +9901,9 @@
           "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymlvocab_test.go:56 TestBigQueryMLVocabularyPreprocess",
-          "test/compat/bigquerymlwnd_test.go:160 TestBigQueryMLHostedModelsRefused",
+          "test/compat/bigquerymlwnd_test.go:162 TestBigQueryMLHostedModelsRefused",
           "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
+          "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -9971,7 +9974,8 @@
         "tests": [
           "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
-          "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel"
+          "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
+          "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel"
         ]
       },
       {
@@ -9996,8 +10000,9 @@
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
           "test/compat/bigquerymltree_test.go:130 TestBigQueryMLBoostedTreeLabelEncoding",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
-          "test/compat/bigquerymlwnd_test.go:160 TestBigQueryMLHostedModelsRefused",
+          "test/compat/bigquerymlwnd_test.go:162 TestBigQueryMLHostedModelsRefused",
           "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
+          "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
         ]
       },
