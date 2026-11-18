@@ -44,6 +44,9 @@ import (
 //   - createDisposition (default CREATE_IF_NEEDED): CREATE_NEVER fails when
 //     the destination does not exist, "Not found".
 //   - Several sources (sourceTables) are copied into one table.
+//   - A new destination is partitioned and clustered as the first source,
+//     and the sources' and an existing destination's partitioning and
+//     clustering must match as BigQuery documents (#1759, copylayout.go).
 //
 // A failure BigQuery reports on the job (a source or the destination's
 // dataset not found, a view as a source, the destination not empty) fails
@@ -106,6 +109,9 @@ type copyTable struct {
 	// table's own; else nil. A destination made from it is partitioned
 	// as it is, and insertSelect keeps each row's _PARTITIONTIME.
 	partitionTime any
+	// layout is the table's partitioning and clustering, as tables.get
+	// gives them (#1759, copylayout.go).
+	layout map[string]json.RawMessage
 }
 
 // partitionExtra returns the Table fields that make a new table
@@ -203,6 +209,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		if t.ProjectID != "" && t.ProjectID != project {
 			notImplemented(fmt.Sprintf("of a table of project %s, not the job's project %s. CloudBurrow copies "+
 				"tables within the job's project only.", t.ProjectID, project))
+			return
+		}
+	}
+
+	if op == "" || op == "COPY" || op == "OPERATION_TYPE_UNSPECIFIED" {
+		if f.refuseLayout(w, r, srcs, past, *c.DestinationTable) { // #1759, copylayout.go
 			return
 		}
 	}
@@ -358,7 +370,15 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			}
 			extra["expirationTime"] = expiration
 		}
-		if err = f.makeTableWith(r, dest.ref, sources[0].schema, partitionExtra(sources, extra)); err == "" {
+		// "All of the partitioning information is copied with the table",
+		// and "all of the clustering information" (#1759, copylayout.go).
+		made := f.newTableLayout(r, sources[0].layout, snapshot, dest.ref.DatasetID)
+		for k, v := range partitionExtra(sources, extra) {
+			if _, ok := made[k]; !ok || k != "timePartitioning" {
+				made[k] = v
+			}
+		}
+		if err = f.makeCopyTable(r, dest.ref, sources[0].schema, made); err == "" {
 			if err = f.insertSelect(r, dest.ref, sources); err != "" {
 				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
 			}
@@ -369,7 +389,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			defer f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 			if err = f.insertSelect(r, scratch, sources); err == "" {
 				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
-				if err = f.makeTableWith(r, dest.ref, sources[0].schema, partitionExtra(sources, nil)); err == "" {
+				// The destination keeps its own partitioning and clustering,
+				// which match the source's or, of a partitioned source into
+				// a table that is not, "remains unpartitioned" (#1759,
+				// copylayout.go).
+				if err = f.makeCopyTable(r, dest.ref, sources[0].schema, f.newTableLayout(r, dest.layout, false,
+					dest.ref.DatasetID)); err == "" {
 					err = f.insertSelect(r, dest.ref, []copyTable{{ref: scratch, fields: sources[0].fields,
 						partitionTime: sources[0].partitionTime}})
 				}
@@ -424,6 +449,7 @@ func (f front) copyTableMeta(r *http.Request, ref tableRef) copyTable {
 	_ = json.Unmarshal(meta.Schema, &s)
 	t.exists, t.kind, t.schema, t.fields = true, meta.Type, meta.Schema, s.Fields
 	t.snapshot = snapshotDefinitionOf(got)
+	t.layout = layoutOf(got)
 	return t
 }
 

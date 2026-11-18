@@ -693,7 +693,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 	client := jobText{query: q.Query}
 	q.Query = sql
 	rec := newRecorder()
-	f.runQuery(rec, r, q, insert)
+	f.runQuery(rec, withMetadataReads(r), q, insert) // #1763, tableoptions.go
 	f.clientText(w, rec, client)
 }
 

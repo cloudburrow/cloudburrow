@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -525,7 +526,12 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 	if !ok {
 		return false
 	}
-	checked := r.Context().Value(privacyCheckedKey{}) != nil
+	// A query the front wrote of INFORMATION_SCHEMA views reads tables
+	// for their metadata (#1763): the client's own reads in it were
+	// checked before it was written, so neither the partition filter nor
+	// the privacy policy of a table its views read refuses it.
+	metadata := r.Context().Value(metadataReadsKey{}) != nil
+	checked := r.Context().Value(privacyCheckedKey{}) != nil || metadata
 	seen := map[string]bool{}
 	var prot []privacyRead
 	for _, tr := range reads {
@@ -571,6 +577,9 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 			f.syncMV(r, tr.dataset, tr.table, meta, true)
 		}
 		seen[key] = true
+		if metadata {
+			continue
+		}
 		if msg := partitionFilterRefusal(tr, meta, name); msg != "" {
 			f.failBeforeRun(w, r, q, insert, tr.dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
 			return true
@@ -599,6 +608,23 @@ func (f front) refuseViewRead(w http.ResponseWriter, r *http.Request, q queryOpt
 	}
 	writeError(w, http.StatusNotImplemented, "notImplemented", why.msg)
 	return true
+}
+
+// metadataReadsKey marks a request whose query the front wrote of the
+// INFORMATION_SCHEMA views a client's query reads (infoschemaviews.go,
+// infoschemajobs.go), after checkReads checked the client's text. Its
+// reads of a table are for the views' metadata, not queries on the table:
+// BigQuery's require_partition_filter is that "queries on this table must
+// include a predicate filter" (DDL table_option_list), "queries on views
+// and materialized views that reference the partitioned table" too
+// (querying-partitioned-tables, re-read 2026-11-17), and INFORMATION_SCHEMA
+// views "retrieve metadata about your BigQuery objects"
+// (information-schema-intro). No page names another exemption.
+type metadataReadsKey struct{}
+
+// withMetadataReads is r marked by metadataReadsKey.
+func withMetadataReads(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), metadataReadsKey{}, true))
 }
 
 // partitionFilterRefusal is BigQuery's 400 of tr, a read of a table with
