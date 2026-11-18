@@ -99,7 +99,6 @@ func wantPrivateCACode(t *testing.T, what string, err error, code codes.Code) {
 //   - the pool's IAM policy is set and read back; and the pool is deleted.
 //
 // covers: google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificate, google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificate, google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificates, google.cloud.security.privateca.v1.CertificateAuthorityService/RevokeCertificate, google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificate, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/DisableCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/EnableCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificateAuthorities, google.cloud.security.privateca.v1.CertificateAuthorityService/UndeleteCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCaPool, google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCaPool, google.cloud.security.privateca.v1.CertificateAuthorityService/GetCaPool, google.cloud.security.privateca.v1.CertificateAuthorityService/ListCaPools, google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCaPool, google.cloud.security.privateca.v1.CertificateAuthorityService/FetchCaCerts
-// covers: google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificateTemplates (unimplemented)
 func TestPrivateCAPoolsRootsAndCertificates(t *testing.T) {
 	h := New(t)
 	clients := privateCAClients(t, h)
@@ -389,9 +388,10 @@ func privateCAFlow(t *testing.T, h *Harness, c *privateca.CertificateAuthorityCl
 		t.Errorf("GetIamPolicy = %v, %v", got, err)
 	}
 
-	// Phase 2 features answer 501.
-	_, err = c.ListCertificateTemplates(ctx, &privatecapb.ListCertificateTemplatesRequest{Parent: loc}).Next()
-	wantPrivateCACode(t, "ListCertificateTemplates", err, codes.Unimplemented)
+	// What is not served answers 501: a CMEK pool.
+	_, err = c.CreateCaPool(ctx, &privatecapb.CreateCaPoolRequest{Parent: loc, CaPoolId: poolID + "-cmek", CaPool: &privatecapb.CaPool{
+		Tier: privatecapb.CaPool_ENTERPRISE, EncryptionSpec: &privatecapb.EncryptionSpec{CloudKmsKey: loc + "/keyRings/r/cryptoKeys/k"}}})
+	wantPrivateCACode(t, "a CMEK pool", err, codes.Unimplemented)
 
 	dpop, err := c.DeleteCaPool(ctx, &privatecapb.DeleteCaPoolRequest{Name: poolName})
 	if err != nil {

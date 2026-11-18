@@ -151,7 +151,7 @@ func (l *locationsServer) GetLocation(_ context.Context, req *locationpb.GetLoca
 
 // iamServer keeps a policy on each CA pool, never enforced (ADR-0006).
 // privateca_v1.yaml binds IAM on caPools, certificateTemplates and
-// certificateRevocationLists; the last two are not served yet.
+// certificateRevocationLists.
 type iamServer struct {
 	iampb.UnimplementedIAMPolicyServer
 	s *Server
@@ -164,12 +164,32 @@ func registerIAM(g grpc.ServiceRegistrar, s *Server) {
 // IAMPolicy is the IAM mixin, for the console.
 func (s *Server) IAMPolicy() iampb.IAMPolicyServer { return &iamServer{s: s} }
 
-func (i *iamServer) target(resource string) (*poolRecord, error) {
+// target is where resource's policy is kept: a pool's, a template's or a
+// CRL's.
+func (i *iamServer) target(resource string) (**iampolicy.Stored, error) {
 	switch {
-	case strings.Contains(resource, "/certificateTemplates/"), strings.Contains(resource, "/certificateRevocationLists/"):
-		return nil, apierror.Unimplemented("IAM on %s is not implemented in CloudBurrow yet (#1834 phase 2)", resource)
+	case strings.Contains(resource, "/certificateTemplates/"):
+		t, err := i.s.template(resource)
+		if err != nil {
+			return nil, err
+		}
+		return &t.Policy, nil
+	case strings.Contains(resource, "/certificateRevocationLists/"):
+		if _, err := i.s.crl(resource); err != nil {
+			return nil, err
+		}
+		p := i.s.crlPolicies[resource]
+		if p == nil {
+			p = new(*iampolicy.Stored)
+			i.s.crlPolicies[resource] = p
+		}
+		return p, nil
 	}
-	return i.s.pool(resource)
+	p, err := i.s.pool(resource)
+	if err != nil {
+		return nil, err
+	}
+	return &p.Policy, nil
 }
 
 func (i *iamServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
@@ -179,7 +199,7 @@ func (i *iamServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyReque
 	if err != nil {
 		return nil, err
 	}
-	out, err := iampolicy.Get(p.Policy, req.GetOptions())
+	out, err := iampolicy.Get(*p, req.GetOptions())
 	return out, apierror.Wrap(err)
 }
 
@@ -190,11 +210,11 @@ func (i *iamServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyReque
 	if err != nil {
 		return nil, err
 	}
-	next, err := iampolicy.SetConditional(p.Policy, req)
+	next, err := iampolicy.SetConditional(*p, req)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	p.Policy = &next
+	*p = &next
 	if err := i.s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -252,5 +272,5 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return s.contentHandler(t)
 }

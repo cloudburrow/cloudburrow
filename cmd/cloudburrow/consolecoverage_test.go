@@ -50,7 +50,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances"}},
 	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
-	config.ServicePrivateCA:     {Providers: []string{"privateca"}},
+	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable

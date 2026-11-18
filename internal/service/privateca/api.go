@@ -232,6 +232,7 @@ func (a *API) UpdateCaPool(_ context.Context, req *privatecapb.UpdateCaPoolReque
 		}
 	}
 	p.Pool = next
+	s.refreshAccessURLs(next.Name)
 	loc, _, _ := strings.Cut(next.Name, "/caPools/")
 	return s.done(loc, "update", next.Name, next)
 }
@@ -254,6 +255,10 @@ func (a *API) DeleteCaPool(_ context.Context, req *privatecapb.DeleteCaPoolReque
 	delete(s.pools, req.GetName())
 	for _, k := range sortedKeys(s.certs, req.GetName()+"/certificates/") {
 		delete(s.certs, k)
+	}
+	for _, k := range sortedKeys(s.crls, req.GetName()+"/certificateAuthorities/") {
+		delete(s.crls, k)
+		delete(s.crlPolicies, k)
 	}
 	loc, _, _ := strings.Cut(req.GetName(), "/caPools/")
 	return s.done(loc, "delete", req.GetName(), &emptypb.Empty{})
@@ -315,7 +320,6 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	switch in.GetType() {
 	case privatecapb.CertificateAuthority_SELF_SIGNED:
 	case privatecapb.CertificateAuthority_SUBORDINATE:
-		return nil, apierror.Unimplemented("subordinate CertificateAuthorities are not implemented in CloudBurrow yet (#1834 phase 2)")
 	default:
 		return nil, apierror.InvalidArgument("certificate_authority.type is required: SELF_SIGNED or SUBORDINATE")
 	}
@@ -361,6 +365,26 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 		return nil, err
 	}
 	now := s.now()
+	if in.GetType() == privatecapb.CertificateAuthority_SUBORDINATE {
+		// "AWAITING_USER_ACTIVATION: Certificates cannot be issued from
+		// this CA. CRLs will not be generated." until its issuer signs
+		// the CSR and ActivateCertificateAuthority installs it; gcloud
+		// and Terraform do both for an issuer of this service.
+		rec := clone(in)
+		rec.Name = name
+		rec.Tier = pool.Pool.GetTier()
+		rec.State = privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION
+		rec.CreateTime = timestamppb.New(now)
+		rec.UpdateTime = rec.CreateTime
+		rec.PemCaCertificates, rec.CaCertificateDescriptions = nil, nil
+		cr := &caRecord{CA: rec, Key: key}
+		if cr.CSR, err = makeCSR(cr); err != nil {
+			return nil, err
+		}
+		rec.AccessUrls = s.accessURLs(rec)
+		s.cas[name] = cr
+		return s.done(loc, "create", name, clone(rec))
+	}
 	start := now.Truncate(time.Second)
 	t := &x509.Certificate{SerialNumber: serial(), Subject: subj, NotBefore: start, NotAfter: start.Add(in.GetLifetime().AsDuration()),
 		SignatureAlgorithm: sigAlg}
@@ -388,9 +412,12 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	rec.CaCertificateDescriptions = []*privatecapb.CertificateDescription{describe(cert)}
 	rec.CreateTime = timestamppb.New(now)
 	rec.UpdateTime = rec.CreateTime
-	rec.AccessUrls = &privatecapb.CertificateAuthority_AccessUrls{}
 	s.cas[name] = &caRecord{CA: rec, Key: key, Cert: cert}
-	return s.done(loc, "create", name, rec)
+	rec.AccessUrls = s.accessURLs(rec)
+	if err := s.regenCRL(name); err != nil {
+		return nil, err
+	}
+	return s.done(loc, "create", name, clone(rec))
 }
 
 func (a *API) GetCertificateAuthority(_ context.Context, req *privatecapb.GetCertificateAuthorityRequest) (*privatecapb.CertificateAuthority, error) {
@@ -444,8 +471,12 @@ func (s *Server) transition(name, verb string, to privatecapb.CertificateAuthori
 		next.DeleteTime, next.ExpireTime = nil, nil
 	}
 	c.CA = next
+	next.AccessUrls = s.accessURLs(next)
+	if err := s.regenCRL(name); err != nil {
+		return nil, err
+	}
 	loc, _, _ := strings.Cut(name, "/caPools/")
-	return s.done(loc, verb, name, next)
+	return s.done(loc, verb, name, clone(next))
 }
 
 // EnableCertificateAuthority: "To enable a CA that is in the STAGED or
@@ -554,14 +585,6 @@ func (a *API) UpdateCertificateAuthority(_ context.Context, req *privatecapb.Upd
 	return s.done(loc, "update", in.GetName(), next)
 }
 
-func (a *API) ActivateCertificateAuthority(context.Context, *privatecapb.ActivateCertificateAuthorityRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("ActivateCertificateAuthority (subordinate CAs) is not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) FetchCertificateAuthorityCsr(context.Context, *privatecapb.FetchCertificateAuthorityCsrRequest) (*privatecapb.FetchCertificateAuthorityCsrResponse, error) {
-	return nil, apierror.Unimplemented("FetchCertificateAuthorityCsr (subordinate CAs) is not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
 // ---- Certificates ----
 
 func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertificateRequest) (*privatecapb.Certificate, error) {
@@ -569,9 +592,6 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	in := req.GetCertificate()
 	if in == nil {
 		return nil, apierror.InvalidArgument("certificate is required")
-	}
-	if in.GetCertificateTemplate() != "" {
-		return nil, apierror.Unimplemented("certificate_template is not implemented in CloudBurrow yet (#1834 phase 2)")
 	}
 	switch in.GetSubjectMode() {
 	case privatecapb.SubjectRequestMode_SUBJECT_REQUEST_MODE_UNSPECIFIED, privatecapb.SubjectRequestMode_DEFAULT:
@@ -606,7 +626,11 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	}
 	policy := pool.Pool.GetIssuancePolicy()
 	modes := policy.GetAllowedIssuanceModes()
-	t := &x509.Certificate{SerialNumber: serial(), SignatureAlgorithm: signatureAlgorithm(issuer.Cert)}
+	tmpl, err := s.applyTemplate(in.GetCertificateTemplate(), req.GetParent())
+	if err != nil {
+		return nil, err
+	}
+	t := &x509.Certificate{SerialNumber: serial(), SignatureAlgorithm: signatureAlgorithm(issuer)}
 	var x509Req *privatecapb.X509Parameters
 	var pub any
 	switch cfg := in.GetCertificateConfig().(type) {
@@ -626,12 +650,17 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 			return nil, apierror.InvalidArgument("pem_csr signature: %v", err)
 		}
 		pub = csr.PublicKey
-		if passthroughSubject(policy) {
+		if sub := s.csrCA(csr); sub != nil {
+			// The CSR FetchCertificateAuthorityCsr made: its CA's own
+			// config is what it asks the issuer for.
+			x509Req = sub.CA.GetConfig().GetX509Config()
+		}
+		if passthroughSubject(policy) && passthroughSubject(tmplPolicy(tmpl)) {
 			t.Subject = pkix.Name{CommonName: csr.Subject.CommonName, Country: csr.Subject.Country, Organization: csr.Subject.Organization,
 				OrganizationalUnit: csr.Subject.OrganizationalUnit, Locality: csr.Subject.Locality, Province: csr.Subject.Province,
 				StreetAddress: csr.Subject.StreetAddress, PostalCode: csr.Subject.PostalCode}
 		}
-		if passthroughSANs(policy) {
+		if passthroughSANs(policy) && passthroughSANs(tmplPolicy(tmpl)) {
 			t.DNSNames, t.EmailAddresses, t.IPAddresses, t.URIs = csr.DNSNames, csr.EmailAddresses, csr.IPAddresses, csr.URIs
 		}
 	case *privatecapb.Certificate_Config:
@@ -648,12 +677,12 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 		if pub, err = parsePublicKey(c.GetPublicKey()); err != nil {
 			return nil, err
 		}
-		if passthroughSubject(policy) {
+		if passthroughSubject(policy) && passthroughSubject(tmplPolicy(tmpl)) {
 			if t.Subject, err = subjectName(c.GetSubjectConfig().GetSubject()); err != nil {
 				return nil, err
 			}
 		}
-		if passthroughSANs(policy) {
+		if passthroughSANs(policy) && passthroughSANs(tmplPolicy(tmpl)) {
 			if err := applySANs(t, c.GetSubjectConfig().GetSubjectAltName()); err != nil {
 				return nil, err
 			}
@@ -671,14 +700,19 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	if t.Subject.String() == "" && len(t.DNSNames)+len(t.EmailAddresses)+len(t.IPAddresses)+len(t.URIs) == 0 {
 		return nil, apierror.InvalidArgument("the certificate needs a subject or a subject alternative name")
 	}
-	if err := applyX509(t, mergeX509(x509Req, policy.GetBaselineValues())); err != nil {
+	if err := applyX509(t, mergeX509(mergeX509(x509Req, tmpl.GetPredefinedValues()), policy.GetBaselineValues())); err != nil {
 		return nil, err
 	}
+	publishTo(t, issuer.CA)
 	now := s.now()
 	if in.GetRequestedNotBeforeTime() != nil {
 		return nil, apierror.Unimplemented("requested_not_before_time is not implemented in CloudBurrow yet")
 	}
-	if t.NotBefore, t.NotAfter, err = validity(now, in.GetLifetime(), policy.GetMaximumLifetime(), policy.GetBackdateDuration(), issuer.Cert.NotAfter); err != nil {
+	maxLife := policy.GetMaximumLifetime()
+	if tl := tmpl.GetMaximumLifetime(); tl != nil && (maxLife == nil || tl.AsDuration() < maxLife.AsDuration()) {
+		maxLife = tl
+	}
+	if t.NotBefore, t.NotAfter, err = validity(now, in.GetLifetime(), maxLife, policy.GetBackdateDuration(), issuer.Cert.NotAfter); err != nil {
 		return nil, err
 	}
 	if t.SubjectKeyId, err = keyID(pub); err != nil {
@@ -815,6 +849,9 @@ func (a *API) RevokeCertificate(_ context.Context, req *privatecapb.RevokeCertif
 	next.RevocationDetails = &privatecapb.Certificate_RevocationDetails{RevocationState: req.GetReason(), RevocationTime: now}
 	next.UpdateTime = now
 	s.certs[req.GetName()] = next
+	if err := s.regenCRL(next.GetIssuerCertificateAuthority()); err != nil {
+		return nil, err
+	}
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -847,38 +884,4 @@ func (a *API) UpdateCertificate(_ context.Context, req *privatecapb.UpdateCertif
 		return nil, apierror.Wrap(err)
 	}
 	return clone(next), nil
-}
-
-// ---- Not yet served (#1834 phase 2) ----
-
-func (a *API) GetCertificateRevocationList(context.Context, *privatecapb.GetCertificateRevocationListRequest) (*privatecapb.CertificateRevocationList, error) {
-	return nil, apierror.Unimplemented("CertificateRevocationLists are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) ListCertificateRevocationLists(context.Context, *privatecapb.ListCertificateRevocationListsRequest) (*privatecapb.ListCertificateRevocationListsResponse, error) {
-	return nil, apierror.Unimplemented("CertificateRevocationLists are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) UpdateCertificateRevocationList(context.Context, *privatecapb.UpdateCertificateRevocationListRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("CertificateRevocationLists are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) CreateCertificateTemplate(context.Context, *privatecapb.CreateCertificateTemplateRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("CertificateTemplates are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) DeleteCertificateTemplate(context.Context, *privatecapb.DeleteCertificateTemplateRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("CertificateTemplates are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) GetCertificateTemplate(context.Context, *privatecapb.GetCertificateTemplateRequest) (*privatecapb.CertificateTemplate, error) {
-	return nil, apierror.Unimplemented("CertificateTemplates are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) ListCertificateTemplates(context.Context, *privatecapb.ListCertificateTemplatesRequest) (*privatecapb.ListCertificateTemplatesResponse, error) {
-	return nil, apierror.Unimplemented("CertificateTemplates are not implemented in CloudBurrow yet (#1834 phase 2)")
-}
-
-func (a *API) UpdateCertificateTemplate(context.Context, *privatecapb.UpdateCertificateTemplateRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Unimplemented("CertificateTemplates are not implemented in CloudBurrow yet (#1834 phase 2)")
 }

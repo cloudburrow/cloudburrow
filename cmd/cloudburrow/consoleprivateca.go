@@ -359,15 +359,40 @@ func (p privateCAProvider) caDetail(ctx context.Context, name string) (console.D
 		props = append(props, console.Property{Label: "Deleted", Value: kmsTime(ca.GetDeleteTime())},
 			console.Property{Label: "Purged after", Value: kmsTime(ca.GetExpireTime())})
 	}
+	sections := []console.Section{
+		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Certificate authority", Properties: props}}, Note: privateCANote},
+		{ID: "pem", Label: "CA certificate chain", Kind: console.KindText, Text: kmsOrDash(strings.Join(ca.GetPemCaCertificates(), ""))},
+	}
+	if ca.GetState() == privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION {
+		csr := "—"
+		if resp, err := p.api().FetchCertificateAuthorityCsr(ctx, &privatecapb.FetchCertificateAuthorityCsrRequest{Name: name}); err == nil {
+			csr = resp.GetPemCsr()
+		}
+		sections = append(sections, console.Section{ID: "csr", Label: "CSR", Kind: console.KindText, Text: csr,
+			Note: "Have the issuer sign this CSR as a CA certificate, then Activate with the certificate and the issuer's chain."})
+	}
+	crls := console.Listing{Columns: []string{"Sequence", "Revoked", "State", "Updated", "Labels"}, NameColumn: "Revocation list", Noun: "revocation lists"}
+	var crlText strings.Builder
+	if resp, err := p.api().ListCertificateRevocationLists(ctx, &privatecapb.ListCertificateRevocationListsRequest{Parent: name, PageSize: 1000}); err != nil {
+		crls.Unavailable = "cannot list the CRLs: " + consoleErr(err)
+	} else {
+		for _, c := range resp.GetCertificateRevocationLists() {
+			crls.Items = append(crls.Items, console.Resource{Name: c.GetName()[strings.LastIndex(c.GetName(), "/")+1:], Fields: map[string]string{
+				"Sequence": strconv.FormatInt(c.GetSequenceNumber(), 10), "Revoked": strconv.Itoa(len(c.GetRevokedCertificates())),
+				"State": c.GetState().String(), "Updated": kmsTime(c.GetUpdateTime()), "Labels": kmsOrDash(labelsText(c.GetLabels()))}})
+			crlText.WriteString(c.GetPemCrl())
+		}
+	}
+	crls.Total = len(crls.Items)
+	sections = append(sections, console.Section{ID: "crls", Label: "Revocation lists", Listing: crls},
+		console.Section{ID: "crlpem", Label: "Current CRL", Kind: console.KindText, Text: kmsOrDash(crlText.String()),
+			Note: "Regenerated on each revocation. With the pool publishing CRLs it is also served at the CA's CRL URL."})
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "State", Value: ca.GetState().String()},
 			{Label: "Created", Value: kmsTime(ca.GetCreateTime())},
 		},
-		Sections: []console.Section{
-			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Certificate authority", Properties: props}}, Note: privateCANote},
-			{ID: "pem", Label: "CA certificate chain", Kind: console.KindText, Text: kmsOrDash(strings.Join(ca.GetPemCaCertificates(), ""))},
-		},
+		Sections: sections,
 	}, nil
 }
 
@@ -451,6 +476,8 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 					Help: "Required in an Enterprise pool; in a DevOps pool, empty is generated."},
 				{Name: "pemCsr", Label: "Certificate signing request (PEM)", Type: "textarea", Required: true},
 				{Name: "lifetimeDays", Label: "Validity (days)", Type: "text", Default: "30", Pattern: `^[0-9]{1,5}$`},
+				{Name: "certificateTemplate", Label: "Certificate template", Type: "text",
+					Help: "Optional: projects/…/locations/…/certificateTemplates/…, in the pool's region."},
 				{Name: "issuer", Label: "Issuing CA ID", Type: "text", Pattern: `^([A-Za-z0-9_\-]{1,63})?$`, Help: "Optional: empty is any enabled CA of the pool."},
 			}},
 			{ID: "requestconfig", Label: "Request certificate from a config", Fields: []console.Field{
@@ -461,6 +488,8 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 				{Name: "publicKey", Label: "Public key (PEM)", Type: "textarea", Required: true},
 				{Name: "usage", Label: "Extended key usage", Type: "select", Default: "server_auth", Options: []string{"server_auth", "client_auth", "server_auth,client_auth"}},
 				{Name: "lifetimeDays", Label: "Validity (days)", Type: "text", Default: "30", Pattern: `^[0-9]{1,5}$`},
+				{Name: "certificateTemplate", Label: "Certificate template", Type: "text",
+					Help: "Optional: projects/…/locations/…/certificateTemplates/…, in the pool's region."},
 				{Name: "issuer", Label: "Issuing CA ID", Type: "text", Pattern: `^([A-Za-z0-9_\-]{1,63})?$`, Help: "Optional: empty is any enabled CA of the pool."},
 			}},
 			{ID: "labels", Label: "Edit labels", Fields: []console.Field{labelsField(labels, "")}},
@@ -494,6 +523,13 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 		}
 		if ca.GetState() != privatecapb.CertificateAuthority_DELETED {
 			out = append(out, console.Action{ID: "labels", Label: "Edit labels", Fields: []console.Field{labelsField(ca.GetLabels(), "")}})
+		}
+		if resp, err := p.api().ListCertificateRevocationLists(ctx, &privatecapb.ListCertificateRevocationListsRequest{Parent: ca.GetName()}); err == nil &&
+			len(resp.GetCertificateRevocationLists()) > 0 && ca.GetState() != privatecapb.CertificateAuthority_DELETED {
+			crl := resp.GetCertificateRevocationLists()[0]
+			out = append(out, console.Action{ID: "crllabels", Label: "Edit CRL labels", Fields: []console.Field{
+				{Name: "crl", Label: "Revocation list", Type: "text", Required: true, Default: crl.GetName()[strings.LastIndex(crl.GetName(), "/")+1:], Pattern: privateCAIDPattern},
+				labelsField(crl.GetLabels(), "")}})
 		}
 		return out
 	case len(path) == 3 && path[1] == "certificates":
@@ -568,7 +604,7 @@ func (p privateCAProvider) poolAction(ctx context.Context, api *privateca.API, p
 		if err != nil {
 			return err
 		}
-		cert := &privatecapb.Certificate{Lifetime: life}
+		cert := &privatecapb.Certificate{Lifetime: life, CertificateTemplate: strings.TrimSpace(values["certificateTemplate"])}
 		if action == "requestcsr" {
 			cert.CertificateConfig = &privatecapb.Certificate_PemCsr{PemCsr: strings.TrimSpace(values["pemCsr"]) + "\n"}
 		} else {
@@ -652,19 +688,46 @@ func privateCACreateCA(ctx context.Context, api *privateca.API, pool string, val
 				KeyUsage: &privatecapb.KeyUsage{BaseKeyUsage: &privatecapb.KeyUsage_KeyUsageOptions{CertSign: true, CrlSign: true}}},
 		},
 	}
+	issuer := strings.TrimSpace(values["issuerCa"])
 	switch values["type"] {
 	case "", "SELF_SIGNED":
 		ca.Type = privatecapb.CertificateAuthority_SELF_SIGNED
+		if issuer != "" {
+			return fmt.Errorf("a root CA has no issuing CA")
+		}
 	case "SUBORDINATE":
 		ca.Type = privatecapb.CertificateAuthority_SUBORDINATE
-		if issuer := strings.TrimSpace(values["issuerCa"]); issuer != "" {
-			ca.SubordinateConfig = &privatecapb.SubordinateConfig{SubordinateConfig: &privatecapb.SubordinateConfig_CertificateAuthority{CertificateAuthority: issuer}}
-		}
 	default:
 		return fmt.Errorf("CA type: %q is not SELF_SIGNED or SUBORDINATE", values["type"])
 	}
-	_, err = api.CreateCertificateAuthority(ctx, &privatecapb.CreateCertificateAuthorityRequest{Parent: pool,
+	op, err := api.CreateCertificateAuthority(ctx, &privatecapb.CreateCertificateAuthorityRequest{Parent: pool,
 		CertificateAuthorityId: strings.TrimSpace(values["certificateAuthorityId"]), CertificateAuthority: ca})
+	if err != nil || ca.Type != privatecapb.CertificateAuthority_SUBORDINATE || issuer == "" {
+		return err
+	}
+	// Signed by a CA of this service, as gcloud privateca subordinates
+	// create --issuer-pool does it: the issuer's pool signs the CSR, and
+	// the certificate activates the new CA.
+	created := &privatecapb.CertificateAuthority{}
+	if err := op.GetResponse().UnmarshalTo(created); err != nil {
+		return err
+	}
+	csr, err := api.FetchCertificateAuthorityCsr(ctx, &privatecapb.FetchCertificateAuthorityCsrRequest{Name: created.GetName()})
+	if err != nil {
+		return err
+	}
+	issuerPool, issuerID, ok := strings.Cut(issuer, "/certificateAuthorities/")
+	if !ok {
+		return fmt.Errorf("issuing CA: %q is not projects/…/caPools/…/certificateAuthorities/…", issuer)
+	}
+	signed, err := api.CreateCertificate(ctx, &privatecapb.CreateCertificateRequest{Parent: issuerPool, IssuingCertificateAuthorityId: issuerID,
+		CertificateId: "subordinate-" + strings.TrimSpace(values["certificateAuthorityId"]) + "-" + strconv.FormatInt(time.Now().Unix(), 36),
+		Certificate:   &privatecapb.Certificate{Lifetime: life, CertificateConfig: &privatecapb.Certificate_PemCsr{PemCsr: csr.GetPemCsr()}}})
+	if err != nil {
+		return fmt.Errorf("the issuer did not sign the subordinate's CSR (the CA stays AWAITING_USER_ACTIVATION): %w", err)
+	}
+	_, err = api.ActivateCertificateAuthority(ctx, &privatecapb.ActivateCertificateAuthorityRequest{Name: created.GetName(), PemCaCertificate: signed.GetPemCertificate(),
+		SubordinateConfig: &privatecapb.SubordinateConfig{SubordinateConfig: &privatecapb.SubordinateConfig_CertificateAuthority{CertificateAuthority: issuer}}})
 	return err
 }
 
@@ -688,6 +751,14 @@ func (p privateCAProvider) caAction(ctx context.Context, api *privateca.API, nam
 			PemCaCertificate: strings.TrimSpace(values["pemCaCertificate"]) + "\n",
 			SubordinateConfig: &privatecapb.SubordinateConfig{SubordinateConfig: &privatecapb.SubordinateConfig_PemIssuerChain{
 				PemIssuerChain: &privatecapb.SubordinateConfig_SubordinateConfigChain{PemCertificates: splitPEMCerts(values["pemIssuerChain"])}}}})
+	case "crllabels":
+		var labels map[string]string
+		if labels, err = console.ParseMap(values["labels"]); err != nil {
+			return err
+		}
+		_, err = api.UpdateCertificateRevocationList(ctx, &privatecapb.UpdateCertificateRevocationListRequest{
+			CertificateRevocationList: &privatecapb.CertificateRevocationList{Name: name + "/certificateRevocationLists/" + strings.TrimSpace(values["crl"]), Labels: labels},
+			UpdateMask:                &fieldmaskpb.FieldMask{Paths: []string{"labels"}}})
 	case "labels":
 		var labels map[string]string
 		if labels, err = console.ParseMap(values["labels"]); err != nil {

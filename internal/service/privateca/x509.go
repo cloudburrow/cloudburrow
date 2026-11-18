@@ -66,8 +66,22 @@ func newKey(alg privatecapb.CertificateAuthority_SignHashAlgorithm) (crypto.Sign
 	return k, sa, err
 }
 
-// signatureAlgorithm is what cert's key signs with, as the CA was made.
-func signatureAlgorithm(ca *x509.Certificate) x509.SignatureAlgorithm { return ca.SignatureAlgorithm }
+// signatureAlgorithm is what a CA's key signs with, by its key spec: a
+// subordinate's own certificate is signed with its issuer's algorithm, so
+// that is not it.
+func signatureAlgorithm(c *caRecord) x509.SignatureAlgorithm {
+	switch c.CA.GetKeySpec().GetAlgorithm() {
+	case privatecapb.CertificateAuthority_RSA_PSS_2048_SHA256, privatecapb.CertificateAuthority_RSA_PSS_3072_SHA256, privatecapb.CertificateAuthority_RSA_PSS_4096_SHA256:
+		return x509.SHA256WithRSAPSS
+	case privatecapb.CertificateAuthority_RSA_PKCS1_2048_SHA256, privatecapb.CertificateAuthority_RSA_PKCS1_3072_SHA256, privatecapb.CertificateAuthority_RSA_PKCS1_4096_SHA256:
+		return x509.SHA256WithRSA
+	case privatecapb.CertificateAuthority_EC_P256_SHA256:
+		return x509.ECDSAWithSHA256
+	case privatecapb.CertificateAuthority_EC_P384_SHA384:
+		return x509.ECDSAWithSHA384
+	}
+	return x509.UnknownSignatureAlgorithm
+}
 
 // subjectName is a Subject as an X.509 name. An rdn_sequence is kept in
 // its order.

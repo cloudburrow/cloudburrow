@@ -71,7 +71,7 @@ func TestConsolePrivateCAPoolsCAsAndCertificates(t *testing.T) {
 		t.Fatal(err)
 	}
 	caPath := []string{pool, "certificateAuthorities", "root"}
-	if got := privateCAActions(p.DetailActions(ctx, project, caPath)); got != "enable,disable,delete,labels" {
+	if got := privateCAActions(p.DetailActions(ctx, project, caPath)); got != "enable,disable,delete,labels,crllabels" {
 		t.Errorf("a STAGED CA offers %s", got)
 	}
 	if err := p.ActAt(ctx, project, caPath, "enable", nil); err != nil {
@@ -199,5 +199,114 @@ func TestConsolePrivateCAPoolPermissions(t *testing.T) {
 	d, _ := p.Detail(ctx, project, []string{pool})
 	if !strings.Contains(d.Sections[1].Listing.Prompt, "DevOps") {
 		t.Errorf("a DevOps pool's certificates section says %q", d.Sections[1].Listing.Prompt)
+	}
+}
+
+// Phase 2 on the page (#1834): Create template, a subordinate CA signed
+// and activated through Create CA with an issuing CA, a certificate
+// requested with the template, Revoke regenerating the subordinate's CRL
+// shown on its page, Edit CRL labels, and a subordinate awaiting a
+// third-party issuer, whose page shows its CSR and offers Activate.
+func TestConsolePrivateCASubordinatesTemplatesAndCRLs(t *testing.T) {
+	ctx := context.Background()
+	p, c := privateCAFixture(t)
+	tp := privateCATemplatesProvider{svc: p.svc}
+	const project = "pca-phase2"
+	pool, err := p.Create(ctx, project, map[string]string{"caPoolId": "pool", "location": "us-central1", "tier": "ENTERPRISE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, project, []string{pool}, "createca", map[string]string{"certificateAuthorityId": "root", "type": "SELF_SIGNED",
+		"commonName": "Root", "algorithm": "EC_P256_SHA256", "lifetimeDays": "365"}); err != nil {
+		t.Fatal(err)
+	}
+	root := pool + "/certificateAuthorities/root"
+	if err := p.ActAt(ctx, project, []string{pool, "certificateAuthorities", "root"}, "enable", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, project, []string{pool}, "createca", map[string]string{"certificateAuthorityId": "sub", "type": "SUBORDINATE", "issuerCa": root,
+		"commonName": "Sub", "algorithm": "EC_P256_SHA256", "lifetimeDays": "90"}); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := c.GetCertificateAuthority(ctx, &privatecapb.GetCertificateAuthorityRequest{Name: pool + "/certificateAuthorities/sub"})
+	if err != nil || sub.GetState() != privatecapb.CertificateAuthority_STAGED || sub.GetSubordinateConfig().GetCertificateAuthority() != root || len(sub.GetPemCaCertificates()) != 2 {
+		t.Fatalf("the subordinate made on the page = %v, %v", sub, err)
+	}
+	subPath := []string{pool, "certificateAuthorities", "sub"}
+	if err := p.ActAt(ctx, project, subPath, "enable", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpl, err := tp.Create(ctx, project, map[string]string{"certificateTemplateId": "clients", "location": "us-central1", "description": "clients",
+		"usages": "digital_signature,client_auth", "allowSubjectPassthrough": "false", "allowSansPassthrough": "true", "maximumLifetimeDays": "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l, err := tp.List(ctx, project); err != nil || len(l.Items) != 1 {
+		t.Fatalf("templates List = %+v, %v", l, err)
+	}
+	if err := tp.ActAt(ctx, project, []string{tmpl}, "edit", map[string]string{"description": "client certs", "usages": "digital_signature,client_auth", "labels": `{"team":"a"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.GetCertificateTemplate(ctx, &privatecapb.GetCertificateTemplateRequest{Name: tmpl}); err != nil || got.GetDescription() != "client certs" || got.GetLabels()["team"] != "a" {
+		t.Fatalf("GetCertificateTemplate = %v, %v", got, err)
+	}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubDER, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err := p.ActAt(ctx, project, []string{pool}, "requestconfig", map[string]string{"certificateId": "client", "commonName": "dropped", "dnsNames": "c.example.com",
+		"publicKey": string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})), "usage": "server_auth", "lifetimeDays": "30",
+		"certificateTemplate": tmpl, "issuer": "sub"}); err != nil {
+		t.Fatal(err)
+	}
+	crt, err := c.GetCertificate(ctx, &privatecapb.GetCertificateRequest{Name: pool + "/certificates/client"})
+	if err != nil || crt.GetCertificateDescription().GetSubjectDescription().GetSubject().GetCommonName() != "" ||
+		crt.GetCertificateDescription().GetX509Description().GetKeyUsage().GetExtendedKeyUsage().GetServerAuth() || crt.GetIssuerCertificateAuthority() != sub.GetName() {
+		t.Fatalf("the templated certificate = %v, %v", crt, err)
+	}
+	if err := p.ActAt(ctx, project, []string{pool, "certificates", "client"}, "revoke", map[string]string{"reason": "SUPERSEDED"}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := p.Detail(ctx, project, subPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crls console.Listing
+	for _, sec := range d.Sections {
+		if sec.ID == "crls" {
+			crls = sec.Listing
+		}
+	}
+	if len(crls.Items) != 1 || crls.Items[0].Fields["Revoked"] != "1" {
+		t.Fatalf("the subordinate's Revocation lists = %+v", crls)
+	}
+	if err := p.ActAt(ctx, project, subPath, "crllabels", map[string]string{"crl": crls.Items[0].Name, "labels": `{"env":"dev"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.GetCertificateRevocationList(ctx, &privatecapb.GetCertificateRevocationListRequest{Name: sub.GetName() + "/certificateRevocationLists/" + crls.Items[0].Name}); err != nil || got.GetLabels()["env"] != "dev" {
+		t.Errorf("GetCertificateRevocationList = %v, %v", got, err)
+	}
+
+	// Awaiting a third-party issuer.
+	if err := p.ActAt(ctx, project, []string{pool}, "createca", map[string]string{"certificateAuthorityId": "ext", "type": "SUBORDINATE",
+		"commonName": "Ext", "algorithm": "EC_P256_SHA256", "lifetimeDays": "30"}); err != nil {
+		t.Fatal(err)
+	}
+	extPath := []string{pool, "certificateAuthorities", "ext"}
+	if got := privateCAActions(p.DetailActions(ctx, project, extPath)); got != "activate,delete,labels" {
+		t.Errorf("a CA awaiting activation offers %s", got)
+	}
+	ed, _ := p.Detail(ctx, project, extPath)
+	hasCSR := false
+	for _, sec := range ed.Sections {
+		hasCSR = hasCSR || (sec.ID == "csr" && strings.Contains(sec.Text, "BEGIN CERTIFICATE REQUEST"))
+	}
+	if !hasCSR {
+		t.Error("a CA awaiting activation shows no CSR")
+	}
+	if err := tp.ActAt(ctx, project, []string{tmpl}, "delete", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetCertificateTemplate(ctx, &privatecapb.GetCertificateTemplateRequest{Name: tmpl}); err == nil {
+		t.Error("the template is still there after Delete template")
 	}
 }

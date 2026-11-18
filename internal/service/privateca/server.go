@@ -8,8 +8,10 @@
 // Operation that is already done, with privateca's OperationMetadata and
 // the resource as its response; operations.get answers it afterwards.
 //
-// What is not served yet (subordinate CAs, certificate templates, CRLs,
-// keys held in Cloud KMS) answers 501 UNIMPLEMENTED with its reason.
+// Subordinate CAs, certificate templates and CRLs (published, with each
+// CA's certificate, at the access URLs this port serves) are phase 2.
+// What is not served yet (keys held in Cloud KMS, CMEK pools) answers 501
+// UNIMPLEMENTED with its reason.
 // docs/privateca.md is the user's guide.
 package privateca
 
@@ -70,6 +72,8 @@ type caRecord struct {
 	CA   *privatecapb.CertificateAuthority
 	Key  crypto.Signer
 	Cert *x509.Certificate
+	// CSR is the PEM CSR of a CA awaiting activation.
+	CSR string
 }
 
 // poolRecord is a CA pool and its IAM policy.
@@ -87,6 +91,14 @@ type Server struct {
 	cas   map[string]*caRecord
 	certs map[string]*privatecapb.Certificate
 	ops   map[string]*longrunningpb.Operation
+	// templates are the certificate templates, crls each CA's CRL.
+	templates map[string]*templateRecord
+	crls      map[string]*privatecapb.CertificateRevocationList
+	// crlPolicies are the CRLs' IAM policies.
+	crlPolicies map[string]**iampolicy.Stored
+
+	// addr is the address published content is served at.
+	addr func() string
 
 	// now is the clock, for tests.
 	now func() time.Time
@@ -97,7 +109,9 @@ type Server struct {
 func NewServer(state string) (*Server, error) {
 	s := &Server{state: state, now: time.Now,
 		pools: map[string]*poolRecord{}, cas: map[string]*caRecord{},
-		certs: map[string]*privatecapb.Certificate{}, ops: map[string]*longrunningpb.Operation{}}
+		certs: map[string]*privatecapb.Certificate{}, ops: map[string]*longrunningpb.Operation{},
+		templates: map[string]*templateRecord{}, crls: map[string]*privatecapb.CertificateRevocationList{},
+		crlPolicies: map[string]**iampolicy.Stored{}}
 	if state != "" {
 		if err := s.load(); err != nil {
 			return nil, err
@@ -114,6 +128,10 @@ type disk struct {
 	CAs      map[string]diskCA          `json:"cas"`
 	Certs    map[string]json.RawMessage `json:"certificates"`
 	Ops      map[string]json.RawMessage `json:"operations"`
+	// Templates, their policies and the CRLs (#1834 phase 2).
+	Templates        map[string]json.RawMessage `json:"templates,omitempty"`
+	TemplatePolicies map[string]json.RawMessage `json:"templatePolicies,omitempty"`
+	CRLs             map[string]json.RawMessage `json:"crls,omitempty"`
 }
 
 type diskCA struct {
@@ -166,7 +184,33 @@ func (s *Server) load() error {
 				rec.Cert = c
 			}
 		}
+		if ca.GetState() == privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION {
+			if rec.CSR, err = makeCSR(rec); err != nil {
+				return fmt.Errorf("CA %s CSR: %w", n, err)
+			}
+		}
 		s.cas[n] = rec
+	}
+	for n, raw := range d.Templates {
+		t := &privatecapb.CertificateTemplate{}
+		if err := protojson.Unmarshal(raw, t); err != nil {
+			return fmt.Errorf("parse template %s: %w", n, err)
+		}
+		rec := &templateRecord{Template: t}
+		if pol, ok := d.TemplatePolicies[n]; ok {
+			rec.Policy = &iampolicy.Stored{}
+			if err := json.Unmarshal(pol, rec.Policy); err != nil {
+				return fmt.Errorf("parse template %s policy: %w", n, err)
+			}
+		}
+		s.templates[n] = rec
+	}
+	for n, raw := range d.CRLs {
+		c := &privatecapb.CertificateRevocationList{}
+		if err := protojson.Unmarshal(raw, c); err != nil {
+			return fmt.Errorf("parse CRL %s: %w", n, err)
+		}
+		s.crls[n] = c
 	}
 	for n, raw := range d.Certs {
 		c := &privatecapb.Certificate{}
@@ -191,7 +235,29 @@ func (s *Server) save() error {
 		return nil
 	}
 	d := disk{Pools: map[string]json.RawMessage{}, Policies: map[string]json.RawMessage{}, CAs: map[string]diskCA{},
-		Certs: map[string]json.RawMessage{}, Ops: map[string]json.RawMessage{}}
+		Certs: map[string]json.RawMessage{}, Ops: map[string]json.RawMessage{},
+		Templates: map[string]json.RawMessage{}, TemplatePolicies: map[string]json.RawMessage{}, CRLs: map[string]json.RawMessage{}}
+	for n, t := range s.templates {
+		b, err := protojson.Marshal(t.Template)
+		if err != nil {
+			return err
+		}
+		d.Templates[n] = b
+		if t.Policy != nil {
+			pb, err := json.Marshal(t.Policy)
+			if err != nil {
+				return err
+			}
+			d.TemplatePolicies[n] = pb
+		}
+	}
+	for n, c := range s.crls {
+		b, err := protojson.Marshal(c)
+		if err != nil {
+			return err
+		}
+		d.CRLs[n] = b
+	}
 	for n, p := range s.pools {
 		b, err := protojson.Marshal(p.Pool)
 		if err != nil {
@@ -271,6 +337,16 @@ func (s *Server) ResetProject(project string) error {
 			delete(s.ops, n)
 		}
 	}
+	for n := range s.templates {
+		if match(n) {
+			delete(s.templates, n)
+		}
+	}
+	for n := range s.crls {
+		if match(n) {
+			delete(s.crls, n)
+		}
+	}
 	return s.save()
 }
 
@@ -316,6 +392,18 @@ func (s *Server) PoolsInProject(project string) []*privatecapb.CaPool {
 		if poolRE.MatchString(k) {
 			out = append(out, clone(s.pools[k].Pool))
 		}
+	}
+	return out
+}
+
+// TemplatesInProject is every certificate template of a project, in every
+// location, for the console's templates page.
+func (s *Server) TemplatesInProject(project string) []*privatecapb.CertificateTemplate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*privatecapb.CertificateTemplate
+	for _, k := range sortedKeys(s.templates, "projects/"+project+"/locations/") {
+		out = append(out, clone(s.templates[k].Template))
 	}
 	return out
 }

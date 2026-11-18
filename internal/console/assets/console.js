@@ -182,7 +182,10 @@ const ROUTES = [
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Cloud KMS single-tenant HSM", section: "Security and identity" },
   // Certificate Authority Service (#1834): CA pools, their CAs and the
   // certificates they issue, at Google's own path.
-  { path: "/security/cas", service: "privateca", title: "Certificate Authority Service", section: "Security and identity" },
+  { path: "/security/cas", service: "privateca", title: "CA pools", section: "Security and identity",
+    product: "privateca", productTitle: "Certificate Authority Service" },
+  { path: "/security/cas/templates", service: "privateca-templates", icon: "privateca", title: "Certificate templates",
+    section: "Security and identity", product: "privateca", productTitle: "Certificate Authority Service" },
   // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
   // never enforced (ADR-0006); Grant access and Remove principal on its
   // Permissions tab.

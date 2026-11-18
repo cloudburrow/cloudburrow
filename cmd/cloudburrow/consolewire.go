@@ -226,7 +226,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Certificate Authority Service (#1834) runs in this process too.
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
-		providers = append(providers, privateCAProvider{svc: d.privateCA})
+		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})

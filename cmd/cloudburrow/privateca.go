@@ -79,6 +79,8 @@ func (s *privateCAService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	// CA certificates and CRLs are published on this port (#1834).
+	api.SetAddress(s.Addr)
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.PrivateCA)))
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
