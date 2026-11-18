@@ -5687,7 +5687,10 @@
           "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
           "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
-          "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
+          "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
+          "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
+          "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
+          "test/compat/memorystoretls_test.go:43 TestMemorystoreInTransitEncryption",
           "test/compat/memorystoreupgrade_test.go:28 TestMemorystoreVersionsAndUpgrade",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
@@ -5702,6 +5705,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
@@ -5730,7 +5734,8 @@
         "tests": [
           "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
           "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover"
+          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
+          "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60"
         ]
       },
       {
@@ -5748,7 +5753,10 @@
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
-          "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
+          "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
+          "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
+          "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
+          "test/compat/memorystoretls_test.go:43 TestMemorystoreInTransitEncryption",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
@@ -5763,6 +5771,7 @@
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -5780,7 +5789,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
-          "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption"
+          "test/compat/memorystoretls_test.go:43 TestMemorystoreInTransitEncryption"
         ]
       },
       {

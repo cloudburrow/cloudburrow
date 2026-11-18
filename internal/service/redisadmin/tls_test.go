@@ -8,6 +8,7 @@ import (
 	"time"
 
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
+	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 )
 
 // TestInTransitEncryption (#1413): an instance created with
@@ -65,5 +66,27 @@ func TestInTransitEncryption(t *testing.T) {
 	// A plain instance has neither.
 	if off, _ := ServerTLS(Spec{}, time.Now()); off != nil {
 		t.Error("ServerTLS of a plain server")
+	}
+}
+
+// TestClusterAddrBefore60 (#1768): a Redis before 6.0 with in-transit
+// encryption replicates from its front's relay on the pod's loopback, by
+// the node it names; 6.x and later dial the node's Service on TLSPort.
+func TestClusterAddrBefore60(t *testing.T) {
+	rs := &haCluster{}
+	old := &record{Server: "redis-x", TransitCA: "ca", Version: "REDIS_5_0"}
+	if h, p := old.clusterAddr(rs, "redis-x-n2"); h != "127.0.0.1" || p != redistlsfront.RelayBase+3 {
+		t.Errorf("node 2 of a 5.0 instance: %s:%d", h, p)
+	}
+	if h, p := old.clusterAddr(rs, "redis-x"); h != "127.0.0.1" || p != redistlsfront.RelayBase {
+		t.Errorf("the 5.0 instance's Service: %s:%d", h, p)
+	}
+	cur := &record{Server: "redis-x", TransitCA: "ca", Version: "REDIS_6_X"}
+	if h, p := cur.clusterAddr(rs, "redis-x-n2"); h != "redis-x-n2.svc" || p != TLSPort {
+		t.Errorf("node 2 of a 6.x instance: %s:%d", h, p)
+	}
+	plain := &record{Server: "redis-x", Version: "REDIS_5_0"}
+	if h, p := plain.clusterAddr(rs, "redis-x-n2"); h != "redis-x-n2.svc" || p != 6379 {
+		t.Errorf("node 2 of a 5.0 instance without TLS: %s:%d", h, p)
 	}
 }

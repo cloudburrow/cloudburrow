@@ -47,6 +47,10 @@ func atLeast(version, since string) bool {
 // own (#1524).
 func preTLS(version string) bool { return !atLeast(version, "REDIS_6_X") }
 
+// PreTLS is whether a Memorystore for Redis server of version is served
+// in-transit encryption by a front of its own (#1768): a Redis before 6.0.
+func PreTLS(version string) bool { return preTLS(version) }
+
 // version is r's redis_version.
 func (r *record) version() string {
 	if r.Version == "" {

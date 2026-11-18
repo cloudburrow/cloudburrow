@@ -268,9 +268,6 @@ func TestCreateRefusals(t *testing.T) {
 		{"read replicas before 5.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
 			i.RedisVersion, i.Tier, i.ReadReplicasMode = "REDIS_4_0", redispb.Instance_STANDARD_HA, redispb.Instance_READ_REPLICAS_ENABLED
 		})}, codes.InvalidArgument},
-		{"TLS before 6.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
-			i.RedisVersion, i.TransitEncryptionMode = "REDIS_5_0", redispb.Instance_SERVER_AUTHENTICATION
-		})}, codes.Unimplemented},
 		{"persistence period", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
 			i.PersistenceConfig = &redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: 99}
 		})}, codes.InvalidArgument},

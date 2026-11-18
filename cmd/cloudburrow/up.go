@@ -250,6 +250,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 		memorystoreAdminSvc.kms = kmsSvc
+		// A Redis before 6.0 with in-transit encryption is served TLS by
+		// a front from the storage image (#1768).
+		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout), comps)
 		// IAM auth (#1614) checks a token against the tokens these
 		// credentials minted and the project's IAM policy.
 		memorystoreAdminSvc.creds = creds

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 )
 
 // Optional emulator components.
@@ -640,6 +641,16 @@ type MemorystoreSettings struct {
 	// client address per family (cluster-announce-client-ipv4, -ipv6), so
 	// host clients and in-cluster clients are each given one they reach.
 	PodAndLoopback6 bool
+
+	// TLSFront, with TLSCert, serves in-transit encryption from a front
+	// of its own (internal/redistlsfront, #1768), for a Redis before 6.0,
+	// which has no TLS: the server listens on the pod's loopback, and the
+	// front, from FrontImage, serves TLS on TLSPort and relays
+	// replication to the nodes of Instance, in Namespace, over TLS.
+	TLSFront bool
+	// FrontImage, Instance and Namespace are TLSFront's image, the
+	// instance's server name and its Services' namespace.
+	FrontImage, Instance, Namespace string
 }
 
 // memorystoreBindPodAndLoopback6 is the bind PodAndLoopback6 adds:
@@ -764,12 +775,25 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
-	if dir != "" && o.TLSCert == "" {
+	if dir != "" && (o.TLSCert == "" || o.TLSFront) {
 		// The directory is made, then the image's own entrypoint starts
 		// the server as it always does, owning it.
 		b.Args = append([]string{"sh", "-c", `set -e; mkdir -p "$0"; exec docker-entrypoint.sh "$@"`, dir}, args...)
 	}
-	if o.TLSCert != "" {
+	if o.TLSCert != "" && o.TLSFront {
+		// The server on the pod's loopback alone, the front serving TLS
+		// and relaying replication (#1768).
+		up := MemorystorePort
+		b.Args = append(b.Args, "--port", fmt.Sprint(up), "--bind", "127.0.0.1")
+		args := []string{"redis-tls-front", "--listen", fmt.Sprintf("0.0.0.0:%d", MemorystoreTLSPort),
+			"--upstream", fmt.Sprintf("127.0.0.1:%d", up)}
+		if o.Instance != "" {
+			args = append(args, "--instance", o.Instance, "--namespace", o.Namespace)
+		}
+		b.Port = MemorystoreTLSPort
+		b.Front = &Front{Name: "tls", Image: o.FrontImage, PullPolicy: "Never", Args: args, UpstreamPort: up,
+			Env: map[string]string{redistlsfront.EnvCert: o.TLSCert, redistlsfront.EnvKey: o.TLSKey, redistlsfront.EnvCA: o.TLSCA}}
+	} else if o.TLSCert != "" {
 		// TLS only (--port 0), clients not asked for a certificate
 		// (SERVER_AUTHENTICATION), replication over TLS. The files are
 		// written from the environment, then the image's own entrypoint

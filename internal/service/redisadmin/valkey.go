@@ -189,10 +189,13 @@ func (v Valkey) Load(ctx context.Context, host string, port int) error {
 	defer c.Close()
 	if v.CA != "" {
 		// The server at host:port, in the same pod, speaks plain TCP.
-		if err := c.ConfigSet(ctx, "tls-replication", "no").Err(); err != nil {
+		// A Redis before 6.0, served TLS by its front (#1768), has no
+		// tls-replication and replicates plain TCP already.
+		if err := c.ConfigSet(ctx, "tls-replication", "no").Err(); err == nil {
+			defer c.ConfigSet(context.WithoutCancel(ctx), "tls-replication", "yes")
+		} else if !strings.Contains(err.Error(), "nsupported CONFIG parameter") && !strings.Contains(err.Error(), "nknown option") {
 			return fmt.Errorf("CONFIG SET tls-replication no: %w", err)
 		}
-		defer c.ConfigSet(context.WithoutCancel(ctx), "tls-replication", "yes")
 	}
 	if err := replicaOf(ctx, c, host, strconv.Itoa(port)); err != nil {
 		return fmt.Errorf("REPLICAOF: %w", err)

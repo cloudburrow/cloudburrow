@@ -34,6 +34,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
+	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 	"github.com/cloudburrow/cloudburrow/internal/supervisor"
 )
@@ -83,6 +84,16 @@ func main() {
 		if err := bigtablefront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, bigtablefront.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage bigtable-front:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "redis-tls-front" {
+		// Memorystore for Redis before 6.0 with in-transit encryption (#1768).
+		if err := redistlsfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, redistlsfront.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage redis-tls-front:", err)
 			}
 			os.Exit(2)
 		}

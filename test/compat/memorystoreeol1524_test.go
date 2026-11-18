@@ -24,7 +24,7 @@ import (
 // over keeping its keys. What Memorystore documents for later versions only
 // is refused: allkeys-lfu and activedefrag before 4.0, the stream configs
 // before 5.0 and read replicas before 5.0 (INVALID_ARGUMENT); in-transit
-// encryption before 6.0 is 501 (#1768).
+// encryption before 6.0 is TestMemorystoreInTransitEncryptionBefore60.
 func TestMemorystoreEndOfLifeVersions(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
@@ -42,7 +42,6 @@ func TestMemorystoreEndOfLifeVersions(t *testing.T) {
 		{"stream-node-max-bytes on 4.0", &redispb.Instance{RedisVersion: "REDIS_4_0", RedisConfigs: map[string]string{"stream-node-max-bytes": "8192"}}, codes.InvalidArgument},
 		{"read replicas on 4.0", &redispb.Instance{RedisVersion: "REDIS_4_0", Tier: redispb.Instance_STANDARD_HA, MemorySizeGb: 5,
 			ReadReplicasMode: redispb.Instance_READ_REPLICAS_ENABLED}, codes.InvalidArgument},
-		{"in-transit encryption on 5.0", &redispb.Instance{RedisVersion: "REDIS_5_0", TransitEncryptionMode: redispb.Instance_SERVER_AUTHENTICATION}, codes.Unimplemented},
 	} {
 		if tc.in.Tier == redispb.Instance_TIER_UNSPECIFIED {
 			tc.in.Tier, tc.in.MemorySizeGb = redispb.Instance_BASIC, 1
