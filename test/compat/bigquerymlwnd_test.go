@@ -173,7 +173,7 @@ func TestBigQueryMLHostedModelsRefused(t *testing.T) {
 			"AutoML"},
 		"AUTOML_CLASSIFIER": {"CREATE MODEL `%s.no` OPTIONS(model_type='automl_classifier', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`", "AutoML"},
 		"TENSORFLOW":        {"CREATE MODEL `%s.no` OPTIONS(model_type='tensorflow', model_path='gs://bucket/saved_model/*')", "TensorFlow"},
-		"a remote model": {"CREATE MODEL `%s.no` REMOTE WITH CONNECTION `us.conn` OPTIONS(endpoint='gemini-2.0-flash')",
+		"a remote model": {"CREATE MODEL `%s.no` REMOTE WITH CONNECTION DEFAULT OPTIONS(endpoint='gemini-2.0-flash')",
 			"connection"},
 		"holiday_region": {"CREATE MODEL `%s.no` OPTIONS(model_type='arima_plus', time_series_timestamp_col='d', time_series_data_col='v', " +
 			"holiday_region='US') AS SELECT d, v FROM `%[1]s.walk`", "holiday calendar"},

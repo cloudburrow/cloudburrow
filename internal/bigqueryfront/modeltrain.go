@@ -95,6 +95,8 @@ type mlOptions struct {
 	UserCol      string `json:"userCol,omitempty"`
 	ItemCol      string `json:"itemCol,omitempty"`
 	RatingCol    string `json:"ratingCol,omitempty"`
+	// WalsAlpha is an IMPLICIT model's wals_alpha, nil before defaults.
+	WalsAlpha *float64 `json:"walsAlpha,omitempty"`
 	// DNN_* (modeldnn.go): HiddenUnits nil is the documented default,
 	// one layer sized by the rows; BatchSize 0 min(32, rows).
 	HiddenUnits []int   `json:"hiddenUnits,omitempty"`

@@ -50,7 +50,9 @@ import (
 // safety_settings and generation_config; ground_with_google_search is
 // refused because it searches Google.
 //
-// UNVERIFIED (docs read 2026-11-17 give none of these texts): the
+// UNVERIFIED (re-read 2026-11-17:
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-generate-text,
+// which gives none of these texts): the
 // wording of the errors for a missing prompt or content column and for
 // an unknown option.
 
@@ -181,14 +183,14 @@ func (f front) createRemote(d modelDDL, project, loc string) (*remoteModel, int,
 	number := connectionProject(cp, f.numbers)
 	cn, ok := f.connections.lookup(number, rd.connection[1], rd.connection[2])
 	if !ok {
-		return nil, 404, fmt.Sprintf("Not found: Connection %s", strings.Join(rd.connection, "."))
+		return nil, 404, fmt.Sprintf("Not found: Connection %s.%s.%s", cp, rd.connection[1], rd.connection[2])
 	}
 	if !sameLocation(cn.Location, loc) {
 		return nil, 400, fmt.Sprintf("Dataset location %s differs from connection location %s", loc, cn.Location)
 	}
 	if _, ok := cn.Fields["cloudResource"]; !ok {
-		return nil, 400, fmt.Sprintf("The connection %s is not a Cloud resource connection: a remote model over Vertex AI needs a CLOUD_RESOURCE connection",
-			strings.Join(rd.connection, "."))
+		return nil, 400, fmt.Sprintf("The connection %s.%s.%s is not a Cloud resource connection: a remote model over Vertex AI needs a CLOUD_RESOURCE connection",
+			cp, rd.connection[1], rd.connection[2])
 	}
 	model := endpointModel(rd.endpoint)
 	if model == "" {

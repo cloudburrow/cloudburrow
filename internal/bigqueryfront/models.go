@@ -1034,10 +1034,6 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				return bad()
 			}
 			o.FeedbackType = strings.ToUpper(s)
-			if o.FeedbackType == "IMPLICIT" {
-				return 501, "Not implemented here: feedback_type IMPLICIT: implicit feedback's confidence weighting (wals_alpha) and ranking metrics " +
-					"are not carried out; CloudBurrow trains EXPLICIT matrix factorization. Nothing was run."
-			}
 		case "user_col", "item_col", "rating_col":
 			s, ok := str()
 			if !ok || s == "" {
@@ -1372,6 +1368,14 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			default:
 				o.SplitMethod = s
 			}
+		case "wals_alpha":
+			// An IMPLICIT matrix factorization's confidence weight
+			// (modelmf.go, #1766).
+			v, ok := num()
+			if !ok || v < 0 {
+				return bad()
+			}
+			o.WalsAlpha = &v
 		case "l1_reg", "l2_reg", "learn_rate", "ls_init_learn_rate", "min_rel_progress", "data_split_eval_fraction", "max_iterations":
 			v, ok := num()
 			if !ok || v < 0 {
@@ -1490,7 +1494,7 @@ var modelTypeOptions = map[string][]string{
 		"batch_size", "dropout", "warm_start"},
 	"AUTOENCODER": {"optimizer", "learn_rate", "activation_fn", "batch_size", "dropout", "hidden_units", "early_stop", "min_rel_progress",
 		"max_iterations", "warm_start", "l1_reg_activation"},
-	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
+	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "wals_alpha", "max_iterations", "early_stop",
 		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
 

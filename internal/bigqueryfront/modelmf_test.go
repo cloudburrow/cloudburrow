@@ -55,12 +55,65 @@ func TestTrainMatrixFactorization(t *testing.T) {
 	if len(tr.Iterations) != 200 || tr.Iterations[0].Index != 199 || tr.Iterations[0].Loss > 1e-6 {
 		t.Errorf("iterations: %d, first %+v", len(tr.Iterations), tr.Iterations[0])
 	}
-	o.FeedbackType = "IMPLICIT"
-	if _, fe := trainMF(o, cols, rows); fe == nil || fe.code != 501 {
-		t.Errorf("implicit: %v", fe)
+	o.Set = append(o.Set, "wals_alpha")
+	if _, fe := trainMF(o, cols, rows); fe == nil || fe.code != 400 {
+		t.Errorf("wals_alpha of an EXPLICIT model: %v", fe)
 	}
-	o.FeedbackType = "EXPLICIT"
+	o.Set = o.Set[:len(o.Set)-1]
 	if _, fe := trainMF(o, cols[:2], nil); fe == nil || fe.code != 400 {
 		t.Errorf("no rating column: %v", fe)
+	}
+}
+
+// TestTrainImplicitMatrixFactorization (#1766): WALS ranks each user's
+// own items above the others', the loss falls, intercepts are 0, and
+// wals_alpha defaults to 40.
+func TestTrainImplicitMatrixFactorization(t *testing.T) {
+	cols := []mlColumn{{"user", "STRING"}, {"item", "STRING"}, {"rating", "INT64"}}
+	var rows [][]*string
+	for _, r := range [][3]string{{"a", "x", "3"}, {"a", "y", "1"}, {"b", "x", "2"}, {"b", "y", "4"}, {"c", "z", "5"}, {"d", "z", "1"}, {"d", "w", "2"}} {
+		u, i, v := r[0], r[1], r[2]
+		rows = append(rows, []*string{&u, &i, &v})
+	}
+	o := defaultMLOptions()
+	o.ModelType, o.FeedbackType, o.NumFactors = "MATRIX_FACTORIZATION", "IMPLICIT", 2
+	applyMFDefaults(&o)
+	if o.WalsAlpha == nil || *o.WalsAlpha != 40 {
+		t.Fatalf("wals_alpha default %v", o.WalsAlpha)
+	}
+	tr, fe := trainMF(o, cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	m := tr.MF
+	if !m.Implicit || len(m.Users) != 4 || len(m.Items) != 4 {
+		t.Fatalf("%+v", m)
+	}
+	idx := func(list []string, v string) int {
+		for k, s := range list {
+			if s == v {
+				return k
+			}
+		}
+		t.Fatalf("%s not in %v", v, list)
+		return -1
+	}
+	score := func(u, i string) float64 { return m.predict(idx(m.Users, u), idx(m.Items, i)) }
+	for _, c := range [][3]string{{"a", "x", "z"}, {"b", "y", "z"}, {"c", "z", "x"}, {"d", "w", "y"}} {
+		if score(c[0], c[1]) <= score(c[0], c[2]) {
+			t.Errorf("user %s: %s %.4f is not above %s %.4f", c[0], c[1], score(c[0], c[1]), c[2], score(c[0], c[2]))
+		}
+	}
+	for _, b := range append(append([]float64(nil), m.UserB...), m.ItemB...) {
+		if b != 0 {
+			t.Errorf("an intercept %v", b)
+		}
+	}
+	n := len(tr.Iterations)
+	if n < 2 || tr.Iterations[0].Loss > tr.Iterations[n-1].Loss {
+		t.Errorf("the loss did not fall: %+v", tr.Iterations)
+	}
+	if len(tr.Eval) != 0 {
+		t.Errorf("metrics %v", tr.Eval)
 	}
 }
