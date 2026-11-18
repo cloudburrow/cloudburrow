@@ -7,6 +7,8 @@ import (
 	"mime/multipart"
 	"strings"
 	"testing"
+
+	"cloud.google.com/go/bigquery"
 )
 
 // TestBigQueryLoadFormSendsHiveAndGeoJSONOptions (#1547): the load form's
@@ -110,5 +112,25 @@ func TestBigQueryLoadFormSendsFileSetSpecType(t *testing.T) {
 	}
 	if _, err := loadExtrasOf(map[string]string{"format": "CSV", "fileSetSpecType": "X"}, true); err == nil {
 		t.Error("an unknown fileSetSpecType was not refused")
+	}
+}
+
+// TestBigQueryLoadFormCharacterMap (#1547): the load forms send
+// columnNameCharacterMap through the Go client's loader.
+func TestBigQueryLoadFormCharacterMap(t *testing.T) {
+	for in, want := range map[string]bigquery.ColumnNameCharacterMap{"": "", "DEFAULT": "", "v2": "V2", "STRICT": "STRICT", "V1": "V1"} {
+		if got, err := loadCharacterMap(map[string]string{"columnNameCharacterMap": in}); err != nil || got != want {
+			t.Errorf("%q: %q %v, want %q", in, got, err, want)
+		}
+	}
+	if _, err := loadCharacterMap(map[string]string{"columnNameCharacterMap": "V3"}); err == nil {
+		t.Error("V3 was not refused")
+	}
+	found := false
+	for _, f := range bigqueryLoadFields(true) {
+		found = found || f.Name == "columnNameCharacterMap"
+	}
+	if !found {
+		t.Error("the load form has no columnNameCharacterMap")
 	}
 }

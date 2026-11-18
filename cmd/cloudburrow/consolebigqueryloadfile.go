@@ -105,6 +105,9 @@ func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tabl
 	if loader.TimePartitioning, loader.Clustering, err = loadTableOptions(values); err != nil {
 		return nil, err
 	}
+	if loader.ColumnNameCharacterMap, err = loadCharacterMap(values); err != nil { // #1547
+		return nil, err
+	}
 	job, err := loader.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)
