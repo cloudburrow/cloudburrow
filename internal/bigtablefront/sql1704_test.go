@@ -436,8 +436,7 @@ func TestSQLLambdasAndNormalize(t *testing.T) {
 		"SELECT MIN_BY(_key, _key) FROM report":                 codes.Unimplemented,
 		"SELECT MAX_BY(_key, _key) FROM report":                 codes.Unimplemented,
 		"SELECT _key, GROUPING(_key) FROM report GROUP BY _key": codes.Unimplemented,
-		"SELECT ST_GEOGPOINT(1, 2)":                             codes.Unimplemented,
-		"SELECT S2_CELLIDFROMPOINT(1)":                          codes.Unimplemented,
+		"SELECT ST_REGIONSTATS(ST_GEOGPOINT(1, 2), 'x')":        codes.Unimplemented,
 	} {
 		err := prepare(sql)
 		if status.Code(err) != want {

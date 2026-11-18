@@ -53,13 +53,14 @@ func (s *Server) ResetProject(ctx context.Context, project string) error {
 	s.emu.Unlock()
 	for _, c := range doomed {
 		name := c.spec.Name
-		if err := w.prov.Remove(ctx, name); err != nil {
+		if err := w.prov.Remove(ctx, c.spec.ServerName()); err != nil {
 			errs = append(errs, fmt.Errorf("remove instance %s: %w", name, err))
 			continue
 		}
 		s.emu.Lock()
 		if w.byName[name] == c {
 			delete(w.byName, name)
+			s.servers.Delete(name)
 		}
 		s.emu.Unlock()
 		if s.conn != nil {

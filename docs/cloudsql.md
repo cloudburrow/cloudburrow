@@ -151,10 +151,8 @@ Refused with 501, each naming what is missing:
 
 | Methods | Why |
 |---|---|
-| `blueGreenDeployments.*` | the switchover moves the blue instance's write endpoint (IP address and DNS name) to the green one: Google-managed networking |
 | `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `instances.switchover` from a PostgreSQL primary with read replicas besides its DR replica | the old primary is rebuilt from a base backup of the new one, and its other replicas would have to follow the new timeline through it while it is rebuilt; with only its DR replica it is served (DR replicas and switchover, below) |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)
@@ -519,22 +517,67 @@ docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
   Google's "the original primary is reconfigured as a read replica of the new primary". The
   instances then answer as for MySQL. If the replica does not catch up, the primary takes writes
   again; if the old primary cannot be rebuilt, the new primary stays the primary and the old one
-  is `FAILED`, naming why.
+  is `FAILED`, naming why. The primary's other read replicas (#1614) stay its replicas, so they
+  are cascading replicas of the new primary through it, as a MySQL primary's are; Google's DR
+  pages say the old primary is "reconfigured as a read replica" and nothing of its other
+  replicas, which keep their `masterInstanceName`. Their WAL went on past the point the DR
+  replica was promoted at (the old primary's shutdown checkpoint reaches them as its server
+  stops to be rebuilt), so they cannot follow the new timeline: each is `MAINTENANCE` during the
+  switchover and, once the old primary serves again, rebuilt from a `pg_basebackup` of it, its
+  own cascading replicas after it from them; a stopped replica (`stopReplica`) stays stopped.
 - **Refused**: switchover of an instance that is not its primary's DR replica (400, also when no
   DR replica is designated), of a primary (400), while either instance is not `RUNNABLE` (409), or
   while the replica's replication is stopped (400); a REGIONAL primary's DR replica and switchover
   are 501 (the old primary would be a read replica, which here is one server); a switchover of a
-  PostgreSQL primary that has read replicas besides its DR replica is 501 (they would have to
-  follow the new timeline through the old primary while it is rebuilt).
+  PostgreSQL primary while one of its other read replicas is not `RUNNABLE` is 409.
 - **Not as Google**: there is no write endpoint (`psaWriteEndpoint`, a DNS name that follows the
   primary): clients connect to the new primary by its own connection name. No backup is taken
   of the new primary after the switchover, and point-in-time recovery is not required of the
-  primary. A MySQL primary's other read replicas stay its replicas, so they are cascading
-  replicas of the new primary.
+  primary. A primary's other read replicas stay its replicas, so they are cascading replicas of
+  the new primary (a PostgreSQL primary's are rebuilt, above).
 - **gcloud**: `gcloud sql instances patch --failover-dr-replica-name` and
   `--clear-failover-dr-replica-name`, and `gcloud sql instances switchover --db-timeout`. In the
   console, a MySQL or PostgreSQL primary with replicas has **Designate DR replica** and **Remove DR replica**,
   and its DR replica's page **Switchover**, confirmed by typing the primary's instance ID.
+
+**Blue-green deployments** (#1614), for MySQL, as Cloud SQL documents them
+([about](https://docs.cloud.google.com/sql/docs/mysql/about-blue-green-deployments),
+[create](https://docs.cloud.google.com/sql/docs/mysql/create-blue-green-deployment),
+[switchover](https://docs.cloud.google.com/sql/docs/mysql/switchover-blue-green-deployment)):
+
+- **`blueGreenDeployments.create`** (`CREATE_BLUE_GREEN_DEPLOYMENT`) in the blue instance's region
+  makes the green instance, `BLUE-green-XXXXXXXX` (the blue name truncated to 48 characters and 8
+  hex digits), a read replica of the blue one with `requestedConfig.databaseVersion` applied
+  (MySQL 8.0 to `MYSQL_8_4` only). The blue instance must be a RUNNABLE MySQL primary with
+  automated backups and binary logging and no read replicas (400 otherwise). Here a green name
+  longer than 55 characters (a blue name over 40) is 501: the server's Kubernetes names hold it.
+- **The state**: `PROVISIONING` while the green instance starts, then `SWITCHOVER_READY` while
+  its replication runs (both threads `ON`), and `SWITCHOVER_NOT_READY` with `errorDetail` when it
+  is stopped or broken, or either instance is gone. `deploymentMappings` holds the one pair; the
+  `DETAILED` view adds its `diffs` (`database_version`, `tier`, `edition`, `availability_type`).
+  Both instances answer `deploymentInfo` (`PRE_SWITCHOVER`, `POST_SWITCHOVER`).
+- **`switchover`** (`SWITCHOVER_BLUE_GREEN_DEPLOYMENT`) makes the blue instance read-only, waits
+  up to a minute for the green one to apply its GTIDs (else it fails, "replication lag is too
+  high", and the blue instance takes writes again), promotes the green one, and makes the blue
+  one writable. The blue instance's name, connection name and backups then belong to the green
+  server, and the green name to the old blue server, a standalone read and write instance:
+  each record names its server (`Spec.Server`), so neither server restarts.
+- **A `REGIONAL` blue instance** (#1614): the green instance is "a clone of the blue
+  environment", so it is `REGIONAL` too, with a primary and a secondary zone: its primary server
+  replicates from the blue instance's primary (through the instance's Service, so it follows a
+  failover of the blue instance), and its standby, in the secondary zone, from it,
+  semi-synchronously, as a `REGIONAL` instance's standby does (the standby's user is created
+  with the replica's binary log off, so the green instance has no transaction the blue one
+  lacks). After the switchover both names keep their standbys, and `instances.failover` of
+  either moves its zones with no committed row lost. Google's pages do not say how a green
+  instance's availability is set; they call it a clone, and its diffs list `availability_type`.
+  Google documents blue-green deployments for MySQL only: "Cloud SQL for PostgreSQL and Cloud
+  SQL for SQL Server aren't supported", so a PostgreSQL source is 400.
+- **`delete`** before a switchover deletes the green instance; after one it deletes the record,
+  and with `deleteOldSource` the old blue server (the green name) too.
+- In the console, a MySQL primary's page has **Create blue-green deployment**, and either
+  instance's page the deployment's role and state, **Switch over blue-green** and **Delete
+  blue-green deployment**.
 
 **A physical sync** (#1570), for MySQL: `startExternalSync` with `migrationType` `PHYSICAL`
 gives the replica a Percona XtraBackup backup of the source instead of a dump, and then
@@ -546,15 +589,29 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
   not seeded from it as from a dump: it waits for the physical sync. With no `dumpFilePath`, and a
   source that is a CloudBurrow instance's server (`sqlinst-NAME:3306`, or `cloudsql-mysql:3306`),
   the sync takes the backup itself, with the source's volume mounted and the replication user.
-- **How it runs**: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
+- **How it runs** on a persistent instance: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
   of the replica's major version (`8.0`, XtraBackup 8.0.35, or `8.4`, 8.4.0; pinned by digest, and
   pulled by the node the first time), on the replica's volume while its server is stopped: the
   backup's files are first written onto that volume, then `xtrabackup --prepare` and
   `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
   and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
   password back to the instance's (the copy has the source's accounts), unlogged.
-- **It needs `--mode persistent`**: the restore is onto the replica's volume, which an
-  instance's server in an ephemeral instance has none of. Elsewhere it is 501, saying so.
+- **On an ephemeral instance** (`--mode ephemeral`, #1614) the server `up` runs for
+  `--services cloudsql-mysql` keeps its data in its container's writable layer, with no volume,
+  so that Job, which mounts the source's volume, cannot take its backup. Instead the replica's
+  server, idle and empty until the sync, is started again on its volume (a created instance's
+  server has one in either mode, #1740) with a start that swaps a restored data directory in
+  before mysqld starts and passes the `--init-file`. XtraBackup runs in an ephemeral container
+  (Kubernetes' debug containers) added to the replica's pod with that volume mounted: it
+  prepares the backup and copies it back beside the live data directory, then mysqld is stopped
+  and its container, started again, swaps the copy in. When the sync takes the backup, a second
+  ephemeral container is added to the source server's pod, in its process namespace: the
+  source's data files are reached through its mysqld's `/proc/PID/root`, linked at
+  `/var/lib/mysql` so the paths the server reports hold, and `xtrabackup --backup
+  --stream=xbstream` over the pod's loopback streams the backup through the host into the
+  replica's ephemeral container, which unpacks it (`xbstream -x`). Ephemeral containers stay in
+  their pod's spec, ended, until the pod goes. The restored data is on the replica's volume, so
+  it is there after the replica's server restarts, as any created instance's is.
 - **`verifyExternalSyncSettings`** with `migrationType` `PHYSICAL` answers
   `UNSUPPORTED_MIGRATION_TYPE` (a PostgreSQL replica, or `syncMode` `OFFLINE`),
   `CONNECTION_FAILURE`, `INCOMPATIBLE_DATABASE_VERSION` (the source's or the backup's
@@ -676,10 +733,16 @@ Create instance form's version picker lists every served version.
 restarted or deleted through the API; each answers 400 naming the `--services` flag that
 starts and stops it.
 
-**Persistence follows the instance's mode.** In persistent mode a created instance's server
-has a volume, and the instance's record is kept in `cloudsql-instances.json` in the instance
-directory, so it is there, with its data, after `stop` and `up`. In ephemeral mode neither is
-kept, and the next `up` removes what an earlier run created.
+**A created instance keeps its data while it exists, in either mode** (#1740). Its server has
+a volume (a PersistentVolumeClaim of its own, deleted with the instance), so its users,
+databases, procedures and rows are there after every restart Google makes without losing them:
+a database-flag change, a tier or edition change, `instances.restart`, a failover, a demotion
+or promotion. **What lasts past `stop` follows the instance's mode.** In persistent mode the
+instance's record is kept in `cloudsql-instances.json` in the instance directory, so the
+instance is there, with its data, after `stop` and `up`. In ephemeral mode no record is kept:
+the next `up` removes every server an earlier run created, with its volume, and `delete`
+removes the cluster and every volume in it. `TestCloudSQLInstanceWrites` checks that a user,
+a database and a row are there after a flag change and after a restart, on both engines.
 
 The console's **Cloud SQL instances** page lists every instance, with Create instance,
 Delete and Restart; a created instance's page has **Edit instance** (tier, labels, database
@@ -783,8 +846,8 @@ instance holding the source's databases as they were at that time, to the micros
 - **The recovery window** is reported by `projects.instances.getLatestRecoveryTime` as
   Google documents it: `earliestRecoveryTime` is the oldest base's time, and
   `latestRecoveryTime` is the server's clock now. A `pointInTime` outside it is 400, naming the
-  window. The log lives on the server's volume, so deleting the instance deletes it, and in
-  ephemeral mode a restart of the server's pod loses it with the data.
+  window. The log lives on the server's volume, so a restart of the server keeps it, in either
+  mode, and deleting the instance deletes it.
 - **Retention:** `transactionLogRetentionDays` is applied as Google documents it: 1 to 7 days
   on the Enterprise edition, 1 to 35 on Enterprise Plus (out of range is 400), 7 or 14 days
   by default, and returned with the default when it is not set. A sweep, each minute, after
@@ -879,9 +942,8 @@ wait for the standby, as on Google. The design:
 - **Not built:** automatic failover when the primary's pod fails (a pod that fails is restarted
   in place, as for a `ZONAL` instance; fail over with `instances.failover`), and the
   point-in-time recovery log of the old primary is not carried to the new one (a recovery to a
-  time before the failover recovers from a base taken after it, or is 400). A MySQL standby
-  whose server restarts without its volume (an ephemeral instance) starts empty and is filled
-  again only by the next failover or `REGIONAL` patch; until then its primary's commits wait.
+  time before the failover recovers from a base taken after it, or is 400). The standby has a
+  volume of its own in either mode, so a restart of its server keeps its data.
 
 `TestCloudSQLHighAvailability` checks it on both engines through the official client and
 connector: rows written before a failover are all there after it, through the same connection

@@ -575,11 +575,14 @@ flags, which they set) and the plain create, get, list, encrypt and decrypt path
 
 **Parts worth taking, without adopting the server** (each is the user's call):
 
-- **`EC_SIGN_SECP256K1_SHA256`**, the one algorithm it has and CloudBurrow lacks. It uses
+- **`EC_SIGN_SECP256K1_SHA256`**, the one algorithm it had and CloudBurrow lacked. It uses
   `github.com/decred/dcrd/dcrec/secp256k1/v4` with low-S normalisation
-  ([secp256k1.go][kmsemu-secp]). Serving it would mean adding that module to CloudBurrow's
-  `go.mod`, which needs the user's approval; it would be a new ticket, written against
-  Google's docs, not a port.
+  ([secp256k1.go][kmsemu-secp]). Serving it meant adding that module to CloudBurrow's
+  `go.mod`, which needed the user's approval; it would be a new ticket, written against
+  Google's docs, not a port. **Since #1719 CloudBurrow serves it** (the user approved the
+  module, v4.4.1, on 2026-11-17), written against Google's algorithms page: HSM and
+  HSM_SINGLE_TENANT keys only, lower-S DER signatures, and a secp256k1
+  SubjectPublicKeyInfo from `GetPublicKey`. That algorithm gap is closed.
 - **Error wording.** If the user wants it, a recorded observation of Cloud KMS's
   "is not enabled, current state is:" and "has incorrect key purpose" messages would settle
   whether CloudBurrow should match them.
@@ -659,3 +662,239 @@ ORC's tools print for them (`TestORCExamples`). A corrupt file's panic in a deco
 as a 400. `govulncheck ./...` reports nothing for it, and adding it added no other module to the
 graph (`golang/protobuf` moved from the graph into `go.mod`'s list because the module has no
 `go.mod`).
+
+## Amendment: an MP3 decoder module for Vertex AI EmbedContent audio (#1721)
+
+Google documents "MP3, WAV" as `gemini-embedding-2`'s audio formats, and its samples send
+`mime_type` `audio/mpeg`. Go's standard library has no MP3 decoder, and none was in `go.mod`. The
+user approved adding one module (2026-11-17). The candidates on the Go module proxy, compared on
+2026-11-17:
+
+| Module | Last version | Licence | CGO | Its own dependencies | Verdict |
+|---|---|---|---|---|---|
+| `github.com/hajimehoshi/go-mp3` | v0.3.4 (2022-11) | Apache 2.0 | none | none in the decoder's packages (`go.mod` names `hajimehoshi/oto/v2`, used only by its example, so `go.sum` gains that module's `go.mod` hash and one of an old `golang.org/x/sys`, and no code) | **Adopted** |
+| `github.com/gopxl/beep/v2` (`mp3`) | v2.1.1 (2025-01) | MIT | none | wraps `hajimehoshi/go-mp3`, and brings `oto/v3`, `tcell`, an Ogg Vorbis and a FLAC decoder | Rejected: the same decoder behind a playback library |
+| `github.com/tosone/minimp3` | v1.1.0 (2026-10) | MIT (minimp3: CC0) | yes | none | Rejected: cgo binding of the C minimp3 |
+| `github.com/kvark128/minimp3` | 2022-04 pseudo-version | MIT | yes | none | Rejected: cgo binding of the C minimp3 |
+
+`go-mp3` is the pure Go MP3 decoder the Ebitengine game library ships (its author's), and the one
+the other Go audio libraries wrap. It decodes MPEG-1 and MPEG-2 Layer III (16 to 48 kHz; mono,
+stereo, joint and intensity stereo) to 16-bit stereo PCM, and scans the frames first, so a clip's
+length is known before it is decoded. It is quiet since 2022, so CloudBurrow uses only its
+`NewDecoder`, `SampleRate`, `Length` and `Read`, and does itself what it leaves out
+(`internal/embedding/mp3.go`): it reads the first frame's header for the channel mode (the decoder
+copies a mono stream to both channels; a mono stream is read back as one channel, a stereo one
+downmixed as a stereo WAV is), and the Info/Xing frame's LAME tag for the encoder's delay and
+padding, trimmed as ffmpeg trims them (the Info frame, then the delay plus the decoder's 529
+samples, and the padding at the end), so an MP3 lines up sample for sample with the WAV it was
+encoded from. A panic of the decoder on a corrupt frame is recovered as `INVALID_ARGUMENT`.
+MPEG-2.5 (8, 11.025 and 12 kHz), which `go-mp3` refuses, was refused naming it until #1734
+(below). Checked against ffmpeg 8: the same 16 kHz mono MP3 decodes to the same samples within one
+16-bit step (`TestDecodeMP3`). `govulncheck ./...` (v1.8.0) reports nothing in it.
+
+### MPEG-2.5 (#1734): go-mp3 copied into third_party and extended
+
+MPEG-2.5 is the unofficial extension of MPEG-2's low sample rates that LAME uses below 16 kHz (8,
+11.025 and 12 kHz, for low bit rates). No other decoder on the Go module proxy fits (the table
+above: the others are cgo bindings or wrap `go-mp3`), and `go-mp3` is quiet since 2022, so its
+decoder is copied into `third_party/go-mp3` (Apache 2.0 allows it; the changed files say so) and
+extended there, and the module leaves `go.mod`. MPEG-2.5 differs from MPEG-2 only in its sample
+rates (MPEG-1's quartered), its scalefactor band tables and, at 8 kHz, the wider bands where a short
+block's first Huffman region and a mixed block's long part end; ffmpeg's decoder is the reference
+for each ([PROVENANCE.md](../third_party/go-mp3/PROVENANCE.md)). Checked against ffmpeg 9 on
+libmp3lame streams with start and short blocks: 8 kHz mono within one 16-bit step, 11.025 and 12
+kHz joint stereo within two a channel (`TestDecodeMPEG25MP3`), and through the official SDK
+(`TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient`).
+
+## Amendment: HEIC, HEIF, AVIF and animated WebP decoders for Vertex AI EmbedContent (#1724)
+
+Google's [Get multimodal embeddings](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) lists "JPEG, PNG, WebP, BMP, HEIC, HEIF, AVIF" for `gemini-embedding-2`, and
+says nothing of animation. `golang.org/x/image` (#1651) decodes still WebP and BMP only. The user
+approved adding the module(s) needed for HEIC, HEIF, AVIF and animated WebP (2026-11-17), pure Go
+preferred: the storage image and the default build are `CGO_ENABLED=0`, and the release CLIs are
+statically linked ([install.md](install.md#how-the-cli-is-linked)). The candidates on the Go module
+proxy, compared on 2026-11-17:
+
+| Module | Last version | Licence | How it decodes | Its own dependencies | Verdict |
+|---|---|---|---|---|---|
+| `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | Pure Go HEVC decoder and HEIF container reader (a port of the Rust `rust_h265`/`oxideav-h265`; byte-exact on the JCT-VC HEVC v1 conformance suite, per its README); Go assembly for NEON/AVX2, `-tags noasm` for none | **none** | **Adopted** for HEIC and HEIF: 2.3 MB of source, adds no other module, decodes alpha, grids, `clap`/`irot`/`imir`, 8–16 bits and image sequences |
+| `github.com/gen2brain/heic` | v0.7.2 (2026-09-15) | MIT (the Rust `heic` crate in WASM) | WASM under wazero; but first tries a system `libheif` through `purego` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | Rejected: see `purego` below; its own README points to `h265` for pure Go |
+| `github.com/gen2brain/avif` | v0.6.0 (2026-07-05) | MIT; libavif BSD-2-Clause, dav1d BSD-2-Clause, aom BSD-2-Clause | libavif + dav1d in WASM (3.5 MB, 1.3 MB gzipped) under wazero; but first tries a system `libavif` through `purego`, unless built with `-tags nodynamic` | `ebitengine/purego`, `tetratelabs/wazero`, `golang.org/x/sys` | **Not adopted as a module; its WASM path vendored** (#1729, below) |
+| `github.com/KarpelesLab/goavif` | v0.1.0 (2026-04-18) | MIT | Pure Go AV1 and AVIF | — | Rejected: unmaintained (created and last pushed within three days in April 2026, one star; inter prediction listed as limited) |
+| `github.com/Kagami/go-avif`, `github.com/f0reth/go-avif` | 2022; — | — | libaom through cgo; libavif through `purego` | — | Rejected: cgo, or a system library |
+
+**Why AVIF is not served.** `gen2brain/avif` (and `gen2brain/heic`) import `ebitengine/purego` in
+every build without `-tags nodynamic`, to load a system libavif when one is installed. With
+`CGO_ENABLED=0`, `purego` links its `fakecgo` runtime shim and imports libc dynamically: a probe
+binary that only imports `gen2brain/avif`, built `CGO_ENABLED=0 GOOS=linux`, is "dynamically
+linked, interpreter /lib/ld-linux-aarch64.so.1", and statically linked with `-tags nodynamic`. So
+adding it would silently break the static Linux CLIs (the release check reads only the recorded
+`CGO_ENABLED=0`, which still passes), and the decode would depend on whichever libavif the host has.
+Serving AVIF needs one of: `-tags nodynamic` on every build of `cmd/cloudburrow` (release, Makefile,
+CI, `go install` instructions) with a check that the Linux CLI is static; or a vendored copy of
+its WASM path without `purego`; or a maintained pure Go AV1 decoder. That decision is the user's;
+`image/avif` stays `INVALID_ARGUMENT` naming the field until then.
+
+**Update 2026-11-17 (#1729): the WASM path is vendored.** The user chose the second: serve AVIF
+fully by vendoring `gen2brain/avif` v0.6.0's WebAssembly decode path, with no build tag. From the
+module zip the Go module proxy serves (commit `1fd2a9a5`), `avif.go`, `avif_wazero.go`,
+`isobmff.go`, `orientation.go`, `lib/avif.wasm.gz` (libavif 1.4.2, dav1d 1.5.3, aom 3.14.1 and
+libyuv, built upstream with wasi-sdk; CloudBurrow compiles no C) and the MIT, libavif and aom licence
+texts are copied into `internal/avif`, unmodified but for deletions: the `if dynamic` branches that
+called the `purego` loader (whose files, `avif_dynamic.go` and `purego_*.go`, are not copied), the
+exported `Dynamic()`, and `avif_wazero.go`'s `!wasm2go` build constraint.
+`third_party/avif/PROVENANCE.md` (deleted with the decoder in #1736; in git history) records every file's upstream
+and committed SHA-256, and `TestVendoredAVIFMatchesProvenance` checks them. No module is added:
+`github.com/tetratelabs/wazero` v1.12.0 (Apache-2.0), already required for go-pdfium (#1723, below),
+becomes a direct requirement. `TestLinuxBinariesNeverImportPurego` (#1722)
+asserts that `CGO_ENABLED=0 GOOS=linux go list -deps ./cmd/cloudburrow` names no
+`github.com/ebitengine/purego`, and the linux/amd64 and linux/arm64 CLIs build "statically linked"
+(`file`, 2026-11-17). The stripped linux/amd64 CLI grows by 1,335,296 bytes (348.0 to 349.4 MB) and the linux/arm64 one by
+1,376,256 bytes (340.5 to 341.9 MB; the 1.3 MB blob and the glue; wazero was already linked for PDFium). The blob also
+holds aom's encoder, unused here, and links libyuv, whose BSD-3-Clause text the module does not
+ship (NOTICE names it). A 10- or 12-bit AVIF over 13312 × 13312 does not fit the module's 4 GiB of
+memory (#1736). `govulncheck ./...` reports nothing for wazero or the vendored code.
+
+**Animated WebP** needs no module: the first `ANMF` frame's VP8/VP8L bitstream (with its `ALPH`) is
+rewrapped as a still WebP, decoded with `golang.org/x/image/webp`, converted as libwebp converts it
+(`internal/embedding/webp.go`) and placed on a transparent canvas (`internal/embedding/webpanim.go`).
+Google's page does not say how an animated image is treated, and documents no refusal; CloudBurrow
+embeds the first frame, the picture a still-image reader shows (an image sequence in a HEIC is
+taken the same way), checked pixel for pixel against libwebp 1.6's `dwebp` of that frame.
+
+`h265`'s HEIC decode upsamples 4:2:0 chroma bilinearly (libavif's 9-3-3-1 weights), matching
+`heif-dec -C bilinear` (libheif 1.23.7) within 0.05 per channel on the unit fixture; libheif's
+default is nearest-neighbour. Its `go.mod` says `go 1.26.4`, so CloudBurrow's `go` line moves from
+1.26.0 to 1.26.4 (CI builds with 1.26.8 and 1.27). `govulncheck ./...` reports nothing for it.
+
+## Amendment: video decoders and a PDF renderer for EmbedContent (#1722, #1723)
+
+EmbeddingGemma 2 embeds a video as frames through its vision encoder, and Google's
+[multimodal embeddings page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) takes, for `gemini-embedding-2`, MP4 and MOV video in AV1, H.264, H.265 or
+VP9 (1 video a request, up to 120 frames, 1 frame a second unless `video_metadata.fps` says
+otherwise, `start_offset` and `end_offset` bounding it; `audio_track_extraction` off by
+default), and one PDF of up to 6 pages a request, each page "rendered as an image", with
+`document_ocr` adding the text OCR reads. The user approved adding the modules needed
+(2026-11-17). CloudBurrow's default build and its storage image have cgo off, so a decoder must be
+pure Go or WebAssembly. The candidates on the Go module proxy, compared on 2026-11-17:
+
+| Need | Module | Version | Licence | cgo | Covers | Verdict |
+|---|---|---|---|---|---|---|
+| MP4/MOV demuxing | `github.com/Eyevinn/mp4ff` | v0.63.0 (2026-11-13) | MIT | none | progressive and fragmented ISO BMFF, `avcC`, `hvcC`, edit lists | **Adopted** (its only requirement, `go-test/deep`, is for its tests) |
+| H.264 | `github.com/oops1/go.264` | v1.14.0 (2026-11-10) | BSD 2-Clause | none, but its Linux hardware encoders import `ebitengine/purego`, which links libc dynamically into a `CGO_ENABLED=0` Linux binary | High profile, CABAC and CAVLC, P and B slices, weighted prediction, progressive 8-bit 4:2:0; bit-exact against ffmpeg on 29 clips (its claim) | **Adopted**, copied into `third_party/go264` (its sources less `hwaccel_linux.go` and the NVENC and VA-API backends, imports rewritten, so every build stays static without `-tags go264_nohwaccel` and `go install ...@latest` still works; `TestLinuxBinariesNeverImportPurego`): measured bit-exact here too (70 dB PSNR, the YUV-to-RGB rounding, against ffmpeg on the model card's 720p High-profile clip with B-frames) |
+| H.264 | `github.com/go-avkit/h264` | v0.10.0 | BSD 3-Clause | none | go.264's decoder imported, 69 of 73 JVT streams | Rejected: its `go.mod` needs Go 1.27.1, and CloudBurrow builds with Go 1.26 |
+| H.264 | `github.com/Eyevinn/hi264` | v0.12.3 | MIT | none | IDR and P_Skip only | Rejected: "full P/B-frame decoding is out of scope" |
+| H.265 | `github.com/gen2brain/h265` | v0.2.5 (2026-11-11) | MIT | none | HEVC v1 and range extensions (8–16 bit, all chroma formats), inter prediction, open GOPs; byte-exact on the JCT-VC conformance suite (its claim) | **Adopted**: measured bit-exact against ffmpeg here (70 dB PSNR) on an x265 MOV with B-frames and a CRA with RASL pictures; raises `go.mod`'s `go` line to 1.26.4 |
+| VP9 | `github.com/thesyncim/govpx` | 2026-10-18 pseudo-version | BSD 3-Clause | none | VP8 and VP9 profile 0, the VP9 conformance corpus (its claim) | **Blocked**: its `go.mod` needs Go 1.27.0 (`toolchain go1.27.2`); CloudBurrow's CI still builds main with Go 1.26. Usable once Go 1.26 is dropped (adopted as a copy since #1731, below) |
+| VP9 | `github.com/go-avkit/vp9` | v0.2.2 | BSD 3-Clause | none | headers and superframes only | Rejected: no pixels |
+| AV1 | `github.com/KarpelesLab/goavif` | v0.1.0 (2026-04) | MIT | none | AV1 intra and single-reference translational inter | Rejected: compound, warped and global motion, which libaom and SVT-AV1 use, repeat the previous frame instead (its README) |
+| AV1 | `github.com/gen2brain/avif` | v0.6.0 | MIT (libavif and libaom BSD 2-Clause) | none (WASM on wazero) | AVIF stills and AVIS sequences | Rejected for video: it reads only AVIF containers, not an MP4's AV1 track (`gen2brain/gav1d` adopted since #1731, below) |
+| any | `codeberg.org/gruf/go-ffmpreg` | 2026-09 | GPL-3.0 (ffmpeg built with `--enable-gpl`) | none (WASM on wazero) | ffmpeg 5.1 | Rejected: GPL |
+| PDF | `github.com/klippa-app/go-pdfium` | v1.21.4 (2026-10-21) | MIT; PDFium BSD 3-Clause and Apache 2.0 | none in its `webassembly` package (PDFium compiled to WASM, run on `tetratelabs/wazero` v1.12.0, Apache 2.0) | rendering, page sizes, text | **Adopted** |
+| PDF | `github.com/gen2brain/go-fitz` | — | AGPL-3.0 (MuPDF) | cgo | rendering | Rejected: AGPL and cgo |
+| PDF | `github.com/pdfcpu/pdfcpu`, `rsc.io/pdf`, `github.com/ledongthuc/pdf` | — | Apache 2.0 / BSD | none | parsing, text | Rejected: no renderer |
+| PDF | `github.com/unidoc/unipdf` | — | commercial | none | rendering | Rejected: licence |
+
+So H.264 and H.265 in MP4 or MOV are served, and VP9 and AV1 stay refused naming why. The PDF
+renderer is 5.8 MB of WebAssembly embedded in the binary, compiled once, the first time a PDF is
+embedded. `document_ocr` reads the text PDFium finds on each page, which is the text a born-digital
+PDF holds; CloudBurrow has no OCR engine, so a PDF with no text on any page (a scan) is refused
+with `document_ocr` rather than embedded without the text Google would have read. A video's audio
+track (`audio_track_extraction`) stays refused: an MP4's audio is AAC, which none of these decode
+(served since #1732, below).
+`govulncheck ./...` reports nothing for any of them. `go mod tidy` added `tetratelabs/wazero` and
+`jolestar/go-commons-pool/v2` as indirect requirements.
+
+## Amendment: an AAC decoder for a video's audio track (#1732)
+
+Google's [multimodal embeddings page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) documents `audio_track_extraction` ("Extract audio from video input"), off by
+default, the audio subject to the 180 seconds a request; it does not say how the audio is placed.
+EmbeddingGemma 2's model card does not either; Transformers' processors (`load_audio_from_video`,
+which `Gemma4Processor` takes) load a video's audio as a clip of its own with its audio placeholder
+right after the video's, and CloudBurrow does the same. An MP4's or MOV's audio is nearly always
+AAC-LC; MP3 and PCM, the formats Google lists for audio, also occur. The user approved media
+decoder modules (2026-11-17). The candidates on the Go module proxy, compared on 2026-11-17:
+
+| Module | Version | Licence | cgo | Covers | Verdict |
+|---|---|---|---|---|---|
+| `github.com/arabian9ts/aac-go` | v0.1.0 (2026-08-11) | Apache 2.0 | none, no dependencies | AAC-LC decoder and encoder, ADTS, mono and stereo, all 13 rates, long and short windows, TNS, M/S, intensity stereo, PNS; HE-AAC, more than 2 channels and 960-sample frames refused with `ErrUnsupported` | **Adopted**: within one 16-bit step of ffmpeg 9 a channel on ffmpeg's own AAC-LC (16 kHz stereo, M/S and short blocks; PNS, which is noise each decoder draws, at the encoder's level), `TestDecodeVideoAudioTrack`. Its `go.mod` says `go 1.26.5`, which raises CloudBurrow's `go` line from 1.26.4 (CI builds with 1.26.8 and 1.27). One release, one day of commits and no stars: the measured agreement with ffmpeg is what it is adopted on; if it needs a fix, copy it into `third_party/` as `go-mp3` is |
+| `github.com/tphakala/go-aac` | v0.7.2 (2026-11-05) | LGPL-2.1 (a port of ffmpeg's) | none | AAC-LC | Rejected: LGPL, not one of the permissive licences approved |
+| `github.com/thesyncim/goaac` | 2026-06 pseudo-version | GPL (a port of FAAD2) | none, but `modernc.org/libc` | AAC-LC, HE-AAC | Rejected: GPL |
+| fdk-aac, FAAD2, ffmpeg in WASM | — | Fraunhofer, GPL, LGPL | — | — | Rejected: licence (and C code) |
+
+An MP4 carries AAC as raw access units; each is given the 7-byte ADTS header its
+AudioSpecificConfig (`esds`, read with `mp4ff`) describes and decoded. The edit list's first media
+time (the encoder's priming, 1024 samples from ffmpeg) is dropped and its duration kept, as ffmpeg
+does. MP3 tracks (`mp4a` with the MPEG-1/2 audio object types, or `.mp3`) go through
+`third_party/go-mp3`, QuickTime linear PCM (`lpcm`, `sowt`, `twos`, `in24`, `in32`, `fl32`, `fl64`)
+is read directly. Opus, AC-3, E-AC-3, ALAC, FLAC and HE-AAC tracks are refused naming the codec:
+Opus has no complete pure Go decoder with a permissive licence, and the others no Go decoder at
+all. `govulncheck ./...` reports nothing for `aac-go`.
+
+## Amendment: VP9 and AV1 decoders for EmbedContent video (#1731)
+
+Google's [multimodal embeddings page](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-multimodal-embeddings)
+(re-read 2026-11-17) lists "Codec: AV1, H264, H265, VP9" for `gemini-embedding-2` video, so the
+VP9 and AV1 refusals of #1722 are a gap. The user approved pure Go, permissively licensed decoders,
+copied into `third_party/` where a module cannot be required (2026-11-17). Compared on the Go module
+proxy on 2026-11-17:
+
+| Need | Module | Version | Licence | cgo | Covers | Verdict |
+|---|---|---|---|---|---|---|
+| VP9 | `github.com/thesyncim/govpx` | v0.0.0-20261018202535-159dce5b931a | BSD 3-Clause (a libvpx port; libvpx's licence and patent grant included) | none, standard library only | VP9 profile 0 (8-bit 4:2:0), superframes, hidden frames, every inter mode | **Adopted as a copy** in `third_party/govpx` ([PROVENANCE.md](../third_party/govpx/PROVENANCE.md)): its `go.mod` needs Go 1.27, which only its `GOEXPERIMENT=simd` files use; the decoder is copied without them and without the encoders, two changes recorded. Bit-exact against ffmpeg 9 on a two-pass libvpx clip with alternate reference frames (180 frames by MD5) |
+| AV1 | `github.com/gen2brain/gav1d` | v0.2.7 (2026-11-11) | BSD 2-Clause (a port of dav1d; dav1d's patent grant in `PATENTS`) | none, no dependencies | every AV1 tool, 8 to 12 bits, 4:0:0 to 4:4:4, film grain | **Adopted**: bit-exact against ffmpeg 9's libdav1d on an SVT-AV1 clip (180 frames by MD5); its `go.mod` says `go 1.26.4`, below CloudBurrow's line. Pure Go, so no WebAssembly blob is needed (it could also serve AVIF) |
+| AV1 | `github.com/KarpelesLab/goavif` | v0.1.0 | MIT | none | intra and single-reference inter | Rejected, as in #1722 |
+| AV1 | dav1d or libaom compiled to WASM on wazero | — | BSD 2-Clause | none | complete | Not needed: `gav1d` is complete in pure Go and needs no blob |
+
+VP9 profiles 1 to 3 (4:2:2, 4:4:4, 10 and 12 bits), which `govpx` does not decode, are refused
+naming the profile; libvpx and every browser's encoder default to profile 0. Neither copy imports
+`ebitengine/purego`, so the `CGO_ENABLED=0` Linux CLI stays statically linked. `govulncheck ./...`
+reports nothing for either.
+
+## Amendment: AVIF on gav1d instead of the WebAssembly decoder (#1736)
+
+The vendored WebAssembly build of `gen2brain/avif` (#1729) could not decode a 10- or 12-bit AVIF
+over 13312 × 13312 in its 4 GiB of memory, while Google takes 16384 × 16384. `gen2brain/gav1d`
+v0.2.7, required since #1731 for AV1 video, has an `avif` package of its own: an ISOBMFF reader
+(grids, clap, irot, imir, alpha items, AVIS sequences, nclx and ICC), dav1d's decoder ported to
+Go, and a YUV-to-RGB converter, with no cgo, no WebAssembly, no `purego` and no dependencies. It
+decodes every #1729 fixture pixel-identically to libavif 1.4.2's references: a lossless AVIF (the
+PNG exactly), 4:2:0 (against `avifdec -u nearest`, with CloudBurrow converting 8-bit planes as
+libyuv does, nearest chroma), 10-bit 4:4:4 (against `avifdec -d 16`, gav1d's own 16-bit
+conversion), alpha, an AVIS sequence's first frame and a clap + irot + imir transform. A 10-bit
+16384 × 16384 AVIF (a 2 × 2 grid written by `avifenc`; libaom cannot encode one 16384 × 16384 frame,
+"Failed to allocate lag buffers") decodes in 1.2 s at a peak RSS of 3.8 GB on an M4 Max, two
+512 × 512 regions identical to `avifdec -d 16`'s (which peaked at 2.9 GB). So `internal/avif`, its
+3.5 MB blob and `third_party/avif` are deleted, `UNIMPLEMENTED` for deep AVIFs is gone, and
+`tetratelabs/wazero` is again only go-pdfium's (indirect) requirement. One deep 4:2:0 or 4:2:2
+difference remains: gav1d upsamples its chroma bilinearly, as libavif's own converter does, where
+libavif with libyuv would take the nearest sample; 8-bit images, nearly every AVIF, convert as
+before. Upstream nit: `avif.DecodeConfig` reports a deep grid as 8-bit (the grid item has no
+`av1C`); CloudBurrow does not use the colour model. `govulncheck ./...` reports nothing for it.
+
+## Amendment: Opus, AC-3 and HE-AAC tracks, VP9 profiles 1 to 3, and copying aac-go (#1739)
+
+Compared on the Go module proxy on 2026-11-17, for a video's audio track and VP9's other profiles,
+under the user's approval of permissive pure Go decoders:
+
+| Need | Module | Version | Licence | cgo | Verdict |
+|---|---|---|---|---|---|
+| Opus | `github.com/kazzmir/opus-go` | v1.7.0 (2026-09-25) | BSD 3-Clause (libopus BSD 3-Clause) | none: libopus transpiled to Go by ccgo, no dependencies, `go 1.24.0` | **Adopted**: a 48 kHz stereo libopus track decodes within 0.71 of a 16-bit step of ffmpeg 9's libopus decode (0.16 of its native decoder's) |
+| Opus | `github.com/thesyncim/gopus` | v0.2.3 | BSD 3-Clause | none | Not needed: its `go.mod` needs Go 1.27.3 |
+| Opus | `github.com/pion/opus` | v0.1.0 | MIT | none | Rejected: SILK only, no CELT |
+| AC-3, E-AC-3 | `github.com/gravity-zero/ac3go` | 2026-10-07 pseudo-version | AGPL-3.0 | none | Rejected: AGPL |
+| AC-3 | `github.com/moon-wind/mediacommon` | — | MIT | none | Rejected: headers only, no decoder |
+| HE-AAC | `github.com/tphakala/go-aac`, `github.com/skrashevich/go-aac` | v0.7.2, v0.1.0 | LGPL-2.1, LGPL-3.0 | none | Rejected: LGPL, and neither decodes SBR |
+| HE-AAC | `github.com/llehouerou/go-faad2` | v0.3.1 | GPL-2.0 (FAAD2 in WASM) | none | Rejected: GPL |
+| HE-AAC | `github.com/Comcast/gaad` | — | Apache 2.0 | none | Rejected: parses SBR, decodes nothing |
+| VP9 profiles 1–3 | `thesyncim/govpx` (latest is the copied 2026-10-18 commit) | — | BSD 3-Clause | none | Not available: its reconstruction is 8-bit 4:2:0 only |
+
+So Opus tracks (mono and stereo, mapping family 0) are served, and AC-3, E-AC-3, HE-AAC tracks and
+VP9 profiles 1 to 3 stay refused naming the codec or profile: each needs a decoder written for
+CloudBurrow (AC-3 from ATSC A/52, SBR and PS on the copied aac-go, high-bit-depth and 4:2:2/4:4:4
+reconstruction in the copied govpx). `arabian9ts/aac-go` is copied into `third_party/aac-go`
+([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)): it has one release and no activity since,
+and SBR would be added there. `govulncheck ./...` reports nothing for `opus-go`.

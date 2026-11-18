@@ -40,7 +40,7 @@ func sqlBackupsDir(cfg config.Config) string {
 func (d *sqlDumper) deployment(t sqladmin.DumpTarget) string {
 	switch {
 	case t.Created:
-		return components.SQLInstancePrefix + t.Instance
+		return components.SQLInstancePrefix + sqlServerOf(t.Instance)
 	case t.MySQL:
 		return string(config.ServiceCloudSQLMySQL)
 	}

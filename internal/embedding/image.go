@@ -2,8 +2,6 @@ package embedding
 
 import (
 	"bytes"
-	"encoding/binary"
-	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -27,12 +25,12 @@ import (
 // position.
 
 // ImageMIMETypes are the image types decoded here: PNG and JPEG with Go's
-// standard library, WebP (lossy, lossless, with or without alpha; not
-// animated) and BMP with golang.org/x/image (#1651). Google's
-// gemini-embedding-2 also takes HEIC, HEIF and AVIF, which need decoders
-// this build does not have (golang.org/x/image has none; re-read
-// 2026-10-19).
-var ImageMIMETypes = []string{"image/png", "image/jpeg", "image/webp", "image/bmp"}
+// standard library, WebP (lossy, lossless, with or without alpha) and BMP
+// with golang.org/x/image (#1651), an animated WebP as its first frame and
+// HEIC and HEIF with github.com/gen2brain/h265 (#1724), and AVIF with
+// github.com/gen2brain/gav1d (#1729, #1736, avif.go): the image types Google's
+// gemini-embedding-2 takes (re-read 2026-11-17).
+var ImageMIMETypes = []string{"image/png", "image/jpeg", "image/webp", "image/bmp", "image/heic", "image/heif", "image/avif"}
 
 // imageDecoders are each type's DecodeConfig and Decode; the keys are
 // ImageMIMETypes and their aliases.
@@ -43,37 +41,11 @@ var imageDecoders = map[string]struct {
 	"image/png":  {png.DecodeConfig, png.Decode},
 	"image/jpeg": {jpeg.DecodeConfig, jpeg.Decode},
 	"image/jpg":  {jpeg.DecodeConfig, jpeg.Decode},
-	"image/webp": {webp.DecodeConfig, webp.Decode},
+	"image/webp": {webp.DecodeConfig, nil}, // decodeWebP
 	"image/bmp":  {bmp.DecodeConfig, bmp.Decode},
-}
-
-// ErrAnimatedWebP is a WebP image with animation, which golang.org/x/image
-// does not decode.
-var ErrAnimatedWebP = errors.New("animated WebP images are not supported; send a still image (one frame as PNG, JPEG, BMP or a still WebP)")
-
-// webpAnimated reports whether data is a WebP whose VP8X header sets the
-// animation flag or which holds ANIM or ANMF chunks.
-func webpAnimated(data []byte) bool {
-	if len(data) < 12 || string(data[:4]) != "RIFF" || string(data[8:12]) != "WEBP" {
-		return false
-	}
-	for off := 12; off+8 <= len(data); {
-		fourCC := string(data[off : off+4])
-		n := int(binary.LittleEndian.Uint32(data[off+4 : off+8]))
-		switch fourCC {
-		case "ANIM", "ANMF":
-			return true
-		case "VP8X":
-			if off+9 <= len(data) && data[off+8]&(1<<1) != 0 {
-				return true
-			}
-		}
-		if n < 0 || n > len(data) {
-			return false
-		}
-		off += 8 + n + n&1
-	}
-	return false
+	"image/heic": {heicConfig, heicDecode},
+	"image/heif": {heicConfig, heicDecode},
+	"image/avif": {avifConfig, avifDecode},
 }
 
 // MaxImageSide is the largest width or height accepted, Google's documented
@@ -100,11 +72,8 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 	}
 	dec, ok := imageDecoders[mt]
 	if !ok {
-		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s (HEIC, HEIF and AVIF have no decoder in this build)",
+		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s",
 			mimeType, strings.Join(ImageMIMETypes, ", "))
-	}
-	if mt == "image/webp" && webpAnimated(data) {
-		return nil, ErrAnimatedWebP
 	}
 	// Check the size before decoding the pixels.
 	cfg, err := dec.config(bytes.NewReader(data))
@@ -114,15 +83,16 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > MaxImageSide || cfg.Height > MaxImageSide {
 		return nil, fmt.Errorf("the image is %dx%d; each side must be 1 to %d pixels", cfg.Width, cfg.Height, MaxImageSide)
 	}
-	img, err := dec.decode(bytes.NewReader(data))
+	var img image.Image
+	if mt == "image/webp" {
+		// A lossy WebP's colours as libwebp (and so the reference) makes
+		// them; an animated one's first frame.
+		img, err = decodeWebP(data)
+	} else {
+		img, err = dec.decode(bytes.NewReader(data))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)
-	}
-	if mt == "image/webp" {
-		// A lossy WebP's colours as libwebp (and so the reference) makes them.
-		if rgb := webpRGB(img); rgb != nil {
-			img = rgb
-		}
 	}
 	return img, nil
 }
@@ -161,12 +131,18 @@ type ImagePatches struct {
 
 // PatchImage prepares img for the vision encoder.
 func PatchImage(img image.Image) (ImagePatches, error) {
+	return patchImage(img, imageSoftTokens)
+}
+
+// patchImage prepares img for the vision encoder with a budget of
+// softTokens: the image processor's, or the video processor's for a frame.
+func patchImage(img image.Image, softTokens int) (ImagePatches, error) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
 		return ImagePatches{}, fmt.Errorf("the image is empty")
 	}
-	maxPatches := imageSoftTokens * imagePoolingKernel * imagePoolingKernel
+	maxPatches := softTokens * imagePoolingKernel * imagePoolingKernel
 	th, tw, err := imageTargetSize(h, w, maxPatches)
 	if err != nil {
 		return ImagePatches{}, err

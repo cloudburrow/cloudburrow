@@ -29,7 +29,8 @@ import (
 // switchover switches them back, and a row written on the original primary
 // reaches its replica again. pg_is_in_recovery() says which server is the
 // standby at each step. A switchover of a primary with another read
-// replica is 501.
+// replica, which has a cascading replica of its own, leaves both replicas
+// of their masters, rebuilt, streaming the new primary's writes.
 // covers: sql.instances.switchover, sql.instances.patch, sql.instances.insert, sql.instances.get, sql.instances.delete, sql.instances.promoteReplica, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLSwitchoverPostgres(t *testing.T) {
 	h := New(t)
@@ -180,10 +181,48 @@ func TestCloudSQLSwitchoverPostgres(t *testing.T) {
 	if _, err := rdb.Exec("INSERT INTO orders VALUES (101, 'on the replica')"); err == nil {
 		t.Error("the replica took a write after switching back")
 	}
-	// With another read replica, which would have to follow the new
-	// timeline through the rebuilt primary, switchover is 501.
-	createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: fmt.Sprintf("swpg-o-%d", n), DatabaseVersion: "POSTGRES_17",
+	// The primary's other read replicas stay its replicas, cascading
+	// replicas of the new primary through it, and a cascading replica of
+	// one of them stays theirs: each is rebuilt from its master and
+	// streams the new primary's writes.
+	oName, cName := fmt.Sprintf("swpg-o-%d", n), fmt.Sprintf("swpg-c-%d", n)
+	o := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: oName, DatabaseVersion: "POSTGRES_17",
 		MasterInstanceName: pName, InstanceType: "READ_REPLICA_INSTANCE", Region: "us-west1", Settings: plus()})
-	_, err = svc.Instances.Switchover(project, rName).Do()
-	wantCode(t, "switchover of a PostgreSQL primary with another read replica", err, 501, "other than its DR replica")
+	cr := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: cName, DatabaseVersion: "POSTGRES_17",
+		MasterInstanceName: oName, InstanceType: "READ_REPLICA_INSTANCE", Region: "us-west1", Settings: plus()})
+	odb, cdb := e.root(t, h, o.ConnectionName), e.root(t, h, cr.ConnectionName)
+	seen(cdb, "the primary's rows on the cascading replica", 4, "switched back")
+	switchover(rName)
+	pi, err := svc.Instances.Get(project, pName).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pi.MasterInstanceName != project+":"+rName || strings.Join(pi.ReplicaNames, ",") != oName || pi.State != "RUNNABLE" ||
+		pi.ReplicationCluster == nil || !pi.ReplicationCluster.DrReplica {
+		t.Errorf("the old primary %s: master %q replicas %v state %s cluster %+v", pName, pi.MasterInstanceName, pi.ReplicaNames,
+			pi.State, pi.ReplicationCluster)
+	}
+	for _, c := range []struct{ name, master string }{{oName, pName}, {cName, oName}} {
+		in, err := svc.Instances.Get(project, c.name).Do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if in.MasterInstanceName != project+":"+c.master || in.State != "RUNNABLE" || in.InstanceType != "READ_REPLICA_INSTANCE" {
+			t.Errorf("the replica %s: master %q state %s type %s, want master %s RUNNABLE", c.name, in.MasterInstanceName, in.State,
+				in.InstanceType, c.master)
+		}
+	}
+	standby(odb, "the old primary's other replica is a standby", true)
+	standby(cdb, "its cascading replica is a standby", true)
+	eventually(t, "a write on the new primary", func() error {
+		_, err := rdb.Exec("INSERT INTO orders VALUES (5, 'after a switchover with other replicas')")
+		return err
+	})
+	seen(pdb, "the new primary's write on the old primary", 5, "after a switchover with other replicas")
+	seen(odb, "the new primary's write on the old primary's other replica", 5, "after a switchover with other replicas")
+	seen(cdb, "the new primary's write on the cascading replica", 5, "after a switchover with other replicas")
+	seen(cdb, "a row of before the switchover on the cascading replica", 4, "switched back")
+	if _, err := odb.Exec("INSERT INTO orders VALUES (102, 'on a cascading replica')"); err == nil {
+		t.Error("the old primary's other replica took a write")
+	}
 }

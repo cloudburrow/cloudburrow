@@ -66,8 +66,8 @@ func fetchJFK(t *testing.T, ctx context.Context) []byte {
 // object's content type stands in), is the same vector, as is a PNG image
 // there; text with the clip is one vector; the console's Embeddings API
 // gives the same vector for the same file_data part; and what is not served
-// (MP3, video, PDF, audio_track_extraction, a missing object or bucket) is refused
-// naming it.
+// (an invalid video or PDF, a missing object or bucket) is refused naming
+// it.
 func TestEmbedContentEmbedsAudioThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -195,20 +195,16 @@ func TestEmbedContentEmbedsAudioThroughThePredictionClient(t *testing.T) {
 		t.Errorf("console inline audio = %d %.200s", code, body)
 	}
 
-	yes := true
 	for what, c := range map[string]struct {
 		parts []*aiplatformpb.Part
 		cfg   *aiplatformpb.EmbedContentRequest_EmbedContentConfig
 		code  codes.Code
 		field string
 	}{
-		"mp3":         {[]*aiplatformpb.Part{inline("audio/mpeg", []byte{0xff, 0xfb, 0x90, 0})}, nil, codes.InvalidArgument, "audio/mpeg"},
-		"video":       {[]*aiplatformpb.Part{inline("video/mp4", []byte{0})}, nil, codes.InvalidArgument, "inline_data.mime_type"},
-		"pdf":         {[]*aiplatformpb.Part{fileData("application/pdf", uri)}, nil, codes.InvalidArgument, "file_data.mime_type"},
-		"audio track": {[]*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{AudioTrackExtraction: &yes}, codes.InvalidArgument, "audio_track_extraction"},
-		"ocr":         {[]*aiplatformpb.Part{textPart("x")}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &yes}, codes.InvalidArgument, "document_ocr"},
-		"missing":     {[]*aiplatformpb.Part{fileData("audio/wav", "gs://"+bucket+"/none.wav")}, nil, codes.NotFound, "none.wav"},
-		"no bucket":   {[]*aiplatformpb.Part{fileData("audio/wav", "gs://"+bucket+"-none/jfk.wav")}, nil, codes.NotFound, `bucket "` + bucket + `-none" not found`},
+		"video":     {[]*aiplatformpb.Part{inline("video/mp4", []byte{0})}, nil, codes.InvalidArgument, "not a valid MP4"},
+		"pdf":       {[]*aiplatformpb.Part{fileData("application/pdf", uri)}, nil, codes.InvalidArgument, "file_data: the data is not a PDF"},
+		"missing":   {[]*aiplatformpb.Part{fileData("audio/wav", "gs://"+bucket+"/none.wav")}, nil, codes.NotFound, "none.wav"},
+		"no bucket": {[]*aiplatformpb.Part{fileData("audio/wav", "gs://"+bucket+"-none/jfk.wav")}, nil, codes.NotFound, `bucket "` + bucket + `-none" not found`},
 	} {
 		_, err := embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_DOCUMENT, c.cfg, c.parts...)
 		if status.Code(err) != c.code || !strings.Contains(err.Error(), c.field) {

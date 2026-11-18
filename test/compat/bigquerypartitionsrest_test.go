@@ -134,10 +134,11 @@ func TestBigQueryIngestionPartitionHistory(t *testing.T) {
 		t.Errorf("col$20240102 of then: %v, want 2", g)
 	}
 
-	// JOBS' nine columns of statistics, empty or NULL.
+	// JOBS' nine columns of statistics, empty or NULL (query_info but its
+	// query_hashes, which a successful query has since #1458).
 	for _, insert := range []bool{false, true} {
 		g := read("SELECT ARRAY_LENGTH(job_stages), ARRAY_LENGTH(object_storage_stats), ARRAY_LENGTH(timeline), "+
-			"query_info IS NULL, materialized_view_statistics IS NULL, metadata_cache_statistics IS NULL, "+
+			"query_info.resource_warning IS NULL AND query_info.performance_insights IS NULL, materialized_view_statistics IS NULL, metadata_cache_statistics IS NULL, "+
 			"search_statistics IS NULL, vector_search_statistics IS NULL, ARRAY_LENGTH(external_service_costs), COUNT(*) > 0 "+
 			"FROM `region-us`.INFORMATION_SCHEMA.JOBS WHERE job_type = 'QUERY' GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9", insert)
 		if strings.Join(g, ",") != "0 0 0 true true true true true 0 true" {

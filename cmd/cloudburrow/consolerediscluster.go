@@ -40,7 +40,7 @@ func (p redisClusterProvider) api() (*redisadmin.ClusterServer, *redisadmin.Serv
 }
 
 const redisClusterNote = "Each cluster is a real Redis Cluster: shard_count primaries with replica_count replicas each, every node a Valkey server in cluster mode. " +
-	"A cluster client on the host starts from the discovery endpoint and follows MOVED to the nodes; with in-transit encryption it trusts the cluster's own CA, which its page shows. IAM auth takes any access token as the AUTH string (IAM is not enforced)."
+	"A cluster client on the host starts from the discovery endpoint and follows MOVED to the nodes; a cluster client in the Kubernetes cluster starts from a node's Service, and is given the nodes' Services, when the instance is bound to 127.0.0.1; with in-transit encryption it trusts the cluster's own CA, which its page shows. IAM auth takes any access token as the AUTH string (IAM is not enforced)."
 
 // List implements console.Provider: the project's clusters.
 func (p redisClusterProvider) List(ctx context.Context, project string) (console.Listing, error) {

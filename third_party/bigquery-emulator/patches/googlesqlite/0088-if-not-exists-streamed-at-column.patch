@@ -1,0 +1,140 @@
+CloudBurrow patch 88 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1458). Applies after patch 0080; needs patches
+0030 and 0056.
+
+Patches 0030 and 0056 give a table made by CREATE TABLE, with a column
+list or AS SELECT, the pseudo-column _PARTITION_STREAMED, the time
+CloudBurrow's front streamed a row, which DML reads to refuse a row
+streamed in the last 30 minutes ("within the last 30 minutes",
+https://cloud.google.com/bigquery/docs/data-manipulation-language); not
+CREATE TABLE IF NOT EXISTS, which may name a table there without it, so
+a table that statement made held its streamed rows from DML only while
+in the streaming buffer (measured through the front: a DELETE of a row
+streamed a minute before ran). It now gets the column when the statement
+makes the table (no SQLite table of that name), with a column list or AS
+SELECT, NULL on the SELECT's rows; a table that is there is left as it
+is, and so is a temporary table. ctas_streamed_at_column_test.go fails
+without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -135,6 +135,13 @@
+ 	// INFORMATION_SCHEMA.TABLE_OPTIONS view surfaces them
+ 	// one-row-per-(table, option).
+ 	Options []*tableOptionSpec `json:"options,omitempty"`
++	// streamedAtIfNew: a CREATE TABLE IF NOT EXISTS gives the table the
++	// pseudo-column _PARTITION_STREAMED when it makes it, not when the
++	// table is there (CloudBurrow patch, cloudburrow/cloudburrow#1458,
++	// CreateTableStmtAction.exec); queryIfNew is a CREATE TABLE ... AS
++	// SELECT's Query then.
++	streamedAtIfNew bool
++	queryIfNew      string
+ }
+ 
+ // TableOptionSpec captures a single CREATE TABLE OPTIONS entry. Type
+@@ -802,7 +809,7 @@
+ 	// column (made by CREATE TABLE ... AS SELECT), which SQLite then
+ 	// leaves as it is: the catalog must not have it either.
+ 	ifNotExists := m1(stmt.CreateMode()) == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists
+-	return &TableSpec{
++	spec := &TableSpec{
+ 		IsTemp:     isTemp,
+ 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
+ 		Columns:    withStreamedAtColumn(newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()), tableDefaultCollation(stmt)), isTemp || ifNotExists),
+@@ -812,6 +819,8 @@
+ 		UpdatedAt:  now,
+ 		CreatedAt:  now,
+ 	}
++	spec.streamedAtIfNew = ifNotExists && !isTemp // CloudBurrow patch (#1458)
++	return spec
+ }
+ 
+ // withStreamedAtColumn gives a table made by a CREATE TABLE statement with
+@@ -989,7 +998,7 @@
+ 		columns = with
+ 		outputColumns = append(outputColumns, "NULL AS `"+streamedAtColumn+"`")
+ 	}
+-	return &TableSpec{
++	spec := &TableSpec{
+ 		IsTemp:     isTemp,
+ 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
+ 		Columns:    columns,
+@@ -999,6 +1008,13 @@
+ 		UpdatedAt:  now,
+ 		CreatedAt:  now,
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): IF NOT EXISTS
++	// gives the column when it makes the table (CreateTableStmtAction.exec).
++	if ifNotExists && !isTemp {
++		spec.streamedAtIfNew = true
++		spec.queryIfNew = fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(append(outputColumns, "NULL AS `"+streamedAtColumn+"`"), ","), query)
++	}
++	return spec
+ }
+ 
+ func newType(t googlesql.Googlesql_TypeNode) *Type {
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -89,6 +89,19 @@
+ 			return err
+ 		}
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): CREATE TABLE IF
++	// NOT EXISTS of a table that is not there makes it with the
++	// pseudo-column of the time a row was streamed, as CREATE TABLE does
++	// (withStreamedAtColumn); a table that is there is left as it is.
++	if a.spec.streamedAtIfNew {
++		var one int
++		if err := conn.QueryRowContext(ctx, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", a.spec.TableName()).Scan(&one); err != nil {
++			a.spec.Columns = withStreamedAtColumn(a.spec.Columns, false)
++			if a.spec.queryIfNew != "" {
++				a.spec.Query = a.spec.queryIfNew
++			}
++		}
++	}
+ 	if _, err := conn.ExecContext(ctx, a.spec.SQLiteSchema(), a.args...); err != nil {
+ 		return fmt.Errorf("failed to exec %s: %w", a.query, err)
+ 	}
+--- a/ctas_streamed_at_column_test.go
++++ b/ctas_streamed_at_column_test.go
+@@ -51,8 +51,32 @@
+ 	if err := db.QueryRowContext(ctx, "SELECT FORMAT('%d:%s', id, IF(_PARTITION_STREAMED IS NULL, 'true', 'false')) FROM `p.d.ctas`").Scan(&got); err != nil || got != "3:true" {
+ 		t.Errorf("CREATE OR REPLACE ... AS SELECT: %s (%v), want 3:true", got, err)
+ 	}
++	// CloudBurrow patch 0088 (cloudburrow/cloudburrow#1458): CREATE TABLE
++	// IF NOT EXISTS gets the column when it makes the table, with a
++	// column list or AS SELECT, and leaves a table that is there as it is.
+ 	exec("CREATE TABLE IF NOT EXISTS `p.d.ine` AS SELECT 1 AS id")
+-	if _, err := db.QueryContext(ctx, "SELECT _PARTITION_STREAMED FROM `p.d.ine`"); err == nil {
+-		t.Error("CREATE TABLE IF NOT EXISTS ... AS SELECT has _PARTITION_STREAMED")
++	if err := db.QueryRowContext(ctx, "SELECT FORMAT('%d:%s', id, IF(_PARTITION_STREAMED IS NULL, 'true', 'false')) FROM `p.d.ine`").Scan(&got); err != nil || got != "1:true" {
++		t.Errorf("CREATE TABLE IF NOT EXISTS ... AS SELECT: %s (%v), want 1:true", got, err)
+ 	}
++	exec("CREATE TABLE IF NOT EXISTS `p.d.inecols` (id INT64)")
++	exec("INSERT INTO `p.d.inecols` (id, _PARTITION_STREAMED) VALUES (1, TIMESTAMP '2026-01-01 00:00:00+00')")
++	if err := db.QueryRowContext(ctx, "SELECT FORMAT('%d:%s', id, IF(_PARTITION_STREAMED IS NULL, 'true', 'false')) FROM `p.d.inecols`").Scan(&got); err != nil || got != "1:false" {
++		t.Errorf("CREATE TABLE IF NOT EXISTS with a column list: %s (%v), want 1:false", got, err)
++	}
++	rows, err = db.QueryContext(ctx, "SELECT * FROM `p.d.inecols`")
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ = rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "id" {
++		t.Errorf("SELECT * of the IF NOT EXISTS table: %v, want [id]", cols)
++	}
++	// A table there without the column (a temporary table's name is
++	// another's; one made before patch 0030 is like this) keeps none.
++	exec("CREATE TABLE `p.d.old` AS SELECT 1 AS id")
++	exec("CREATE TABLE IF NOT EXISTS `p.d.old` (id INT64)")
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.old`").Scan(new(int)); err != nil {
++		t.Errorf("a table there after CREATE TABLE IF NOT EXISTS: %v", err)
++	}
+ }

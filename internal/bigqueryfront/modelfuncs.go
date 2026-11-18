@@ -537,6 +537,9 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
 	}
+	if md.ONNX != nil {
+		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711
+	}
 	if typ == "MATRIX_FACTORIZATION" {
 		return f.mfSubquery(r, q, md, c)
 	}

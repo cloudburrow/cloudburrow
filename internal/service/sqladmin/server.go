@@ -132,6 +132,29 @@ type Server struct {
 	// Observe, if set, is called once per request with the method name and
 	// the answer's status.
 	Observe func(method string, code int)
+	// servers are the instances whose server in the cluster has another
+	// name than theirs (Spec.Server, #1614), by instance name.
+	servers sync.Map
+	// bgs are the blue-green deployments (#1614); emu guards them.
+	bgs map[string]*blueGreen
+}
+
+// ServerOf is the name of instance name's server in the cluster: its own
+// name, unless a blue-green switchover moved it to another server.
+func (s *Server) ServerOf(name string) string {
+	if v, ok := s.servers.Load(name); ok {
+		return v.(string)
+	}
+	return name
+}
+
+// noteServer records spec's server name for ServerOf.
+func (s *Server) noteServer(spec Spec) {
+	if spec.Server != "" && spec.Server != spec.Name {
+		s.servers.Store(spec.Name, spec.Server)
+	} else {
+		s.servers.Delete(spec.Name)
+	}
 }
 
 // NewServer serves engines at addr once started.
@@ -292,9 +315,6 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // refused (#1462): each names what is missing.
 const (
 	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
-	BlueGreenWhy = "a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, " +
-		"which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector. " +
-		"Read replicas and promoteReplica are served (docs/cloudsql.md)"
 )
 
 // verbWhy is why an instance method other than restart is not served.
@@ -333,7 +353,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.connect.resolve", out, err
 	}
 	if len(p) >= 5 && p[0] == "projects" && p[2] == "locations" && p[4] == "blueGreenDeployments" {
-		return "sql.blueGreenDeployments", nil, unimplemented("blueGreenDeployments", BlueGreenWhy)
+		return s.blueGreenDeployments(r, base, p)
 	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
 		// flags and locations.

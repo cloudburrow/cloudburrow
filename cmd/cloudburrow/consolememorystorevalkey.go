@@ -46,7 +46,7 @@ func (p valkeyProvider) api() (*redisadmin.MemorystoreServer, *redisadmin.Server
 }
 
 const valkeyNote = "Each instance runs real Valkey 8.1 nodes: in cluster mode shard_count primaries with replica_count replicas each, " +
-	"with cluster mode disabled one primary and its replicas. A client on the host connects to the endpoints shown, over TLS trusting the instance's own CA when in-transit encryption is on; token auth users and backups are on its page."
+	"with cluster mode disabled one primary and its replicas. A client on the host connects to the endpoints shown (a cluster client in the Kubernetes cluster to a node's Service, which gives it the nodes' Services, when the instance is bound to 127.0.0.1), over TLS trusting the instance's own CA when in-transit encryption is on; token auth users and backups are on its page."
 
 // valkeyEndpoint is an instance's first endpoint of kind, host:port.
 func valkeyEndpoint(inst *memorystorepb.Instance, kind memorystorepb.ConnectionType) string {

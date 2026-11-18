@@ -141,3 +141,22 @@ func TestLaunchStartsThePortForward(t *testing.T) {
 		t.Errorf("started %q, want %q", k.started, want)
 	}
 }
+
+// A Loopback6 tunnel bound to 127.0.0.1 listens on ::1 too, at the same
+// port (#1614).
+func TestLaunchLoopback6(t *testing.T) {
+	k := &fakeKube{
+		answers: map[string]string{
+			"get svc spanner -o json":         `{"spec":{"selector":{"app":"spanner"},"ports":[{"port":9010,"targetPort":9010}]}}`,
+			"get pods -l app=spanner -o json": readyPod,
+		},
+		startErr: errors.New("no kubectl"),
+	}
+	f := fakeForwarder(k)
+	f.target.Loopback6 = true
+	_ = f.launch(context.Background(), true)
+	_, port, _ := strings.Cut(f.HostAddr(), "127.0.0.1:")
+	if want := "--kubeconfig /k/config -n cb port-forward --address 127.0.0.1,::1 pod/spanner-abc " + port + ":9010"; len(k.started) != 1 || k.started[0] != want {
+		t.Errorf("started %q, want %q", k.started, want)
+	}
+}

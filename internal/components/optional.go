@@ -23,8 +23,11 @@ const (
 	SpannerImage = "gcr.io/cloud-spanner-emulator/emulator@sha256:c6f3402f2599684f295a0fdefb6fbbbfb18a0e43e309ff5456ccb452a4570a79"
 
 	FirestorePort = 8080
-	DatastorePort = 8081
-	BigtablePort  = 8086
+	// FirestoreMongoDBPort is Firestore with MongoDB compatibility's wire
+	// protocol (#1703), which the Firestore pod's call front serves.
+	FirestoreMongoDBPort = 27017
+	DatastorePort        = 8081
+	BigtablePort         = 8086
 	// BigtableEmulatorPort is the Bigtable emulator's own port, on its
 	// pod's loopback alone: its front serves BigtablePort (#1206).
 	BigtableEmulatorPort = 8096
@@ -300,7 +303,7 @@ func firestoreBackend(persistent bool) Backend {
 	stopped := FirestoreDocumentsDir + "/stopped-$HOSTNAME"
 	script := `trap '' TERM; ` +
 		`java -Duser.language=en -cp ` + firestoreEmulator + `/cloud-firestore-emulator.jar com.google.cloud.datastore.emulator.firestore.CloudFirestore start ` +
-		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=standard & pid=$!; `, FirestoreEmulatorPort) +
+		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=enterprise & pid=$!; `, FirestoreEmulatorPort) +
 		`trap 'i=0; while [ ! -e ` + stopped + ` ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -KILL $pid 2>/dev/null; wait $pid; exit 0' TERM; ` +
 		`wait $pid`
 	b := Backend{
@@ -312,6 +315,8 @@ func firestoreBackend(persistent bool) Backend {
 		JVM:       true,
 		RunAsUser: FirestoreUser,
 		Front:     firestoreFront(),
+		// Firestore with MongoDB compatibility (#1703), the front's own.
+		ExtraPorts: []NamedPort{{Name: "mongodb", Port: FirestoreMongoDBPort}},
 	}
 	if persistent {
 		b.Persistent, b.OwnsClaim = true, true
@@ -330,7 +335,11 @@ func firestoreBackend(persistent bool) Backend {
 func firestoreFront() *Front {
 	f := callFront("firestore", FirestorePort, FirestoreEmulatorPort)
 	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore",
-		"--firestore-documents", FirestoreDocumentsDir, "--firestore-export-interval", FirestoreExportInterval)
+		"--firestore-documents", FirestoreDocumentsDir, "--firestore-export-interval", FirestoreExportInterval,
+		"--mongodb-listen", fmt.Sprintf("0.0.0.0:%d", FirestoreMongoDBPort))
+	// The front serves the port itself; the emulator's container
+	// declares a port nothing listens on, as the others' fronts do.
+	f.Extra = []FrontPort{{Port: FirestoreMongoDBPort, Upstream: FirestoreMongoDBPort + 1}}
 	withState(f)
 	f.ShareState = true
 	return f
@@ -623,7 +632,19 @@ type MemorystoreSettings struct {
 	// appendonly, it is the node's persistence and the mode's own
 	// append-only file is not added.
 	Dir string
+	// PodAndLoopback6 binds the server to its pod's address and to ::1
+	// only, not to 127.0.0.1 (#1614): a host tunnel (kubectl port-forward)
+	// then reaches it over IPv6, as the kubelet's port forwarding dials
+	// localhost over IPv4 first and over IPv6 when nothing listens there,
+	// while pods reach it over IPv4; a Redis Cluster node announces a
+	// client address per family (cluster-announce-client-ipv4, -ipv6), so
+	// host clients and in-cluster clients are each given one they reach.
+	PodAndLoopback6 bool
 }
+
+// memorystoreBindPodAndLoopback6 is the bind PodAndLoopback6 adds:
+// hostname -i is the pod's address, from the hosts file the kubelet writes.
+const memorystoreBindPodAndLoopback6 = ` --bind "$(hostname -i)" ::1`
 
 // MemorystoreTLSPort is the port a Memorystore server with in-transit
 // encryption serves TLS on, as Memorystore's does (#1413).
@@ -750,6 +771,14 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
 		b.Port = tlsPort
 		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
+	}
+	if o.PodAndLoopback6 {
+		if len(b.Args) > 2 && b.Args[0] == "sh" {
+			b.Args = append([]string{}, b.Args...)
+			b.Args[2] = strings.Replace(b.Args[2], `exec docker-entrypoint.sh "$@"`, `exec docker-entrypoint.sh "$@"`+memorystoreBindPodAndLoopback6, 1)
+		} else {
+			b.Args = append([]string{"sh", "-c", `exec docker-entrypoint.sh "$@"` + memorystoreBindPodAndLoopback6, "sh"}, b.Args...)
+		}
 	}
 	return b
 }

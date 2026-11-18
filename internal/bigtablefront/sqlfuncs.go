@@ -45,7 +45,7 @@ ARRAY_LAST_N ARRAY_LENGTH ARRAY_OFFSET ARRAY_OFFSETS ARRAY_REVERSE ARRAY_SLICE A
 GENERATE_ARRAY GENERATE_DATE_ARRAY GENERATE_TIMESTAMP_ARRAY IF IFNULL NULLIF COALESCE CURRENT_DATE DATE
 UNIX_DATE DATE_ADD DATE_SUB DATE_DIFF DATE_TRUNC FORMAT_DATE PARSE_DATE DATE_FROM_UNIX_DATE LAST_DAY
 IFERROR ISERROR NULLIFERROR PERCENTILE_CONT PERCENTILE_DISC CUME_DIST DENSE_RANK FIRST_VALUE LAG LAST_VALUE LEAD
-NTH_VALUE NTILE PERCENT_RANK RANK ROW_NUMBER S2_CELLIDFROMPOINT S2_COVERINGCELLIDS`)
+NTH_VALUE NTILE PERCENT_RANK RANK ROW_NUMBER`)
 
 var aggregates = map[string]bool{"COUNT": true, "COUNTIF": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true,
 	"ANY_VALUE": true, "LOGICAL_AND": true, "LOGICAL_OR": true, "ARRAY_AGG": true, "STRING_AGG": true,
@@ -65,6 +65,7 @@ type call struct {
 	re          *regexp.Regexp // a constant regular expression argument
 	win         *windowSpec    // the OVER clause of a window function call
 	winSlot     int            // its slot in env.wins
+	names       []string       // the arguments' names (=>), when one is named
 }
 
 // fnDef is a scalar function: sig types a call, run evaluates it. Unless
@@ -76,6 +77,9 @@ type fnDef struct {
 	// lazy, when set, evaluates the call itself, its arguments unevaluated
 	// (IFERROR and the other debugging functions catch their errors).
 	lazy func(c *call, e *env) (any, error)
+	// params name the arguments, in order, for a function that takes them
+	// by name (=>); an optional argument left out is absent.
+	params []string
 }
 
 func (c *call) String() string {
@@ -88,6 +92,11 @@ func (c *call) String() string {
 
 func (c *call) check(s *scope) (*btpb.Type, error) {
 	if unlisted[c.name] {
+		return nil, unlistedErr{c.name}
+	}
+	if _, ok := functions[c.name]; !ok && !aggregates[c.name] && (strings.HasPrefix(c.name, "ST_") || strings.HasPrefix(c.name, "S2_")) {
+		// GoogleSQL's other geography functions, such as BigQuery's
+		// ST_CLUSTERDBSCAN, are not in GoogleSQL for Bigtable's list.
 		return nil, unlistedErr{c.name}
 	}
 	if c.win != nil {
@@ -106,15 +115,12 @@ func (c *call) check(s *scope) (*btpb.Type, error) {
 				return nil, unsupportedErr{"the function " + c.name}
 			}
 		}
-		if strings.HasPrefix(c.name, "ST_") || strings.HasPrefix(c.name, "S2_") {
-			// The geography functions (functions-all lists ST_ACCUM to
-			// ST_WITHIN, S2_CELLIDFROMPOINT and S2_COVERINGCELLIDS): they
-			// need S2 spherical geometry, a module CloudBurrow does not have.
-			return nil, unsupportedErr{"the geography function " + c.name}
-		}
 		return nil, fmt.Errorf("Function not found: %s", c.name)
 	}
 	c.fn = fn
+	if err := c.placeNamed(); err != nil {
+		return nil, err
+	}
 	c.argTypes = nil
 	for _, a := range c.args {
 		if l, ok := a.(*lambda); ok {

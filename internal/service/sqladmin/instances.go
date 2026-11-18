@@ -97,6 +97,19 @@ type Spec struct {
 	// pg_basebackup of its primary when the epoch its volume records
 	// differs, and keeps it otherwise.
 	RebuildEpoch int `json:"rebuildEpoch,omitempty"`
+	// Server is the name of the instance's server in the cluster (its
+	// Deployment, Service, volume and tunnel), "" for Name. A blue-green
+	// deployment's switchover (#1614) moves the blue instance's name to
+	// the green instance's server, and the green name to the blue's.
+	Server string `json:"server,omitempty"`
+}
+
+// ServerName is the name of the instance's server in the cluster.
+func (s Spec) ServerName() string {
+	if s.Server != "" {
+		return s.Server
+	}
+	return s.Name
 }
 
 // Regional reports whether the instance has a standby (#1408).
@@ -201,7 +214,8 @@ func (s *Server) restore() {
 			continue
 		}
 		s.writes.byName[sp.Name] = &created{spec: sp, engine: w.prov.Engine(sp), state: "PENDING_CREATE"}
-		keep = append(keep, sp.Name)
+		s.noteServer(sp)
+		keep = append(keep, sp.ServerName())
 	}
 	s.emu.Unlock()
 	go func() {
@@ -877,11 +891,15 @@ func (s *Server) deleteInstance(r *http.Request, base, project, name string) (an
 				return
 			}
 		}
-		err = s.writes.prov.Remove(ctx, name)
+		s.emu.RLock()
+		server := c.spec.ServerName()
+		s.emu.RUnlock()
+		err = s.writes.prov.Remove(ctx, server)
 		s.emu.Lock()
 		if err == nil {
 			if s.writes.byName[name] == c {
 				delete(s.writes.byName, name)
+				s.servers.Delete(name)
 			}
 			err = s.saveLocked()
 		} else {
@@ -1031,6 +1049,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	s.diskEncryptionJSON(in, spec)
 	s.replicationClusterJSON(in, spec)
 	s.casInstanceJSON(in, spec)
+	s.blueGreenInfoJSON(in, spec)
 	return in, nil
 }
 

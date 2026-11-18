@@ -84,6 +84,8 @@ func ScopeNoteFor(service string) string {
 			"project only, and keeps nothing across a restart"
 	case "bigquery-storage":
 		return "the BigQuery Storage Read API (gRPC) for the endpoint above"
+	case "firestore-mongodb":
+		return "Firestore with MongoDB compatibility (the MongoDB wire protocol) for the endpoint above"
 	case "spanner-rest":
 		return "the Spanner emulator's REST API for the endpoint above; Terraform's spanner_custom_endpoint"
 	case "cloudsql-mysql":

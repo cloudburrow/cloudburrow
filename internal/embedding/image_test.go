@@ -65,7 +65,7 @@ func TestDecodeImage(t *testing.T) {
 	if err != nil || img.Bounds().Dx() != 3 {
 		t.Fatalf("%v %v", img, err)
 	}
-	for mt, want := range map[string]string{"image/heic": "not supported", "image/avif": "not supported", "image/webp": "not a valid", "image/bmp": "not a valid", "image/jpeg": "not a valid", "": "not supported"} {
+	for mt, want := range map[string]string{"image/heic": "not a valid", "image/heif": "not a valid", "image/avif": "not a valid", "image/webp": "not a valid", "image/bmp": "not a valid", "image/jpeg": "not a valid", "": "not supported"} {
 		if _, err := DecodeImage(mt, b.Bytes()); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", mt, err, want)
 		}
@@ -145,31 +145,6 @@ func TestDecodeWebPAndBMP(t *testing.T) {
 	// Each format's data under another's type is refused, not sniffed.
 	if _, err := DecodeImage("image/bmp", readTestImage(t, "pattern-lossless.webp")); err == nil || !strings.Contains(err.Error(), "not a valid image/bmp") {
 		t.Errorf("WebP sent as BMP: %v", err)
-	}
-}
-
-// TestDecodeImageRefusesAnimatedWebP: golang.org/x/image decodes no
-// animation, so an animated WebP is refused saying so, whatever its frames.
-func TestDecodeImageRefusesAnimatedWebP(t *testing.T) {
-	data := readTestImage(t, "pattern-animated.webp")
-	if !webpAnimated(data) {
-		t.Fatal("the animated fixture is not seen as animated")
-	}
-	if _, err := DecodeImage("image/webp", data); err != ErrAnimatedWebP {
-		t.Fatalf("animated WebP: %v, want %v", err, ErrAnimatedWebP)
-	}
-	for _, still := range []string{"pattern-lossless.webp", "pattern-lossy.webp", "pattern-alpha.webp"} {
-		if webpAnimated(readTestImage(t, still)) {
-			t.Errorf("%s is seen as animated", still)
-		}
-	}
-	// The VP8X animation flag alone is enough; truncated chunks are not.
-	flagOnly := []byte("RIFF\x16\x00\x00\x00WEBPVP8X\x0a\x00\x00\x00\x02\x00\x00\x00\x0f\x00\x00\x0f\x00\x00")
-	if !webpAnimated(flagOnly) {
-		t.Error("a VP8X animation flag is not seen")
-	}
-	if webpAnimated([]byte("RIFF\xff\xff\xff\xffWEBPVP8L\xff\xff\xff\x7f")) || webpAnimated([]byte("RIFF")) {
-		t.Error("truncated data is seen as animated")
 	}
 }
 

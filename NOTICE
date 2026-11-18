@@ -31,6 +31,20 @@ under the Apache License, Version 2.0, and with its dependencies
 github.com/golang/glog (Apache License, Version 2.0) and gonum.org/v1/gonum,
 Copyright The Gonum Authors, under the BSD 3-Clause License.
 
+The binary is linked with gen2brain/gav1d v0.2.7
+(https://github.com/gen2brain/gav1d), a pure Go port of dav1d that decodes
+AVIF images and AV1 video, Copyright (c) 2018-2025 VideoLAN and dav1d
+authors and Copyright (c) 2016 Alliance for Open Media, under the BSD 2-Clause
+License, with the Alliance for Open Media Patent License 1.0 its PATENTS file
+carries. (AVIF was decoded until #1736 by libavif, dav1d, aom and libyuv
+compiled to WebAssembly; none of them is in the binary now.)
+
+The binary is linked with a copy of thesyncim/govpx
+(https://github.com/thesyncim/govpx), a pure Go port of libvpx's VP9 decoder,
+under the BSD 3-Clause License, with libvpx's BSD 3-Clause licence and patent
+grant (Copyright (c) 2010, The WebM Project authors); third_party/govpx holds
+the texts and PROVENANCE.md records what was copied and changed.
+
 The binary embeds builds of goccy/bigquery-emulator v0.8.1
 (https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki
 Goshima, under the MIT License, linked with goccy/googlesqlite v0.3.1 and
@@ -41,3 +55,18 @@ three MIT licence texts are in third_party/bigquery-emulator/; the licence and
 notice files of every module linked into the emulator ship in the image it
 runs from (/licenses/bigquery-emulator.txt) and, in each release archive, as
 LICENSES-bigquery-emulator.txt.
+
+internal/s2ops contains code ported from the S2 Geometry Library
+(https://github.com/google/s2geometry, commit
+677c8cebcff11ba11accc0b02005bc214e06e9fd), Copyright Google Inc., under the
+Apache License, Version 2.0: S2BooleanOperation (src/s2/s2boolean_operation.cc),
+S2Builder and its snapping and edge-chain simplification
+(src/s2/s2builder.cc), S2Builder::Graph (src/s2/s2builder_graph.cc), the
+S2Builder layers S2PolygonLayer, S2PolylineVectorLayer and S2PointVectorLayer
+and the ClosedSetNormalizer (src/s2/s2builderutil_*.cc), S2WindingOperation
+(src/s2/s2winding_operation.cc, src/s2/s2builderutil_get_snapped_winding_delta.cc),
+S2BufferOperation's offset curves (src/s2/s2buffer_operation.cc), and
+predicates and edge-crossing helpers golang/geo lacks (src/s2/s2predicates.cc,
+src/s2/s2edge_crossings.cc, src/s2/s2edge_crosser.h). Each ported file keeps
+Google's copyright line; internal/s2ops/PROVENANCE.md records every file, its
+upstream path, and what was taken and what was changed.

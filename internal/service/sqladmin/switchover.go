@@ -36,9 +36,16 @@ package sqladmin
 //     CloudSQLReplicaBackend), as a high-availability instance's standby
 //     is rebuilt after a failover.
 //
-// A PostgreSQL primary's other read replicas would have to follow the
-// new timeline through the rebuilt server, so a switchover of a primary
-// that has any besides its DR replica is 501 (pgCascadeWhy).
+//   - the primary's other read replicas stay its replicas, now cascading
+//     replicas of the new primary through it, as a MySQL primary's do
+//     (Cloud SQL's DR documentation has the old primary "reconfigured as a
+//     read replica" and says nothing of its replicas, which keep their
+//     master instance). Their WAL went on past the point the DR replica
+//     was promoted at (the old primary's shutdown checkpoint, written as
+//     its server stops for the rebuild, reaches them), so they cannot
+//     follow the new timeline: each is rebuilt, once the old primary
+//     serves again, from a pg_basebackup of it, the cascading source.
+//
 // replicationCluster.psaWriteEndpoint, a private services access DNS name
 // that follows the primary, is not answered: instances here have no
 // private IP, and are reached by connection name through the connector.
@@ -52,12 +59,6 @@ import (
 	"strings"
 	"time"
 )
-
-// pgCascadeWhy is why a PostgreSQL switchover of a primary with other
-// read replicas is not served.
-const pgCascadeWhy = "the old primary is rebuilt from a base backup of the new one, and its other read replicas would have to " +
-	"follow the new primary's timeline through it while it is rebuilt, which is not built; delete or promote them first, " +
-	"or make one of them the DR replica's own replica after the switchover (docs/cloudsql.md)"
 
 // drReplicateFlags are the flags a DR replica must not have set
 // ("None of these flags set to non-default values").
@@ -236,18 +237,41 @@ func (s *Server) switchover(r *http.Request, base, project, name string) (any, e
 	case pc.spec.Regional():
 		return fail(unimplemented("a switchover from a high-availability (REGIONAL) primary",
 			"the primary becomes a read replica, and a read replica here is one server"))
-	case !spec.MySQL() && len(s.replicaNamesLocked(project, pc.spec.Name)) > 1:
-		return fail(unimplemented("a switchover of a PostgreSQL primary with read replicas other than its DR replica", pgCascadeWhy))
+	}
+	// A PostgreSQL primary's other read replicas, and their cascading
+	// replicas, upstream first, are rebuilt.
+	var others []*created
+	if !spec.MySQL() {
+		queue := []string{pc.spec.Name}
+		for len(queue) > 0 {
+			up := queue[0]
+			queue = queue[1:]
+			for _, rn := range s.replicaNamesLocked(project, up) {
+				rc := s.writes.byName[rn]
+				if rn == name || rc == nil {
+					continue
+				}
+				if rc.state != "RUNNABLE" {
+					return fail(Errorf(http.StatusConflict, "Operation failed because the read replica %s of %s is %s.", rn, up, rc.state))
+				}
+				others = append(others, rc)
+				queue = append(queue, rn)
+			}
+		}
 	}
 	c.state, pc.state = "MAINTENANCE", "MAINTENANCE"
+	for _, rc := range others {
+		rc.state = "MAINTENANCE"
+	}
 	s.emu.Unlock()
 	op := s.pending(base, project, name, "SWITCHOVER")
 	go func() {
-		run := s.runSwitchover
-		if !spec.MySQL() {
-			run = s.runPGSwitchover
+		var err error
+		if spec.MySQL() {
+			err = s.runSwitchover(c, pc, timeout)
+		} else {
+			err = s.runPGSwitchover(c, pc, others, timeout)
 		}
-		err := run(c, pc, timeout)
 		s.finish(op["name"].(string), err)
 	}()
 	return op, nil
@@ -306,7 +330,7 @@ func (s *Server) runSwitchover(c, pc *created, timeout time.Duration) (err error
 	serverID := 2 + crc32.ChecksumIEEE([]byte(master))%1000000
 	if err := oldPrimary.exec(ctx,
 		fmt.Sprintf("SET PERSIST server_id = %d", serverID),
-		"CHANGE REPLICATION SOURCE TO SOURCE_HOST = "+myString(instanceServicePrefix+name)+", SOURCE_PORT = 3306, SOURCE_USER = "+
+		"CHANGE REPLICATION SOURCE TO SOURCE_HOST = "+myString(instanceServicePrefix+s.ServerOf(name))+", SOURCE_PORT = 3306, SOURCE_USER = "+
 			myString(ReplicaUser)+", SOURCE_PASSWORD = "+myString(password)+", SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1",
 		"START REPLICA"); err != nil {
 		return fmt.Errorf("make %s a replica of %s: %w", master, name, err)
@@ -362,7 +386,7 @@ func waitForGTIDs(ctx context.Context, m *MySQL, gtids string, timeout time.Dura
 // DR replica c (#1524): the primary stops taking writes, the replica
 // replays all of its WAL and is promoted, and the old primary is rebuilt
 // from a base backup of the new one as its standby.
-func (s *Server) runPGSwitchover(c, pc *created, timeout time.Duration) (err error) {
+func (s *Server) runPGSwitchover(c, pc *created, others []*created, timeout time.Duration) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	s.emu.RLock()
@@ -373,6 +397,7 @@ func (s *Server) runPGSwitchover(c, pc *created, timeout time.Duration) (err err
 	if !ok1 || !ok2 || newPrimary.Logical {
 		s.emu.Lock()
 		c.state, pc.state = "RUNNABLE", "RUNNABLE"
+		setState(others, "RUNNABLE")
 		s.emu.Unlock()
 		return unimplemented("instances.switchover", "these servers are not PostgreSQL servers streaming from one another")
 	}
@@ -386,6 +411,7 @@ func (s *Server) runPGSwitchover(c, pc *created, timeout time.Duration) (err err
 		_ = oldPrimary.exec(context.Background(), "SELECT pg_reload_conf()")
 		s.emu.Lock()
 		c.state, pc.state = "RUNNABLE", "RUNNABLE"
+		setState(others, "RUNNABLE")
 		s.emu.Unlock()
 	}()
 	// The primary stops accepting writes: every new transaction is
@@ -436,30 +462,84 @@ func (s *Server) runPGSwitchover(c, pc *created, timeout time.Duration) (err err
 	err = s.saveLocked()
 	s.emu.Unlock()
 	if err != nil {
-		s.failPGSwitchover(c, pc, err)
+		s.failPGSwitchover(c, pc, others, err)
 		return err
 	}
 	if err := newPrimary.PrepareReplicationSource(ctx, password); err != nil {
-		s.failPGSwitchover(c, pc, err)
+		s.failPGSwitchover(c, pc, others, err)
 		return fmt.Errorf("make %s a replication source: %w", name, err)
 	}
 	// The old primary's server starts again, its data replaced by a base
 	// backup of the new primary, streaming from it.
 	if err := s.writes.prov.Start(ctx, olds); err != nil {
-		s.failPGSwitchover(c, pc, err)
+		s.failPGSwitchover(c, pc, others, err)
 		return fmt.Errorf("rebuild %s as a replica of %s: %w", master, name, err)
 	}
 	s.emu.Lock()
 	pc.state, pc.failure = "RUNNABLE", ""
 	s.emu.Unlock()
+	// The old primary's other replicas are rebuilt from it, its cascading
+	// replicas now, and theirs from them, upstream first: every server's
+	// data is a copy of the new primary's, whose replication user has
+	// password.
+	var failed []string
+	for _, rc := range others {
+		if err := s.rebuildPGReplica(ctx, rc, password); err != nil {
+			failed = append(failed, err.Error())
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("the switchover is done, and %s", strings.Join(failed, "; "))
+	}
 	return nil
 }
 
+// rebuildPGReplica starts the read replica rc's server again with its
+// data replaced by a base backup of its master, whose replication user's
+// password is password, keeping its stopReplica state.
+func (s *Server) rebuildPGReplica(ctx context.Context, rc *created, password string) error {
+	s.emu.Lock()
+	rs := rc.spec
+	rs.ReplicationPassword = password
+	rs.RebuildEpoch++
+	rs.SettingsVersion++
+	rc.spec = rs
+	rc.engine = s.writes.prov.Engine(rs)
+	err := s.saveLocked()
+	s.emu.Unlock()
+	if err == nil {
+		err = s.writes.prov.Start(ctx, rs)
+	}
+	if err == nil && rs.ReplicationStopped {
+		if r, ok := rc.engine.(replicator); ok {
+			err = r.PauseReplication(ctx, true)
+		}
+	}
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	if err != nil {
+		rc.state, rc.failure = "FAILED", err.Error()
+		return fmt.Errorf("rebuild the read replica %s from %s: %w", rs.Name, rs.MasterInstanceName, err)
+	}
+	rc.state, rc.failure = "RUNNABLE", ""
+	return nil
+}
+
+func setState(cs []*created, state string) {
+	for _, c := range cs {
+		c.state = state
+	}
+}
+
 // failPGSwitchover leaves the promoted replica c the primary and marks the
-// old primary pc FAILED with err: it is read-only, and was not rebuilt.
-func (s *Server) failPGSwitchover(c, pc *created, err error) {
+// old primary pc and its other replicas others FAILED with err: it is
+// read-only, and was not rebuilt.
+func (s *Server) failPGSwitchover(c, pc *created, others []*created, err error) {
 	s.emu.Lock()
 	c.state = "RUNNABLE"
 	pc.state, pc.failure = "FAILED", err.Error()
+	for _, rc := range others {
+		rc.state, rc.failure = "FAILED", "its master "+pc.spec.Name+" was not rebuilt: "+err.Error()
+	}
 	s.emu.Unlock()
 }

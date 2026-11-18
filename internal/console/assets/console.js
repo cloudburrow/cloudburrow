@@ -8442,16 +8442,25 @@ async function renderEmbeddings(view) {
     if (ep) ep.textContent = endpointFor(method.value);
   };
   model.addEventListener("input", showEndpoint);
-  // Images (#1454): each chosen file is embedded with its own EmbedContent
-  // request, as one inline_data part, by the model that embeds images, so
-  // its vector can be compared with the texts'.
+  // Images (#1454), and videos (#1722) and PDFs (#1723): each chosen file
+  // is embedded with its own EmbedContent request, as one inline_data part,
+  // by the model that embeds images, so its vector can be compared with the
+  // texts'.
   const images = el("input", { id: "emb-images", type: "file", multiple: "",
-    accept: (status.imageMimeTypes || []).join(","), "aria-label": "Images to embed" });
+    // The extensions too: a browser that knows no image/heic or image/avif
+    // type (#1724, #1729) matches the picker's filter by name.
+    accept: [...(status.imageMimeTypes || []), ".heic", ".heif", ".avif", ...(status.videoMimeTypes || []),
+      ...(status.documentMimeTypes || [])].join(","),
+    "aria-label": "Images, videos and PDFs to embed" });
   // Audio clips (#1651) go the same way, and Cloud Storage objects as
   // file_data parts, one gs:// URI per line, read by the instance's own
   // Cloud Storage.
   const audio = el("input", { id: "emb-audio", type: "file", multiple: "",
     accept: (status.audioMimeTypes || []).join(","), "aria-label": "Audio clips to embed" });
+  // A video's audio track (#1732): embed_content_config.audio_track_extraction
+  // on each video's request, off by default as on Google.
+  const audioTrack = el("input", { id: "emb-audio-track", type: "checkbox",
+    "aria-label": "Embed each video's audio track (audio_track_extraction)" });
   const gcs = el("textarea", { id: "emb-gcs", rows: 2, cols: 60, class: "mono",
     placeholder: "gs://bucket/object.wav, one per line", "aria-label": "Cloud Storage objects to embed (file_data)" });
   const toMultimodal = () => {
@@ -8464,9 +8473,11 @@ async function renderEmbeddings(view) {
   audio.addEventListener("change", () => { if (audio.files.length) toMultimodal(); });
   gcs.addEventListener("input", () => { if (gcs.value.trim()) toMultimodal(); });
   // A media type from a file name's extension, for a gs:// URI or a file
-  // the browser gives no type (#1651: WebP and BMP).
-  const mediaTypeOf = (name) => ({ wav: "audio/wav", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-    webp: "image/webp", bmp: "image/bmp" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
+  // the browser gives no type (#1651: WebP and BMP; #1721: MP3; #1724: HEIC
+  // and HEIF; #1722, #1723: video and PDF; #1729: AVIF).
+  const mediaTypeOf = (name) => ({ wav: "audio/wav", mp3: "audio/mpeg", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+    webp: "image/webp", bmp: "image/bmp", heic: "image/heic", heif: "image/heif", avif: "image/avif", mp4: "video/mp4", mov: "video/quicktime",
+    pdf: "application/pdf" })[(String(name).match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()];
   const readBase64 = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
@@ -8517,15 +8528,18 @@ async function renderEmbeddings(view) {
             data.truncated === true]);
         }
         for (const file of files) {
+          const isVideo = (file.type || mediaTypeOf(file.name) || "").startsWith("video/");
           const data = await post("embedContent", {
             content: { role: "user", parts: [{ inlineData: { mimeType: file.type || mediaTypeOf(file.name), data: await readBase64(file) } }] },
-            embedContentConfig: { outputDimensionality: Number(dim.value) },
+            embedContentConfig: { outputDimensionality: Number(dim.value),
+              ...(isVideo && audioTrack.checked ? { audioTrackExtraction: true } : {}) },
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
-          lines.push("[image] " + file.name);
+          const type = file.type || mediaTypeOf(file.name) || "";
+          lines.push((type.startsWith("video/") ? "[video] " : type === "application/pdf" ? "[pdf] " : "[image] ") + file.name);
         }
         const media = [
-          ...clips.map((file) => ["[audio] " + file.name, async () => ({ inlineData: { mimeType: file.type || "audio/wav", data: await readBase64(file) } })]),
+          ...clips.map((file) => ["[audio] " + file.name, async () => ({ inlineData: { mimeType: file.type || mediaTypeOf(file.name) || "audio/wav", data: await readBase64(file) } })]),
           // Google's file_data carries a mime_type; it is named from the
           // object's extension when known, else the object's content type is used.
           ...uris.map((uri) => ["[file_data] " + uri, async () => {
@@ -8610,7 +8624,8 @@ async function renderEmbeddings(view) {
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
       ...(status.imageModel ? [el("div", {}, el("label", { for: "emb-images", text: "Images " }), images,
-        el("label", { for: "emb-audio", text: " Audio " }), audio),
+        el("label", { for: "emb-audio", text: " Audio " }), audio,
+        el("label", { for: "emb-audio-track", text: " Videos' audio track " }), audioTrack),
         el("div", {}, el("label", { for: "emb-gcs", text: "Cloud Storage objects " }), gcs),
         el("p", { class: "unavailable", id: "emb-image-note", text: status.imageModelNote })] : []),
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,

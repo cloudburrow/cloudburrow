@@ -391,7 +391,7 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 		}
 	}
 	for n, c := range s.writes.byName {
-		if c.engine.Addr() == rep.OnPremises.HostPort || (short == instanceServicePrefix+n && port == enginePort) {
+		if c.engine.Addr() == rep.OnPremises.HostPort || (short == instanceServicePrefix+c.spec.ServerName() && port == enginePort) {
 			ext.Instance, ext.InstanceUp = n, false
 		}
 	}

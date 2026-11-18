@@ -65,6 +65,8 @@ type bqModel struct {
 	// featureColumns. A model made before either was kept has neither.
 	TransformSQL []string   `json:"transformSql,omitempty"`
 	Inputs       []mlColumn `json:"inputs,omitempty"`
+	// ONNX is an imported ONNX model's (modelonnx.go, #1711).
+	ONNX *onnxImport `json:"onnx,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -77,6 +79,9 @@ type bqModels struct {
 	logf   func(string, ...any)
 	// now is the instance's clock (#1487); nil is the system's.
 	now func() time.Time
+	// blobs are imported ONNX models' files, by SHA-256, when the front
+	// keeps no state directory (modelonnx.go).
+	blobs map[string][]byte
 }
 
 // clock is the time now by m.now.
@@ -163,6 +168,7 @@ func (m *bqModels) get(project, dataset, id string) (bqModel, bool) {
 	}
 	if md.Expiration > 0 && md.Expiration <= m.clock().UnixMilli() {
 		delete(m.models, modelKey(project, dataset, id))
+		m.dropBlobLocked(md)
 		m.saveLocked()
 		return bqModel{}, false
 	}
@@ -175,7 +181,10 @@ func (m *bqModels) put(md bqModel) {
 	if m.models == nil {
 		m.models = map[string]*bqModel{}
 	}
-	m.models[modelKey(md.Project, md.Dataset, md.ID)] = &md
+	k := modelKey(md.Project, md.Dataset, md.ID)
+	old := m.models[k]
+	m.models[k] = &md
+	m.dropBlobLocked(old)
 	m.saveLocked()
 }
 
@@ -186,10 +195,12 @@ func (m *bqModels) remove(project, dataset, id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := modelKey(project, dataset, id)
-	if _, ok := m.models[k]; !ok {
+	old, ok := m.models[k]
+	if !ok {
 		return false
 	}
 	delete(m.models, k)
+	m.dropBlobLocked(old)
 	m.saveLocked()
 	return true
 }
@@ -264,7 +275,8 @@ func (md bqModel) resource(full bool) map[string]any {
 			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS",
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
-			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER"}[md.Options.ModelType],
+			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
+			"ONNX": "ONNX"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -282,6 +294,10 @@ func (md bqModel) resource(full bool) map[string]any {
 		res["expirationTime"] = ms(md.Expiration)
 	}
 	if !full {
+		return res
+	}
+	if md.ONNX != nil {
+		md.onnxResource(res) // modelonnx.go, #1711
 		return res
 	}
 	var feats []map[string]any
@@ -682,6 +698,8 @@ type modelDDL struct {
 	opts                                 mlOptions
 	query                                string
 	transform                            []string
+	// onnxPath is an imported ONNX model's MODEL_PATH (modelonnx.go).
+	onnxPath string
 }
 
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
@@ -691,11 +709,10 @@ var unsupportedModelTypes = map[string]string{
 	"AUTOML_CLASSIFIER": "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
 	"ARIMA_PLUS_XREG":   "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	// An imported model (#1562, measured): no CloudBurrow build has a
-	// TensorFlow or XGBoost runtime, and the ONNX Runtime is loaded only
-	// by the opt-in `-tags onnx` build, for Vertex AI embeddings.
+	// TensorFlow or XGBoost runtime. An ONNX model runs on the ONNX
+	// Runtime of the opt-in `-tags onnx` build (modelonnx.go, #1711).
 	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
 	"TENSORFLOW_LITE":       "an imported TensorFlow Lite model needs the TensorFlow Lite runtime, which CloudBurrow's BigQuery does not have",
-	"ONNX":                  "an imported ONNX model needs the ONNX Runtime, which only CloudBurrow's opt-in `-tags onnx` build loads, for Vertex AI embeddings, not its BigQuery",
 	"XGBOOST":               "an imported XGBoost model needs the XGBoost runtime, which CloudBurrow does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
@@ -784,6 +801,20 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
+					if strings.EqualFold(typ, "ONNX") {
+						// An imported ONNX model (modelonnx.go, #1711):
+						// MODEL_PATH, and no TRANSFORM or query.
+						if c, m := parseONNXOptions(opts, &d); c != 0 {
+							return d, true, c, m
+						}
+						switch {
+						case d.transform != nil:
+							return d, true, 400, "CREATE MODEL of model_type ONNX takes no TRANSFORM clause"
+						case end+1 < len(stmt):
+							return d, true, 400, "CREATE MODEL of model_type ONNX takes no query: the model is imported from model_path"
+						}
+						return d, true, 0, ""
+					}
 					if why, refused := unsupportedModelTypes[strings.ToUpper(typ)]; refused {
 						return d, true, 501, refusedModelType(strings.ToUpper(typ), why)
 					}
@@ -1599,6 +1630,23 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	case had && !d.replace:
 		fail(409, fmt.Sprintf("Already Exists: Model %s:%s.%s", project, dataset, id))
 		return true
+	case d.opts.ModelType == "ONNX":
+		// An imported ONNX model (modelonnx.go, #1711).
+		imp, data, c, m := f.importONNX(r.Context(), d.onnxPath)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's ONNX file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "ONNX", Created: now, Modified: now,
+				Location: loc, Options: d.opts, ONNX: imp})
+		}
 	default:
 		trainSQL := d.query
 		var transformSQL []string

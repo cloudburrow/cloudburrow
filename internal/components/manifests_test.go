@@ -421,6 +421,32 @@ func TestStorageServerReachesResourceManager(t *testing.T) {
 	t.Fatal("no storage backend")
 }
 
+// Given the ONNX runner's in-cluster address, BigQuery's front is told it
+// (#1711); without one, nothing is.
+func TestBigQueryFrontReachesTheONNXRunner(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery}
+	for _, addr := range []string{"cloudburrow-host.cloudburrow.svc.cluster.local:9025", ""} {
+		c := NewLifecycleComponent("kc", cfg, io.Discard)
+		c.SetBuiltinStorageImage("img")
+		c.SetONNXRunner(addr)
+		found := false
+		for _, b := range c.Backends() {
+			if b.Name != "bigquery" || b.Front == nil {
+				continue
+			}
+			found = true
+			args := strings.Join(b.Front.Args, " ")
+			if addr != "" && !strings.Contains(args, "--onnx http://"+addr) || addr == "" && strings.Contains(args, "--onnx") {
+				t.Errorf("runner %q: front args %q", addr, args)
+			}
+		}
+		if !found {
+			t.Fatal("no BigQuery front")
+		}
+	}
+}
+
 // TestMemorystoreNodeDir (#1557): a Redis Cluster or Valkey node keeps its
 // files in its formation's directory on its volume, made before the server
 // starts, with the node's own persistence; ephemeral mode has none.
@@ -435,5 +461,24 @@ func TestMemorystoreNodeDir(t *testing.T) {
 	e := MemorystoreServerOf(MemorystoreSettings{Name: "n", MaxMemory: 1 << 30, Dir: "/data/g3"})
 	if strings.Contains(strings.Join(e.Args, " "), "/data/g3") || e.Args[0] == "sh" {
 		t.Errorf("ephemeral node args = %q", e.Args)
+	}
+}
+
+// A cluster node of an instance bound to 127.0.0.1 binds its pod's address
+// and ::1 alone (#1614), whichever way the image's entrypoint is started.
+func TestMemorystoreNodePodAndLoopback6(t *testing.T) {
+	for _, s := range []MemorystoreSettings{
+		{Name: "n", MaxMemory: 1 << 30, PodAndLoopback6: true},
+		{Name: "n", Persistent: true, MaxMemory: 1 << 30, Dir: "/data/g3", PodAndLoopback6: true},
+		{Name: "n", MaxMemory: 1 << 30, TLSCert: "c", TLSKey: "k", TLSCA: "a", PodAndLoopback6: true},
+	} {
+		b := MemorystoreServerOf(s)
+		if b.Args[0] != "sh" || b.Args[1] != "-c" || strings.Count(b.Args[2], `--bind "$(hostname -i)" ::1`) != 1 ||
+			!strings.HasSuffix(b.Args[2], `exec docker-entrypoint.sh "$@"`+memorystoreBindPodAndLoopback6) {
+			t.Errorf("args of %+v = %q", s.Dir+s.TLSCert, b.Args)
+		}
+	}
+	if b := MemorystoreServerOf(MemorystoreSettings{Name: "n", MaxMemory: 1 << 30}); strings.Contains(strings.Join(b.Args, " "), "--bind") {
+		t.Errorf("a server bound as before has args %q", b.Args)
 	}
 }

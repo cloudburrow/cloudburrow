@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -76,7 +77,21 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	if rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, body); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Cloud Storage") {
 		t.Fatalf("no storage: status %d: %s", rec.Code, rec.Body)
 	}
+	// An MP3 (#1721), inline as audio/mpeg or audio/mp3: a one-second tone at
+	// 16 kHz, its encoder delay and padding trimmed.
+	mp3, err := os.ReadFile("../../embedding/testdata/tone-mono-16k.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mt := range []string{"audio/mpeg", "audio/mp3"} {
+		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID,
+			`{"content":{"parts":[{"inlineData":{"mimeType":"`+mt+`","data":"`+base64.StdEncoding.EncodeToString(mp3)+`"}}]}}`)
+		if rec.Code != http.StatusOK || len(e.in.Parts) != 1 || len(e.in.Parts[0].Audio) != 16000 {
+			t.Fatalf("inline %s: status %d: %s", mt, rec.Code, rec.Body)
+		}
+	}
 	s.UseStorage(fakeObjects{
+		"gs://b/clip.mp3":  {mp3, "audio/mpeg"},
 		"gs://b/clip.wav":  {wav, "audio/wav"},
 		"gs://b/img.png":   {mustB64(t, testPNG(t, 32, 32)), "application/octet-stream"},
 		"gs://b/movie.mp4": {[]byte{0}, "video/mp4"},
@@ -84,6 +99,10 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	// The object's content type stands in for a missing mime_type.
 	if rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, body); rec.Code != http.StatusOK || len(e.in.Parts) != 1 || len(e.in.Parts[0].Audio) != 16000 {
 		t.Fatalf("file_data audio: status %d: %s", rec.Code, rec.Body)
+	}
+	if rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID,
+		`{"content":{"parts":[{"fileData":{"fileUri":"gs://b/clip.mp3"}}]}}`); rec.Code != http.StatusOK || len(e.in.Parts[0].Audio) != 16000 {
+		t.Fatalf("file_data MP3: status %d: %s", rec.Code, rec.Body)
 	}
 	// The part's mime_type wins over the object's.
 	if rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID,
@@ -99,8 +118,9 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	}{
 		"missing":    {`{"content":{"parts":[{"fileData":{"mimeType":"audio/wav","fileUri":"gs://b/none.wav"}}]}}`, "not found", http.StatusNotFound},
 		"bad uri":    {`{"content":{"parts":[{"fileData":{"mimeType":"audio/wav","fileUri":"https://x/y.wav"}}]}}`, "file_data.file_uri", http.StatusBadRequest},
-		"video":      {`{"content":{"parts":[{"fileData":{"fileUri":"gs://b/movie.mp4"}}]}}`, "file_data.mime_type", http.StatusBadRequest},
-		"mp3":        {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/mpeg","data":"AA=="}}]}}`, "audio/wav", http.StatusBadRequest},
+		"video":      {`{"content":{"parts":[{"fileData":{"fileUri":"gs://b/movie.mp4"}}]}}`, "file_data: the data is not a valid MP4", http.StatusBadRequest},
+		"bad mp3":    {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/mpeg","data":"AA=="}}]}}`, "parts[0].inline_data: the data is not a valid MP3 file", http.StatusBadRequest},
+		"ogg":        {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/ogg","data":"AA=="}}]}}`, "audio/wav, audio/mpeg", http.StatusBadRequest},
 		"over 180 s": {twoLong, "at most 180 seconds", http.StatusBadRequest},
 		"bad wav":    {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"AA=="}}]}}`, "parts[0].inline_data", http.StatusBadRequest},
 	} {
@@ -114,7 +134,7 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 	// audio is refused as a type the model does not embed.
 	s.SwapModelEmbedder(localai.EmbeddingGemma2ONNXID, &multimodalEmbedder{}, nil)
 	rec = postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, `{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"`+b64+`"}}]}}`)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "video, audio and PDF") {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "; audio input is not served") {
 		t.Fatalf("no audio encoder: status %d: %s", rec.Code, rec.Body)
 	}
 }

@@ -244,7 +244,7 @@ func (s *Server) upgradeReplica(name, version string) error {
 		err = fmt.Errorf("%s cannot be a replication source", c.spec.MasterInstanceName)
 	}
 	if err == nil {
-		err = s.writes.prov.Remove(ctx, name)
+		err = s.writes.prov.Remove(ctx, spec.ServerName())
 	}
 	if err == nil {
 		err = s.writes.prov.Start(ctx, spec)

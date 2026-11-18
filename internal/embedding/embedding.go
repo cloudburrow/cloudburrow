@@ -61,9 +61,12 @@ type Part struct {
 	Image image.Image
 	// Audio is a clip's mono samples at AudioSampleRate (DecodeAudio).
 	Audio []float32
+	// Video is a video's sampled frames (DecodeVideo).
+	Video []image.Image
 }
 
-// Multimodal is implemented by an embedder that embeds images.
+// Multimodal is implemented by an embedder that embeds images, and so
+// video frames and PDF pages.
 type Multimodal interface {
 	EmbedsImages() bool
 }
@@ -97,6 +100,10 @@ const (
 	AudioToken      = "<|audio|>"
 	BeginAudioToken = "<|audio>"
 	EndAudioToken   = "<audio|>"
+	// VideoToken marks a video's place; each frame is expanded to the
+	// begin-image token, one VideoToken per soft token, and the end-image
+	// token, as EmbeddingGemma2Processor does.
+	VideoToken = "<|video|>"
 )
 
 // reservedMarkers are the vocabulary's media markers, which a text part may
@@ -115,14 +122,17 @@ func MultimodalPrompt(in Input) (string, int, error) {
 	media, images, texts := 0, 0, 0
 	prevText := false
 	for i, p := range in.Parts {
-		if p.Image != nil || p.Audio != nil {
+		if p.Image != nil || p.Audio != nil || p.Video != nil {
 			if media > 0 && !prevText {
 				b.WriteString(" ")
 			}
-			if p.Image != nil {
+			switch {
+			case p.Image != nil:
 				b.WriteString(ImageToken)
 				images++
-			} else {
+			case p.Video != nil:
+				b.WriteString(VideoToken)
+			default:
 				b.WriteString(AudioToken)
 			}
 			media++

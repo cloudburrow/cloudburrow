@@ -218,7 +218,7 @@ Dept2 5 1 5 NULL 9 0.25 9.5`)
 		"SELECT MAX_BY(_key, _key) FROM report":                 codes.Unimplemented,
 		"SELECT _key, GROUPING(_key) FROM report GROUP BY _key": codes.Unimplemented,
 		"SELECT ARRAY_FILTER([1, 2], e -> e + 1)":               codes.InvalidArgument,
-		"SELECT ST_AREA(_key) FROM report":                      codes.Unimplemented,
+		"SELECT ST_REGIONSTATS(_key, 'x') FROM report":          codes.Unimplemented,
 		"SELECT COSINE_DISTANCE([1.0], [CAST(1 AS FLOAT32)])":   codes.InvalidArgument,
 	} {
 		_, err := c.PrepareStatement(ctx, sql, nil)

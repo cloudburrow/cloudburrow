@@ -12,8 +12,8 @@ import (
 
 // TestEmbedContentWebPAndBMPOnEmbeddingGemma2 (#1651): WebP (lossless,
 // lossy, with alpha) and BMP images are embedded as PNG and JPEG are,
-// inline or as file_data, and an animated WebP, HEIC, HEIF and AVIF are
-// INVALID_ARGUMENT naming the part.
+// inline or as file_data, and a bad AVIF or BMP is INVALID_ARGUMENT naming
+// the part (HEIC, HEIF, animated WebP and AVIF: embedcontentheic_test.go).
 func TestEmbedContentWebPAndBMPOnEmbeddingGemma2(t *testing.T) {
 	e := &multimodalEmbedder{}
 	s := NewServer(nil)
@@ -56,10 +56,8 @@ func TestEmbedContentWebPAndBMPOnEmbeddingGemma2(t *testing.T) {
 	}
 
 	for name, c := range map[string]struct{ body, want string }{
-		"animated": {inline("image/webp", "pattern-animated.webp"), "parts[1].inline_data: animated WebP images are not supported"},
-		"bad bmp":  {inline("image/bmp", "pattern-lossless.webp"), "not a valid image/bmp"},
-		"heif":     {`{"content":{"parts":[{"inlineData":{"mimeType":"image/heif","data":"AA=="}}]}}`, "image/heif"},
-		"avif":     {`{"content":{"parts":[{"inlineData":{"mimeType":"image/avif","data":"AA=="}}]}}`, "image/avif"},
+		"bad bmp": {inline("image/bmp", "pattern-lossless.webp"), "not a valid image/bmp"},
+		"avif":    {`{"content":{"parts":[{"inlineData":{"mimeType":"image/avif","data":"AA=="}}]}}`, "image/avif"},
 	} {
 		rec := postEmbed(t, s, "v1", localai.EmbeddingGemma2ONNXID, c.body)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.want) {

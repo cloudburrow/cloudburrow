@@ -462,7 +462,7 @@
     },
     "toolchain": {
       "go": {
-        "version": "1.26.0",
+        "version": "1.26.4",
         "source": "https://go.dev",
         "license": "BSD-3-Clause",
         "updateFeed": "go-release-feed",
@@ -616,6 +616,116 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Vertex AI EmbedContent's WebP and BMP images (#1651, internal/embedding/image.go), approved by the maintainer 2026-10-19: its webp and bmp decoders. Promoted from indirect (v0.25.0, in the module graph only) to direct. It needs golang.org/x/sys and golang.org/x/text, already required at the same versions; no new dependency was added. Lossy WebP colours are converted as libwebp converts them (internal/embedding/webp.go), not by image.YCbCr."
+      },
+      "go264": {
+        "module": "github.com/oops1/go.264",
+        "version": "v1.14.0",
+        "sum": "h1:CLElIjsfp3sI6s1YWVl08vjacB4h3G56EeYhPaNk/Wc=",
+        "pinnedCommit": "cc9c9d0309d6e8a0e80bb182c14d2e3e13276aa2",
+        "source": "https://github.com/oops1/go.264",
+        "license": "BSD-2-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's H.264 video (#1722, internal/embedding/video.go), approved by the maintainer 2026-11-17: a pure Go H.264 High-profile decoder (P and B slices, CABAC), bit-exact against ffmpeg here. Copied into third_party/go264 (import path github.com/cloudburrow/cloudburrow/third_party/go264; the module's non-test sources, fetched through the go command at this sum, with hwaccel_linux.go and its NVENC and VA-API backends left out and the import paths rewritten, third_party/go264/PROVENANCE.md), not required in go.mod: those backends import ebitengine/purego, which links libc dynamically into a CGO_ENABLED=0 Linux binary (TestLinuxBinariesNeverImportPurego), and a replace directive would break `go install ...@latest`. Chosen over go-avkit/h264, which needs Go 1.27 (docs/upstream-evaluation.md)."
+      },
+      "goMp4ff": {
+        "module": "github.com/Eyevinn/mp4ff",
+        "version": "v0.63.0",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's MP4 and MOV video (#1722, internal/embedding/video.go), approved by the maintainer 2026-11-17: an ISO BMFF reader (progressive and fragmented files, avcC, hvcC, edit lists), pure Go. Its one requirement, go-test/deep, is for its tests (docs/upstream-evaluation.md)."
+      },
+      "goPdfium": {
+        "module": "github.com/klippa-app/go-pdfium",
+        "version": "v1.21.4",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's PDF pages and document_ocr (#1723, internal/embedding/pdf.go), approved by the maintainer 2026-11-17: its webassembly package runs PDFium (BSD-3-Clause and Apache-2.0, compiled to WebAssembly and embedded, 5.8 MB) on wazero, so no cgo; its native packages, which need cgo, are not imported. Chosen over go-fitz, which is AGPL MuPDF and cgo (docs/upstream-evaluation.md)."
+      },
+      "goWazero": {
+        "module": "github.com/tetratelabs/wazero",
+        "version": "v1.12.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723); an indirect requirement again since #1736, when AVIF moved from a vendored WebAssembly decoder to gen2brain/gav1d; no cgo and no dependencies beyond golang.org/x/sys, already required at the same version."
+      },
+      "goH265": {
+        "module": "github.com/gen2brain/h265",
+        "version": "v0.2.5",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's HEIC and HEIF images (#1724, internal/embedding/heic.go), approved by the maintainer 2026-11-17: a pure Go HEVC decoder and HEIF container reader, no cgo and no dependencies. Its go.mod needs go 1.26.4, which raised CloudBurrow's go line. Chosen over gen2brain/heic and gen2brain/avif, which import purego and so link libc dynamically into a CGO_ENABLED=0 Linux binary (docs/upstream-evaluation.md, #1724); AVIF is served by the vendored WebAssembly path of gen2brain/avif (goAVIFVendored, #1729)."
+      },
+      "goOrc": {
+        "module": "github.com/scritchley/orc",
+        "version": "v0.0.0-20210513144143-06dddf1ad665",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "BigQuery ORC loads (#1713, internal/bigqueryfront), approved by the maintainer 2026-11-17: an ORC reader. No tagged releases upstream, so a commit is pinned."
+      },
+      "goSecp256k1": {
+        "module": "github.com/decred/dcrd/dcrec/secp256k1/v4",
+        "version": "v4.4.1",
+        "license": "ISC",
+        "verification": "go.sum",
+        "notes": "Cloud KMS EC_SIGN_SECP256K1_SHA256 (#1719, internal/service/kms/secp256k1.go), approved by the maintainer 2026-11-17: secp256k1 keys and lower-S ECDSA signatures. go.sum also lists github.com/decred/dcrd/crypto/blake256, which only the module's own tests use; it is not compiled into CloudBurrow."
+      },
+      "goGeo": {
+        "module": "github.com/golang/geo",
+        "version": "v0.0.0-20261029132150-f51d36688936",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Bigtable SQL geography ST_ and S2_ functions (#1720, internal/bigtablefront), approved by the maintainer 2026-11-17: S2 geometry. No tagged releases upstream, so a commit is pinned. The S2 boolean operations it does not port are #1728."
+      },
+      "goMP3": {
+        "module": "github.com/hajimehoshi/go-mp3",
+        "version": "v0.3.4",
+        "sum": "h1:NUP7pBYH8OguP4diaTZ9wJbUbk3tC0KlfzsEpWmYj68=",
+        "pinnedCommit": "26f0b17459ab4b2b3d9d2b484a27a4eab3cca17b",
+        "source": "https://github.com/hajimehoshi/go-mp3",
+        "license": "Apache-2.0",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's MP3 audio (#1721, internal/embedding/mp3.go), approved by the maintainer 2026-11-17: a pure Go MPEG-1/2 Layer III decoder, no cgo. Copied into third_party/go-mp3 (import path github.com/cloudburrow/cloudburrow/third_party/go-mp3; the module's non-test sources, fetched through the go command at this sum, imports rewritten) and extended there to MPEG-2.5, 8 to 12 kHz (#1734: its sample rates, scalefactor bands and short-block regions, checked against ffmpeg), which upstream refuses and has not released since 2022 (third_party/go-mp3/PROVENANCE.md). No longer required in go.mod (docs/upstream-evaluation.md)."
+      },
+      "goAAC": {
+        "module": "github.com/arabian9ts/aac-go",
+        "version": "v0.1.0",
+        "sum": "h1:e298pHWu+Xcv6VPU2hmS1UTmOq5C9KHD38eQcJR4K8c=",
+        "pinnedCommit": "c4cc4c5fae73af12eb0a54aa745f10d105c825f6",
+        "source": "https://github.com/arabian9ts/aac-go",
+        "license": "Apache-2.0",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Copied into third_party/aac-go since #1739 (import path github.com/cloudburrow/cloudburrow/third_party/aac-go; non-test sources without cmd/ and scripts/, imports rewritten; third_party/aac-go/PROVENANCE.md) so CloudBurrow owns its fixes: one release, no activity since. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md)."
+      },
+      "goOpus": {
+        "module": "github.com/kazzmir/opus-go",
+        "version": "v1.7.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): libopus (BSD-3-Clause) transpiled to Go with ccgo, no cgo and no dependencies. Within 0.71 of a 16-bit step of ffmpeg 9's libopus decode here. Chosen over thesyncim/gopus (BSD-3-Clause, but its go.mod needs Go 1.27.3) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
+      },
+      "govpx": {
+        "module": "github.com/thesyncim/govpx",
+        "version": "v0.0.0-20261018202535-159dce5b931a",
+        "sum": "h1:NIUp9Ir2/cvq/yY3XnNLQG68w4hxFoW2DnkBVu/lu8o=",
+        "pinnedCommit": "159dce5b931af4f7c600f157d64c2a813092ec57",
+        "source": "https://github.com/thesyncim/govpx",
+        "license": "BSD-3-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's VP9 video (#1731, internal/embedding/video.go): a pure Go libvpx port, standard library only. Its go.mod needs Go 1.27 for GOEXPERIMENT=simd files only, so the VP9 decoder is copied without them and without the encoders (import path github.com/cloudburrow/cloudburrow/third_party/govpx; third_party/govpx/PROVENANCE.md). Bit-exact against ffmpeg 9 on a libvpx clip with hidden alternate reference frames."
+      },
+      "gav1d": {
+        "module": "github.com/gen2brain/gav1d",
+        "version": "v0.2.7",
+        "license": "BSD-2-Clause",
+        "verification": "go.sum",
+        "notes": "Vertex AI EmbedContent's AV1 video (#1731, internal/embedding/video.go) and AVIF images (#1736, internal/embedding/avif.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go port of dav1d with an AVIF reader, no cgo, no WebAssembly and no dependencies, 8 to 12 bits and every chroma format. Bit-exact against ffmpeg 9's libdav1d on an SVT-AV1 clip; AVIF pixel-identical to libavif 1.4.2's references, and a 10-bit 16384 x 16384 AVIF decodes at a 3.8 GB peak RSS. It replaced the vendored WebAssembly build of gen2brain/avif (libavif, dav1d, aom, libyuv), which could not decode a 10- or 12-bit AVIF over 13312 x 13312 in its 4 GiB of memory (docs/upstream-evaluation.md)."
+      },
+      "goMongoDriver": {
+        "module": "go.mongodb.org/mongo-driver/v2",
+        "version": "v2.10.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Firestore with MongoDB compatibility (#1703): the official MongoDB Go driver for the compat test, and its bson package for the wire-protocol server (internal/firestoreadmin), approved by the maintainer 2026-11-17."
       }
     },
     "apiContracts": {

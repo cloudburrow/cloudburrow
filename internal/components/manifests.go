@@ -685,10 +685,11 @@ spec:
 		}
 	}
 
-	if b.Persistent || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
+	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() {
 		sb.WriteString("      volumes:\n")
 	}
-	if b.dataMount() {
+	switch {
+	case b.dataMount():
 		fmt.Fprintf(&sb, "        - name: data\n          persistentVolumeClaim:\n            claimName: %s\n", b.claim())
 	}
 	if shared && b.Persistent {

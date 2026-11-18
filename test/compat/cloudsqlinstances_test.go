@@ -51,7 +51,10 @@ func sqlProtection(on bool) *sqladmin.DatabaseInstance {
 // flag, which the server itself reports afterwards; deletion protection
 // refuses a delete until a patch lifts it; a restart restarts the server;
 // delete removes it, and the instances `up` runs refuse to be deleted.
-// covers: sql.instances.insert, sql.instances.get, sql.instances.list, sql.instances.patch, sql.instances.update, sql.instances.restart, sql.instances.delete, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
+// A user, a database and a row made before the patch, whose flag change
+// restarts the server, are there after it and after the restart, in
+// either mode (#1740), as Google keeps an instance's data across both.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.list, sql.instances.patch, sql.instances.update, sql.instances.restart, sql.instances.delete, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral, sql.users.insert, sql.databases.insert
 func TestCloudSQLInstanceWrites(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
@@ -61,21 +64,28 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 	project := h.Project()
 	type engine struct {
 		version, flag, value, show string
-		dsn                        func(drv, conn string) string
-		register                   func(string, ...cloudsqlconn.Option) (func() error, error)
+		// probe is the table the row is kept in, and hasDB the query
+		// that finds the database keepdb.
+		probe, hasDB string
+		dsn          func(drv, conn, user, password string) string
+		register     func(string, ...cloudsqlconn.Option) (func() error, error)
 	}
 	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
 	var engines []engine
 	if os.Getenv(EnvCloudSQL) != "" {
 		engines = append(engines, engine{version: "POSTGRES_17", flag: "max_connections", value: "42",
-			dsn: func(_, conn string) string {
-				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+			dsn: func(_, conn, user, password string) string {
+				return fmt.Sprintf("host=%s user=%s password=%s dbname=postgres sslmode=disable", conn, user, password)
 			}, show: "SHOW max_connections",
+			probe: "keep_probe", hasDB: "SELECT count(*) FROM pg_database WHERE datname = 'keepdb'",
 			register: func(n string, o ...cloudsqlconn.Option) (func() error, error) { return pgxv5.RegisterDriver(n, o...) }})
 	}
 	if os.Getenv(EnvMySQL) != "" {
 		engines = append(engines, engine{version: "MYSQL_8_4", flag: "max_connections", value: "42",
-			dsn: func(drv, conn string) string { return fmt.Sprintf("root:Root-pass1@%s(%s)/mysql", drv, conn) }, show: "SELECT @@max_connections",
+			dsn: func(drv, conn, user, password string) string {
+				return fmt.Sprintf("%s:%s@%s(%s)/", user, password, drv, conn)
+			}, show: "SELECT @@max_connections",
+			probe: "keepdb.keep_probe", hasDB: "SELECT count(*) FROM information_schema.schemata WHERE schema_name = 'keepdb'",
 			register: func(n string, o ...cloudsqlconn.Option) (func() error, error) {
 				return cloudsqlmysql.RegisterDriver(n, o...)
 			}})
@@ -127,7 +137,9 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 				t.Errorf("instances.list does not list %s", name)
 			}
 
-			query := func(q string) string {
+			// queryAs runs the statements as user through the connector and
+			// answers the last one's one value.
+			queryAs := func(user, password string, qs ...string) string {
 				t.Helper()
 				drv := "cloudsql-" + strings.ToLower(e.version) + "-" + suffix + fmt.Sprint(time.Now().UnixNano())
 				cleanup, err := e.register(drv, connectorOptions(h)...)
@@ -135,21 +147,61 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer cleanup()
-				db, err := sql.Open(drv, e.dsn(drv, in.ConnectionName))
+				db, err := sql.Open(drv, e.dsn(drv, in.ConnectionName, user, password))
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer db.Close()
 				ctx, cancel := context.WithTimeout(h.Context(), time.Minute)
 				defer cancel()
+				last := len(qs) - 1
+				for _, q := range qs[:last] {
+					if _, err := db.ExecContext(ctx, q); err != nil {
+						t.Fatalf("%s as %s through the connector: %v", q, user, err)
+					}
+				}
 				var out string
-				if err := db.QueryRowContext(ctx, q).Scan(&out); err != nil {
-					t.Fatalf("%s through the connector: %v", q, err)
+				if err := db.QueryRowContext(ctx, qs[last]).Scan(&out); err != nil {
+					t.Fatalf("%s as %s through the connector: %v", qs[last], user, err)
 				}
 				return out
 			}
+			root := "postgres"
+			if strings.HasPrefix(e.version, "MYSQL") {
+				root = "root"
+			}
+			query := func(q string) string { t.Helper(); return queryAs(root, "Root-pass1", q) }
 			if got := query("SELECT 1"); got != "1" {
 				t.Errorf("SELECT 1: %s", got)
+			}
+
+			// What the restarts below must keep (#1740): a user and a
+			// database made through the API, and a row.
+			op, err = svc.Users.Insert(project, name, &sqladmin.User{Name: "keeper", Password: "Keep-pass1"}).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitSQLOp(t, svc, project, op)
+			op, err = svc.Databases.Insert(project, name, &sqladmin.Database{Name: "keepdb"}).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitSQLOp(t, svc, project, op)
+			if got := queryAs(root, "Root-pass1", "CREATE TABLE "+e.probe+" (v varchar(32) NOT NULL)",
+				"INSERT INTO "+e.probe+" VALUES ('kept')", "SELECT count(*) FROM "+e.probe); got != "1" {
+				t.Fatalf("rows written: %s", got)
+			}
+			kept := func(after string) {
+				t.Helper()
+				if got := queryAs("keeper", "Keep-pass1", "SELECT 1"); got != "1" {
+					t.Errorf("the user keeper's login after %s: %s", after, got)
+				}
+				if got := query(e.hasDB); got != "1" {
+					t.Errorf("the database keepdb after %s: %s", after, got)
+				}
+				if got := query("SELECT v FROM " + e.probe); got != "kept" {
+					t.Errorf("the row after %s: %q", after, got)
+				}
 			}
 
 			// Deletion protection.
@@ -176,6 +228,7 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 			if got := query(e.show); got != e.value {
 				t.Errorf("%s after the patch: %s, want %s", e.show, got, e.value)
 			}
+			kept("the flag change restarted the server")
 
 			// update replaces the settings: the labels go.
 			op, err = svc.Instances.Update(project, name, &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{
@@ -196,6 +249,7 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 			if got := query("SELECT 1"); got != "1" {
 				t.Errorf("SELECT 1 after restart: %s", got)
 			}
+			kept("instances.restart")
 
 			op, err = svc.Instances.Delete(project, name).Do()
 			if err != nil {

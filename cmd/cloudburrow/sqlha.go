@@ -40,18 +40,27 @@ func nodeName(name string, node int) string {
 // instance's Service, which selects the primary's server; a server that
 // has been a standby keeps the standby's start, at its epoch.
 func (p *sqlProvisioner) nodeBackend(spec sqladmin.Spec, node int) components.Backend {
-	b := p.backend(spec)
-	b.Name = nodeName(spec.Name, node)
+	base := spec
+	if spec.HAEpochs[node] > 0 {
+		// A standby replicates from its own instance's primary, whatever
+		// that instance replicates from: a REGIONAL read replica's standby
+		// (a blue-green deployment's green instance, #1614) is not a replica
+		// of its master, so its server is the same before and after a
+		// switchover makes the instance a primary, and is not restarted.
+		base.MasterInstanceName, base.External = "", nil
+	}
+	b := p.backend(base)
+	b.Name = nodeName(spec.ServerName(), node)
 	if node == 0 {
-		b.Selects = nodeName(spec.Name, spec.PrimaryNode())
+		b.Selects = nodeName(spec.ServerName(), spec.PrimaryNode())
 	}
 	if e := spec.HAEpochs[node]; e > 0 {
 		if spec.MySQL() {
-			b = components.CloudSQLMySQLStandbyBackend(b, components.SQLInstancePrefix+spec.Name, e,
+			b = components.CloudSQLMySQLStandbyBackend(b, components.SQLInstancePrefix+spec.ServerName(), e,
 				2+crc32.ChecksumIEEE([]byte(b.Name))%1000000)
 			b.Env["CLOUDSQL_STANDBY_PASSWORD"] = spec.HAPassword
 		} else {
-			b = components.CloudSQLStandbyBackend(b, components.SQLInstancePrefix+spec.Name, e)
+			b = components.CloudSQLStandbyBackend(b, components.SQLInstancePrefix+spec.ServerName(), e)
 		}
 	}
 	return b
@@ -105,8 +114,8 @@ func (p *sqlProvisioner) standby(ctx context.Context, spec sqladmin.Spec) error 
 	if spec.MySQL() {
 		return p.mysqlStandby(ctx, spec)
 	}
-	primary := nodeName(spec.Name, spec.PrimaryNode())
-	sb := nodeName(spec.Name, 1-spec.PrimaryNode())
+	primary := nodeName(spec.ServerName(), spec.PrimaryNode())
+	sb := nodeName(spec.ServerName(), 1-spec.PrimaryNode())
 	if !spec.Regional() {
 		if spec.HAEpochs == [2]int{} {
 			return nil // never had a standby
@@ -165,8 +174,8 @@ func (p *sqlProvisioner) standby(ctx context.Context, spec sqladmin.Spec) error 
 // Failover makes the standby the primary and rebuilds the old primary as
 // the new standby (#1408).
 func (p *sqlProvisioner) Failover(ctx context.Context, from, to sqladmin.Spec) error {
-	oldPrimary := nodeName(from.Name, from.PrimaryNode())
-	newPrimary := nodeName(to.Name, to.PrimaryNode())
+	oldPrimary := nodeName(from.ServerName(), from.PrimaryNode())
+	newPrimary := nodeName(to.ServerName(), to.PrimaryNode())
 	// The Service first: a client reconnecting once the old primary has
 	// stopped reaches the new one.
 	if err := p.applyService(ctx, to); err != nil {
@@ -223,8 +232,19 @@ func (p *sqlProvisioner) mysqlScript(ctx context.Context, deployment, script str
 // from: GTIDs on, by MySQL's online procedure, the semi-synchronous source
 // plugin, and the standby's user, created only when missing, so a primary
 // with semi-synchronous replication on and no standby yet commits nothing
-// it would wait on.
+// it would wait on. A primary server that is itself a read replica (a
+// high-availability blue-green deployment's green instance, #1614) is
+// super_read_only: the setup lifts it while it runs, and creates the user
+// with its binary log off, so the replica has no transaction of its own
+// its source lacks (its standby copies the user when it is set up).
 const mysqlStandbySource = `q() { mysql $MYSQL_LOCAL -N -e "$1"; }
+sro=$(q 'SELECT @@GLOBAL.super_read_only')
+nolog=
+if [ "$sro" = 1 ]; then
+  nolog='SET SESSION sql_log_bin = 0; '
+  trap "mysql $MYSQL_LOCAL -e 'SET GLOBAL super_read_only = ON'" EXIT
+  q 'SET GLOBAL super_read_only = OFF'
+fi
 mode=$(q 'SELECT @@GLOBAL.gtid_mode')
 if [ "$mode" != ON ]; then
   q 'SET PERSIST enforce_gtid_consistency = ON'
@@ -242,7 +262,7 @@ fi
 [ "$(q "SELECT COUNT(*) FROM information_schema.plugins WHERE plugin_name = 'rpl_semi_sync_replica'")" = 1 ] ||
   q "INSTALL PLUGIN rpl_semi_sync_replica SONAME 'semisync_replica.so'"
 if [ "$(q "SELECT COUNT(*) FROM mysql.user WHERE user = '` + components.SQLStandbyUser + `'")" = 0 ]; then
-  q "CREATE USER '` + components.SQLStandbyUser + `'@'%' IDENTIFIED BY '$1'; GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '` + components.SQLStandbyUser + `'@'%'"
+  q "${nolog}CREATE USER '` + components.SQLStandbyUser + `'@'%' IDENTIFIED BY '$1'; GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '` + components.SQLStandbyUser + `'@'%'"
 fi
 `
 
@@ -302,8 +322,8 @@ q "STOP REPLICA; RESET REPLICA ALL; SET PERSIST rpl_semi_sync_replica_enabled = 
 
 // mysqlStandby is standby for a MySQL instance.
 func (p *sqlProvisioner) mysqlStandby(ctx context.Context, spec sqladmin.Spec) error {
-	primary := nodeName(spec.Name, spec.PrimaryNode())
-	sb := nodeName(spec.Name, 1-spec.PrimaryNode())
+	primary := nodeName(spec.ServerName(), spec.PrimaryNode())
+	sb := nodeName(spec.ServerName(), 1-spec.PrimaryNode())
 	if !spec.Regional() {
 		if spec.HAEpochs == [2]int{} {
 			return nil
