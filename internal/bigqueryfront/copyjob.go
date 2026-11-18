@@ -66,8 +66,7 @@ import (
 // 501, and nothing is copied: a CLONE, SNAPSHOT or RESTORE of several
 // sources, a CLONE into a table that exists (BigQuery's documentation
 // implies a clone may overwrite one, "If the table clone overwrites an
-// existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration with a
-// partition decorator (the key is given to a whole table: copykey.go, #1762),
+// existing table", but gives no writeDisposition rule for it),
 // destinationExpirationTime into a table that exists (whether it changes
 // that table's expiration is not documented), and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
@@ -195,15 +194,6 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	if keyWhy != "" {
 		invalid(keyWhy)
 		return
-	}
-	if key != "" {
-		for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
-			if _, _, ok := decorated(t.TableID); ok {
-				notImplemented("of or into a partition (" + t.TableID + ") with destinationEncryptionConfiguration. " +
-					"CloudBurrow gives the key to a whole destination table.")
-				return
-			}
-		}
 	}
 	expiration, hasExpiration, expOK := copyExpiration(c.DestinationExpirationTime)
 	if !expOK {

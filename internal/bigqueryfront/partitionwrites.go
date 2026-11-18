@@ -516,11 +516,13 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: reason, Message: msg})
 		return true
 	}
-	if key != "" { // #1762, copykey.go: a key comes here with no decorator
+	if key != "" { // #1762, #1822, copykey.go
 		if why := keyRegionMismatch(key, of(dest.base).datasetLocation(r, dest.base.DatasetID)); why != "" {
 			return fail("invalid", why)
 		}
-		if !made && write != "WRITE_TRUNCATE" && f.copyTableMeta(r, dest.base).key != key {
+		// A partition's WRITE_TRUNCATE replaces the partition, not the
+		// table, whose key stays (#1822, copykey.go).
+		if !made && (write != "WRITE_TRUNCATE" || dest.dec != "") && f.copyTableMeta(r, dest.base).key != key {
 			return fail("invalid", keyMismatchMessage)
 		}
 	}
