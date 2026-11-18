@@ -2,6 +2,7 @@ package rest
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -430,9 +431,55 @@ func (t *Transcoder) decodeBody(r *http.Request, m proto.Message) error {
 		return nil
 	}
 	if err := protojson.Unmarshal(b, m); err != nil {
+		if snakeMaskBody(b, m) {
+			return nil
+		}
 		return apierror.InvalidArgument("the request body is not a valid %s", m.ProtoReflect().Descriptor().Name())
 	}
 	return nil
+}
+
+// snakeMaskBody decodes a body whose top-level FieldMask names its paths
+// in snake_case ("updateMask": "display_name"), which protojson refuses
+// and Google accepts: Terraform's google_service_account sends one
+// (#1747). It reports whether that decoded the body into m.
+func snakeMaskBody(b []byte, m proto.Message) bool {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(b, &raw) != nil {
+		return false
+	}
+	fields := m.ProtoReflect().Descriptor().Fields()
+	masks := map[protoreflect.FieldDescriptor]string{}
+	for i := 0; i < fields.Len(); i++ {
+		fd := fields.Get(i)
+		if fd.Message() == nil || fd.Message().FullName() != "google.protobuf.FieldMask" || fd.IsList() {
+			continue
+		}
+		v, ok := raw[fd.JSONName()]
+		var paths string
+		if !ok || json.Unmarshal(v, &paths) != nil || !strings.Contains(paths, "_") {
+			continue
+		}
+		masks[fd] = paths
+		delete(raw, fd.JSONName())
+	}
+	if len(masks) == 0 {
+		return false
+	}
+	rest, err := json.Marshal(raw)
+	if err != nil || protojson.Unmarshal(rest, m) != nil {
+		return false
+	}
+	for fd, paths := range masks {
+		mask := m.ProtoReflect().Mutable(fd).Message()
+		list := mask.Mutable(mask.Descriptor().Fields().ByName("paths")).List()
+		for _, p := range strings.Split(paths, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				list.Append(protoreflect.ValueOfString(p))
+			}
+		}
+	}
+	return true
 }
 
 // writeStatusError writes the AIP-193 error envelope: code, message, status

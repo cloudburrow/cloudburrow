@@ -42,7 +42,9 @@ func (f *fakeDirectory) Granted(member, account, permission string) bool {
 	return f.grants[member+" "+permission]
 }
 
-func (f *fakeDirectory) Signer(string) (*rsa.PrivateKey, string, error) { return f.key, "system-key", nil }
+func (f *fakeDirectory) Signer(string) (*rsa.PrivateKey, string, error) {
+	return f.key, "system-key", nil
+}
 
 func (f *fakeDirectory) Key(kid string, _ time.Time) (*rsa.PublicKey, string, bool, bool) {
 	if kid != "user-key" {

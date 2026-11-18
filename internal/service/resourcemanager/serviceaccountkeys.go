@@ -63,6 +63,9 @@ type saKey struct {
 	ValidAfter  time.Time `json:"validAfter"`
 	ValidBefore time.Time `json:"validBefore"`
 	Disabled    bool      `json:"disabled,omitempty"`
+	// Deleted keys are kept, hidden, so the token endpoint refuses an
+	// assertion signed with one rather than taking it as a stranger's.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 func (k *saKey) privateKey() (*rsa.PrivateKey, error) {
@@ -174,7 +177,7 @@ func (a *serviceAccount) rotateSystemKey(now time.Time) error {
 func (a *serviceAccount) userKeys() int {
 	n := 0
 	for _, k := range a.Keys {
-		if !k.System {
+		if !k.System && !k.Deleted {
 			n++
 		}
 	}
@@ -279,7 +282,7 @@ func (r *Registry) UploadServiceAccountKey(name string, data []byte) (*adminpb.S
 		return nil, apierror.FailedPrecondition("Precondition check failed.")
 	}
 	for _, k := range a.Keys {
-		if k.CertPEM == string(pem.EncodeToMemory(b)) {
+		if !k.Deleted && k.CertPEM == string(pem.EncodeToMemory(b)) {
 			return nil, apierror.AlreadyExists("The key already exists for this service account.")
 		}
 	}
@@ -315,6 +318,9 @@ func (r *Registry) ListServiceAccountKeys(req *adminpb.ListServiceAccountKeysReq
 	}
 	out := &adminpb.ListServiceAccountKeysResponse{}
 	for i := range a.Keys {
+		if a.Keys[i].Deleted {
+			continue
+		}
 		k := a.Keys[i].proto(a, adminpb.ServiceAccountPublicKeyType_TYPE_NONE)
 		if len(want) > 0 && !want[k.KeyType] {
 			continue
@@ -335,7 +341,7 @@ func (r *Registry) keyLocked(name string) (*serviceAccount, int, error) {
 		return nil, 0, err
 	}
 	for i := range a.Keys {
-		if a.Keys[i].ID == id {
+		if a.Keys[i].ID == id && !a.Keys[i].Deleted {
 			return a, i, nil
 		}
 	}
@@ -364,7 +370,7 @@ func (r *Registry) DeleteServiceAccountKey(name string) error {
 	if a.Keys[i].System {
 		return apierror.FailedPrecondition("A system-managed key cannot be deleted.")
 	}
-	a.Keys = append(a.Keys[:i], a.Keys[i+1:]...)
+	a.Keys[i].Deleted = true
 	return r.putSALocked(a)
 }
 
@@ -383,31 +389,29 @@ func (r *Registry) SetServiceAccountKeyDisabled(name string, disabled bool) erro
 	return r.putSALocked(a)
 }
 
-// ServiceAccountPublicKey is the public key an assertion's key ID names,
-// with the email of its account, when the key and its account are live,
-// enabled and valid at now: what the token endpoint accepts a key file's
-// assertion with.
-func (r *Registry) ServiceAccountPublicKey(keyID string, now time.Time) (*rsa.PublicKey, string, bool) {
+// ServiceAccountKeyState is the public key a key ID names, with the email
+// of its account: known is whether any account has the key, usable whether
+// the key and its account are live, enabled and the key valid at now. It
+// is what the token endpoint accepts a key file's assertion with.
+func (r *Registry) ServiceAccountKeyState(keyID string, now time.Time) (pub *rsa.PublicKey, email string, known, usable bool) {
 	if keyID == "" {
-		return nil, "", false
+		return nil, "", false, false
 	}
 	r.mu.Lock()
 	defer r.unlock()
 	all, err := r.accountsLocked("")
 	if err != nil {
-		return nil, "", false
+		return nil, "", false, false
 	}
 	for _, a := range all {
 		for _, k := range a.Keys {
 			if k.ID != keyID {
 				continue
 			}
-			if a.Deleted || a.Disabled || k.Disabled || now.Before(k.ValidAfter) || !now.Before(k.ValidBefore) {
-				return nil, "", false
-			}
 			pub := k.publicKey()
-			return pub, a.email(), pub != nil
+			ok := !a.Deleted && !a.Disabled && !k.Disabled && !k.Deleted && !now.Before(k.ValidAfter) && now.Before(k.ValidBefore) && pub != nil
+			return pub, a.email(), true, ok
 		}
 	}
-	return nil, "", false
+	return nil, "", false, false
 }

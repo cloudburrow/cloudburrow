@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -51,12 +53,19 @@ func newIAMPrincipal(t *testing.T, h *Harness, project, name string, roles ...st
 		meta = "http://" + meta
 	}
 	ctx := h.Context()
-	ic, err := credentials.NewIamCredentialsRESTClient(ctx, option.WithEndpoint(meta), option.WithoutAuthentication())
+	// The token is minted through IAM Credentials as the ADC fixture's
+	// account, granted the Token Creator role on a service account of
+	// the test's own (#1747).
+	me, source := instanceAccount(t)
+	ic, err := credentials.NewIamCredentialsRESTClient(ctx, option.WithEndpoint(meta),
+		option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: source}}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ic.Close()
-	p := &iamPrincipal{email: fmt.Sprintf("%s-%d@%s.iam.gserviceaccount.com", name, time.Now().UnixNano()%1e8, project)}
+	sa := newServiceAccount(t, h, project, name)
+	grantOn(t, h, sa.GetName(), "roles/iam.serviceAccountTokenCreator", "serviceAccount:"+me)
+	p := &iamPrincipal{email: sa.GetEmail()}
 	change := projectRoles(t, h, project, "serviceAccount:"+p.email)
 	p.grant = func(role string) { change(role, true) }
 	p.revoke = func(role string) { change(role, false) }

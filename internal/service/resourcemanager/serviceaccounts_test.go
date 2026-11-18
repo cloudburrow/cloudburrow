@@ -233,7 +233,7 @@ func TestServiceAccountKeysThroughTheOfficialClient(t *testing.T) {
 	if err != nil || !priv.(*rsa.PrivateKey).PublicKey.Equal(cert.PublicKey) {
 		t.Errorf("the certificate is not the file's key's: %v", err)
 	}
-	if pub, who, ok := reg.ServiceAccountPublicKey(id, time.Now()); !ok || who != sa.GetEmail() || !pub.Equal(cert.PublicKey) {
+	if pub, who, known, ok := reg.ServiceAccountKeyState(id, time.Now()); !known || !ok || who != sa.GetEmail() || !pub.Equal(cert.PublicKey) {
 		t.Errorf("ServiceAccountPublicKey = %v, %v", who, ok)
 	}
 
@@ -264,14 +264,14 @@ func TestServiceAccountKeysThroughTheOfficialClient(t *testing.T) {
 	if err := c.DisableServiceAccountKey(ctx, &adminpb.DisableServiceAccountKeyRequest{Name: key.GetName()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok := reg.ServiceAccountPublicKey(id, time.Now()); ok {
+	if _, _, known, ok := reg.ServiceAccountKeyState(id, time.Now()); !known || ok {
 		t.Error("a disabled key still signs in")
 	}
 	if err := c.EnableServiceAccountKey(ctx, &adminpb.EnableServiceAccountKeyRequest{Name: key.GetName()}); err != nil {
 		t.Fatal(err)
 	}
 	_ = c.DisableServiceAccount(ctx, &adminpb.DisableServiceAccountRequest{Name: sa.GetName()})
-	if _, _, ok := reg.ServiceAccountPublicKey(id, time.Now()); ok {
+	if _, _, known, ok := reg.ServiceAccountKeyState(id, time.Now()); !known || ok {
 		t.Error("a disabled account's key still signs in")
 	}
 	_ = c.EnableServiceAccount(ctx, &adminpb.EnableServiceAccountRequest{Name: sa.GetName()})
@@ -374,6 +374,11 @@ func TestServiceAccountsOverREST(t *testing.T) {
 		UpdateMask: "description"}).Do()
 	if err != nil || p.Description != "d" || p.DisplayName != "REST" {
 		t.Errorf("Patch = %+v, %v", p, err)
+	}
+	// Terraform names the mask's paths in snake_case, which Google takes.
+	if p, err := svc.Projects.ServiceAccounts.Patch(sa.Name, &iamv1.PatchServiceAccountRequest{ServiceAccount: &iamv1.ServiceAccount{DisplayName: "snake"},
+		UpdateMask: "display_name"}).Do(); err != nil || p.DisplayName != "snake" {
+		t.Errorf("Patch with a snake_case mask = %+v, %v", p, err)
 	}
 	k, err := svc.Projects.ServiceAccounts.Keys.Create(sa.Name, &iamv1.CreateServiceAccountKeyRequest{}).Do()
 	if err != nil {
