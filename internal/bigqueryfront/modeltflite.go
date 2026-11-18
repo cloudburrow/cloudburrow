@@ -47,7 +47,7 @@ import (
 // not run, a quantized model, a STRING tensor or control flow is 501,
 // naming what is missing.
 //
-// UNVERIFIED (2026-11-17), chosen here as Google does not say: each row
+// UNVERIFIED (docs re-read 2026-11-17: bigqueryml-syntax-create-tflite), chosen here as Google does not say: each row
 // runs as a batch of one; a NULL input is 400 (a TensorFlow Lite tensor
 // has no missing value); the create-tflite page's "You can only use an
 // imported TensorFlow Lite model with an object table" is not enforced,

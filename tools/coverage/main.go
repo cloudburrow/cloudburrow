@@ -52,6 +52,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
+	bqconnection "google.golang.org/api/bigqueryconnection/v1"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
 
@@ -351,6 +352,9 @@ func bigqueryMethods() []string {
 			out = append(out, "bigquery."+lower(f.Name)+"."+lower(f.Type.Method(j).Name))
 		}
 	}
+	// The BigQuery Connection API (#1755), served on the BigQuery
+	// front's port, by its discovery IDs.
+	out = append(out, discoveryMethods("bigqueryconnection", reflect.TypeOf(bqconnection.Service{}))...)
 	sort.Strings(out)
 	return out
 }

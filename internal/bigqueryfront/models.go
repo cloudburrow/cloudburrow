@@ -805,8 +805,8 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 			}
 			i = next
 		case stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
-			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Google-hosted Vertex AI or Cloud AI endpoint through a " +
-				"Cloud resource connection of the BigQuery Connection API, which CloudBurrow does not serve. Nothing was run."
+			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): CloudBurrow serves the BigQuery Connection API (#1755), but its " +
+				"BigQuery does not yet route a remote model's calls through its connection to the instance's local Vertex AI endpoints (#1755 follow-up), and never to Google's. Nothing was run."
 		}
 	}
 	d.opts = defaultMLOptions()

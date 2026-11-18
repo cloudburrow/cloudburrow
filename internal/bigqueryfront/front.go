@@ -229,6 +229,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
+	connections := &bqConnections{}                 // connections.go, #1755
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.logf != nil {
@@ -248,11 +249,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		policies.now = clock
 	}
 	models.now = clock
+	connections.now = clock
 	functions := &knownFunctions{started: clock().UnixMilli(), now: clock}
 	if o.stateDir != "" {
 		dropped.keep(droppedStateFile(o.stateDir), o.logf)         // dropped.go, #1460
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
+		connections.keep(connectionsStateFile(o.stateDir), o.logf) // connections.go, #1755
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -313,6 +316,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
+			return
+		}
+		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
 			return
 		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,

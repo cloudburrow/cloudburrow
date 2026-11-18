@@ -1349,6 +1349,18 @@ var parityRows = []parityRow{
 	{Resource: "BigQuery dataset replace", Service: "bigquery",
 		Methods:  []string{"bigquery.datasets.update"},
 		Excluded: "the replacing form of the edit the console makes with datasets.patch, which changes the fields Edit dataset holds without clearing the ones it does not show"},
+	// The BigQuery Connection API (#1755): listed on the BigQuery page;
+	// the forms to create, edit and delete connections are #1760's.
+	{Resource: "BigQuery connections", Service: "bigquery",
+		Methods:  []string{"bigqueryconnection.projects.locations.connections.list"},
+		Provider: "bigquery", Offers: "The BigQuery page's External connections (us) summary: each connection's ID, type and the service account BigQuery gave it, as connections.list reads them (#1755)",
+		Tests: []string{"TestBigQueryConnectionsSummary"}},
+	{Resource: "BigQuery connection writes and IAM", Service: "bigquery",
+		Methods: []string{"bigqueryconnection.projects.locations.connections.create", "bigqueryconnection.projects.locations.connections.get",
+			"bigqueryconnection.projects.locations.connections.patch", "bigqueryconnection.projects.locations.connections.delete",
+			"bigqueryconnection.projects.locations.connections.getIamPolicy", "bigqueryconnection.projects.locations.connections.setIamPolicy",
+			"bigqueryconnection.projects.locations.connections.testIamPermissions"},
+		Issue: 1760},
 	{Resource: "BigQuery service account", Service: "bigquery",
 		Methods:  []string{"bigquery.projects.getServiceAccount"},
 		Provider: "bigquery", Offers: "The BigQuery page's Project summary: the project ID and the BigQuery service account projects.getServiceAccount names, the account a customer-managed encryption key is granted to (#1270)",
