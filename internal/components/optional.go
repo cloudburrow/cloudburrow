@@ -663,6 +663,23 @@ const (
 	MemorystoreRedis70Image = "redis:7.0.15-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
 )
 
+// Redis images of Memorystore's end-of-life versions (#1524), each the
+// last release of its line the Docker official image built (3.2.12 in
+// 2018, 4.0.14 in 2020, 5.0.14 in 2022; Memorystore runs 3.2.13, 4.0.14
+// and 5.0.14), pinned by the index digest (linux/amd64 and linux/arm64
+// among others), BSD-3-Clause.
+const (
+	MemorystoreRedis32Image = "redis:3.2.12-alpine@sha256:e9083e10f5f81d350a3f687d582aefd06e114890b03e7f08a447fa1a1f66d967"
+	MemorystoreRedis40Image = "redis:4.0.14-alpine@sha256:aaf7c123077a5e45ab2328b5ef7e201b5720616efac498d55e65a7afbb96ae20"
+	MemorystoreRedis50Image = "redis:5.0.14-alpine@sha256:1a3c609295332f1ce603948142a132656c92a08149d7096e203058533c415b8c"
+)
+
+// memorystoreBeforeReplicaOf is whether image is a Redis before 5.0,
+// which names replication SLAVEOF only.
+func memorystoreBeforeReplicaOf(image string) bool {
+	return strings.HasPrefix(image, "redis:3.") || strings.HasPrefix(image, "redis:4.")
+}
+
 // Valkey images of Memorystore for Valkey's other engine versions (#1557),
 // each the latest release of its line, pinned by the index digest
 // (linux/amd64 and linux/arm64 among others): VALKEY_7_2 is Valkey 7.2.14
@@ -713,7 +730,11 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		args = append(args, "--requirepass", password)
 	}
 	if h, p, err := net.SplitHostPort(o.ReplicaOf); err == nil {
-		args = append(args, "--replicaof", h, p)
+		flag := "--replicaof"
+		if memorystoreBeforeReplicaOf(image) {
+			flag = "--slaveof" // REPLICAOF is new in Redis 5.0
+		}
+		args = append(args, flag, h, p)
 	}
 	dir := ""
 	if persistent && o.Dir != "" && strings.HasPrefix(o.Dir, "/data/") {

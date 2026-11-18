@@ -601,6 +601,9 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 // memorystoreImages are the server images of redis_version (#1386); the
 // Valkey image, REDIS_7_2, is the default.
 var memorystoreImages = map[string]string{
+	"REDIS_3_2": components.MemorystoreRedis32Image,
+	"REDIS_4_0": components.MemorystoreRedis40Image,
+	"REDIS_5_0": components.MemorystoreRedis50Image,
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
 	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 is the

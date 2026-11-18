@@ -593,8 +593,21 @@ func checkCreate(in *redispb.Instance) error {
 	if err := checkVersion(in.GetRedisVersion()); err != nil {
 		return err
 	}
-	return checkConfigs(in.GetRedisConfigs(), in.GetMemorySizeGb())
+	if in.GetReadReplicasMode() == redispb.Instance_READ_REPLICAS_ENABLED && !atLeast(in.GetRedisVersion(), "REDIS_5_0") {
+		return errReadReplicasVersion
+	}
+	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION && preTLS(in.GetRedisVersion()) {
+		return apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION on %s is not served yet: Redis before 6.0 has no TLS of its own, "+
+			"and CloudBurrow serves in-transit encryption with the server's own TLS (Memorystore puts a TLS endpoint of its own in front of "+
+			"these versions; #1768 tracks building one). Use REDIS_6_X or later for in-transit encryption", in.GetRedisVersion())
+	}
+	return checkConfigs(in.GetRedisConfigs(), in.GetMemorySizeGb(), in.GetRedisVersion())
 }
+
+// errReadReplicasVersion is Memorystore's rule: "Read replicas can only be
+// enabled on instances that use Redis version 5.0 or higher"
+// (docs.cloud.google.com/memorystore/docs/redis/about-read-replicas, #1524).
+var errReadReplicasVersion = apierror.InvalidArgument("read replicas can only be enabled on instances that use Redis version 5.0 or higher")
 
 // newAuthString is a fresh AUTH string, shaped as Google's: a UUID.
 func newAuthString() (string, error) {
@@ -679,7 +692,7 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 	if set["redis_configs"] {
 		next.RedisConfigs = copyMap(in.GetRedisConfigs())
 	}
-	if err := checkConfigs(next.RedisConfigs, next.MemorySizeGB); err != nil {
+	if err := checkConfigs(next.RedisConfigs, next.MemorySizeGB, next.version()); err != nil {
 		return nil, err
 	}
 	rescale := false
@@ -690,6 +703,9 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 		if set["read_replicas_mode"] {
 			switch in.GetReadReplicasMode() {
 			case redispb.Instance_READ_REPLICAS_ENABLED:
+				if !atLeast(r.version(), "REDIS_5_0") {
+					return nil, errReadReplicasVersion
+				}
 				next.ReadReplicas = true
 			default:
 				if r.ReadReplicas {

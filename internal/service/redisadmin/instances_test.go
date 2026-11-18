@@ -255,7 +255,22 @@ func TestCreateRefusals(t *testing.T) {
 		{"no tier", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: &redispb.Instance{MemorySizeGb: 1}}, codes.InvalidArgument},
 		{"no size", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.MemorySizeGb = 0 })}, codes.InvalidArgument},
 		{"standard on servers that do not replicate", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.Tier = redispb.Instance_STANDARD_HA })}, codes.Unimplemented},
-		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_5_0" })}, codes.Unimplemented},
+		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_2_8" })}, codes.InvalidArgument},
+		{"lfu before 4.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
+			i.RedisVersion, i.RedisConfigs = "REDIS_3_2", map[string]string{"maxmemory-policy": "allkeys-lfu"}
+		})}, codes.InvalidArgument},
+		{"activedefrag before 4.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
+			i.RedisVersion, i.RedisConfigs = "REDIS_3_2", map[string]string{"activedefrag": "yes"}
+		})}, codes.InvalidArgument},
+		{"streams before 5.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
+			i.RedisVersion, i.RedisConfigs = "REDIS_4_0", map[string]string{"stream-node-max-entries": "10"}
+		})}, codes.InvalidArgument},
+		{"read replicas before 5.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
+			i.RedisVersion, i.Tier, i.ReadReplicasMode = "REDIS_4_0", redispb.Instance_STANDARD_HA, redispb.Instance_READ_REPLICAS_ENABLED
+		})}, codes.InvalidArgument},
+		{"TLS before 6.0", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
+			i.RedisVersion, i.TransitEncryptionMode = "REDIS_5_0", redispb.Instance_SERVER_AUTHENTICATION
+		})}, codes.Unimplemented},
 		{"persistence period", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
 			i.PersistenceConfig = &redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: 99}
 		})}, codes.InvalidArgument},

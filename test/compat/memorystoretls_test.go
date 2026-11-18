@@ -127,9 +127,10 @@ func TestMemorystoreInTransitEncryption(t *testing.T) {
 	}
 	for _, v := range []string{"REDIS_3_2", "REDIS_4_0", "REDIS_5_0"} {
 		_, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "eol",
-			Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, RedisVersion: v}})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "end of life") {
-			t.Errorf("CreateInstance %s: %v, want UNIMPLEMENTED, end of life", v, err)
+			Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, RedisVersion: v,
+				TransitEncryptionMode: redispb.Instance_SERVER_AUTHENTICATION}})
+		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "no TLS of its own") {
+			t.Errorf("CreateInstance %s with in-transit encryption: %v, want UNIMPLEMENTED, no TLS of its own (#1768)", v, err)
 		}
 	}
 }

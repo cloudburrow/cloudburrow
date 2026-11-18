@@ -2,6 +2,7 @@ package redisadmin
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -26,10 +27,28 @@ const maxmemoryGB = "maxmemory-gb"
 var policies = map[string]bool{"noeviction": true, "allkeys-lru": true, "volatile-lru": true, "allkeys-random": true,
 	"volatile-random": true, "volatile-ttl": true, "volatile-lfu": true, "allkeys-lfu": true}
 
-// checkConfigs refuses a config Memorystore does not accept, and a value
-// that is not one, before any server sees it.
-func checkConfigs(configs map[string]string, sizeGB int32) error {
+// configSince is the first redis_version each config is documented for
+// (docs.cloud.google.com/memorystore/docs/redis/supported-redis-configurations,
+// read 2026-11-17, #1524); one not here is on every version.
+var configSince = map[string]string{
+	"activedefrag": "REDIS_4_0", "lfu-decay-time": "REDIS_4_0", "lfu-log-factor": "REDIS_4_0",
+	"stream-node-max-bytes": "REDIS_5_0", "stream-node-max-entries": "REDIS_5_0",
+}
+
+// lfuPolicies are the eviction policies of Redis 4.0 and later.
+var lfuPolicies = map[string]bool{"volatile-lfu": true, "allkeys-lfu": true}
+
+// checkConfigs refuses a config Memorystore does not accept, a value that
+// is not one, and one the instance's version (redis_version, "" for the
+// default) does not have, before any server sees it.
+func checkConfigs(configs map[string]string, sizeGB int32, version string) error {
 	for k, v := range configs {
+		if since, ok := configSince[k]; ok && !atLeast(version, since) {
+			return apierror.InvalidArgument("redis_configs %q is not available on %s: it needs Redis %s or later", k, version, versionNumber(since))
+		}
+		if k == "maxmemory-policy" && lfuPolicies[v] && !atLeast(version, "REDIS_4_0") {
+			return apierror.InvalidArgument("redis_configs %s=%q is not available on %s: it needs Redis 4.0 or later", k, v, version)
+		}
 		switch k {
 		case maxmemoryGB:
 			gb, err := strconv.ParseFloat(v, 64)
@@ -78,4 +97,10 @@ func maxMemory(sizeGB int32, configs map[string]string) int64 {
 		}
 	}
 	return int64(sizeGB) * gib
+}
+
+// versionNumber is a redis_version as Redis numbers it: REDIS_4_0 is 4.0,
+// REDIS_6_X 6.x.
+func versionNumber(v string) string {
+	return strings.ReplaceAll(strings.TrimPrefix(v, "REDIS_"), "_", ".")
 }

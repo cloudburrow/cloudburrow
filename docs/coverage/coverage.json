@@ -5683,11 +5683,12 @@
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
           "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
           "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
-          "test/compat/memorystoreupgrade_test.go:27 TestMemorystoreVersionsAndUpgrade",
+          "test/compat/memorystoreupgrade_test.go:28 TestMemorystoreVersionsAndUpgrade",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
@@ -5727,6 +5728,7 @@
         "method": "google.cloud.redis.v1.CloudRedis/FailoverInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
           "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
           "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover"
         ]
@@ -5806,7 +5808,8 @@
         "method": "google.cloud.redis.v1.CloudRedis/UpgradeInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreupgrade_test.go:27 TestMemorystoreVersionsAndUpgrade"
+          "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
+          "test/compat/memorystoreupgrade_test.go:28 TestMemorystoreVersionsAndUpgrade"
         ]
       }
     ]

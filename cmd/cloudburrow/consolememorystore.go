@@ -49,7 +49,7 @@ func (memorystoreProvider) ID() string    { return "memorystore" }
 func (memorystoreProvider) Title() string { return "Memorystore" }
 
 const memorystoreNote = "The instance memorystore is the Valkey server --services memorystore runs; it cannot be edited or deleted. " +
-	"Each instance created here is a server of its own, BASIC tier, or a primary and replicas, STANDARD_HA (REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), with or without in-transit encryption (TLS, with a CA of its own)."
+	"Each instance created here is a server of its own, BASIC tier, or a primary and replicas, STANDARD_HA (REDIS_3_2 Redis 3.2, REDIS_4_0 Redis 4.0, REDIS_5_0 Redis 5.0, REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), with or without in-transit encryption (TLS, with a CA of its own)."
 
 // List implements console.Provider: the project's instances.
 func (p memorystoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -169,7 +169,7 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 		{Name: "replicaCount", Label: "Replicas", Type: "number", Pattern: `^[0-5]?$`,
 			Help: "STANDARD_HA: 1 without read replicas, 1 to 5 with them (default 2)."},
 		{Name: "redisVersion", Label: "Version", Type: "select", Default: redisadmin.DefaultRedisVersion, Options: redisadmin.Versions,
-			Help: "REDIS_6_X is Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey 8.1."},
+			Help: "REDIS_3_2 is Redis 3.2.12, REDIS_4_0 Redis 4.0.14, REDIS_5_0 Redis 5.0.14, REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey 8.1. Read replicas need REDIS_5_0 or later, in-transit encryption REDIS_6_X or later."},
 		{Name: "authEnabled", Label: "Enable AUTH", Type: "checkbox",
 			Help: "Clients must AUTH with the instance's AUTH string, which GetInstanceAuthString returns."},
 		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",

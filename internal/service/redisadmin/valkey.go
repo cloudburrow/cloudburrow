@@ -194,10 +194,10 @@ func (v Valkey) Load(ctx context.Context, host string, port int) error {
 		}
 		defer c.ConfigSet(context.WithoutCancel(ctx), "tls-replication", "yes")
 	}
-	if err := c.Do(ctx, "REPLICAOF", host, strconv.Itoa(port)).Err(); err != nil {
+	if err := replicaOf(ctx, c, host, strconv.Itoa(port)); err != nil {
 		return fmt.Errorf("REPLICAOF: %w", err)
 	}
-	defer c.Do(context.WithoutCancel(ctx), "REPLICAOF", "NO", "ONE")
+	defer replicaOf(context.WithoutCancel(ctx), c, "NO", "ONE")
 	for {
 		link, err := infoField(ctx, c, "replication", "master_link_status")
 		if err != nil && !strings.HasPrefix(err.Error(), "LOADING") {
@@ -213,7 +213,17 @@ func (v Valkey) Load(ctx context.Context, host string, port int) error {
 		case <-time.After(savePoll):
 		}
 	}
-	return c.Do(ctx, "REPLICAOF", "NO", "ONE").Err()
+	return replicaOf(ctx, c, "NO", "ONE")
+}
+
+// replicaOf is REPLICAOF host port, or SLAVEOF on a Redis before 5.0
+// (#1524), which has only that name for it.
+func replicaOf(ctx context.Context, c *redis.Client, host, port string) error {
+	err := c.Do(ctx, "REPLICAOF", host, port).Err()
+	if err != nil && strings.HasPrefix(err.Error(), "ERR unknown command") {
+		err = c.Do(ctx, "SLAVEOF", host, port).Err()
+	}
+	return err
 }
 
 // ReplicaOf makes the server a replica of host:port, or a primary with
@@ -225,9 +235,9 @@ func (v Valkey) ReplicaOf(ctx context.Context, host string, port int) error {
 	}
 	defer c.Close()
 	if host == "" {
-		return c.Do(ctx, "REPLICAOF", "NO", "ONE").Err()
+		return replicaOf(ctx, c, "NO", "ONE")
 	}
-	return c.Do(ctx, "REPLICAOF", host, strconv.Itoa(port)).Err()
+	return replicaOf(ctx, c, host, strconv.Itoa(port))
 }
 
 // Replication reads INFO replication: the server's role, how much of the
