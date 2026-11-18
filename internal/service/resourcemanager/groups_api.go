@@ -19,12 +19,12 @@ import (
 // cloudidentity.googleapis.com serves: /v1/groups... The shapes are those of
 // the official discovery client, google.golang.org/api/cloudidentity/v1.
 // Mutations answer a done Operation whose response is the resource, as
-// Google's do. Served: groups create/get/list/lookup/patch/delete;
-// memberships create/get/list/lookup/delete; checkTransitiveMembership;
-// searchTransitiveGroups. groups.search, the security settings,
-// getMembershipGraph, modifyMembershipRoles, searchDirectGroups and
-// searchTransitiveMemberships are refused 501, and so are devices,
-// customers, inbound SSO and the policies.
+// Google's do. Served: groups create/get/list/lookup/patch/delete/search;
+// memberships create/get/list/lookup/delete, checkTransitiveMembership,
+// searchTransitiveGroups, searchDirectGroups, searchTransitiveMemberships,
+// getMembershipGraph and modifyMembershipRoles (groups_search.go). The
+// security settings are refused 501, and so are devices, customers,
+// inbound SSO and the policies.
 
 const (
 	groupType      = "type.googleapis.com/google.apps.cloudidentity.groups.v1.Group"
@@ -51,7 +51,11 @@ func groupJSON(g *Group, full bool) *ci.Group {
 func membershipJSON(g *Group, m GroupMember, full bool) *ci.Membership {
 	out := &ci.Membership{Name: MembershipName(g, m), PreferredMemberKey: &ci.EntityKey{Id: m.Email}, Type: m.Type}
 	for _, r := range m.Roles {
-		out.Roles = append(out.Roles, &ci.MembershipRole{Name: r})
+		role := &ci.MembershipRole{Name: r}
+		if r == "MEMBER" && m.ExpireTime != nil {
+			role.ExpiryDetail = &ci.ExpiryDetail{ExpireTime: ciTime(*m.ExpireTime)}
+		}
+		out.Roles = append(out.Roles, role)
 	}
 	if full {
 		out.CreateTime, out.UpdateTime = ciTime(m.CreateTime), ciTime(m.UpdateTime)
@@ -173,9 +177,22 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		if _, ok := g.Labels[labelDynamic]; ok {
 			in.Dynamic = true
 		}
+		initial := req.URL.Query().Get("initialGroupConfig")
 		out, err := r.CreateGroup(in)
 		if err != nil {
 			return err
+		}
+		if initial == "WITH_INITIAL_OWNER" {
+			// "The end user making the request will be added as the
+			// initial owner of the Group": the account the bearer token
+			// was minted for. A token the instance minted for no account
+			// (its admin token) names no end user, and adds no owner.
+			bearer, _ := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
+			if caller, ok := r.Caller(strings.TrimSpace(bearer)); ok && caller != out.Email {
+				if _, _, err := r.CreateMembership(out.Name(), caller, "", []string{"OWNER"}); err != nil {
+					return err
+				}
+			}
 		}
 		return doneOp(w, groupType, groupJSON(out, true))
 	})
@@ -219,7 +236,33 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		return rest.WriteJSON(w, http.StatusOK, ci.LookupGroupNameResponse{Name: name})
 	})
 	rt.Handle("GET /v1/groups:search", func(w http.ResponseWriter, req *http.Request) error {
-		return apierror.Unimplemented("Not implemented here: groups.search; list the customer's groups with groups.list, or look one up with groups.lookup.")
+		full, err := view(req)
+		if err != nil {
+			return err
+		}
+		gs, err := r.SearchGroups(req.URL.Query().Get("query"))
+		if err != nil {
+			return err
+		}
+		max, def := 1000, 200
+		if full {
+			max, def = 500, 50
+		}
+		byKey := map[string]*Group{}
+		keys := make([]string, 0, len(gs))
+		for _, g := range gs {
+			byKey[g.Email] = g
+			keys = append(keys, g.Email)
+		}
+		page, next, err := pageOf(req, "search:"+req.URL.Query().Get("query"), keys, def, max)
+		if err != nil {
+			return err
+		}
+		resp := ci.SearchGroupsResponse{NextPageToken: next, Groups: []*ci.Group{}}
+		for _, k := range page {
+			resp.Groups = append(resp.Groups, groupJSON(byKey[k], full))
+		}
+		return rest.WriteJSON(w, http.StatusOK, resp)
 	})
 	rt.Handle("GET /v1/groups/{group}", func(w http.ResponseWriter, req *http.Request) error {
 		g, err := r.GetGroup("groups/" + req.PathValue("group"))
@@ -268,13 +311,21 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 			email, ns = m.PreferredMemberKey.Id, m.PreferredMemberKey.Namespace
 		}
 		var roles []string
+		var expire *time.Time
 		for _, x := range m.Roles {
-			if x.ExpiryDetail != nil || x.RestrictionEvaluations != nil {
-				return apierror.Unimplemented("Not implemented here: a membership role's expiryDetail and restrictionEvaluations.")
+			if x.RestrictionEvaluations != nil {
+				return apierror.InvalidArgument("restrictionEvaluations is output only.")
+			}
+			t, err := roleExpiry(x)
+			if err != nil {
+				return err
+			}
+			if t != nil {
+				expire = t
 			}
 			roles = append(roles, x.Name)
 		}
-		g, out, err := r.CreateMembership("groups/"+req.PathValue("group"), email, ns, roles)
+		g, out, err := r.CreateMembershipExpiring("groups/"+req.PathValue("group"), email, ns, roles, expire)
 		if err != nil {
 			return err
 		}
@@ -386,8 +437,12 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 				resp.Memberships = append(resp.Memberships, byKey[k])
 			}
 			return rest.WriteJSON(w, http.StatusOK, resp)
-		case "memberships:getMembershipGraph", "memberships:searchDirectGroups", "memberships:searchTransitiveMemberships":
-			return apierror.Unimplemented("Not implemented here: %s; checkTransitiveMembership and searchTransitiveGroups are served.", req.PathValue("verb"))
+		case "memberships:searchDirectGroups":
+			return r.searchDirectGroups(w, req, parent)
+		case "memberships:searchTransitiveMemberships":
+			return r.searchTransitiveMemberships(w, req, parent)
+		case "memberships:getMembershipGraph":
+			return r.getMembershipGraph(w, req, parent)
 		}
 		return apierror.NotFound("no such method: GET %s", req.URL.Path)
 	})
@@ -415,7 +470,11 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		}
 	}
 	rt.Handle("POST /v1/groups/{group}/memberships/{membership}", func(w http.ResponseWriter, req *http.Request) error {
-		return apierror.Unimplemented("Not implemented here: modifyMembershipRoles; delete the membership and create it again with its roles.")
+		id, ok := strings.CutSuffix(req.PathValue("membership"), ":modifyMembershipRoles")
+		if !ok {
+			return apierror.NotFound("no such method: POST %s", req.URL.Path)
+		}
+		return r.modifyMembershipRoles(w, req, "groups/"+req.PathValue("group")+"/memberships/"+id)
 	})
 }
 

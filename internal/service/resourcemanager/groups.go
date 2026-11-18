@@ -69,6 +69,15 @@ type GroupMember struct {
 	Type       string    `json:"type"`
 	CreateTime time.Time `json:"createTime"`
 	UpdateTime time.Time `json:"updateTime"`
+	// ExpireTime is when the MEMBER role, and so the membership, expires
+	// (MembershipRole.expiryDetail, "only supported for MEMBER"); nil for
+	// never.
+	ExpireTime *time.Time `json:"expireTime,omitempty"`
+}
+
+// expired is whether m's MEMBER role has expired at now.
+func (m GroupMember) expired(now time.Time) bool {
+	return m.ExpireTime != nil && !now.Before(*m.ExpireTime)
 }
 
 func newIdentityID() string {
@@ -101,6 +110,9 @@ func (r *Registry) loadGroupLocked(id string) (*Group, error) {
 	if err := json.Unmarshal(b, &g); err != nil {
 		return nil, apierror.Internal(err, "decode group %s", id)
 	}
+	// A membership whose MEMBER role has expired is gone.
+	now := r.now()
+	g.Members = slices.DeleteFunc(g.Members, func(m GroupMember) bool { return m.expired(now) })
 	return &g, nil
 }
 
@@ -373,6 +385,11 @@ func membershipRoles(roles []string) ([]string, error) {
 		seen[r] = true
 	}
 	out := slices.Clone(roles)
+	if !seen["MEMBER"] {
+		// Every membership holds MEMBER, which cannot be removed
+		// (ModifyMembershipRolesRequest.removeRoles).
+		out = append(out, "MEMBER")
+	}
 	sort.Slice(out, func(i, j int) bool { return roleRank(out[i]) < roleRank(out[j]) })
 	return out, nil
 }
@@ -399,6 +416,23 @@ func MembershipName(g *Group, m GroupMember) string { return g.Name() + "/member
 
 // CreateMembership adds email to the group parent names, with roles.
 func (r *Registry) CreateMembership(parent, email, namespace string, roles []string) (*Group, GroupMember, error) {
+	return r.CreateMembershipExpiring(parent, email, namespace, roles, nil)
+}
+
+// checkExpiry checks a MEMBER role's expiry time: in the future.
+func (r *Registry) checkExpiry(t *time.Time) error {
+	if t != nil && !t.After(r.now()) {
+		return apierror.InvalidArgument("Invalid expiryDetail.expireTime %s: it must be in the future.", t.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// CreateMembershipExpiring is CreateMembership with the MEMBER role's
+// expiry (nil for none).
+func (r *Registry) CreateMembershipExpiring(parent, email, namespace string, roles []string, expire *time.Time) (*Group, GroupMember, error) {
+	if err := r.checkExpiry(expire); err != nil {
+		return nil, GroupMember{}, err
+	}
 	if namespace != "" {
 		return nil, GroupMember{}, apierror.Unimplemented("Not implemented here: identity-mapped members (preferredMemberKey.namespace) need an identity source, which this instance does not have.")
 	}
@@ -432,7 +466,7 @@ func (r *Registry) CreateMembership(parent, email, namespace string, roles []str
 		return nil, GroupMember{}, err
 	}
 	now := r.now().UTC()
-	m := GroupMember{ID: newIdentityID(), Email: email, Roles: roles, Type: typ, CreateTime: now, UpdateTime: now}
+	m := GroupMember{ID: newIdentityID(), Email: email, Roles: roles, Type: typ, CreateTime: now, UpdateTime: now, ExpireTime: expire}
 	g.Members = append(g.Members, m)
 	if err := r.putGroupLocked(g); err != nil {
 		return nil, GroupMember{}, err
