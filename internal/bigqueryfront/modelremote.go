@@ -264,13 +264,17 @@ var refusedGenerateOptions = map[string]string{
 // remote model.
 func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	rm := md.Remote
+	fname := "ML." + c.fn
+	if c.ai {
+		fname = "AI." + c.fn
+	}
 	switch {
 	case c.fn == "GENERATE_TEXT" && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
-		return "", 400, fmt.Sprintf("Function ML.%s is not supported for the remote model with endpoint %s", c.fn, rm.Endpoint)
+		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s", fname, rm.Endpoint)
 	case c.fn != "GENERATE_TEXT" && c.fn != "GENERATE_EMBEDDING":
-		return "", 400, fmt.Sprintf("Function ML.%s is not supported for the remote model with endpoint %s", c.fn, rm.Endpoint)
+		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s", fname, rm.Endpoint)
 	case c.input == "":
-		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
+		return "", 400, fname + " requires an input: a query in parentheses or TABLE name"
 	}
 	if f.vertexai == "" {
 		return "", 501, "Not implemented here: ML." + c.fn + ": this instance does not serve its local Vertex AI endpoint to BigQuery (#1760). Nothing was run."
@@ -280,7 +284,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	dims := 0
 	for k, v := range c.struc {
 		switch {
-		case k == "flatten_json_output":
+		case k == "flatten_json_output" && !c.ai:
 			b, ok := map[string]bool{"TRUE": true, "FALSE": false}[strings.ToUpper(v)]
 			if !ok {
 				return "", 400, "flatten_json_output must be a BOOL literal"
@@ -333,10 +337,10 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 	}
 	if found == nil {
-		return "", 400, fmt.Sprintf("Invalid table-valued function ML.%s: the input must have a column named %s", c.fn, col)
+		return "", 400, fmt.Sprintf("Invalid table-valued function %s: the input must have a column named %s", fname, col)
 	}
 	if !strings.EqualFold(found.Type, "STRING") {
-		return "", 400, fmt.Sprintf("Invalid table-valued function ML.%s: column %s must be of type STRING, not %s", c.fn, found.Name, found.Type)
+		return "", 400, fmt.Sprintf("Invalid table-valued function %s: column %s must be of type STRING, not %s", fname, found.Name, found.Type)
 	}
 	key := "_cbml_in." + sqlIdent(found.Name)
 	_, rows, code, msg := f.queryAllRows(r, q, "SELECT DISTINCT "+key+" FROM ("+c.input+") AS _cbml_in WHERE "+key+" IS NOT NULL")
@@ -345,7 +349,10 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	}
 	project := projectOf(f.base)
 	var outCols []string // name and type
-	if c.fn == "GENERATE_TEXT" && flatten {
+	if c.ai {
+		// AI.GENERATE_TEXT's columns, a Gemini model's (#1765).
+		outCols = []string{"result STRING", "rai_result JSON", "grounding_result JSON", "statistics JSON", "full_response JSON", "status STRING"}
+	} else if c.fn == "GENERATE_TEXT" && flatten {
 		outCols = []string{"ml_generate_text_llm_result STRING", "ml_generate_text_rai_result JSON", "ml_generate_text_grounding_result JSON", "ml_generate_text_status STRING"}
 	} else if c.fn == "GENERATE_TEXT" {
 		outCols = []string{"ml_generate_text_result JSON", "ml_generate_text_status STRING"}
@@ -361,7 +368,9 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 		in := *row[0]
 		var parts []string
-		if c.fn == "GENERATE_TEXT" {
+		if c.ai {
+			parts = f.aiGenerateTextRow(r.Context(), project, rm, in)
+		} else if c.fn == "GENERATE_TEXT" {
 			parts = f.generateRow(r.Context(), project, rm, in, flatten)
 		} else {
 			parts = f.embedRow(r.Context(), project, rm, in, flatten, taskType, dims)
@@ -533,8 +542,45 @@ func aiFunction(sql string) string {
 	for i := 0; i+3 < len(toks); i++ {
 		if toks[i].is("AI") && toks[i+1].punct(".") && toks[i+2].kind == tokWord && toks[i+3].punct("(") &&
 			(i == 0 || !toks[i-1].punct(".")) {
+			if toks[i+2].is("GENERATE_TEXT") && i+4 < len(toks) && toks[i+4].is("MODEL") {
+				continue // served as ML.GENERATE_TEXT's twin (#1765)
+			}
 			return "AI." + strings.ToUpper(toks[i+2].text)
 		}
 	}
 	return ""
+}
+
+// aiGenerateTextRow is one prompt's AI.GENERATE_TEXT columns, as SQL
+// literals: result, rai_result, grounding_result, statistics (the
+// response's usageMetadata), full_response and status (#1765).
+func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, prompt string) []string {
+	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
+	null := []string{"CAST(NULL AS STRING)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", jsonLiteral(out)}
+	if status != "" {
+		return append(null, sqlString(status))
+	}
+	var resp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			SafetyRatings     json.RawMessage `json:"safetyRatings"`
+			GroundingMetadata json.RawMessage `json:"groundingMetadata"`
+		} `json:"candidates"`
+		UsageMetadata json.RawMessage `json:"usageMetadata"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil || len(resp.Candidates) == 0 {
+		return append(null, sqlString("The response had no candidates"))
+	}
+	cand := resp.Candidates[0]
+	var text strings.Builder
+	for _, p := range cand.Content.Parts {
+		text.WriteString(p.Text)
+	}
+	return []string{sqlString(text.String()), jsonLiteral(cand.SafetyRatings), jsonLiteral(cand.GroundingMetadata), jsonLiteral(resp.UsageMetadata),
+		jsonLiteral(out), sqlString("")}
 }

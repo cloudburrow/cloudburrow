@@ -87,6 +87,8 @@ func remoteModelSetup(t *testing.T, h *Harness, c *bigquery.Client, suffix strin
 // substituted; temperature is refused 501. The model's words are
 // recorded, not asserted.
 //
+// AI.GENERATE_TEXT (#1765) answers the same rows under its own columns.
+//
 // covers: bigquery.jobs.query, bigquery.models.get
 func TestBigQueryMLRemoteGenerateText(t *testing.T) {
 	h := New(t)
@@ -163,6 +165,31 @@ func TestBigQueryMLRemoteGenerateText(t *testing.T) {
 		"(SELECT 'hi' AS prompt), STRUCT(TRUE AS flatten_json_output))", ds))
 	if len(rows) != 1 || rows[0]["ml_generate_text_llm_result"] != nil || !strings.Contains(fmt.Sprint(rows[0]["ml_generate_text_status"]), "NOT_FOUND") {
 		t.Errorf("a gemini endpoint with no alias: %v", rows)
+	}
+	// AI.GENERATE_TEXT, its AI.* twin (#1765): result, rai_result,
+	// grounding_result, statistics, full_response and status, with the
+	// input's columns.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM AI.GENERATE_TEXT(MODEL `%s.gen`, TABLE `%s.prompts`) ORDER BY id", ds, ds))
+	if len(rows) != 3 {
+		t.Fatalf("AI.GENERATE_TEXT rows: %v", rows)
+	}
+	for _, r := range rows[:2] {
+		text, _ := r["result"].(string)
+		if r["status"] != "" || strings.TrimSpace(text) == "" || r["prompt"] == nil || r["full_response"] == nil {
+			t.Errorf("AI.GENERATE_TEXT row: %v", r)
+		}
+		for _, col := range []string{"rai_result", "grounding_result", "statistics"} {
+			if _, ok := r[col]; !ok {
+				t.Errorf("AI.GENERATE_TEXT has no %s column: %v", col, r)
+			}
+		}
+		t.Logf("AI.GENERATE_TEXT output (recorded, not asserted): %q", text)
+	}
+	if rows[2]["result"] != nil {
+		t.Errorf("AI.GENERATE_TEXT answered a NULL prompt: %v", rows[2])
+	}
+	if err := run(fmt.Sprintf("SELECT * FROM AI.GENERATE_TEXT(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT(TRUE AS flatten_json_output))", ds)); err == nil {
+		t.Error("AI.GENERATE_TEXT took flatten_json_output")
 	}
 	if err := run(fmt.Sprintf("SELECT * FROM ML.GENERATE_TEXT(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT(0.2 AS temperature))", ds)); err == nil ||
 		!strings.Contains(err.Error(), "temperature") {

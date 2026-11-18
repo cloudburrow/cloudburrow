@@ -42,12 +42,14 @@ type mlCall struct {
 	// thresholds are ML.ROC_CURVE's GENERATE_ARRAY argument.
 	thresholds []float64
 	pos, end   int
+	// ai is AI.GENERATE_TEXT, ML.GENERATE_TEXT's AI.* twin (#1765).
+	ai bool
 }
 
 // findMLCalls finds the ML function calls of a MODEL in sql. msg is a
 // syntax error.
 func findMLCalls(sql string) ([]mlCall, string) {
-	if !strings.Contains(strings.ToUpper(sql), "ML") {
+	if u := strings.ToUpper(sql); !strings.Contains(u, "ML") && !strings.Contains(u, "AI.") {
 		return nil, ""
 	}
 	toks, ok := lex(sql)
@@ -56,14 +58,15 @@ func findMLCalls(sql string) ([]mlCall, string) {
 	}
 	var calls []mlCall
 	for i := 0; i+4 < len(toks); i++ {
-		if !toks[i].is("ML") || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
+		ai := toks[i].is("AI") && toks[i+2].is("GENERATE_TEXT") && (i == 0 || !toks[i-1].punct("."))
+		if !toks[i].is("ML") && !ai || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
 			continue
 		}
 		end := matchParen(toks, i+3)
 		if end < 0 {
 			return nil, "Syntax error: unclosed ML." + toks[i+2].text
 		}
-		c := mlCall{fn: strings.ToUpper(toks[i+2].text), pos: toks[i].pos, end: toks[end].end}
+		c := mlCall{fn: strings.ToUpper(toks[i+2].text), pos: toks[i].pos, end: toks[end].end, ai: ai}
 		path, n := readModelPath(toks[i+5 : end])
 		if n == 0 {
 			return nil, "Syntax error: expected a model name after MODEL"
