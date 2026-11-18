@@ -74,6 +74,8 @@ type tflitePortCol struct {
 	Array bool   `json:"array,omitempty"`
 	// Shape is the port's, -1 where the model leaves it free.
 	Shape []int `json:"shape"`
+	// image is set for a query whose column is an image STRUCT.
+	image bool
 }
 
 func (c tflitePortCol) sqlType() string {
@@ -197,6 +199,9 @@ func (md bqModel) tfliteResource(res map[string]any) {
 // tfliteTensor is a row's JSON value of column c as the port's tensor,
 // with a batch of one.
 func tfliteTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, string) {
+	if c.image {
+		return tfliteImageTensor(c, raw)
+	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return tflitemodel.Tensor{}, err.Error()
@@ -330,6 +335,7 @@ func tfliteLiteral(c tflitePortCol, t tflitemodel.Tensor) string {
 // Lite model.
 func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	imp := md.TFLite
+	inputs := append([]tflitePortCol(nil), imp.Inputs...) // marked per query (image)
 	switch {
 	case c.fn == "PREDICT":
 	case md.Type == "TENSORFLOW" && tensorflowUnsupportedFns[c.fn]:
@@ -364,7 +370,7 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		byName[strings.ToLower(col.Name)] = col
 	}
 	var refs []string
-	for i, in := range imp.Inputs {
+	for i, in := range inputs {
 		col, ok := byName[strings.ToLower(in.Name)]
 		if !ok {
 			return "", 400, "Invalid table-valued function ML.PREDICT Column " + in.Name + " is not found in the input data to the PREDICT function."
@@ -373,6 +379,14 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		elem, isArray := strings.CutPrefix(ct, "ARRAY<")
 		elem = strings.TrimSuffix(elem, ">")
 		okType := false
+		switch {
+		case ct == "RECORD" && in.Array && in.Type != "STRING" && in.Type != "BOOL":
+			// An image STRUCT (ML.DECODE_IMAGE's, mlimage.go, #1798),
+			// reshaped to the input's tensor; checked by value.
+			inputs[i].image = true
+			refs = append(refs, "_cbml_in."+sqlIdent(col.Name)+" AS c"+strconv.Itoa(i))
+			continue
+		}
 		switch elem {
 		case "INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC", "BOOL":
 			okType = isArray == in.Array && in.Type != "STRING"
@@ -407,7 +421,7 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 			return "", 500, "cloudburrow: could not read the input's values: " + err.Error()
 		}
 		var ins []tflitemodel.Tensor
-		for i, in := range imp.Inputs {
+		for i, in := range inputs {
 			t, why := tfliteTensor(in, vals["c"+strconv.Itoa(i)])
 			if why != "" {
 				return "", 400, "ML.PREDICT input column " + in.Name + " " + why
@@ -441,4 +455,48 @@ func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	}
 	return "(SELECT " + strings.Join(sel, ", ") + ", " + in + " FROM (" + c.input + ") AS _cbml_in LEFT JOIN UNNEST(ARRAY<STRUCT<_cbml_k STRING, " +
 		strings.Join(outTypes, ", ") + ">>[" + strings.Join(lits, ", ") + "]) AS _cbml_p ON " + key + " = _cbml_p._cbml_k)", 0, ""
+}
+
+// tfliteImageTensor is an image STRUCT (mlimage.go, #1798) as the port's
+// tensor: a batch of one of its height × width × channels, for an input
+// of rank 4 whose fixed dimensions it must match, or its values flattened
+// for one of rank 2.
+func tfliteImageTensor(c tflitePortCol, raw json.RawMessage) (tflitemodel.Tensor, string) {
+	m, why := imageFromJSON(raw, false, "ML.PREDICT")
+	if why != "" {
+		return tflitemodel.Tensor{}, why
+	}
+	if m == nil {
+		return tflitemodel.Tensor{}, "is NULL; a TensorFlow Lite model's input has no missing value"
+	}
+	var shape []int
+	switch len(c.Shape) {
+	case 4:
+		shape = []int{1, m.h, m.w, m.c}
+		for k := 1; k < 4; k++ {
+			if c.Shape[k] >= 0 && c.Shape[k] != shape[k] {
+				return tflitemodel.Tensor{}, fmt.Sprintf("is an image of %d × %d × %d (height, width, channels); the model's input of shape %v takes %d × %d × %d: "+
+					"resize it with ML.RESIZE_IMAGE", m.h, m.w, m.c, c.Shape, c.Shape[1], c.Shape[2], c.Shape[3])
+			}
+		}
+	case 2:
+		shape = []int{1, len(m.v)}
+		if c.Shape[1] >= 0 && c.Shape[1] != len(m.v) {
+			return tflitemodel.Tensor{}, fmt.Sprintf("is an image of %d values; the model's input of shape %v takes %d", len(m.v), c.Shape, c.Shape[1])
+		}
+	default:
+		return tflitemodel.Tensor{}, fmt.Sprintf("is an image; the model's input of shape %v is not one of an image (batch, height, width, channels)", c.Shape)
+	}
+	t := tflitemodel.Tensor{Type: tflitemodel.Float64, Shape: shape}
+	if c.Type == "INT64" {
+		t.Type = tflitemodel.Int64
+		for _, x := range m.v {
+			t.I = append(t.I, int64(x))
+		}
+		return t, ""
+	}
+	for _, x := range m.v {
+		t.F = append(t.F, float32(x))
+	}
+	return t, ""
 }

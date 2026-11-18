@@ -384,6 +384,16 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	case c.input == "":
 		return "", 400, fname + " requires an input: a query in parentheses or TABLE name"
 	}
+	if c.table != nil {
+		// Multimodal input (#1798): an object table's objects sent to the
+		// model with the prompt (bigqueryml-syntax-generate-text, "TABLE
+		// object_table").
+		if ds, table, ok := tableOf(q, c.table); ok && (len(c.table) < 3 || c.table[0] == projectOf(f.base)) && f.isObjectTable(r, ds, table) {
+			return "", 501, "Not implemented here: " + fname + " over an object table (a multimodal prompt): the instance's local generative runtime " +
+				"(LiteRT-LM, `up --local-ai-model`) runs text models and reads text only; its generateContent refuses inlineData and fileData parts, " +
+				"so the objects cannot be sent to it (#1798). Nothing was run."
+		}
+	}
 	if f.vertexai == "" {
 		return "", 501, "Not implemented here: ML." + c.fn + ": this instance does not serve its local Vertex AI endpoint to BigQuery (#1760). Nothing was run."
 	}

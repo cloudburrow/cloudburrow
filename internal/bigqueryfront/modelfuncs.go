@@ -231,6 +231,16 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			return true
 		}
 	}
+	// The image functions, evaluated here (mlimagesql.go, #1798).
+	if text, code, msg = f.rewriteImageFunctions(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
 	// The scalar AI functions, evaluated row by row here (aigenerate.go,
 	// #1765, #1771, #1772).
 	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
