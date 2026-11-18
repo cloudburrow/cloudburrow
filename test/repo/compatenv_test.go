@@ -23,10 +23,6 @@ import (
 // has a value for them: each is a test-mode switch or a fixture a job makes
 // for itself. Each must still be listed in test/compat/README.md.
 var compatEnvExceptions = map[string]string{
-	// The local embeddings model (#41) is a 330 MB download no instance
-	// fetches unless asked (`up -local-ai-embeddings`); set it to run
-	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
-	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
 	// The instance under test is a `-tags onnx` build whose BigQuery
 	// imports ONNX models (#1711); no instance reports which build it is.
 	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",
@@ -207,7 +203,12 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 	write("kubeconfig", "apiVersion: v1\n")
 	write("admin-token", "fixture-admin-token\n")
 	// A detached instance stamps each line of its log (#1193).
-	write("up.log", "starting\n2026-10-15T10:31:31.107839Z local AI:  http://127.0.0.1:9020\n  model:   m\n")
+	// The embeddings line of the last local AI block names the same
+	// endpoint for CLOUDBURROW_TEST_EMBEDDINGS (#1765); an earlier up's
+	// block is ignored.
+	write("up.log", "starting\nlocal AI:  http://127.0.0.1:9001\n  embeddings: not loaded (x)\n"+
+		"2026-10-15T10:31:31.107839Z local AI:  http://127.0.0.1:9020\n  model:   m\n"+
+		"2026-10-15T10:31:31.107900Z   embeddings: POST /v1/projects/{p}/locations/{l}/publishers/google/models/e:predict\n")
 	write("up.json", `{"pid": 1, "control": "127.0.0.1:50001", "log": "`+filepath.Join(dir, "up.log")+`",
   "endpoints": {"control": "127.0.0.1:50001", "metadata": "127.0.0.1:9005", "console": "127.0.0.1:9090",
     "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}}`)
@@ -351,6 +352,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"BIGQUERY_PROJECT":         "ct-local",
 		"LOCALAI":                  "127.0.0.1:9020",
 		"PREDICTION":               "127.0.0.1:9020",
+		"EMBEDDINGS":               "127.0.0.1:9020",
 		"GCLOUD":                   "/opt/gcloud/bin/gcloud",
 		"TOFU":                     "/opt/tofu",
 		"SPANNER_REST":             "http://127.0.0.1:9022",
@@ -542,5 +544,25 @@ func TestCompatEnvCLIArgsNameTheInstance(t *testing.T) {
 	code, _, stderr = runCompatEnv(t, envFile, statusFile, "--only", "CLI_ARGS")
 	if code == 0 || !strings.Contains(stderr, "name no --name and --state-dir") {
 		t.Errorf("no instance directory: exit %d, %s", code, stderr)
+	}
+}
+
+// CLOUDBURROW_TEST_EMBEDDINGS is set only when the last up loaded the
+// embedding runtime (#1765): a default build's `embeddings: not loaded`
+// leaves it unset, so its tests skip rather than meet a 501.
+func TestCompatEnvEmbeddingsOnlyWhenLoaded(t *testing.T) {
+	dir, envFile, statusFile := compatEnvFixture(t, nil)
+	log := "local AI:  http://127.0.0.1:9001\n  embeddings: POST /v1/x:predict\n" +
+		"2026-10-15T10:31:31.107839Z local AI:  http://127.0.0.1:9020\n" +
+		"2026-10-15T10:31:31.107900Z   embeddings: not loaded (every :predict answers 501)\n"
+	if err := os.WriteFile(filepath.Join(dir, "up.log"), []byte(log), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, got, stderr := runCompatEnv(t, envFile, statusFile, "--only", "EMBEDDINGS,LOCALAI")
+	if code != 0 || got["CLOUDBURROW_TEST_EMBEDDINGS"] != "" || got["CLOUDBURROW_TEST_LOCALAI"] != "127.0.0.1:9020" {
+		t.Errorf("exit %d, %v, %s", code, got, stderr)
+	}
+	if !strings.Contains(stderr, "CLOUDBURROW_TEST_EMBEDDINGS") {
+		t.Errorf("the unset variable is not named on stderr: %s", stderr)
 	}
 }

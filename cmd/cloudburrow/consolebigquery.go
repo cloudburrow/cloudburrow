@@ -147,7 +147,7 @@ func (p bigqueryProvider) projectSummary(ctx context.Context, project string) []
 	return []console.PropertyGroup{{Heading: "Project", Properties: []console.Property{
 		{Label: "Project ID", Value: project},
 		{Label: "BigQuery service account", Value: email},
-	}}}
+	}}, p.connectionsSummary(ctx, project)}
 }
 
 func countTables(ctx context.Context, ds *bigquery.Dataset) (int, error) {

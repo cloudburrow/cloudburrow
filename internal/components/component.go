@@ -51,6 +51,9 @@ type LifecycleComponent struct {
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
+	// vertexAI is the local Vertex AI endpoint's in-cluster address
+	// (host:port), given to the BigQuery front for remote models (#1760).
+	vertexAI string
 	// knative is the Knative install running in the background, nil
 	// before it starts; knativeJoined says KnativeReady waits for it
 	// rather than Start (#1588).
@@ -100,6 +103,10 @@ func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager
 // SetONNXRunner records the in-cluster address of the onnx build's ONNX
 // runner, for BigQuery's front (#1711).
 func (c *LifecycleComponent) SetONNXRunner(addr string) { c.onnxRunner = addr }
+
+// SetVertexAI records the in-cluster address of the instance's local
+// Vertex AI endpoint, which BigQuery ML's remote models run on (#1760).
+func (c *LifecycleComponent) SetVertexAI(addr string) { c.vertexAI = addr }
 
 // SetStorageSigningKeys records the PEM public keys, by service account
 // email, the builtin storage server accepts RSA signed URLs from.
@@ -219,6 +226,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// runner, through cloudburrow-host (#1711).
 					if c.onnxRunner != "" {
 						b.Front.Args = append(b.Front.Args, "--onnx", "http://"+c.onnxRunner)
+					}
+					// Remote models run on the local Vertex AI (#1760).
+					if c.vertexAI != "" {
+						b.Front.Args = append(b.Front.Args, "--vertexai", "http://"+c.vertexAI)
 					}
 				}
 				out = append(out, b)

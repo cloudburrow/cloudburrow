@@ -70,6 +70,9 @@ func (p bigqueryProvider) modelsSection(ctx context.Context, ds *bigquery.Datase
 		fields := map[string]string{"Type": "—", "Created": "—"}
 		if md, err := m.Metadata(ctx); err == nil {
 			fields["Type"] = orDash(md.Type)
+			if md.Type == "" {
+				fields["Type"] = "Remote" // #1760: a remote model has none
+			}
 			if !md.CreationTime.IsZero() {
 				fields["Created"] = md.CreationTime.UTC().Format(time.RFC3339)
 			}
@@ -89,7 +92,8 @@ func (p bigqueryProvider) modelsSection(ctx context.Context, ds *bigquery.Datase
 	out.Total = len(out.Items)
 	if out.Total == 0 && out.Unavailable == "" {
 		out.Note = "This dataset has no models. CREATE MODEL ... OPTIONS(model_type='linear_reg' or 'logistic_reg') AS SELECT ... " +
-			"in the query editor's Read-write mode trains one."
+			"in the query editor's Read-write mode trains one; CREATE MODEL ... REMOTE WITH CONNECTION `project.us.connection` OPTIONS(ENDPOINT = '...') " +
+			"makes a remote model on the instance's local Vertex AI."
 	}
 	return console.Section{ID: "models", Label: "Models", Listing: out}
 }
@@ -108,8 +112,14 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the model: " + bigqueryRefusal(err).Error(), Trail: trail}, nil
 	}
-	if md.Type == "ONNX" || md.Type == "XGBOOST" {
+	if md.Type == "ONNX" || md.Type == "XGBOOST" || md.Type == "TENSORFLOW_LITE" {
 		return p.onnxModelDetail(md, datasetID, modelID, trail), nil
+	}
+	if md.Type == "" {
+		// A remote model has no model type (#1760).
+		if d, ok := p.remoteModelDetail(ctx, md, datasetID, modelID, trail); ok {
+			return d, nil
+		}
 	}
 	feats := console.Listing{Columns: []string{"Type", "Weight"}, NameColumn: "Feature", Noun: "features"}
 	cols, _ := md.RawFeatureColumns()
@@ -243,7 +253,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	}, nil
 }
 
-// onnxModelDetail is an imported ONNX or XGBoost model's page (#1711): its inputs and
+// onnxModelDetail is an imported ONNX, XGBoost or TensorFlow Lite model's page (#1711, #1755): its inputs and
 // outputs, which models.get reports as featureColumns and labelColumns,
 // and the Cloud Storage URI it was imported from. It has no training,
 // weights or evaluation: BigQuery imports the model as it is.
@@ -292,6 +302,50 @@ func (p bigqueryProvider) onnxModelDetail(md *bigquery.ModelMetadata, datasetID,
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Model", Properties: props}}},
 		},
 	}
+}
+
+// remoteModelDetail is a remote model's page (#1760): its endpoint and
+// connection, as models.get's remoteModelInfo reads them, and the
+// function that runs it. ok is false when the model is not remote.
+func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.ModelMetadata, datasetID, modelID string, trail []console.Crumb) (console.Detail, bool) {
+	svc, err := p.service(ctx)
+	if err != nil {
+		return console.Detail{}, false
+	}
+	m, err := svc.Models.Get(p.project, datasetID, modelID).Context(ctx).Do()
+	if err != nil || m.RemoteModelInfo == nil {
+		return console.Detail{}, false
+	}
+	ri := m.RemoteModelInfo
+	fn := "ML.GENERATE_TEXT(MODEL `" + datasetID + "." + modelID + "`, (SELECT 'Hello' AS prompt), STRUCT(TRUE AS flatten_json_output))"
+	if strings.Contains(strings.ToLower(ri.Endpoint), "embedding") {
+		fn = "ML.GENERATE_EMBEDDING(MODEL `" + datasetID + "." + modelID + "`, (SELECT 'Hello' AS content))"
+	}
+	props := []console.Property{
+		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},
+		{Label: "Type", Value: "Remote model"},
+		{Label: "Endpoint", Value: ri.Endpoint},
+		{Label: "Connection", Value: ri.Connection},
+		{Label: "Location", Value: orDash(md.Location)},
+		{Label: "Runs on", Value: "the instance's local Vertex AI endpoint; never Google's"},
+		{Label: "Try it", Value: "SELECT * FROM " + fn},
+	}
+	if md.Description != "" {
+		props = append(props, console.Property{Label: "Description", Value: md.Description})
+	}
+	if md.Name != "" {
+		props = append(props, console.Property{Label: "Friendly name", Value: md.Name})
+	}
+	if !md.CreationTime.IsZero() {
+		props = append(props, console.Property{Label: "Created", Value: md.CreationTime.UTC().Format(time.RFC3339)})
+	}
+	return console.Detail{
+		Trail:   trail,
+		Summary: []console.Property{{Label: "Dataset", Value: datasetID}, {Label: "Type", Value: "Remote"}, {Label: "Endpoint", Value: ri.Endpoint}},
+		Sections: []console.Section{
+			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Model", Properties: props}}},
+		},
+	}, true
 }
 
 // modelResultSections are a model's centroids (KMEANS, ML.CENTROIDS),

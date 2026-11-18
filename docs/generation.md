@@ -66,8 +66,8 @@ not honoured tells the caller their setting applied when it did not.
 
 | Field | Why |
 |---|---|
-| `temperature`, `topP`, `topK`, `seed` | The runtime exposes no sampling control. `litert_lm_main --helpfull` lists no such flag. |
-| `maxOutputTokens` | **Accepted by the runtime and ignored by it.** The same prompt decoded 309 tokens at a limit of 8, at 40, and with no limit. Refused on that measurement, not on the flag's absence. |
+| `temperature`, `topP`, `topK`, `seed` | The runtime exposes no sampling control. `litert_lm_main --helpfull` lists no such flag (re-checked 2026-11-17, #1765). |
+| `maxOutputTokens` | **Accepted by the runtime and ignored by it.** The same prompt decoded 309 tokens at a limit of 8, at 40, and with no limit. Refused on that measurement, not on the flag's absence. Re-measured 2026-11-17 (#1765) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `--max_output_tokens=8` and `=64` wrote the same 746-word answer. |
 | `stopSequences` | No runtime control. |
 | `candidateCount` > 1 | `--num_output_candidates` exists but was never exercised; untested is not supported. |
 | `responseMimeType`, `responseSchema` | No constrained decoding is wired up. |

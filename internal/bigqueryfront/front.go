@@ -229,6 +229,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
+	connections := &bqConnections{}                 // connections.go, #1755
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.logf != nil {
@@ -248,11 +249,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		policies.now = clock
 	}
 	models.now = clock
+	connections.now = clock
 	functions := &knownFunctions{started: clock().UnixMilli(), now: clock}
 	if o.stateDir != "" {
 		dropped.keep(droppedStateFile(o.stateDir), o.logf)         // dropped.go, #1460
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
+		connections.keep(connectionsStateFile(o.stateDir), o.logf) // connections.go, #1755
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -313,6 +316,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
+			return
+		}
+		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
 			return
 		}
 		if iam.serveRewriteMember(w, r) { // iam.go, #1751
@@ -401,7 +407,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models,
-				onnx: o.onnx}
+				onnx: o.onnx, vertexai: o.vertexai, connections: connections, numbers: numbers}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -635,6 +641,14 @@ type front struct {
 	// onnx runs imported ONNX models (modelonnx.go, #1711): the runner
 	// of the onnx build's CLI, or nil, and every ONNX model is 501.
 	onnx onnxRunner
+	// vertexai is the instance's local Vertex AI endpoint (http://host:port),
+	// which remote models run on (modelremote.go, #1760), or "".
+	vertexai string
+	// connections and numbers are the Connection API's connections and
+	// the project numbers that key them (connections.go), which a remote
+	// model names.
+	connections *bqConnections
+	numbers     *projectNumbers
 }
 
 // Option is an option of Wrap.
@@ -672,6 +686,9 @@ type options struct {
 	resourceManager string
 	// onnx runs imported ONNX models, or nil (modelonnx.go, #1711).
 	onnx onnxRunner
+	// vertexai is the local Vertex AI endpoint remote models run on, or ""
+	// (modelremote.go, #1760).
+	vertexai string
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

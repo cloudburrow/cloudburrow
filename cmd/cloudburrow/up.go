@@ -178,6 +178,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetONNXRunner(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ONNX))
 	}
+	if serviceEnabled(cfg, config.ServiceBigQuery) && localAIServed(cfg) {
+		if err := pinLocalAIPort(&cfg); err != nil {
+			return err
+		}
+	}
+	if serviceEnabled(cfg, config.ServiceBigQuery) && localAIServed(cfg) && cfg.Endpoints.LocalAI > 0 {
+		// The local Vertex AI endpoint, through cloudburrow-host, runs
+		// BigQuery ML's remote models for the front (#1760).
+		comps.SetVertexAI(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.LocalAI))
+	}
 	if serviceEnabled(cfg, config.ServiceFirestore) {
 		// Firestore with MongoDB compatibility serves TLS only (#1738),
 		// with a certificate of the instance's own CA, which
@@ -744,6 +755,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := onnxRunner.Addr(); a != "" {
 			live["onnx"] = a
 		}
+		if localAISrv != nil && localAISrv.Addr() != "" {
+			live["localai"] = localAISrv.Addr()
+		}
 		for _, e := range startupEndpoints(cfg, forwarders, tasksSvc, runSvc, secretsSvc, kmsSvc, hostComp) {
 			live[e.Service] = e.Host
 		}
@@ -764,9 +778,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "localai": true}
 		if !runEnabled {
-			published = map[string]bool{"resourcemanager": true, "onnx": true}
+			published = map[string]bool{"resourcemanager": true, "onnx": true, "localai": true}
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}

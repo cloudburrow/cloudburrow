@@ -45,6 +45,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"and JOBS_BY_ORGANIZATION read a project's ancestry from (#1392); empty: those views are 501")
 	onnx := fs.String("onnx", "", "the ONNX runner of the onnx build's CLI (http://host:port), which runs BigQuery ML's imported "+
 		"ONNX models (#1711); empty: CREATE MODEL of model_type ONNX is 501")
+	vertexai := fs.String("vertexai", "", "the instance's local Vertex AI endpoint (http://host:port), which BigQuery ML's remote models "+
+		"run on (#1760); empty: CREATE MODEL … REMOTE WITH CONNECTION is 501. Never Google's")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -80,6 +82,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	handler := Wrap(results, WithStorage(*storage), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
 		o.policies, o.resourceManager = policies, *resourceManager
+		o.vertexai = *vertexai
 		if *onnx != "" {
 			o.onnx = onnxrunner.NewClient(*onnx, nil)
 		}

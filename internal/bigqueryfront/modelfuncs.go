@@ -31,7 +31,7 @@ import (
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true,
-	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true}
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true}
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -42,12 +42,14 @@ type mlCall struct {
 	// thresholds are ML.ROC_CURVE's GENERATE_ARRAY argument.
 	thresholds []float64
 	pos, end   int
+	// ai is AI.GENERATE_TEXT, ML.GENERATE_TEXT's AI.* twin (#1765).
+	ai bool
 }
 
 // findMLCalls finds the ML function calls of a MODEL in sql. msg is a
 // syntax error.
 func findMLCalls(sql string) ([]mlCall, string) {
-	if !strings.Contains(strings.ToUpper(sql), "ML") {
+	if u := strings.ToUpper(sql); !strings.Contains(u, "ML") && !strings.Contains(u, "AI.") {
 		return nil, ""
 	}
 	toks, ok := lex(sql)
@@ -56,14 +58,15 @@ func findMLCalls(sql string) ([]mlCall, string) {
 	}
 	var calls []mlCall
 	for i := 0; i+4 < len(toks); i++ {
-		if !toks[i].is("ML") || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
+		ai := toks[i].is("AI") && toks[i+2].is("GENERATE_TEXT") && (i == 0 || !toks[i-1].punct("."))
+		if !toks[i].is("ML") && !ai || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
 			continue
 		}
 		end := matchParen(toks, i+3)
 		if end < 0 {
 			return nil, "Syntax error: unclosed ML." + toks[i+2].text
 		}
-		c := mlCall{fn: strings.ToUpper(toks[i+2].text), pos: toks[i].pos, end: toks[end].end}
+		c := mlCall{fn: strings.ToUpper(toks[i+2].text), pos: toks[i].pos, end: toks[end].end, ai: ai}
 		path, n := readModelPath(toks[i+5 : end])
 		if n == 0 {
 			return nil, "Syntax error: expected a model name after MODEL"
@@ -221,6 +224,21 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			return true
 		}
 	}
+	// AI.GENERATE, evaluated row by row here (aigenerate.go, #1765).
+	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
+	if fn := aiFunction(text); fn != "" {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": of BigQuery's generative AI functions only AI.GENERATE and AI.GENERATE_TEXT are served (#1765; the rest are #1771 and #1772); "+
+			"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING of a remote model run on the instance's local Vertex AI (#1760). Nothing was run.")
+		return true
+	}
 	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
@@ -236,7 +254,8 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
-				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN and ML.RECONSTRUCTION_LOSS. Nothing was run.")
+				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
+				"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -253,7 +272,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		}
 		sub, code, why := f.mlSubquery(r, q, md, c)
 		if code != 0 {
-			reason := map[int]string{400: "invalidQuery", 501: "notImplemented"}[code]
+			reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 			if code == 501 {
 				writeError(w, code, reason, why)
 				return true
@@ -537,11 +556,20 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
 	}
+	if md.Remote != nil {
+		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
+	}
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" {
+		return "", 400, "Function ML." + c.fn + " is only supported for remote models"
+	}
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711
 	}
 	if md.XGB != nil {
 		return f.xgbSubquery(r, q, md, c) // modelxgb.go, #1711
+	}
+	if md.TFLite != nil {
+		return f.tfliteSubquery(r, q, md, c) // modeltflite.go, #1755
 	}
 	if typ == "MATRIX_FACTORIZATION" {
 		return f.mfSubquery(r, q, md, c)
