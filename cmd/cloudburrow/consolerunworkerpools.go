@@ -191,7 +191,7 @@ func (runWorkerPoolsProvider) CreateForm() (string, []console.Field) {
 // workerPoolScalingFields are a pool's scaling settings (#1788), as the
 // discovery document defines them: Manual runs the number of instances;
 // Automatic scales between the minimum and the maximum, with a CPU
-// utilization target. Locally an automatic pool runs its minimum (#1789).
+// utilization target, which the CPU driver applies (#1789).
 func workerPoolScalingFields(cur runadapter.WorkerPoolScaling, section string) []console.Field {
 	mode := cur.Mode
 	if mode == "" {
@@ -215,7 +215,7 @@ func workerPoolScalingFields(cur runadapter.WorkerPoolScaling, section string) [
 	return []console.Field{
 		{Name: "scalingMode", Label: "Scaling mode", Type: "select", Options: []string{"MANUAL", "AUTOMATIC"}, Default: mode,
 			Help: "Manual runs the number of instances below. Automatic scales between the minimum and maximum " +
-				"(locally it runs the minimum: growing on CPU is not implemented yet).", Section: section},
+				"on the CPU utilization target.", Section: section},
 		{Name: "instances", Label: "Number of instances", Type: "text", Default: manual,
 			Help: "Manual scaling: this many instances run at all times, split among revisions.", Pattern: `^[0-9]{0,4}$`, Section: section},
 		{Name: "minInstances", Label: "Minimum instances", Type: "text", Default: minN,

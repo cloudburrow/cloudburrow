@@ -50,6 +50,9 @@ type Server struct {
 	// volumeMu orders a collection of unused volume objects after the
 	// writes of workloads that mount them (volumegc.go).
 	volumeMu sync.RWMutex
+	// cpu is the CPU utilization driver's state (cpuscaling.go); nil until
+	// StartCPUScaling, when no revision has a CPU floor.
+	cpu *cpuScaler
 }
 
 // WithSecrets attaches a secret resolver, enabling secretKeyRef environment

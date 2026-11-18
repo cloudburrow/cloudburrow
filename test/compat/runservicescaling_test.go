@@ -111,7 +111,6 @@ func TestRunServiceLevelScaling(t *testing.T) {
 		{ts: &runpb.RevisionScaling{CpuUtilization: proto.Float32(0.95)}, code: codes.InvalidArgument},
 		{ts: &runpb.RevisionScaling{ConcurrencyUtilization: proto.Float32(0.05)}, code: codes.InvalidArgument},
 		{ts: &runpb.RevisionScaling{CpuUtilization: proto.Float32(0), ConcurrencyUtilization: proto.Float32(0)}, code: codes.InvalidArgument},
-		{ts: &runpb.RevisionScaling{CpuUtilization: proto.Float32(0.6)}, code: codes.Unimplemented},
 	} {
 		_, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: &runpb.Service{Name: name, Scaling: bad.sc,
 			Template: &runpb.RevisionTemplate{Scaling: bad.ts, Containers: []*runpb.Container{{Image: helloDigest}}}}})

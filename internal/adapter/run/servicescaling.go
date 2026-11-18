@@ -312,6 +312,15 @@ func (s *Server) applyServiceScaling(ctx context.Context, k ksvc) error {
 			o := own(r.Metadata.Name)
 			sc = revisionScale{o.GetMinInstanceCount(), o.GetMaxInstanceCount()}
 		}
+		// The CPU driver's recommendation is a floor under KPA's
+		// concurrency one, within the revision's maximum (cpuscaling.go).
+		// MANUAL counts are fixed, so it does not apply to them.
+		if f := s.cpu.floor(r.Metadata.Name); f > sc.min && svc.GetScalingMode() != runpb.ServiceScaling_MANUAL {
+			sc.min = f
+			if sc.max > 0 && sc.min > sc.max {
+				sc.min = sc.max
+			}
+		}
 		want := map[string]*string{annMinScale: nil, annMaxScale: nil}
 		if sc.min > 0 {
 			v := strconv.Itoa(int(sc.min))
@@ -340,10 +349,10 @@ func (s *Server) applyServiceScaling(ctx context.Context, k ksvc) error {
 }
 
 // checkScaling validates a service's scaling at both levels, and refuses
-// what the local cluster cannot do: KPA scales on concurrency only, so a
-// CPU threshold (cpuUtilization above 0) or disabling the concurrency
-// threshold is Unimplemented; cpuUtilization 0.0, which disables the CPU
-// threshold, is what KPA does already. A MANUAL split that leaves a serving
+// what the local cluster cannot do. A CPU threshold is the CPU driver's
+// (cpuscaling.go), beside KPA's concurrency one; cpuUtilization 0.0 turns
+// the CPU driver off. Disabling the concurrency threshold is Unimplemented:
+// KPA always scales on concurrency. A MANUAL split that leaves a serving
 // revision without instances is refused before anything is applied.
 func checkScaling(svc *runpb.Service) error {
 	if err := checkServiceScaling(svc.GetScaling()); err != nil {
@@ -352,10 +361,6 @@ func checkScaling(svc *runpb.Service) error {
 	ts := svc.GetTemplate().GetScaling()
 	if err := checkRevisionScaling(ts); err != nil {
 		return err
-	}
-	if ts.GetCpuUtilization() > 0 {
-		return apierror.Unimplemented("template.scaling.cpuUtilization %v: scaling a service on CPU utilization is not supported locally; "+
-			"Knative's KPA scales on concurrency (set 0.0 to disable the CPU threshold)", ts.GetCpuUtilization())
 	}
 	if ts != nil && ts.ConcurrencyUtilization != nil && ts.GetConcurrencyUtilization() == 0 {
 		return apierror.Unimplemented("template.scaling.concurrencyUtilization 0.0: disabling the concurrency threshold is not supported locally; " +

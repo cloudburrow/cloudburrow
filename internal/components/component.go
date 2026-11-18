@@ -349,7 +349,20 @@ func (c *LifecycleComponent) startKnative(ctx context.Context) {
 	go func() {
 		defer close(run.done)
 		run.err = c.ensureKnative(kctx)
+		if run.err == nil {
+			c.ensureMetricsServer(kctx)
+		}
 	}()
+}
+
+// ensureMetricsServer installs metrics-server beside Knative (#1789): the
+// CPU signal Cloud Run's CPU-target scaling reads. Without it everything
+// else still works, and a CPU target simply has nothing to read, so a
+// failure is reported rather than failing the start.
+func (c *LifecycleComponent) ensureMetricsServer(ctx context.Context) {
+	if err := c.installer.InstallMetricsServer(ctx, c.timeout); err != nil && ctx.Err() == nil {
+		fmt.Fprintf(c.out, "  warning: metrics-server is not running, so Cloud Run cannot scale on CPU: %v\n", err)
+	}
 }
 
 // joinKnative waits for the background install and returns its result.

@@ -683,6 +683,7 @@
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:89 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:53 TestRunServiceCloudSQLMySQLVolume",
+          "test/compat/runcpuscaling_test.go:100 TestRunServiceCPUUtilizationScaling",
           "test/compat/rungcsfuse_test.go:215 TestTerraformRunCloudStorageVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
@@ -729,6 +730,8 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:89 TestRunServiceCloudSQLVolume",
+          "test/compat/runcpuscaling_test.go:100 TestRunServiceCPUUtilizationScaling",
+          "test/compat/rundisabled_test.go:51 TestRunServiceDisabledByManualZero",
           "test/compat/rungcsfuse_test.go:215 TestTerraformRunCloudStorageVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
@@ -775,6 +778,7 @@
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:227 TestRunUpdateService",
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
+          "test/compat/rundisabled_test.go:51 TestRunServiceDisabledByManualZero",
           "test/compat/runservicescaling_test.go:54 TestRunServiceLevelScaling",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
@@ -804,6 +808,7 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
@@ -842,6 +847,7 @@
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",

@@ -70,7 +70,7 @@ func TestCheckScalingLimits(t *testing.T) {
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: f(0.96)}}}, "between 0.1 and 0.95"},
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0), ConcurrencyUtilization: f(0)}}}, "cannot both be disabled"},
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{MinInstanceCount: 3, MaxInstanceCount: 2}}}, "must not exceed"},
-		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0.6)}}}, "not supported locally"},
+		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0.6)}}}, ""}, // the CPU driver (#1800)
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: f(0)}}}, "not supported locally"},
 		{&runpb.Service{Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)}}, "not supported locally"},
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0), ConcurrencyUtilization: f(0.95)}},
