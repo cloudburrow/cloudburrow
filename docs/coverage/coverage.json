@@ -6034,8 +6034,8 @@
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
           "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
-          "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
+          "test/compat/memorystoreha_test.go:173 TestGcloudRedisFailover",
+          "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
@@ -6083,8 +6083,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
-          "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
+          "test/compat/memorystoreha_test.go:173 TestGcloudRedisFailover",
+          "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60"
         ]
       },
@@ -6155,7 +6155,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
-          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
+          "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",

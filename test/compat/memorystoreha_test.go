@@ -6,11 +6,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	redisadmin "cloud.google.com/go/redis/apiv1"
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -171,7 +174,6 @@ func TestGcloudRedisFailover(t *testing.T) {
 	h := New(t)
 	c, _ := memorystoreAdminClient(t, h)
 	g := newGcloudSession(t, h)
-	ctx := h.Context()
 	id := fmt.Sprintf("gcloud-ha-%d", time.Now().UnixNano()%1e8)
 	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
 	p, region := "--project="+g.project, "--region=us-central1"
@@ -180,7 +182,16 @@ func TestGcloudRedisFailover(t *testing.T) {
 			_ = waitLRODone(context.Background(), op)
 		}
 	})
+	// Each step takes its own h.Context() once gcloud has returned: gcloud
+	// waits for an operation with exponential backoff (2 s growing by 1.4
+	// each poll, so 15 s, then 21 s, then 30 s between polls), and one
+	// context taken before the create spent its 60 s on the create's wait
+	// whenever the create took more than about 45 s (main CI, Landing 144),
+	// failing the GetInstance after it with DeadlineExceeded.
+	start := time.Now()
 	g.must("redis", "instances", "create", id, p, region, "--tier=standard", "--size=1", "--zone=us-central1-a")
+	logCreateTimes(t, h, c, name, time.Since(start))
+	ctx := h.Context()
 	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
 	if err != nil || inst.GetTier() != redispb.Instance_STANDARD_HA || inst.GetReplicaCount() != 1 || inst.GetCurrentLocationId() != "us-central1-a" {
 		t.Fatalf("after gcloud create, GetInstance = %v, %v", inst, err)
@@ -196,6 +207,7 @@ func TestGcloudRedisFailover(t *testing.T) {
 		return err == nil && n >= 1
 	})
 	g.must("redis", "instances", "failover", id, p, region, "--data-protection-mode=force-data-loss", "--quiet")
+	ctx = h.Context()
 	after, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
 	if err != nil || after.GetCurrentLocationId() != inst.GetAlternativeLocationId() || after.GetPort() != inst.GetPort() {
 		t.Fatalf("after gcloud failover, GetInstance = %v, %v", after, err)
@@ -207,5 +219,31 @@ func TestGcloudRedisFailover(t *testing.T) {
 	}
 	if r := role(ctx, t, next); r != "master" {
 		t.Errorf("after failover the endpoint reaches a %s", r)
+	}
+}
+
+// logCreateTimes logs how long gcloud's create of name took and how long
+// its create operation ran on the instance (create_time to end_time), so a
+// slow create shows whether the server or gcloud's polling took the time.
+func logCreateTimes(t *testing.T, h *Harness, c *redisadmin.CloudRedisClient, name string, took time.Duration) {
+	t.Helper()
+	m := regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+)/`).FindStringSubmatch(name)
+	if m == nil {
+		return
+	}
+	it := c.ListOperations(h.Context(), &longrunningpb.ListOperationsRequest{Name: m[1],
+		Filter: fmt.Sprintf("metadata.target = %q AND metadata.verb = \"create\"", name)})
+	for {
+		op, err := it.Next()
+		if err != nil {
+			t.Logf("gcloud create took %s (its operation: %v)", took.Round(time.Millisecond), err)
+			return
+		}
+		md := &redispb.OperationMetadata{}
+		if op.GetMetadata().UnmarshalTo(md) == nil && md.GetEndTime() != nil {
+			t.Logf("gcloud create took %s; its operation ran %s", took.Round(time.Millisecond),
+				md.GetEndTime().AsTime().Sub(md.GetCreateTime().AsTime()).Round(time.Millisecond))
+			return
+		}
 	}
 }
