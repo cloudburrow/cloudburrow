@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
@@ -78,8 +79,14 @@ func (i *Installer) kubectl(ctx context.Context, stdin string, args ...string) (
 	return k8s.NewWith(inv, i.Kubeconfig, "", "").Do(ctx, stdin, args...)
 }
 
+// logMu serializes logf: Start waits for the cluster's DNS in a goroutine
+// beside InstallBackends (#1781), and both log to the same Out.
+var logMu sync.Mutex
+
 func (i *Installer) logf(format string, a ...any) {
 	if i.Out != nil {
+		logMu.Lock()
+		defer logMu.Unlock()
 		fmt.Fprintf(i.Out, format, a...)
 	}
 }
