@@ -468,6 +468,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Backup and DR Service API v1, REST, plaintext; read by no client library: pass http://" + bd + "/ to option.WithEndpoint"})
 	}
 
+	// Certificate Authority Service (#1834): gcloud privateca, and
+	// Terraform's google_privateca_* through privateca_custom_endpoint.
+	if privateCAEnabled(cfg) && cfg.Endpoints.PrivateCA != 0 {
+		pc := addr(cfg.Endpoints.PrivateCA)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_PRIVATECA", "http://" + pc + "/", "read by gcloud; gcloud privateca pools, roots and certificates"},
+			envVar{cliEndpointVar("privateca"), pc,
+				"Certificate Authority Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
 	if cfg.Endpoints.ServiceUsage > 0 {
@@ -599,6 +609,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
 		"backupdr":          &e.BackupDR,
+		"privateca":         &e.PrivateCA,
 		"onnx":              &e.ONNX,
 		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured

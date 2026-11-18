@@ -22,7 +22,8 @@
 #              restart probes, and Resource Manager, which every instance
 #              serves, for TestOneProjectNumberEverywhere, which compares
 #              its project number with Cloud Storage's service agent;
-#   served:    the remaining CloudBurrow-served APIs (kms, logging) and the
+#   served:    the remaining CloudBurrow-served APIs (kms, logging,
+#              privateca) and the
 #              KMS restart probe, with Resource Manager as
 #              LOGGING_RESOURCEMANAGER for the Logging folder tests;
 #   run:       Cloud Run with its Knative install and the prediction
@@ -134,7 +135,8 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging
+      SERVICES=kms,logging,privateca
+      # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
       # (#1395) make their folder with it, which every instance serves, as
@@ -142,7 +144,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"

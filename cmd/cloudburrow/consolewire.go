@@ -66,6 +66,8 @@ type consoleDeps struct {
 	serviceUsage *serviceusage.Server
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
+	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
+	privateCA *privateCAService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -524,6 +526,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceLogging:       "Cloud Logging",
 	config.ServiceKMS:           "Cloud KMS",
 	config.ServiceBackupDR:      "Backup and DR",
+	config.ServicePrivateCA:     "Certificate Authority Service",
 }
 
 func serviceTitle(s config.Service) string {

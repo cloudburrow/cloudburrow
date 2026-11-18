@@ -12525,5 +12525,201 @@
         ]
       }
     ]
+  },
+  {
+    "Key": "privateca",
+    "Title": "Certificate Authority Service (v1)",
+    "counts": {
+      "Unimplemented": 10,
+      "Verified": 19
+    },
+    "rows": [
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ActivateCertificateAuthority",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCaPool",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCaPool",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCertificateTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DisableCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/EnableCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/FetchCaCerts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/FetchCertificateAuthorityCsr",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCaPool",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateRevocationList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCaPools",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificateAuthorities",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificateRevocationLists",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificateTemplates",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificates",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/RevokeCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UndeleteCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCaPool",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificate",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificateAuthority",
+        "status": "Verified",
+        "tests": [
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+        ]
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificateRevocationList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificateTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
   }
 ]
