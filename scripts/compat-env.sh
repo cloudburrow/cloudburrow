@@ -59,7 +59,7 @@ ALL=(
   CMEK_KMS CLOUDSQL_SECRETS NOPUBSUB_STORAGE APPENGINE_URL
   SPANNER SPANNER_REST DATASTORE FIRESTORE FIRESTORE_MONGODB FIRESTORE_MONGODB_CA BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN CLOUDSQL_CONNECTOR BACKUPDR
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
-  LOCALAI PREDICTION GCLOUD TOFU
+  LOCALAI PREDICTION EMBEDDINGS GCLOUD TOFU
 )
 
 only="" strict="" plain="" cli="" gcloud="" tofu=""
@@ -348,6 +348,19 @@ value() {
       log=$(jq -r '.log // empty' <<< "$RUNTIME_JSON")
       [ -n "$log" ] || log=${INSTANCE_DIR:+$INSTANCE_DIR/up.log}
       [ -z "$log" ] || [ ! -r "$log" ] || VALUE=$(sed -n -E 's|^([0-9TZ:.-]+ )?local AI: *http://||p' "$log" | tail -n 1) ;;
+    # The same endpoint, only when `up --local-ai-embeddings` loaded the
+    # embedding runtime (an onnx build): the last local AI block of the log
+    # has an `embeddings: POST` line then, and `embeddings: not loaded`
+    # otherwise (#1765).
+    EMBEDDINGS)
+      need_runtime
+      local log
+      log=$(jq -r '.log // empty' <<< "$RUNTIME_JSON")
+      [ -n "$log" ] || log=${INSTANCE_DIR:+$INSTANCE_DIR/up.log}
+      [ -z "$log" ] || [ ! -r "$log" ] || VALUE=$(sed -E 's|^[0-9TZ:.-]+ ||' "$log" | awk '
+        /^local AI: *http:\/\// { addr = $0; sub(/^local AI: *http:\/\//, "", addr); emb = ""; next }
+        /^  embeddings: POST / { emb = addr }
+        END { print emb }') ;;
     GCLOUD) VALUE=$gcloud ;;
     TOFU) VALUE=$tofu ;;
     *) echo "compat-env: internal error: no source for $1" >&2; exit 2 ;;

@@ -210,7 +210,14 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 		fmt.Fprintf(w, "  aliases: %s (explicitly configured substitutions)\n",
 			strings.Join(cfg.LocalAI.Aliases, ", "))
 	}
-	if cfg.LocalAI.Embeddings {
+	// The embeddings line names the route only when the runtime loaded (an
+	// onnx build with the model fetched): scripts/compat-env.sh exports
+	// CLOUDBURROW_TEST_EMBEDDINGS from it (#1765), so a default build's
+	// instance leaves the variable unset and its tests skip.
+	if cfg.LocalAI.Embeddings && !srv.EmbedderLoaded() {
+		fmt.Fprintf(w, "  embeddings: not loaded (every :predict answers 501; an onnx build with ONNXRUNTIME_LIB serves them)\n")
+	}
+	if cfg.LocalAI.Embeddings && srv.EmbedderLoaded() {
 		fmt.Fprintf(w, "  embeddings: POST /v1/projects/{p}/locations/{l}/publishers/google/models/%s:predict\n", localai.EmbeddingGemmaONNXID)
 		fmt.Fprintf(w, "              a COMMUNITY ONNX int8 conversion, NOT an official Google artifact\n")
 	}
