@@ -143,6 +143,8 @@ func (p *postgresSnapshotter) databases(ctx context.Context) ([]string, error) {
 
 func quotePGIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
+func quotePGLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
 // Export dumps each database in pg_dump's custom format. The dump is spooled
 // to a temporary file because an archive entry declares its size first.
 func (p *postgresSnapshotter) Export(ctx context.Context, w admin.EntryWriter) error {
@@ -214,7 +216,18 @@ func (p *postgresSnapshotter) Import(ctx context.Context, r admin.EntryReader) e
 		// FORCE ends the sessions an application still holds; without it
 		// a connected client would make the load fail halfway.
 		if _, err := p.psql(ctx, "DROP DATABASE "+quotePGIdent(name)+" WITH (FORCE)"); err != nil {
-			return fmt.Errorf("drop %s: %w", name, err)
+			if !strings.Contains(err.Error(), "syntax error") {
+				return fmt.Errorf("drop %s: %w", name, err)
+			}
+			// Before PostgreSQL 13 DROP DATABASE has no FORCE (#1524): the
+			// sessions are ended first, as FORCE does, then it is dropped.
+			if _, err := p.psql(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = "+
+				quotePGLiteral(name)+" AND pid <> pg_backend_pid()"); err != nil {
+				return fmt.Errorf("end the sessions of %s: %w", name, err)
+			}
+			if _, err := p.psql(ctx, "DROP DATABASE "+quotePGIdent(name)); err != nil {
+				return fmt.Errorf("drop %s: %w", name, err)
+			}
 		}
 	}
 	restored := false

@@ -108,9 +108,9 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a physical
 (`PHYSICAL`) external sync on an instance not started with `--mode persistent` (#1570; see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
 and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
-upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and
-point-in-time recovery on PostgreSQL 9.6 to 11 (#1462, #1769; their read replicas and high availability are served since #1524,
-promoted with `pg_ctl promote`). A legacy failover replica
+and upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions); read
+replicas, high availability and point-in-time recovery on PostgreSQL 9.6 to 11 are served since #1524, with
+`recovery.conf` and `pg_ctl promote`. A legacy failover replica
 (`failoverReplica`, `failoverTarget`) is 400, as Cloud SQL refuses one since 2025, and so is changing a PostgreSQL
 database's charset or collation, which Cloud SQL documents is not set through the API. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method, and the next section for the

@@ -80,25 +80,12 @@ const sqlServerVersionWhy = "SQL Server has no Docker Hub official image; Micros
 	"2017, 2019 and 2022) is linux/amd64 only, so a linux/arm64 node cannot run it; CloudBurrow runs PostgreSQL and MySQL"
 
 // pgBefore12 is whether version is a PostgreSQL version before 12 (#1462),
-// whose servers lack what point-in-time recovery is built on here: the
-// recovery.signal file, new in PostgreSQL 12. Their read replicas and
-// high availability are served (#1524): pg_basebackup -R writes
-// recovery.conf, and a promotion runs pg_ctl promote, as they have no
-// pg_promote().
+// whose servers have no pg_promote() and no standby.signal or
+// recovery.signal: their read replicas, high availability and
+// point-in-time recovery are served with recovery.conf, which
+// pg_basebackup -R and a recovery write, and pg_ctl promote (#1524).
 func pgBefore12(version string) bool {
 	return engineOf(version) == "POSTGRES" && versionIndex(version) >= 0 && versionIndex(version) < versionIndex("POSTGRES_12")
-}
-
-// pgBefore12Why refuses what, on an instance of version, if version is
-// before PostgreSQL 12.
-func pgBefore12Why(version, what string) error {
-	if !pgBefore12(version) {
-		return nil
-	}
-	return unimplemented(what+" on "+version, "CloudBurrow recovers to a point in time with PostgreSQL 12's recovery.signal, "+
-		"and its recovery.conf form for "+version+" is not built yet (#1769, re-read 2026-11-17); "+version+" serves a primary "+
-		"instance's databases, users, backups, imports, exports, read replicas, high availability and major version upgrades. "+
-		"Upgrade it to POSTGRES_12 or later for this")
 }
 
 // upgradable is the upgradableDatabaseVersions of an instance of version:
@@ -308,14 +295,4 @@ func (s *Server) upgrade(name string, from, to Spec, opID string, includeReplica
 		_ = s.saveLocked()
 	}
 	s.emu.Unlock()
-}
-
-// pgBefore12Unsupported refuses high availability and point-in-time
-// recovery on a PostgreSQL instance before 12 (pgBefore12), when s turns
-// either on: for a new instance (cur nil), or one that had it off.
-func (s Spec) pgBefore12Unsupported(cur *Spec) error {
-	if s.PITREnabled() && (cur == nil || !cur.PITREnabled()) {
-		return pgBefore12Why(s.DatabaseVersion, "point-in-time recovery")
-	}
-	return nil
 }

@@ -590,9 +590,6 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	} else if b.Settings == nil || b.Settings.Tier == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}
-	if err := spec.pgBefore12Unsupported(nil); err != nil {
-		return nil, err
-	}
 	key, err := parseDiskEncryption(b.DiskEncryption)
 	if err != nil {
 		return nil, err
@@ -754,10 +751,6 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		// Settings sent with the new version apply to the new server.
 		b.apply(&to, replace)
 		to.DatabaseVersion = b.DatabaseVersion
-		if err := to.pgBefore12Unsupported(&from); err != nil {
-			s.emu.Unlock()
-			return nil, err
-		}
 		to.SettingsVersion++
 		c.spec = to
 		c.engine = s.writes.prov.Engine(to)
@@ -789,10 +782,6 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
 			"a read replica here is one server; make the primary REGIONAL, and its replicas follow it across a failover (docs/cloudsql.md)")
-	}
-	if err := next.pgBefore12Unsupported(&c.spec); err != nil {
-		s.emu.Unlock()
-		return nil, err
 	}
 	// Turning high availability on adds the standby, and off removes it
 	// (#1408); either is a change the provisioner applies.

@@ -10517,7 +10517,7 @@
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
-          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention"
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention"
         ]
       },
       {
@@ -10527,7 +10527,7 @@
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
-          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
       },
@@ -10593,7 +10593,7 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
+          "test/compat/cloudsqlversions_test.go:297 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -10620,7 +10620,7 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas"
+          "test/compat/cloudsqlversions_test.go:297 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -10765,8 +10765,9 @@
         "tests": [
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
-          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:112 TestCloudSQLPointInTimeRecoveryBeforePostgres12",
+          "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary"
         ]
@@ -10792,7 +10793,7 @@
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
@@ -10807,9 +10808,9 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
-          "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:297 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:407 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch4_test.go:405 TestTerraformSQLSourceRepresentation",
@@ -10886,8 +10887,8 @@
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlpitrrestore_test.go:33 TestCloudSQLPointInTimeRestoreFromBackupDR",
           "test/compat/cloudsqlpitrrestore_test.go:74 TestGcloudSQLPointInTimeRestoreRefused",
@@ -10905,10 +10906,10 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
-          "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:204 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:297 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:407 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
@@ -10952,8 +10953,9 @@
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlpgreplicas1524_test.go:24 TestCloudSQLReadReplicasBeforePostgres12",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
-          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:112 TestCloudSQLPointInTimeRecoveryBeforePostgres12",
+          "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
@@ -10969,10 +10971,10 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
-          "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:204 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:297 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:407 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
           "test/compat/consolecloudsqlinstances_test.go:236 TestConsoleCloudSQLReadReplicaPostgres96",
           "test/compat/consolecloudsqlinstances_test.go:493 TestConsoleCloudSQLHighAvailabilityPostgres11",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
@@ -11021,9 +11023,9 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:112 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:204 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:407 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
@@ -11062,7 +11064,7 @@
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:301 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:297 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/consolecloudsqlinstances_test.go:236 TestConsoleCloudSQLReadReplicaPostgres96"
         ]
       },
@@ -11191,7 +11193,7 @@
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
-          "test/compat/cloudsqlpitr_test.go:194 TestGcloudSQLPointInTimeClone",
+          "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
@@ -11200,9 +11202,9 @@
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:411 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:448 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:204 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:407 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
@@ -11228,7 +11230,8 @@
         "method": "sql.projects.instances.getLatestRecoveryTime",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlpitr_test.go:245 TestCloudSQLPointInTimeRetention",
+          "test/compat/cloudsqlpitr_test.go:112 TestCloudSQLPointInTimeRecoveryBeforePostgres12",
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/terraform_batch12_sql_test.go:426 TestTerraformSQLLatestRecoveryTime"
         ]
@@ -11348,7 +11351,7 @@
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlversions_test.go:208 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:204 TestCloudSQLMajorVersionUpgrade",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
