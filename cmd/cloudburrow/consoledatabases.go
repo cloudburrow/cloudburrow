@@ -1250,7 +1250,7 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 		Columns: []string{"Columns", "Indexes", "Parent"}, NameColumn: "Table", Noun: "tables",
 		RowsOpenable: true,
 	}
-	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	c, err := newConsoleSpannerClient(ctx, p.endpoint, dbName)
 	if err != nil {
 		tables.Unavailable = "cannot open the database: " + err.Error()
 	} else {
@@ -1353,7 +1353,7 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 	defer cancel()
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)
-	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	c, err := newConsoleSpannerClient(ctx, p.endpoint, dbName)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot open the database: " + err.Error()}, nil
 	}
@@ -1502,7 +1502,7 @@ func (p spannerProvider) Query(ctx context.Context, project string, path []strin
 	defer cancel()
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, path[0], path[1])
-	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	c, err := newConsoleSpannerClient(ctx, p.endpoint, dbName)
 	if err != nil {
 		return console.Listing{}, fmt.Errorf("cannot open the database: %w", err)
 	}

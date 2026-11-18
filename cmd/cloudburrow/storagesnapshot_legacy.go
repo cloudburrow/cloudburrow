@@ -109,7 +109,8 @@ func (s *builtinStorageSnapshotter) importLegacy(ctx context.Context, r admin.En
 		return err
 	}
 	base := strings.TrimSuffix(u, "/_cloudburrow/state")
-	c, err := storage.NewClient(ctx, option.WithEndpoint(base+"/storage/v1/"), option.WithoutAuthentication())
+	c, err := storage.NewClient(ctx, option.WithEndpoint(base+"/storage/v1/"), option.WithoutAuthentication(),
+		storage.WithDisabledClientMetrics())
 	if err != nil {
 		return err
 	}

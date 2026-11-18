@@ -144,10 +144,16 @@ func (p bigtableProvider) newData(ctx context.Context, project string) (*bigtabl
 // classic data plane, which is what the front runs each session vRPC as.
 //
 // Its clients also export no client-side metrics: the built-in exporter
-// drops the endpoint option and would send them to Cloud Monitoring.
+// drops the endpoint option and would send them to Cloud Monitoring. And
+// they do not try Direct Access, which is on by default: the channel pool
+// probes it with a dial of its own, and when that dial is not ALTS (it never
+// is here) investigateDirectAccessFailure asks metadata.OnGCE, an HTTP
+// request to 169.254.169.254 and a DNS lookup of metadata.google.internal
+// (internal/transport/direct_access_checker.go, #1825).
 var consoleBigtableConfig = bigtable.ClientConfig{
-	DisableSession:  true,
-	MetricsProvider: bigtable.NoopMetricsProvider{},
+	DisableSession:      true,
+	DisableDirectAccess: true,
+	MetricsProvider:     bigtable.NoopMetricsProvider{},
 }
 
 // newConsoleBigtableClient is a data client on instance at endpoint, made
