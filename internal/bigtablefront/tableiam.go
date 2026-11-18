@@ -21,8 +21,9 @@ import (
 // TestIamPermissions on tables, stored and never enforced, as ADR-0006
 // decides for every service that serves them. The emulator has none of
 // them; the front answers them through the shared internal/iampolicy (a set
-// returns a new etag, a stale one is ABORTED, conditions and audit configs
-// are UNIMPLEMENTED naming the field). The table must exist in the emulator,
+// returns a new etag, a stale one is ABORTED, conditional bindings are
+// stored with Google's version rules, #1745, and audit configs are
+// UNIMPLEMENTED naming the field). The table must exist in the emulator,
 // and its policy goes with it: DeleteTable through the front, and an
 // instance's deletion, drop it, so a table made again starts with none.
 // Policies are kept in memory, as the emulator keeps its tables.
@@ -91,7 +92,7 @@ func (t *tableIAM) set(ctx context.Context, req *iampb.SetIamPolicyRequest) (pro
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	next, err := iampolicy.Set(t.policies[req.GetResource()], req)
+	next, err := iampolicy.SetConditional(t.policies[req.GetResource()], req)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -136,4 +137,20 @@ func (t *tableIAM) drop(resource string) {
 			delete(t.policies, name)
 		}
 	}
+}
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every instance's, table's, authorized view's and backup's
+// policy: a deleted service account's bindings (#1751), which the host
+// sends to iampolicy.RewriteMemberPath.
+func (f *Front) RewriteIAMMember(from, to string) error {
+	f.instances.mu.Lock()
+	for _, in := range f.instances.byNm {
+		in.policy.RewriteMember(from, to)
+	}
+	f.instances.mu.Unlock()
+	f.tableIAM.mu.Lock()
+	iampolicy.RewriteMemberIn(f.tableIAM.policies, from, to)
+	f.tableIAM.mu.Unlock()
+	return f.save()
 }

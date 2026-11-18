@@ -51,6 +51,14 @@ func indexKeys(x *adminpb.Index) bson.D {
 		if f.GetFieldPath() == "__name__" {
 			continue
 		}
+		if f.GetSearchConfig().GetTextSpec() != nil {
+			keys = append(keys, bson.E{Key: f.GetFieldPath(), Value: "text"})
+			continue
+		}
+		if isTextIndex(x) {
+			// A text index's partition field is not one of its keys.
+			continue
+		}
 		var dir int32 = 1
 		if f.GetOrder() == adminpb.Index_IndexField_DESCENDING {
 			dir = -1
@@ -106,7 +114,37 @@ func (s *MongoServer) createIndexes(mc *mongoConn, cmd bson.D) (bson.D, error) {
 		if len(keys) > mongoMaxIndexFields {
 			return nil, mql.Errorf(67, "CannotCreateIndex", "An index can have at most %d fields.", mongoMaxIndexFields)
 		}
-		in := &adminpb.Index{QueryScope: adminpb.Index_COLLECTION_GROUP, ApiScope: adminpb.Index_MONGODB_COMPATIBLE_API,
+		in, err := textIndexSpec(keys, spec)
+		if err != nil {
+			return nil, err
+		}
+		if in != nil {
+			name, _ := mql.Lookup(spec, "name").(string)
+			if name == "" {
+				name = defaultIndexName(keys)
+			}
+			for _, x := range a.mongoIndexes(mc.db.name, coll) {
+				if isTextIndex(x) {
+					if a.mongoIndexName(x) == name && mql.ValuesEqual(indexKeys(x), keys) {
+						name = ""
+						break
+					}
+					return nil, mql.Errorf(85, "IndexOptionsConflict", "An equivalent index already exists with a different name and options. A collection can have only one text index; it has %s.", a.mongoIndexName(x))
+				}
+			}
+			if name == "" {
+				continue
+			}
+			if total >= mongoMaxIndexes {
+				return nil, mql.Errorf(67, "CannotCreateIndex", "A database can have at most %d indexes.", mongoMaxIndexes)
+			}
+			in.Name = mc.db.name + "/collectionGroups/" + coll + "/indexes/CICAg" + randomID(6)
+			a.indexes[in.Name] = in
+			a.mongoIndexNames[in.Name] = name
+			total++
+			continue
+		}
+		in = &adminpb.Index{QueryScope: adminpb.Index_COLLECTION_GROUP, ApiScope: adminpb.Index_MONGODB_COMPATIBLE_API,
 			State: adminpb.Index_READY, Density: adminpb.Index_DENSE, Unique: mql.Truthy(mql.Lookup(spec, "unique"))}
 		if mql.Truthy(mql.Lookup(spec, "sparse")) {
 			in.Density = adminpb.Index_SPARSE_ANY
@@ -163,6 +201,26 @@ func (s *MongoServer) listIndexes(mc *mongoConn, cmd bson.D) (bson.D, error) {
 	var out []bson.D
 	for _, x := range a.mongoIndexes(mc.db.name, coll) {
 		d := bson.D{{Key: "v", Value: int32(2)}, {Key: "key", Value: indexKeys(x)}, {Key: "name", Value: a.mongoIndexName(x)}}
+		if isTextIndex(x) {
+			ti := textOf(x)
+			lang := ti.Language
+			if lang == "" {
+				lang = "english"
+			}
+			over := ti.LanguageOverride
+			if over == "" || over == "\x00" {
+				over = "language"
+			}
+			weights := bson.D{}
+			for _, f := range ti.Fields {
+				weights = append(weights, bson.E{Key: f, Value: int32(1)})
+			}
+			d = append(d, bson.E{Key: "weights", Value: weights}, bson.E{Key: "default_language", Value: lang},
+				bson.E{Key: "language_override", Value: over}, bson.E{Key: "textIndexVersion", Value: int32(3)})
+			if ti.Partition != "" {
+				d = append(d, bson.E{Key: "firestoreOptions", Value: bson.D{{Key: "customPartitionFields", Value: bson.A{ti.Partition}}}})
+			}
+		}
 		if x.GetUnique() {
 			d = append(d, bson.E{Key: "unique", Value: true})
 		}

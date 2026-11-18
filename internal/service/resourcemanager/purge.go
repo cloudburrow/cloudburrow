@@ -47,7 +47,16 @@ func (r *Registry) unlock() {
 		numberHooks = r.onNumbers
 	}
 	r.numbersChanged = false
+	rewrites, rewriteHooks := r.rewrites, r.onRewrite
+	r.rewrites = nil
 	r.mu.Unlock()
+	for _, rw := range rewrites {
+		for _, fn := range rewriteHooks {
+			if err := fn(rw.from, rw.to); err != nil {
+				slog.Warn("a deleted service account's bindings could not be rewritten everywhere", "from", rw.from, "to", rw.to, "error", err)
+			}
+		}
+	}
 	defer func() {
 		for _, fn := range numberHooks {
 			fn()
@@ -140,6 +149,12 @@ func (r *Registry) ResetProjectState(project string) error {
 // caller holds r.mu.
 func (r *Registry) dropProjectStateLocked(id string) error {
 	r.dropIAM("projects/" + id)
+	if err := r.dropRolesLocked("projects/" + id); err != nil {
+		return err
+	}
+	if err := r.dropServiceAccountsLocked(id); err != nil {
+		return err
+	}
 	if err := r.deletePrefixLocked(orgPolicyPrefix + id + "/"); err != nil {
 		return err
 	}

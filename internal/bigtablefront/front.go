@@ -438,6 +438,10 @@ func (f *Front) httpHandler() http.Handler {
 			f.serveReset(w, r)
 			return
 		}
+		if r.URL.Path == iampolicy.RewriteMemberPath {
+			iampolicy.ServeRewriteMember(w, r, f.RewriteIAMMember)
+			return
+		}
 		http.NotFound(w, r)
 	})
 }

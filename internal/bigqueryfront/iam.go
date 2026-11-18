@@ -10,8 +10,10 @@ package bigqueryfront
 //     table), and routines.getIamPolicy, setIamPolicy and
 //     testIamPermissions, through internal/iampolicy: a set returns a new
 //     etag and one carrying a stale etag is refused 409 ABORTED; IAM
-//     Conditions and audit configs are 501 naming the field; a version 3
-//     policy without conditions is accepted; testIamPermissions returns
+//     Conditions are stored with Google's version rules (#1745: BigQuery
+//     is one of the services Google lists as allowing them); audit
+//     configs are 501 naming the field; a version 3 policy without
+//     conditions is accepted; testIamPermissions returns
 //     every requested permission on a resource that exists, and an empty
 //     set on one that does not (iam_policy.proto and BigQuery's tables.testIamPermissions reference).
 //   - rowAccessPolicies.getIamPolicy and testIamPermissions. The API has no
@@ -180,7 +182,7 @@ func (p *iamPolicies) currentLocked(key, created string) *iampolicy.Stored {
 func (p *iamPolicies) set(key, created string, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	next, err := iampolicy.Set(p.currentLocked(key, created), req)
+	next, err := iampolicy.SetConditional(p.currentLocked(key, created), req)
 	if err != nil {
 		return nil, err
 	}
@@ -453,4 +455,32 @@ func rowPolicyIAM(pol rowPolicy) *iampb.Policy {
 		out.Bindings = []*iampb.Binding{{Role: filteredDataViewer, Members: append([]string(nil), pol.Grantees...)}}
 	}
 	return out
+}
+
+// rewriteMember replaces the member from with to (dropping it when to is
+// empty) in every table's and routine's policy: a deleted service
+// account's bindings (#1751), which the host sends to
+// iampolicy.RewriteMemberPath.
+func (p *iamPolicies) rewriteMember(from, to string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	changed := false
+	for _, s := range p.policies {
+		if s.Policy.RewriteMember(from, to) {
+			changed = true
+		}
+	}
+	if changed {
+		p.saveLocked()
+	}
+	return nil
+}
+
+// serveRewriteMember answers iampolicy.RewriteMemberPath.
+func (p *iamPolicies) serveRewriteMember(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != iampolicy.RewriteMemberPath {
+		return false
+	}
+	iampolicy.ServeRewriteMember(w, r, p.rewriteMember)
+	return true
 }

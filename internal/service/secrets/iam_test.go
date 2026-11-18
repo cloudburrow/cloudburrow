@@ -67,8 +67,12 @@ func TestRESTIamPolicyMethods(t *testing.T) {
 	if code, body = do(t, srv, http.MethodPost, base+":testIamPermissions", `{"permissions":["secretmanager.versions.access"]}`); code != http.StatusOK || !strings.Contains(body, "secretmanager.versions.access") {
 		t.Errorf("testIamPermissions: %d %s", code, body)
 	}
-	if code, body = do(t, srv, http.MethodPost, base+":setIamPolicy", `{"policy":{"bindings":[{"role":"r","members":["user:a@example.com"],"condition":{"expression":"true"}}]}}`); code != http.StatusNotImplemented || !strings.Contains(body, "condition") {
-		t.Errorf("a conditional binding: %d %s, want 501 naming the condition", code, body)
+	if code, body = do(t, srv, http.MethodPost, base+":setIamPolicy", `{"policy":{"bindings":[{"role":"r","members":["user:a@example.com"],"condition":{"expression":"true"}}]}}`); code != http.StatusBadRequest || !strings.Contains(body, "condition") {
+		t.Errorf("a conditional binding in a version 1 policy: %d %s, want 400 naming the condition", code, body)
+	}
+	// #1745: Secret Manager accepts conditional bindings in version 3.
+	if code, body = do(t, srv, http.MethodPost, base+":setIamPolicy", `{"policy":{"version":3,"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["user:a@example.com"],"condition":{"title":"prod","expression":"resource.name.endsWith(\"/s\")"}}]}}`); code != http.StatusOK || !strings.Contains(body, `"title":"prod"`) || !strings.Contains(body, `"version":3`) {
+		t.Errorf("a version 3 conditional binding: %d %s, want it stored", code, body)
 	}
 	if code, body = do(t, srv, http.MethodGet, base+":somethingElse", ""); code != http.StatusNotImplemented {
 		t.Errorf("GET with an unknown verb: %d %s, want 501", code, body)

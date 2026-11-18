@@ -157,6 +157,19 @@
 > are then sampled and prepared as H.264's are. The sea turtle clip in VP9 and AV1 gives the H.264
 > clip's 368 tokens and vectors at cosine 0.995 and 0.993 to it.
 >
+> **Update 2026-11-17 (#1739): the rest of the codecs.** VP9 profiles 1 to 3 (8, 10 and 12 bits;
+> 4:2:0, 4:2:2, 4:4:0 and 4:4:4; RGB) are decoded by `third_party/govpx/vp9hbd`, a VP9 decoder
+> written here from the VP9 bitstream specification, bit-exact against ffmpeg on 180-frame clips of
+> profiles 1, 2 and 3. A video's HE-AAC (SBR, and SBR with parametric stereo), AC-3, E-AC-3 and
+> surround Opus tracks are decoded: SBR and PS added to `third_party/aac-go` from ISO/IEC 14496-3
+> (with PacketVideo's Apache 2.0 OpenCORE decoder as a reference), AC-3 and E-AC-3 by
+> `internal/ac3`, written here from ATSC A/52, and surround Opus through `opus-go`'s multistream
+> decoder; each is downmixed to mono as ffmpeg's resampler does (the AC-3 bitstream's centre and
+> surround mix levels included) and is within 6e-4 of ffmpeg 9's decode. Still refused, naming
+> them: parametric stereo with 34 bands, IPD/OPD or mixing procedure B (no permissively licensed
+> source for their normative tables, and no encoder at hand emits them), 960-sample AAC frames,
+> AAC with more than two channels, and Opus mapping families other than 0 and 1.
+>
 > **Update 2026-11-17 (#1724): HEIC, HEIF and animated WebP.** With the maintainer's approval
 > (2026-11-17), `github.com/gen2brain/h265` v0.2.5 joins go.mod: a pure Go HEVC decoder and HEIF
 > reader, MIT, no cgo and no dependencies ([upstream-evaluation.md](upstream-evaluation.md#amendment-heic-heif-avif-and-animated-webp-decoders-for-vertex-ai-embedcontent-1724)
@@ -402,3 +415,20 @@ docker run --rm -v "$PWD:/models" \
 ```
 
 `pip install litert-lm` provides `litert-lm-peek` and `litert-lm-builder`.
+
+> **Update 2026-11-17 (#1733): `document_ocr` on scanned PDFs.** A PDF page with no text layer (a
+> scan) is no longer refused with `document_ocr`: it is rendered again at 300 DPI and read with
+> Tesseract OCR (5.5.4, compiled to WebAssembly and run on wazero, `internal/ocr`), and its text
+> follows the page's image as text tokens, counted against the request's token limit like any
+> other text. A page with a text layer keeps PDFium's text. The models are tessdata_fast `eng`
+> and `osd`, embedded in the binary; an upside-down page is turned back first. A page in another
+> script (orientation and script detection names it) is read with tessdata_fast 4.1.0's model of
+> that script (`script/Cyrillic`, `script/HanS` for Han, `script/Hangul` for Korean, ...), fetched
+> the first time one is needed into `<state-dir>/models` and checked against the SHA-256 pinned in
+> `internal/localai/tessdata.go`. About 6 seconds a page on one Tesseract instance (orientation
+> and script detection 1.6 s, recognition 4.4 s on an A4 page); a PDF's scanned pages are read in
+> parallel on up to four instances (half the CPUs, at least two), so Google's most, six pages, take
+> about 14 s on a 16-core Apple M-series machine rather than 36 s. **Verified** 2026-11-17 with the official `aiplatform`
+> client (`TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient`: the scanned invoice gains 195
+> tokens of OCR text). The console's Embeddings page has a **PDFs' text (OCR)** box that sends
+> `document_ocr` with each PDF (`TestEmbeddingsPageReadsAScannedPDFWithOCR`).

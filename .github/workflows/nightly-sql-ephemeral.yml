@@ -1,0 +1,182 @@
+name: Cloud SQL ephemeral nightly
+
+# The Cloud SQL compat shard (ci.yml's "official SDK compatibility (sql)")
+# on an instance brought up with --mode ephemeral (#1752). ci.yml's compat
+# job runs the shard on a persistent instance only, and an ephemeral
+# instance stores a created Cloud SQL server's data differently: on a volume
+# of its own that goes with the instance's record, so a flag change, a
+# restart or a failover keeps it (#1740). That path is tested here, nightly
+# and by hand, so PR CI stays as it is: this workflow never runs on a pull
+# request, a merge group or a push, and it is not a required check. A red
+# scheduled run, or one dispatched on main, is reported by
+# report-red-runs.yml.
+#
+# The shard is the one scripts/compat-shards.sh defines (compat_shard sql),
+# with the same setup steps as ci.yml's compat job. The restart probes are
+# not run: they measure persistent mode first, which ci.yml already does on
+# every push to main. Nothing here reaches Google: the compat harness's
+# egress guard stays on, and gcloud's update check is off as in ci.yml.
+on:
+  schedule:
+    # 06:47 UTC, off the hour and clear of the other nightlies.
+    - cron: "47 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-sql-ephemeral-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # No job may reach Google Cloud. Same as ci.yml.
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+  GOOGLE_CLOUD_PROJECT: ""
+
+jobs:
+  sql-ephemeral:
+    name: official SDK compatibility (sql, ephemeral)
+    runs-on: ubuntu-latest
+    # ci.yml's compat job's 90, plus a cold emulator build when its cache
+    # misses; go test's own 60m deadline fires first.
+    timeout-minutes: 105
+    env:
+      SHARD: sql
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - id: go
+        run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+      # The embedded BigQuery emulator, from ci.yml's cache, read only and
+      # under ci.yml's key, as upgrade.yml and arm64.yml restore it: a night
+      # whose emulator sources main has already built builds nothing.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: internal/bigqueryimage/bin/bigquery-emulator-*
+          key: bigquery-emulator-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
+
+      - name: Install kubectl
+        run: |
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      # The pinned Google Cloud CLI for the gcloud sql tests, as in ci.yml:
+      # checked against its SHA-256, never given credentials, and with no
+      # update check, which would reach Google and fail the egress guard.
+      - name: Install the Google Cloud CLI
+        run: |
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
+          echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
+          "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" components install alpha beta --quiet
+          printf '[component_manager]\ndisable_update_check = true\n' >> "$RUNNER_TEMP/google-cloud-sdk/properties"
+          echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
+
+      # Google's Cloud SQL Auth Proxy for TestCloudSQLAuthProxyBinary, as in
+      # ci.yml: the pinned release, checked against its SHA-256.
+      - name: Install the Cloud SQL Auth Proxy
+        run: |
+          echo "CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)" >> "$GITHUB_ENV"
+
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          install_only: true
+          version: v0.33.0
+
+      # The Terraform compat tests the shard runs, as in ci.yml.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - name: Start an ephemeral instance and run the Cloud SQL suite
+        run: |
+          # make build, not go build: the CLI embeds the binaries `up` builds
+          # its images from (#514).
+          make build
+          # The shard's services, fixtures and compat-env.sh variables, from
+          # the file ci.yml and scripts/verify-local.sh read (#705).
+          # shellcheck source=scripts/compat-shards.sh
+          . scripts/compat-shards.sh
+          compat_shard "$SHARD"
+          # ci.yml's flags, with --mode ephemeral: no backend `up` runs has
+          # a volume, and a created Cloud SQL server has one of its own (#1740).
+          CB=(--name ci --state-dir "$RUNNER_TEMP/cb" --mode ephemeral "${FIXTURES[@]}"
+            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
+            --services "$SERVICES")
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
+          ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
+          # The running instance's own banner, a timestamp then "mode:", names its mode; `wait` can
+          # return a moment before `up` has written it.
+          UPLOG="$RUNNER_TEMP/cb/ci/up.log"
+          for _ in $(seq 1 30); do grep -q 'press Ctrl-C to stop' "$UPLOG" && break; sleep 1; done
+          grep -qE ' mode: +ephemeral$' "$UPLOG" ||
+            { echo "the instance is not in ephemeral mode"; grep -E ' mode:' "$UPLOG"; exit 1; }
+
+          ./bin/cloudburrow env "${CB[@]}" --format json > env.json
+          # --strict: every variable named must be non-empty and no port 0.
+          # An assignment, not eval "$(...)", so a failure fails the step.
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
+          eval "$COMPAT_ENV"
+          if [ ! -s "$CLOUDBURROW_TEST_KUBECONFIG" ] || ! kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER"; then
+            echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1
+          fi
+
+          set -o pipefail
+          # shellcheck source=.github/scripts/retry-flaky.sh
+          . .github/scripts/retry-flaky.sh
+          set +e
+          go test -tags=compat -timeout 60m -v ./test/compat/... | tee compat.log
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            retry_flaky compat.log go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... ||
+              { echo "compat failed"; exit 1; }
+          fi
+          echo "== compat summary ($SHARD, ephemeral): $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped, retried: $(grep -h '^RETRIED:' compat.log | sed 's/RETRIED: //' | tr '\n' ' ')"
+          grep -- '--- SKIP' compat.log || true
+          # The tests #1740 found failing only in this mode must have run and
+          # passed, not skipped.
+          for t in TestCloudSQLInstanceWrites TestCloudSQLDemoteSkipReplicationSetup TestCloudSQLDemotePostgres TestCloudSQLExternalPostgresPrimary; do
+            grep -q -- "^--- PASS: $t (" compat.log ||
+              { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" compat.log || echo 'no result')"; exit 1; }
+          done
+          ./bin/cloudburrow stop "${CB[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: compat-log-sql-ephemeral
+          path: |
+            compat.log
+            ${{ runner.temp }}/cb/ci/up.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          # The redacted bug-report bundle (#293), as in ci.yml.
+          ./bin/cloudburrow diagnose -o diagnostics/bundle.tar.gz --name ci --state-dir "$RUNNER_TEMP/cb" || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: compat-diagnostics-sql-ephemeral
+          path: diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: |
+          PID=$(jq -r .pid "$RUNNER_TEMP/cb/ci/up.json" 2>/dev/null || true)
+          [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
+          for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done

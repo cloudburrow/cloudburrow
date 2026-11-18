@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -69,17 +71,54 @@ func TestStorageBucketIAMStaleEtagInProcess(t *testing.T) {
 	}
 }
 
-// A conditional binding is 501 naming the field, never stored and ignored.
-func TestStorageBucketIAMConditionUnimplementedInProcess(t *testing.T) {
+// #1745: a conditional binding needs uniform bucket-level access and
+// version 3; it is stored, rendered _withcond_ to a version 1 reader, kept
+// through a version 1 read-modify-write, and keeps uniform bucket-level
+// access from being disabled.
+func TestStorageBucketIAMConditionsInProcess(t *testing.T) {
 	_, _, h := sdkBucket(t, "iam-cond")
-	code, body := raw(t, "PUT", h.URL+"/storage/v1/b/iam-cond/iam",
-		`{"version":3,"bindings":[{"role":"roles/storage.objectViewer","members":["user:a@example.com"],"condition":{"expression":"true","title":"t"}}]}`)
-	if code != http.StatusNotImplemented || !strings.Contains(body, "condition") {
-		t.Errorf("a conditional binding = %d %s; want 501 naming the condition", code, body)
+	iam := h.URL + "/storage/v1/b/iam-cond/iam"
+	cond := `{"version":3,"bindings":[{"role":"roles/storage.objectViewer","members":["user:a@example.com"],"condition":{"expression":"resource.name.startsWith(\"projects/_/buckets/iam-cond/objects/pub/\")","title":"pub"}}]}`
+	if code, body := rawc(t, "PUT", iam, cond); code != http.StatusBadRequest || !strings.Contains(body, "uniformBucketLevelAccess") {
+		t.Errorf("a conditional binding without uniform access = %d %s; want 400", code, body)
 	}
-	if _, body := raw(t, "GET", h.URL+"/storage/v1/b/iam-cond/iam", ""); strings.Contains(body, "objectViewer") {
-		t.Errorf("the refused policy was stored: %s", body)
+	if code, body := rawc(t, "PATCH", h.URL+"/storage/v1/b/iam-cond", `{"iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}}`); code != 200 {
+		t.Fatalf("enable uniform access = %d %s", code, body)
 	}
+	if code, body := rawc(t, "PUT", iam, strings.Replace(cond, `"version":3`, `"version":1`, 1)); code != http.StatusBadRequest || !strings.Contains(body, "version 3") {
+		t.Errorf("a version 1 conditional policy = %d %s; want 400", code, body)
+	}
+	if code, body := rawc(t, "PUT", iam, strings.Replace(cond, `startsWith`, `contains`, 1)); code != http.StatusBadRequest {
+		t.Errorf("a bad expression = %d %s; want 400", code, body)
+	}
+	if code, body := rawc(t, "PUT", iam, cond); code != 200 || !strings.Contains(body, `"title":"pub"`) || !strings.Contains(body, `"version":3`) {
+		t.Fatalf("a conditional binding = %d %s; want it stored", code, body)
+	}
+	_, v1 := rawc(t, "GET", iam, "")
+	if !strings.Contains(v1, "roles/storage.objectViewer_withcond_") || strings.Contains(v1, `"condition"`) || !strings.Contains(v1, `"version":1`) {
+		t.Errorf("version 1 read = %s; want the _withcond_ role without the condition", v1)
+	}
+	if _, v3 := rawc(t, "GET", iam+"?optionsRequestedPolicyVersion=3", ""); !strings.Contains(v3, `"title":"pub"`) {
+		t.Errorf("version 3 read = %s", v3)
+	}
+	// A version 1 read-modify-write keeps the condition.
+	if code, body := rawc(t, "PUT", iam, v1); code != 200 || !strings.Contains(body, `"title":"pub"`) {
+		t.Errorf("a version 1 write back = %d %s; want the condition kept", code, body)
+	}
+	if code, body := rawc(t, "PATCH", h.URL+"/storage/v1/b/iam-cond", `{"iamConfiguration":{"uniformBucketLevelAccess":{"enabled":false}}}`); code != http.StatusBadRequest || !strings.Contains(body, "conditional") {
+		t.Errorf("disable uniform access with a condition = %d %s; want 400", code, body)
+	}
+}
+
+// rawc is raw with the answer's JSON compacted.
+func rawc(t *testing.T, method, url, body string) (int, string) {
+	t.Helper()
+	code, out := raw(t, method, url, body)
+	var buf bytes.Buffer
+	if json.Compact(&buf, []byte(out)) == nil {
+		out = buf.String()
+	}
+	return code, out
 }
 
 // Object IAM stays 501 by name; the ACL methods are built (acl_test.go).

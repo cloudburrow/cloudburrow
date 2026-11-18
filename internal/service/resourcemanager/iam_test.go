@@ -2,8 +2,10 @@ package resourcemanager
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -40,10 +43,6 @@ func TestProjectIAMThroughTheOfficialClients(t *testing.T) {
 	}
 	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{Etag: empty.GetEtag()}}); status.Code(err) != codes.Aborted {
 		t.Errorf("SetIamPolicy with a stale etag = %v, want Aborted", err)
-	}
-	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{Version: 3,
-		Bindings: []*iampb.Binding{{Role: "roles/viewer", Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("a conditional binding = %v, want Unimplemented", err)
 	}
 	// Terraform's mask names auditConfigs on every set; with none, it is a no-op.
 	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{Etag: set.GetEtag(),
@@ -209,5 +208,81 @@ func TestFolderAndOrganizationIAM(t *testing.T) {
 	}
 	if _, err := reg.Folder(f.Name); err != nil {
 		t.Errorf("a reset removed the folder: %v", err)
+	}
+}
+
+// TestProjectIAMConditions (#1742): version 3 policies with conditions,
+// Google's validation, and the version 1 rendering with _withcond_ roles
+// that a version 1 set keeps.
+func TestProjectIAMConditions(t *testing.T) {
+	reg, _, c := startAPI(t)
+	ctx := context.Background()
+	if _, err := reg.Create(Project{ProjectID: "cond-project"}); err != nil {
+		t.Fatal(err)
+	}
+	const res = "projects/cond-project"
+	cond := &expr.Expr{Title: "db only", Description: "one database",
+		Expression: `resource.name == "projects/cond-project/databases/db1"`}
+	set := func(p *iampb.Policy) (*iampb.Policy, error) {
+		return c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: p})
+	}
+	bad := map[string]*iampb.Policy{
+		"version 1":     {Version: 1, Bindings: []*iampb.Binding{{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: cond}}},
+		"no version":    {Bindings: []*iampb.Binding{{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: cond}}},
+		"no title":      {Version: 3, Bindings: []*iampb.Binding{{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Expression: "true"}}}},
+		"no expression": {Version: 3, Bindings: []*iampb.Binding{{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Title: "t"}}}},
+		"syntax":        {Version: 3, Bindings: []*iampb.Binding{{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Title: "t", Expression: "resource.name =="}}}},
+		"not bool":      {Version: 3, Bindings: []*iampb.Binding{{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Title: "t", Expression: "resource.name"}}}},
+		"unknown hash":  {Version: 1, Bindings: []*iampb.Binding{{Role: "roles/datastore.user_withcond_0123456789abcdef0123", Members: []string{"user:a@example.com"}}}},
+	}
+	for name, p := range bad {
+		if _, err := set(p); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("%s: SetIamPolicy = %v, want InvalidArgument", name, err)
+		}
+	}
+	got, err := set(&iampb.Policy{Version: 3, Bindings: []*iampb.Binding{
+		{Role: "roles/datastore.user", Members: []string{"user:a@example.com"}, Condition: cond},
+		{Role: "roles/datastore.user", Members: []string{"user:b@example.com"}, Condition: cond},
+		{Role: "roles/viewer", Members: []string{"user:a@example.com"}},
+	}})
+	if err != nil || got.GetVersion() != 3 || len(got.GetBindings()) != 2 || len(got.GetBindings()[0].GetMembers()) != 2 ||
+		got.GetBindings()[0].GetCondition().GetTitle() != "db only" {
+		t.Fatalf("SetIamPolicy version 3 = %v, %v", got, err)
+	}
+	v3, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
+	if err != nil || v3.GetVersion() != 3 || v3.GetBindings()[0].GetCondition().GetExpression() != cond.Expression {
+		t.Fatalf("GetIamPolicy version 3 = %v, %v", v3, err)
+	}
+	v1, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+	if err != nil || v1.GetVersion() != 1 || v1.GetBindings()[0].GetCondition() != nil ||
+		!strings.HasPrefix(v1.GetBindings()[0].GetRole(), "roles/datastore.user_withcond_") {
+		t.Fatalf("GetIamPolicy version 1 = %v, %v", v1, err)
+	}
+	mixed := proto.Clone(v1).(*iampb.Policy)
+	mixed.Bindings = append(mixed.Bindings, &iampb.Binding{Role: "roles/owner", Members: []string{"user:c@example.com"}, Condition: cond})
+	mixed.Version = 3
+	if _, err := set(mixed); status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "both conditions and condition hashes") {
+		t.Errorf("conditions and hashes = %v", err)
+	}
+	// A version 1 read-modify-write keeps the condition.
+	v1.Bindings[1].Members = append(v1.Bindings[1].Members, "user:d@example.com")
+	if _, err := set(v1); err != nil {
+		t.Fatalf("SetIamPolicy version 1 with a condition hash: %v", err)
+	}
+	after, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
+	if err != nil || after.GetBindings()[0].GetCondition().GetTitle() != "db only" || len(after.GetBindings()[1].GetMembers()) != 2 {
+		t.Errorf("after a version 1 set = %v, %v", after, err)
+	}
+	// Google's limit: 20 conditions for one role and principal.
+	var many []*iampb.Binding
+	for i := range 21 {
+		many = append(many, &iampb.Binding{Role: "roles/viewer", Members: []string{"user:a@example.com"},
+			Condition: &expr.Expr{Title: "t", Expression: fmt.Sprintf("request.time.getHours() == %d", i)}})
+	}
+	if _, err := set(&iampb.Policy{Version: 3, Bindings: many}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("21 conditions for one role and principal = %v, want InvalidArgument", err)
+	}
+	if _, err := set(&iampb.Policy{Version: 3, Bindings: many[:20]}); err != nil {
+		t.Errorf("20 conditions for one role and principal: %v", err)
 	}
 }

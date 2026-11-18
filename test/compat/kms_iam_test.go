@@ -19,7 +19,7 @@ import (
 // TestKMSIamPolicyIsStoredNotEnforced (#428; ADR-0006 as amended by #421):
 // on a key ring and on a crypto key, through the official client against the
 // CI instance, a policy round-trips with etags, a stale etag is ABORTED, a
-// condition is UNIMPLEMENTED, version 3 without conditions is accepted, and
+// condition needs a title (#1745), version 3 without conditions is accepted, and
 // TestIamPermissions returns everything asked. Nothing is inherited, and
 // nothing is enforced: Encrypt and Decrypt still work for a caller no binding
 // names.
@@ -73,8 +73,9 @@ func TestKMSIamPolicyIsStoredNotEnforced(t *testing.T) {
 					}
 					_, err = c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{Version: 3,
 						Bindings: []*iampb.Binding{{Role: "roles/cloudkms.admin", Members: []string{other}, Condition: &expr.Expr{Expression: "true"}}}}})
-					if kmsCode(variant, err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "condition") {
-						t.Errorf("a conditional binding = %v, want UNIMPLEMENTED naming condition", err)
+					// #1745: Cloud KMS takes conditions; this one has no title.
+					if kmsCode(variant, err) != codes.InvalidArgument || !strings.Contains(status.Convert(err).Message(), "condition") {
+						t.Errorf("a condition without a title = %v, want INVALID_ARGUMENT naming condition", err)
 					}
 					if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{Version: 3,
 						Bindings: []*iampb.Binding{{Role: "roles/cloudkms.cryptoKeyDecrypter", Members: []string{other}}}}}); err != nil {

@@ -540,6 +540,9 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711
 	}
+	if md.XGB != nil {
+		return f.xgbSubquery(r, q, md, c) // modelxgb.go, #1711
+	}
 	if typ == "MATRIX_FACTORIZATION" {
 		return f.mfSubquery(r, q, md, c)
 	}

@@ -675,7 +675,7 @@ func (s *Store) SetIamPolicy(project, id string, req *iampb.SetIamPolicyRequest)
 	if err != nil {
 		return iampolicy.Stored{}, err
 	}
-	next, err := iampolicy.Set(sec.IAMPolicy, req)
+	next, err := iampolicy.SetConditional(sec.IAMPolicy, req)
 	if err != nil {
 		return iampolicy.Stored{}, err
 	}
@@ -1195,4 +1195,30 @@ func (s *Store) ResolveSecretRef(project, secret, version string) (secretName, d
 	}
 	// Each version is a Kubernetes Secret of its own (#1596).
 	return VersionSecretName(project, id, number), VersionKey(number), nil
+}
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every secret's policy: a deleted service account's bindings
+// (#1751), which the resource manager registry's OnMemberRewrite hook
+// passes here.
+func (s *Store) RewriteIAMMember(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values, err := s.scan("secret/")
+	if err != nil {
+		return apierror.Internal(err, "list secrets")
+	}
+	for key, raw := range values {
+		var sec Secret
+		if err := json.Unmarshal(raw, &sec); err != nil {
+			continue
+		}
+		if !sec.IAMPolicy.RewriteMember(from, to) {
+			continue
+		}
+		if err := s.put(key, sec); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -53,8 +53,9 @@ func TestIAMPoliciesAreStoredOnInstancesAndDatabases(t *testing.T) {
 			t.Errorf("%s: stale etag = %v, want Aborted", res, err)
 		}
 		if _, err := api.set(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{Version: 3, Bindings: []*iampb.Binding{{Role: "roles/viewer",
-			Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.Unimplemented {
-			t.Errorf("%s: condition = %v, want Unimplemented", res, err)
+			Members: []string{"user:a@example.com"}, Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.InvalidArgument {
+			// #1745: Spanner accepts conditions; this one has no title.
+			t.Errorf("%s: condition without a title = %v, want InvalidArgument", res, err)
 		}
 		if got, err := api.get(ctx, &iampb.GetIamPolicyRequest{Resource: res}); err != nil || len(got.GetBindings()) != 1 {
 			t.Errorf("%s: read back = %v, %v", res, got, err)

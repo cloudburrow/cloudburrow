@@ -59,3 +59,42 @@ Download the new version with `go mod download`, copy the same files, reapply th
 record the version, sum and commit here and in `dependencies.json`, and run
 `go test ./internal/embedding/ ./test/repo/`. Once CloudBurrow builds with Go 1.27 only, the
 module can be required instead.
+
+## `vp9hbd`: CloudBurrow's VP9 decoder for every profile
+
+`vp9hbd` (import path `github.com/cloudburrow/cloudburrow/third_party/govpx/vp9hbd`) is not
+copied from govpx: CloudBurrow wrote it, for VP9 profiles 1 to 3 (10 and 12 bits a sample, 4:2:2,
+4:4:0 and 4:4:4), which govpx's decoder does not decode. It decodes profile 0 too. It follows the
+normative decoding process of the *VP9 Bitstream & Decoding Process Specification* v0.6
+(31 March 2016, Google; https://www.webmproject.org/vp9/), section by section (the code cites the
+sections: 6 syntax, 7 semantics, 8 decoding process, 9 parsing, Annex B superframes), with every
+sample a `uint16`. It is standard library only: no cgo, no assembly, no other module.
+
+From govpx it reuses, by import and unchanged, the constant tables of `internal/vp9/tables`
+(default and keyframe probabilities, scans, coefficient bands, Pareto table, quantizer lookups for
+8, 10 and 12 bits, motion vector reference positions, interpolation kernels). `txfm1d.go` holds
+govpx's 1-D inverse DCT and ADST (`internal/vp9/dsp`, ports of libvpx's `vpx_dsp/inv_txfm.c`,
+BSD 3-Clause) widened from `int16` to `int32` arithmetic, as libvpx's high-bitdepth build computes
+them. No GPL or LGPL code (ffmpeg's, libav's) was read; ffmpeg was only run, to make the test clips
+and their reference decodes.
+
+Where the specification text and libvpx differ, it does what libvpx (the reference decoder) does:
+
+1. In 4:2:2 and 4:4:0 the chroma area of an 8x16 or 16x8 block is 4x16 or 16x4, for which
+   `get_plane_block_size` gives `BLOCK_INVALID`; the plane's size in 4x4 units is computed from
+   the block's size and the subsampling instead (libvpx's `n4_w`, `n4_h`), and the chroma
+   transform size is the largest that fits it (libvpx's `uv_txsize_lookup`).
+2. Spec typos: key and intra-only frames read partitions with the keyframe probabilities, and the
+   loop filter level lookup applies the deltas when `loop_filter_delta_enabled` is 1.
+
+It also refuses frames beyond level 6.2's size (16384 a side, 35651584 samples), references out of
+the 7.2 scaling range or of another bit depth or subsampling, and turns any panic on corrupt data
+into an error.
+
+Checked by `go test ./third_party/govpx/vp9hbd/`: 23 clips in its `testdata` (one per pixel
+format yuv420p, yuv422p, yuv440p, yuv444p, yuv420p10le, yuv420p12le, yuv422p10le, yuv444p12le,
+yuv440p10le, with hidden alternate reference frames in superframes and compound prediction; two
+tile columns; lossless; error resilient with segmentation; per-segment quantizers; a 17x9 frame;
+`show_existing_frame`; a size change at a keyframe; 60 frames of `internal/embedding`'s turtle
+clip; reference scaling and intra-only frames made by rewriting libvpx streams' headers) match
+ffmpeg 9's decode frame for frame by MD5. The test file records the command that made each clip.

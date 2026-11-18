@@ -81,7 +81,8 @@ func TestBigQueryTableIAMIsStoredNotEnforced(t *testing.T) {
 		_, err = svc.Tables.SetIamPolicy("projects/"+project+"/datasets/"+ds.DatasetID+"/tables/"+target.TableID, &bq.SetIamPolicyRequest{Policy: &bq.Policy{
 			Version: 3, Bindings: []*bq.Binding{{Role: "roles/bigquery.dataViewer", Members: []string{"user:ada@example.com"}, Condition: &bq.Expr{Expression: "true"}}},
 		}}).Context(ctx).Do()
-		wantCode(t, target.TableID+": a condition", err, http.StatusNotImplemented, "condition")
+		// #1745: BigQuery takes conditions; this one has no title.
+		wantCode(t, target.TableID+": a condition without a title", err, http.StatusBadRequest, "condition")
 		perms, err := handle.TestPermissions(ctx, []string{"bigquery.tables.get", "bigquery.tables.getData"})
 		if err != nil || strings.Join(perms, ",") != "bigquery.tables.get,bigquery.tables.getData" {
 			t.Errorf("%s: TestPermissions = %v, %v; want both", target.TableID, perms, err)

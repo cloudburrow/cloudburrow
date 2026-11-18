@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
@@ -303,6 +305,10 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		if s == config.ServiceFirestore && cfg.Endpoints.FirestoreMongoDB != 0 {
 			vars = append(vars, envVar{"CLOUDBURROW_FIRESTORE_MONGODB_ENDPOINT", addr(cfg.Endpoints.FirestoreMongoDB),
 				"Firestore with MongoDB compatibility; read by no client library: put it in a mongodb:// connection string"})
+			// It serves TLS only, as Google's does (#1738), with a
+			// certificate of the instance's own CA: tlsCAFile.
+			vars = append(vars, envVar{"CLOUDBURROW_FIRESTORE_MONGODB_CA_FILE", filepath.Join(cfg.InstanceDir(), firestoreadmin.MongoCAFile),
+				"Firestore with MongoDB compatibility's CA certificate; put it in the connection string as tlsCAFile"})
 		}
 		// Spanner's REST API, a second port of the same emulator (#1331):
 		// the Terraform provider's instance and database admin calls use

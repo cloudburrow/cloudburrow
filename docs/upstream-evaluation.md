@@ -898,3 +898,44 @@ CloudBurrow (AC-3 from ATSC A/52, SBR and PS on the copied aac-go, high-bit-dept
 reconstruction in the copied govpx). `arabian9ts/aac-go` is copied into `third_party/aac-go`
 ([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)): it has one release and no activity since,
 and SBR would be added there. `govulncheck ./...` reports nothing for `opus-go`.
+
+**Follow-up (#1739, 2026-11-17): the decoders written here.** With no permissive module to adopt,
+each is written for CloudBurrow, standard library only, from a public specification:
+
+- **VP9 profiles 1 to 3**: `third_party/govpx/vp9hbd`, a VP9 decoder following the VP9 bitstream
+  specification's decoding process for every profile (8, 10 and 12 bits; 4:2:0, 4:2:2, 4:4:0,
+  4:4:4), reusing govpx's tables; bit-exact against ffmpeg 9 on 180-frame clips of each profile
+  ([PROVENANCE.md](../third_party/govpx/PROVENANCE.md)). govpx's own decoder still decodes profile 0.
+- **HE-AAC**: SBR and parametric stereo added to `third_party/aac-go` from ISO/IEC 14496-3, with
+  PacketVideo's OpenCORE AAC decoder (Apache 2.0) as a reference for the PS Huffman tables and the
+  QMF window's even coefficients ([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)). Parametric
+  stereo with 34 bands, IPD/OPD or mixing procedure B stays refused naming the tool: their
+  normative tables are printed only in ISO/IEC 14496-3 itself and in LGPL code (not read), and
+  AudioToolbox, the only HE-AACv2 encoder at hand, never emits them.
+- **AC-3 and E-AC-3**: `internal/ac3`, from ATSC A/52 as ETSI TS 102 366 V1.4.1 publishes it
+  (with Annex E), within 3e-5 of ffmpeg 9's float decode at high bit rates.
+- **Surround Opus**: `opus-go`'s multistream decoder, mapping family 1.
+
+## Amendment: OCR for `document_ocr` on scanned PDFs (#1733)
+
+Google documents that `document_ocr` adds the text OCR reads from each PDF page. CloudBurrow now
+reads a page with no text layer with **Tesseract 5.5.4**, the LSTM engine Google developed and
+open-sourced (Apache-2.0), compiled here to a WASI WebAssembly module and run on wazero, like
+PDFium: no cgo, and the Linux CLI stays static.
+
+| Candidate | Licence | Runtime | Result |
+|---|---|---|---|
+| Tesseract 5.5.4 + Leptonica 1.87.0, built by `third_party/tesseract-wasm/build.sh` with wasi-sdk 34 | Apache-2.0; BSD-2-Clause | WASI module on `tetratelabs/wazero` (already required) | **Adopted**: CER 1.5-2.0% on the 300 DPI test scan, about 6 s a page on one instance, six pages in about 14 s in parallel |
+| tesseract.js core (Emscripten build) | Apache-2.0 | needs Emscripten's JavaScript glue | Rejected: not a WASI module; a prebuilt binary not built here |
+| `github.com/Danlock/gogosseract` | MIT | wazero, tesseract.js's Emscripten build | Rejected: wraps a prebuilt third-party module and its Emscripten glue |
+| `github.com/otiai10/gosseract` | MIT | cgo, libtesseract | Rejected: cgo |
+| PaddleOCR PP-OCRv5 (ONNX) | Apache-2.0 | ONNX Runtime (`-tags onnx` builds only) | Rejected: not Google-authored, and only in the ONNX build |
+
+Models: tessdata_fast 4.1.0 `eng` and `osd` (Apache-2.0), embedded gzipped (6.2 MB). A page is
+rendered again at 300 DPI, orientation and script detection turns an upside-down page back
+(automatic page segmentation reads a page turned a quarter as vertical text), and the text is read
+in reading order. A page orientation and script detection finds in another script is read with
+tessdata_fast 4.1.0's model of that script (`script/Cyrillic`, `script/HanS`, ... 36 in all,
+Apache-2.0), fetched by `internal/localai` the first time one is needed into `<state-dir>/models`
+and checked against its pinned SHA-256 (CER 0.0% Cyrillic, 1.8% Greek on generated scans). Provenance: `third_party/tesseract-wasm/PROVENANCE.md`; `dependencies.json`
+`tesseractWasm`.
