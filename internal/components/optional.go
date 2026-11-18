@@ -1120,8 +1120,12 @@ if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
 		` -D "$PGDATA" -R -X stream -c fast; do
     echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA" && mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA"; sleep 2
   done
+  # Before PostgreSQL 12 the standby's settings are recovery.conf's, which
+  # -R wrote, and its timeline is the current one unless told (#1524).
+  conf="$PGDATA/postgresql.auto.conf"
+  if [ -f "$PGDATA/recovery.conf" ]; then conf="$PGDATA/recovery.conf"; echo "recovery_target_timeline = 'latest'" >> "$conf"; fi
   echo "primary_conninfo = 'host=$CLOUDSQL_PRIMARY_HOST port=` + fmt.Sprint(CloudSQLPort) + ` user=` + SQLReplicaUser +
-		` application_name=` + SQLStandbyApplicationName + `'" >> "$PGDATA/postgresql.auto.conf"
+		` application_name=` + SQLStandbyApplicationName + `'" >> "$conf"
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
 fi
 exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}

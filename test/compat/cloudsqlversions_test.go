@@ -105,8 +105,8 @@ func eventually(t *testing.T, what string, f func() error) {
 // and its upgradableDatabaseVersions, flags.list answers that version's
 // flags, and through the official connector, with pgx or the MySQL driver,
 // SELECT version() is that major version's server. PostgreSQL 9.6 to 12
-// are served (#1462), and 9.6 to 11 refuse high availability with why
-// (their read replicas are served since #1524); MYSQL_5_7, MYSQL_5_6 and SQL Server (whose images
+// are served (#1462), and 9.6 to 11 refuse point-in-time recovery with
+// why (their read replicas and high availability are served since #1524); MYSQL_5_7, MYSQL_5_6 and SQL Server (whose images
 // are linux/amd64 only) and a version Cloud SQL no longer offers are 501.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.flags.list, sql.databases.insert, sql.databases.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLDatabaseVersions(t *testing.T) {
@@ -176,12 +176,14 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 				t.Errorf("SELECT version() = %q, want %q", got, v.server)
 			}
 			if v.name == "POSTGRES_9_6" || v.name == "POSTGRES_11" {
-				// Before PostgreSQL 12 (no pg_promote, no recovery.signal):
-				// high availability is 501 with why. Read replicas are
-				// TestCloudSQLReadReplicasBeforePostgres12 (#1524).
+				// Before PostgreSQL 12 (no recovery.signal): point-in-time
+				// recovery is 501 with why (#1769). Read replicas and high
+				// availability are TestCloudSQLReadReplicasBeforePostgres12
+				// and TestCloudSQLHighAvailabilityBeforePostgres13 (#1524).
 				_, err := svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{
-					Settings: &sqladmin.Settings{AvailabilityType: "REGIONAL"}}).Do()
-				wantHTTP(t, "REGIONAL on "+v.name, err, 501)
+					Settings: &sqladmin.Settings{BackupConfiguration: &sqladmin.BackupConfiguration{Enabled: true,
+						PointInTimeRecoveryEnabled: true}}}).Do()
+				wantHTTP(t, "point-in-time recovery on "+v.name, err, 501)
 				// Its databases and users are served.
 				op, err := svc.Databases.Insert(project, name, &sqladmin.Database{Name: "app"}).Do()
 				if err != nil {

@@ -47,9 +47,10 @@ func errStatus(err error) string {
 	return err.Error()
 }
 
-// PostgreSQL 9.6 to 11 serve a primary, and refuse high availability,
-// read replicas and point-in-time recovery, which need PostgreSQL 12
-// (#1462); turning either on for 12 and later is not refused.
+// PostgreSQL 9.6 to 11 serve a primary, read replicas and high
+// availability (#1524), and refuse point-in-time recovery, which needs
+// PostgreSQL 12's recovery.signal (#1462, #1769); turning it on for 12 and
+// later is not refused.
 func TestPGBefore12Refusals(t *testing.T) {
 	for v, want := range map[string]bool{"POSTGRES_9_6": true, "POSTGRES_10": true, "POSTGRES_11": true, "POSTGRES_12": false,
 		"POSTGRES_17": false, "MYSQL_8_0": false} {
@@ -57,15 +58,20 @@ func TestPGBefore12Refusals(t *testing.T) {
 			t.Errorf("pgBefore12(%s) = %v", v, got)
 		}
 		ha := Spec{DatabaseVersion: v, AvailabilityType: "REGIONAL"}
-		if err := ha.pgBefore12Unsupported(nil); (err != nil) != want || (err != nil && !strings.Contains(errStatus(err), "501")) {
+		if err := ha.pgBefore12Unsupported(nil); err != nil {
 			t.Errorf("REGIONAL %s: %v", v, err)
 		}
-		if err := ha.pgBefore12Unsupported(&ha); err != nil {
-			t.Errorf("REGIONAL kept on %s: %v", v, err)
+		pitr := Spec{DatabaseVersion: v, Settings: map[string]any{"backupConfiguration": map[string]any{
+			"enabled": true, "pointInTimeRecoveryEnabled": true, "binaryLogEnabled": true}}}
+		if err := pitr.pgBefore12Unsupported(nil); (err != nil) != want || (err != nil && !strings.Contains(errStatus(err), "501")) {
+			t.Errorf("point-in-time recovery on %s: %v", v, err)
+		}
+		if err := pitr.pgBefore12Unsupported(&pitr); err != nil {
+			t.Errorf("point-in-time recovery kept on %s: %v", v, err)
 		}
 	}
-	if err := pgBefore12Why("POSTGRES_10", "a read replica"); err == nil || !strings.Contains(err.Error(), "pg_promote") {
-		t.Errorf("a POSTGRES_10 replica: %v", err)
+	if err := pgBefore12Why("POSTGRES_10", "point-in-time recovery"); err == nil || !strings.Contains(err.Error(), "#1769") {
+		t.Errorf("point-in-time recovery on POSTGRES_10: %v", err)
 	}
 }
 
