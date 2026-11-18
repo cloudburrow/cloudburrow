@@ -66,8 +66,8 @@ not honoured tells the caller their setting applied when it did not.
 
 | Field | Why |
 |---|---|
-| `temperature`, `topP`, `topK`, `seed` | The runtime exposes no sampling control. `litert_lm_main --helpfull` lists no such flag (re-checked 2026-11-17, #1765). |
-| `maxOutputTokens` | **Accepted by the runtime and ignored by it.** The same prompt decoded 309 tokens at a limit of 8, at 40, and with no limit. Refused on that measurement, not on the flag's absence. Re-measured 2026-11-17 (#1765) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `--max_output_tokens=8` and `=64` wrote the same 746-word answer. |
+| `temperature`, `topP`, `topK`, `seed` | The runtime exposes no sampling control. `litert_lm_main --helpfull` lists no such flag (re-checked 2026-11-17, #1765). Re-checked 2026-11-18 (#1773) against LiteRT-LM's `main` (`0082833d`) and release `v0.19.1`: `runtime/engine/shared_flags.cc` still has no temperature, top-k, top-p or seed flag; the sampler's parameters exist only in the C++ API (`SessionConfig`, `runtime/proto/sampler_params.proto`), which `litert_lm_main` sets to `SessionConfig::CreateDefault()`. Honouring them needs a runner of CloudBurrow's own over that API (#1797). |
+| `maxOutputTokens` | **Accepted by the runtime and ignored by it.** The same prompt decoded 309 tokens at a limit of 8, at 40, and with no limit. Refused on that measurement, not on the flag's absence. Re-measured 2026-11-17 (#1765) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `--max_output_tokens=8` and `=64` wrote the same 746-word answer. Re-checked 2026-11-18 (#1773): upstream commit `a789b7d0` (2026-11-05, "Apply --max_output_tokens in litert_lm_main", after the pin) passes the flag to `Conversation::SendMessageAsync` as `OptionalArgs::max_output_tokens`, so a pin at or after it should honour the limit; it stays refused until the pin is moved and the limit measured again (#1797). |
 | `stopSequences` | No runtime control. |
 | `candidateCount` > 1 | `--num_output_candidates` exists but was never exercised; untested is not supported. |
 | `responseMimeType`, `responseSchema` | No constrained decoding is wired up. |

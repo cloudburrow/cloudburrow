@@ -79,6 +79,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
 	// Custom prediction containers, as Vertex endpoints (#1193).
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/endpoints/{endpoint}", s.handleEndpoint)
+	// Cloud Vision's text features, for BigQuery's ML.ANNOTATE_IMAGE
+	// (vision.go, #1773).
+	mux.HandleFunc("POST /v1/images:annotate", s.annotateImages)
 	mux.HandleFunc("/", s.notFound)
 	// The playground page and any browser tab can reach this port (#676).
 	return hostguard.Wrap(mux)

@@ -328,10 +328,18 @@ func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.Mo
 	if strings.Contains(strings.ToLower(ri.Endpoint), "embedding") {
 		fn = "ML.GENERATE_EMBEDDING(MODEL `" + datasetID + "." + modelID + "`, (SELECT 'Hello' AS content))"
 	}
+	// A model over a Cloud AI service names its service type, not an
+	// endpoint (#1773): a Vision model runs ML.ANNOTATE_IMAGE over an
+	// object table.
+	target := console.Property{Label: "Endpoint", Value: ri.Endpoint}
+	if ri.RemoteServiceType != "" {
+		target = console.Property{Label: "Remote service type", Value: ri.RemoteServiceType}
+		fn = "ML.ANNOTATE_IMAGE(MODEL `" + datasetID + "." + modelID + "`, TABLE `" + datasetID + ".OBJECT_TABLE`, STRUCT(['TEXT_DETECTION'] AS vision_features))"
+	}
 	props := []console.Property{
 		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},
 		{Label: "Type", Value: "Remote model"},
-		{Label: "Endpoint", Value: ri.Endpoint},
+		target,
 		{Label: "Connection", Value: ri.Connection},
 		{Label: "Location", Value: orDash(md.Location)},
 		{Label: "Runs on", Value: "the instance's local Vertex AI endpoint; never Google's"},
@@ -348,7 +356,7 @@ func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.Mo
 	}
 	return console.Detail{
 		Trail:   trail,
-		Summary: []console.Property{{Label: "Dataset", Value: datasetID}, {Label: "Type", Value: "Remote"}, {Label: "Endpoint", Value: ri.Endpoint}},
+		Summary: []console.Property{{Label: "Dataset", Value: datasetID}, {Label: "Type", Value: "Remote"}, target},
 		Sections: []console.Section{
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Model", Properties: props}}},
 		},

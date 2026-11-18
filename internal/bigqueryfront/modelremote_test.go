@@ -14,19 +14,26 @@ func TestParseRemoteModel(t *testing.T) {
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='gemini-2.0-flash')":              0,
 		"CREATE OR REPLACE MODEL ds.m REMOTE WITH CONNECTION `us.c` OPTIONS(endpoint = 'text-embedding-005')": 0,
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION DEFAULT OPTIONS(ENDPOINT='gemini-2.0-flash')":               0,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1')": 501,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x', bogus=1)":                    400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x') AS SELECT 1":                 400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c`":                                                   400,
-		"CREATE MODEL ds.m REMOTE CONNECTION `p.us.c` OPTIONS(ENDPOINT='x')":                                  400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `a.b.c.d` OPTIONS(ENDPOINT='x')":                            400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1')": 0,
+		// #1773: the services with no local model, and their options.
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_TRANSLATE_V3')":                        501,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_NATURAL_LANGUAGE_V1')":                 501,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_SPEECH_TO_TEXT_V2')":                   501,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_DOCUMENT_V1', DOCUMENT_PROCESSOR='x')": 501,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_NOPE')":                                400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1', ENDPOINT='x')":             400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x', bogus=1)":                                              400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x') AS SELECT 1":                                           400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c`":                                                                             400,
+		"CREATE MODEL ds.m REMOTE CONNECTION `p.us.c` OPTIONS(ENDPOINT='x')":                                                            400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `a.b.c.d` OPTIONS(ENDPOINT='x')":                                                      400,
 	} {
 		toks, _ := lex(sql)
 		d, is, code, msg := parseModelDDL(toks, sql)
 		if !is || code != want {
 			t.Errorf("%s: %v %d %s; want %d", sql, is, code, msg, want)
 		}
-		if code == 0 && (d.remote == nil || d.remote.endpoint == "" || len(d.remote.connection) != 3 && !d.remote.isDefault) {
+		if code == 0 && (d.remote == nil || d.remote.endpoint == "" && d.remote.serviceType == "" || len(d.remote.connection) != 3 && !d.remote.isDefault) {
 			t.Errorf("%s: %+v", sql, d.remote)
 		}
 	}
@@ -138,6 +145,38 @@ func TestAIFunctionsAreNamed(t *testing.T) {
 	} {
 		if got := aiFunction(sql); got != want {
 			t.Errorf("%s: %q, want %q", sql, got, want)
+		}
+	}
+}
+
+func TestParseStringArray(t *testing.T) {
+	for in, want := range map[string]string{
+		"['text_detection']":                           "text_detection",
+		"['TEXT_DETECTION','DOCUMENT_TEXT_DETECTION']": "TEXT_DETECTION|DOCUMENT_TEXT_DETECTION",
+		"ARRAY<STRING>['a']":                           "a",
+		"[]":                                           "",
+		"['a''b']":                                     "",
+		"[1]":                                          "",
+		"'a'":                                          "",
+	} {
+		got, ok := parseStringArray(in)
+		if strings.Join(got, "|") != want || ok != (want != "") {
+			t.Errorf("%s: %v %v; want %q", in, got, ok, want)
+		}
+	}
+}
+
+func TestServiceTypeRefusalsNameTheirFunction(t *testing.T) {
+	for typ, fn := range serviceTypeFunctions {
+		code, msg := checkServiceType(strings.ToLower(typ))
+		if typ == "CLOUD_AI_VISION_V1" {
+			if code != 0 {
+				t.Errorf("%s: %d %s", typ, code, msg)
+			}
+			continue
+		}
+		if code != 501 || !strings.Contains(msg, fn) {
+			t.Errorf("%s: %d %s", typ, code, msg)
 		}
 	}
 }

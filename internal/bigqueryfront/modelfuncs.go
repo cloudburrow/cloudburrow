@@ -31,13 +31,17 @@ import (
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
-	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true}
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
+	"ANNOTATE_IMAGE": true} // modelservice.go, #1773
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
 	fn    string
 	path  []string
 	input string // the input query, or ""
+	// table is the TABLE argument's path, or nil (ML.ANNOTATE_IMAGE's
+	// object table, modelservice.go).
+	table []string
 	struc map[string]string
 	// thresholds are ML.ROC_CURVE's GENERATE_ARRAY argument.
 	thresholds []float64
@@ -118,6 +122,7 @@ func findMLCalls(sql string) ([]mlCall, string) {
 					return nil, "Syntax error: expected a table name after TABLE"
 				}
 				c.input = "SELECT * FROM " + quotePath(p)
+				c.table = p
 			default:
 				return nil, "Syntax error: unexpected " + a[0].text + " in ML." + c.fn
 			}
@@ -255,7 +260,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
 				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.HOLIDAY_INFO, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
-				"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING. Nothing was run.")
+				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING and ML.ANNOTATE_IMAGE. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -559,7 +564,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if md.Remote != nil {
 		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
 	}
-	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" {
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "ANNOTATE_IMAGE" {
 		return "", 400, "Function ML." + c.fn + " is only supported for remote models"
 	}
 	if md.ONNX != nil {

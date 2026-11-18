@@ -69,6 +69,10 @@ type remoteModel struct {
 	// takes, false for a generative one, which ML.GENERATE_TEXT takes.
 	Embedding bool   `json:"embedding,omitempty"`
 	Location  string `json:"location"`
+	// ServiceType is REMOTE_SERVICE_TYPE, for a remote model over a Cloud
+	// AI service (modelservice.go, #1773), with no endpoint; "" for an
+	// LLM or embedding model.
+	ServiceType string `json:"serviceType,omitempty"`
 }
 
 // remoteDDL is a CREATE MODEL … REMOTE WITH CONNECTION's parts.
@@ -76,6 +80,8 @@ type remoteDDL struct {
 	connection []string // project, location, id; nil for DEFAULT
 	isDefault  bool     // REMOTE WITH CONNECTION DEFAULT
 	endpoint   string
+	// serviceType is REMOTE_SERVICE_TYPE (modelservice.go, #1773).
+	serviceType string
 }
 
 // parseRemote reads REMOTE WITH CONNECTION {DEFAULT | name} OPTIONS(...)
@@ -125,7 +131,21 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 				return 400, "The ENDPOINT option of a remote model must be a string literal"
 			}
 			rd.endpoint = v
-		case "REMOTE_SERVICE_TYPE", "MAX_BATCHING_ROWS", "SPEECH_RECOGNIZER", "PROMPT_COL", "INPUT_LABEL_COLS",
+		case "REMOTE_SERVICE_TYPE":
+			v, ok := unquoteString(opts[k+2].text)
+			if opts[k+2].kind != tokString || !ok {
+				return 400, "The REMOTE_SERVICE_TYPE option of a remote model must be a string literal"
+			}
+			if code, msg := checkServiceType(v); code != 0 { // modelservice.go, #1773
+				return code, msg
+			}
+			rd.serviceType = strings.ToUpper(v)
+		case "DOCUMENT_PROCESSOR", "SPEECH_RECOGNIZER":
+			// Only CLOUD_AI_DOCUMENT_V1's and CLOUD_AI_SPEECH_TO_TEXT_V2's,
+			// which are refused (modelservice.go).
+			return 501, "Not implemented here: the " + name + " option of a remote model: " + serviceTypeRefusals[map[string]string{
+				"DOCUMENT_PROCESSOR": "CLOUD_AI_DOCUMENT_V1", "SPEECH_RECOGNIZER": "CLOUD_AI_SPEECH_TO_TEXT_V2"}[name]] + " Nothing was run."
+		case "MAX_BATCHING_ROWS", "PROMPT_COL", "INPUT_LABEL_COLS",
 			"MODEL_TYPE", "AI_SERVICE_TYPE":
 			return 501, "Not implemented here: the " + name + " option of a remote model: CloudBurrow's remote models are LLM " +
 				"and embedding models on the instance's local Vertex AI endpoint alone. Nothing was run."
@@ -137,8 +157,11 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 			k++
 		}
 	}
-	if rd.endpoint == "" {
-		return 400, "CREATE MODEL with a remote connection requires the ENDPOINT option"
+	if rd.endpoint != "" && rd.serviceType != "" {
+		return 400, "A remote model takes either the ENDPOINT or the REMOTE_SERVICE_TYPE option, not both"
+	}
+	if rd.endpoint == "" && rd.serviceType == "" {
+		return 400, "CREATE MODEL with a remote connection requires the ENDPOINT or REMOTE_SERVICE_TYPE option"
 	}
 	if end+1 < len(stmt) {
 		return 400, "Syntax error: a remote model takes no AS query: unexpected " + stmt[end+1].text
@@ -210,11 +233,15 @@ func (f front) createRemote(ctx context.Context, d modelDDL, project, loc string
 			cp, rd.connection[1], rd.connection[2])
 	}
 	model := endpointModel(rd.endpoint)
-	if model == "" {
+	if model == "" && rd.serviceType == "" {
 		return nil, 400, "Invalid ENDPOINT " + strconv.Quote(rd.endpoint)
 	}
 	if code, msg := f.checkConnectionUse(ctx, cp, project, cn); code != 0 { // connectionauth.go, #1765
 		return nil, code, msg
+	}
+	if rd.serviceType != "" {
+		return &remoteModel{Connection: fmt.Sprintf("projects/%d/locations/%s/connections/%s", number, cn.Location, cn.ID),
+			ServiceType: rd.serviceType, Location: cn.Location}, 0, ""
 	}
 	return &remoteModel{Connection: fmt.Sprintf("projects/%d/locations/%s/connections/%s", number, cn.Location, cn.ID),
 		Endpoint: rd.endpoint, Model: model, Embedding: isEmbeddingEndpoint(model), Location: cn.Location}, 0, ""
@@ -231,6 +258,11 @@ func sameLocation(a, b string) bool {
 // remoteResource fills a remote model's resource.
 func (md bqModel) remoteResource(res map[string]any) {
 	delete(res, "modelType")
+	if md.Remote.ServiceType != "" {
+		// remoteServiceType, with no endpoint (modelservice.go, #1773).
+		res["remoteModelInfo"] = map[string]any{"connection": md.Remote.Connection, "remoteServiceType": md.Remote.ServiceType}
+		return
+	}
 	res["remoteModelInfo"] = map[string]any{"connection": md.Remote.Connection, "endpoint": md.Remote.Endpoint}
 }
 
@@ -267,6 +299,12 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	fname := "ML." + c.fn
 	if c.ai {
 		fname = "AI." + c.fn
+	}
+	if rm.ServiceType != "" {
+		return f.serviceSubquery(r, q, md, c, fname) // modelservice.go, #1773
+	}
+	if c.fn == "ANNOTATE_IMAGE" {
+		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s: it takes a remote model whose REMOTE_SERVICE_TYPE is CLOUD_AI_VISION_V1", fname, rm.Endpoint)
 	}
 	switch {
 	case c.fn == "GENERATE_TEXT" && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
