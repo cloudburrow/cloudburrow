@@ -315,7 +315,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
 			return
 		}
-		if iam.serveRewriteMember(w, r) { // iam.go, #1751
+		if iam.serveRewriteMember(w, r, next) { // iam.go and datasetaccessrewrite.go, #1751
 			return
 		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
