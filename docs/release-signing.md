@@ -113,8 +113,9 @@ then `codesign -dv` output with `Authority=Developer ID Application`, a `Timesta
 section. The signed archives are the run's `cloudburrow-darwin-*` artifacts.
 
 On the first tagged release, check a downloaded darwin binary as
-[Gatekeeper](install.md#gatekeeper) describes (`codesign -dv --verbose=2`, `spctl -a -t exec -vv`,
-`gh attestation verify`). That is the acceptance for #605.
+[Gatekeeper](install.md#gatekeeper) describes (`codesign -dv --verbose=2`, `spctl -a -vv -t open --context context:primary-signature`,
+`gh attestation verify`). That is the acceptance for #605, met by v0.2.0. `spctl -a -t exec`
+rejects any bare command-line binary as "not an app", signed or not, so it is not the check.
 
 ## Optional: local notarization
 

@@ -14,7 +14,7 @@ charts and operators work against it directly.
 
 ## Status
 
-**Released: [v0.1.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0).** Install it
+**Released: [v0.2.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.2.0).** Install it
 with `brew install cloudburrow/tap/cloudburrow`, the install script, or from source
 ([docs/install.md](docs/install.md)). Every archive, and the one `checksums.txt`, carries a GitHub
 build attestation, and the installer refuses an archive it cannot verify. The
@@ -134,7 +134,7 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
 - **Signed URLs are verified, but only against local keys.** A bad signature, an unknown key or
   an expired URL is 403; a URL signed here is accepted by no Google service.
 - **No GKE management APIs.** BigQuery is an opt-in community emulator that
-  serves one project and keeps nothing across a restart; see
+  serves every ACTIVE project of Resource Manager (#1764) and keeps nothing across a restart; see
   [compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
 
 ## How it fits together
