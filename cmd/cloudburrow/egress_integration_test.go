@@ -117,10 +117,10 @@ func cloudBurrowDecimal(n int) string {
 // OpenTelemetry's GCP resource detector or any other metadata-server probe,
 // not a token refresh or an ADC lookup, not DirectPath.
 //
-// It builds the CLI with egressGuard, starts every service with it, makes a
-// Spanner database and a Bigtable table to open, walks every console screen
-// it can reach from each service's list (every list, every detail, two
-// levels down), runs a Spanner query and a write and a BigQuery query
+// It builds the CLI with egressGuard, prefetches, starts every service
+// offline with the guard on, makes a Spanner database and a Bigtable table
+// to open, walks every console screen it can reach from each service's list
+// (every list, every detail, three levels down), runs a Spanner query and a write and a BigQuery query
 // through the console, saves and loads the state, resets, and then reads the
 // guard's log: any line in it fails the test, with the stack that made it.
 //
@@ -194,7 +194,16 @@ func TestNoGoogleEgress(t *testing.T) {
 		_ = exec.Command("kind", "delete", "cluster", "--name", "cloudburrow-"+name).Run()
 	})
 
-	t.Logf("up: %s", tailLines(run(40*time.Minute, "up", "--detach", "--detach-timeout", "35m"), 5))
+	// What `up` downloads (Knative's manifests, images, binaries) is
+	// prefetched first, unguarded: those downloads are the product's
+	// deliberate egress, which --offline then rules out, so the guard sees
+	// only what nobody asked for.
+	prefetch := exec.Command(bin, append([]string{"prefetch"}, flags...)...)
+	prefetch.Env = env[:len(env)-1]
+	if out, err := prefetch.CombinedOutput(); err != nil {
+		t.Fatalf("cloudburrow prefetch: %v\n%s", err, tailLines(string(out), 40))
+	}
+	t.Logf("up: %s", tailLines(run(40*time.Minute, "up", "--offline", "--detach", "--detach-timeout", "35m"), 5))
 
 	cfg, err := config.Load(config.Options{Args: flags})
 	if err != nil {
