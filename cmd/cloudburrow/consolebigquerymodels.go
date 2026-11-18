@@ -330,11 +330,15 @@ func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.Mo
 	}
 	// A model over a Cloud AI service names its service type, not an
 	// endpoint (#1773): a Vision model runs ML.ANNOTATE_IMAGE over an
-	// object table.
+	// object table, a Speech-to-Text model ML.TRANSCRIBE (#1799).
 	target := console.Property{Label: "Endpoint", Value: ri.Endpoint}
 	if ri.RemoteServiceType != "" {
 		target = console.Property{Label: "Remote service type", Value: ri.RemoteServiceType}
 		fn = "ML.ANNOTATE_IMAGE(MODEL `" + datasetID + "." + modelID + "`, TABLE `" + datasetID + ".OBJECT_TABLE`, STRUCT(['TEXT_DETECTION'] AS vision_features))"
+		if ri.RemoteServiceType == "CLOUD_AI_SPEECH_TO_TEXT_V2" { // #1799
+			fn = "ML.TRANSCRIBE(MODEL `" + datasetID + "." + modelID + "`, TABLE `" + datasetID + ".OBJECT_TABLE`, " +
+				`recognition_config => (JSON '{"model": "chirp", "language_codes": ["en-US"], "auto_decoding_config": {}}'))`
+		}
 	}
 	props := []console.Property{
 		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},

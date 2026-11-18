@@ -67,8 +67,6 @@ var serviceTypeRefusals = map[string]string{
 		"that analyses entities, sentiment, syntax or categories as the Natural Language API does, and never calls Google (#1773).",
 	"CLOUD_AI_TRANSLATE_V3": "a remote model over the Cloud Translation API (ML.TRANSLATE): CloudBurrow has no local translation model " +
 		"yet, and never calls Google (#1773).",
-	"CLOUD_AI_SPEECH_TO_TEXT_V2": "a remote model over the Speech-to-Text API (ML.TRANSCRIBE): CloudBurrow has no local speech " +
-		"recognition model yet, and never calls Google (#1773).",
 	"CLOUD_AI_DOCUMENT_V1": "a remote model over the Document AI API (ML.PROCESS_DOCUMENT): CloudBurrow serves no Document AI API, " +
 		"so no processor can exist for DOCUMENT_PROCESSOR to name, and never calls Google (#1773).",
 }
@@ -142,6 +140,12 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 	if f.vertexai == "" {
 		return "", 501, "Not implemented here: " + fname + ": this instance does not serve its local Vertex AI endpoint to BigQuery (#1760). Nothing was run."
 	}
+	if c.fn == "TRANSCRIBE" {
+		return f.transcribeSubquery(r, q, md, c, fname) // modeltranscribe.go, #1799
+	}
+	for k := range c.named {
+		return "", 400, "Unknown argument " + k + " of " + fname
+	}
 	var features []string
 	for k, v := range c.struc {
 		if k != "vision_features" {
@@ -168,64 +172,93 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 	if len(features) == 0 {
 		return "", 400, fname + " requires STRUCT([...] AS vision_features)"
 	}
-	project := projectOf(f.base)
-	ds, table, ok := tableOf(q, c.table)
-	if !ok {
-		return "", 400, "Table name " + strings.Join(c.table, ".") + " missing dataset while no default dataset is set in the request."
-	}
-	if len(c.table) == 3 && c.table[0] != project {
-		return "", 400, fmt.Sprintf("%s takes an object table of project %s", fname, project)
-	}
-	ot, live := f.objectTable(r, ds, table)
-	if !live {
-		if st, got := f.get(r, tablePath(ds, table)); st != http.StatusOK {
-			return "", st, errorMessage(got, st)
-		}
-		return "", 400, fmt.Sprintf("%s takes an object table; %s:%s.%s is not one", fname, project, ds, table)
-	}
-	if !sameLocation(rm.Location, f.datasetLocation(r, ds)) {
-		return "", 400, fmt.Sprintf("%s must run in the remote model's location %s", fname, rm.Location)
-	}
-	cn, ok := f.remoteConnection(rm)
-	if !ok {
-		return "", 404, "Not found: Connection " + rm.Connection
-	}
-	if code, msg := f.checkConnectionUse(r.Context(), md.Project, md.Project, cn); code != 0 {
-		return "", code, msg
-	}
-	if ot.stale(f.now()) {
-		if code, msg := f.refreshObjectTable(r, streamKey(project, ds, table)); code != 0 {
-			return "", code, msg
-		}
-	}
-	src := quotePath([]string{project, ds, table})
-	_, rows, code, msg := f.queryAllRows(r, q, "SELECT uri, generation FROM "+src)
+	src, objects, code, msg := f.serviceObjects(r, q, md, c, fname)
 	if code != 0 {
 		return "", code, msg
 	}
 	var lits []string
-	for _, row := range rows {
-		if len(row) != 2 || row[0] == nil || row[1] == nil {
-			continue
-		}
-		uri := *row[0]
-		gen, _ := strconv.ParseInt(*row[1], 10, 64)
+	for _, o := range objects {
 		var res []byte
-		status := ""
-		data, code, msg := f.objectData(r, ot, uri, gen)
-		switch {
-		case code == 403:
-			return "", code, msg
-		case code != 0:
-			status = msg
-		default:
-			res, status = f.annotateImage(r.Context(), data, features)
+		status := o.status
+		if o.data != nil {
+			res, status = f.annotateImage(r.Context(), o.data, features)
 		}
-		lits = append(lits, "STRUCT("+sqlString(uri)+", "+jsonLiteral(res)+", "+sqlString(status)+")")
+		lits = append(lits, "STRUCT("+sqlString(o.uri)+", "+jsonLiteral(res)+", "+sqlString(status)+")")
 	}
 	return "(SELECT _cbml_p.ml_annotate_image_result AS ml_annotate_image_result, _cbml_p.ml_annotate_image_status AS ml_annotate_image_status, " +
 		"_cbml_in.* FROM " + src + " AS _cbml_in LEFT JOIN UNNEST(ARRAY<STRUCT<_cbml_k STRING, ml_annotate_image_result JSON, ml_annotate_image_status STRING>>[" +
 		strings.Join(lits, ", ") + "]) AS _cbml_p ON _cbml_in.uri = _cbml_p._cbml_k)", 0, ""
+}
+
+// serviceObject is one object of a service function's object table: its
+// data, or the row's status when it could not be read.
+type serviceObject struct {
+	uri    string
+	data   []byte
+	status string
+}
+
+// serviceObjects checks a service function's object table, the model's
+// location and connection, and reads every object at its row's generation
+// (objectData, as the table's connection may). src is the table's quoted
+// path.
+func (f front) serviceObjects(r *http.Request, q queryOptions, md bqModel, c mlCall, fname string) (src string, objects []serviceObject, code int, msg string) {
+	rm := md.Remote
+	project := projectOf(f.base)
+	ds, table, ok := tableOf(q, c.table)
+	if !ok {
+		return "", nil, 400, "Table name " + strings.Join(c.table, ".") + " missing dataset while no default dataset is set in the request."
+	}
+	if len(c.table) == 3 && c.table[0] != project {
+		return "", nil, 400, fmt.Sprintf("%s takes an object table of project %s", fname, project)
+	}
+	ot, live := f.objectTable(r, ds, table)
+	if !live {
+		if st, got := f.get(r, tablePath(ds, table)); st != http.StatusOK {
+			return "", nil, st, errorMessage(got, st)
+		}
+		return "", nil, 400, fmt.Sprintf("%s takes an object table; %s:%s.%s is not one", fname, project, ds, table)
+	}
+	if !sameLocation(rm.Location, f.datasetLocation(r, ds)) {
+		return "", nil, 400, fmt.Sprintf("%s must run in the remote model's location %s", fname, rm.Location)
+	}
+	cn, ok := f.remoteConnection(rm)
+	if !ok {
+		return "", nil, 404, "Not found: Connection " + rm.Connection
+	}
+	if code, msg := f.checkConnectionUse(r.Context(), md.Project, md.Project, cn); code != 0 {
+		return "", nil, code, msg
+	}
+	if ot.stale(f.now()) {
+		if code, msg := f.refreshObjectTable(r, streamKey(project, ds, table)); code != 0 {
+			return "", nil, code, msg
+		}
+	}
+	src = quotePath([]string{project, ds, table})
+	_, rows, code, msg := f.queryAllRows(r, q, "SELECT uri, generation FROM "+src)
+	if code != 0 {
+		return "", nil, code, msg
+	}
+	for _, row := range rows {
+		if len(row) != 2 || row[0] == nil || row[1] == nil {
+			continue
+		}
+		o := serviceObject{uri: *row[0]}
+		gen, _ := strconv.ParseInt(*row[1], 10, 64)
+		data, code, msg := f.objectData(r, ot, o.uri, gen)
+		switch {
+		case code == 403:
+			return "", nil, code, msg
+		case code != 0:
+			o.status = msg
+		case data == nil:
+			o.data = []byte{}
+		default:
+			o.data = data
+		}
+		objects = append(objects, o)
+	}
+	return src, objects, 0, ""
 }
 
 // annotateImage sends one image to the local endpoint's Vision route:

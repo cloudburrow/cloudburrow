@@ -22,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/speech"
 )
 
 // buildLocalAI returns the local generation endpoint, or nil when no model is
@@ -64,6 +65,7 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
 	srv := vertexai.NewServerOn(addr, gen)
+	attachSpeechModel(cfg) // ML.TRANSCRIBE's route is on every local AI endpoint (#1799)
 	for _, a := range cfg.LocalAI.Aliases {
 		srv.Alias(a)
 	}
@@ -109,6 +111,7 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 	}
 	if srv == nil {
 		srv = vertexai.NewServerOn(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI)), nil)
+		attachSpeechModel(cfg)
 	}
 	srv.SetEndpoints(endpointResolver{src: predictionSource{run: runProvider{
 		kubeconfig:     cfg.KubeconfigPath(),
@@ -149,8 +152,24 @@ func attachScriptModels(cfg config.Config) {
 	})
 }
 
+// attachSpeechModel lets ML.TRANSCRIBE read audio (#1799): whisper.cpp's
+// ggml Whisper base model is fetched the first time audio is transcribed,
+// into <state-dir>/models, and checked against its pinned SHA-256.
+func attachSpeechModel(cfg config.Config) {
+	cache := embeddingCache(cfg)
+	speech.SetModelSource(func(ctx context.Context) (string, error) {
+		f := localai.Whisper.Pin.Files[0]
+		if _, err := os.Stat(cache.PinnedPath(localai.Whisper, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "fetching %s (%s @ %s, MIT) for ML.TRANSCRIBE...\n",
+				f.Path, localai.WhisperRepo, localai.Whisper.Pin.Revision[:12])
+		}
+		return cache.FetchPinnedFile(ctx, localai.Whisper, f)
+	})
+}
+
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {
 	attachScriptModels(cfg)
+	attachSpeechModel(cfg)
 	m, err := localai.Lookup(localai.EmbeddingGemmaONNXID)
 	if err != nil {
 		srv.SetEmbedder(nil, err)

@@ -48,6 +48,8 @@ const (
 	ModalityEmbedding Modality = "embedding"
 	// ModalityOCR is text recognition (Tesseract's models, #1733).
 	ModalityOCR Modality = "ocr"
+	// ModalitySpeech is speech recognition (whisper.cpp's models, #1799).
+	ModalitySpeech Modality = "speech-recognition"
 )
 
 // Model is a catalogued artifact.
