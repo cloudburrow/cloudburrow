@@ -22,6 +22,21 @@ func isOperatorUpdate(u bson.D) bool {
 // applyUpdate is doc with update u applied; inserting says the document
 // is an upsert's new one, which $setOnInsert applies to.
 func applyUpdate(doc bson.D, u any, inserting bool) (bson.D, error) {
+	return applyUpdateCtx(doc, u, inserting, nil)
+}
+
+func applyUpdateCtx(doc bson.D, u any, inserting bool, uc *UpdateContext) (bson.D, error) {
+	var filters map[string]bson.D
+	if uc != nil && uc.ArrayFilters != nil {
+		if _, isPipeline := u.(bson.A); isPipeline {
+			return nil, merr(72, "InvalidOptions", "arrayFilters may not be specified for pipeline-style updates")
+		}
+		var err error
+		if filters, err = parseArrayFilters(uc.ArrayFilters); err != nil {
+			return nil, err
+		}
+	}
+	used := map[string]bool{}
 	id, hasID := lookupE(doc, "_id")
 	var out bson.D
 	switch x := u.(type) {
@@ -66,9 +81,23 @@ func applyUpdate(doc bson.D, u any, inserting bool) (bson.D, error) {
 				return nil, merr(9, "FailedToParse", "Modifiers operate on fields but we found type %s instead. For example: {$mod: {<field>: ...}} not {%s: %v}", bsonTypeName(op.Value), op.Key, op.Value)
 			}
 			for _, f := range fields {
-				if err := applyOp(&out, op.Key, f.Key, f.Value, inserting); err != nil {
-					return nil, err
+				paths := []string{f.Key}
+				if strings.Contains(f.Key, "$") {
+					var err error
+					if paths, err = expandPositional(out, f.Key, uc, filters, used, inserting); err != nil {
+						return nil, err
+					}
 				}
+				for _, p := range paths {
+					if err := applyOp(&out, op.Key, p, f.Value, inserting); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+		for id := range filters {
+			if !used[id] {
+				return nil, merr(9, "FailedToParse", "The array filter for identifier '%s' was not used in the update %v", id, x)
 			}
 		}
 	default:
@@ -84,9 +113,6 @@ func applyUpdate(doc bson.D, u any, inserting bool) (bson.D, error) {
 }
 
 func applyOp(d *bson.D, op, path string, v any, inserting bool) error {
-	if strings.Contains(path, "$") {
-		return badValue("The positional operators ($, $[] and $[<identifier>]) are not supported by CloudBurrow: %s", path)
-	}
 	parts := strings.Split(path, ".")
 	cur, exists := getPath(*d, path)
 	switch op {

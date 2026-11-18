@@ -321,6 +321,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
 			return
 		}
+		if iam.serveRewriteMember(w, r) { // iam.go, #1751
+			return
+		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
 			functions: functions, records: records, settings: settings, models: models}).serveUndelete(w, r) { // dropped.go, #1460
 			return

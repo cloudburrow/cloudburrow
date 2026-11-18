@@ -105,6 +105,17 @@ Rules both follow-ups must meet:
    sets version 3 on every `*_iam_member`, conditions or not, so refusing the version refused
    the case this ADR exists for. That was measured: the first `apply` failed with
    `policy.version 3 … notImplemented`. A policy stored here still never holds a condition.
+   *Amended by #1742 (the maintainer's ticket, 2026-11-17):* Resource Manager's projects, folders
+   and the organization store IAM Conditions, with Google's policy version rules, and the checks
+   that already consult a project's policy (Firestore with MongoDB compatibility's sign-ins,
+   Memorystore's IAM auth, rule 1's amendments) evaluate them (`internal/iamcond`). Every other
+   service still refuses a condition UNIMPLEMENTED.
+   *Amended by #1745 (the maintainer's ticket, 2026-11-17):* the services Google lists under
+   "Services that allow conditions" store them on their own resources' policies too (Bigtable,
+   BigQuery, Cloud KMS, Cloud Logging, Cloud Run, Resource Manager tags, Secret Manager,
+   Spanner, and Cloud Storage buckets with uniform bucket-level access), and the services it
+   does not list refuse a condition **INVALID_ARGUMENT**, as Google refuses it, not
+   UNIMPLEMENTED. They are stored, never enforced, as every binding here.
 4. `TestIamPermissions` returns every requested permission.
 5. Policies follow `--mode`, are cleared by `/admin/reset`, and are captured by `state save`
    where the service is.

@@ -243,3 +243,48 @@ func TestPermissionsTabIsDrawn(t *testing.T) {
 		}
 	}
 }
+
+// IAM Conditions (#1742): Grant access with a condition makes its own
+// binding, Edit condition moves one principal's role between conditions in
+// one SetIamPolicy, and Remove principal names the binding's condition.
+func TestPermissionsConditions(t *testing.T) {
+	t.Parallel()
+	sets := 0
+	f := policyFake{fakeProvider: fakeProvider{id: "iam", title: "IAM fake"},
+		policy: &Policy{Etag: "e1", Bindings: []Binding{{Role: "roles/viewer", Members: []string{"user:a@example.com"}}}}, sets: &sets}
+	srv := serve(t, f)
+	cond := map[string]any{"title": "db", "expression": `resource.name == "projects/p/databases/d"`}
+	if code, body := postPermissions(t, srv.URL, map[string]any{"Path": []string{"r"}, "Etag": "e1",
+		"Grant": map[string]any{"Members": []string{"user:a@example.com"}, "Role": "roles/viewer", "Condition": cond}}); code != http.StatusOK {
+		t.Fatalf("grant with a condition = %d %s", code, body)
+	}
+	if len(f.policy.Bindings) != 2 || f.policy.Bindings[1].Conditional == nil || f.policy.Bindings[1].Conditional.Title != "db" ||
+		f.policy.Bindings[1].Condition == "" {
+		t.Fatalf("after a conditional grant: %+v", f.policy.Bindings)
+	}
+	if code, body := postPermissions(t, srv.URL, map[string]any{"Path": []string{"r"}, "Etag": f.policy.Etag,
+		"Grant": map[string]any{"Members": []string{"user:b@example.com"}, "Role": "roles/viewer", "Condition": map[string]any{"expression": "true"}}}); code != http.StatusBadRequest {
+		t.Errorf("a condition without a title = %d %s", code, body)
+	}
+	// Edit the unconditional grant to a new condition: the binding merges with the existing one.
+	if code, body := postPermissions(t, srv.URL, map[string]any{"Path": []string{"r"}, "Etag": f.policy.Etag,
+		"EditCondition": map[string]any{"Member": "user:a@example.com", "Role": "roles/viewer", "To": map[string]any{"title": "later", "expression": "true"}}}); code != http.StatusOK {
+		t.Fatalf("edit condition = %d %s", code, body)
+	}
+	if len(f.policy.Bindings) != 2 || f.policy.Bindings[0].Conditional == nil || f.policy.Bindings[1].Conditional.Title != "later" {
+		t.Fatalf("after edit condition: %+v", f.policy.Bindings)
+	}
+	if code, body := postPermissions(t, srv.URL, map[string]any{"Path": []string{"r"}, "Etag": f.policy.Etag,
+		"Remove": map[string]any{"Member": "user:a@example.com", "Role": "roles/viewer", "Condition": cond}}); code != http.StatusOK {
+		t.Fatalf("remove from a conditional binding = %d %s", code, body)
+	}
+	if len(f.policy.Bindings) != 1 || f.policy.Bindings[0].Conditional.Title != "later" {
+		t.Errorf("after remove: %+v", f.policy.Bindings)
+	}
+	src := consoleAsset(t, "console.js")
+	for _, want := range []string{"openConditionForm", "EditCondition:", "Condition expression (CEL)", "view.conditions"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("console.js does not have %q", want)
+		}
+	}
+}

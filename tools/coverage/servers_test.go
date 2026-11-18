@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -59,6 +60,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterTagValuesServer(srv, resourcemanager.NewTagValuesServer(rmReg))
 	rmpb.RegisterTagBindingsServer(srv, resourcemanager.NewTagBindingsServer(rmReg))
 	rmpb.RegisterTagHoldsServer(srv, resourcemanager.NewTagHoldsServer(rmReg))
+	iamadminpb.RegisterIAMServer(srv, resourcemanager.NewIAMAdminServer(rmReg))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
@@ -141,6 +143,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// no such RPC yet); TestDeleteKeyRingOverGRPC calls it over gRPC
 		// (internal/service/kms).
 		if m == "google.cloud.kms.v1.KeyManagementService/DeleteKeyRing" {
+			continue
+		}
+		// IAM ListRoles with no parent lists Google's predefined roles,
+		// which are UNIMPLEMENTED by design (#1743); with a parent it is
+		// served, as TestCustomRolesThroughTheOfficialClient checks
+		// (internal/service/resourcemanager).
+		if m == "google.iam.admin.v1.IAM/ListRoles" {
 			continue
 		}
 		methods = append(methods, m)

@@ -172,6 +172,20 @@ jobs:
       - name: Run the patched modules' tests
         run: make bigquery-patch-tests
 
+  # Rebuilds third_party/tesseract-wasm/tesseract.wasm from its pinned
+  # Tesseract, Leptonica and wasi-sdk releases and fails unless the result
+  # matches the committed SHA-256 (#1733): the build is byte-identical on
+  # macOS and Linux, arm64 and x86_64, so one hash. About two minutes; not in
+  # ci-green, so not a required check.
+  tesseract-wasm:
+    name: rebuild tesseract.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rebuild and compare
+        run: WORK="$RUNNER_TEMP/tesseract-wasm" third_party/tesseract-wasm/build.sh --check
+
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
@@ -1033,7 +1047,7 @@ jobs:
           # need a -tags onnx build, and Cloud Build's
           # host-steps-off test (#1382) an instance without
           # --cloudbuild-host-steps, which the run shard sets; all run locally.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|EmbedContentEmbedsImagesThroughThePredictionClient|EmbedContentEmbedsAudioThroughThePredictionClient|EmbedContentEmbedsWebPAndBMPThroughThePredictionClient|EmbedContentEmbedsVideoAndPDFThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|EmbedContentEmbedsMP3ThroughThePredictionClient|EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient|EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient|EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient|BigQueryMLImportedONNXModel|EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient)$'
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|EmbedContentEmbedsImagesThroughThePredictionClient|EmbedContentEmbedsAudioThroughThePredictionClient|EmbedContentEmbedsWebPAndBMPThroughThePredictionClient|EmbedContentEmbedsVideoAndPDFThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|EmbedContentEmbedsMP3ThroughThePredictionClient|EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient|EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient|EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient|BigQueryMLImportedONNXModel|EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient|EmbedContentEmbedsAVIFThroughThePredictionClient)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

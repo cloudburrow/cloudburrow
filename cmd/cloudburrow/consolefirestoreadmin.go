@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -26,18 +27,24 @@ import (
 type firestoreDatabasesProvider struct {
 	endpoint string
 	// mongo is Firestore with MongoDB compatibility's host address
-	// (#1703), shown in an Enterprise database's connection string.
-	mongo string
+	// (#1703), shown in an Enterprise database's connection string, and
+	// mongoCA its CA certificate's file (#1738).
+	mongo, mongoCA string
 }
 
 // mongoConnectionString is the connection string Google documents for
 // SCRAM ("Authenticate and connect to a database"), for an Enterprise
-// edition database on this instance's endpoint: cleartext, so tls=false.
-func mongoConnectionString(addr, user, dbID string) string {
-	if addr == "" {
+// edition database on this instance's endpoint: TLS, as Google's, trusting
+// the instance's CA (tlsCAFile, #1738).
+func (p firestoreDatabasesProvider) mongoConnectionString(user, dbID string) string {
+	if p.mongo == "" {
 		return ""
 	}
-	return "mongodb://" + user + ":PASSWORD@" + addr + "/" + dbID + "?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false"
+	cs := "mongodb://" + user + ":PASSWORD@" + p.mongo + "/" + dbID + "?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=true&retryWrites=false"
+	if p.mongoCA != "" {
+		cs += "&tlsCAFile=" + url.QueryEscape(p.mongoCA)
+	}
+	return cs
 }
 
 func (firestoreDatabasesProvider) ID() string    { return "firestore-databases" }
@@ -150,7 +157,7 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 	// User credentials and pipelines are Enterprise edition features
 	// (#1500, consolefirestorepipeline.go).
 	if db.DatabaseEdition == adminpb.Database_ENTERPRISE {
-		if cs := mongoConnectionString(p.mongo, "USERNAME", path[0]); cs != "" {
+		if cs := p.mongoConnectionString("USERNAME", path[0]); cs != "" {
 			summary = append(summary, console.Property{Label: "MongoDB connection string", Value: cs})
 		}
 		sections = append(sections, console.Section{ID: "usercreds", Label: "User credentials", Listing: p.userCreds(ctx, c, name, path[0])})
@@ -161,7 +168,7 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 // indexes is a database's Indexes tab: its composite indexes, in every
 // collection group.
 func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.FirestoreAdminClient, db, id string) console.Listing {
-	list := console.Listing{Columns: []string{"Collection group", "Fields", "Query scope", "State"}, NameColumn: "Index ID", Noun: "indexes"}
+	list := console.Listing{Columns: []string{"Collection group", "Fields", "Query scope", "API scope", "State"}, NameColumn: "Index ID", Noun: "indexes"}
 	it := c.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: db + "/collectionGroups/-"})
 	for {
 		x, err := it.Next()
@@ -177,6 +184,7 @@ func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.Firest
 			"Collection group": parts[len(parts)-3],
 			"Fields":           indexFields(x.Fields),
 			"Query scope":      enumWord(x.QueryScope, ""),
+			"API scope":        apiScopeWord(x),
 			"State":            enumWord(x.State, ""),
 		},
 			// Delete index (#1343), addressed by the collection group and ID.
@@ -201,10 +209,25 @@ func indexFields(fields []*adminpb.Index_IndexField) string {
 			mode = "Array contains"
 		case f.GetVectorConfig() != nil:
 			mode = fmt.Sprintf("Vector (%d)", f.GetVectorConfig().GetDimension())
+		case f.GetSearchConfig().GetTextSpec() != nil:
+			mode = "Text"
 		}
 		out = append(out, f.FieldPath+" "+mode)
 	}
 	return strings.Join(out, ", ")
+}
+
+// apiScopeWord is an index's API scope as the console shows it, with a
+// text index's language (#1738).
+func apiScopeWord(x *adminpb.Index) string {
+	w := "Any API"
+	if x.GetApiScope() == adminpb.Index_MONGODB_COMPATIBLE_API {
+		w = "MongoDB compatible API"
+	}
+	if l := x.GetSearchIndexOptions().GetTextLanguage(); l != "" {
+		w += ", text language " + l
+	}
+	return w
 }
 
 // fields is a database's Field overrides tab: the fields with index

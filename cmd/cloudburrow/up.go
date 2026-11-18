@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
@@ -188,6 +189,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetVertexAI(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.LocalAI))
 	}
+	if serviceEnabled(cfg, config.ServiceFirestore) {
+		// Firestore with MongoDB compatibility serves TLS only (#1738),
+		// with a certificate of the instance's own CA, which
+		// CLOUDBURROW_FIRESTORE_MONGODB_CA_FILE names for clients.
+		ns := cfg.Cluster.Namespace
+		cert, key, err := firestoreadmin.MongoServerTLS(cfg.InstanceDir(), time.Now(),
+			"firestore", "firestore."+ns, "firestore."+ns+".svc", "firestore."+ns+".svc.cluster.local")
+		if err != nil {
+			return fmt.Errorf("Firestore with MongoDB compatibility's TLS certificate: %w", err)
+		}
+		comps.SetFirestoreMongoTLS(string(cert), string(key))
+	}
 	var mysqlCreds components.MySQLCredentials
 	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) {
 		if mysqlCreds, err = loadOrCreateMySQLCredentials(cfg); err != nil {
@@ -300,6 +313,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var projectRegistry *resourcemanager.Registry
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
+	if serviceEnabled(cfg, config.ServiceFirestore) {
+		// Firestore with MongoDB compatibility's token sign-in (#1738)
+		// checks the tokens these credentials minted and the project's
+		// IAM policy, as Memorystore's IAM auth does.
+		fmIAM := &firestoreMongoIAM{creds: creds, client: &http.Client{Timeout: 5 * time.Second},
+			registry: func() *resourcemanager.Registry { return projectRegistry },
+			addr:     func() string { return forwardedAddr(forwarders, "firestore") }}
+		fmIAM.start(ctx)
 	}
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
@@ -497,6 +519,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err == nil && projects != nil {
 		projectRegistry = projects
 		wirePurge(adminAPI, projects)
+		wireMemberRewrites(projects, tasksSvc, secretsSvc, kmsSvc, loggingSvc, runSvc, forwarders)
+		// Service accounts (#1747): a key file names this instance's
+		// token endpoint, and IAM Credentials and the token endpoint
+		// resolve accounts and keys in the registry.
+		projects.SetServiceAccountTokenURI(tokenURI(cfg))
+		creds.SetServiceAccounts(serviceAccountDirectory{reg: projects})
+		projects.SetSignAuthorizer(signAuthorizer(creds, serviceAccountDirectory{reg: projects}))
 		wireProjectNumbers(ctx, projects, map[string]func() *netfwd.Forwarder{
 			"storage":  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
 			"bigquery": func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, // #1551

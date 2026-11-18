@@ -55,8 +55,8 @@ func gaxPolicy(c gaxIAMClient, resource string) policyHandle {
 }
 
 // policyRoundTrip is ADR-0006 rule 6's SDK test on one resource: a set reads
-// back with a new etag, a stale etag is ABORTED, a conditional binding is
-// UNIMPLEMENTED and TestIamPermissions answers perm.
+// back with a new etag, a stale etag is ABORTED, a condition without a title is
+// INVALID_ARGUMENT (#1745) and TestIamPermissions answers perm.
 func policyRoundTrip(t *testing.T, ctx context.Context, what string, p policyHandle, role, perm string) {
 	t.Helper()
 	empty, err := p.get(ctx)
@@ -74,8 +74,9 @@ func policyRoundTrip(t *testing.T, ctx context.Context, what string, p policyHan
 		t.Errorf("%s: a stale etag = %v; want Aborted", what, err)
 	}
 	if err := p.set(ctx, &iampb.Policy{Version: 3, Bindings: []*iampb.Binding{{Role: role, Members: []string{"user:ada@example.com"},
-		Condition: &expr.Expr{Expression: "true"}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("%s: a conditional binding = %v; want Unimplemented", what, err)
+		Condition: &expr.Expr{Expression: "true"}}}}); status.Code(err) != codes.InvalidArgument {
+		// #1745: Spanner and Bigtable take conditions; this one has no title.
+		t.Errorf("%s: a condition without a title = %v; want InvalidArgument", what, err)
 	}
 	if held, err := p.test(ctx, []string{perm}); err != nil || !slices.Equal(held, []string{perm}) {
 		t.Errorf("%s: TestIamPermissions = %v, %v; want %s", what, held, err, perm)

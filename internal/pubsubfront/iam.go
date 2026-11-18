@@ -338,3 +338,24 @@ func (f *Front) serveRESTIAM(w http.ResponseWriter, r *http.Request, name, verb 
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	_, _ = w.Write(b)
 }
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every topic's, subscription's, snapshot's and schema's
+// policy: a deleted service account's bindings (#1751), which the host
+// sends to iampolicy.RewriteMemberPath when the account is deleted,
+// undeleted or purged.
+func (f *Front) RewriteIAMMember(from, to string) error {
+	f.mu.Lock()
+	changed := false
+	for name, p := range f.iam {
+		if p.RewriteMember(from, to) {
+			f.iam[name] = p
+			changed = true
+		}
+	}
+	f.mu.Unlock()
+	if changed {
+		return f.save()
+	}
+	return nil
+}

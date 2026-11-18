@@ -135,11 +135,14 @@ func (p loggingBucketsProvider) get(ctx context.Context, project, name string) (
 }
 
 func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
 	}
 	if _, err := bucketParent(ctx, project); err != nil {
 		return console.Detail{Prompt: "Choose a project in the toolbar, or a parent on the Log storage screen."}, nil
+	}
+	if len(path) == 2 {
+		return p.viewDetail(ctx, project, path)
 	}
 	b, err := p.get(ctx, project, path[0])
 	if err != nil {
@@ -155,9 +158,11 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 		}
 		for _, v := range resp.GetViews() {
 			id := v.GetName()[strings.LastIndex(v.GetName(), "/")+1:]
+			// The view's page (#1748), which links the Logs Explorer
+			// through the view (#1410) and has its Permissions tab.
 			row := console.Resource{Name: id, Fields: map[string]string{
 				"Filter": orDash(v.GetFilter()), "Description": orDash(v.GetDescription())},
-				Link: viewExplorerHref(project, v.GetName())} // #1410
+				Opens: []string{path[0], id}}
 			if viewChangeable(b, id) {
 				row.Actions = viewRowActions(v) // #1283
 			}
@@ -268,6 +273,33 @@ func (p loggingBucketsProvider) Act(ctx context.Context, project, name, action s
 	}
 	_, err = a.ConfigServer().UndeleteBucket(ctx, &loggingpb.UndeleteBucketRequest{Name: name})
 	return err
+}
+
+// viewDetail is a view's page (#1748): its configuration, a link to the
+// Logs Explorer reading through it (#1410), and the Permissions tab
+// (PolicyOn), with Edit, Delete and the row's Permissions form among its
+// actions (DetailActions).
+func (p loggingBucketsProvider) viewDetail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if err := bucketOfParent(ctx, project, path[0]); err != nil {
+		return console.Detail{Unavailable: consoleErr(err)}, nil
+	}
+	v, err := p.view(ctx, path[0]+"/views/"+path[1])
+	if err != nil {
+		return console.Detail{Unavailable: consoleErr(err)}, nil
+	}
+	explore := console.Property{Label: "Logs Explorer", Value: "Read entries through this view", Link: viewExplorerHref(project, v.GetName())}
+	return console.Detail{
+		Summary: []console.Property{{Label: "Filter", Value: orDash(v.GetFilter())}, explore},
+		Sections: []console.Section{{ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{Heading: "View", Properties: []console.Property{
+				{Label: "Resource name", Value: v.GetName()},
+				{Label: "Filter", Value: orDash(v.GetFilter())},
+				{Label: "Description", Value: orDash(v.GetDescription())},
+				{Label: "Created", Value: loggingTime(v.GetCreateTime())},
+				{Label: "Updated", Value: loggingTime(v.GetUpdateTime())},
+				explore,
+			}}}}},
+	}, nil
 }
 
 // viewExplorerHref is the Logs Explorer reading through a view (#1410).

@@ -1,11 +1,16 @@
 package storage
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 )
 
 // Bucket IAM (#504), stored and never enforced, under ADR-0006 as amended
@@ -13,9 +18,23 @@ import (
 // b/{bucket}/iam. No method consults a stored policy (rule 1). A set
 // returns a new etag, and one carrying a stale etag is refused (rule 2;
 // 412 conditionNotMet is the JSON API's code for a failed precondition,
-// UNVERIFIED for this method). A condition is 501 naming the field, and a
+// UNVERIFIED for this method). A version 3 policy without conditions is
+// accepted (rule 3).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/setIamPolicy
-// version 3 policy without conditions is accepted (rule 3).
+//
+// IAM Conditions (#1745), as Google's "Overview of IAM Conditions" and
+// Cloud Storage's "Use IAM Conditions on buckets" document them: a bucket's
+// policy may hold a conditional binding (title, optional description, CEL
+// expression internal/iamcond compiles) when the bucket has uniform
+// bucket-level access ("To use conditions in the allow policy for a Cloud
+// Storage bucket, you must enable uniform bucket-level access"), in a
+// version 3 policy; uniform bucket-level access cannot then be disabled
+// while the policy has one. A getIamPolicy that does not ask for version 3
+// is answered version 1 with each conditional role renamed
+// ROLE_withcond_HASH and its condition left out (Google's "Policy
+// versions"). A managed folder's policy takes none: Google does not list
+// managed folders among the resources that accept conditions, and they are
+// refused 400. Google does not publish these errors' text.
 // testIamPermissions returns every requested permission on a bucket that
 // exists (rule 4). The policy is part of the bucket record, so it follows
 // the server's persistence, reset and state capture (rule 5). Managed
@@ -31,8 +50,38 @@ type bucketPolicy struct {
 }
 
 type policyBinding struct {
-	Role    string   `json:"role"`
-	Members []string `json:"members"`
+	Role      string           `json:"role"`
+	Members   []string         `json:"members"`
+	Condition *policyCondition `json:"condition,omitempty"`
+}
+
+// policyCondition is a binding's IAM condition.
+type policyCondition struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Expression  string `json:"expression"`
+}
+
+// withCond joins a conditional role and its condition's hash in a version
+// 1 rendering, as Google's "Policy versions" shows.
+const withCond = "_withcond_"
+
+func (c *policyCondition) hash(role string) string {
+	sum := sha256.Sum256([]byte(role + "\x00" + c.Title + "\x00" + c.Description + "\x00" + c.Expression))
+	return hex.EncodeToString(sum[:])[:20]
+}
+
+// conditional is whether p holds a conditional binding.
+func (p *bucketPolicy) conditional() bool {
+	if p == nil {
+		return false
+	}
+	for _, b := range p.Bindings {
+		if b.Condition != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func policyETag(seq uint64) string {
@@ -43,16 +92,43 @@ func (s *Server) policyJSON(b bucketRecord) map[string]any {
 	return policyDocument("projects/_/buckets/"+b.Name, b.Policy)
 }
 
+// policyJSONFor renders b's policy for a reader that asked for version.
+func (s *Server) policyJSONFor(b bucketRecord, version int) map[string]any {
+	return policyDocumentVersion("projects/_/buckets/"+b.Name, b.Policy, version)
+}
+
 // policyDocument is a stored policy as the JSON API's Policy, for the
 // resource it is set on; nil is the empty version 1 policy.
 func policyDocument(resourceID string, stored *bucketPolicy) map[string]any {
+	return policyDocumentVersion(resourceID, stored, 3)
+}
+
+// policyDocumentVersion renders stored for a reader that asked for
+// version: below 3, a conditional role carries "_withcond_" and its
+// condition's hash, and the condition is left out.
+func policyDocumentVersion(resourceID string, stored *bucketPolicy, version int) map[string]any {
 	p := bucketPolicy{Version: 1}
 	if stored != nil {
 		p = *stored
 	}
+	if version < 3 && p.Version == 3 && p.conditional() {
+		p.Version = 1
+	}
 	bindings := []any{}
 	for _, bd := range p.Bindings {
-		bindings = append(bindings, map[string]any{"role": bd.Role, "members": bd.Members})
+		m := map[string]any{"role": bd.Role, "members": bd.Members}
+		if c := bd.Condition; c != nil {
+			if version < 3 {
+				m["role"] = bd.Role + withCond + c.hash(bd.Role)
+			} else {
+				cm := map[string]any{"title": c.Title, "expression": c.Expression}
+				if c.Description != "" {
+					cm["description"] = c.Description
+				}
+				m["condition"] = cm
+			}
+		}
+		bindings = append(bindings, m)
 	}
 	return map[string]any{
 		"kind": "storage#policy", "resourceId": resourceID,
@@ -62,16 +138,29 @@ func policyDocument(resourceID string, stored *bucketPolicy) map[string]any {
 
 // checkPolicyVersion checks getIamPolicy's optionsRequestedPolicyVersion.
 func checkPolicyVersion(r *http.Request) error {
-	if v := r.URL.Query().Get("optionsRequestedPolicyVersion"); v != "" {
-		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 3 {
-			return badRequest("Invalid argument: optionsRequestedPolicyVersion=%q must be 1, 2 or 3", v)
-		}
+	_, err := requestedPolicyVersion(r)
+	return err
+}
+
+// requestedPolicyVersion is getIamPolicy's optionsRequestedPolicyVersion,
+// 1 when absent.
+func requestedPolicyVersion(r *http.Request) (int, error) {
+	v := r.URL.Query().Get("optionsRequestedPolicyVersion")
+	if v == "" {
+		return 1, nil
 	}
-	return nil
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > 3 {
+		return 0, badRequest("Invalid argument: optionsRequestedPolicyVersion=%q must be 1, 2 or 3", v)
+	}
+	return n, nil
 }
 
 // readPolicy reads a setIamPolicy body: the policy to store, its Seq still
-// unset, and the etag the caller sent, if any.
+// unset, and the etag the caller sent, if any. A conditional binding is
+// validated here; whether the resource takes one is the caller's check
+// (checkConditional), and a ROLE_withcond_HASH role is left for
+// resolveHashes.
 func readPolicy(r *http.Request) (bucketPolicy, string, error) {
 	body, err := readBody(r)
 	if err != nil {
@@ -81,9 +170,9 @@ func readPolicy(r *http.Request) (bucketPolicy, string, error) {
 		Version  json.Number `json:"version"`
 		ETag     string      `json:"etag"`
 		Bindings []struct {
-			Role      string          `json:"role"`
-			Members   []string        `json:"members"`
-			Condition json.RawMessage `json:"condition"`
+			Role      string           `json:"role"`
+			Members   []string         `json:"members"`
+			Condition *policyCondition `json:"condition"`
 		} `json:"bindings"`
 	}
 	raw, _ := json.Marshal(body)
@@ -108,17 +197,81 @@ func readPolicy(r *http.Request) (bucketPolicy, string, error) {
 		}
 	}
 	p := bucketPolicy{Version: version}
+	hashes := false
 	for i, bd := range in.Bindings {
-		if len(bd.Condition) > 0 && string(bd.Condition) != "null" {
-			return bucketPolicy{}, "", errorf(http.StatusNotImplemented, "notImplemented",
-				"policy.bindings[%d].condition is not implemented: IAM Conditions are never stored (ADR-0006)", i)
-		}
 		if bd.Role == "" || len(bd.Members) == 0 {
 			return bucketPolicy{}, "", badRequest("Invalid argument: policy.bindings[%d] needs a role and at least one member", i)
 		}
-		p.Bindings = append(p.Bindings, policyBinding{Role: bd.Role, Members: bd.Members})
+		pb := policyBinding{Role: bd.Role, Members: bd.Members}
+		if c := bd.Condition; c != nil {
+			if c.Title == "" {
+				return bucketPolicy{}, "", badRequest("Invalid argument: policy.bindings[%d].condition.title is required", i)
+			}
+			if strings.TrimSpace(c.Expression) == "" {
+				return bucketPolicy{}, "", badRequest("Invalid argument: policy.bindings[%d].condition.expression is required", i)
+			}
+			if _, err := iamcond.Compile(c.Expression); err != nil {
+				return bucketPolicy{}, "", badRequest("Invalid argument: policy.bindings[%d].condition.expression is invalid: %v", i, err)
+			}
+			if strings.Contains(c.Expression, "iam.googleapis.com/modifiedGrantsByRole") {
+				return bucketPolicy{}, "", badRequest("Invalid argument: policy.bindings[%d].condition.expression: iam.googleapis.com/modifiedGrantsByRole is accepted only in the allow policies of projects, folders and organizations", i)
+			}
+			cc := *c
+			pb.Condition = &cc
+		} else if strings.Contains(bd.Role, withCond) {
+			hashes = true
+		}
+		p.Bindings = append(p.Bindings, pb)
+	}
+	explicit := false
+	for _, bd := range in.Bindings {
+		if bd.Condition != nil {
+			explicit = true
+		}
+	}
+	switch {
+	case explicit && hashes:
+		return bucketPolicy{}, "", badRequest("Policy cannot contain both conditions and condition hashes")
+	case explicit && version != 3:
+		return bucketPolicy{}, "", badRequest("Invalid argument: a policy with conditional role bindings must be version 3, not %d", version)
 	}
 	return p, in.ETag, nil
+}
+
+// resolveHashes gives each ROLE_withcond_HASH role of p back its condition
+// from current, so a version 1 read-modify-write keeps it; the kept
+// conditions make p a version 3 policy again.
+func resolveHashes(p *bucketPolicy, current *bucketPolicy) error {
+	for i, bd := range p.Bindings {
+		role, h, ok := strings.Cut(bd.Role, withCond)
+		if !ok || bd.Condition != nil {
+			continue
+		}
+		found := false
+		if current != nil {
+			for _, cb := range current.Bindings {
+				if cb.Role == role && cb.Condition != nil && cb.Condition.hash(role) == h {
+					cc := *cb.Condition
+					p.Bindings[i].Role, p.Bindings[i].Condition, found = role, &cc, true
+					break
+				}
+			}
+		}
+		if !found {
+			return badRequest("Invalid argument: policy.bindings[%d].role %q: the condition hash matches no conditional binding of the current policy; read it with optionsRequestedPolicyVersion=3", i, bd.Role)
+		}
+		p.Version = 3
+	}
+	return nil
+}
+
+// checkConditional refuses a conditional policy on a bucket without
+// uniform bucket-level access.
+func checkConditional(b bucketRecord, p bucketPolicy) error {
+	if p.conditional() && !uniformAccess(b) {
+		return badRequest("Invalid argument: IAM Conditions can be set only on a bucket with iamConfiguration.uniformBucketLevelAccess enabled.")
+	}
+	return nil
 }
 
 // nextPolicy is p stored over current: refused if the caller's etag is
@@ -137,12 +290,13 @@ func nextPolicy(current *bucketPolicy, p bucketPolicy, sentETag string) (*bucket
 
 func (s *Server) bucketsGetIamPolicy(w http.ResponseWriter, r *http.Request) {
 	name := pathVar(r, jsonPrefix, 1)
-	if err := checkPolicyVersion(r); err != nil {
+	version, err := requestedPolicyVersion(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}
 	var b bucketRecord
-	err := s.meta.View(func(tx Tx) error {
+	err = s.meta.View(func(tx Tx) error {
 		var ok bool
 		var err error
 		if b, ok, err = s.getBucket(tx, name); err != nil {
@@ -156,7 +310,7 @@ func (s *Server) bucketsGetIamPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeResponse(w, r, http.StatusOK, s.policyJSON(b))
+	writeResponse(w, r, http.StatusOK, s.policyJSONFor(b, version))
 }
 
 func (s *Server) bucketsSetIamPolicy(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +328,13 @@ func (s *Server) bucketsSetIamPolicy(w http.ResponseWriter, r *http.Request) {
 			return gerr
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
+		}
+		p := p
+		if err := resolveHashes(&p, b.Policy); err != nil {
+			return err
+		}
+		if err := checkConditional(b, p); err != nil {
+			return err
 		}
 		next, err := nextPolicy(b.Policy, p, sentETag)
 		if err != nil {

@@ -31,8 +31,8 @@ import (
 	"strings"
 
 	"cloud.google.com/go/bigtable"
+	btadmin "cloud.google.com/go/bigtable/admin/apiv2"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
-	"cloud.google.com/go/iam"
 	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -684,62 +684,53 @@ func editNodes(ctx context.Context, c *bigtable.InstanceAdminClient, instanceNam
 	return err
 }
 
-// Permissions: an instance's page, through the client's instance IAM
-// handle. Clusters and app profiles have no policy of their own.
+// Permissions: an instance's page, through the generated instance admin
+// client's GetIamPolicy and SetIamPolicy at version 3 (#1748), so a
+// conditional binding is shown and edited with its condition, as on a
+// table's page. Clusters and app profiles have no policy of their own.
 
 func (bigtableInstancesProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if len(path) != 1 {
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "optional-services",
-		RoleHelp: roleHelp("Bigtable", "roles/bigtable.user")}
+		RoleHelp: roleHelp("Bigtable", "roles/bigtable.user"), Conditions: true}
 }
 
-func (p bigtableInstancesProvider) instanceIAM(ctx context.Context, project string, path []string) (*iam.Handle, func(), error) {
-	c, err := p.client(ctx, project)
-	if err != nil {
-		return nil, nil, err
+// withInstanceIAM calls fn with the instance admin API and the instance's
+// full name.
+func (p bigtableInstancesProvider) withInstanceIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
+	if project == "" {
+		return errors.New("choose a project first")
 	}
-	return c.InstanceIAM(path[0]), func() { _ = c.Close() }, nil
+	c, err := btadmin.NewBigtableInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach the Bigtable instance admin API: %w", err)
+	}
+	defer c.Close()
+	return fn(gaxServer{c}, "projects/"+project+"/instances/"+path[0])
 }
 
-func (p bigtableInstancesProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
-	h, done, err := p.instanceIAM(ctx, project, path)
-	if err != nil {
-		return console.Policy{}, err
-	}
-	defer done()
-	pol, err := h.Policy(ctx)
-	if err != nil {
-		return console.Policy{}, err
-	}
-	return policyFromProto(pol.InternalProto), nil
+func (p bigtableInstancesProvider) GetPolicy(ctx context.Context, project string, path []string) (pol console.Policy, err error) {
+	err = p.withInstanceIAM(ctx, project, path, func(api iamServer, name string) error {
+		pol, err = getProtoPolicy(ctx, api, name)
+		return err
+	})
+	return pol, err
 }
 
 func (p bigtableInstancesProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
-	h, done, err := p.instanceIAM(ctx, project, path)
-	if err != nil {
-		return err
-	}
-	defer done()
-	etag, err := protoEtag(pol)
-	if err != nil {
-		return err
-	}
-	proto, err := policyToProto(pol, etag)
-	if err != nil {
-		return err
-	}
-	return h.SetPolicy(ctx, &iam.Policy{InternalProto: proto})
+	return p.withInstanceIAM(ctx, project, path, func(api iamServer, name string) error {
+		return setProtoPolicy(ctx, api, name, pol)
+	})
 }
 
-func (p bigtableInstancesProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
-	h, done, err := p.instanceIAM(ctx, project, path)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	return h.TestPermissions(ctx, perms)
+func (p bigtableInstancesProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) (held []string, err error) {
+	err = p.withInstanceIAM(ctx, project, path, func(api iamServer, name string) error {
+		held, err = testProtoPermissions(ctx, api, name, perms)
+		return err
+	})
+	return held, err
 }
 
 var (

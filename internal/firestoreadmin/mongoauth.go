@@ -9,11 +9,12 @@ package firestoreadmin
 //     authentication database the database's ID;
 //   - PLAIN with the user access_token and an access token as the
 //     password, from $external, for diagnostics;
-//   - MONGODB-OIDC with a Google identity token.
+//   - MONGODB-OIDC with an access token (Google's callback returns the
+//     application default credentials' access token).
 //
-// CloudBurrow verifies no Google token (docs/credentials.md), so the last
-// two accept any token that is not empty, as every other service does;
-// the IAM roles Google checks are not checked either.
+// The last two take only a live access token this instance minted, and
+// each command then needs its permissions in the principal's roles
+// (mongoiam.go, #1738).
 
 import (
 	"crypto/hmac"
@@ -120,6 +121,7 @@ func (a *Admin) mongoDatabase(dbID string) (*mongoDB, error) {
 // scramConv is a SCRAM-SHA-256 conversation in progress.
 type scramConv struct {
 	db          *mongoDB
+	user        string
 	keys        *scramKeys
 	clientFirst string // client-first-message-bare
 	serverFirst string
@@ -160,7 +162,7 @@ func (a *Admin) scramStart(authDB string, payload []byte) (*scramConv, []byte, e
 	_, _ = rand.Read(nb)
 	nonce := attrs["r"] + base64.StdEncoding.EncodeToString(nb)
 	first := "r=" + nonce + ",s=" + base64.StdEncoding.EncodeToString(keys.Salt) + ",i=" + strconv.Itoa(keys.Iterations)
-	return &scramConv{db: db, keys: keys, clientFirst: bare, serverFirst: first, nonce: nonce}, []byte(first), nil
+	return &scramConv{db: db, user: user, keys: keys, clientFirst: bare, serverFirst: first, nonce: nonce}, []byte(first), nil
 }
 
 // scramFinish checks a client-final message's proof and answers with the

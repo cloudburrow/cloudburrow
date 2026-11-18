@@ -139,7 +139,7 @@ func setOn(s *Server, r iamResource, rec any, policy **iampolicy.Stored, req *ia
 
 // apply sets *policy from req and writes rec back.
 func apply(s *Server, r iamResource, rec any, policy **iampolicy.Stored, req *iampb.SetIamPolicyRequest) (iampolicy.Stored, error) {
-	next, err := iampolicy.Set(*policy, req)
+	next, err := iampolicy.SetConditional(*policy, req)
 	if err != nil {
 		return iampolicy.Stored{}, apierror.Wrap(err)
 	}

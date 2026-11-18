@@ -37,10 +37,20 @@ import (
 // the client's first AUTH finds it), and on a tick that drops expired
 // tokens and follows policy changes (Google: "may take a few minutes").
 //
-// Not served: a binding's condition (Resource Manager refuses conditions,
-// so a binding is project-wide here, never limited to one cluster), and
-// roles other than the two named (Google's basic roles are not expanded
-// here). A cluster or instance kept from before #1614 with IAM auth, whose
+// A binding's condition (#1742, #1745) is evaluated per cluster or
+// instance, as Google evaluates one inherited from the project: request.time
+// and resource tags (the cluster's or instance's effective tags, its own
+// bindings and the project's) are evaluated, and a resource.name, .type or
+// .service part grants nothing, because Memorystore is not among the
+// services Google's "Resource attributes for IAM Conditions" lists ("Other
+// services and resource types do not recognize resource attributes"). A
+// custom role (#1743) grants the connection when it holds
+// redis.clusters.connect or memorystore.instances.connect, which the host's
+// IAMSource evaluates.
+//
+// Not served: predefined roles other than the two named (Google's basic
+// roles are not expanded here). A cluster or instance kept from before
+// #1614 with IAM auth, whose
 // nodes' default user has no password, still takes any AUTH string, until
 // it is created again.
 
@@ -59,8 +69,10 @@ type IAMSource struct {
 	// Tokens are the access tokens live at now.
 	Tokens func(now time.Time) []IssuedToken
 	// Members are the members ("serviceAccount:x@y", "user:x@y") of
-	// project's bindings of role.
-	Members func(project, role string) []string
+	// project's bindings of role that grant it on resource (the cluster's
+	// or instance's name): a conditional binding counts where its
+	// condition holds for resource.
+	Members func(project, resource, role string) []string
 }
 
 // iamEvery is how often the nodes' IAM users are set again: expired tokens
@@ -167,7 +179,7 @@ func (c *clusters) iamUsers(r *clusterRecord) map[string][]any {
 		return out
 	}
 	allowed := map[string]bool{}
-	for _, m := range c.iam.src.Members(r.project(), r.connectRole()) {
+	for _, m := range c.iam.src.Members(r.project(), r.Name, r.connectRole()) {
 		kind, email, ok := strings.Cut(m, ":")
 		if ok && (kind == "serviceAccount" || kind == "user") {
 			allowed[strings.ToLower(email)] = true

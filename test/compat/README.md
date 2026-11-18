@@ -109,6 +109,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_DATASTORE` | `DATASTORE_EMULATOR_HOST` | Datastore |
 | `CLOUDBURROW_TEST_FIRESTORE` | `FIRESTORE_EMULATOR_HOST` | Firestore |
 | `CLOUDBURROW_TEST_FIRESTORE_MONGODB` | `CLOUDBURROW_FIRESTORE_MONGODB_ENDPOINT` | Firestore with MongoDB compatibility's wire protocol, for the official MongoDB Go driver (#1703) |
+| `CLOUDBURROW_TEST_FIRESTORE_MONGODB_CA` | `CLOUDBURROW_FIRESTORE_MONGODB_CA_FILE` | the CA certificate file of that endpoint's TLS, the driver's `tlsCAFile`: it serves TLS only, as Google's does (#1738) |
 | `CLOUDBURROW_TEST_BIGTABLE` | `BIGTABLE_EMULATOR_HOST` | Bigtable |
 | `CLOUDBURROW_TEST_MEMORYSTORE` | `REDIS_HOST`:`REDIS_PORT` | Memorystore |
 | `CLOUDBURROW_TEST_MEMORYSTORE_ADMIN` | `CLOUDBURROW_MEMORYSTORE_ENDPOINT` | Memorystore admin API (#1302) |
