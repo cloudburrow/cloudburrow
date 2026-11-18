@@ -10183,6 +10183,7 @@
         "method": "bigquery.jobs.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryexecimmediate_test.go:157 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",

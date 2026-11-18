@@ -134,7 +134,8 @@
         "patches/googlesqlite/0089-older-table-streamed-at-column.patch",
         "patches/googlesqlite/0090-kept-change-records.patch",
         "patches/googlesqlite/0093-json-text-bound-in-a-struct.patch",
-        "patches/googlesqlite/0095-names-of-the-project.patch"
+        "patches/googlesqlite/0095-names-of-the-project.patch",
+        "patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch"
       ]
     },
     {

@@ -27,6 +27,16 @@ The patch:
   transactions (the reads of a lazy dataset's tables used the newest
   one's), and a read request's transactions out of that list: it reads on
   a connection of its own.
+- makes the index of the job order (jobOrderIndex) when the repository
+  is made, before any request, not on the first jobs.list of the jobs
+  after one (the front's INFORMATION_SCHEMA.JOBS and jobs.list): that
+  jobs.list runs without the write lock, and its CREATE INDEX waited for
+  a running writer's statement (SQLite's busy timeout) or failed;
+- has a read request that adds a project on first use (the front's known
+  project header) take the write lock first, for the same reason;
+- limits the write-ahead log's size once checkpointed
+  (journal_size_limit), so that the pages a DROP frees are still given
+  back to the filesystem (auto_vacuum FULL, cloudburrow/cloudburrow#1662).
 An in-memory database (MemoryStorage) and a --database file keep the one
 request lock.
 
@@ -241,6 +251,45 @@ CloudBurrow Authors.
  	tablesLoaded, modelsLoaded, routinesLoaded bool
  }
  
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -130,9 +130,36 @@
+ 	if err := r.migrateJobOrder(context.Background(), tx); err != nil {
+ 		return nil, err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): jobOrderIndex is
++	// made here, before any request, not by the first jobs.list that pages:
++	// a jobs.list runs beside a writer, without the write lock, and a
++	// CREATE INDEX there would wait for the writer's statement, or fail.
++	if err := tx.Commit(); err != nil {
++		return nil, err
++	}
++	if err := r.indexJobOrderOnce(context.Background()); err != nil {
++		return nil, err
++	}
+ 	return r, nil
+ }
+ 
++// indexJobOrderOnce makes jobOrderIndex on a connection of its own.
++// CloudBurrow patch (cloudburrow/cloudburrow#1823).
++func (r *Repository) indexJobOrderOnce(ctx context.Context) error {
++	conn, err := r.db.Conn(ctx)
++	if err != nil {
++		return fmt.Errorf("failed to index the job order: %w", err)
++	}
++	defer conn.Close()
++	return conn.Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		return r.indexJobOrder(ctx, gsqlConn)
++	})
++}
++
+ func (r *Repository) getConnection(ctx context.Context) (*sql.Conn, error) {
+ 	conn, err := r.db.Conn(ctx)
+ 	if err != nil {
 --- a/internal/metadata/results_test.go
 +++ b/internal/metadata/results_test.go
 @@ -53,7 +53,7 @@
@@ -252,9 +301,70 @@ CloudBurrow Authors.
  	defer UnbindTx(tx)
  	if err := f(ctx, tx); err != nil {
  		tx.Rollback()
+--- a/server/cloudburrow_auto_vacuum_test.go
++++ b/server/cloudburrow_auto_vacuum_test.go
+@@ -13,7 +13,10 @@
+ // TestTempStorageGivesBackFreedPages (CloudBurrow patch,
+ // cloudburrow/cloudburrow#1662): TempStorage's file is in auto_vacuum FULL
+ // mode with the driver's busy timeout, and shrinks when a table is dropped.
+-// Without the patch the file kept its size (auto_vacuum NONE).
++// Without the patch the file kept its size (auto_vacuum NONE). Since
++// cloudburrow/cloudburrow#1823 the file is in WAL mode, where the main file
++// shrinks at a checkpoint, which SQLite runs when the log holds 1000 pages,
++// and the log is cut back to its size limit: both together shrink.
+ func TestTempStorageGivesBackFreedPages(t *testing.T) {
+ 	s, err := New(TempStorage)
+ 	if err != nil {
+@@ -50,24 +53,39 @@
+ 			t.Fatalf("%s: %v", query, err)
+ 		}
+ 	}
+-	var mode, timeout int
++	var mode, timeout, limit int
++	var journal string
+ 	raw("PRAGMA auto_vacuum", &mode)
+ 	raw("PRAGMA busy_timeout", &timeout)
+-	if mode != 1 || timeout != 60000 {
+-		t.Fatalf("auto_vacuum %d (want 1, FULL), busy_timeout %d (want 60000)", mode, timeout)
++	raw("PRAGMA journal_mode", &journal)
++	raw("PRAGMA journal_size_limit", &limit)
++	if mode != 1 || timeout != 60000 || journal != "wal" || limit != 1048576 {
++		t.Fatalf("auto_vacuum %d (want 1, FULL), busy_timeout %d (want 60000), journal_mode %s (want wal), journal_size_limit %d (want 1048576)", mode, timeout, journal, limit)
+ 	}
++	// The main file and its write-ahead log.
+ 	size := func() int64 {
+ 		t.Helper()
+-		fi, err := os.Stat(path)
+-		if err != nil {
+-			t.Fatal(err)
++		var n int64
++		for _, p := range []string{path, path + "-wal"} {
++			fi, err := os.Stat(p)
++			if os.IsNotExist(err) && p != path {
++				continue
++			}
++			if err != nil {
++				t.Fatal(err)
++			}
++			n += fi.Size()
+ 		}
+-		return fi.Size()
++		return n
+ 	}
+ 	raw("CREATE TABLE cloudburrow_vacuum_test (b BLOB)")
+ 	raw("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 4000) INSERT INTO cloudburrow_vacuum_test SELECT randomblob(1000) FROM n")
+ 	full := size()
+ 	raw("DROP TABLE cloudburrow_vacuum_test")
++	// The checkpoint SQLite runs once the log holds 1000 pages; RESTART,
++	// as the next write then rewinds the log, which cuts it to its limit.
++	raw("PRAGMA wal_checkpoint(RESTART)")
++	raw("CREATE TABLE cloudburrow_vacuum_test (b BLOB)")
+ 	if after := size(); full < 4_000_000 || after > full/4 {
+ 		t.Errorf("the file was %d bytes with the table and is %d after its DROP; want it to shrink", full, after)
+ 	}
 --- /dev/null
 +++ b/server/cloudburrow_concurrent_reads.go
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,346 @@
 +package server
 +
 +import (
@@ -300,8 +410,14 @@ CloudBurrow Authors.
 +
 +// cloudburrowFilePragmas are the PRAGMAs of a file database: those of
 +// TempStorage (cloudburrow_auto_vacuum.go), then WAL mode, so that reads
-+// run beside the writer.
-+const cloudburrowFilePragmas = cloudburrowTempPragmas + "&_pragma=journal_mode(wal)"
++// run beside the writer, and a limit to the size the write-ahead log keeps
++// once checkpointed (SQLite checkpoints it when it holds 1000 pages, 4 MB):
++// without one it keeps the largest size it had, and the pages a DROP freed
++// are given back to the filesystem only by the main file.
++const cloudburrowFilePragmas = cloudburrowTempPragmas + "&_pragma=journal_mode(wal)&_pragma=journal_size_limit(" + cloudburrowWALSizeLimit + ")"
++
++// cloudburrowWALSizeLimit is the write-ahead log's size limit, in bytes.
++const cloudburrowWALSizeLimit = "1048576"
 +
 +// engineAccess is the emulator's write lock.
 +type engineAccess struct {
@@ -597,7 +713,7 @@ CloudBurrow Authors.
 +}
 --- /dev/null
 +++ b/server/cloudburrow_concurrent_reads_test.go
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,197 @@
 +package server_test
 +
 +import (
@@ -607,6 +723,7 @@ CloudBurrow Authors.
 +	"fmt"
 +	"io"
 +	"net/http"
++	"strings"
 +	"sync"
 +	"testing"
 +	"time"
@@ -662,16 +779,25 @@ CloudBurrow Authors.
 +		t.Fatalf("CREATE TABLE: %d %s %v", code, b, err)
 +	}
 +
-+	// A query long enough to measure the others against: about a second
-+	// or more, alone.
-+	slow := "SELECT COUNT(*) FROM UNNEST(GENERATE_ARRAY(1, 300)) a, UNNEST(GENERATE_ARRAY(1, 300)) b, UNNEST(GENERATE_ARRAY(1, 300)) c"
-+	start := time.Now()
-+	if code, b, err := query(slow); err != nil || code != http.StatusOK {
-+		t.Fatalf("slow query: %d %s %v", code, b, err)
-+	}
-+	alone := time.Since(start)
-+	if alone < 500*time.Millisecond {
-+		t.Skipf("the slow query took %v alone, too short to measure by", alone)
++	// A query long enough to measure the others against: two seconds or
++	// more, alone. Its size is found by growing it, since the same cross
++	// join takes a second here and minutes under the race detector.
++	var (
++		slow   string
++		alone  time.Duration
++		sizing int // the slow queries run to find its size
++	)
++	for n := 40; alone < 2*time.Second; n = n * 3 / 2 {
++		if n > 1000 {
++			t.Skipf("the slow query took %v alone, too short to measure by", alone)
++		}
++		slow = fmt.Sprintf("SELECT COUNT(*) FROM UNNEST(GENERATE_ARRAY(1, %d)) a, UNNEST(GENERATE_ARRAY(1, %[1]d)) b, UNNEST(GENERATE_ARRAY(1, %[1]d)) c", n)
++		start := time.Now()
++		if code, b, err := query(slow); err != nil || code != http.StatusOK {
++			t.Fatalf("slow query: %d %s %v", code, b, err)
++		}
++		alone = time.Since(start)
++		sizing++
 +	}
 +
 +	slowDone := make(chan time.Time, 1)
@@ -704,6 +830,31 @@ CloudBurrow Authors.
 +		}
 +	}
 +	<-slowDone
++
++	// A jobs.list of the jobs after one, as the front's INFORMATION_SCHEMA
++	// and jobs.list send, beside a statement that writes, which holds
++	// SQLite's write lock: the first such list made an index then, and
++	// waited for the writer.
++	writeDone := make(chan error, 1)
++	go func() {
++		code, b, err := query("CREATE TABLE ds.slow AS " + strings.Replace(slow, "COUNT(*)", "COUNT(*) AS n", 1))
++		if err == nil && code != http.StatusOK {
++			err = fmt.Errorf("%d %s", code, b)
++		}
++		writeDone <- err
++	}()
++	time.Sleep(alone / 5)
++	if code, b, err := do(http.MethodGet, "/jobs?cloudburrowAfterJobId=none", nil); err != nil || code != http.StatusOK {
++		t.Fatalf("jobs.list after a job beside a writing statement: %d %s %v", code, b, err)
++	}
++	select {
++	case <-writeDone:
++		t.Fatalf("jobs.list after a job answered only once the writing statement (%v alone) had ended", alone)
++	default:
++	}
++	if err := <-writeDone; err != nil {
++		t.Fatalf("CREATE TABLE AS of the slow query: %v", err)
++	}
 +
 +	// Writes and reads at once: each answers, and all are kept.
 +	const writers, readers = 8, 8
@@ -753,12 +904,27 @@ CloudBurrow Authors.
 +	var list struct {
 +		Jobs []json.RawMessage `json:"jobs"`
 +	}
-+	// CREATE, the slow query twice, the three reads that are queries, the
++	// CREATE, the slow queries that sized it, the slow query beside the
++	// reads, the three reads that are queries, the CREATE TABLE AS, the
 +	// writers and readers, and the count.
-+	if want := 1 + 2 + 3 + writers + readers + 1; json.Unmarshal(b, &list) != nil || len(list.Jobs) != want {
++	if want := 1 + sizing + 1 + 3 + 1 + writers + readers + 1; json.Unmarshal(b, &list) != nil || len(list.Jobs) != want {
 +		t.Errorf("jobs.list: %d jobs, want %d", len(list.Jobs), want)
 +	}
 +}
+--- a/server/cloudburrow_known_projects.go
++++ b/server/cloudburrow_known_projects.go
+@@ -27,6 +27,11 @@
+ 	}
+ 	// Two first requests at once: one adds it, the other's insert fails
+ 	// on the key, and both read it back.
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): a read request,
++	// which runs without the write lock, takes it to add the project, so
++	// that it waits for the writer here rather than in SQLite's busy
++	// timeout.
++	lockWrites(ctx)
+ 	addErr := server.SetProject(projectID)
+ 	project, err = server.metaRepo.FindProject(ctx, projectID)
+ 	if err == nil && project == nil && addErr != nil {
 --- /dev/null
 +++ b/server/cloudburrow_select_statement_test.go
 @@ -0,0 +1,33 @@
