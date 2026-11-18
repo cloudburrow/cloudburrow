@@ -84,6 +84,7 @@ func mongoCode(err error) int32 {
 // command Google does not support.
 func TestFirestoreMongoDB(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	h.Endpoint(EnvResourceManager)

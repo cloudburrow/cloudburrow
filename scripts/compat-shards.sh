@@ -197,7 +197,8 @@ compat_shard() {
       # BigQuery (#1404), as SINK_LOGGING, SINK_STORAGE and SINK_PUBSUB, so
       # those suites stay in their shards; the copies to a Cloud Storage
       # bucket (#1394) run here under the same names. Cloud Storage again as
-      # FIRESTORE_STORAGE, for Firestore's exports and imports (#1500).
+      # FIRESTORE_STORAGE, for Firestore's exports and imports (#1500), and
+      # as BQML_STORAGE, for BigQuery ML's imported models (#1761).
       # Spanner with its REST API for Terraform (#1331), Datastore (#307),
       # Firestore and Bigtable (#346), and BigQuery with the one
       # project its emulator serves (#277); the pod that dials its Service
@@ -209,11 +210,16 @@ compat_shard() {
       # Memorystore in the memorystore shard (#1568).
       # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
       # BigQuery's JOBS_BY_FOLDER test and the purged project's data test
-      # (#1568) read it, so the Resource Manager tests stay in storage.
+      # (#1568) read it, so the Resource Manager tests stay in storage;
+      # so does FIRESTORE_RESOURCEMANAGER, for the Firestore with MongoDB
+      # compatibility tests that grant a sign-in's principal its roles
+      # (#1738, #1742, #1743), with FIRESTORE_MONGODB_CA, the CA of the
+      # endpoint since it serves TLS only (without the two the MongoDB
+      # tests ran in no shard, #1761).
       # The Logging tests that need BigQuery (linked datasets, Log Analytics)
       # or Cloud Storage (the copies) read SINK_LOGGING and SINK_STORAGE, and
       # the copies from a folder LOGGING_RESOURCEMANAGER (#1568).
-      TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
+      TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"

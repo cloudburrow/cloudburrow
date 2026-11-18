@@ -227,3 +227,13 @@ func (o *OperationsServer) WaitOperation(ctx context.Context, req *longrunningpb
 		}
 	}
 }
+
+// launch returns operation op as it stands, then runs f in the background.
+// Google answers a create, update or delete with the operation still
+// pending (done false); taking the snapshot after f had started let a fast
+// f finish first and the caller see the operation done.
+func (s *Server) launch(op string, f func()) (*longrunningpb.Operation, error) {
+	out, err := s.operation(op)
+	go f()
+	return out, err
+}

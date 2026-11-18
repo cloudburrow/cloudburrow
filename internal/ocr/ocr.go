@@ -9,7 +9,7 @@
 // page is turned, the page is turned upright, and the LSTM model
 // (tessdata_fast eng, which reads the Latin alphabet) reads it in reading
 // order with automatic page segmentation and orientation detection (--psm 1:
-// --psm 3 would save a second detection, about 0.7 s of 6 s a page, but
+// --psm 3 would save a second detection, about a tenth of a page's time, but
 // reads a page turned a quarter that the first pass was not confident
 // about, at 0.2 to 0.4, as garbage). A page OSD finds in another
 // script is read with tessdata_fast's model of that script (script/Cyrillic,
@@ -94,7 +94,13 @@ var maxEngines = min(4, max(2, runtime.NumCPU()/2))
 func start() error {
 	rtOnce.Do(func() {
 		ctx := context.Background()
-		rt = wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().WithCloseOnContextDone(true))
+		// Not WithCloseOnContextDone: it makes every loop iteration of the
+		// module leave to Go to check the context, which made a page take
+		// 6 s instead of 0.8 s (and 15 s under the race detector, #1761).
+		// The context is checked before each call into the module
+		// instead (engine.call), so a cancelled read stops after the call
+		// it is in, under a second of a page on a laptop.
+		rt = wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig())
 		if _, rtErr = wasi_snapshot_preview1.Instantiate(ctx, rt); rtErr != nil {
 			return
 		}
@@ -259,9 +265,12 @@ func newEngine(ctx context.Context) (*engine, error) {
 }
 
 func (e *engine) call(ctx context.Context, name string, args ...uint64) (uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	r, err := e.fn[name].Call(ctx, args...)
 	if err != nil {
-		return 0, fmt.Errorf("tesseract %s: %v", name, err)
+		return 0, fmt.Errorf("tesseract %s: %w", name, err)
 	}
 	if len(r) == 0 {
 		return 0, nil
@@ -272,7 +281,10 @@ func (e *engine) call(ctx context.Context, name string, args ...uint64) (uint64,
 // cstring copies s, NUL-terminated, into the module's memory.
 func (e *engine) cstring(ctx context.Context, s string) (uint64, error) {
 	p, err := e.call(ctx, "cb_malloc", uint64(len(s)+1))
-	if err != nil || p == 0 {
+	if err != nil {
+		return 0, err
+	}
+	if p == 0 {
 		return 0, fmt.Errorf("tesseract: out of memory")
 	}
 	if !e.mem.Write(uint32(p), append([]byte(s), 0)) {
@@ -432,7 +444,10 @@ func rotate(g *image.Gray, deg int) *image.Gray {
 func (e *engine) setImage(ctx context.Context, h uint64, g *image.Gray, ppi int) error {
 	n := len(g.Pix)
 	p, err := e.call(ctx, "cb_malloc", uint64(n))
-	if err != nil || p == 0 {
+	if err != nil {
+		return err
+	}
+	if p == 0 {
 		return fmt.Errorf("tesseract: out of memory for a %dx%d page", g.Rect.Dx(), g.Rect.Dy())
 	}
 	defer e.call(ctx, "cb_free", p)
@@ -450,7 +465,10 @@ func (e *engine) detect(ctx context.Context, g *image.Gray, ppi int) (deg int, c
 		return
 	}
 	out, err := e.call(ctx, "cb_malloc", 16)
-	if err != nil || out == 0 {
+	if err != nil {
+		return 0, 0, "", false, err
+	}
+	if out == 0 {
 		return 0, 0, "", false, fmt.Errorf("tesseract: out of memory")
 	}
 	defer e.call(ctx, "cb_free", out)

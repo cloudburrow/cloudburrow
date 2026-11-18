@@ -837,8 +837,7 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	op := c.newOperation(name, "create")
 	c.busy[name] = op
 	c.mu.Unlock()
-	go c.create(name, op)
-	return s.api.operation(op)
+	return s.api.launch(op, func() { c.create(name, op) })
 }
 
 func keepJSON(dst *string, m proto.Message) {
@@ -1597,7 +1596,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		c.busy[r.Name] = op
 		snap, users := *r, c.aclUsers(r)
 		nodes := append([]*clusterNode(nil), r.Nodes...)
-		go func() {
+		return s.api.launch(op, func() {
 			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 			defer cancel()
 			err := c.switchAuth(ctx, &snap, oldPassword, authChange, users, nodes)
@@ -1606,8 +1605,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 			out := c.render(r)
 			c.mu.Unlock()
 			c.finish(op, out, err)
-		}()
-		return s.api.operation(op)
+		})
 	}
 	if !reshape {
 		c.finish(op, c.render(r), nil)
@@ -1616,8 +1614,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	r.state, r.message = clusterpb.Cluster_UPDATING, "changing the cluster's shape"
 	r.pendingShards, r.pendingReplicas = shards, replicas
 	c.busy[r.Name] = op
-	go c.reshape(r.Name, op, shards, replicas)
-	return s.api.operation(op)
+	return s.api.launch(op, func() { c.reshape(r.Name, op, shards, replicas) })
 }
 
 // reshape adds or removes shards or replicas, then completes op.
@@ -1851,7 +1848,7 @@ func (s *ClusterServer) DeleteCluster(ctx context.Context, req *clusterpb.Delete
 	c.busy[r.Name] = op
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	name := r.Name
-	go func() {
+	return s.api.launch(op, func() {
 		c.removeNodes(nodes)
 		c.mu.Lock()
 		delete(c.busy, name)
@@ -1864,6 +1861,5 @@ func (s *ClusterServer) DeleteCluster(ctx context.Context, req *clusterpb.Delete
 		}
 		c.mu.Unlock()
 		c.finish(op, &emptypb.Empty{}, err)
-	}()
-	return s.api.operation(op)
+	})
 }

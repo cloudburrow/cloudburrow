@@ -50,6 +50,7 @@ func hasLabel(err error, label string) bool {
 // command MongoDB refuses in a transaction is refused.
 func TestFirestoreMongoDBTransactions(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	db, _ := mongoDatabase(t, h, "mongo-txn")
 	accounts := db.Collection("accounts")
@@ -203,6 +204,7 @@ func TestFirestoreMongoDBTransactions(t *testing.T) {
 // projection, through the official driver.
 func TestFirestoreMongoDBPositional(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	db, _ := mongoDatabase(t, h, "mongo-pos")
 	students := db.Collection("students")
@@ -260,6 +262,7 @@ func TestFirestoreMongoDBPositional(t *testing.T) {
 // pipeline, and a collection-less aggregation ($documents).
 func TestFirestoreMongoDBLookupPipeline(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	db, _ := mongoDatabase(t, h, "mongo-lookup")
 	if _, err := db.Collection("orders").InsertMany(ctx, []any{bson.D{{Key: "_id", Value: "o1"}, {Key: "item", Value: "a"}, {Key: "qty", Value: int32(5)}},
@@ -312,6 +315,7 @@ func TestFirestoreMongoDBLookupPipeline(t *testing.T) {
 // aggregate, count and update, in the verbosities Google lists.
 func TestFirestoreMongoDBExplain(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	db, _ := mongoDatabase(t, h, "mongo-explain")
 	orders := db.Collection("orders")
@@ -370,6 +374,7 @@ func lookupD(d bson.D, key string) any {
 // aggregate with Google's search string syntax and {$meta: "textScore"}.
 func TestFirestoreMongoDBText(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	db, dbName := mongoDatabase(t, h, "mongo-text")
 	cities := db.Collection("cities")

@@ -925,7 +925,7 @@ PDFium: no cgo, and the Linux CLI stays static.
 
 | Candidate | Licence | Runtime | Result |
 |---|---|---|---|
-| Tesseract 5.5.4 + Leptonica 1.87.0, built by `third_party/tesseract-wasm/build.sh` with wasi-sdk 34 | Apache-2.0; BSD-2-Clause | WASI module on `tetratelabs/wazero` (already required) | **Adopted**: CER 1.5-2.0% on the 300 DPI test scan, about 6 s a page on one instance, six pages in about 14 s in parallel |
+| Tesseract 5.5.4 + Leptonica 1.87.0, built by `third_party/tesseract-wasm/build.sh` with wasi-sdk 34 | Apache-2.0; BSD-2-Clause | WASI module on `tetratelabs/wazero` (already required) | **Adopted**: CER 1.5-2.0% on the 300 DPI test scan, about 0.8 s a page on one instance, six pages in about 3 s in parallel (6 s and 14 s before #1761 dropped wazero's close-on-context-done checks) |
 | tesseract.js core (Emscripten build) | Apache-2.0 | needs Emscripten's JavaScript glue | Rejected: not a WASI module; a prebuilt binary not built here |
 | `github.com/Danlock/gogosseract` | MIT | wazero, tesseract.js's Emscripten build | Rejected: wraps a prebuilt third-party module and its Emscripten glue |
 | `github.com/otiai10/gosseract` | MIT | cgo, libtesseract | Rejected: cgo |

@@ -164,6 +164,10 @@ func consolePermissionsRoundTripIn(t *testing.T, h *Harness, addr, service, proj
 	if err := c.set(ctx, got); err != nil {
 		t.Fatalf("the official client's SetIamPolicy: %v", err)
 	}
+	before, err := c.get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got.Etag = stale
 	sdkErr := c.set(ctx, got)
 	if sdkErr == nil {
@@ -179,8 +183,11 @@ func consolePermissionsRoundTripIn(t *testing.T, h *Harness, addr, service, proj
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(holders(after, role), "user:late@example.com") || len(holders(after, "roles/viewer")) != 1 {
-		t.Errorf("a refused grant changed the policy: %v", after.GetBindings())
+	// The policy is the one the official client set: compared by etag, not
+	// by counting roles/viewer's holders, which is also role on a project,
+	// where a binding of the same role and condition is merged (#1761).
+	if slices.Contains(holders(after, role), "user:late@example.com") || string(after.GetEtag()) != string(before.GetEtag()) {
+		t.Errorf("a refused grant changed the policy: %v, was %v", after.GetBindings(), before.GetBindings())
 	}
 
 	// Test permissions (#1242): the console's answer is the official

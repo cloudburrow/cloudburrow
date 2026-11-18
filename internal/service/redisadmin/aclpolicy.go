@@ -364,7 +364,7 @@ func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.Upda
 		jobs = append(jobs, job{*r, c.aclUsers(r), append([]*clusterNode(nil), r.Nodes...)})
 	}
 	c.mu.Unlock()
-	go func() {
+	return s.api.launch(op.Name, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
 		var err error
@@ -382,8 +382,7 @@ func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.Upda
 		a.pmu.Unlock()
 		c.mu.Unlock()
 		c.finish(op.Name, out, err)
-	}()
-	return s.api.operation(op.Name)
+	})
 }
 
 // DeleteAclPolicy deletes a policy no cluster is attached to.

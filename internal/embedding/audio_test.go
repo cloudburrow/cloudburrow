@@ -308,6 +308,7 @@ func TestDecodeMPEG25MP3(t *testing.T) {
 // TestDecodeMP3Refusals: what is not an MP3 the decoder reads is refused
 // naming why, never a panic.
 func TestDecodeMP3Refusals(t *testing.T) {
+	t.Parallel() // the package's slow tests overlap (#1761)
 	read := func(f string) []byte {
 		b, err := os.ReadFile(filepath.Join("testdata", f))
 		if err != nil {

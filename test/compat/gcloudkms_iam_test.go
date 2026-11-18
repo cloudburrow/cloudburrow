@@ -13,8 +13,11 @@ import (
 
 // TestGcloudKMSIam (#431): KMS IAM through real gcloud, configured by
 // gcloud-setup alone; stored, never enforced (ADR-0006 as amended by #421).
-// gcloud sends version 3 policies, which rule 3 accepts without conditions,
-// and read-modify-writes with the etag, so a second add keeps the first.
+// gcloud sends version 3 policies and read-modify-writes with the etag, so
+// a second add keeps the first. A binding with an IAM Condition is stored
+// (#1745), as Google's KMS stores one; gcloud then refuses to add an
+// unconditional binding to that policy non-interactively unless it is
+// given --condition=None, as it does against Google.
 func TestGcloudKMSIam(t *testing.T) {
 	h := New(t)
 	run, project := gcloudKMS(t, h)
@@ -40,16 +43,17 @@ func TestGcloudKMSIam(t *testing.T) {
 	}
 	roles := func(res string) map[string]string {
 		t.Helper()
-		p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+		p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
 		if err != nil {
 			t.Fatalf("GetIamPolicy %s: %v", res, err)
 		}
 		out := map[string]string{}
 		for _, b := range p.GetBindings() {
-			if b.GetCondition() != nil {
-				t.Errorf("%s holds a conditional binding: %v", res, b)
+			role := b.GetRole()
+			if c := b.GetCondition(); c != nil {
+				role += " if " + c.GetExpression()
 			}
-			out[b.GetRole()] = strings.Join(b.GetMembers(), ",")
+			out[role] = strings.Join(b.GetMembers(), ",")
 		}
 		return out
 	}
@@ -80,18 +84,30 @@ func TestGcloudKMSIam(t *testing.T) {
 		t.Errorf("get-iam-policy = %+v; want the binding and an etag", got)
 	}
 
-	out, err := run(append([]string{"kms", "keys", "add-iam-policy-binding", "k", "--member", dev, "--role", "roles/cloudkms.admin",
-		`--condition=expression=request.time<timestamp("2030-01-01T00:00:00Z"),title=t`}, kr...)...)
-	if err == nil || !strings.Contains(out, "UNIMPLEMENTED") || !strings.Contains(out, "condition") {
-		t.Errorf("a conditional binding = %v:\n%s; want a failure naming UNIMPLEMENTED and condition", err, out)
-	}
-	if r := roles(key.GetName()); r["roles/cloudkms.admin"] != "" {
-		t.Errorf("the conditional binding was stored: %v", r)
+	const expr = `request.time < timestamp("2030-01-01T00:00:00Z")`
+	gc(append([]string{"kms", "keys", "add-iam-policy-binding", "k", "--member", dev, "--role", "roles/cloudkms.admin",
+		"--condition=expression=" + expr + ",title=t"}, kr...)...)
+	if r := roles(key.GetName()); r["roles/cloudkms.admin if "+expr] != dev || r["roles/cloudkms.admin"] != "" {
+		t.Errorf("after a conditional add, the key's policy = %v; want admin → %s on the condition only", r, dev)
 	}
 
+	// The policy holds a condition now: an unconditional binding needs
+	// --condition=None, without which gcloud refuses in non-interactive
+	// mode (as against Google).
 	const second = "user:second@example.com"
-	gc(append([]string{"kms", "keys", "add-iam-policy-binding", "k", "--member", second, "--role", "roles/cloudkms.viewer"}, kr...)...)
-	if r := roles(key.GetName()); r["roles/cloudkms.cryptoKeyEncrypterDecrypter"] != dev || r["roles/cloudkms.viewer"] != second {
-		t.Errorf("after a second add, the key's policy = %v; want both bindings", r)
+	viewer := append([]string{"kms", "keys", "add-iam-policy-binding", "k", "--member", second, "--role", "roles/cloudkms.viewer"}, kr...)
+	if out, err := run(viewer...); err == nil || !strings.Contains(out, "--condition=None") {
+		t.Errorf("an unconditional add to a policy with a condition, without --condition = %v:\n%s; want gcloud to ask for --condition=None", err, out)
+	}
+	gc(append(viewer, "--condition=None")...)
+	r := roles(key.GetName())
+	if r["roles/cloudkms.cryptoKeyEncrypterDecrypter"] != dev || r["roles/cloudkms.viewer"] != second || r["roles/cloudkms.admin if "+expr] != dev {
+		t.Errorf("after a second add, the key's policy = %v; want all three bindings", r)
+	}
+
+	gc(append([]string{"kms", "keys", "remove-iam-policy-binding", "k", "--member", dev, "--role", "roles/cloudkms.admin",
+		"--condition=expression=" + expr + ",title=t"}, kr...)...)
+	if r := roles(key.GetName()); r["roles/cloudkms.admin if "+expr] != "" || r["roles/cloudkms.viewer"] != second {
+		t.Errorf("after removing the conditional binding, the key's policy = %v", r)
 	}
 }

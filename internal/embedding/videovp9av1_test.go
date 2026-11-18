@@ -46,6 +46,7 @@ func planesMD5(w, h int, planes [3][]byte, strides [3]int) string {
 // turtle clips, 180 frames each, decodes to the bytes ffmpeg 9's own vp9
 // and libdav1d decoders give (testdata/*.framemd5).
 func TestVP9AndAV1MatchFFmpeg(t *testing.T) {
+	t.Parallel() // the package's slow tests overlap (#1761)
 	for _, file := range []string{"turtle-vp9.mp4", "turtle-av1.mp4"} {
 		want := ffmpegFrameMD5s(t, strings.TrimSuffix(file, ".mp4")+".framemd5")
 		tr, err := readVideoTrack(readTestdata(t, file))

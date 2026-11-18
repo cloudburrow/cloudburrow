@@ -39,32 +39,41 @@ func hbdPlanesMD5(f *vp9hbd.Frame) string {
 // VP9 profiles 1 (8-bit 4:4:4), 2 (10-bit 4:2:0) and 3 (12-bit 4:2:2),
 // 180 frames each with hidden alternate reference frames, decodes to the
 // samples ffmpeg 9's vp9 decoder gives (testdata/*.framemd5, `ffmpeg -i f
-// -f framemd5 -pix_fmt <its format>`), and so does profile 0's clip.
+// -f framemd5 -pix_fmt <its format>`), and so does profile 0's clip. The
+// clips decode in parallel.
 func TestVP9ProfilesMatchFFmpeg(t *testing.T) {
 	for _, file := range []string{"turtle-vp9-444.mp4", "turtle-vp9-10bit.mp4", "turtle-vp9-422-12bit.mp4", "turtle-vp9.mp4"} {
-		want := ffmpegFrameMD5s(t, file[:len(file)-4]+".framemd5")
-		tr, err := readVideoTrack(readTestdata(t, file))
+		t.Run(file, func(t *testing.T) {
+			t.Parallel()
+			vp9MatchesFFmpeg(t, file)
+		})
+	}
+}
+
+// vp9MatchesFFmpeg checks every frame of file against its framemd5.
+func vp9MatchesFFmpeg(t *testing.T, file string) {
+	want := ffmpegFrameMD5s(t, file[:len(file)-4]+".framemd5")
+	tr, err := readVideoTrack(readTestdata(t, file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := vp9hbd.NewDecoder()
+	var got []string
+	for _, s := range tr.samples {
+		fs, err := d.Decode(s)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", file, err)
 		}
-		d := vp9hbd.NewDecoder()
-		var got []string
-		for _, s := range tr.samples {
-			fs, err := d.Decode(s)
-			if err != nil {
-				t.Fatalf("%s: %v", file, err)
-			}
-			for _, f := range fs {
-				got = append(got, hbdPlanesMD5(f))
-			}
+		for _, f := range fs {
+			got = append(got, hbdPlanesMD5(f))
 		}
-		if len(got) != len(want) || len(got) != 180 {
-			t.Fatalf("%s: %d frames, ffmpeg %d", file, len(got), len(want))
-		}
-		for i := range got {
-			if got[i] != want[i] {
-				t.Fatalf("%s: frame %d's MD5 is %s, ffmpeg's %s", file, i, got[i], want[i])
-			}
+	}
+	if len(got) != len(want) || len(got) != 180 {
+		t.Fatalf("%s: %d frames, ffmpeg %d", file, len(got), len(want))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("%s: frame %d's MD5 is %s, ffmpeg's %s", file, i, got[i], want[i])
 		}
 	}
 }

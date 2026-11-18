@@ -35,6 +35,7 @@ func mongoTokenURI(token, endpoint, database, ca string) string {
 // refuses the principal's next command.
 func TestFirestoreMongoDBIAMToken(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	project := iamProject(t, h, "fm-iam-")
