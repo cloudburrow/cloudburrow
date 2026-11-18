@@ -46,6 +46,8 @@ type Modality string
 const (
 	ModalityText      Modality = "text-generation"
 	ModalityEmbedding Modality = "embedding"
+	// ModalityOCR is text recognition (Tesseract's models, #1733).
+	ModalityOCR Modality = "ocr"
 )
 
 // Model is a catalogued artifact.

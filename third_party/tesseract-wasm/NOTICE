@@ -12,3 +12,7 @@ Exceptions (licenses/libcxx-LICENSE.TXT).
 
 tessdata/ holds eng.traineddata and osd.traineddata from tessdata_fast 4.1.0, Copyright the
 Tesseract OCR authors, Apache License 2.0 (licenses/tessdata_fast-LICENSE).
+
+The tessdata_fast 4.1.0 script models internal/localai fetches on demand for document_ocr
+(script/*.traineddata), Copyright the Tesseract OCR authors, Apache License 2.0
+(licenses/tessdata_fast-LICENSE), are not distributed with CloudBurrow.

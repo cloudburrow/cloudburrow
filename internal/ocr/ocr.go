@@ -8,7 +8,10 @@
 // --psm 1: orientation and script detection (the osd model) finds how the
 // page is turned, the page is turned upright, and the LSTM model
 // (tessdata_fast eng, which reads the Latin alphabet) reads it in reading
-// order with automatic page segmentation.
+// order with automatic page segmentation. A page OSD finds in another
+// script is read with tessdata_fast's model of that script (script/Cyrillic,
+// script/HanS, ...), which SetScriptSource's function fetches on demand
+// (internal/localai pins each by SHA-256 and keeps it in <state-dir>/models).
 package ocr
 
 import (
@@ -22,6 +25,7 @@ import (
 	"image/color"
 	"io"
 	"io/fs"
+	"os"
 	"strings"
 	"sync"
 	"testing/fstest"
@@ -59,6 +63,9 @@ type Result struct {
 	// Script is the script orientation and script detection found (for
 	// example "Latin"), empty when it found none.
 	Script string
+	// Model is the language model the page was read with: "eng", or a
+	// tessdata_fast script model such as "script/Cyrillic".
+	Model string
 	// Detected is the clockwise rotation orientation detection reported,
 	// and Confidence its confidence (15 is reasonably confident).
 	Detected   int
@@ -89,7 +96,10 @@ func start() error {
 		if compiled, rtErr = rt.CompileModule(ctx, tesseractwasm.Module); rtErr != nil {
 			return
 		}
-		tessFS, rtErr = loadTessdata()
+		var mem fs.FS
+		if mem, rtErr = loadTessdata(); rtErr == nil {
+			tessFS = layeredFS{mem}
+		}
 	})
 	if rtErr != nil {
 		return fmt.Errorf("starting Tesseract: %v", rtErr)
@@ -124,6 +134,82 @@ func loadTessdata() (fs.FS, error) {
 	return m, nil
 }
 
+// ScriptModels are tessdata_fast 4.1.0's script models a page can be read
+// with, by the name OSD reports for it where the two differ: Han text is read
+// with simplified Chinese (OSD does not tell simplified from traditional),
+// Korean (Hangul with Han) with Hangul, and kana with Japanese. Latin, and a
+// script with no model, are read with eng; so is Vietnamese, which OSD
+// reports as Latin.
+var ScriptModels = map[string]string{
+	"Han": "HanS", "Korean": "Hangul", "Hiragana": "Japanese", "Katakana": "Japanese",
+	"Arabic": "Arabic", "Armenian": "Armenian", "Bengali": "Bengali", "Canadian_Aboriginal": "Canadian_Aboriginal",
+	"Cherokee": "Cherokee", "Cyrillic": "Cyrillic", "Devanagari": "Devanagari", "Ethiopic": "Ethiopic",
+	"Fraktur": "Fraktur", "Georgian": "Georgian", "Greek": "Greek", "Gujarati": "Gujarati", "Gurmukhi": "Gurmukhi",
+	"Hangul": "Hangul", "Hebrew": "Hebrew", "Japanese": "Japanese", "Kannada": "Kannada", "Khmer": "Khmer",
+	"Lao": "Lao", "Malayalam": "Malayalam", "Myanmar": "Myanmar", "Oriya": "Oriya", "Sinhala": "Sinhala",
+	"Syriac": "Syriac", "Tamil": "Tamil", "Telugu": "Telugu", "Thaana": "Thaana", "Thai": "Thai", "Tibetan": "Tibetan",
+}
+
+// MinScriptConfidence is the script confidence below which a page is read
+// with eng whatever script OSD names.
+const MinScriptConfidence = 0.5
+
+var (
+	scriptMu     sync.Mutex
+	scriptSource func(ctx context.Context, model string) (string, error)
+	scriptPaths  = map[string]string{} // model name -> verified file on this host
+)
+
+// SetScriptSource installs the function that returns the path of
+// tessdata_fast's script model (for example "Cyrillic"), fetching and
+// checking it first when needed. Without one, every page is read with eng.
+func SetScriptSource(f func(ctx context.Context, model string) (string, error)) {
+	scriptMu.Lock()
+	defer scriptMu.Unlock()
+	scriptSource = f
+	scriptPaths = map[string]string{}
+}
+
+// scriptModel returns the host path of the script model for script, ""
+// when the page is read with eng.
+func scriptModel(ctx context.Context, script string) (string, error) {
+	name := ScriptModels[script]
+	if name == "" {
+		return "", nil
+	}
+	scriptMu.Lock()
+	defer scriptMu.Unlock()
+	if scriptSource == nil {
+		return "", nil
+	}
+	if _, ok := scriptPaths[name]; !ok {
+		p, err := scriptSource(ctx, name)
+		if err != nil {
+			return "", fmt.Errorf("the Tesseract model for the %s script: %v", script, err)
+		}
+		scriptPaths[name] = p
+	}
+	return name, nil
+}
+
+// layeredFS is the tessdata directory the module sees: the embedded models,
+// and script/<name>.traineddata from the files SetScriptSource's function
+// returned.
+type layeredFS struct{ mem fs.FS }
+
+func (l layeredFS) Open(name string) (fs.File, error) {
+	if rest, ok := strings.CutPrefix(name, "script/"); ok {
+		scriptMu.Lock()
+		p, found := scriptPaths[strings.TrimSuffix(rest, ".traineddata")]
+		scriptMu.Unlock()
+		if !found || !strings.HasSuffix(rest, ".traineddata") {
+			return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+		}
+		return os.Open(p)
+	}
+	return l.mem.Open(name)
+}
+
 // engine is one instance of the module with an LSTM engine and an OSD
 // engine initialised.
 type engine struct {
@@ -132,6 +218,9 @@ type engine struct {
 	fn   map[string]api.Function
 	lstm uint64
 	osd  uint64
+	// scripts are the LSTM engines of script models, started the first time
+	// a page in that script is read.
+	scripts map[string]uint64
 }
 
 var exports = []string{"cb_malloc", "cb_free", "cb_create", "cb_init", "cb_set_variable", "cb_set_psm",
@@ -144,7 +233,7 @@ func newEngine(ctx context.Context) (*engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("starting Tesseract: %v", err)
 	}
-	e := &engine{mod: mod, mem: mod.Memory(), fn: map[string]api.Function{}}
+	e := &engine{mod: mod, mem: mod.Memory(), fn: map[string]api.Function{}, scripts: map[string]uint64{}}
 	for _, name := range exports {
 		f := mod.ExportedFunction(name)
 		if f == nil {
@@ -341,21 +430,26 @@ func (e *engine) detect(ctx context.Context, g *image.Gray, ppi int) (deg int, c
 	b, _ := e.mem.Read(uint32(out), 16)
 	deg = int(int32(binary.LittleEndian.Uint32(b[0:])))
 	conf = float64(int32(binary.LittleEndian.Uint32(b[4:]))) / 100
+	sconf := float64(int32(binary.LittleEndian.Uint32(b[8:]))) / 100
 	if sp := binary.LittleEndian.Uint32(b[12:]); sp != 0 {
 		script = e.readCString(sp)
+	}
+	if sconf < MinScriptConfidence && script != "Latin" {
+		script = ""
 	}
 	return deg, conf, script, true, nil
 }
 
-func (e *engine) text(ctx context.Context, g *image.Gray, ppi int) (string, error) {
-	if err := e.setImage(ctx, e.lstm, g, ppi); err != nil {
+// text reads g with the LSTM engine h.
+func (e *engine) text(ctx context.Context, h uint64, g *image.Gray, ppi int) (string, error) {
+	if err := e.setImage(ctx, h, g, ppi); err != nil {
 		return "", err
 	}
-	defer e.call(ctx, "cb_clear", e.lstm)
-	if _, err := e.call(ctx, "cb_set_psm", e.lstm, psmAutoOSD); err != nil {
+	defer e.call(ctx, "cb_clear", h)
+	if _, err := e.call(ctx, "cb_set_psm", h, psmAutoOSD); err != nil {
 		return "", err
 	}
-	p, err := e.call(ctx, "cb_get_text", e.lstm)
+	p, err := e.call(ctx, "cb_get_text", h)
 	if err != nil {
 		return "", err
 	}
@@ -393,7 +487,24 @@ func Read(ctx context.Context, img image.Image, ppi int) (Result, error) {
 			g = rotate(g, turned)
 		}
 	}
-	t, err := e.text(ctx, g, ppi)
+	h, model := e.lstm, "eng"
+	name, err := scriptModel(ctx, res.Script)
+	if err != nil {
+		ok = true // the engine is unharmed
+		return Result{}, err
+	}
+	if name != "" {
+		sh, have := e.scripts[name]
+		if !have {
+			if sh, err = e.initEngine(ctx, "script/"+name, oemLSTM); err != nil {
+				return Result{}, err
+			}
+			e.scripts[name] = sh
+		}
+		h, model = sh, "script/"+name
+	}
+	res.Model = model
+	t, err := e.text(ctx, h, g, ppi)
 	if err != nil {
 		return Result{}, err
 	}

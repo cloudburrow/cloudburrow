@@ -408,8 +408,11 @@ docker run --rm -v "$PWD:/models" \
 > Tesseract OCR (5.5.4, compiled to WebAssembly and run on wazero, `internal/ocr`), and its text
 > follows the page's image as text tokens, counted against the request's token limit like any
 > other text. A page with a text layer keeps PDFium's text. The models are tessdata_fast `eng`
-> and `osd`, embedded in the binary, so only the Latin script is read; an upside-down page is
-> turned back first. About 5 seconds a page. **Verified** 2026-11-17 with the official `aiplatform`
+> and `osd`, embedded in the binary; an upside-down page is turned back first. A page in another
+> script (orientation and script detection names it) is read with tessdata_fast 4.1.0's model of
+> that script (`script/Cyrillic`, `script/HanS` for Han, `script/Hangul` for Korean, ...), fetched
+> the first time one is needed into `<state-dir>/models` and checked against the SHA-256 pinned in
+> `internal/localai/tessdata.go`. About 5 seconds a page. **Verified** 2026-11-17 with the official `aiplatform`
 > client (`TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient`: the scanned invoice gains 195
 > tokens of OCR text). The console's Embeddings page has a **PDFs' text (OCR)** box that sends
 > `document_ocr` with each PDF (`TestEmbeddingsPageReadsAScannedPDFWithOCR`).

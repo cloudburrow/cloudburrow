@@ -917,6 +917,8 @@ PDFium: no cgo, and the Linux CLI stays static.
 Models: tessdata_fast 4.1.0 `eng` and `osd` (Apache-2.0), embedded gzipped (6.2 MB). A page is
 rendered again at 300 DPI, orientation and script detection turns an upside-down page back
 (automatic page segmentation reads a page turned a quarter as vertical text), and the text is read
-in reading order. Only the Latin script is read: other scripts' models (tessdata_fast `script/*`)
-are not fetched. Provenance: `third_party/tesseract-wasm/PROVENANCE.md`; `dependencies.json`
+in reading order. A page orientation and script detection finds in another script is read with
+tessdata_fast 4.1.0's model of that script (`script/Cyrillic`, `script/HanS`, ... 36 in all,
+Apache-2.0), fetched by `internal/localai` the first time one is needed into `<state-dir>/models`
+and checked against its pinned SHA-256 (CER 0.0% Cyrillic, 1.8% Greek on generated scans). Provenance: `third_party/tesseract-wasm/PROVENANCE.md`; `dependencies.json`
 `tesseractWasm`.

@@ -34,6 +34,10 @@ type Pin struct {
 	// Revision is the full commit SHA on Hugging Face, never a branch name,
 	// so the same bytes are fetched however the repository moves.
 	Revision string
+	// BaseURL, when set, is where the files are fetched from (each file's
+	// Path appended), for a model hosted outside Hugging Face; it must name
+	// the pinned revision too.
+	BaseURL string
 	// Files are every file the runtime needs, each with its checksum.
 	Files []PinnedFile
 }
@@ -56,6 +60,9 @@ func (p Pin) TotalBytes() int64 {
 
 // URL is the HTTPS location of a pinned file at the pinned revision.
 func (p Pin) URL(repo string, f PinnedFile) string {
+	if p.BaseURL != "" {
+		return p.BaseURL + "/" + f.Path
+	}
 	return "https://huggingface.co/" + repo + "/resolve/" + p.Revision + "/" + f.Path
 }
 

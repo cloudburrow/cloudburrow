@@ -14,7 +14,16 @@ tesseract.js nor any other prebuilt WebAssembly build is used.
 | tessdata_fast `eng.traineddata` | 4.1.0 (tag object `a8ba5063`) | https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/eng.traineddata | `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2` | Apache-2.0 (`licenses/tessdata_fast-LICENSE`) |
 | tessdata_fast `osd.traineddata` | 4.1.0 | https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/osd.traineddata | `9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff` | Apache-2.0 |
 
-The two models are committed gzipped (`tessdata/*.traineddata.gz`, `gzip -9 -n`) so that each
+| tessdata_fast `script/*.traineddata` (36 models: every script but Latin) | 4.1.0 (commit `65727574dfcd264acbb0c3e07860e4e9e9b22185`) | https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/65727574dfcd264acbb0c3e07860e4e9e9b22185/script/ | each pinned in `internal/localai/tessdata.go` | Apache-2.0 |
+
+The script models are not committed: `internal/localai` fetches one the first time a page in its
+script is read (orientation and script detection names the script; `internal/ocr`'s
+`ScriptModels` maps it to a model) into `<state-dir>/models`, and checks it against the SHA-256
+pinned in `internal/localai/tessdata.go`. Those SHA-256s and sizes were measured on 2026-11-17
+on the files downloaded from the commit above, each of which also matched the git blob ID
+GitHub's contents API reports for it.
+
+The two embedded models are committed gzipped (`tessdata/*.traineddata.gz`, `gzip -9 -n`) so that each
 tracked file stays under 5 MB; `internal/ocr` decompresses them into memory and checks the
 SHA-256s above before loading them.
 
