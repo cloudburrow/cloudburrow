@@ -142,6 +142,14 @@ off), are the one known remaining source. `TestHEAACImplicitADTS` checks that `D
 fixtures; `TestDecodeAUMatchesDecodeLC` checks that plain AAC-LC through `DecodeAU` matches
 `Decode`; `TestPSRefusals` checks the refusals above.
 
+### Channel configurations 3 to 6 (#1651)
+
+`configureCore` takes channel configurations 1 to 6 (mono to 5.1; configuration 7, and a
+`program_config_element`'s layout, stay `ErrUnsupported`), and `decodeFrame` decodes `lfe_channel_element()` as the single channel element
+it is (ISO/IEC 14496-3 Table 4.3). SBR over more than two channels is `ErrUnsupported`, explicit
+or found in the stream. A 5.1 AAC-LC track decodes within 1.8e-7 of ffmpeg 9 after ffmpeg's
+downmix (`internal/embedding/decoders_test.go`).
+
 ## Checked
 
 `go test ./third_party/aac-go/` (HE-AAC, above).

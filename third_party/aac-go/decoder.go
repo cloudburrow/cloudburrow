@@ -165,8 +165,13 @@ func (d *Decoder) configureCore(sfi, channels int) error {
 	if !ok {
 		return fmt.Errorf("aac: invalid sampling_frequency_index %d", sfi)
 	}
-	if channels != 1 && channels != 2 {
-		return unsupportedf("channel_configuration %d (mono and stereo only)", channels)
+	// Channel configurations 1 to 6 (#1651): their channel count is the
+	// configuration (SCE; CPE; SCE CPE; SCE CPE SCE; SCE CPE CPE; SCE CPE
+	// CPE LFE). Configuration 7 (eight channels) is not decoded: no
+	// encoder at hand writes it (ffmpeg's writes 7.1 with a
+	// program_config_element).
+	if channels < 1 || channels > 6 {
+		return unsupportedf("channel_configuration %d (1 to 6 only)", channels)
 	}
 	d.sampleRate = rate
 	d.samplingFrequencyIndex = sfi
@@ -242,7 +247,16 @@ func (d *Decoder) decodeFrame(payload []byte) ([][]float64, error) {
 			if err := skipPCE(r); err != nil {
 				return nil, err
 			}
-		case idCCE, idLFE:
+		case idLFE:
+			// lfe_channel_element() is a single_channel_element() of
+			// long windows (#1651); SBR does not apply to it.
+			ch, err := d.decodeSCE(r)
+			if err != nil {
+				return nil, err
+			}
+			elems = append(elems, frameElement{first: len(chans), lfe: true})
+			chans = append(chans, ch)
+		case idCCE:
 			return nil, unsupportedf("syntactic element id %d", id)
 		case idEND:
 			if len(chans) != d.channels {

@@ -119,8 +119,8 @@ func TestWAVLayoutsAndRefusals(t *testing.T) {
 		data []byte
 		want string
 	}{
-		{"ADPCM", wavBytes(2, 1, 16000, 4, 0, 16), "WAVE format 2"},
-		{"12-bit", wavBytes(1, 1, 16000, 12, 0, 16), "12 bits"},
+		{"3-bit IMA ADPCM", wavBytes(0x11, 1, 16000, 3, 0, 16), "3-bit IMA ADPCM"},
+		{"MP3 in WAV", wavBytes(0x55, 1, 16000, 16, 0, 16), "WAVE format 85"},
 		{"a 4 kHz rate", wavBytes(1, 1, 4000, 16, 0, 16), "4000 Hz"},
 		{"nine channels, no mask", wavBytes(1, 9, 16000, 16, 0, 16), "9 channels"},
 		{"BL without BR", wavBytes(1, 3, 16000, 16, 0x1|0x2|0x10, 16), "BL without BR"},
@@ -136,13 +136,10 @@ func TestWAVLayoutsAndRefusals(t *testing.T) {
 	}
 }
 
-// TestUndecodedAudioTrackIsNotInvalid: a video's ALAC track is valid media
-// this build does not decode, so its error matches ErrNotDecoded (#1651).
+// TestUndecodedAudioTrackIsNotInvalid: data that is not a video stays
+// invalid, not ErrNotDecoded (#1651; an undecoded track codec is
+// TestUndecodedTrackCodec).
 func TestUndecodedAudioTrackIsNotInvalid(t *testing.T) {
-	_, err := DecodeVideoAudio("video/mp4", readTestdata(t, "va-alac.mp4"), VideoOptions{})
-	if !errors.Is(err, ErrNotDecoded) || !strings.Contains(err.Error(), "alac") {
-		t.Errorf("ALAC track: %v; want ErrNotDecoded naming alac", err)
-	}
 	if _, err := DecodeVideoAudio("video/mp4", []byte("not a video"), VideoOptions{}); err == nil || errors.Is(err, ErrNotDecoded) {
 		t.Errorf("not a video: %v; want invalid data", err)
 	}
