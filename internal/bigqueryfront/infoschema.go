@@ -442,9 +442,17 @@ func columnsRows(project, dataset string, t infoTable) [][]string {
 		if n, ok := cluster[strings.ToLower(name)]; ok {
 			clus = strconv.Itoa(n)
 		}
+		// A generated embedding column (autoembed.go, #1778): its
+		// generatedColumn, written to the schema with the generation.
+		generated, expr, stored, async := sqlString("NEVER"), "NULL", "NULL", asyncGenerationNone
+		if gc, _ := fl["generatedColumn"].(map[string]any); gc != nil {
+			info, _ := gc["generatedExpressionInfo"].(map[string]any)
+			generated, expr, stored = sqlString("ALWAYS"), sqlOrNull(str(info, "generationExpression")), sqlString("YES")
+			async = "STRUCT(CAST(NULL AS STRUCT<message STRING>) AS blocking_error)"
+		}
 		rows = append(rows, append(append([]string{}, head...), sqlString(name), strconv.Itoa(i+1),
-			yesNo(!strings.EqualFold(str(fl, "mode"), "REQUIRED")), sqlString(fieldSQLType(fl)), sqlString("NEVER"), "NULL",
-			"NULL", asyncGenerationNone, sqlString("NO"), "NULL", sqlString("NO"), yesNo(partCol != "" && strings.EqualFold(partCol, name)), clus,
+			yesNo(!strings.EqualFold(str(fl, "mode"), "REQUIRED")), sqlString(fieldSQLType(fl)), generated, expr,
+			stored, async, sqlString("NO"), "NULL", sqlString("NO"), yesNo(partCol != "" && strings.EqualFold(partCol, name)), clus,
 			sqlOrNull(str(fl, "collation")), sqlOrNull(str(fl, "defaultValueExpression")), sqlOrNull(str(fl, "roundingMode")),
 			"ARRAY<STRUCT<name STRING>>[]", policyTags(fl), sqlString("NO"), "NULL", "NULL", "NULL", "NULL", "NULL", "NULL"))
 	}

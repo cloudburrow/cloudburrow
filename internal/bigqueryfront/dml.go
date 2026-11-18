@@ -178,6 +178,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, #1417, projectoptions.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.serveGeneratedColumns(w, r, q, insert) { // #1778, autoembed.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && (f.modelStatements(w, r, q, insert) || f.mlFunctions(w, r, q, insert)) { // #1465, models.go, modelfuncs.go
 		return
 	}

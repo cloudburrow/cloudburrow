@@ -1002,6 +1002,16 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	if f.refuseSnapshotWrite(w, r, dataset, table, "tabledata.insertAll") { // #1002, snapshots.go
 		return
 	}
+	if f.tables != nil { // #1778, autoembed.go
+		rows := make([]map[string]any, len(req.Rows))
+		for i, row := range req.Rows {
+			rows[i] = row.JSON
+		}
+		if msg := f.refuseGeneratedRows(projectOf(f.base), dataset, table, rows); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
+	}
 
 	// A partition decorator, and an ingestion-time partitioned table's
 	// streaming buffer (#1273, streamingbuffer.go).

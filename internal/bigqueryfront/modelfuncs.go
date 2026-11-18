@@ -252,15 +252,24 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
 		return true
 	}
+	// AI.SEARCH, over a table's generated embeddings (aisearch.go, #1778).
+	if text, code, msg = f.rewriteAISearch(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
 	if fn := aiFunction(text); fn != "" {
 		why := map[string]string{
 			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +
 				"and a count made any other way would not be the model's",
-			"AI.SEARCH": "it searches tables with autonomous embedding generation, which CloudBurrow does not serve yet (#1778)",
 		}[fn]
 		if why == "" {
 			why = "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
-				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY and AI.AGG run on the instance's local Vertex AI (#1765, #1771, #1772, #1777)"
+				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY, AI.AGG and AI.SEARCH run on the instance's local Vertex AI (#1765, #1771, #1772, #1777, #1778)"
 		}
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": "+why+". Nothing was run.")
 		return true

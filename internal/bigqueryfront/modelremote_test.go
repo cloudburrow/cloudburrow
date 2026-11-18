@@ -148,7 +148,7 @@ func TestAIFunctionsAreNamed(t *testing.T) {
 		"SELECT * FROM AI.GENERATE_TABLE(MODEL m, (SELECT 'x' AS prompt))":                         "",
 		"select ai.embed(content) from t":                                                          "",
 		"SELECT AI.AGG(s, 'summarize') FROM t":                                                     "",
-		"SELECT AI.SEARCH(TABLE t, 'c', 'q')":                                                      "AI.SEARCH",
+		"SELECT AI.SEARCH(TABLE t, 'c', 'q')":                                                      "",
 		"SELECT AI.COUNT_TOKENS('hi')":                                                             "AI.COUNT_TOKENS",
 		"SELECT ai.x FROM t AS ai":                                                                 "",
 		"SELECT p.ai.f(1)":                                                                         "",
