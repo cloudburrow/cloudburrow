@@ -58,7 +58,8 @@
         "patches/bigquery-emulator/0084-dataset-tables-when-asked.patch",
         "patches/bigquery-emulator/0076-existing-job-is-409-duplicate.patch",
         "patches/bigquery-emulator/0085-temp-file-auto-vacuum.patch",
-        "patches/bigquery-emulator/0086-result-rows-read-from-their-table.patch"
+        "patches/bigquery-emulator/0086-result-rows-read-from-their-table.patch",
+        "patches/bigquery-emulator/0091-known-projects-on-first-use.patch"
       ]
     },
     {

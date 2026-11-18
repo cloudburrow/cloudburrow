@@ -199,6 +199,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// Every project Resource Manager has ACTIVE (knownprojects.go, #1764).
+	known := &knownProjects{rm: o.resourceManager}
+	next = known.engine(next)
 	// A client request's repeated reads of a dataset or table are the
 	// engine's first answer (readmemo.go, #1623).
 	next = memoReads(next)
@@ -524,7 +527,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	return known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -548,7 +551,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed))
+	}), next, settings, failed)))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -1135,6 +1138,13 @@ func (f front) sendHeader(r *http.Request, method, path string, body []byte, hea
 }
 
 // projectOf returns the project in a base path.
+// inProject is f with its base in project rather than its own (#1764): the
+// engine reads another project's datasets and tables there.
+func (f front) inProject(project string) front {
+	f.base = f.base[:strings.LastIndex(f.base, "/")+1] + url.PathEscape(project)
+	return f
+}
+
 func projectOf(base string) string {
 	p := base[strings.LastIndex(base, "/")+1:]
 	if u, err := url.PathUnescape(p); err == nil {

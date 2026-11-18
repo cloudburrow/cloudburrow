@@ -1,0 +1,67 @@
+package bigqueryfront
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+)
+
+// TestKnownProjectsMarkTheEngine (#1764): a request of a project Resource
+// Manager has ACTIVE reaches the engine with KnownProjectHeader, one of a
+// project it does not have (or has not ACTIVE) without, and a client's own
+// header never reaches it. Resource Manager is asked once for an ACTIVE
+// project.
+func TestKnownProjectsMarkTheEngine(t *testing.T) {
+	var asked atomic.Int32
+	rm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		switch r.URL.Path {
+		case "/v3/projects/other":
+			_, _ = w.Write([]byte(`{"projectId":"other","state":"ACTIVE"}`))
+		case "/v3/projects/gone":
+			_, _ = w.Write([]byte(`{"projectId":"gone","state":"DELETE_REQUESTED"}`))
+		default:
+			http.Error(w, `{"error":{"code":404}}`, http.StatusNotFound)
+		}
+	}))
+	defer rm.Close()
+	var marked atomic.Value
+	engine := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		marked.Store(r.Header.Get(KnownProjectHeader))
+		_, _ = w.Write([]byte(`{}`))
+	})
+	k := &knownProjects{rm: rm.URL}
+	h := k.client(k.engine(engine))
+	for _, c := range []struct {
+		path   string
+		client bool
+		want   string
+	}{
+		{"/bigquery/v2/projects/other/datasets", false, "1"},
+		{"/bigquery/v2/projects/other/datasets", false, "1"},
+		{"/upload/bigquery/v2/projects/other/jobs", false, "1"},
+		{"/bigquery/v2/projects/gone/datasets", false, ""},
+		{"/bigquery/v2/projects/nowhere/datasets", true, ""},
+	} {
+		req := httptest.NewRequest(http.MethodGet, c.path, nil)
+		if c.client {
+			req.Header.Set(KnownProjectHeader, "1")
+		}
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		if got, _ := marked.Load().(string); got != c.want {
+			t.Errorf("%s (client header %v): the engine's header %q, want %q", c.path, c.client, got, c.want)
+		}
+	}
+	if n := asked.Load(); n != 3 {
+		t.Errorf("Resource Manager was asked %d times, want 3 (other once, gone, nowhere)", n)
+	}
+	// With no Resource Manager, nothing is marked.
+	none := &knownProjects{}
+	req := httptest.NewRequest(http.MethodGet, "/bigquery/v2/projects/other/datasets", nil)
+	req.Header.Set(KnownProjectHeader, "1")
+	none.client(none.engine(engine)).ServeHTTP(httptest.NewRecorder(), req)
+	if got, _ := marked.Load().(string); got != "" {
+		t.Errorf("with no Resource Manager: the engine's header %q, want none", got)
+	}
+}
