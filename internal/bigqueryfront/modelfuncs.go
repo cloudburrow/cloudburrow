@@ -221,8 +221,18 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			return true
 		}
 	}
+	// AI.GENERATE, evaluated row by row here (aigenerate.go, #1765).
+	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
 	if fn := aiFunction(text); fn != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": BigQuery's generative AI functions are not served yet (#1765); "+
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": of BigQuery's generative AI functions only AI.GENERATE is served (#1765); "+
 			"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING of a remote model run on the instance's local Vertex AI (#1760). Nothing was run.")
 		return true
 	}

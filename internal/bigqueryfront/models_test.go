@@ -154,7 +154,7 @@ func TestParseModelDDL(t *testing.T) {
 		"CREATE MODEL ds.m OPTIONS(model_type='automl_regressor') AS SELECT 1",
 		"CREATE MODEL ds.m OPTIONS(model_type='logistic_reg', auto_class_weights=true) AS SELECT 1",
 		"CREATE MODEL ds.m OPTIONS(model_type='pca', num_principal_components=2, pca_solver='randomized') AS SELECT 1",
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION DEFAULT OPTIONS(endpoint='gemini')",
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1')",
 		"CREATE MODEL ds.m OPTIONS(model_type='linear_reg', warm_start=true) AS SELECT 1",
 	} {
 		toks, _ := lex(bad)

@@ -519,10 +519,9 @@ func (f front) embedRow(ctx context.Context, project string, rm *remoteModel, co
 }
 
 // aiFunction is the first AI.<fn>( call in sql, upper-cased, or "".
-// BigQuery's generative AI functions (AI.GENERATE, AI.GENERATE_TEXT,
-// AI.GENERATE_TABLE, AI.EMBED, AI.FORECAST, …) are not served: each is
-// a scalar or table function over any expression, which the front cannot
-// yet evaluate row by row before the engine runs the query (#1760).
+// AI.GENERATE is rewritten before this is asked (aigenerate.go, #1765);
+// BigQuery's other generative AI functions (AI.GENERATE_TEXT,
+// AI.GENERATE_TABLE, AI.EMBED, AI.FORECAST, …) are not served yet.
 func aiFunction(sql string) string {
 	if !strings.Contains(strings.ToUpper(sql), "AI.") {
 		return ""
