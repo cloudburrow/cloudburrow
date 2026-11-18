@@ -92,6 +92,8 @@ func TestReportRedRunsWatchesTheUnreportedWorkflows(t *testing.T) {
 		"Functions build":     "functions.yml",
 		"ONNX build":          "onnx.yml",
 		"Upgrade test":        "upgrade.yml",
+
+		"Cloud SQL ephemeral nightly": "nightly-sql-ephemeral.yml",
 	}
 	pending := map[string]bool{}
 	if len(watched) != len(want) {
