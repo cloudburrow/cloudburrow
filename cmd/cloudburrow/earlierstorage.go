@@ -119,7 +119,8 @@ func (e *earlierStorage) Export(ctx context.Context) (bool, error) {
 func (e *earlierStorage) download(ctx context.Context, base, dir string) (int, error) {
 	c, err := storage.NewClient(ctx, option.WithEndpoint(base+"/storage/v1/"), option.WithoutAuthentication(),
 		// The JSON media path, which the earlier server serves at any Host.
-		storage.WithJSONReads())
+		storage.WithJSONReads(),
+		storage.WithDisabledClientMetrics())
 	if err != nil {
 		return 0, err
 	}

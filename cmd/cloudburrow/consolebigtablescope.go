@@ -123,7 +123,43 @@ func (p bigtableProvider) newData(ctx context.Context, project string) (*bigtabl
 	if err != nil {
 		return nil, err
 	}
-	return bigtable.NewClient(ctx, project, instance, localOpts(p.endpoint)...)
+	return newConsoleBigtableClient(ctx, p.endpoint, project, instance)
+}
+
+// consoleBigtableConfig is the configuration of every data client the
+// console makes (#1820).
+//
+// The console makes a client for each request and closes it when the
+// request is done, so each of its point reads and writes would be the first
+// call on a cold session pool: the front's configuration sends every
+// ReadRow and Apply through a session (sessions.go). The Go client's
+// session pool (cloud.google.com/go/bigtable v1.58.0,
+// internal/transport/session_pool.go, CheckoutSession) can lose the wake-up
+// of a caller that finds no ready session: when the pool's first session
+// turns active after the caller looked for one but before it queued as a
+// waiter, the one signal finds no waiter, and the caller waits out its
+// whole deadline beside an idle session ("no sessions available: context
+// deadline exceeded"). Under the race detector and load about one cold read
+// in a thousand did. The console's calls are one-offs, so it uses the
+// classic data plane, which is what the front runs each session vRPC as.
+//
+// Its clients also export no client-side metrics: the built-in exporter
+// drops the endpoint option and would send them to Cloud Monitoring. And
+// they do not try Direct Access, which is on by default: the channel pool
+// probes it with a dial of its own, and when that dial is not ALTS (it never
+// is here) investigateDirectAccessFailure asks metadata.OnGCE, an HTTP
+// request to 169.254.169.254 and a DNS lookup of metadata.google.internal
+// (internal/transport/direct_access_checker.go, #1825).
+var consoleBigtableConfig = bigtable.ClientConfig{
+	DisableSession:      true,
+	DisableDirectAccess: true,
+	MetricsProvider:     bigtable.NoopMetricsProvider{},
+}
+
+// newConsoleBigtableClient is a data client on instance at endpoint, made
+// with consoleBigtableConfig.
+func newConsoleBigtableClient(ctx context.Context, endpoint, project, instance string) (*bigtable.Client, error) {
+	return bigtable.NewClientWithConfig(ctx, project, instance, consoleBigtableConfig, localOpts(endpoint)...)
 }
 
 // scope is the list screen's picker, with the instance in force selected.

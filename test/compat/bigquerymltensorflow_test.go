@@ -128,6 +128,11 @@ func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
 	if err := mlRunWithin(h, c, fmt.Sprintf("CREATE MODEL `%s.mlp` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/mlp/*')", name, b), tensorflowImportDeadline); err != nil {
 		t.Fatalf("CREATE MODEL mlp: %v", err)
 	}
+	// ctx is the harness's 60 s from the test's start, which a cold build
+	// of the converter image outlasts (in main run 44377266506 it failed
+	// TestBigQueryMLImageFunctions' next statement at once): the rest of
+	// the test gets 60 s of its own.
+	ctx = h.Context()
 	md, err := c.Dataset(name).Model("mlp").Metadata(ctx)
 	if err != nil {
 		t.Fatalf("Model.Metadata: %v", err)

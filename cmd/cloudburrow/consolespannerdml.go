@@ -212,7 +212,7 @@ func (p spannerProvider) Write(ctx context.Context, project string, path []strin
 	defer cancel()
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, path[0], path[1])
-	c, err := spanner.NewClient(ctx, dbName, localOpts(p.endpoint)...)
+	c, err := newConsoleSpannerClient(ctx, p.endpoint, dbName)
 	if err != nil {
 		return 0, fmt.Errorf("cannot open the database: %w", err)
 	}
