@@ -1399,7 +1399,7 @@ var parityRows = []parityRow{
 		Methods: []string{"bigqueryconnection.projects.locations.connections.get",
 			"bigqueryconnection.projects.locations.connections.getIamPolicy", "bigqueryconnection.projects.locations.connections.setIamPolicy",
 			"bigqueryconnection.projects.locations.connections.testIamPermissions"},
-		Issue: 1765},
+		Issue: 1770},
 	{Resource: "BigQuery service account", Service: "bigquery",
 		Methods:  []string{"bigquery.projects.getServiceAccount"},
 		Provider: "bigquery", Offers: "The BigQuery page's Project summary: the project ID and the BigQuery service account projects.getServiceAccount names, the account a customer-managed encryption key is granted to (#1270)",

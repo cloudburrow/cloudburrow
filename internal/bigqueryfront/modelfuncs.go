@@ -235,7 +235,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		return true
 	}
 	if fn := aiFunction(text); fn != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": of BigQuery's generative AI functions only AI.GENERATE is served (#1765); "+
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": of BigQuery's generative AI functions only AI.GENERATE and AI.GENERATE_TEXT are served (#1765; the rest are #1771 and #1772); "+
 			"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING of a remote model run on the instance's local Vertex AI (#1760). Nothing was run.")
 		return true
 	}
