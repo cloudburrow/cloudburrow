@@ -77,7 +77,7 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 	sent := run(count)
 	if len(sent) != 4 || sent[0] != "DROP TABLE IF EXISTS "+table || !strings.HasPrefix(sent[1], "CREATE TABLE "+table+" (cache_hit BOOL") ||
 		!strings.HasPrefix(sent[2], "INSERT INTO "+table+" SELECT * FROM (SELECT * FROM UNNEST(") || rowsIn(sent[2]) != 3 ||
-		sent[3] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS" {
+		sent[3] != "SELECT COUNT(*) FROM "+withOptimizationDetails("(SELECT * FROM "+table+")")+" AS JOBS" {
 		t.Fatalf("first JOBS query sent %q", sent)
 	}
 	sent = run(count)
@@ -88,7 +88,7 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 	// to date as an unfiltered one does (#1564).
 	sent = run(count + " WHERE job_id = 'auto1'")
 	if len(sent) != 2 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) || rowsIn(sent[0]) != 1 ||
-		sent[1] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS WHERE job_id = 'auto1'" {
+		sent[1] != "SELECT COUNT(*) FROM "+withOptimizationDetails("(SELECT * FROM "+table+")")+" AS JOBS WHERE job_id = 'auto1'" {
 		t.Fatalf("filtered JOBS query sent %q, want the new row written and the table read", sent)
 	}
 	// A job that finished since (its row was not DONE), and one deleted
@@ -168,7 +168,7 @@ func TestJobsTableSyncsInTheBackground(t *testing.T) {
 	emu.mu.Lock()
 	sent := emu.e.sentSince(from)
 	emu.mu.Unlock()
-	if len(sent) != 1 || sent[0] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS" {
+	if len(sent) != 1 || sent[0] != "SELECT COUNT(*) FROM "+withOptimizationDetails("(SELECT * FROM "+table+")")+" AS JOBS" {
 		t.Fatalf("the JOBS query after the background sync sent %q, want only its read of the table", sent)
 	}
 }
@@ -230,14 +230,14 @@ func TestJobsTableReadByFilteredQueries(t *testing.T) {
 	for _, where := range []string{" WHERE job_type = 'QUERY'", " WHERE creation_time > TIMESTAMP '2000-01-01'"} {
 		sent := run(count + where)
 		last := sent[len(sent)-1]
-		if last != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS"+where {
+		if last != "SELECT COUNT(*) FROM "+withOptimizationDetails("(SELECT * FROM "+table+")")+" AS JOBS"+where {
 			t.Fatalf("%s: sent %q, want the table read", where, sent)
 		}
 	}
 	// Once it is, the table, whatever the query keeps (#1564): a literal
 	// is cut from a list of every job.
 	sent = run(count + " WHERE job_id IN ('auto1', 'auto2')")
-	if last := sent[len(sent)-1]; last != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS WHERE job_id IN ('auto1', 'auto2')" {
+	if last := sent[len(sent)-1]; last != "SELECT COUNT(*) FROM "+withOptimizationDetails("(SELECT * FROM "+table+")")+" AS JOBS WHERE job_id IN ('auto1', 'auto2')" {
 		t.Fatalf("JOBS query of two jobs sent %q, want the table read", sent)
 	}
 }
@@ -364,7 +364,7 @@ func TestJobsTableSyncsIncrementally(t *testing.T) {
 	query(count)
 	var sent []string
 	locked(func() { sent = emu.e.sentSince(from) })
-	if len(sent) != 1 || sent[0] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS" {
+	if len(sent) != 1 || sent[0] != "SELECT COUNT(*) FROM "+withOptimizationDetails("(SELECT * FROM "+table+")")+" AS JOBS" {
 		t.Fatalf("the JOBS query after the background syncs sent %q, want only its read of the table: its rows differ from a full rebuild", sent)
 	}
 }
