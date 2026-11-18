@@ -29,6 +29,7 @@ type frameElement struct {
 	first  int // its first channel
 	stereo bool
 	lfe    bool
+	tag    int // element_instance_tag
 }
 
 // ASC is the part of an MPEG-4 AudioSpecificConfig (ISO/IEC 14496-3
@@ -46,6 +47,8 @@ type ASC struct {
 	// ExtensionSamplingFrequency is the SBR rate when SBR is signalled.
 	ExtensionSamplingFrequency int
 	FrameLengthFlag            bool
+	// program is channel configuration 0's program_config_element.
+	program *programConfig
 }
 
 // ParseASC parses an AudioSpecificConfig.
@@ -95,7 +98,16 @@ func ParseASC(asc []byte) (*ASC, error) {
 	}
 	b.u(1) // extensionFlag
 	if a.ChannelConfiguration == 0 {
-		return a, unsupportedf("channel_configuration 0 (a program_config_element)")
+		// The program_config_element (#1651), byte-aligned from the
+		// AudioSpecificConfig's start.
+		if b.err != nil {
+			return nil, fmt.Errorf("aac: AudioSpecificConfig: %w", b.err)
+		}
+		pc, err := parsePCE(b.r)
+		if err != nil {
+			return a, err
+		}
+		a.program = pc
 	}
 	// The backward-compatible SBR and PS signalling.
 	if a.SBR == -1 && b.err == nil && b.r.Remaining() >= 16 {
@@ -130,11 +142,13 @@ func NewDecoderASC(asc []byte) (*Decoder, error) {
 		return nil, unsupportedf("960-sample frames")
 	}
 	d, _ := NewDecoder()
-	if err := d.configureCore(a.SamplingFrequencyIndex, a.ChannelConfiguration); err != nil {
-		return nil, err
+	channels := a.ChannelConfiguration
+	if a.program != nil {
+		channels = a.program.channels
+		d.pce = a.program
 	}
-	if a.SBR == 1 && a.ChannelConfiguration > 2 {
-		return nil, unsupportedf("SBR over channel_configuration %d", a.ChannelConfiguration)
+	if err := d.configureCore(a.SamplingFrequencyIndex, channels); err != nil {
+		return nil, err
 	}
 	switch a.SBR {
 	case 1:
@@ -192,9 +206,6 @@ func (d *Decoder) OutputChannels() int {
 
 // readSBR decodes an SBR extension payload for the last element.
 func (d *Decoder) readSBR(r *bits.BitReader, elems []frameElement, crc bool, payloadBits int) error {
-	if d.channels > 2 {
-		return unsupportedf("SBR over %d channels", d.channels)
-	}
 	if !d.sbrOn {
 		// Implicit signalling: SBR found in the stream doubles the rate.
 		d.sbrOn = true
