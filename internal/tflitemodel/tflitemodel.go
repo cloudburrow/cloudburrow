@@ -8,8 +8,9 @@
 // or subgraph 0's inputs and outputs when the model has no signature, with
 // float32 arithmetic as LiteRT's reference kernels do, checked against
 // LiteRT's own interpreter (ai-edge-litert 2.3.0) on models
-// TensorFlow 2.20's TFLiteConverter wrote (tflitemodel_test.go). An
-// operator it does not run, a quantized tensor or a second subgraph is an
+// TensorFlow 2.20's TFLiteConverter wrote (tflitemodel_test.go).
+// Quantized tensors (quant.go) and STRING tensors (strings.go) run too
+// (#1766). An operator it does not run or a second subgraph is an
 // *UnsupportedError, so the caller can refuse it as not implemented
 // rather than as the model's fault.
 package tflitemodel
@@ -72,13 +73,14 @@ func (t Type) IsInt() bool {
 }
 
 // Tensor is a value: its shape, and its elements row-major in F (the
-// float types), I (the integer types) or B (BOOL).
+// float types), I (the integer types), B (BOOL) or S (STRING, #1766).
 type Tensor struct {
 	Type  Type
 	Shape []int
 	F     []float32
 	I     []int64
 	B     []bool
+	S     []string
 }
 
 // Len is the number of elements the shape holds.
@@ -109,6 +111,10 @@ type tensorDef struct {
 	typ   Type
 	shape []int
 	data  *Tensor // a constant
+	// q is a quantized tensor's parameters (quant.go, #1766): its values
+	// are carried as float32, typ is FLOAT32, and stored is its own type.
+	q      *quant
+	stored Type
 }
 
 type op struct {
@@ -163,6 +169,13 @@ const (
 	opAbs            = 101
 	opBatchMatMul    = 126
 	opGelu           = 150
+	// The convolution, pooling and gather operators (#1766).
+	opAveragePool2D   = 1
+	opConv2D          = 3
+	opDepthwiseConv2D = 4
+	opMaxPool2D       = 17
+	opGather          = 36
+	opQuantize        = 114
 )
 
 var opNames = map[int32]string{opAdd: "ADD", opConcatenation: "CONCATENATION", opDequantize: "DEQUANTIZE", opFullyConnected: "FULLY_CONNECTED",
@@ -170,7 +183,8 @@ var opNames = map[int32]string{opAdd: "ADD", opConcatenation: "CONCATENATION", o
 	opTanh: "TANH", opTranspose: "TRANSPOSE", opMean: "MEAN", opSub: "SUB", opDiv: "DIV", opSqueeze: "SQUEEZE", opStridedSlice: "STRIDED_SLICE",
 	opExp: "EXP", opCast: "CAST", opMaximum: "MAXIMUM", opMinimum: "MINIMUM", opNeg: "NEG", opExpandDims: "EXPAND_DIMS", opLog: "LOG",
 	opSum: "SUM", opSqrt: "SQRT", opRsqrt: "RSQRT", opPow: "POW", opPack: "PACK", opSquare: "SQUARE", opLeakyRelu: "LEAKY_RELU",
-	opSquaredDiff: "SQUARED_DIFFERENCE", opAbs: "ABS", opBatchMatMul: "BATCH_MATMUL", opGelu: "GELU"}
+	opSquaredDiff: "SQUARED_DIFFERENCE", opAbs: "ABS", opBatchMatMul: "BATCH_MATMUL", opGelu: "GELU",
+	opAveragePool2D: "AVERAGE_POOL_2D", opConv2D: "CONV_2D", opDepthwiseConv2D: "DEPTHWISE_CONV_2D", opMaxPool2D: "MAX_POOL_2D", opGather: "GATHER", opQuantize: "QUANTIZE"}
 
 // Ops are the builtin operators Run runs, by schema.fbs name.
 func Ops() []string {
@@ -289,11 +303,12 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 		if sh := ints(t, 18); sh != nil {
 			d.shape = sh
 		}
-		if qt := sub(t, 12); qt != nil {
-			// QuantizationParameters: scale is its field 8.
-			if field(qt, 8) != 0 && qt.VectorLen(field(qt, 8)) > 0 && !d.typ.IsFloat() {
-				return nil, &UnsupportedError{"the model is quantized (tensor " + d.name + " is " + d.typ.String() + " with a quantization scale): CloudBurrow's TensorFlow Lite interpreter runs float models"}
+		if qt := sub(t, 12); qt != nil && !d.typ.IsFloat() {
+			q, err := readQuant(qt, d)
+			if err != nil {
+				return nil, err
 			}
+			d.q = q
 		}
 		if field(t, 16) != 0 {
 			return nil, &UnsupportedError{"tensor " + d.name + " is sparse: sparse tensors are not supported"}
@@ -306,10 +321,16 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 				if err != nil {
 					return nil, fmt.Errorf("tensor %s: %w", d.name, err)
 				}
+				if d.q != nil {
+					c = d.q.dequantize(c)
+				}
 				d.data = c
 			} else if bufs[b].GetUint64Slot(6, 0) > 1 {
 				return nil, &UnsupportedError{"tensor " + d.name + " keeps its data outside the FlatBuffer: CloudBurrow reads models under 2 GB"}
 			}
+		}
+		if d.q != nil {
+			d.stored, d.typ = d.typ, Float32
 		}
 		m.tensors = append(m.tensors, d)
 	}
@@ -342,7 +363,11 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 		if name == "" {
 			name = d.name
 		}
-		return Port{Name: name, Type: d.typ, Shape: d.shape, index: i}, nil
+		typ := d.typ
+		if d.q != nil {
+			typ = d.stored // a quantized port takes and gives its integers
+		}
+		return Port{Name: name, Type: typ, Shape: d.shape, index: i}, nil
 	}
 	if sig != nil {
 		for k, slot := range []int{4, 6} {
@@ -379,6 +404,9 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 // constant decodes a buffer's little-endian elements.
 func constant(typ Type, shape []int, raw []byte) (*Tensor, error) {
 	t := &Tensor{Type: typ, Shape: shape}
+	if typ == String {
+		return stringConstant(t, raw)
+	}
 	n := prod(shape)
 	size := map[Type]int{Float32: 4, Float16: 2, Float64: 8, Int8: 1, Uint8: 1, Int16: 2, Uint16: 2, Int32: 4, Uint32: 4, Int64: 8, Uint64: 8, Bool: 1}[typ]
 	if size == 0 {

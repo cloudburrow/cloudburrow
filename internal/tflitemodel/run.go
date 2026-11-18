@@ -33,6 +33,9 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 			}
 		}
 		t := convert(in, p.Type)
+		if q := m.tensors[p.index].q; q != nil {
+			t = *q.dequantize(&t)
+		}
 		vals[p.index] = &t
 	}
 	for _, o := range m.ops {
@@ -57,13 +60,20 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 			c := convert(*r, want)
 			r = &c
 		}
+		if q := m.tensors[o.out[0]].q; q != nil {
+			r = q.round(r)
+		}
 		vals[o.out[0]] = r
 	}
 	for _, p := range m.Outputs {
 		if vals[p.index] == nil {
 			return nil, fmt.Errorf("no operator writes output %s", p.Name)
 		}
-		out = append(out, *vals[p.index])
+		v := *vals[p.index]
+		if q := m.tensors[p.index].q; q != nil {
+			v = q.quantize(&v, p.Type)
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }
@@ -73,6 +83,12 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 func convert(t Tensor, typ Type) Tensor {
 	r := Tensor{Type: typ, Shape: t.Shape}
 	n := t.Len()
+	if typ == String || t.Type == String {
+		if typ == t.Type {
+			return t
+		}
+		panic(fmt.Sprintf("a %s tensor cannot be converted to %s", t.Type, typ))
+	}
 	switch {
 	case typ.IsFloat():
 		r.F = make([]float32, n)
@@ -193,6 +209,13 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 	if x == nil {
 		return nil, fmt.Errorf("operator %s has no input", o.name)
 	}
+	if x.Type == String {
+		switch o.code {
+		case opReshape, opSqueeze, opExpandDims, opTranspose, opConcatenation, opPack, opStridedSlice, opGather:
+		default:
+			return nil, &UnsupportedError{fmt.Sprintf("operator %s on STRING tensors is not supported", o.name)}
+		}
+	}
 	unary := func(fn func(float32) float32) (*Tensor, error) {
 		if !x.Type.IsFloat() {
 			return nil, &UnsupportedError{fmt.Sprintf("operator %s on %s tensors is not supported", o.name, x.Type)}
@@ -254,6 +277,8 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 			}
 			return float32(0.5 * x * (1 + math.Erf(x/math.Sqrt2)))
 		})
+	case opQuantize:
+		return x, nil // Run rounds it to the output tensor's grid
 	case opDequantize, opCast:
 		var to Type
 		if o.code == opDequantize {
@@ -291,6 +316,12 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 		return r, nil
 	case opFullyConnected:
 		return fullyConnected(o, x, arg(1), arg(2))
+	case opConv2D, opDepthwiseConv2D:
+		return conv2D(o, x, arg(1), arg(2))
+	case opAveragePool2D, opMaxPool2D:
+		return pool2D(o, x)
+	case opGather:
+		return gather(o, x, arg(1))
 	case opBatchMatMul:
 		return batchMatMul(o, x, arg(1))
 	case opReshape:
@@ -586,6 +617,8 @@ func at(dst *Tensor, j int, src *Tensor, i int) {
 		dst.I[j] = src.I[i]
 	case src.B != nil:
 		dst.B[j] = src.B[i]
+	case src.S != nil:
+		dst.S[j] = src.S[i]
 	}
 }
 
@@ -599,6 +632,8 @@ func alloc(like *Tensor, shape []int) *Tensor {
 		r.I = make([]int64, n)
 	case like.B != nil:
 		r.B = make([]bool, n)
+	case like.S != nil:
+		r.S = make([]string, n)
 	}
 	return r
 }
