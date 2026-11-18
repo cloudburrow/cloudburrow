@@ -48,7 +48,23 @@ A fix release for v0.2.0, with one new BigQuery function. The generated coverage
   imported a model. The build now runs once, under its own 30-minute limit, and is never cancelled
   by a request waiting for it; nor is the `CREATE MODEL` job, which still finishes when its client
   gives up. `cloudburrow prefetch --tensorflow-converter` builds the 2.3 GB image ahead of time,
-  for instances that will run offline (#1775).
+  for instances that will run offline (#1775). Its compat tests now give the statements after a
+  cold build a deadline of their own: `ML.PREDICT` of the converted model was never slow, but on a
+  CI runner it was sent with a deadline the build had already used up.
+
+#### Console
+
+- **The console no longer contacts Google** (#1825). Its Spanner data clients exported built-in
+  metrics to Cloud Monitoring (`monitoring.googleapis.com`) and probed the metadata server
+  (`169.254.169.254`, `metadata.google.internal`) to find their location; its Bigtable clients'
+  Direct Access check asked the metadata server too; and the client metrics of CloudBurrow's own
+  Cloud Storage clients, turned on by `GCP_STORAGE_GO_ENABLE_OTEL_METRICS`, exported to Cloud
+  Monitoring. Each is now off, whatever
+  the environment, and an integration test fails on any dial or name lookup that leaves the host.
+- **Bigtable pages no longer hang for 15 s** (#1820). The console's Bigtable reads could wait out
+  their deadline with "no sessions available" beside an idle session, a lost wake-up in the Go
+  client's session pool. The console's Bigtable clients now use the classic data plane, which
+  opens no session.
 
 #### CLI
 

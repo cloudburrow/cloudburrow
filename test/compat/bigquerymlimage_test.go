@@ -81,7 +81,7 @@ func TestBigQueryMLImageFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateConnection: %v", err)
 	}
-	t.Cleanup(func() { _ = cc.DeleteConnection(ctx, &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
+	t.Cleanup(func() { _ = cc.DeleteConnection(h.Context(), &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
 	if _, err := cc.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: cn.Name, Policy: &iampb.Policy{
 		Bindings: []*iampb.Binding{{Role: "roles/bigquery.connectionUser", Members: []string{callerMember(project)}}}}}); err != nil {
 		t.Fatalf("SetIamPolicy on the connection: %v", err)
@@ -91,7 +91,7 @@ func TestBigQueryMLImageFunctions(t *testing.T) {
 	if err := c.Dataset(ds).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
 		t.Fatalf("Dataset.Create: %v", err)
 	}
-	t.Cleanup(func() { _ = c.Dataset(ds).DeleteWithContents(ctx) })
+	t.Cleanup(func() { _ = c.Dataset(ds).DeleteWithContents(h.Context()) })
 
 	bh := bucket(t, h, sc)
 	put := func(name, ct string, data []byte) {
@@ -308,6 +308,13 @@ func TestBigQueryMLImageFunctions(t *testing.T) {
 	if err := mlRunWithin(h, c, fmt.Sprintf("CREATE MODEL `%s.tfmodel` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/models/tf/*')", ds, bh.BucketName()), tensorflowImportDeadline); err != nil {
 		t.Fatalf("CREATE MODEL TENSORFLOW: %v", err)
 	}
+	// ctx is the harness's 60 s from the test's start, which a cold build
+	// of the converter image outlasts: in main run 44377266506 the build
+	// took most of the test's 130 s, and this ML.PREDICT then failed at
+	// once with "context deadline exceeded". The ML.PREDICT is not slow:
+	// with the image built the whole test takes about 4 s. The statements
+	// after the import get a fresh 60 s.
+	ctx = h.Context()
 	row, _ = one(fmt.Sprintf("SELECT probs FROM ML.PREDICT(MODEL `%s.tfmodel`, (SELECT ML.DECODE_IMAGE(data) AS image %s))", ds, at("small.png")))
 	got, _ := row[0].([]bigquery.Value)
 	want := fx.Predict["small"].TensorFlow
