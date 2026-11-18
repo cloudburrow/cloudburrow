@@ -279,6 +279,9 @@ func (r *runService) Start(ctx context.Context) error {
 		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
 			functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
 				adapter.V1Handler(runadapter.NewRESTHandler(register)))))))
+	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
+	// /v1/ path is Cloud Run v1's, and its other calls through the above.
+	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}

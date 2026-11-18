@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
@@ -45,7 +46,9 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 			Help: "Lowercase letters, digits and hyphens."},
 		{Name: "format", Label: "Format", Type: "select", Options: []string{"DOCKER", "PYTHON", "NPM", "MAVEN", "GENERIC", "APT", "YUM"}, Default: "DOCKER",
 			Help: "Each format serves its own protocol on the Run port; the repository's page says how its client reaches it."},
-		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
+		// The locations Artifact Registry's Locations mixin lists (#1578).
+		{Name: "location", Label: "Region", Type: "select", Options: runadapter.ArtifactRegistryLocations, Required: true, Default: "us-central1",
+			Help: "A region, or the multi-region asia, europe or us."},
 		{Name: "mode", Label: "Mode", Type: "select", Options: []string{"STANDARD_REPOSITORY", "REMOTE_REPOSITORY", "VIRTUAL_REPOSITORY"}, Default: "STANDARD_REPOSITORY",
 			Help: "A remote repository pulls through from, and caches, another repository of this instance (DOCKER, PYTHON, NPM, MAVEN); a virtual one reads its upstreams (PYTHON, NPM, MAVEN)."},
 		{Name: "upstream", Label: "Upstream repositories", Type: "text",
