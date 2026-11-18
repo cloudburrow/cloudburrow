@@ -55,7 +55,8 @@ func handleRW(ctx context.Context, h *iam.Handle) policyRW {
 // server, another process), a Pub/Sub topic, subscription and schema, a
 // Bigtable instance, a Spanner instance and a BigQuery table (their
 // fronts, other processes, which the host reaches through their tunnels),
-// a Logging view, a Cloud Run job and an Artifact Registry repository.
+// a Logging view, a Cloud Run job and an Artifact Registry repository;
+// and a Pub/Sub schema and a Bigtable table.
 // Another member of the same binding is kept. (Purge, 30 days after the
 // delete, drops the member: unit-tested, TestMemberRewriteHooks.)
 func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
@@ -122,7 +123,28 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 		},
 	}
 
+	sch := schemaClient(t, h)
+	schema, err := sch.CreateSchema(ctx, &pubsubpb.CreateSchemaRequest{Parent: "projects/" + h.Project(), SchemaId: "dse-" + suffix,
+		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_AVRO, Definition: avroSchemaV1}})
+	if err != nil {
+		t.Fatalf("CreateSchema: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sch.DeleteSchema(context.Background(), &pubsubpb.DeleteSchemaRequest{Name: schema.GetName()})
+	})
+	res["schema"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return sch.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: schema.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := sch.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: schema.GetName(), Policy: p})
+			return err
+		},
+	}
+
 	// Bigtable.
+	btAdmin, _ := bigtableTable(t, h, "dse-"+suffix)
+	res["bigtable table"] = handleRW(ctx, btAdmin.TableIAM("dse-"+suffix))
 	iac := bigtableInstanceAdmin(t, h)
 	btID := "dse-bt-" + suffix
 	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: btID, DisplayName: "dse bigtable", ClusterId: btID + "-c", Zone: "europe-west1-b", NumNodes: 1}); err != nil {
