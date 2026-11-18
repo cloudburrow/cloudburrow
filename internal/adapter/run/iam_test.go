@@ -44,8 +44,9 @@ func TestJobIamPolicyIsStoredNotEnforced(t *testing.T) {
 	}
 	if _, err := js.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{Version: 3,
 		Bindings: []*iampb.Binding{{Role: "roles/run.invoker", Members: []string{"allUsers"},
-			Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("condition = %v, want Unimplemented", err)
+			Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.InvalidArgument {
+		// #1745: Cloud Run accepts conditions; this one has no title.
+		t.Errorf("condition without a title = %v, want InvalidArgument", err)
 	}
 	// The policy is not on the job: its etag is unchanged.
 	after, err := js.GetJob(ctx, &runpb.GetJobRequest{Name: name})

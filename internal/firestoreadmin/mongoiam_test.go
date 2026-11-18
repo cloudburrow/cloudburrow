@@ -77,3 +77,36 @@ func TestMongoIAMCustomRole(t *testing.T) {
 		t.Error("a custom role with no permissions: find allowed")
 	}
 }
+
+// TestMongoIAMConditions (#1742): a conditional binding grants its role on
+// the databases its condition holds for, as Google's "Authenticate and
+// connect to a database" scopes a user credentials' role to its database.
+func TestMongoIAMConditions(t *testing.T) {
+	a := New("")
+	for _, n := range []string{"projects/p/databases/ent", "projects/p/databases/ent2"} {
+		a.databases[n] = &adminpb.Database{Name: n, DatabaseEdition: adminpb.Database_ENTERPRISE}
+	}
+	s := a.NewMongoServer("", t.Logf)
+	const sa = "sa@p.iam.gserviceaccount.com"
+	find := bson.D{{Key: "find", Value: "c"}}
+	on := func(id string) *mongoConn {
+		return &mongoConn{db: &mongoDB{name: "projects/p/databases/" + id, id: id}, principal: sa}
+	}
+	a.SetMongoIAM(&MongoIAM{Conditional: map[string]map[string][]MongoConditionalRole{sa: {"p": {
+		{Role: "roles/datastore.user", Expression: `resource.name == "projects/p/databases/ent" && resource.type == "firestore.googleapis.com/Database" && resource.service == "firestore.googleapis.com"`},
+		{Role: "roles/datastore.owner", Expression: `request.time < timestamp("2000-01-01T00:00:00Z")`},
+	}}}})
+	if err := s.checkMongoIAM(on("ent"), "find", "find", find); err != nil {
+		t.Errorf("the condition's database: find refused: %v", err)
+	}
+	if err := s.checkMongoIAM(on("ent2"), "find", "find", find); err == nil {
+		t.Error("another database: find allowed")
+	}
+	if got := a.mongoVisibleDatabases(sa); !reflect.DeepEqual(got, []string{"ent"}) {
+		t.Errorf("visible databases = %v, want [ent]", got)
+	}
+	token := &mongoConn{token: true, principal: sa}
+	if err := s.checkMongoIAM(token, "listdatabases", "listDatabases", bson.D{{Key: "listDatabases", Value: 1}}); err != nil {
+		t.Errorf("listDatabases with a conditional grant refused: %v", err)
+	}
+}

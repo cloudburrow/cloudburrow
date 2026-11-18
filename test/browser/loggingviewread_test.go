@@ -55,8 +55,11 @@ func TestLogsExplorerThroughViewAndParentPicker(t *testing.T) {
 	p.clickText("#view tbody a", bucket)
 	p.waitFor(`document.querySelector("#tab-views") !== null`)
 	p.eval(`document.querySelector("#tab-views").click(), true`, nil)
-	p.waitFor(`[...document.querySelectorAll("#view a")].some((a) => a.textContent === "errors" && a.href.includes("scope=view"))`)
+	// The view's row opens its page (#1748), which links the Explorer.
+	p.waitFor(`[...document.querySelectorAll("#view a")].some((a) => a.textContent === "errors")`)
 	p.eval(`[...document.querySelectorAll("#view a")].find((a) => a.textContent === "errors").click(), true`, nil)
+	p.waitFor(`[...document.querySelectorAll("#view a")].some((a) => a.textContent === "Read entries through this view" && a.href.includes("scope=view"))`)
+	p.eval(`[...document.querySelectorAll("#view a")].find((a) => a.textContent === "Read entries through this view").click(), true`, nil)
 
 	p.waitFor(`location.pathname === "/logs" && document.querySelector("#log-scope") !== null && document.querySelector("#log-scope").value === "view"`)
 	p.waitFor(fmt.Sprintf(`document.querySelector("#log-view").value === %q`, view))

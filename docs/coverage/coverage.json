@@ -323,6 +323,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
+          "test/compat/iamconditions1745_test.go:80 TestIAMConditionsOnServicePolicies",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch11_test.go:478 TestTerraformRegionalSecretIAM",
@@ -400,6 +401,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
+          "test/compat/iamconditions1745_test.go:194 TestConsoleIAMConditionsOnServicePolicies",
+          "test/compat/iamconditions1745_test.go:80 TestIAMConditionsOnServicePolicies",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
@@ -560,7 +563,7 @@
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:144 TestRunJobIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -604,7 +607,7 @@
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:144 TestRunJobIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -612,7 +615,7 @@
         "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:144 TestRunJobIamPolicyIsStoredNotEnforced"
         ]
       },
       {
@@ -694,7 +697,7 @@
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -732,7 +735,7 @@
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -740,7 +743,7 @@
         "method": "google.cloud.run.v2.Services/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced"
         ]
       },
       {
@@ -3684,6 +3687,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
+          "test/compat/iamconditions1745_test.go:80 TestIAMConditionsOnServicePolicies",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11",
@@ -3714,6 +3718,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
+          "test/compat/iamconditions1745_test.go:80 TestIAMConditionsOnServicePolicies",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
@@ -4031,7 +4036,7 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -4042,7 +4047,7 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -4061,7 +4066,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -4094,7 +4099,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
@@ -4103,7 +4108,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM"
         ]
       },
       {
@@ -4125,7 +4130,7 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch10_test.go:93 TestTerraformOrganizationIAMAuditConfig",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
@@ -4149,7 +4154,7 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch10_test.go:93 TestTerraformOrganizationIAMAuditConfig"
         ]
       },
@@ -4157,7 +4162,7 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM"
         ]
       },
       {
@@ -4178,12 +4183,13 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:203 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
-          "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
-          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
+          "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
+          "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
+          "test/compat/storediam_test.go:562 TestTerraformProjectIAMAuditConfig",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
@@ -4223,9 +4229,11 @@
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
-          "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
+          "test/compat/iamconditions1745_test.go:132 TestIAMConditionAttributes",
+          "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
+          "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
@@ -4233,8 +4241,8 @@
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
+          "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM"
         ]
       },
       {
@@ -4324,10 +4332,10 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:407 TestResourceManagerTagIAM",
-          "test/compat/storediam_test.go:426 TestTerraformTagIAM",
-          "test/compat/storediam_test.go:476 TestGcloudTagIAM",
-          "test/compat/storediam_test.go:498 TestConsoleTagPermissions"
+          "test/compat/storediam_test.go:408 TestResourceManagerTagIAM",
+          "test/compat/storediam_test.go:427 TestTerraformTagIAM",
+          "test/compat/storediam_test.go:477 TestGcloudTagIAM",
+          "test/compat/storediam_test.go:499 TestConsoleTagPermissions"
         ]
       },
       {
@@ -4356,17 +4364,17 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:407 TestResourceManagerTagIAM",
-          "test/compat/storediam_test.go:426 TestTerraformTagIAM",
-          "test/compat/storediam_test.go:498 TestConsoleTagPermissions"
+          "test/compat/storediam_test.go:408 TestResourceManagerTagIAM",
+          "test/compat/storediam_test.go:427 TestTerraformTagIAM",
+          "test/compat/storediam_test.go:499 TestConsoleTagPermissions"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.TagKeys/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:407 TestResourceManagerTagIAM",
-          "test/compat/storediam_test.go:498 TestConsoleTagPermissions"
+          "test/compat/storediam_test.go:408 TestResourceManagerTagIAM",
+          "test/compat/storediam_test.go:499 TestConsoleTagPermissions"
         ]
       },
       {
@@ -4394,10 +4402,10 @@
         "method": "google.cloud.resourcemanager.v3.TagValues/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:407 TestResourceManagerTagIAM",
-          "test/compat/storediam_test.go:426 TestTerraformTagIAM",
-          "test/compat/storediam_test.go:476 TestGcloudTagIAM",
-          "test/compat/storediam_test.go:498 TestConsoleTagPermissions"
+          "test/compat/storediam_test.go:408 TestResourceManagerTagIAM",
+          "test/compat/storediam_test.go:427 TestTerraformTagIAM",
+          "test/compat/storediam_test.go:477 TestGcloudTagIAM",
+          "test/compat/storediam_test.go:499 TestConsoleTagPermissions"
         ]
       },
       {
@@ -4426,17 +4434,17 @@
         "method": "google.cloud.resourcemanager.v3.TagValues/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:407 TestResourceManagerTagIAM",
-          "test/compat/storediam_test.go:426 TestTerraformTagIAM",
-          "test/compat/storediam_test.go:498 TestConsoleTagPermissions"
+          "test/compat/storediam_test.go:408 TestResourceManagerTagIAM",
+          "test/compat/storediam_test.go:427 TestTerraformTagIAM",
+          "test/compat/storediam_test.go:499 TestConsoleTagPermissions"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.TagValues/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:407 TestResourceManagerTagIAM",
-          "test/compat/storediam_test.go:498 TestConsoleTagPermissions"
+          "test/compat/storediam_test.go:408 TestResourceManagerTagIAM",
+          "test/compat/storediam_test.go:499 TestConsoleTagPermissions"
         ]
       },
       {
@@ -4566,7 +4574,7 @@
         "method": "cloudresourcemanager.organizations.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
@@ -4606,7 +4614,7 @@
         "method": "cloudresourcemanager.organizations.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
@@ -4623,7 +4631,7 @@
         "method": "cloudresourcemanager.organizations.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM"
         ]
       },
       {
@@ -4638,7 +4646,7 @@
         "method": "cloudresourcemanager.projects.create",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
           "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
@@ -4648,7 +4656,7 @@
         "method": "cloudresourcemanager.projects.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
@@ -4657,7 +4665,7 @@
         "method": "cloudresourcemanager.projects.get",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
           "test/compat/terraform_batch10_test.go:460 TestTerraformResourceManagerDataSources"
@@ -4685,11 +4693,12 @@
         "method": "cloudresourcemanager.projects.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:203 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
-          "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
-          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
+          "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
+          "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
+          "test/compat/storediam_test.go:562 TestTerraformProjectIAMAuditConfig",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
@@ -4726,11 +4735,12 @@
         "method": "cloudresourcemanager.projects.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:203 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
+          "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
+          "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus",
-          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
+          "test/compat/storediam_test.go:562 TestTerraformProjectIAMAuditConfig",
           "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
@@ -4747,7 +4757,7 @@
         "method": "cloudresourcemanager.projects.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
+          "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM"
         ]
       },
       {
@@ -5483,6 +5493,7 @@
           "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/iamconditions1748_test.go:162 TestMemorystoreIAMConditions",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
@@ -6078,7 +6089,7 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
@@ -6092,7 +6103,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
@@ -6114,7 +6125,7 @@
         "tests": [
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
@@ -6189,7 +6200,7 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
@@ -6203,7 +6214,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
@@ -6223,7 +6234,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:338 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
@@ -6319,7 +6330,7 @@
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -6352,7 +6363,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
           "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ]
@@ -6381,7 +6392,7 @@
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubresetseed_test.go:179 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
@@ -6508,53 +6519,53 @@
         "method": "pubsub.projects.schemas.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM"
+          "test/compat/pubsubiam_test.go:143 TestPubSubIAMOnASnapshotAndASchema",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM"
         ]
       },
       {
         "method": "pubsub.projects.schemas.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM"
+          "test/compat/pubsubiam_test.go:143 TestPubSubIAMOnASnapshotAndASchema",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM"
         ]
       },
       {
         "method": "pubsub.projects.schemas.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:143 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.snapshots.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:143 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.snapshots.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:143 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.snapshots.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:141 TestPubSubIAMOnASnapshotAndASchema"
+          "test/compat/pubsubiam_test.go:143 TestPubSubIAMOnASnapshotAndASchema"
         ]
       },
       {
         "method": "pubsub.projects.subscriptions.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:201 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:337 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6562,9 +6573,9 @@
         "method": "pubsub.projects.subscriptions.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:201 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:337 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6572,7 +6583,7 @@
         "method": "pubsub.projects.subscriptions.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:337 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6580,9 +6591,9 @@
         "method": "pubsub.projects.topics.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:201 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:337 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6590,9 +6601,9 @@
         "method": "pubsub.projects.topics.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:199 TestGcloudPubSubIAM",
-          "test/compat/pubsubiam_test.go:267 TestTerraformPubSubIAM",
-          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:201 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:337 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       },
@@ -6600,7 +6611,7 @@
         "method": "pubsub.projects.topics.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubiam_test.go:335 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:337 TestConsolePermissionsOnATopicAndASubscription",
           "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       }
@@ -6819,7 +6830,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
-          "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
+          "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
+          "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -6999,22 +7011,29 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
-          "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
-          "test/compat/storageiam_test.go:60 TestStorageBucketIAMStaleEtag",
+          "test/compat/iamconditions1745_test.go:194 TestConsoleIAMConditionsOnServicePolicies",
+          "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
+          "test/compat/storageiam_test.go:63 TestStorageBucketIAMStaleEtag",
+          "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
           {
-            "code": "412",
-            "case": "a stale etag (the JSON API's precondition code; no page states it for this method)",
-            "test": "internal/service/storage/iam_test.go:54 TestStorageBucketIAMStaleEtagInProcess"
+            "code": "400",
+            "case": "the refusals' text (Google does not publish it)",
+            "test": "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions"
           },
           {
             "code": "412",
             "case": "a stale etag (the JSON API's precondition code; no page states it for this method)",
-            "test": "test/compat/storageiam_test.go:60 TestStorageBucketIAMStaleEtag"
+            "test": "internal/service/storage/iam_test.go:56 TestStorageBucketIAMStaleEtagInProcess"
+          },
+          {
+            "code": "412",
+            "case": "a stale etag (the JSON API's precondition code; no page states it for this method)",
+            "test": "test/compat/storageiam_test.go:63 TestStorageBucketIAMStaleEtag"
           }
         ]
       },
@@ -7023,7 +7042,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
-          "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip"
+          "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip"
         ]
       },
       {
@@ -8499,6 +8518,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/terraform_batch11_test.go:198 TestTerraformBigtableSchemaBundle",
           "test/compat/terraform_bigtable_rest_test.go:29 TestTerraformBigtableAppProfileAndIAM"
         ]
@@ -8607,6 +8627,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/terraform_bigtable_rest_test.go:29 TestTerraformBigtableAppProfileAndIAM"
         ]
       },
@@ -8749,7 +8770,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance",
-          "test/compat/storediam_test.go:219 TestBigtableTableIAM"
+          "test/compat/storediam_test.go:220 TestBigtableTableIAM"
         ]
       },
       {
@@ -8789,10 +8810,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState",
-          "test/compat/storediam_test.go:219 TestBigtableTableIAM",
-          "test/compat/storediam_test.go:243 TestTerraformBigtableTableIAM",
-          "test/compat/storediam_test.go:293 TestGcloudBigtableTableIAM",
-          "test/compat/storediam_test.go:347 TestConsoleBigtableTablePermissions",
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
+          "test/compat/storediam_test.go:220 TestBigtableTableIAM",
+          "test/compat/storediam_test.go:244 TestTerraformBigtableTableIAM",
+          "test/compat/storediam_test.go:294 TestGcloudBigtableTableIAM",
+          "test/compat/storediam_test.go:348 TestConsoleBigtableTablePermissions",
           "test/compat/terraform_batch11_test.go:198 TestTerraformBigtableSchemaBundle"
         ]
       },
@@ -8881,10 +8903,11 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:219 TestBigtableTableIAM",
-          "test/compat/storediam_test.go:243 TestTerraformBigtableTableIAM",
-          "test/compat/storediam_test.go:293 TestGcloudBigtableTableIAM",
-          "test/compat/storediam_test.go:347 TestConsoleBigtableTablePermissions"
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
+          "test/compat/storediam_test.go:220 TestBigtableTableIAM",
+          "test/compat/storediam_test.go:244 TestTerraformBigtableTableIAM",
+          "test/compat/storediam_test.go:294 TestGcloudBigtableTableIAM",
+          "test/compat/storediam_test.go:348 TestConsoleBigtableTablePermissions"
         ]
       },
       {
@@ -8898,8 +8921,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:219 TestBigtableTableIAM",
-          "test/compat/storediam_test.go:347 TestConsoleBigtableTablePermissions"
+          "test/compat/storediam_test.go:220 TestBigtableTableIAM",
+          "test/compat/storediam_test.go:348 TestConsoleBigtableTablePermissions"
         ]
       },
       {
@@ -9167,10 +9190,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/storediam_test.go:108 TestTerraformSpannerIAM",
-          "test/compat/storediam_test.go:157 TestGcloudSpannerIAM",
-          "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
-          "test/compat/storediam_test.go:93 TestSpannerIAM",
+          "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
+          "test/compat/storediam_test.go:158 TestGcloudSpannerIAM",
+          "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
+          "test/compat/storediam_test.go:94 TestSpannerIAM",
           "test/compat/terraform_batch11_test.go:347 TestTerraformSpannerInstancePartition"
         ]
       },
@@ -9239,17 +9262,18 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:108 TestTerraformSpannerIAM",
-          "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
-          "test/compat/storediam_test.go:93 TestSpannerIAM"
+          "test/compat/iamconditions1745_test.go:117 TestSpannerIAMConditions",
+          "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
+          "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
+          "test/compat/storediam_test.go:94 TestSpannerIAM"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
-          "test/compat/storediam_test.go:93 TestSpannerIAM"
+          "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
+          "test/compat/storediam_test.go:94 TestSpannerIAM"
         ]
       },
       {
@@ -9334,10 +9358,10 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:108 TestTerraformSpannerIAM",
-          "test/compat/storediam_test.go:157 TestGcloudSpannerIAM",
-          "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
-          "test/compat/storediam_test.go:93 TestSpannerIAM",
+          "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
+          "test/compat/storediam_test.go:158 TestGcloudSpannerIAM",
+          "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
+          "test/compat/storediam_test.go:94 TestSpannerIAM",
           "test/compat/terraform_batch11_test.go:347 TestTerraformSpannerInstancePartition"
         ]
       },
@@ -9423,17 +9447,18 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:108 TestTerraformSpannerIAM",
-          "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
-          "test/compat/storediam_test.go:93 TestSpannerIAM"
+          "test/compat/iamconditions1745_test.go:117 TestSpannerIAMConditions",
+          "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
+          "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
+          "test/compat/storediam_test.go:94 TestSpannerIAM"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
-          "test/compat/storediam_test.go:93 TestSpannerIAM"
+          "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
+          "test/compat/storediam_test.go:94 TestSpannerIAM"
         ]
       },
       {
@@ -10312,7 +10337,7 @@
         "method": "bigquery.routines.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:125 TestBigQueryRoutineIAMIsStoredNotEnforced",
+          "test/compat/bigqueryiam_test.go:126 TestBigQueryRoutineIAMIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -10341,7 +10366,7 @@
         "method": "bigquery.routines.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:125 TestBigQueryRoutineIAMIsStoredNotEnforced",
+          "test/compat/bigqueryiam_test.go:126 TestBigQueryRoutineIAMIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -10349,7 +10374,7 @@
         "method": "bigquery.routines.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:125 TestBigQueryRoutineIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:126 TestBigQueryRoutineIAMIsStoredNotEnforced"
         ]
       },
       {
@@ -10386,7 +10411,7 @@
         "method": "bigquery.rowAccessPolicies.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:193 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
+          "test/compat/bigqueryiam_test.go:194 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
         ]
       },
       {
@@ -10409,7 +10434,7 @@
         "method": "bigquery.rowAccessPolicies.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:193 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
+          "test/compat/bigqueryiam_test.go:194 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
         ]
       },
       {
@@ -10593,6 +10618,7 @@
         "tests": [
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
+          "test/compat/iamconditions1748_test.go:77 TestBigQueryTableIAMConditions",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -10673,6 +10699,7 @@
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
+          "test/compat/iamconditions1748_test.go:77 TestBigQueryTableIAMConditions",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },

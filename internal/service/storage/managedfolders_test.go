@@ -249,8 +249,8 @@ func TestManagedFolderIAM(t *testing.T) {
 	if code, _ := raw(t, "PUT", iam, set); code != 412 {
 		t.Errorf("a set with a stale etag = %d, want 412", code)
 	}
-	if code, body := raw(t, "PUT", iam, `{"bindings":[{"role":"r","members":["user:a@example.com"],"condition":{"expression":"true"}}]}`); code != 501 || !strings.Contains(body, "condition") {
-		t.Errorf("a conditional binding = %d %s, want 501", code, body)
+	if code, body := raw(t, "PUT", iam, `{"bindings":[{"role":"r","members":["user:a@example.com"],"condition":{"title":"t","expression":"true"}}]}`); code != 400 || !strings.Contains(body, "conditional") {
+		t.Errorf("a conditional binding = %d %s, want 400 (#1745: managed folders accept none)", code, body)
 	}
 	if code, body := raw(t, "GET", iam+"/testPermissions?permissions=storage.objects.get&permissions=storage.objects.list", ""); code != 200 ||
 		!strings.Contains(body, "storage.objects.get") || !strings.Contains(body, "storage.objects.list") {

@@ -675,7 +675,7 @@ func (s *Store) SetIamPolicy(project, id string, req *iampb.SetIamPolicyRequest)
 	if err != nil {
 		return iampolicy.Stored{}, err
 	}
-	next, err := iampolicy.Set(sec.IAMPolicy, req)
+	next, err := iampolicy.SetConditional(sec.IAMPolicy, req)
 	if err != nil {
 		return iampolicy.Stored{}, err
 	}

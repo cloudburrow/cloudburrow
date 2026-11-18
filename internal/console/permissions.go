@@ -40,10 +40,44 @@ const PermissionsNote = "CloudBurrow stores IAM policies but does not enforce th
 type Binding struct {
 	Role    string   `json:"role"`
 	Members []string `json:"members"`
-	// Condition is the binding's condition as text, empty for none. None of
-	// the services with a Permissions tab stores one (they refuse IAM
-	// Conditions UNIMPLEMENTED), so it is shown and never written.
+	// Condition is the binding's condition as text, empty for none.
 	Condition string `json:"condition,omitempty"`
+	// Conditional is the condition itself, for a service that stores IAM
+	// Conditions (#1742: Resource Manager's projects), so the page can
+	// write it back and edit it. A binding with Condition text and no
+	// Conditional is shown and never written.
+	Conditional *Condition `json:"conditional,omitempty"`
+}
+
+// Condition is an IAM Condition: a title, an optional description and a
+// CEL expression, as Google's console edits one.
+type Condition struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Expression  string `json:"expression"`
+}
+
+// Text is the condition as a Permissions tab lists it.
+func (c *Condition) Text() string {
+	if c == nil {
+		return ""
+	}
+	if c.Title != "" {
+		return c.Title + ": " + c.Expression
+	}
+	return c.Expression
+}
+
+// sameBinding is whether b is the binding of role under cond (nil for the
+// unconditional one).
+func sameBinding(b Binding, role string, cond *Condition) bool {
+	if b.Role != role {
+		return false
+	}
+	if cond == nil {
+		return b.Condition == "" && b.Conditional == nil
+	}
+	return b.Conditional != nil && *b.Conditional == *cond
 }
 
 // Policy is an IAM policy as the console reads and writes it.
@@ -63,6 +97,9 @@ type PolicyTarget struct {
 	// a principal, in its own terms.
 	RoleHelp      string `json:"roleHelp,omitempty"`
 	PrincipalHelp string `json:"principalHelp,omitempty"`
+	// Conditions is whether the service stores IAM Conditions, so Grant
+	// access offers one and a row's condition can be edited (#1742).
+	Conditions bool `json:"conditions,omitempty"`
 }
 
 // PermissionsView is a KindPermissions section's content.
@@ -126,11 +163,19 @@ type permissionsRequest struct {
 	// Etag is the one the page read.
 	Etag  string
 	Grant *struct {
-		Members []string
-		Role    string
+		Members   []string
+		Role      string
+		Condition *Condition
 	}
 	Remove *struct {
 		Member, Role string
+		Condition    *Condition
+	}
+	// Edit condition (#1742) moves Member's Role from the binding under
+	// From to the one under To (nil: no condition), in one SetIamPolicy.
+	EditCondition *struct {
+		Member, Role string
+		From, To     *Condition
 	}
 	// Test is Test permissions (#1242): it changes nothing, so it needs no
 	// etag.
@@ -159,8 +204,8 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
 		return
 	}
-	if n := btoi(req.Grant != nil) + btoi(req.Remove != nil) + btoi(req.Test != nil); n != 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant, remove or test"})
+	if n := btoi(req.Grant != nil) + btoi(req.Remove != nil) + btoi(req.Test != nil) + btoi(req.EditCondition != nil); n != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant, remove, editCondition or test"})
 		return
 	}
 	if req.Test != nil {
@@ -183,9 +228,12 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	name := strings.Join(req.Path, "/")
 	var action, what string
-	if req.Grant != nil {
+	switch {
+	case req.Grant != nil:
 		action, what = "grant", "granted "+strings.TrimSpace(req.Grant.Role)
-	} else {
+	case req.EditCondition != nil:
+		action, what = "edit condition", "changed the condition of "+req.EditCondition.Member+"'s "+req.EditCondition.Role
+	default:
 		action, what = "remove principal", "removed "+req.Remove.Member+" from "+req.Remove.Role
 	}
 	opID := s.logs.StartOperation(action, name, project)
@@ -204,10 +252,20 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var next Policy
-	if req.Grant != nil {
-		next, err = GrantAccess(current, req.Grant.Role, req.Grant.Members)
-	} else {
-		next, err = RemovePrincipal(current, req.Remove.Role, req.Remove.Member)
+	switch {
+	case req.Grant != nil:
+		next, err = GrantConditional(current, req.Grant.Role, req.Grant.Members, req.Grant.Condition)
+	case req.EditCondition != nil:
+		e := req.EditCondition
+		next, err = RemoveConditional(current, e.Role, e.Member, e.From)
+		if err == nil {
+			next, err = GrantConditional(next, e.Role, []string{e.Member}, e.To)
+		}
+		if err != nil && req.Etag != current.Etag {
+			next, err = current, nil
+		}
+	default:
+		next, err = RemoveConditional(current, req.Remove.Role, req.Remove.Member, req.Remove.Condition)
 		// A binding already gone from a policy that has changed since the
 		// page read it is the service's to refuse, by the etag: sent
 		// unchanged, the stale etag gets its own message.
@@ -284,7 +342,25 @@ func btoi(b bool) int {
 // refused with its message; members are trimmed, and at least one is needed,
 // because a binding with none grants nothing and a service drops it silently.
 func GrantAccess(p Policy, role string, members []string) (Policy, error) {
+	return GrantConditional(p, role, members, nil)
+}
+
+// GrantConditional is GrantAccess under a condition (nil for none): the
+// members join role's binding with that condition (#1742). A condition
+// without a title or an expression is refused here, as the service would.
+func GrantConditional(p Policy, role string, members []string, cond *Condition) (Policy, error) {
 	role = strings.TrimSpace(role)
+	if cond != nil {
+		c := Condition{Title: strings.TrimSpace(cond.Title), Description: strings.TrimSpace(cond.Description), Expression: strings.TrimSpace(cond.Expression)}
+		if c == (Condition{}) {
+			cond = nil
+		} else {
+			if c.Title == "" || c.Expression == "" {
+				return Policy{}, fmt.Errorf("a condition needs a title and an expression")
+			}
+			cond = &c
+		}
+	}
 	var add []string
 	for _, m := range members {
 		if m = strings.TrimSpace(m); m != "" && !slices.Contains(add, m) {
@@ -296,7 +372,7 @@ func GrantAccess(p Policy, role string, members []string) (Policy, error) {
 	}
 	out := clonePolicy(p)
 	for i, b := range out.Bindings {
-		if b.Role == role && b.Condition == "" {
+		if sameBinding(b, role, cond) {
 			for _, m := range add {
 				if !slices.Contains(b.Members, m) {
 					out.Bindings[i].Members = append(out.Bindings[i].Members, m)
@@ -305,16 +381,22 @@ func GrantAccess(p Policy, role string, members []string) (Policy, error) {
 			return out, nil
 		}
 	}
-	out.Bindings = append(out.Bindings, Binding{Role: role, Members: add})
+	out.Bindings = append(out.Bindings, Binding{Role: role, Members: add, Conditional: cond, Condition: cond.Text()})
 	return out, nil
 }
 
 // RemovePrincipal takes member out of role's binding, and the binding out of
 // the policy when it was the last member.
 func RemovePrincipal(p Policy, role, member string) (Policy, error) {
+	return RemoveConditional(p, role, member, nil)
+}
+
+// RemoveConditional is RemovePrincipal for role's binding under cond (nil
+// for the unconditional one).
+func RemoveConditional(p Policy, role, member string, cond *Condition) (Policy, error) {
 	out := clonePolicy(p)
 	for i, b := range out.Bindings {
-		if b.Role != role || b.Condition != "" {
+		if !sameBinding(b, role, cond) {
 			continue
 		}
 		j := slices.Index(b.Members, member)
@@ -340,7 +422,12 @@ func orRole(role string) string {
 func clonePolicy(p Policy) Policy {
 	out := Policy{Etag: p.Etag}
 	for _, b := range p.Bindings {
-		out.Bindings = append(out.Bindings, Binding{Role: b.Role, Members: slices.Clone(b.Members), Condition: b.Condition})
+		nb := Binding{Role: b.Role, Members: slices.Clone(b.Members), Condition: b.Condition}
+		if b.Conditional != nil {
+			c := *b.Conditional
+			nb.Conditional = &c
+		}
+		out.Bindings = append(out.Bindings, nb)
 	}
 	return out
 }

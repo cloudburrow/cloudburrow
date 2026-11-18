@@ -9,7 +9,7 @@ package main
 import (
 	"context"
 
-	"cloud.google.com/go/iam"
+	btadmin "cloud.google.com/go/bigtable/admin/apiv2"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
@@ -48,7 +48,7 @@ func (spannerProvider) PolicyOn(_ context.Context, path []string) *console.Polic
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "optional-services",
-		RoleHelp: roleHelp("Spanner", "roles/spanner.databaseReader")}
+		RoleHelp: roleHelp("Spanner", "roles/spanner.databaseReader"), Conditions: true}
 }
 
 // withSpannerIAM calls fn with the instance or database admin client and
@@ -94,52 +94,56 @@ func (p spannerProvider) TestPermissions(ctx context.Context, project string, pa
 }
 
 // --- Bigtable: a table's page ------------------------------------------
+//
+// Through the generated table admin client's GetIamPolicy and SetIamPolicy
+// at version 3 (#1748), as getProtoPolicy and setProtoPolicy call every
+// other service's, so a conditional binding is shown and written back with
+// its condition: Bigtable is among the services Google lists as allowing
+// conditions. The handwritten client's TableIAM handle reads version 1.
 
 func (bigtableProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if len(path) != 1 {
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "optional-services",
-		RoleHelp: roleHelp("Bigtable", "roles/bigtable.reader")}
+		RoleHelp: roleHelp("Bigtable", "roles/bigtable.reader"), Conditions: true}
 }
 
-func (p bigtableProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
-	ac, err := p.newAdmin(ctx, project)
+// withTableIAM calls fn with the table admin API and the full name of the
+// table at path, in the instance ctx's request addresses.
+func (p bigtableProvider) withTableIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
+	inst, err := p.instance(ctx, project)
 	if err != nil {
-		return console.Policy{}, err
+		return err
 	}
-	defer ac.Close()
-	pol, err := ac.TableIAM(path[0]).Policy(ctx)
+	c, err := btadmin.NewBigtableTableAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
-		return console.Policy{}, err
+		return err
 	}
-	return policyFromProto(pol.InternalProto), nil
+	defer c.Close()
+	return fn(gaxServer{c}, "projects/"+project+"/instances/"+inst+"/tables/"+path[0])
+}
+
+func (p bigtableProvider) GetPolicy(ctx context.Context, project string, path []string) (pol console.Policy, err error) {
+	err = p.withTableIAM(ctx, project, path, func(api iamServer, name string) error {
+		pol, err = getProtoPolicy(ctx, api, name)
+		return err
+	})
+	return pol, err
 }
 
 func (p bigtableProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
-	ac, err := p.newAdmin(ctx, project)
-	if err != nil {
-		return err
-	}
-	defer ac.Close()
-	etag, err := protoEtag(pol)
-	if err != nil {
-		return err
-	}
-	pb, err := policyToProto(pol, etag)
-	if err != nil {
-		return err
-	}
-	return ac.TableIAM(path[0]).SetPolicy(ctx, &iam.Policy{InternalProto: pb})
+	return p.withTableIAM(ctx, project, path, func(api iamServer, name string) error {
+		return setProtoPolicy(ctx, api, name, pol)
+	})
 }
 
-func (p bigtableProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
-	ac, err := p.newAdmin(ctx, project)
-	if err != nil {
-		return nil, err
-	}
-	defer ac.Close()
-	return ac.TableIAM(path[0]).TestPermissions(ctx, perms)
+func (p bigtableProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) (held []string, err error) {
+	err = p.withTableIAM(ctx, project, path, func(api iamServer, name string) error {
+		held, err = testProtoPermissions(ctx, api, name, perms)
+		return err
+	})
+	return held, err
 }
 
 // --- Tags: a tag key's page and a tag value's ----------------------------

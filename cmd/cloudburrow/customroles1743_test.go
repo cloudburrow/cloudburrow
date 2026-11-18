@@ -32,16 +32,16 @@ func TestPermissionChecksEvaluateCustomRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := memorystoreIAM(nil, func() *resourcemanager.Registry { return reg })
-	if got := src.Members("cr-project", "roles/redis.dbConnectionUser"); !slices.Contains(got, member) {
+	if got := src.Members("cr-project", "projects/cr-project/locations/us-central1/clusters/c", "roles/redis.dbConnectionUser"); !slices.Contains(got, member) {
 		t.Errorf("Redis connect members = %v, want %s", got, member)
 	}
-	if got := src.Members("cr-project", "roles/memorystore.dbConnectionUser"); slices.Contains(got, member) {
+	if got := src.Members("cr-project", "projects/cr-project/locations/us-central1/clusters/c", "roles/memorystore.dbConnectionUser"); slices.Contains(got, member) {
 		t.Errorf("Valkey connect members = %v: a role without memorystore.instances.connect grants it", got)
 	}
 	if _, err := reg.DeleteRole(role.GetName(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := src.Members("cr-project", "roles/redis.dbConnectionUser"); slices.Contains(got, member) {
+	if got := src.Members("cr-project", "projects/cr-project/locations/us-central1/clusters/c", "roles/redis.dbConnectionUser"); slices.Contains(got, member) {
 		t.Errorf("a deleted role still grants the connection: %v", got)
 	}
 }

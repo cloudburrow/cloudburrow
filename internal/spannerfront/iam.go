@@ -23,8 +23,10 @@ import (
 // enforced, as ADR-0006 decides for every service that serves them. The
 // emulator answers the three methods UNIMPLEMENTED; the front answers them
 // through the shared internal/iampolicy: a set returns a new etag and a
-// stale one is ABORTED, conditions and audit configs are UNIMPLEMENTED naming
-// the field, and a version 3 policy without conditions is accepted.
+// stale one is ABORTED, conditional bindings are stored with Google's
+// version rules (#1745: Spanner is one of the services Google lists as
+// allowing conditions), audit configs are UNIMPLEMENTED naming the field,
+// and a version 3 policy without conditions is accepted.
 //
 // The resource must exist in the emulator (NOT_FOUND otherwise, as Google
 // documents for TestIamPermissions on a missing instance), and its policy
@@ -84,7 +86,7 @@ func (s *Instances) setIAM(ctx context.Context, req *iampb.SetIamPolicyRequest, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next, err := iampolicy.Set(s.policies[req.GetResource()], req)
+	next, err := iampolicy.SetConditional(s.policies[req.GetResource()], req)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}

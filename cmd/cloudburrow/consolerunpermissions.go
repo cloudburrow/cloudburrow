@@ -53,7 +53,7 @@ func (runProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTar
 	if len(path) != 1 {
 		return nil
 	}
-	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.invoker")}
+	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.invoker"), Conditions: true}
 }
 
 func (p runProvider) withServiceIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
@@ -99,7 +99,7 @@ func (runJobsProvider) PolicyOn(_ context.Context, path []string) *console.Polic
 	if len(path) != 1 {
 		return nil
 	}
-	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.invoker")}
+	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.invoker"), Conditions: true}
 }
 
 func (p runJobsProvider) withJobIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
@@ -143,7 +143,7 @@ func (runWorkerPoolsProvider) PolicyOn(_ context.Context, path []string) *consol
 	if len(path) != 1 {
 		return nil
 	}
-	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.developer")}
+	return &console.PolicyTarget{Link: runPermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.developer"), Conditions: true}
 }
 
 func (p runWorkerPoolsProvider) withPoolIAM(ctx context.Context, project string, path []string, fn func(iamServer, string) error) error {
@@ -192,7 +192,7 @@ func (runInstancesProvider) PolicyOn(_ context.Context, path []string) *console.
 	if len(path) != 1 {
 		return nil
 	}
-	return &console.PolicyTarget{Link: runInstancePermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.invoker")}
+	return &console.PolicyTarget{Link: runInstancePermissionsLink, RoleHelp: roleHelp("Cloud Run", "roles/run.invoker"), Conditions: true}
 }
 
 // v1InstanceIAM is the v1 client's instance IAM methods as iamServer, the
@@ -200,7 +200,11 @@ func (runInstancesProvider) PolicyOn(_ context.Context, path []string) *console.
 type v1InstanceIAM struct{ c *runv1.APIService }
 
 func (i v1InstanceIAM) GetIamPolicy(ctx context.Context, r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	p, err := i.c.Projects.Locations.Instances.GetIamPolicy(r.GetResource()).Context(ctx).Do()
+	call := i.c.Projects.Locations.Instances.GetIamPolicy(r.GetResource())
+	if v := r.GetOptions().GetRequestedPolicyVersion(); v != 0 {
+		call = call.OptionsRequestedPolicyVersion(int64(v))
+	}
+	p, err := call.Context(ctx).Do()
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +251,12 @@ func v1PolicyToProto(p *runv1.Policy) (*iampb.Policy, error) {
 func v1PolicyFromProto(p *iampb.Policy) *runv1.Policy {
 	out := &runv1.Policy{Version: int64(p.GetVersion()), Etag: base64.StdEncoding.EncodeToString(p.GetEtag())}
 	for _, b := range p.GetBindings() {
-		out.Bindings = append(out.Bindings, &runv1.Binding{Role: b.GetRole(), Members: b.GetMembers()})
+		rb := &runv1.Binding{Role: b.GetRole(), Members: b.GetMembers()}
+		if c := b.GetCondition(); c != nil {
+			// #1745: Cloud Run stores a binding's condition.
+			rb.Condition = &runv1.Expr{Title: c.GetTitle(), Description: c.GetDescription(), Expression: c.GetExpression(), Location: c.GetLocation()}
+		}
+		out.Bindings = append(out.Bindings, rb)
 	}
 	return out
 }

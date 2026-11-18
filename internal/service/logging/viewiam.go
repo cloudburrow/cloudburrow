@@ -115,7 +115,7 @@ func (s viewIAMServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRe
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	next, err := iampolicy.Set(cur, req)
+	next, err := iampolicy.SetConditional(cur, req)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}

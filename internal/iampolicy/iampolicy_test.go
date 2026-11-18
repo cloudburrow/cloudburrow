@@ -79,8 +79,12 @@ func TestConditionsAndAuditConfigsAreUnimplemented(t *testing.T) {
 			req.UpdateMask = &fieldmaskpb.FieldMask{Paths: c.mask}
 		}
 		_, err := Set(nil, req)
-		if code(err) != codes.Unimplemented || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: %v, want UNIMPLEMENTED naming %s", name, err, c.want)
+		want := codes.Unimplemented
+		if name == "condition" {
+			want = codes.InvalidArgument // #1745: Google refuses it where it accepts none
+		}
+		if code(err) != want || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want %v naming %s", name, err, want, c.want)
 		}
 	}
 	if _, err := set(t, nil, &iampb.Policy{Version: 3, Bindings: []*iampb.Binding{{Role: "roles/viewer", Members: []string{"user:a@example.com"}}}}); err != nil {
@@ -152,5 +156,33 @@ func TestAuditConfigsFollowTheUpdateMask(t *testing.T) {
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"audit_configs"}}}); code(err) != codes.InvalidArgument {
 			t.Errorf("%v = %v, want InvalidArgument", bad, err)
 		}
+	}
+}
+
+// SetConditional stores a conditional binding on a resource of a service
+// Google lists as allowing conditions, with the version rules, and refuses
+// modifiedGrantsByRole, which Google accepts on projects, folders and
+// organizations only (#1745).
+func TestSetConditional(t *testing.T) {
+	cond := &expr.Expr{Title: "t", Expression: `request.time < timestamp("2030-01-01T00:00:00Z")`}
+	p := &iampb.Policy{Version: 3, Bindings: []*iampb.Binding{{Role: "roles/viewer", Members: []string{"user:a@example.com"}, Condition: cond}}}
+	st, err := SetConditional(nil, &iampb.SetIamPolicyRequest{Policy: p})
+	if err != nil {
+		t.Fatalf("SetConditional: %v", err)
+	}
+	if len(st.Bindings) != 1 || st.Bindings[0].Condition == nil || st.Bindings[0].Condition.Title != "t" {
+		t.Fatalf("stored %+v", st.Bindings)
+	}
+	p.Version = 1
+	if _, err := SetConditional(nil, &iampb.SetIamPolicyRequest{Policy: p}); code(err) != codes.InvalidArgument {
+		t.Errorf("version 1 with a condition: %v, want INVALID_ARGUMENT", err)
+	}
+	p.Version = 3
+	p.Bindings[0].Condition = &expr.Expr{Title: "t", Expression: `api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly(['roles/viewer'])`}
+	if _, err := SetConditional(nil, &iampb.SetIamPolicyRequest{Policy: p}); code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "projects, folders and organizations") {
+		t.Errorf("modifiedGrantsByRole on a resource: %v, want INVALID_ARGUMENT", err)
+	}
+	if _, err := SetWithAuditConfigs(nil, &iampb.SetIamPolicyRequest{Policy: p}); err != nil {
+		t.Errorf("modifiedGrantsByRole on a project: %v", err)
 	}
 }

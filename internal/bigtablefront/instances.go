@@ -823,7 +823,7 @@ func (s *instances) setIamPolicy(_ context.Context, req *iampb.SetIamPolicyReque
 	if err != nil {
 		return nil, err
 	}
-	p, err := iampolicy.Set(in.policy, req)
+	p, err := iampolicy.SetConditional(in.policy, req)
 	if err != nil {
 		return nil, err
 	}

@@ -60,7 +60,8 @@ func rolesOf(p *iampb.Policy) map[string]string {
 // TestResourceManagerProjectIAM: the official v3 ProjectsClient's
 // GetIamPolicy, SetIamPolicy and TestIamPermissions, and v1's, on one
 // policy. A set reads back with a new etag, a stale etag is ABORTED, a
-// conditional binding is UNIMPLEMENTED (audit configs are stored since #1486,
+// condition without a title is INVALID_ARGUMENT (conditions since #1742,
+// TestResourceManagerIAMConditions; audit configs are stored since #1486,
 // TestResourceManagerAuditConfigs), TestIamPermissions
 // answers the permissions a project can hold, nothing inherits the policy (a
 // bucket-less check: the instance project's policy is untouched), and a
@@ -86,8 +87,8 @@ func TestResourceManagerProjectIAM(t *testing.T) {
 		t.Errorf("SetIamPolicy with a stale etag = %v; want ABORTED", err)
 	}
 	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{Version: 3, Bindings: []*iampb.Binding{{
-		Role: "roles/viewer", Members: []string{"user:ada@example.com"}, Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("a conditional binding = %v; want UNIMPLEMENTED", err)
+		Role: "roles/viewer", Members: []string{"user:ada@example.com"}, Condition: &expr.Expr{Expression: "true"}}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a condition without a title = %v; want INVALID_ARGUMENT (TestResourceManagerIAMConditions)", err)
 	}
 	tp, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name,
 		Permissions: []string{"storage.buckets.create", "resourcemanager.projects.get", "resourcemanager.organizations.get"}})

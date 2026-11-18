@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -51,6 +52,25 @@ const (
 // payload is what the front is given now.
 func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 	m := firestoreadmin.MongoIAM{Tokens: []firestoreadmin.MongoIAMToken{}, Roles: map[string]map[string][]string{}, CustomRoles: map[string][]string{}}
+	// grant gives key role on project, or, for a conditional binding
+	// (#1742), role where its condition holds, which the front evaluates
+	// for the database a command runs on.
+	grant := func(key, project, role string, cond *iampolicy.Condition) {
+		if cond != nil {
+			if m.Conditional == nil {
+				m.Conditional = map[string]map[string][]firestoreadmin.MongoConditionalRole{}
+			}
+			if m.Conditional[key] == nil {
+				m.Conditional[key] = map[string][]firestoreadmin.MongoConditionalRole{}
+			}
+			m.Conditional[key][project] = append(m.Conditional[key][project], firestoreadmin.MongoConditionalRole{Role: role, Expression: cond.Expression})
+			return
+		}
+		if m.Roles[key] == nil {
+			m.Roles[key] = map[string][]string{}
+		}
+		m.Roles[key][project] = append(m.Roles[key][project], role)
+	}
 	emails := map[string]bool{}
 	for _, t := range f.creds.LiveTokens(now) {
 		if t.Email == "" {
@@ -105,10 +125,7 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 			}
 			for _, member := range b.Members {
 				if key, ok := userCredsMember(member, ids); ok {
-					if m.Roles[key] == nil {
-						m.Roles[key] = map[string][]string{}
-					}
-					m.Roles[key][p.ProjectID] = append(m.Roles[key][p.ProjectID], b.Role)
+					grant(key, p.ProjectID, b.Role, b.Condition)
 					continue
 				}
 				kind, email, ok := strings.Cut(member, ":")
@@ -116,10 +133,7 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 				if !ok || (kind != "serviceAccount" && kind != "user") || !emails[email] {
 					continue
 				}
-				if m.Roles[email] == nil {
-					m.Roles[email] = map[string][]string{}
-				}
-				m.Roles[email][p.ProjectID] = append(m.Roles[email][p.ProjectID], b.Role)
+				grant(email, p.ProjectID, b.Role, b.Condition)
 			}
 		}
 	}
