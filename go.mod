@@ -36,6 +36,7 @@ require (
 	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
 	github.com/creack/pty v1.1.24
+	github.com/darui3018823/opus v1.8.0
 	github.com/daulet/tokenizers v1.27.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/gen2brain/gav1d v0.2.7
@@ -48,7 +49,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/kazzmir/opus-go v1.7.0
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/prometheus/client_model v0.6.3

@@ -6,7 +6,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -191,7 +194,7 @@ func TestDecodeVideoAudioTrackCodecs(t *testing.T) {
 		{"va-heaacv2.mp4", 1e-3}, // measured 5.8e-4, RMS 7.1e-5
 		{"va-ac3.mp4", 1e-3},     // measured 5.7e-4 (RMS 7.7e-5): ffmpeg's dither differs from ours
 		{"va-eac3.mp4", 1e-3},    // measured 2.7e-4 (RMS 3.3e-5)
-		{"va-opus51.mp4", 1e-4},  // libopus transpiled: measured 3.6e-5, RMS 9.2e-6
+		{"va-opus51.mp4", 1e-4},  // measured 3.6e-5, RMS 9.2e-6
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", c.file))
 		if err != nil {
@@ -234,4 +237,154 @@ func TestDecodeVideoAudioTrackCodecs(t *testing.T) {
 			t.Errorf("%s: %.2e from ffmpeg's decode, want at most %.0e", c.file, maxDiff, c.maxDiff)
 		}
 	}
+}
+
+// growStack calls f below n frames of about 1 KiB each, so that f starts
+// at a different depth of a goroutine stack that has to grow (and move)
+// to hold it.
+//
+//go:noinline
+func growStack(n int, f func()) byte {
+	var pad [1024]byte
+	pad[n%len(pad)] = byte(n)
+	if n == 0 {
+		f()
+		return pad[0]
+	}
+	return growStack(n-1, f) + pad[n%len(pad)]
+}
+
+// TestDecodeOpusOnMovingStacks (#1811): an Opus track decodes to the same
+// samples whatever the decoding goroutine's stack does meanwhile, and as
+// ffmpeg's libopus decodes it. github.com/kazzmir/opus-go, the decoder
+// before #1811, kept addresses of stack variables as uintptrs, which a
+// goroutine stack that grows or shrinks (and so moves) mid-decode leaves
+// pointing at the old stack; built with
+// -gcflags=github.com/kazzmir/opus-go/...=-d=maymorestack=runtime.mayMoreStackMove
+// (the runtime moves the stack at every function entry) it decoded
+// va-opus51.mp4 0.76 of full scale from ffmpeg, and va-opus.mp4 17947
+// 16-bit steps. Here every decode runs on a new goroutine (whose small
+// stack grows while the decoder runs) at another depth, while a second
+// goroutine keeps the collector running (which shrinks stacks). The files
+// are 5.1 (va-opus51.mp4, see TestDecodeVideoAudioTrackCodecs) and 7.1
+// CELT, and stereo hybrid (SILK and CELT) at 20 kbit/s; the references are
+// ffmpeg 9's libopus decodes, `ffmpeg -c:a libopus -i f -vn -t 4 -ac 1 -ar
+// 16000 -f f32le`, of 4 seconds each:
+//
+//	S8="aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*660*t)|0.25*sin(2*PI*330*t)|0.2*sin(2*PI*(200+300*t)*t)|0.2*sin(2*PI*880*t)*sin(2*PI*2*t)|0.15*sin(2*PI*2500*t)|0.15*sin(2*PI*1500*t)*sin(2*PI*3*t)|0.2*sin(2*PI*60*t):s=48000:d=4:channel_layout=7.1"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=4 -f lavfi -i "$S8" -c:v libx264 -c:a libopus -b:a 192k -shortest -map_metadata -1 va-opus71.mp4
+//	V="anoisesrc=d=4:c=pink:r=48000:a=0.1:s=1,lowpass=3000,volume='0.5+0.5*sin(2*PI*1.5*t)':eval=frame,aformat=channel_layouts=stereo"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=4 -f lavfi -i "$V" -c:v libx264 -c:a libopus -application voip -b:a 20k -shortest -map_metadata -1 va-opus-voip.mp4
+func TestDecodeOpusOnMovingStacks(t *testing.T) {
+	var stop atomic.Bool
+	gcDone := make(chan struct{})
+	go func() {
+		defer close(gcDone)
+		for !stop.Load() {
+			runtime.GC()
+		}
+	}()
+	defer func() { stop.Store(true); <-gcDone }()
+
+	for _, c := range []struct {
+		file    string
+		maxDiff float64 // per sample, full scale 1
+		modes   string  // the Opus modes the track must use
+	}{
+		// Most of the difference is the resampler's (see
+		// TestDecodeVideoAudioTrackCodecs): at 48 kHz, before it, the 5.1
+		// and 7.1 decodes are within 6e-5 of ffmpeg's downmix.
+		{"va-opus51.mp4", 1e-4, "CELT"},      // measured 3.6e-5, RMS 9.2e-6
+		{"va-opus71.mp4", 3e-4, "CELT"},      // measured 1.8e-4, RMS 1.1e-5
+		{"va-opus-voip.mp4", 3e-4, "hybrid"}, // measured 1.5e-4, RMS 2.3e-5
+	} {
+		b := readTestdata(t, c.file)
+		if got := opusModes(t, b); got != c.modes {
+			t.Errorf("%s: its packets are %s, want %s", c.file, got, c.modes)
+		}
+		ref := readTestdata(t, strings.TrimSuffix(c.file, ".mp4")+".ffmpeg-16k.f32")
+		want := make([]float32, len(ref)/4)
+		for i := range want {
+			want[i] = math.Float32frombits(binary.LittleEndian.Uint32(ref[4*i:]))
+		}
+		var first []float32
+		for _, depth := range []int{0, 1, 3, 7, 20, 60, 200, 1000} {
+			var got []float32
+			var err error
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				growStack(depth, func() { got, err = DecodeVideoAudio("video/mp4", b, VideoOptions{}) })
+			}()
+			<-done
+			if err != nil {
+				t.Fatalf("%s at depth %d: %v", c.file, depth, err)
+			}
+			if first == nil {
+				first = got
+				if len(got) != len(want) {
+					t.Fatalf("%s: %d samples, ffmpeg %d", c.file, len(got), len(want))
+				}
+				var maxDiff, ss float64
+				for i := resampleZeros; i < len(got)-resampleZeros; i++ {
+					d := math.Abs(float64(got[i] - want[i]))
+					maxDiff = max(maxDiff, d)
+					ss += d * d
+				}
+				t.Logf("%s: max %.2e, RMS %.2e from ffmpeg", c.file, maxDiff, math.Sqrt(ss/float64(len(got)-2*resampleZeros)))
+				if maxDiff > c.maxDiff {
+					t.Errorf("%s: %.2e from ffmpeg's decode, want at most %.0e", c.file, maxDiff, c.maxDiff)
+				}
+				continue
+			}
+			if !slices.Equal(got, first) {
+				t.Errorf("%s: decoded %d frames deeper, the samples differ from the first decode's", c.file, depth)
+			}
+		}
+	}
+}
+
+// opusModes names the Opus modes (RFC 6716 3.1, the TOC byte's
+// configuration) of an MP4's Opus packets, of each stream.
+func opusModes(t *testing.T, b []byte) string {
+	t.Helper()
+	f, err := mp4.DecodeFile(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var silk, hybrid, celt bool
+	for _, trak := range f.Moov.Traks {
+		if trak.Mdia.Hdlr.HandlerType != "soun" {
+			continue
+		}
+		err := progressiveSamples(trak.Mdia.Minf.Stbl, b, func(_ int64, _ uint32, _ int32, _ bool, p []byte) {
+			// The first stream's TOC byte (a multistream packet's first
+			// streams are self-delimited, RFC 6716 appendix B, but begin
+			// with their TOC byte all the same).
+			if len(p) == 0 {
+				return
+			}
+			switch cfg := p[0] >> 3; {
+			case cfg < 12:
+				silk = true
+			case cfg < 16:
+				hybrid = true
+			default:
+				celt = true
+			}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var modes []string
+	for _, m := range []struct {
+		on   bool
+		name string
+	}{{silk, "SILK"}, {hybrid, "hybrid"}, {celt, "CELT"}} {
+		if m.on {
+			modes = append(modes, m.name)
+		}
+	}
+	return strings.Join(modes, " ")
 }
