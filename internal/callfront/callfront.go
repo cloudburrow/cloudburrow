@@ -23,6 +23,7 @@ package callfront
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -285,10 +287,18 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// guard keeps a Standard database's writes to Standard's values.
 		icpts = append(icpts, fa, fa.EditionGuard())
 		if *mongoListen != "" {
+			// TLS only, as Google requires (#1738): the certificate the
+			// instance issued, in the front's environment.
+			tlsCfg, err := firestoreadmin.MongoTLSConfig(os.Getenv(firestoreadmin.MongoTLSCertEnv), os.Getenv(firestoreadmin.MongoTLSKeyEnv))
+			if err != nil {
+				return fmt.Errorf("Firestore with MongoDB compatibility's TLS certificate (%s, %s): %w",
+					firestoreadmin.MongoTLSCertEnv, firestoreadmin.MongoTLSKeyEnv, err)
+			}
 			ml, err := net.Listen("tcp", *mongoListen)
 			if err != nil {
 				return fmt.Errorf("listen on %s: %w", *mongoListen, err)
 			}
+			ml = tls.NewListener(ml, tlsCfg)
 			// Its documents calls go through this front's own port, so
 			// they are logged, gated and exported as every other call.
 			_, port, _ := net.SplitHostPort(*listen)

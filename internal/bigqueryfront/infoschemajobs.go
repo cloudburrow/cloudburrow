@@ -831,50 +831,72 @@ func (f front) totalPartitions(r *http.Request, project, dataset string, t infoT
 }
 
 // storageBytes is TABLE_STORAGE's total_logical_bytes,
-// active_logical_bytes, long_term_logical_bytes and
-// storage_last_modified_time of table t, as SQL (#1458). The logical
-// bytes are the rows' documented sizes (logicalbytes.go); a snapshot's
-// and a clone's "as if they were complete tables". Data is long-term once
-// unmodified for 90 days: a table made less than 90 days ago (by the
-// front's clock) has none, and for an older one, whose partitions' last
-// writes the engine keeps for seven days only, active and long-term are
-// NULL. storage_last_modified_time is "the most recent time that data was
-// written to the table", the latest change in the engine's change table
-// (changeWrites), and NULL "if no data exists", or when that table holds
-// no change (none in the last seven days, or none kept).
-func (f front) storageBytes(r *http.Request, project, dataset string, t infoTable, hours int64) (logical, active, long, modified, travel string, st int, msg string) {
+// active_logical_bytes, long_term_logical_bytes,
+// storage_last_modified_time and the logical bytes held for time travel
+// and fail-safe of table t, as SQL (#1458). The logical bytes are the
+// rows' documented sizes (logicalbytes.go); a snapshot's and a clone's "as
+// if they were complete tables". Data is long-term once unmodified for 90
+// days: a table made less than 90 days ago (by the front's clock) has
+// none, and an older one's bytes are split by each partition's last write
+// (tierBytes, partitionlastwrites.go), NULL where one is unknown.
+// storage_last_modified_time is "the most recent time that data was
+// written to the table", the latest write record the engine holds
+// (allWrites), and NULL "if no data exists", or when it holds none.
+func (f front) storageBytes(r *http.Request, project, dataset string, t infoTable, hours int64) (s storageSizes, st int, msg string) {
 	raw, err := json.Marshal(t)
 	var pm partitionMeta
 	if err != nil || json.Unmarshal(raw, &pm) != nil {
-		return "", "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not read a table's schema"
+		return s, http.StatusInternalServerError, "cloudburrow: could not read a table's schema"
 	}
 	name := str(t, "tableId")
 	path := quotePath([]string{project, dataset, name})
-	logical, active, long, modified, travel = "NULL", "NULL", "NULL", "NULL", "NULL"
+	s = storageSizes{"NULL", "NULL", "NULL", "NULL", "NULL", "NULL"}
 	n := int64(0)
 	e := f.tableBytesExpr(r, path, pm.Schema.Fields)
 	if e != "" {
 		var m string
 		if n, m = f.scalar(r, "SELECT IFNULL(SUM("+e+"), 0) FROM "+path); m != "" {
-			return "", "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
+			return s, http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
 		}
-		logical = strconv.FormatInt(n, 10)
+		s.logical = strconv.FormatInt(n, 10)
 	}
-	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && logical != "NULL" && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
-		active, long = logical, "0"
+	if s.logical != "NULL" {
+		if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
+			s.active, s.long = s.logical, "0"
+		} else {
+			s.active, s.long = f.tierBytes(r, project, dataset, name, pm, e, hours)
+		}
 	}
 	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)
-	if c := f.changeWrites(r, project, dataset, name, false); c != "" && (rows > 0 || n > 0) {
-		if us, m := f.scalar(r, "SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+c); m == "" && us >= 0 {
-			modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
+	if c := f.allWrites(r, project, dataset, name, pm, "CAST(NULL AS STRING)"); c != "" && (rows > 0 || n > 0) {
+		if us, m := f.scalar(r, "SELECT IFNULL(UNIX_MICROS(MAX(t)), -1) FROM "+c); m == "" && us >= 0 {
+			s.modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
 		}
-		if e != "" && e == logicalBytesExpr(pm.Schema.Fields) {
+	}
+	if e != "" && e == logicalBytesExpr(pm.Schema.Fields) {
+		if c := f.changeWrites(r, project, dataset, name, false); c != "" {
 			if b, m := f.scalar(r, "SELECT "+timeTravelBytesExpr(pm.Schema.Fields, hours)+" FROM "+c); m == "" {
-				travel = strconv.FormatInt(b, 10)
+				s.travel = strconv.FormatInt(b, 10)
+			}
+			all := c
+			if k := f.keptWrites(r, project, dataset, name, false); k != "" {
+				all = "(SELECT * FROM " + c + " UNION ALL SELECT * FROM " + k + ")"
+			}
+			if b, m := f.scalar(r, "SELECT "+failSafeBytesExpr(e, hours)+" FROM "+all); m == "" {
+				s.failSafe = strconv.FormatInt(b, 10)
 			}
 		}
 	}
-	return logical, active, long, modified, travel, 0, ""
+	return s, 0, ""
+}
+
+// storageSizes are a table's TABLE_STORAGE logical bytes, as SQL, each
+// "NULL" when unknown: total, active and long-term, the
+// storage_last_modified_time, and the logical bytes of its rows deleted or
+// replaced within the time travel window and in the fail-safe period after
+// it.
+type storageSizes struct {
+	logical, active, long, modified, travel, failSafe string
 }
 
 // timeTravelBytesExpr is the SQL, over a table's change table, of the
@@ -890,19 +912,20 @@ func timeTravelBytesExpr(fields []field, hours int64) string {
 // physicalBytes are TABLE_STORAGE's current_physical_bytes,
 // total_physical_bytes, active_physical_bytes, long_term_physical_bytes,
 // time_travel_physical_bytes and fail_safe_physical_bytes, as SQL, of a
-// table's logical bytes (logical, active, long) and the logical bytes of
-// its rows held for time travel (travel), each NULL when unknown (#1458).
-// BigQuery's physical bytes are compressed sizes, which no value defines
-// and the engine does not keep; CloudBurrow estimates them as the logical
-// bytes, uncompressed, as tables.get's numBytes is (logicalbytes.go):
-// current the table's, time travel its deleted and replaced rows' within
-// the dataset's time travel window, total and active the two added ("including
+// table's storageSizes, each NULL when unknown (#1458). BigQuery's
+// physical bytes are compressed sizes, which no value defines and the
+// engine does not keep; CloudBurrow estimates them as the logical bytes,
+// uncompressed, as tables.get's numBytes is (logicalbytes.go): current the
+// table's, time travel its deleted and replaced rows' within the dataset's
+// time travel window, total and active the two added ("including
 // time-travel (deleted or changed data) bytes"), long-term the long-term
-// logical bytes, and fail-safe 0, the front letting go of every change
-// older than the window (changehistoryretention.go), so the instance keeps
-// none past it. UNVERIFIED, docs re-read 2026-11-17: estimates, not BigQuery's
-// compressed sizes (https://docs.cloud.google.com/bigquery/docs/information-schema-table-storage).
-func physicalBytes(logical, active, long, travel string) []string {
+// logical bytes, and fail-safe the deleted and replaced rows' of the seven
+// days after the window ("deleted or changed data retained after the
+// time-travel window", not in total; the engine keeps them,
+// partitionlastwrites.go). UNVERIFIED, docs re-read 2026-11-17: estimates,
+// not BigQuery's compressed sizes
+// (https://docs.cloud.google.com/bigquery/docs/information-schema-table-storage).
+func physicalBytes(s storageSizes) []string {
 	sum := func(a, b string) string {
 		x, err1 := strconv.ParseInt(a, 10, 64)
 		y, err2 := strconv.ParseInt(b, 10, 64)
@@ -911,28 +934,33 @@ func physicalBytes(logical, active, long, travel string) []string {
 		}
 		return strconv.FormatInt(x+y, 10)
 	}
-	failSafe := "0"
-	if logical == "NULL" {
+	failSafe := s.failSafe
+	if s.logical == "NULL" {
 		failSafe = "NULL"
 	}
-	return []string{logical, sum(logical, travel), sum(active, travel), long, travel, failSafe}
+	return []string{s.logical, sum(s.logical, s.travel), sum(s.active, s.travel), s.long, s.travel, failSafe}
 }
 
 // storageAtOnce is totalPartitions and storageBytes of table t read by
-// one query of the engine, not five (#1510): its partitions, its logical
-// bytes and its change table's last change. ok is false when that query
-// fails, a column the engine keeps under another name or a table with no
-// change table, and the two are read one by one, as they say.
-func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTable, hours int64) (parts int64, logical, active, long, modified, travel string, ok bool) {
+// one query of the engine, not one a column (#1510): its partitions, its
+// logical bytes, its last write and its time travel and fail-safe bytes.
+// ok is false when that query fails (a column the engine keeps under
+// another name, a table with no change or kept table) and when t is 90
+// days old or more (its bytes are split by partition, tierBytes), and they
+// are read one by one, as they say.
+func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTable, hours int64) (parts int64, s storageSizes, ok bool) {
 	raw, err := json.Marshal(t)
 	var pm partitionMeta
 	if err != nil || json.Unmarshal(raw, &pm) != nil {
-		return 0, "", "", "", "", "", false
+		return 0, s, false
+	}
+	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err != nil || f.now().Sub(time.UnixMilli(ms)) >= 90*24*time.Hour {
+		return 0, s, false
 	}
 	name := str(t, "tableId")
 	id, ok := partitionIDExpr(pm)
 	if !ok {
-		return 0, "", "", "", "", "", false
+		return 0, s, false
 	}
 	path := quotePath([]string{project, dataset, name})
 	count := "0"
@@ -940,23 +968,23 @@ func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTab
 		count = "(SELECT COUNT(DISTINCT " + id + ") FROM " + path + ")"
 	}
 	changes := quotePath([]string{project, dataset, name + changeTableSuffix})
-	got, msg := f.scalars(r, "SELECT "+count+", (SELECT IFNULL(SUM("+logicalBytesExpr(pm.Schema.Fields)+"), 0) FROM "+path+"), "+
-		"(SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+changes+" WHERE _CHANGE_TYPE != 'START'), "+
-		"(SELECT "+timeTravelBytesExpr(pm.Schema.Fields, hours)+" FROM "+changes+")", 4)
+	kept := quotePath([]string{project, dataset, name + keptTableSuffix})
+	bytes := logicalBytesExpr(pm.Schema.Fields)
+	got, msg := f.scalars(r, "SELECT "+count+", (SELECT IFNULL(SUM("+bytes+"), 0) FROM "+path+"), "+
+		"(SELECT IFNULL(UNIX_MICROS(MAX(t)), -1) FROM (SELECT _CHANGE_TIMESTAMP AS t FROM "+changes+" WHERE _CHANGE_TYPE != 'START' "+
+		"UNION ALL SELECT _CHANGE_TIMESTAMP FROM "+kept+")), "+
+		"(SELECT "+timeTravelBytesExpr(pm.Schema.Fields, hours)+" FROM "+changes+"), "+
+		"(SELECT "+failSafeBytesExpr(bytes, hours)+" FROM (SELECT * FROM "+changes+" UNION ALL SELECT * FROM "+kept+"))", 5)
 	if msg != "" {
-		return 0, "", "", "", "", "", false
+		return 0, s, false
 	}
 	n := got[1]
-	logical, active, long, modified = strconv.FormatInt(n, 10), "NULL", "NULL", "NULL"
-	travel = strconv.FormatInt(got[3], 10)
-	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
-		active, long = logical, "0"
-	}
+	s = storageSizes{strconv.FormatInt(n, 10), strconv.FormatInt(n, 10), "0", "NULL", strconv.FormatInt(got[3], 10), strconv.FormatInt(got[4], 10)}
 	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)
 	if us := got[2]; us >= 0 && (rows > 0 || n > 0) {
-		modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
+		s.modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
 	}
-	return got[0], logical, active, long, modified, travel, true
+	return got[0], s, true
 }
 
 // storageRows are a dataset's TABLE_STORAGE rows: its tables, snapshots
@@ -983,22 +1011,22 @@ func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (str
 		} else if t["cloneDefinition"] != nil {
 			tt = "CLONE"
 		}
-		parts, logical, active, long, modified, travel, ok := f.storageAtOnce(r, project, dataset, t, hours)
+		parts, sz, ok := f.storageAtOnce(r, project, dataset, t, hours)
 		if !ok {
 			var st int
 			var msg string
 			if parts, st, msg = f.totalPartitions(r, project, dataset, t); st != 0 {
 				return "", st, msg
 			}
-			if logical, active, long, modified, travel, st, msg = f.storageBytes(r, project, dataset, t, hours); st != 0 {
+			if sz, st, msg = f.storageBytes(r, project, dataset, t, hours); st != 0 {
 				return "", st, msg
 			}
 		}
-		phys := physicalBytes(logical, active, long, travel)
+		phys := physicalBytes(sz)
 		row := []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
-			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), logical, active, long}
+			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), sz.logical, sz.active, sz.long}
 		row = append(row, phys[:5]...)
-		rows = append(rows, append(row, modified, "FALSE", sqlString(tt), managed, phys[5], "NULL", "NULL", "NULL"))
+		rows = append(rows, append(row, sz.modified, "FALSE", sqlString(tt), managed, phys[5], "NULL", "NULL", "NULL"))
 	}
 	return rowsSubquery(storageColumns, rows), 0, ""
 }

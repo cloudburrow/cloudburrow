@@ -1,0 +1,35 @@
+#format: frame checksums
+#version: 2
+#hash: MD5
+#software: Lavf63.1.102
+#tb 0: 1/10
+#media_type 0: video
+#codec_id 0: rawvideo
+#dimensions 0: 98x66
+#sar 0: 0/1
+#stream#, dts,        pts, duration,     size, hash
+0,          0,          0,        1,    19404, 42ad3e52110dc8ef6f126d1071705d5c
+0,          1,          1,        1,    19404, d0aa4a9d7001ed919ed9207c71e1542b
+0,          2,          2,        1,    19404, 87cef534256560578f7749bab91d3468
+0,          3,          3,        1,    19404, feec2323f829abcbc1ffc558e6dabf27
+0,          4,          4,        1,    19404, ddeadd685daca49ce945b88da274def8
+0,          5,          5,        1,    19404, 421917326df4bf46b9a320aa43993ffa
+0,          6,          6,        1,    19404, 46766578a71054961aff7e307ad83a84
+0,          7,          7,        1,    19404, ba4b3b0cc6d1741f0eaa1365005ac0bd
+0,          8,          8,        1,    19404, fbfbf5e638d961042ad31e31fb566749
+0,          9,          9,        1,    19404, 590e5bcb7d2d218ccead0a4fd7baa4fe
+0,         10,         10,        1,    19404, ef9ebaf06872b85e498de95bd09159c1
+0,         11,         11,        1,    19404, 42274c8313074df7f883bc592300a97f
+0,         12,         12,        1,    19404, a9d19362ee962d559d67ac2a8f86a5b6
+0,         13,         13,        1,    19404, d01c4a97daeef09aa929845eea5f9085
+0,         14,         14,        1,    19404, 6fde381874d3efffac997599a30abfb6
+0,         15,         15,        1,    19404, 3b4f3275ff36a331bcc9a205c1505154
+0,         16,         16,        1,    19404, dcc3a74789291b873e48b42b313e7f70
+0,         17,         17,        1,    19404, e174f0649fbb524d0354a9cc34f4a4ba
+0,         18,         18,        1,    19404, f37fb01698c418f2ca6f4f41f9e4ef44
+0,         19,         19,        1,    19404, bfe64e6bc1038f1226975678238ffa92
+0,         20,         20,        1,    19404, 3e1d7ebd1f69aaa153daa84587ca8803
+0,         21,         21,        1,    19404, 3efb7f6d6a3c5521eb1a138025b46493
+0,         22,         22,        1,    19404, 4ff1dd07dd6cc5cb3325f2d0af8a91ec
+0,         23,         23,        1,    19404, d6b7aa729c810a01496672026a22feeb
+0,         24,         24,        1,    19404, 0d00001a680380bba5fc282612c1fec2

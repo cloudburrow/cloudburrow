@@ -4,12 +4,17 @@ instance's IAM Credentials endpoint, which the metadata server serves at
 GCE_METADATA_HOST.
 
 The source credentials are the generated fixture that default credentials
-resolve to, refreshed at its local token_uri. Every request here is HTTP, so
+resolve to, refreshed at its local token_uri. The target is a service
+account made through the IAM API (on the Resource Manager port), on which
+the fixture's account is granted roles/iam.serviceAccountTokenCreator, as
+Google requires (#1747). Every request here is HTTP, so
 the socket guard sees each one: a lookup of iamcredentials.googleapis.com,
 oauth2.googleapis.com or storage.googleapis.com fails the session.
 """
 
 import datetime
+
+import requests
 
 import google.auth
 from google.auth import impersonated_credentials
@@ -24,8 +29,23 @@ def test_impersonated_token_drives_the_storage_client(project, suffix):
     # The token drives a Storage client; without the instance's storage the
     # client would default to Google, which the loopback guard refuses.
     require("STORAGE_EMULATOR_HOST")
+    iam = require("CLOUDBURROW_RESOURCEMANAGER_ENDPOINT")
+    if not iam.startswith("http"):
+        iam = f"http://{iam}"
     source, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    target = f"worker@{project}.iam.gserviceaccount.com"
+    # The IAM API calls carry the fixture's token by hand: an
+    # AuthorizedSession would look up the account's Regional Access
+    # Boundary at iamcredentials.googleapis.com, which the guard refuses.
+    source.refresh(Request())
+    session = requests.Session()
+    session.headers["Authorization"] = f"Bearer {source.token}"
+    created = session.post(f"{iam}/v1/projects/{project}/serviceAccounts", json={"accountId": f"py-worker-{suffix}"[:30].rstrip("-")})
+    assert created.status_code == 200, created.text
+    target = created.json()["email"]
+    resource = f"{iam}/v1/projects/{project}/serviceAccounts/{target}"
+    granted = session.post(f"{resource}:setIamPolicy", json={"policy": {"bindings": [
+        {"role": "roles/iam.serviceAccountTokenCreator", "members": [f"serviceAccount:{source.service_account_email}"]}]}})
+    assert granted.status_code == 200, granted.text
     creds = impersonated_credentials.Credentials(
         source_credentials=source,
         target_principal=target,
@@ -70,5 +90,6 @@ def test_impersonated_token_drives_the_storage_client(project, suffix):
         assert bucket.name in [b.name for b in client.list_buckets()]
     finally:
         bucket.delete(force=True)
+        session.delete(resource)
     # Every request carried the impersonated token.
     assert sent and all(h == f"Bearer {creds.token}" for h in sent), sent

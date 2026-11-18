@@ -49,9 +49,13 @@ func roleHelp(service, example string) string {
 func policyFromProto(p *iampb.Policy) console.Policy {
 	out := console.Policy{Etag: base64.StdEncoding.EncodeToString(p.GetEtag()), Bindings: []console.Binding{}}
 	for _, b := range p.GetBindings() {
-		out.Bindings = append(out.Bindings, console.Binding{
+		cb := console.Binding{
 			Role: b.GetRole(), Members: append([]string(nil), b.GetMembers()...), Condition: conditionText(b.GetCondition()),
-		})
+		}
+		if c := b.GetCondition(); c != nil {
+			cb.Conditional = &console.Condition{Title: c.GetTitle(), Description: c.GetDescription(), Expression: c.GetExpression()}
+		}
+		out.Bindings = append(out.Bindings, cb)
 	}
 	return out
 }
@@ -66,16 +70,23 @@ func conditionText(c *expr.Expr) string {
 	return c.GetExpression()
 }
 
-// policyToProto is the policy to send with SetIamPolicy, carrying etag.
+// policyToProto is the policy to send with SetIamPolicy, carrying etag. A
+// conditional binding is written back with its condition, in a version 3
+// policy (#1742); a service that stores none refuses it with its own
+// message.
 func policyToProto(p console.Policy, etag []byte) (*iampb.Policy, error) {
 	out := &iampb.Policy{Version: 1, Etag: etag}
 	for _, b := range p.Bindings {
-		// None of these services stores a condition, so none is read back;
-		// one that were would be lost by a binding written without it.
-		if b.Condition != "" {
+		pb := &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		switch {
+		case b.Conditional != nil:
+			pb.Condition = &expr.Expr{Title: b.Conditional.Title, Description: b.Conditional.Description, Expression: b.Conditional.Expression}
+			out.Version = 3
+		case b.Condition != "":
+			// Shown as text only: written without it, it would be lost.
 			return nil, fmt.Errorf("the binding for %s has a condition, which the console cannot write back", b.Role)
 		}
-		out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
+		out.Bindings = append(out.Bindings, pb)
 	}
 	return out, nil
 }
@@ -106,7 +117,10 @@ func testProtoPermissions(ctx context.Context, api iamServer, resource string, p
 }
 
 func getProtoPolicy(ctx context.Context, api iamServer, resource string) (console.Policy, error) {
-	p, err := api.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resource})
+	// Version 3, so a conditional binding is read with its condition, not
+	// as a version 1 ROLE_withcond_HASH (#1742).
+	p, err := api.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resource,
+		Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
 	if err != nil {
 		return console.Policy{}, err
 	}
@@ -178,7 +192,7 @@ func (secretsProvider) PolicyOn(_ context.Context, path []string) *console.Polic
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "secret-manager--googlecloudsecretmanagerv1",
-		RoleHelp: roleHelp("Secret Manager", "roles/secretmanager.secretAccessor")}
+		RoleHelp: roleHelp("Secret Manager", "roles/secretmanager.secretAccessor"), Conditions: true}
 }
 
 func (p secretsProvider) secretIAM(project string, path []string) (iamServer, string, error) {
@@ -224,7 +238,7 @@ func (kmsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTar
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "cloud-kms--googlecloudkmsv1",
-		RoleHelp: roleHelp("Cloud KMS", "roles/cloudkms.cryptoKeyEncrypterDecrypter")}
+		RoleHelp: roleHelp("Cloud KMS", "roles/cloudkms.cryptoKeyEncrypterDecrypter"), Conditions: true}
 }
 
 func (p kmsProvider) kmsIAM(project string, path []string) (iamServer, string, error) {
@@ -282,6 +296,9 @@ func (p storageProvider) PolicyOn(ctx context.Context, path []string) *console.P
 	case len(path) == 0 || strings.HasPrefix(path[0], "_"):
 		return nil
 	case len(path) == 1:
+		// #1745: a bucket's policy takes conditions (the service
+		// refuses one without uniform bucket-level access).
+		target.Conditions = true
 		return target
 	}
 	if _, _, ok := notificationPath(path); ok || !p.isManagedFolder(ctx, path[0], folderName(path)) {
@@ -316,17 +333,25 @@ func (p storageProvider) GetPolicy(ctx context.Context, _ string, path []string)
 	if len(path) > 1 {
 		return p.managedFolderPolicy(ctx, path)
 	}
-	h, done, err := p.bucketIAM(ctx, path)
+	// The JSON API at version 3, so a conditional binding (#1745: a
+	// bucket with uniform bucket-level access keeps one) is read with its
+	// condition.
+	s, err := jsonAPI(ctx, p.endpoint)
 	if err != nil {
 		return console.Policy{}, err
 	}
-	defer done()
-	pol, err := h.Policy(ctx)
+	pol, err := s.Buckets.GetIamPolicy(path[0]).OptionsRequestedPolicyVersion(3).Context(ctx).Do()
 	if err != nil {
 		return console.Policy{}, err
 	}
-	out := policyFromProto(pol.InternalProto)
-	out.Etag = string(pol.InternalProto.GetEtag())
+	out := console.Policy{Etag: pol.Etag, Bindings: []console.Binding{}}
+	for _, b := range pol.Bindings {
+		cb := console.Binding{Role: b.Role, Members: append([]string(nil), b.Members...), Condition: jsonConditionText(b.Condition)}
+		if c := b.Condition; c != nil {
+			cb.Conditional = &console.Condition{Title: c.Title, Description: c.Description, Expression: c.Expression}
+		}
+		out.Bindings = append(out.Bindings, cb)
+	}
 	return out, nil
 }
 
@@ -334,16 +359,24 @@ func (p storageProvider) SetPolicy(ctx context.Context, _ string, path []string,
 	if len(path) > 1 {
 		return p.setManagedFolderPolicy(ctx, path, pol)
 	}
-	h, done, err := p.bucketIAM(ctx, path)
+	out := &storagev1.Policy{Version: 1, Etag: pol.Etag}
+	for _, b := range pol.Bindings {
+		pb := &storagev1.PolicyBindings{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		switch {
+		case b.Conditional != nil:
+			pb.Condition = &storagev1.Expr{Title: b.Conditional.Title, Description: b.Conditional.Description, Expression: b.Conditional.Expression}
+			out.Version = 3
+		case b.Condition != "":
+			return fmt.Errorf("the binding for %s has a condition, which the console cannot write back", b.Role)
+		}
+		out.Bindings = append(out.Bindings, pb)
+	}
+	s, err := jsonAPI(ctx, p.endpoint)
 	if err != nil {
 		return err
 	}
-	defer done()
-	proto, err := policyToProto(pol, []byte(pol.Etag))
-	if err != nil {
-		return err
-	}
-	return h.SetPolicy(ctx, &iam.Policy{InternalProto: proto})
+	_, err = s.Buckets.SetIamPolicy(path[0], out).Context(ctx).Do()
+	return err
 }
 
 // TestPermissions is storage.buckets.testIamPermissions through the official

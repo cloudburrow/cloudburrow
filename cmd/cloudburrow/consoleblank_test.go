@@ -2,6 +2,7 @@ package main
 
 import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
+	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc"
 	"time"
@@ -119,7 +120,15 @@ func TestNoDetailShowsABlankProperty(t *testing.T) {
 				t.Fatalf("no rows, so no Detail was opened: seed this provider's backend in blankCheckDeps")
 			}
 			w := blankWalker{t: t, ctx: ctx, id: p.ID(), driller: driller}
+			predefined := 0
 			for _, row := range list.Items {
+				// IAM & Admin > Roles lists Google's 2,400-odd predefined
+				// roles, one page each from the same code: open a sample.
+				if strings.HasPrefix(row.Name, predefinedRolePrefix) {
+					if predefined++; predefined > 25 && !strings.HasPrefix(row.Name, predefinedRolePrefix+"storage.") {
+						continue
+					}
+				}
 				path := row.Opens
 				if path == nil {
 					path = []string{row.Name}
@@ -228,6 +237,17 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 	// Tags (#1295): a key with a value, bound to the project.
+	if _, err := d.projects.CreateRole("projects/"+blankProject, "blankRole", &adminpb.Role{Title: "Blank role", Description: "Blank role",
+		IncludedPermissions: []string{"datastore.entities.get"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A service account (#1747), with a key.
+	if sa, err := d.projects.CreateServiceAccount(&adminpb.CreateServiceAccountRequest{Name: "projects/" + blankProject, AccountId: "blank-account",
+		ServiceAccount: &adminpb.ServiceAccount{DisplayName: "Blank account", Description: "Blank account"}}); err != nil {
+		t.Fatal(err)
+	} else if _, err := d.projects.CreateServiceAccountKey(&adminpb.CreateServiceAccountKeyRequest{Name: sa.GetName()}); err != nil {
+		t.Fatal(err)
+	}
 	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)
 	if err != nil {
 		t.Fatal(err)

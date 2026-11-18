@@ -25,8 +25,9 @@ const EmbeddingsNote = "embeddinggemma-300m-onnx-community is a COMMUNITY ONNX i
 // the screen sends images to.
 const Embeddings2Note = "embeddinggemma-2-onnx-community is a COMMUNITY ONNX int8 conversion " +
 	"of EmbeddingGemma 2 by onnx-community. It is NOT an official Google artifact. It embeds text, " +
-	"PNG, JPEG, WebP, BMP, HEIC, HEIF or AVIF images and WAV or MP3 audio into one space, inline or read from this instance's Cloud " +
-	"Storage (gs://); load it on the Local models page to serve it."
+	"PNG, JPEG, WebP, BMP, HEIC, HEIF or AVIF images, WAV or MP3 audio, video and PDFs into one space, inline or read from this " +
+	"instance's Cloud Storage (gs://); with document_ocr a PDF page's text, read with Tesseract OCR when the page is a scan, " +
+	"follows its image. Load it on the Local models page to serve it."
 
 // embeddingsConfigured reports whether the Embeddings screen is offered.
 func (p *Playground) embeddingsConfigured() bool {

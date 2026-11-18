@@ -108,7 +108,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the model: " + bigqueryRefusal(err).Error(), Trail: trail}, nil
 	}
-	if md.Type == "ONNX" {
+	if md.Type == "ONNX" || md.Type == "XGBOOST" {
 		return p.onnxModelDetail(md, datasetID, modelID, trail), nil
 	}
 	feats := console.Listing{Columns: []string{"Type", "Weight"}, NameColumn: "Feature", Noun: "features"}
@@ -243,7 +243,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	}, nil
 }
 
-// onnxModelDetail is an imported ONNX model's page (#1711): its inputs and
+// onnxModelDetail is an imported ONNX or XGBoost model's page (#1711): its inputs and
 // outputs, which models.get reports as featureColumns and labelColumns,
 // and the Cloud Storage URI it was imported from. It has no training,
 // weights or evaluation: BigQuery imports the model as it is.
@@ -260,7 +260,7 @@ func (p bigqueryProvider) onnxModelDetail(md *bigquery.ModelMetadata, datasetID,
 	out, _ := md.RawLabelColumns()
 	props := []console.Property{
 		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},
-		{Label: "Type", Value: "ONNX"},
+		{Label: "Type", Value: md.Type},
 		{Label: "Location", Value: orDash(md.Location)},
 	}
 	if runs := md.RawTrainingRuns(); len(runs) > 0 && runs[0].TrainingOptions != nil && runs[0].TrainingOptions.ModelUri != "" {
@@ -282,7 +282,7 @@ func (p bigqueryProvider) onnxModelDetail(md *bigquery.ModelMetadata, datasetID,
 		Trail: trail,
 		Summary: []console.Property{
 			{Label: "Dataset", Value: datasetID},
-			{Label: "Type", Value: "ONNX"},
+			{Label: "Type", Value: md.Type},
 			{Label: "Inputs", Value: fmt.Sprint(len(in))},
 			{Label: "Outputs", Value: fmt.Sprint(len(out))},
 		},

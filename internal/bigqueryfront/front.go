@@ -319,6 +319,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
 			return
 		}
+		if iam.serveRewriteMember(w, r) { // iam.go, #1751
+			return
+		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
 			functions: functions, records: records, settings: settings, models: models}).serveUndelete(w, r) { // dropped.go, #1460
 			return

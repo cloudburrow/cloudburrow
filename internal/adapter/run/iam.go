@@ -144,7 +144,7 @@ func (s *Server) setPolicy(ctx context.Context, o iamOwner, req *iampb.SetIamPol
 	if err != nil {
 		return nil, err
 	}
-	next, err := iampolicy.Set(st, req)
+	next, err := iampolicy.SetConditional(st, req)
 	if err != nil {
 		return nil, err
 	}

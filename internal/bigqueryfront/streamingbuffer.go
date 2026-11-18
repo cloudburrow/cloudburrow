@@ -97,9 +97,12 @@ import (
 // keeps each table's last stream time (recent), so DML of a table not
 // streamed to in 30 minutes reads nothing more, and bufferedChange counts
 // the rows the statement would change among those streamed within
-// dmlLockFor of the clock. A table made by a CREATE TABLE statement, or
-// before the engine had the column, has none: its streamed rows are held
-// only while in the buffer, as before. The clock is the front's, which
+// dmlLockFor of the clock. A table made by a CREATE TABLE statement has
+// it too (googlesqlite patches 0030, 0056, 0088), and so, since
+// googlesqlite patch 0089 (#1458), does one kept in the state from before
+// those patches, NULL on its old rows; a table that still has none (the
+// fallback below) has its streamed rows held only while in the buffer.
+// The clock is the front's, which
 // the CloudBurrow extension POST /cloudburrow/bigquery/v2/clock:advance
 // moves forward (serveClock), so a test passes the 30 minutes at once.
 

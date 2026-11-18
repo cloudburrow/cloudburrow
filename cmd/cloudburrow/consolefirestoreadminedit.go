@@ -68,10 +68,16 @@ func createIndexFields() []console.Field {
 		{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern,
 			Help: "The collection group the index is for."},
 		{Name: "fields", Label: "Fields", Type: "textarea", Required: true,
-			Help: "One field per line: its path, then ascending, descending or array-contains, such as \"city ascending\". " +
-				"At least two fields; __name__ is appended as Firestore appends it."},
+			Help: "One field per line: its path, then ascending, descending, array-contains or text, such as \"city ascending\". " +
+				"At least two fields; __name__ is appended as Firestore appends it. A text index (Enterprise edition, " +
+				"Firestore with MongoDB compatibility's $text) has text fields alone, and may start with one ascending partition field."},
 		{Name: "queryScope", Label: "Query scope", Type: "select", Default: "COLLECTION",
 			Options: []string{"COLLECTION", "COLLECTION_GROUP"}},
+		{Name: "apiScope", Label: "API scope", Type: "select", Default: "ANY_API",
+			Options: []string{"ANY_API", "MONGODB_COMPATIBLE_API"},
+			Help:    "MONGODB_COMPATIBLE_API for an index of Firestore with MongoDB compatibility, such as a text index."},
+		{Name: "textLanguage", Label: "Text language (optional)", Type: "text",
+			Help: "A text index's default language, as a language code such as en, or none; empty for English."},
 	}
 }
 
@@ -96,8 +102,16 @@ func parseIndexFields(raw string) ([]*adminpb.Index_IndexField, error) {
 			f.ValueMode = &adminpb.Index_IndexField_Order_{Order: adminpb.Index_IndexField_DESCENDING}
 		case "array-contains", "array":
 			f.ValueMode = &adminpb.Index_IndexField_ArrayConfig_{ArrayConfig: adminpb.Index_IndexField_CONTAINS}
+		case "text":
+			// A text index's field, as Firestore with MongoDB
+			// compatibility's createIndexes makes it (#1738).
+			f.ValueMode = &adminpb.Index_IndexField_SearchConfig_{SearchConfig: &adminpb.Index_IndexField_SearchConfig{
+				TextSpec: &adminpb.Index_IndexField_SearchConfig_SearchTextSpec{
+					IndexSpecs: []*adminpb.Index_IndexField_SearchConfig_SearchTextIndexSpec{{
+						IndexType: adminpb.Index_IndexField_SearchConfig_TOKENIZED,
+						MatchType: adminpb.Index_IndexField_SearchConfig_MATCH_GLOBALLY}}}}}
 		default:
-			return nil, fmt.Errorf("%q: %q is not ascending, descending or array-contains", line, mode)
+			return nil, fmt.Errorf("%q: %q is not ascending, descending, array-contains or text", line, mode)
 		}
 		out = append(out, f)
 	}
@@ -251,6 +265,7 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 		if d.DatabaseEdition == adminpb.Database_ENTERPRISE {
 			acts = append(acts,
 				console.Action{ID: "runpipeline", Label: "Run pipeline", Fields: runPipelineFields()},
+				console.Action{ID: "explainquery", Label: "Query Explain (MongoDB)", Fields: explainQueryFields()},
 				console.Action{ID: "createcreds", Label: "Create user credentials", Fields: createCredsFields()})
 		}
 		return acts
@@ -348,8 +363,15 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 			return err
 		}
 		scope := adminpb.Index_QueryScope(adminpb.Index_QueryScope_value[values["queryScope"]])
-		op, err := c.CreateIndex(ctx, &adminpb.CreateIndexRequest{Parent: db + "/collectionGroups/" + cg,
-			Index: &adminpb.Index{QueryScope: scope, Fields: fields}})
+		in := &adminpb.Index{QueryScope: scope, Fields: fields,
+			ApiScope: adminpb.Index_ApiScope(adminpb.Index_ApiScope_value[values["apiScope"]])}
+		for _, f := range fields {
+			if f.GetSearchConfig() != nil {
+				in.SearchIndexOptions = &adminpb.Index_SearchIndexOptions{TextLanguage: strings.TrimSpace(values["textLanguage"])}
+				break
+			}
+		}
+		op, err := c.CreateIndex(ctx, &adminpb.CreateIndexRequest{Parent: db + "/collectionGroups/" + cg, Index: in})
 		if err == nil {
 			_, err = op.Wait(ctx)
 		}

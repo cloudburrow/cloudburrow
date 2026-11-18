@@ -115,7 +115,7 @@ func (bigqueryProvider) PolicyOn(_ context.Context, path []string) *console.Poli
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "bigquery-is-a-community-emulator",
-		RoleHelp: roleHelp("BigQuery", "roles/bigquery.dataViewer")}
+		RoleHelp: roleHelp("BigQuery", "roles/bigquery.dataViewer"), Conditions: true}
 }
 
 // iamResource is the IAM resource name of a table's or a routine's page.
@@ -145,20 +145,25 @@ func (p bigqueryProvider) GetPolicy(ctx context.Context, project string, path []
 	}
 	var pol *bqv2.Policy
 	if routine {
-		pol, err = svc.Routines.GetIamPolicy(resource, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
+		pol, err = svc.Routines.GetIamPolicy(resource, &bqv2.GetIamPolicyRequest{Options: &bqv2.GetPolicyOptions{RequestedPolicyVersion: 3}}).Context(ctx).Do()
 	} else {
-		pol, err = svc.Tables.GetIamPolicy(resource, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
+		pol, err = svc.Tables.GetIamPolicy(resource, &bqv2.GetIamPolicyRequest{Options: &bqv2.GetPolicyOptions{RequestedPolicyVersion: 3}}).Context(ctx).Do()
 	}
 	if err != nil {
 		return console.Policy{}, bigqueryRefusal(err)
 	}
 	out := console.Policy{Etag: pol.Etag, Bindings: []console.Binding{}}
 	for _, b := range pol.Bindings {
-		cond := ""
-		if b.Condition != nil {
-			cond = b.Condition.Expression
+		cb := console.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		if c := b.Condition; c != nil {
+			cb.Condition = c.Expression
+			if c.Title != "" {
+				cb.Condition = c.Title + ": " + c.Expression
+			}
+			// #1745: BigQuery stores a binding's condition.
+			cb.Conditional = &console.Condition{Title: c.Title, Description: c.Description, Expression: c.Expression}
 		}
-		out.Bindings = append(out.Bindings, console.Binding{Role: b.Role, Members: append([]string(nil), b.Members...), Condition: cond})
+		out.Bindings = append(out.Bindings, cb)
 	}
 	return out, nil
 }
@@ -173,10 +178,15 @@ func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []
 	}
 	out := &bqv2.Policy{Version: 1, Etag: pol.Etag}
 	for _, b := range pol.Bindings {
-		if b.Condition != "" {
+		bb := &bqv2.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		switch {
+		case b.Conditional != nil:
+			bb.Condition = &bqv2.Expr{Title: b.Conditional.Title, Description: b.Conditional.Description, Expression: b.Conditional.Expression}
+			out.Version = 3
+		case b.Condition != "":
 			return fmt.Errorf("the binding for %s has a condition, which the console cannot write back", b.Role)
 		}
-		out.Bindings = append(out.Bindings, &bqv2.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
+		out.Bindings = append(out.Bindings, bb)
 	}
 	svc, err := p.service(ctx)
 	if err != nil {

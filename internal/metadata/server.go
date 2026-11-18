@@ -187,6 +187,10 @@ func (s *Server) Handler() http.Handler {
 	// token URI that never leaves the machine.
 	mux.HandleFunc("/token", s.token)
 	mux.HandleFunc("/certs", s.certs)
+	// A service account's public certificates (#1750); see serviceaccountcerts.go.
+	for _, p := range []string{saX509Prefix, saJWKPrefix, robotX509Prefix} {
+		mux.HandleFunc(p, s.serviceAccountCerts)
+	}
 	// IAM Credentials (#303), for impersonation; see iamcredentials.go.
 	mux.HandleFunc(iamPrefix, s.iamCredentials)
 
@@ -226,7 +230,9 @@ func (s *Server) requireFlavor(next http.Handler) http.Handler {
 		// clients do not send the header to it.
 		// So is IAM Credentials: it is a Google API, called by its own
 		// clients, which have never heard of the metadata header.
-		if r.URL.Path == "/token" || r.URL.Path == "/certs" || strings.HasPrefix(r.URL.Path, iamPrefix) {
+		// And a service account's public certificates (#1750), which any
+		// verifier fetches as www.googleapis.com serves them.
+		if r.URL.Path == "/token" || r.URL.Path == "/certs" || strings.HasPrefix(r.URL.Path, iamPrefix) || isCertPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -327,7 +333,16 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	// instance's key signed it (the ADC fixture's), and for no account
 	// otherwise: it is still served, but no check that needs an account
 	// (Memorystore's IAM auth, #1614) passes with it.
-	s.writeAccessToken(w, s.creds.assertionAccount(r.PostForm.Get("assertion")))
+	email, refuse := s.creds.assertionAccountChecked(r.PostForm.Get("assertion"))
+	if refuse {
+		// A service account key that is disabled or deleted, or whose
+		// account is (#1747): Google's token endpoint answers the same.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Invalid JWT Signature."}`))
+		return
+	}
+	s.writeAccessToken(w, email)
 }
 
 // certs serves the public key, so a client configured to fetch certificates

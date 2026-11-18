@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -48,64 +50,27 @@ type iamPrincipal struct {
 func newIAMPrincipal(t *testing.T, h *Harness, project, name string, roles ...string) *iamPrincipal {
 	t.Helper()
 	meta := h.Endpoint(EnvMetadata)
-	rmEndpoint := runShardEndpoint(h, envMemorystoreResourceManager, EnvResourceManager)
+	// projectRoles reads the shared variable, so the shard's own name is
+	// exported under it for this test.
+	shardEndpoint(h, envMemorystoreResourceManager, EnvResourceManager)
 	if !strings.HasPrefix(meta, "http://") {
 		meta = "http://" + meta
 	}
 	ctx := h.Context()
-	ic, err := credentials.NewIamCredentialsRESTClient(ctx, option.WithEndpoint(meta), option.WithoutAuthentication())
+	// The token is minted through IAM Credentials as the ADC fixture's
+	// account, granted the Token Creator role on a service account of
+	// the test's own (#1747).
+	me, source := instanceAccount(t)
+	ic, err := credentials.NewIamCredentialsRESTClient(ctx, option.WithEndpoint(meta),
+		option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: source}}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ic.Close()
-	rm, err := resourcemanager.NewProjectsClient(ctx, rmOptionsAt(rmEndpoint)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = rm.Close() })
-	p := &iamPrincipal{email: fmt.Sprintf("%s-%d@%s.iam.gserviceaccount.com", name, time.Now().UnixNano()%1e8, project)}
-	member := "serviceAccount:" + p.email
-	change := func(role string, add bool) {
-		t.Helper()
-		for attempt := 0; ; attempt++ {
-			pol, err := rm.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + project})
-			if err != nil {
-				t.Fatalf("GetIamPolicy: %v", err)
-			}
-			var bindings []*iampb.Binding
-			found := false
-			for _, b := range pol.GetBindings() {
-				if b.GetRole() == role {
-					found = true
-					var ms []string
-					for _, m := range b.GetMembers() {
-						if m != member {
-							ms = append(ms, m)
-						}
-					}
-					if add {
-						ms = append(ms, member)
-					}
-					if len(ms) == 0 {
-						continue
-					}
-					b = &iampb.Binding{Role: role, Members: ms}
-				}
-				bindings = append(bindings, b)
-			}
-			if !found && add {
-				bindings = append(bindings, &iampb.Binding{Role: role, Members: []string{member}})
-			}
-			pol.Bindings = bindings
-			_, err = rm.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "projects/" + project, Policy: pol})
-			if err == nil {
-				return
-			}
-			if status.Code(err) != codes.Aborted || attempt > 20 {
-				t.Fatalf("SetIamPolicy: %v", err)
-			}
-		}
-	}
+	sa := newServiceAccount(t, h, project, name)
+	grantOn(t, h, sa.GetName(), "roles/iam.serviceAccountTokenCreator", "serviceAccount:"+me)
+	p := &iamPrincipal{email: sa.GetEmail()}
+	change := projectRoles(t, h, project, "serviceAccount:"+p.email)
 	p.grant = func(role string) { change(role, true) }
 	p.revoke = func(role string) { change(role, false) }
 	for _, role := range roles {
@@ -278,4 +243,59 @@ func TestMemorystoreIAMAuthChecksTheToken(t *testing.T) {
 	if err := rc.Set(ctx, "iam", "cluster", 0).Err(); err != nil {
 		t.Errorf("a ClusterClient with the granted token: SET = %v", err)
 	}
+}
+
+// projectRoles changes member's roles on project through the official
+// Resource Manager client: change(role, true) grants role, false takes it
+// back, retrying a concurrent change's ABORTED.
+func projectRoles(t *testing.T, h *Harness, project, member string) func(role string, add bool) {
+	t.Helper()
+	ctx := h.Context()
+	rm, err := resourcemanager.NewProjectsClient(ctx, rmOptionsAt(h.Endpoint(EnvResourceManager))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rm.Close() })
+	change := func(role string, add bool) {
+		t.Helper()
+		for attempt := 0; ; attempt++ {
+			pol, err := rm.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + project})
+			if err != nil {
+				t.Fatalf("GetIamPolicy: %v", err)
+			}
+			var bindings []*iampb.Binding
+			found := false
+			for _, b := range pol.GetBindings() {
+				if b.GetRole() == role {
+					found = true
+					var ms []string
+					for _, m := range b.GetMembers() {
+						if m != member {
+							ms = append(ms, m)
+						}
+					}
+					if add {
+						ms = append(ms, member)
+					}
+					if len(ms) == 0 {
+						continue
+					}
+					b = &iampb.Binding{Role: role, Members: ms}
+				}
+				bindings = append(bindings, b)
+			}
+			if !found && add {
+				bindings = append(bindings, &iampb.Binding{Role: role, Members: []string{member}})
+			}
+			pol.Bindings = bindings
+			_, err = rm.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "projects/" + project, Policy: pol})
+			if err == nil {
+				return
+			}
+			if status.Code(err) != codes.Aborted || attempt > 20 {
+				t.Fatalf("SetIamPolicy: %v", err)
+			}
+		}
+	}
+	return change
 }

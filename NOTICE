@@ -45,6 +45,17 @@ under the BSD 3-Clause License, with libvpx's BSD 3-Clause licence and patent
 grant (Copyright (c) 2010, The WebM Project authors); third_party/govpx holds
 the texts and PROVENANCE.md records what was copied and changed.
 
+The binary is linked with a copy of arabian9ts/aac-go v0.1.0
+(https://github.com/arabian9ts/aac-go), a pure Go AAC decoder, Copyright 2026
+arabian9ts, under the Apache License, Version 2.0, which CloudBurrow extends
+with HE-AAC decoding. Its SBR and parametric stereo tables are taken from
+PacketVideo's OpenCORE AAC decoder as Android ships it (platform/frameworks/av,
+android-4.1.1_r1, media/libstagefright/codecs/aacdec), Copyright (C) 1998-2009
+PacketVideo, under the Apache License, Version 2.0, whose files also carry an
+ISO/IEC software copyright notice (Copyright (c) ISO/IEC 2002, 2003);
+third_party/aac-go holds the licence, the NOTICE texts of both, and
+PROVENANCE.md records what was copied and changed.
+
 The binary embeds builds of goccy/bigquery-emulator v0.8.1
 (https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki
 Goshima, under the MIT License, linked with goccy/googlesqlite v0.3.1 and

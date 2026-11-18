@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -106,7 +107,27 @@ func embeddingCache(cfg config.Config) localai.Cache {
 // The pinned files are fetched over HTTPS at the pinned revision and verified
 // by SHA-256 only when the runtime is compiled in: downloading 330 MB for a
 // binary that cannot run it would be waste.
+// attachScriptModels lets document_ocr read a scanned page in a script
+// other than Latin (#1733): tessdata_fast's model of that script is fetched
+// the first time one is read, into <state-dir>/models, and checked against
+// its pinned SHA-256.
+func attachScriptModels(cfg config.Config) {
+	cache := embeddingCache(cfg)
+	ocr.SetScriptSource(func(ctx context.Context, name string) (string, error) {
+		f, ok := localai.TessdataScript(name)
+		if !ok {
+			return "", fmt.Errorf("no tessdata_fast model %q is pinned", name)
+		}
+		if _, err := os.Stat(cache.PinnedPath(localai.TessdataFastScripts, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "fetching tessdata_fast %s (%s @ %s, Apache-2.0) for document_ocr...\n",
+				f.Path, localai.TessdataFastRepo, localai.TessdataFastScripts.Pin.Revision[:12])
+		}
+		return cache.FetchPinnedFile(ctx, localai.TessdataFastScripts, f)
+	})
+}
+
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {
+	attachScriptModels(cfg)
 	m, err := localai.Lookup(localai.EmbeddingGemmaONNXID)
 	if err != nil {
 		srv.SetEmbedder(nil, err)

@@ -8,6 +8,7 @@ package mql
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -220,6 +221,10 @@ func runStage(env *aggEnv, docs []bson.D, st bson.E) ([]bson.D, error) {
 		}
 		return []bson.D{res}, nil
 	case "$out", "$merge":
+		return nil, merr(40324, "Location40324", "The %s stage is not supported.", st.Key)
+	case "$documents":
+		return nil, merr(5858200, "Location5858200", "$documents is only valid as the first stage of a collection-less aggregate ({aggregate: 1}) or a $lookup pipeline without 'from'")
+	case "$currentOp", "$listLocalSessions", "$listSessions", "$indexStats", "$planCacheStats":
 		return nil, merr(40324, "Location40324", "The %s stage is not supported.", st.Key)
 	}
 	return nil, merr(40324, "Location40324", "Unrecognized pipeline stage name: '%s'", st.Key)
@@ -444,48 +449,209 @@ func unwindStage(docs []bson.D, spec any) ([]bson.D, error) {
 
 func lookupStage(env *aggEnv, docs []bson.D, spec any) ([]bson.D, error) {
 	sd, ok := spec.(bson.D)
+	if !ok {
+		return nil, merr(40319, "Location40319", "the $lookup specification must be an Object")
+	}
+	for _, e := range sd {
+		switch e.Key {
+		case "from", "localField", "foreignField", "as", "let", "pipeline":
+		default:
+			return nil, merr(9, "FailedToParse", "unknown argument to $lookup: %s", e.Key)
+		}
+	}
 	from, _ := lookup(sd, "from").(string)
 	local, _ := lookup(sd, "localField").(string)
 	foreign, _ := lookup(sd, "foreignField").(string)
 	as, _ := lookup(sd, "as").(string)
-	if _, p := lookupE(sd, "pipeline"); p {
-		return nil, badValue("$lookup with a pipeline is not supported by CloudBurrow.")
+	pv, hasPipeline := lookupE(sd, "pipeline")
+	pipeline, _ := pv.(bson.A)
+	if hasPipeline && pipeline == nil {
+		if _, ok := pv.(bson.A); !ok {
+			return nil, merr(14, "TypeMismatch", "$lookup argument 'pipeline' must be an array, is type %s", bsonTypeName(pv))
+		}
 	}
-	if !ok || from == "" || local == "" || foreign == "" || as == "" || env == nil || env.load == nil {
-		return nil, merr(9, "FailedToParse", "$lookup requires from, localField, foreignField and as")
+	letSpec, hasLet := lookupE(sd, "let")
+	letDoc, _ := letSpec.(bson.D)
+	if hasLet && !hasPipeline {
+		return nil, merr(9, "FailedToParse", "$lookup with 'let' must also specify 'pipeline'")
 	}
-	other, err := env.load(from)
-	if err != nil {
-		return nil, err
+	if as == "" {
+		return nil, merr(9, "FailedToParse", "must specify 'as' field for a $lookup")
+	}
+	if (local == "") != (foreign == "") {
+		return nil, merr(9, "FailedToParse", "$lookup requires both or neither of 'localField' and 'foreignField' to be specified")
+	}
+	if !hasPipeline && (from == "" || local == "") {
+		return nil, merr(9, "FailedToParse", "$lookup requires either 'pipeline' or both 'localField' and 'foreignField' to be specified")
+	}
+	if from == "" && !startsWithDocuments(pipeline) {
+		return nil, merr(9, "FailedToParse", "$lookup requires a 'from' field, unless its pipeline starts with $documents")
+	}
+	if env == nil || env.load == nil {
+		return nil, merr(51047, "Location51047", "$lookup is not allowed here")
+	}
+	var other []bson.D
+	if from != "" {
+		var err error
+		if other, err = env.load(from); err != nil {
+			return nil, err
+		}
 	}
 	out := make([]bson.D, 0, len(docs))
 	for _, d := range docs {
-		lv := pathValues(d, strings.Split(local, "."))
-		var keys []any
-		for _, v := range lv {
-			if a, ok := v.(bson.A); ok {
-				keys = append(keys, a...)
-			} else if _, m := v.(missingT); m {
-				keys = append(keys, nil)
-			} else {
-				keys = append(keys, v)
+		cands := other
+		if local != "" {
+			lv := pathValues(d, strings.Split(local, "."))
+			var keys []any
+			for _, v := range lv {
+				if a, ok := v.(bson.A); ok {
+					keys = append(keys, a...)
+				} else if _, m := v.(missingT); m {
+					keys = append(keys, nil)
+				} else {
+					keys = append(keys, v)
+				}
 			}
-		}
-		matched := bson.A{}
-		for _, o := range other {
-			fv := pathValues(o, strings.Split(foreign, "."))
-			for _, k := range keys {
-				if eqMatch(fv, k) {
-					matched = append(matched, o)
-					break
+			cands = nil
+			for _, o := range other {
+				fv := pathValues(o, strings.Split(foreign, "."))
+				for _, k := range keys {
+					if eqMatch(fv, k) {
+						cands = append(cands, o)
+						break
+					}
 				}
 			}
 		}
+		var matched []bson.D
+		if hasPipeline {
+			vars := map[string]any{}
+			for _, e := range letDoc {
+				if !letVarRe.MatchString(e.Key) {
+					return nil, merr(16867, "Location16867", "'%s' starts with an invalid character for a user variable name", e.Key)
+				}
+				v, err := evalExpr(e.Value, d, nil)
+				if err != nil {
+					return nil, err
+				}
+				if _, m := v.(missingT); m {
+					v = nil
+				}
+				vars[e.Key] = v
+			}
+			p := bindVars(pipeline, vars).(bson.A)
+			in := cands
+			if from == "" {
+				var err error
+				if in, p, err = documentsInput(p); err != nil {
+					return nil, err
+				}
+			}
+			var err error
+			if matched, err = runPipeline(env, in, p); err != nil {
+				return nil, err
+			}
+		} else {
+			matched = cands
+		}
+		arr := bson.A{}
+		for _, m := range matched {
+			arr = append(arr, m)
+		}
 		n := cloneDoc(d)
-		_ = setPath(&n, strings.Split(as, "."), matched)
+		_ = setPath(&n, strings.Split(as, "."), arr)
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+// letVarRe is a user variable's name, as MongoDB allows it.
+var letVarRe = regexp.MustCompile(`^[a-z\x{80}-\x{10FFFF}][A-Za-z0-9_\x{80}-\x{10FFFF}]*$`)
+
+// startsWithDocuments is whether a pipeline's first stage is $documents.
+func startsWithDocuments(p bson.A) bool {
+	if len(p) == 0 {
+		return false
+	}
+	sd, ok := p[0].(bson.D)
+	return ok && len(sd) == 1 && sd[0].Key == "$documents"
+}
+
+// DocumentsInput is the documents a collection-less pipeline's first stage,
+// $documents, makes, and the rest of the pipeline.
+func DocumentsInput(p bson.A) ([]bson.D, bson.A, error) { return documentsInput(p) }
+
+func documentsInput(p bson.A) ([]bson.D, bson.A, error) {
+	if !startsWithDocuments(p) {
+		return nil, nil, merr(73, "InvalidNamespace", "{aggregate: 1} is not valid for this pipeline; its first stage must be $documents")
+	}
+	v, err := evalExpr(p[0].(bson.D)[0].Value, bson.D{}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	arr, ok := v.(bson.A)
+	if !ok {
+		return nil, nil, merr(5858203, "Location5858203", "an array is expected")
+	}
+	docs := make([]bson.D, 0, len(arr))
+	for _, e := range arr {
+		d, ok := e.(bson.D)
+		if !ok {
+			return nil, nil, merr(40228, "Location40228", "'newRoot' expression must evaluate to an object, but resulting value was of type %s", bsonTypeName(e))
+		}
+		docs = append(docs, d)
+	}
+	return docs, p[1:], nil
+}
+
+// bindVars is v, a pipeline or a part of one, with each reference to a
+// variable of vars ("$$name" or "$$name.path") replaced by its value as a
+// $literal: a $lookup's let variables, which its pipeline reads. A $match
+// is a query, whose strings are values, so only its $expr is bound.
+func bindVars(v any, vars map[string]any) any {
+	return bindIn(v, vars, false)
+}
+
+func bindIn(v any, vars map[string]any, query bool) any {
+	switch x := v.(type) {
+	case string:
+		if query || !strings.HasPrefix(x, "$$") {
+			return x
+		}
+		name, rest, _ := strings.Cut(x[2:], ".")
+		val, ok := vars[name]
+		if !ok {
+			return x
+		}
+		if rest != "" {
+			g, ok := getPath(val, rest)
+			if !ok {
+				return "$$REMOVE"
+			}
+			val = g
+		}
+		return bson.D{{Key: "$literal", Value: val}}
+	case bson.A:
+		out := make(bson.A, len(x))
+		for i, e := range x {
+			out[i] = bindIn(e, vars, query)
+		}
+		return out
+	case bson.D:
+		out := make(bson.D, len(x))
+		for i, e := range x {
+			switch {
+			case e.Key == "$match":
+				out[i] = bson.E{Key: e.Key, Value: bindIn(e.Value, vars, true)}
+			case query && e.Key == "$expr":
+				out[i] = bson.E{Key: e.Key, Value: bindIn(e.Value, vars, false)}
+			default:
+				out[i] = bson.E{Key: e.Key, Value: bindIn(e.Value, vars, query)}
+			}
+		}
+		return out
+	}
+	return v
 }
 
 // removeT is $$REMOVE.
@@ -607,6 +773,15 @@ func nullish(v any) bool {
 
 func evalOp(op string, arg any, doc bson.D, vars map[string]any) (any, error) {
 	switch op {
+	case "$meta":
+		if arg != "textScore" {
+			return nil, badValue("$meta only supports textScore, not %v", arg)
+		}
+		v, ok := lookupE(doc, TextScoreKey)
+		if !ok {
+			return nil, merr(40218, "Location40218", "query requires text score metadata, but it is not available")
+		}
+		return v, nil
 	case "$literal":
 		return arg, nil
 	case "$cond":

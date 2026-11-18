@@ -25,6 +25,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 // Server serves Cloud Storage.
@@ -291,6 +292,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveReset(w, r)
 	case path == ProjectNumbersPath:
 		s.serveProjectNumbers(w, r)
+	case path == iampolicy.RewriteMemberPath:
+		s.serveRewriteMember(w, r)
 	case path == statePath:
 		s.serveState(w, r)
 	case path == ChannelsPath:

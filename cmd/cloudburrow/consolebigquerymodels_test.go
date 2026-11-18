@@ -235,3 +235,31 @@ func TestBigQueryONNXModelPage(t *testing.T) {
 		}
 	}
 }
+
+// TestBigQueryXGBoostModelPage (#1711): an imported XGBoost model's page
+// is an imported model's, its type XGBOOST, its one output the label.
+func TestBigQueryXGBoostModelPage(t *testing.T) {
+	const model = `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"x"},"modelType":"XGBOOST",
+"creationTime":"1700000000000","lastModifiedTime":"1700000000000","location":"US","etag":"e",
+"featureColumns":[{"name":"f_a","type":{"typeKind":"FLOAT64"}},{"name":"f_cat","type":{"typeKind":"INT64"}}],
+"labelColumns":[{"name":"predicted_label","type":{"typeKind":"FLOAT64"}}],
+"trainingRuns":[{"trainingOptions":{"modelUri":"gs://b/xgb/*"},"startTime":"2023-11-14T22:13:20Z"}]}`
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/datasets/d/models/x") {
+			fmt.Fprint(w, model)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	d, err := p.Detail(context.Background(), "p", []string{"d", "models", "x"})
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 {
+		t.Fatalf("the model's page: %v %+v", err, d)
+	}
+	if d.Summary[1].Value != "XGBOOST" || d.Sections[0].Listing.Items[1].Name != "f_cat" ||
+		d.Sections[1].Listing.Items[0].Name != "predicted_label" {
+		t.Errorf("page %+v", d)
+	}
+}

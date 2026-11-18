@@ -32,7 +32,8 @@ import (
 // followed by the WAV as a part of its own, and the speech query scores it
 // far higher than the frames alone; without the option it is the frames
 // alone, and with video_metadata's offsets the track is cut to them. Since
-// #1739 an Opus track is embedded as the AAC one is.
+// #1739 Opus, HE-AAC (v1 and v2), AC-3 and E-AC-3 tracks are embedded as
+// the AAC one is.
 func TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -124,6 +125,40 @@ func TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient(t *testin
 		t.Errorf("Opus track against the AAC track: cosine %.4f, want at least 0.99", co)
 	}
 	t.Logf("Opus track: cosine %.6f to the AAC track's vector", co)
+
+	// HE-AAC, AC-3 and E-AC-3 tracks (#1739): the same file with its track
+	// re-encoded by ffmpeg 9 (see the files' commands below), each decoded
+	// by a decoder written for CloudBurrow: the same tokens, and a vector
+	// within 0.99 of the AAC track's. AudioToolbox's HE-AAC tracks run 0.13
+	// and 0.10 seconds longer (its padding, which the edit list keeps, as
+	// ffmpeg's decode does), so up to 4 tokens more.
+	//
+	//	ffmpeg -i turtle-jfk.mp4 -map 0:v -map 0:a -c:v copy -af aresample=32000 -c:a aac_at -profile:a 4 -b:a 32k -map_metadata -1 turtle-jfk-heaac.mp4
+	//	ffmpeg -i turtle-jfk.mp4 -map 0:v -map 0:a -c:v copy -af "aresample=44100,pan=stereo|c0=c0|c1=0.8*c0" -c:a aac_at -profile:a 28 -b:a 48k -map_metadata -1 turtle-jfk-heaacv2.mp4
+	//	ffmpeg -i turtle-jfk.mp4 -map 0:v -map 0:a -c:v copy -af "aresample=48000,pan=5.1(side)|FL=0.3*c0|FR=0.3*c0|FC=c0|LFE=0*c0|SL=0.1*c0|SR=0.1*c0" -c:a ac3 -b:a 128k -map_metadata -1 turtle-jfk-ac3.mp4
+	//	ffmpeg -i turtle-jfk.mp4 -map 0:v -map 0:a -c:v copy -af "aresample=48000,pan=stereo|c0=c0|c1=c0" -c:a eac3 -b:a 64k -map_metadata -1 turtle-jfk-eac3.mp4
+	//
+	// (aac_at is macOS's AudioToolbox encoder: profile 4 is HE-AAC, SBR at
+	// 16 kHz; 28 HE-AACv2, SBR and parametric stereo at 22.05 kHz.)
+	for _, file := range []string{"turtle-jfk-heaac.mp4", "turtle-jfk-heaacv2.mp4", "turtle-jfk-ac3.mp4", "turtle-jfk-eac3.mp4"} {
+		data, err := os.ReadFile("testdata/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := must(embed(true, inline("video/mp4", data)))
+		extra := int32(0)
+		if strings.Contains(file, "heaac") {
+			extra = 4
+		}
+		if n := r.GetUsageMetadata().GetPromptTokenCount(); n < nt || n > nt+extra {
+			t.Errorf("%s: %d tokens, the AAC track's %d (+%d)", file, n, nt, extra)
+		}
+		c := cosine(r.GetEmbedding().GetValues(), v)
+		if c < 0.99 {
+			t.Errorf("%s against the AAC track: cosine %.4f, want at least 0.99", file, c)
+		}
+		t.Logf("%s: cosine %.6f to the AAC track's vector", file, c)
+	}
 
 	// A track this build does not decode is refused naming it.
 	if _, err := embed(true, inline("video/mp4", []byte("not a video"))); status.Code(err) != codes.InvalidArgument ||
