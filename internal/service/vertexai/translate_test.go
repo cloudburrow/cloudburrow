@@ -117,3 +117,17 @@ func TestSameLanguage(t *testing.T) {
 		t.Error("distinct variants")
 	}
 }
+
+// TestTranslateTextGreedy: a translation is decoded greedily, temperature 0
+// and top-k 1, so a text always answers the same words.
+func TestTranslateTextGreedy(t *testing.T) {
+	var seen []Request
+	gen := &ScriptedGenerator{ID: "gemma-test", Chunks: []string{"Good morning"}, Options: true, Seen: func(r Request) { seen = append(seen, r) }}
+	code, out := translationCall(t, gen, "translateText", `{"contents": ["Guten Morgen"], "sourceLanguageCode": "de", "targetLanguageCode": "en"}`)
+	if tr := out["translations"].([]any)[0].(map[string]any); code != 200 || tr["translatedText"] != "Good morning" {
+		t.Fatalf("%d %v", code, out)
+	}
+	if len(seen) != 1 || seen[0].Temperature == nil || *seen[0].Temperature != 0 || seen[0].TopK == nil || *seen[0].TopK != 1 {
+		t.Errorf("sampler: %+v", seen)
+	}
+}

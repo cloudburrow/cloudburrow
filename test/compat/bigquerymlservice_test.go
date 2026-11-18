@@ -309,9 +309,12 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 // text_content; a NULL text has no result. TRANSLATE_TEXT runs the
 // instance's local Gemma model: with one, the page's sample shape
 // (glossary_translations, translation_memory_translations, and
-// translations[0] with detected_language_code and translated_text, whose
-// words are recorded, not asserted); with none (an instance without
-// --local-ai-model), 501. An invalid target language is the row's
+// translations[0] with detected_language_code and translated_text) for the
+// three sentences into en and es, a NULL text with no result; each
+// translation is one line with no preamble, carries its sentence's meaning
+// (en: "hello", "good morning", "weather"...; es: the detector reads it as
+// es), and a second run answers the same words; with none (an instance
+// without --local-ai-model), 501. An invalid target language is the row's
 // INVALID_ARGUMENT; a missing target, a bad mode, an unknown option, an
 // input without text_content and another function of the model are
 // refused before anything is sent.
@@ -389,20 +392,68 @@ func TestBigQueryMLTranslate(t *testing.T) {
 		}
 		t.Logf("TRANSLATE_TEXT: this instance has no local generation model: %v", err)
 	} else {
-		rows = mlQuery(t, h, c, fmt.Sprintf("SELECT id, TO_JSON_STRING(ml_translate_result) AS result, ml_translate_status AS status, "+
-			"STRING(ml_translate_result.translations[0].detected_language_code) AS detected, STRING(ml_translate_result.translations[0].translated_text) AS text "+
-			"FROM ML.TRANSLATE(MODEL `%s.translate`, TABLE `%s.texts`, STRUCT('translate_text' AS translate_mode, 'en' AS target_language_code)) ORDER BY id", ds, ds))
-		if len(rows) != 4 {
-			t.Fatalf("TRANSLATE_TEXT rows: %v", rows)
-		}
-		for i, want := range []string{"fr", "de", "ja"} {
-			r := rows[i]
-			res := fmt.Sprint(r["result"])
-			if r["status"] != "" || r["detected"] != want || strings.TrimSpace(fmt.Sprint(r["text"])) == "" ||
-				!strings.Contains(res, `"glossary_translations":[]`) || !strings.Contains(res, `"translation_memory_translations":[]`) {
-				t.Errorf("TRANSLATE_TEXT row %d: %v", i+1, r)
+		translate := func(target string) []map[string]bigquery.Value {
+			rows := mlQuery(t, h, c, fmt.Sprintf("SELECT id, TO_JSON_STRING(ml_translate_result) AS result, ml_translate_status AS status, "+
+				"STRING(ml_translate_result.translations[0].detected_language_code) AS detected, STRING(ml_translate_result.translations[0].translated_text) AS text "+
+				"FROM ML.TRANSLATE(MODEL `%s.translate`, TABLE `%s.texts`, STRUCT('translate_text' AS translate_mode, '%s' AS target_language_code)) ORDER BY id", ds, ds, target))
+			if len(rows) != 4 {
+				t.Fatalf("TRANSLATE_TEXT %s rows: %v", target, rows)
 			}
-			t.Logf("translation (recorded, not asserted): %v", r["text"])
+			if r := rows[3]; (r["result"] != nil && r["result"] != "null") || r["status"] != nil || r["text"] != nil {
+				t.Errorf("TRANSLATE_TEXT %s, a NULL text: %v", target, rows[3])
+			}
+			for i, want := range []string{"fr", "de", "ja"} {
+				r := rows[i]
+				res := fmt.Sprint(r["result"])
+				if r["status"] != "" || r["detected"] != want || strings.TrimSpace(fmt.Sprint(r["text"])) == "" ||
+					!strings.Contains(res, `"glossary_translations":[]`) || !strings.Contains(res, `"translation_memory_translations":[]`) {
+					t.Errorf("TRANSLATE_TEXT %s row %d: %v", target, i+1, r)
+				}
+				// The translation alone, as Translation answers it: one
+				// line, no preamble, quotes or commentary around it.
+				if s := fmt.Sprint(r["text"]); strings.ContainsAny(s, "\n\"“”*") || strings.Contains(strings.ToLower(s), "translat") {
+					t.Errorf("TRANSLATE_TEXT %s row %d has more than the translation: %q", target, i+1, s)
+				}
+			}
+			return rows
+		}
+		en := translate("en")
+		// The words are Gemma's, not NMT's: what is asserted is the meaning
+		// each sentence must carry, in English.
+		for i, words := range [][]string{{"hello", "how are you"}, {"good morning", "how are you", "today"}, {"hello", "weather", "today"}} {
+			s := strings.ToLower(fmt.Sprint(en[i]["text"]))
+			for _, w := range words {
+				if !strings.Contains(s, w) {
+					t.Errorf("TRANSLATE_TEXT en row %d %q lacks %q", i+1, s, w)
+				}
+			}
+			t.Logf("translation to en (row %d): %v", i+1, en[i]["text"])
+		}
+		// Temperature 0 and top-k 1: a second run answers the same words,
+		// as Translation does.
+		for i, r := range translate("en")[:3] {
+			if r["text"] != en[i]["text"] {
+				t.Errorf("TRANSLATE_TEXT is not deterministic, row %d: %q then %q", i+1, en[i]["text"], r["text"])
+			}
+		}
+		// Another target: the detector reads each Spanish translation as
+		// Spanish.
+		es := translate("es")
+		var lits []string
+		for i, r := range es[:3] {
+			t.Logf("translation to es (row %d): %v", i+1, r["text"])
+			lits = append(lits, fmt.Sprintf("SELECT %d AS id, '%s' AS text_content", i+1,
+				strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(fmt.Sprint(r["text"]))))
+		}
+		rows = mlQuery(t, h, c, fmt.Sprintf("SELECT id, JSON_VALUE(ml_translate_result, '$.languages[0].language_code') AS code FROM ML.TRANSLATE(MODEL `%s.translate`, "+
+			"(%s), STRUCT('DETECT_LANGUAGE' AS translate_mode)) ORDER BY id", ds, strings.Join(lits, " UNION ALL ")))
+		if len(rows) != 3 {
+			t.Fatalf("DETECT_LANGUAGE of the Spanish translations: %v", rows)
+		}
+		for i, r := range rows {
+			if r["code"] != "es" {
+				t.Errorf("translation to es, row %d, detected as %v: %q", i+1, r["code"], es[i]["text"])
+			}
 		}
 	}
 	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT ml_translate_result AS result, ml_translate_status AS status FROM ML.TRANSLATE(MODEL `%s.translate`, "+

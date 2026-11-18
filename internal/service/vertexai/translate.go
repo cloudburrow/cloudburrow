@@ -28,7 +28,8 @@ import (
 //     zh-CN.
 //   - translateText runs the instance's local Gemma model (the LiteRT-LM
 //     generator AI.GENERATE uses, `up --local-ai-model`) with
-//     TranslateGemma's prompt, at temperature 0. TranslateGemma itself is
+//     TranslateGemma's prompt, greedily (temperature 0, top-k 1), so a
+//     text always translates to the same words. TranslateGemma itself is
 //     published for LiteRT only as MediaPipe web (GPU) bundles, which the
 //     CPU runtime does not run. With no local model, translateText is
 //     UNIMPLEMENTED. A text whose language is already the target is
@@ -238,8 +239,11 @@ func (s *Server) translateOne(r *http.Request, text, src, tgt string) (string, e
 		sn + " text into " + tn + ":\n\n\n" + text
 	gr := GenerateContentRequest{Contents: []Content{{Role: "user", Parts: []Part{{Text: prompt}}}}}
 	if honoursOptions(s.gen) {
-		var zero float32
-		gr.GenerationConfig = &GenerationConfig{Temperature: &zero}
+		// Greedy decoding, so a text always translates to the same words,
+		// as Translation's do: temperature 0, and top-k 1 for a sampler
+		// that does not read temperature 0 as greedy.
+		zero, one := float32(0), float32(1)
+		gr.GenerationConfig = &GenerationConfig{Temperature: &zero, TopK: &one}
 	}
 	req, _ := json.Marshal(gr)
 	resp, err := s.generateUnary(r.Context(), s.gen.Model(), bytes.NewReader(req))
