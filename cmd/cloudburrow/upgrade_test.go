@@ -10,6 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	pubsub "cloud.google.com/go/pubsub/v2"
+	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
@@ -17,18 +23,38 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
-// State written by v0.1.0, the latest release (#1605), must load in this
-// one. testdata/state-v0.1.0 holds what that release wrote for an instance
-// seeded through the official clients (test/upgrade): the host side of its
-// persistent state directory, and a `state save` archive. These tests read
-// both back through this release's stores; test/upgrade does the whole
-// upgrade against real instances.
+// State written by an earlier release must load in this one (#1605, #1807):
+// v0.2.0, the latest release, and v0.1.0 before it. testdata/state-<release>
+// holds what that release wrote for a persistent instance seeded through the
+// official clients (test/upgrade's TestSeedRunning): the host side of its
+// state directory (the tasks, projects and scheduler stores; the other
+// services keep theirs on cluster volumes), and a `state save` archive taken
+// before `stop`. These tests read both back through this release's stores;
+// test/upgrade does the whole upgrade against real instances.
+//
+// To capture a release's fixture: bring that release's published binary up
+// with `--mode persistent` and test/upgrade's flags, run TestSeedRunning
+// against it, `state save` it to state-save.tar.gz, `stop` it, and copy
+// <state-dir>/<name>/{tasks,projects,scheduler}/metadata.json under statedir.
 
-const v010Project = "w-ejx-up"
+// stateFixture is one earlier release's testdata, and the project its
+// instance ran as.
+type stateFixture struct {
+	release, project string
+}
 
-func copyFixtureDir(t *testing.T, name string) store.Store {
+var (
+	v010 = stateFixture{release: "v0.1.0", project: "w-ejx-up"}
+	v020 = stateFixture{release: "v0.2.0", project: "w-emdb"}
+)
+
+func (f stateFixture) path(elem ...string) string {
+	return filepath.Join(append([]string{"testdata", "state-" + f.release}, elem...)...)
+}
+
+func (f stateFixture) copyDir(t *testing.T, name string) store.Store {
 	t.Helper()
-	src := filepath.Join("testdata", "state-v0.1.0", "statedir", name)
+	src := f.path("statedir", name)
 	dst := filepath.Join(t.TempDir(), name)
 	if err := os.MkdirAll(dst, 0o700); err != nil {
 		t.Fatal(err)
@@ -42,72 +68,81 @@ func copyFixtureDir(t *testing.T, name string) store.Store {
 	}
 	st, err := store.OpenDurable(dst)
 	if err != nil {
-		t.Fatalf("open v0.1.0's %s state: %v", name, err)
+		t.Fatalf("open %s's %s state: %v", f.release, name, err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
 
-func checkV010Tasks(t *testing.T, db store.Store) {
+func (f stateFixture) checkTasks(t *testing.T, db store.Store) {
 	t.Helper()
 	ts := tasks.NewStore(db)
-	q := "projects/" + v010Project + "/locations/us-central1/queues/upgrade-queue"
+	q := "projects/" + f.project + "/locations/us-central1/queues/upgrade-queue"
 	got, err := ts.GetQueue(q)
 	if err != nil {
-		t.Fatalf("v0.1.0's queue: %v", err)
+		t.Fatalf("%s's queue: %v", f.release, err)
 	}
 	if got.State != tasks.StatePaused || got.RetryConfig.MaxAttempts != 7 {
-		t.Errorf("v0.1.0's queue = %+v", got)
+		t.Errorf("%s's queue = %+v", f.release, got)
 	}
 	task, err := ts.GetTask(tasks.TaskName(q, "upgrade-task"))
 	if err != nil {
-		t.Fatalf("v0.1.0's task: %v", err)
+		t.Fatalf("%s's task: %v", f.release, err)
 	}
 	if task.HTTPRequest == nil || string(task.HTTPRequest.Body) != "payload" {
-		t.Errorf("v0.1.0's task = %+v", task)
+		t.Errorf("%s's task = %+v", f.release, task)
 	}
-	// The queue takes new tasks, beside v0.1.0's, which carry no tombstones.
+	// The queue takes new tasks beside the older release's (v0.1.0's carry
+	// no tombstones).
 	if _, err := ts.CreateTask(tasks.Task{Name: tasks.TaskName(q, "after-upgrade"),
 		HTTPRequest: &tasks.HTTPRequest{URL: "http://127.0.0.1:9/x"}}); err != nil {
 		t.Errorf("a task after the upgrade: %v", err)
 	}
 	if err := ts.DeleteTask(tasks.TaskName(q, "upgrade-task")); err != nil {
-		t.Errorf("delete v0.1.0's task: %v", err)
+		t.Errorf("delete %s's task: %v", f.release, err)
 	}
 }
 
-func checkV010Projects(t *testing.T, db store.Store) {
+func (f stateFixture) checkProjects(t *testing.T, db store.Store) {
 	t.Helper()
 	p, err := resourcemanager.New(db).Get("cb-upgrade-proj")
 	if err != nil {
-		t.Fatalf("v0.1.0's project: %v", err)
+		t.Fatalf("%s's project: %v", f.release, err)
 	}
 	if p.DisplayName != "Upgrade" {
-		t.Errorf("v0.1.0's project = %+v", p)
+		t.Errorf("%s's project = %+v", f.release, p)
 	}
 }
 
-func TestStateDirFromV010Loads(t *testing.T) {
-	checkV010Tasks(t, copyFixtureDir(t, "tasks"))
-	checkV010Projects(t, copyFixtureDir(t, "projects"))
-	j, err := scheduler.NewStore(copyFixtureDir(t, "scheduler")).Get("projects/" + v010Project + "/locations/us-central1/jobs/upgrade-job")
+func (f stateFixture) checkScheduler(t *testing.T, db store.Store) {
+	t.Helper()
+	j, err := scheduler.NewStore(db).Get("projects/" + f.project + "/locations/us-central1/jobs/upgrade-job")
 	if err != nil {
-		t.Fatalf("v0.1.0's job: %v", err)
+		t.Fatalf("%s's job: %v", f.release, err)
 	}
 	if j.State != scheduler.StatePaused || j.Schedule != "0 3 * * *" {
-		t.Errorf("v0.1.0's job = %+v", j)
+		t.Errorf("%s's job = %+v", f.release, j)
 	}
 }
 
-// v010Archive reads the v0.1.0 archive's entries.
-func v010Archive(t *testing.T) memEntries {
+func (f stateFixture) checkStateDir(t *testing.T) {
+	f.checkTasks(t, f.copyDir(t, "tasks"))
+	f.checkProjects(t, f.copyDir(t, "projects"))
+	f.checkScheduler(t, f.copyDir(t, "scheduler"))
+}
+
+func TestStateDirFromV010Loads(t *testing.T) { v010.checkStateDir(t) }
+func TestStateDirFromV020Loads(t *testing.T) { v020.checkStateDir(t) }
+
+// archive reads the release's `state save` archive's entries.
+func (f stateFixture) archive(t *testing.T) memEntries {
 	t.Helper()
-	f, err := os.Open(filepath.Join("testdata", "state-v0.1.0", "state-save.tar.gz"))
+	file, err := os.Open(f.path("state-save.tar.gz"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,22 +175,26 @@ func (m memEntries) service(name string) memEntries {
 	return out
 }
 
-func TestStateArchiveFromV010Loads(t *testing.T) {
-	a := v010Archive(t)
-	ctx := context.Background()
-	load := func(name string) store.Store {
-		t.Helper()
-		db := store.NewMemory()
-		if err := (&kvSnapshotter{name: name, db: func() store.Store { return db }}).Import(ctx, a.service(name)); err != nil {
-			t.Fatalf("load v0.1.0's %s: %v", name, err)
-		}
-		return db
+// loadKV loads one key-value service of the archive into a fresh store.
+func (f stateFixture) loadKV(t *testing.T, a memEntries, name string) store.Store {
+	t.Helper()
+	db := store.NewMemory()
+	if err := (&kvSnapshotter{name: name, db: func() store.Store { return db }}).Import(context.Background(), a.service(name)); err != nil {
+		t.Fatalf("load %s's %s: %v", f.release, name, err)
 	}
-	checkV010Tasks(t, load("tasks"))
-	checkV010Projects(t, load("projects"))
+	return db
+}
 
-	ss := secrets.NewStore(load("secretmanager"))
-	vs, err := ss.ListVersions(v010Project, "upgrade-secret")
+// checkArchive loads what every release's archive holds: Cloud Tasks,
+// projects, Secret Manager and Cloud Storage.
+func (f stateFixture) checkArchive(t *testing.T, a memEntries) {
+	t.Helper()
+	ctx := context.Background()
+	f.checkTasks(t, f.loadKV(t, a, "tasks"))
+	f.checkProjects(t, f.loadKV(t, a, "projects"))
+
+	ss := secrets.NewStore(f.loadKV(t, a, "secretmanager"))
+	vs, err := ss.ListVersions(f.project, "upgrade-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,33 +203,70 @@ func TestStateArchiveFromV010Loads(t *testing.T) {
 		states[v.Number] = v.State
 	}
 	if states[1] != secrets.StateDisabled || states[2] != secrets.StateDestroyed || states[3] != secrets.StateEnabled {
-		t.Errorf("v0.1.0's versions = %v", states)
+		t.Errorf("%s's versions = %v", f.release, states)
 	}
-	if v, err := ss.AccessVersion(v010Project, "upgrade-secret", "3"); err != nil || string(v.Payload) != "third" {
-		t.Errorf("v0.1.0's version 3 = %q, %v", v.Payload, err)
+	if v, err := ss.AccessVersion(f.project, "upgrade-secret", "3"); err != nil || string(v.Payload) != "third" {
+		t.Errorf("%s's version 3 = %q, %v", f.release, v.Payload, err)
 	}
-	// The archive was saved with five versions, the last two destroyed.
-	if v, err := ss.AddVersion(v010Project, "upgrade-secret", []byte("sixth")); err != nil || v.Number != len(vs)+1 {
+	// A new version is numbered after every saved one, destroyed ones too.
+	if v, err := ss.AddVersion(f.project, "upgrade-secret", []byte("next")); err != nil || v.Number != len(vs)+1 {
 		t.Errorf("a version after the upgrade = %+v, %v", v, err)
 	}
 
-	// Cloud Storage, from the layout of the archive v0.1.0 wrote (#290),
-	// into the builtin server (#519).
 	srv, call := builtinAt(t)
 	call("POST", "/storage/v1/b?project=p", strings.NewReader(`{"name":"before-the-load"}`))
-	s := &builtinStorageSnapshotter{tunnel: forwarderAt(t, srv.Listener.Addr().String()), project: v010Project}
+	s := &builtinStorageSnapshotter{tunnel: forwarderAt(t, srv.Listener.Addr().String()), project: f.project}
 	if err := s.Import(ctx, a.service("storage")); err != nil {
-		t.Fatalf("load v0.1.0's storage: %v", err)
+		t.Fatalf("load %s's storage: %v", f.release, err)
 	}
 	if code, body := call("GET", "/download/storage/v1/b/cb-upgrade-1605/o/dir%2Fb.json?alt=media", nil); code != 200 || body != `{"n": 1}` {
-		t.Errorf("v0.1.0's object = %d %q", code, body)
+		t.Errorf("%s's object = %d %q", f.release, code, body)
 	}
 	if _, body := call("GET", "/storage/v1/b/cb-upgrade-1605/o/a.txt", nil); !strings.Contains(body, `"seeded": "yes"`) ||
 		!strings.Contains(body, `"contentType": "text/plain"`) {
-		t.Errorf("v0.1.0's object metadata = %s", body)
+		t.Errorf("%s's object metadata = %s", f.release, body)
 	}
 	if code, _ := call("GET", "/storage/v1/b/before-the-load", nil); code != 404 {
 		t.Errorf("a bucket made before the load is still there: %d", code)
+	}
+}
+
+// v0.1.0's archive keeps Cloud Storage in the layout of the server it ran
+// before the builtin one (#290), which a load creates through the builtin
+// server's JSON API (#519).
+func TestStateArchiveFromV010Loads(t *testing.T) {
+	v010.checkArchive(t, v010.archive(t))
+}
+
+// v0.2.0's archive keeps the builtin server's own Cloud Storage state, and
+// adds Cloud Scheduler and Pub/Sub's resources (#880).
+func TestStateArchiveFromV020Loads(t *testing.T) {
+	a := v020.archive(t)
+	if _, ok := a["services/storage/state.json"]; !ok {
+		t.Fatal("v0.2.0's archive has no services/storage/state.json")
+	}
+	v020.checkArchive(t, a)
+	v020.checkScheduler(t, v020.loadKV(t, a, "scheduler"))
+
+	_, addr := pubsubBehindFront(t)
+	ctx := context.Background()
+	p := &pubsubSnapshotter{tunnel: forwarderAt(t, addr), projects: func() []string { return nil }}
+	if err := p.Import(ctx, a.service("pubsub")); err != nil {
+		t.Fatalf("load v0.2.0's pubsub: %v", err)
+	}
+	c, err := pubsub.NewClient(ctx, v020.project, option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	sub, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
+		Subscription: "projects/" + v020.project + "/subscriptions/upgrade-sub"})
+	if err != nil {
+		t.Fatalf("v0.2.0's subscription: %v", err)
+	}
+	if sub.Topic != "projects/"+v020.project+"/topics/upgrade-topic" || sub.AckDeadlineSeconds != 30 {
+		t.Errorf("v0.2.0's subscription = %v", sub)
 	}
 }
 

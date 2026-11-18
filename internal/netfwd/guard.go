@@ -71,6 +71,13 @@ func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, 
 // startObservedGuard is startGuard, telling observe about each request
 // (observe.go, #1267) when it is not nil.
 func startObservedGuard(addr, upstream string, logf func(string, ...any), observe func(Call)) (*guardProxy, error) {
+	return startObservedGuardFunc(addr, func() string { return upstream }, logf, observe)
+}
+
+// startObservedGuardFunc is startObservedGuard with an upstream read on
+// each request, so a tunnel whose kubectl moves to another port
+// (repickRefusedKubePort) keeps its guard.
+func startObservedGuardFunc(addr string, upstream func() string, logf func(string, ...any), observe func(Call)) (*guardProxy, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -156,8 +163,8 @@ func setClientAddr(r *http.Request) {
 // over TLS, so no page can send it, and a gRPC client's :authority is
 // whatever name it dialed, which a check could only break. Everything else,
 // HTTP/1.1 and any other h2c request, is checked.
-func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
-	proxy := PassThrough(upstream, logf)
+func guardHandler(upstream func() string, logf func(string, ...any)) http.Handler {
+	proxy := passThrough(upstream, logf)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setClientAddr(r)
 		if isGRPC(r) {
@@ -185,6 +192,11 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 // front an emulator's pod runs (internal/callfront, #1288), which pods
 // reach by the Service's name.
 func PassThrough(upstream string, logf func(string, ...any)) http.Handler {
+	return passThrough(func() string { return upstream }, logf)
+}
+
+// passThrough is PassThrough with an upstream read on each request.
+func passThrough(upstream func() string, logf func(string, ...any)) http.Handler {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -208,7 +220,7 @@ func PassThrough(upstream string, logf func(string, ...any)) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme = "http"
-			pr.Out.URL.Host = upstream
+			pr.Out.URL.Host = upstream()
 			// The emulator sees the name the client used, as through a raw
 			// tunnel.
 			pr.Out.Host = pr.In.Host

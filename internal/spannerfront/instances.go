@@ -50,6 +50,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -118,7 +119,12 @@ type change struct {
 }
 
 // New returns the front for the emulator whose gRPC port is at emulator.
-func New(emulator string) (*Instances, error) {
+func New(emulator string) (*Instances, error) { return newWith(emulator) }
+
+// newWith is New with extra gRPC server options (tests). The server is
+// served through ServeHTTP: grpchttp's, so Stop waits for every call's
+// handler (#1804).
+func newWith(emulator string, opts ...grpc.ServerOption) (*Instances, error) {
 	conn, err := grpc.NewClient(emulator, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
@@ -129,7 +135,7 @@ func New(emulator string) (*Instances, error) {
 		backups: map[string]*backup{}, restored: map[string]*databasepb.RestoreInfo{}, schedules: map[string]*schedule{},
 		roleStmts: map[string][]string{}, configs: map[string]*instancepb.InstanceConfig{}, partitions: map[string]*partitionChange{},
 		splitPoints: map[string][]*databasepb.SplitPoints{}}
-	s.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(s.persistAfter))
+	s.grpc = grpchttp.NewServer(append([]grpc.ServerOption{grpc.ChainUnaryInterceptor(s.persistAfter)}, opts...)...)
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
 	longrunningpb.RegisterOperationsServer(s.grpc, s)
@@ -190,6 +196,11 @@ func (s *Instances) Claims(r *http.Request) bool {
 	_, ok := restCall(r)
 	return ok
 }
+
+// Stop stops the gRPC server, once the HTTP server the front is served by
+// has shut down, waiting for every call's handler, and the state it
+// persists, until ctx ends (#1804).
+func (s *Instances) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, s.grpc) }
 
 // ServeHTTP answers a call Claims claimed.
 func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {

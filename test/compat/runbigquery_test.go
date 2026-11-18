@@ -76,14 +76,20 @@ func TestAPodDialingTheBigQueryServiceGetsTheFrontWithoutCloudRun(t *testing.T) 
 	defer cancel()
 	loadEnvProbe(ctx, t)
 	ns := testNamespace()
-	// Without Cloud Run, cloudburrow-host publishes Resource Manager alone,
-	// for the front's folder and organization lookups (#1392); with Cloud
-	// Run it publishes Cloud Run's API too, and the Cloud Run tests cover
-	// that instance.
+	// Without Cloud Run, cloudburrow-host publishes what the BigQuery front
+	// and the storage server dial (up.go): Resource Manager, for the front's
+	// folder and organization lookups (#1392), the ONNX runner (#1711), the
+	// TensorFlow converter (#1775), the local Vertex AI (remote models) and,
+	// with Cloud Storage, the metadata server (#1787). With Cloud Run it
+	// publishes Cloud Run's API and the rest too, and the Cloud Run tests
+	// cover that instance. (Main run 44326182935 skipped this test in the
+	// emulators shard, which has no Cloud Run, on "metadata", so it ran in
+	// no shard.)
+	withoutRun := map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true, "metadata": true}
 	if names, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", ns, "get", "service", "cloudburrow-host",
 		"-o", "jsonpath={.spec.ports[*].name}").Output(); err == nil {
 		for _, name := range strings.Fields(string(names)) {
-			if name != "resourcemanager" {
+			if !withoutRun[name] {
 				t.Skipf("this instance publishes %s to pods (Cloud Run is enabled); the Cloud Run tests cover it", name)
 			}
 		}

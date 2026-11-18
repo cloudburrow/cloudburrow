@@ -94,6 +94,24 @@ type Peeker interface {
 	SawRequest(r *http.Request)
 }
 
+// Stopper is an intercept with a gRPC server of its own, served through
+// ServeHTTP, whose calls' handlers can outlive the front's HTTP servers'
+// Shutdown (#1804): Stop waits for them, until ctx ends.
+type Stopper interface {
+	Stop(ctx context.Context) error
+}
+
+// Stop stops each of the intercepts that is a Stopper.
+func (is Intercepts) Stop(ctx context.Context) error {
+	var errs []error
+	for _, i := range is {
+		if s, ok := i.(Stopper); ok {
+			errs = append(errs, s.Stop(ctx))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // SawRequest shows r to each of the intercepts that is a Peeker.
 func (is Intercepts) SawRequest(r *http.Request) {
 	for _, i := range is {
@@ -185,6 +203,45 @@ func Server(h http.Handler, logf func(string, ...any), service ...string) *http.
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(logWriter(logf), "", 0),
 	}
+}
+
+// serveAll serves each of servers on its listener until ctx ends, then shuts
+// them down and stops the intercepts, and returns once both are done.
+func serveAll(ctx context.Context, servers []*http.Server, listeners []net.Listener, icpts Intercepts) error {
+	shut := make(chan struct{})
+	go func() {
+		defer close(shut)
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, srv := range servers {
+			_ = srv.Shutdown(sctx)
+		}
+		// Shutdown waits for ServeHTTP, which can return before a gRPC
+		// call an intercept answered has ended (#1804).
+		_ = icpts.Stop(sctx)
+	}()
+	errs := make(chan error, len(servers))
+	for i, srv := range servers {
+		go func() { errs <- srv.Serve(listeners[i]) }()
+	}
+	// One port failing fails the front, so the pod restarts it whole
+	// rather than serve one port of two.
+	for range servers {
+		if err := <-errs; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			for _, srv := range servers {
+				_ = srv.Close()
+			}
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = icpts.Stop(sctx)
+			return err
+		}
+	}
+	// Serve returns ErrServerClosed as soon as Shutdown begins, not once
+	// it is done.
+	<-shut
+	return nil
 }
 
 type logWriter func(string, ...any)
@@ -345,27 +402,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		servers = append(servers, Server(h, logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
 	}
-	go func() {
-		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		for _, srv := range servers {
-			_ = srv.Shutdown(sctx)
-		}
-	}()
-	errs := make(chan error, len(servers))
-	for i, srv := range servers {
-		go func() { errs <- srv.Serve(listeners[i]) }()
-	}
-	// One port failing fails the front, so the pod restarts it whole
-	// rather than serve one port of two.
-	for range servers {
-		if err := <-errs; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			for _, srv := range servers {
-				_ = srv.Close()
-			}
-			return err
-		}
+	if err := serveAll(ctx, servers, listeners, icpts); err != nil {
+		return err
 	}
 	// The documents' last export, which the emulator's container waits
 	// for before it stops the emulator (#1615).

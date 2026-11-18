@@ -12,7 +12,9 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
@@ -22,9 +24,13 @@ import (
 type listener struct {
 	addr string
 
+	// options are extra gRPC server options (tests: a stats handler).
+	options []grpc.ServerOption
+
 	mu   sync.Mutex
 	ln   net.Listener
 	srv  *http.Server
+	grpc *grpc.Server
 	done chan struct{}
 }
 
@@ -55,11 +61,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// No write timeout: a generation can legitimately run for minutes, and a
 	// deadline here would cut a stream mid-token for no reason the caller
 	// could see. The read header timeout still bounds a stalled client.
-	srv := &http.Server{Handler: s.mixedHandler(), ReadHeaderTimeout: 10 * time.Second}
+	g := s.newGRPCServer()
+	srv := &http.Server{Handler: s.mixedHandler(g), ReadHeaderTimeout: 10 * time.Second}
 	done := make(chan struct{})
 
 	s.lis.mu.Lock()
-	s.lis.ln, s.lis.srv, s.lis.done = ln, srv, done
+	s.lis.ln, s.lis.srv, s.lis.grpc, s.lis.done = ln, srv, g, done
 	s.lis.mu.Unlock()
 
 	go func() {
@@ -75,8 +82,7 @@ func (s *Server) Start(ctx context.Context) error {
 // for Secret Manager and KMS: HTTP/2 with an application/grpc content type
 // goes to PredictionService, everything else to the JSON routes. h2c accepts
 // the prior-knowledge HTTP/2 an insecure gRPC client speaks.
-func (s *Server) mixedHandler() http.Handler {
-	g := s.newGRPCServer()
+func (s *Server) mixedHandler(g *grpc.Server) http.Handler {
 	jsonAPI := s.Handler()
 	grpcAPI := hostguard.Wrap(g)
 	both := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -92,8 +98,8 @@ func (s *Server) mixedHandler() http.Handler {
 // Stop shuts the endpoint down.
 func (s *Server) Stop(ctx context.Context) error {
 	s.lis.mu.Lock()
-	srv, done := s.lis.srv, s.lis.done
-	s.lis.srv = nil
+	srv, g, done := s.lis.srv, s.lis.grpc, s.lis.done
+	s.lis.srv, s.lis.grpc = nil, nil
 	s.lis.mu.Unlock()
 
 	if srv == nil {
@@ -103,6 +109,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err != nil {
 		_ = srv.Close()
 	}
+	// h2c hijacks the connection, so Shutdown waits for no gRPC call;
+	// stopping g ends them and waits for their handlers, where a call's
+	// stats end, until ctx ends (#1804).
+	_ = grpchttp.Stop(ctx, g)
 	if done != nil {
 		select {
 		case <-done:

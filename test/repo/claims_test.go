@@ -182,3 +182,77 @@ func repoRoot(t *testing.T) string {
 	}
 	return strings.TrimSpace(string(root))
 }
+
+// TestPersistenceTableMatchesTheRestartProbes ties install.md's "What
+// survives a restart" table to the restart probes CI runs (#1801): a row
+// that says **Yes** names its probes, each of which is in PROBE_TESTS of
+// scripts/compat-shards.sh, and every probe there is named by a **Yes** row.
+// A row that says anything else names no probe, so the table never claims a
+// survival that no stop/up measured, nor leaves out one that is.
+func TestPersistenceTableMatchesTheRestartProbes(t *testing.T) {
+	root := repoRoot(t)
+	doc, err := os.ReadFile(filepath.Join(root, "docs", "install.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shards, err := os.ReadFile(filepath.Join(root, "scripts", "compat-shards.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probes := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^\s*PROBE_TESTS="([^"]*)"`).FindAllStringSubmatch(string(shards), -1) {
+		for _, name := range strings.Fields(m[1]) {
+			probes[name] = true
+		}
+	}
+	if len(probes) == 0 {
+		t.Fatal("scripts/compat-shards.sh sets no PROBE_TESTS")
+	}
+
+	text := string(doc)
+	start := strings.Index(text, "\n## What survives a restart\n")
+	if start < 0 {
+		t.Fatal(`docs/install.md has no "## What survives a restart" section`)
+	}
+	section := text[start+1:]
+	if end := strings.Index(section[3:], "\n## "); end >= 0 {
+		section = section[:end+3]
+	}
+	named := map[string]bool{}
+	rows := 0
+	for _, line := range strings.Split(section, "\n") {
+		cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
+		if len(cells) != 3 || strings.HasPrefix(strings.TrimSpace(cells[0]), "---") || strings.TrimSpace(cells[0]) == "Service" {
+			continue
+		}
+		rows++
+		service, claim, cited := strings.TrimSpace(cells[0]), strings.TrimSpace(cells[1]), cells[2]
+		tests := regexp.MustCompile("`(Test[A-Za-z0-9_]+)`").FindAllStringSubmatch(cited, -1)
+		yes := strings.HasPrefix(claim, "**Yes**")
+		if !yes {
+			for _, m := range tests {
+				if probes[m[1]] {
+					t.Errorf("%s: says %q but cites the restart probe %s", service, claim[:min(len(claim), 20)], m[1])
+				}
+			}
+			continue
+		}
+		if len(tests) == 0 {
+			t.Errorf("%s: says it survives stop/up but cites no restart probe", service)
+		}
+		for _, m := range tests {
+			if !probes[m[1]] {
+				t.Errorf("%s: cites %s, which no shard runs as a restart probe (PROBE_TESTS)", service, m[1])
+			}
+			named[m[1]] = true
+		}
+	}
+	if rows == 0 {
+		t.Fatal("found no rows in install.md's persistence table")
+	}
+	for p := range probes {
+		if !named[p] {
+			t.Errorf("the restart probe %s is in PROBE_TESTS but no **Yes** row of install.md's table names it", p)
+		}
+	}
+}

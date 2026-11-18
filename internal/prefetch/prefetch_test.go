@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -279,6 +280,17 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 
 func (f *fakeRunner) RunStdout(_ context.Context, w io.Writer, name string, args ...string) error {
 	f.record(name, args)
+	if name == "docker" && len(args) > 0 && args[0] == "cp" {
+		// docker cp CONTAINER:FILE - writes a tar holding the file.
+		tw := tar.NewWriter(w)
+		if err := tw.WriteHeader(&tar.Header{Name: path.Base(args[1]), Mode: 0o644, Size: int64(len(f.archive)), Typeflag: tar.TypeReg}); err != nil {
+			return err
+		}
+		if _, err := tw.Write(f.archive); err != nil {
+			return err
+		}
+		return tw.Close()
+	}
 	_, err := w.Write(f.archive)
 	return err
 }
@@ -335,7 +347,9 @@ func TestPrefetcherStoresEverythingOnce(t *testing.T) {
 		"docker save dev.local/cloudburrow-storage:abc",
 		"docker save dev.local/cloudburrow-bigquery:def",
 		"docker exec helper-node ctr --namespace=k8s.io images pull --platform linux/arm64 gcr.io/sdk@sha256:sdk",
-		"docker exec helper-node ctr --namespace=k8s.io images export --platform linux/arm64 - docker.io/envoyproxy/envoy:v1.37-latest",
+		"docker exec helper-node ctr --namespace=k8s.io images export --platform linux/arm64 " + nodeExport + " docker.io/envoyproxy/envoy:v1.37-latest",
+		"docker cp helper-node:" + nodeExport + " -",
+		"docker exec helper-node rm -f " + nodeExport,
 	} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("no %q in:\n%s", want, calls)
@@ -509,5 +523,30 @@ func TestTheTerminalImageIsPrefetchedAndOptional(t *testing.T) {
 	empty := &Loader{Cache: Cache{Dir: t.TempDir()}, Runner: lr, Nodes: l.Nodes}
 	if done, err := empty.LoadOptional(context.Background(), last); done || err != nil {
 		t.Errorf("LoadOptional of an uncached image = %v, %v; want nothing done", done, err)
+	}
+}
+
+// A docker cp tar cut short inside its archive is refused, never cached
+// as an image (#1805).
+func TestUnwrapCopyRefusesAShortCopy(t *testing.T) {
+	t.Parallel()
+	a := archive(t, true)
+	var full bytes.Buffer
+	tw := tar.NewWriter(&full)
+	if err := tw.WriteHeader(&tar.Header{Name: "x.tar", Mode: 0o644, Size: int64(len(a)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := unwrapCopy(bytes.NewReader(full.Bytes()), io.Discard, "docker.io/library/x:1"); err != nil {
+		t.Fatalf("a whole copy: %v", err)
+	}
+	short := full.Bytes()[:512+len(a)/2]
+	if err := unwrapCopy(bytes.NewReader(short), io.Discard, "docker.io/library/x:1"); err == nil {
+		t.Fatal("a copy cut short was accepted")
 	}
 }

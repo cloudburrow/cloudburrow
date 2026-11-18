@@ -1,6 +1,7 @@
 package run
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -66,5 +67,28 @@ func TestCPURecommendation(t *testing.T) {
 	var none *cpuScaler
 	if none.floor("r") != 0 {
 		t.Error("a server without the driver has a floor")
+	}
+}
+
+// An instance's CPU limit is rendered with a small request, so a local node
+// can run as many instances as the CPU driver asks for (main run
+// 44326182935: each CPU test's service "grew to 1" on a 4-CPU runner).
+func TestCPULimitIsRenderedWithASmallRequest(t *testing.T) {
+	var b strings.Builder
+	cs := []*runpb.Container{{Image: "dev.local/x:1", Resources: &runpb.ResourceRequirements{Limits: map[string]string{"cpu": "1", "memory": "256Mi"}}}}
+	if err := renderContainers(&b, cs, containerRender{}); err != nil {
+		t.Fatal(err)
+	}
+	want := "          resources:\n            limits:\n              cpu: \"1\"\n              memory: \"256Mi\"\n            requests:\n              cpu: \"10m\"\n"
+	if !strings.Contains(b.String(), want) {
+		t.Fatalf("rendered:\n%s\nwant it to hold:\n%s", b.String(), want)
+	}
+	for limit, want := range map[string]string{"2": "10m", "500m": "10m", "5m": "5m"} {
+		if got, ok := cpuRequest(limit); !ok || got != want {
+			t.Errorf("cpuRequest(%q) = %q, %v; want %q", limit, got, ok, want)
+		}
+	}
+	if _, ok := cpuRequest(""); ok {
+		t.Error("a request was rendered with no CPU limit")
 	}
 }

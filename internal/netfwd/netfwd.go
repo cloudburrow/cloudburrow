@@ -241,9 +241,8 @@ func (f *Forwarder) Start(ctx context.Context) error {
 	if f.target.Guarded {
 		f.mu.Lock()
 		public := net.JoinHostPort(f.bindAddr, strconv.Itoa(f.hostPort))
-		kube := net.JoinHostPort(kubeBind, strconv.Itoa(f.kubePort))
 		f.mu.Unlock()
-		g, err := startObservedGuard(public, kube, f.logf, f.Observe)
+		g, err := startObservedGuardFunc(public, f.kubeAddr, f.logf, f.Observe)
 		if err != nil {
 			f.stopProcess(context.Background())
 			return fmt.Errorf("%w: listen on %s: %w", ErrForwardFailed, public, err)
@@ -339,6 +338,7 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	for time.Now().Before(deadline) {
 		select {
 		case <-done:
+			f.repickRefusedKubePort(errOut)
 			return fmt.Errorf("%w: kubectl exited: %s", ErrForwardFailed, errOut.tail())
 		case <-ctx.Done():
 			f.stopProcess(context.Background())
@@ -346,6 +346,13 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 		default:
 		}
 		if err := f.carries(addr, errOut); err == nil {
+			// A listener on addr that is not this kubectl's is another
+			// process's: a tunnel through it carries someone else's traffic.
+			if msg, refused := errOut.listenRefused(); refused {
+				f.stopProcess(context.Background())
+				f.repickRefusedKubePort(errOut)
+				return fmt.Errorf("%w: %s is another process's: %s", ErrForwardFailed, addr, msg)
+			}
 			return f.serves(ctx, addr)
 		} else if !errors.Is(err, errNotListening) {
 			f.stopProcess(context.Background())
@@ -355,6 +362,36 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 	}
 	f.stopProcess(context.Background())
 	return fmt.Errorf("%w: %s never accepted a connection: %s", ErrForwardFailed, addr, errOut.tail())
+}
+
+// repickRefusedKubePort gives a guarded tunnel a new kubectl port when
+// kubectl could not bind its own: the port is only the guard's upstream, so
+// another process holding it need not stop the tunnel for good. The guard
+// reads the port on each request (kubeAddr). A published hostPort is kept:
+// clients were told it.
+func (f *Forwarder) repickRefusedKubePort(errOut *syncBuffer) {
+	if !f.target.Guarded {
+		return
+	}
+	if _, refused := errOut.listenRefused(); !refused {
+		return
+	}
+	p, err := freePort(kubeBind)
+	if err != nil {
+		return
+	}
+	f.mu.Lock()
+	old := f.kubePort
+	f.kubePort = p
+	f.mu.Unlock()
+	f.logf("tunnel %s: kubectl could not listen on %d; using %d", f.Name(), old, p)
+}
+
+// kubeAddr is where kubectl listens behind the guard.
+func (f *Forwarder) kubeAddr() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return net.JoinHostPort(kubeBind, strconv.Itoa(f.kubePort))
 }
 
 // carries opens one connection through the tunnel and holds it briefly:
@@ -743,12 +780,50 @@ func (f *Forwarder) stopProcess(ctx context.Context) error {
 	return nil
 }
 
-// freePort asks the OS for an unused port on the bind address.
+// freePort asks the OS for an unused port on the bind address, one no
+// other freePort call of this process has handed out.
+//
+// The port is reserved and released at once, and kubectl binds it later,
+// so the OS is free to hand the same port to the next caller in between.
+// On main's CI run 44326182935 it did: the Datastore and BigQuery tunnels
+// were given one kubectl port. Whichever kubectl bound it first carried
+// both tunnels' traffic, and the other's kubectl failed "unable to listen
+// on any of the requested ports" on every one of its 700 restarts. BigQuery
+// answered 404 "Not Found" (the Datastore emulator's answer to its paths)
+// until the Datastore tunnel restarted and BigQuery's kubectl took the port,
+// and from then on Datastore's gRPC reached the BigQuery engine ("frame
+// header looked like an HTTP/1.1 header"). A port is never handed out twice.
 func freePort(bindAddr string) (int, error) {
-	l, err := net.Listen("tcp", net.JoinHostPort(bindAddr, "0"))
-	if err != nil {
-		return 0, err
+	handedOut.mu.Lock()
+	defer handedOut.mu.Unlock()
+	for range 64 {
+		l, err := net.Listen("tcp", net.JoinHostPort(bindAddr, "0"))
+		if err != nil {
+			return 0, err
+		}
+		p := l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+		if !handedOut.ports[p] {
+			handedOut.ports[p] = true
+			return p, nil
+		}
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
+	return 0, fmt.Errorf("no port on %s that this process has not handed out already", bindAddr)
+}
+
+// handedOut is every port freePort has returned. Keyed by port alone: a
+// tunnel on 0.0.0.0 and one on 127.0.0.1 collide on one port too.
+var handedOut = struct {
+	mu    sync.Mutex
+	ports map[int]bool
+}{ports: map[int]bool{}}
+
+// listenRefused reports kubectl's own words for a port it could not bind.
+func (s *syncBuffer) listenRefused() (string, bool) {
+	for _, line := range strings.Split(s.String(), "\n") {
+		if strings.Contains(line, "unable to listen on") {
+			return strings.TrimSpace(line), true
+		}
+	}
+	return "", false
 }

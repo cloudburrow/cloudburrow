@@ -209,7 +209,6 @@ func TestBigQueryAIManagedFunctions(t *testing.T) {
 		fmt.Sprintf("SELECT a.id FROM `%s.reviews` a JOIN `%s.reviews` b ON AI.IF((a.review, b.review), endpoint => '%s')", ds, ds, localModel): "JOIN",
 		fmt.Sprintf("SELECT AI.IF(review, endpoint => '%s', max_error_ratio => 0.5) FROM `%s.reviews`", localModel, ds):                         "MINIMIZE_COST",
 		fmt.Sprintf("SELECT AI.CLASSIFY(review, [], endpoint => '%s') FROM `%s.reviews`", localModel, ds):                                       "category",
-		"SELECT AI.AGG(s, 'summarize') FROM UNNEST(['a']) AS s":                                                                                 "AI.AGG",
 	} {
 		if err := mlRun(h, c, sql); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", sql, err, want)

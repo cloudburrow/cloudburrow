@@ -12,6 +12,7 @@ import (
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	runv1 "google.golang.org/api/run/v1"
+	"google.golang.org/genproto/googleapis/api"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -868,6 +869,16 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				svc.Client = v
 			case v1ClientVersion:
 				svc.ClientVersion = v
+			case v1LaunchStage:
+				// `gcloud beta` and `alpha` send it on every service write
+				// (gcloud 593.0.0's `beta run services update`: 501 before),
+				// as on a job (#1450): v2's launchStage. Like client and
+				// clientVersion, a service does not read it back.
+				st, ok := api.LaunchStage_value[v]
+				if !ok {
+					return nil, apierror.InvalidArgument("metadata.annotations[%s]: %q is not a launch stage", k, v)
+				}
+				svc.LaunchStage = api.LaunchStage(st)
 			case v1ServiceMinScale, v1ServiceMaxScale, v1ScalingMode, v1ManualInstanceCount:
 				if err := fromV1ServiceScaling(svc, k, v); err != nil {
 					return nil, err

@@ -558,7 +558,9 @@ jobs:
           for bin in work/*/cloudburrow; do
             ok=""
             for _ in 1 2 3 4 5 6; do
-              verdict="$(spctl -a -t exec -vv "${bin}" 2>&1 || true)"
+              # -t open with the primary-signature context: -t exec rejects a
+              # bare CLI as "not an app" whatever its signature (v0.2.0's run).
+              verdict="$(spctl -a -vv -t open --context context:primary-signature "${bin}" 2>&1 || true)"
               echo "${verdict}"
               case "${verdict}" in *"source=Notarized Developer ID"*) ok=1; break ;; esac
               sleep 20
