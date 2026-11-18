@@ -11,8 +11,10 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
 The second release. The generated coverage now tracks thirty API surfaces, up from nine in
-v0.1.0, and counts **1,133 of 1,222 methods Verified** through official clients, up from 97 of
+v0.1.0, and counts **1,133 of 1,227 methods Verified** through official clients, up from 97 of
 191 ([docs/coverage](docs/coverage/README.md)). New since v0.1.0: Cloud Run's v1 (Knative) API,
 jobs and worker pools; Cloud Build, Artifact Registry, Secure Source Manager and Developer Connect;
 Cloud Functions v1 and v2; the Cloud SQL Admin API and Backup and DR; the Memorystore for Redis,
@@ -23,7 +25,7 @@ folders, organizations, tags and liens. CloudBurrow now builds its own Cloud Sto
 its own BigQuery emulator, and BigQuery serves every Resource Manager project. Local AI embeds
 text, images, audio, video and PDFs with EmbeddingGemma 2, OCR included, and serves Vertex AI's
 `PredictionService` over gRPC. IAM gains roles, service accounts and Conditions; policies are
-stored and still not enforced, with three named exceptions under **Changed**. The console has a
+stored and still not enforced, with five named exceptions under **Changed**. The console has a
 Cloud Shell-style terminal and a screen for every service. Releases are smoke-tested before they
 become latest, and macOS signing and notarization are ready once the maintainer adds the Apple
 secrets. Only a row of [docs/compatibility.md](docs/compatibility.md) marked Verified is a support
@@ -92,7 +94,11 @@ claim; [docs/gaps.md](docs/gaps.md) lists what is still open.
 #### Cloud Run
 
 - **Jobs, executions and tasks** run as Kubernetes batch Jobs (#582, #1223), and **worker pools and
-  instances**, including automatic scaling over REST (#1299, #1300, #1348, #1387, #1788).
+  instances** (#1299, #1300, #1348, #1387).
+- **Scaling**: service-level `scaling` (automatic and manual, including manual zero instances),
+  revision `cpuUtilization` and `concurrencyUtilization`, and worker-pool automatic scaling over
+  REST, which CloudBurrow drives on the pods' CPU utilization; the console edits service scaling
+  (#1788, #1789, #1790, #1800, #1802).
 - Traffic splits, tags and pinned revisions, mapped to Knative (#1224).
 - The service account, Secret Manager and in-memory volumes, Cloud SQL volumes through the Auth
   Proxy, NFS volumes, Cloud Storage FUSE volumes from the instance's own storage, the `h2c` port
@@ -175,7 +181,20 @@ claim; [docs/gaps.md](docs/gaps.md) lists what is still open.
   remote models over the local Vertex AI endpoint (`ML.GENERATE_TEXT`, `ML.GENERATE_EMBEDDING`)
   (#1465, #1481, #1518, #1548, #1562, #1600, #1711, #1760, #1765, #1775, #1776). compatibility.md
   lists the model types and functions served.
-- The BigQuery Connection API over REST and gRPC, with connection IAM (#1755, #1770).
+- **AI functions** on the local Vertex AI endpoint, never Google: `AI.GENERATE` with
+  `output_schema`, `AI.GENERATE_BOOL`, `_INT`, `_DOUBLE` and `_TABLE` through constrained decoding,
+  and `AI.GENERATE_EMBEDDING`, `AI.EMBED`, `AI.SIMILARITY`, `AI.CLASSIFY`, `AI.IF` and `AI.SCORE`
+  (#1771, #1772, #1779). Remote models honour `max_output_tokens` and the sampling options
+  (#1797).
+- Remote models over Cloud AI services: `REMOTE_SERVICE_TYPE = 'CLOUD_AI_VISION_V1'` with
+  `ML.ANNOTATE_IMAGE` text detection over an object table, read locally with Tesseract; other
+  service types are 501 (#1773).
+- Image functions over object tables: `ML.DECODE_IMAGE`, `ML.RESIZE_IMAGE`,
+  `ML.CONVERT_COLOR_SPACE`, `ML.CONVERT_IMAGE_TYPE`, and `ML.PREDICT` of an imported TensorFlow
+  Lite or TensorFlow image model over them (#1798).
+- The BigQuery Connection API over REST and gRPC, with connection IAM. A deleted service account
+  in a connection's policy reads as `deleted:` and is dropped on purge, as in other services'
+  policies (#1755, #1770, #1795).
 - Query parameters of every top-level type, `STRUCT` and `RANGE` parameters, DML row counts and
   statement types, and the `bq` CLI's `mk`, `insert`, `query` and `rm` (#696, #1008, #1082, #1108,
   #1111).
@@ -301,6 +320,9 @@ claim; [docs/gaps.md](docs/gaps.md) lists what is still open.
   `GenerateContent`, `StreamGenerateContent`, `EmbedContent`, `Explain` with Sampled Shapley, and
   the streaming and direct predict methods, raw ones relayed to a container's `grpcPorts` (#1193,
   #1244, #1257, #1284, #1285, #1454, #1475, #1477).
+- Local generation honours `temperature`, `topP`, `topK`, `seed`, `maxOutputTokens` and
+  `stopSequences` on a newer LiteRT-LM, and `responseSchema` through constrained decoding; the
+  console playground offers them (#1779, #1797).
 - The local-AI runtime image is published with each release, `ghcr.io/cloudburrow/litert-lm:<tag>`,
   and a release CLI uses it by digest, so local generation no longer needs a checkout (#602).
 - Console: model download, load and unload, an embedding view, and custom prediction requests from
@@ -390,12 +412,15 @@ claim; [docs/gaps.md](docs/gaps.md) lists what is still open.
 
 #### IAM, projects and credentials
 
-- **IAM policies are still not enforced, with three exceptions**, each recorded in
-  [ADR-0006](docs/adr/0006-iam-policy-surface.md): BigQuery's checks of minted tokens and remote
-  models (above), Memorystore for Redis Cluster and Valkey IAM auth, and Firestore with MongoDB
-  compatibility's token sign-in. A Redis cluster or Valkey instance with IAM auth, and a token
-  sign-in to Firestore, accept only an access token this instance minted, for a principal holding
-  the documented role (#1614, #1738).
+- **IAM policies are still not enforced, with five exceptions**, each recorded in
+  [ADR-0006](docs/adr/0006-iam-policy-surface.md): BigQuery's per-project checks of minted tokens
+  (above, #1767, #1774); BigQuery remote models' connection permissions (above, #1765);
+  Memorystore for Redis Cluster and Valkey IAM auth (#1614); Firestore with MongoDB
+  compatibility's token sign-in and command permissions (#1738); and IAM Credentials
+  (`generateAccessToken`, `generateIdToken`, `signBlob`, `signJwt`, and the IAM API's deprecated
+  `SignBlob` and `SignJwt`) on service accounts the IAM API created (#1747, #1751). All but the
+  remote-model check accept only an access token this instance minted, for a principal holding the
+  documented role. Calls as the instance's own account are checked no more than in v0.1.0.
 - **One project number everywhere** (#1211, #1544): the metadata server's `numeric-project-id`,
   zone and machine type now carry the project's own number rather than `000000000000`, and
   Resource Manager v3 names a project `projects/{number}`, as Google does. A project recreated
@@ -487,6 +512,8 @@ claim; [docs/gaps.md](docs/gaps.md) lists what is still open.
 - Cloud KMS and Secret Manager no longer hold their lock across one Kubernetes read per record, so
   requests no longer time out on a large instance (#1232).
 - Cloud SQL in ephemeral mode keeps a created instance's data across a server restart (#1740).
+- Resource Manager's `Stop` waits for every call's handler, so a call's trace span is no longer
+  cut short (#1803).
 - `up` over a cluster made before the builtin Cloud Storage server removes the old server instead
   of crash-looping (#780).
 - The console loads back an archive that its own **Save state** wrote, over the upload limit
@@ -578,12 +605,6 @@ operation in [docs/compatibility.md](docs/compatibility.md) and summarised in
   one `checksums.txt`, a Homebrew formula and an installer that refuses an archive it cannot
   verify (#71, #324).
 
-[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0
-
-<!-- When v0.2.0 is tagged: rename "## [Unreleased]" above to "## [0.2.0] - YYYY-MM-DD", put a new
-empty "## [Unreleased]" above it (test/install's TestTheChangelogHasAnUnreleasedSectionAndV010
-requires one), and replace the [Unreleased] link above with these two lines:
 [Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.1.0...v0.2.0
--->
+[0.1.0]: https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0
