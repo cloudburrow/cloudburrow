@@ -230,8 +230,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// BigQuery's signed URLs name the address clients reach Cloud Storage
 	// at (#1786): the storage tunnel's, which New has already chosen when
 	// --port-storage is 0. The configured port was 0 there, and every
-	// signed URL named http://127.0.0.1:0 (main run 44357900271), as
-	// fake-gcs-server's public host once did (#269).
+	// signed URL named http://127.0.0.1:0 (main run 44357900271), as the
+	// storage backend's advertised host once did (#269).
 	if f := forwarderFor(forwarders, "storage"); f != nil && f.HostAddr() != "" {
 		comps.SetStoragePublic("http://" + f.HostAddr())
 	}

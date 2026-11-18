@@ -38,6 +38,15 @@ A fix release for v0.2.0, with one new BigQuery function. The generated coverage
   BigQuery and Datastore tunnels at once, so BigQuery answered 404 and Datastore failed with "frame
   too large". A tunnel is now never given a port already handed out, a kubectl that cannot listen
   fails its launch, and a guarded tunnel whose port is taken moves to a new one.
+- **Object tables' signed URLs name the real Cloud Storage port.** With `--port-storage 0`, the
+  signed URLs of `EXTERNAL_OBJECT_TRANSFORM(..., ['SIGNED_URL'])` named `http://127.0.0.1:0`, the
+  configured port, instead of the port the storage tunnel bound, so no client could fetch them
+  (#1786).
+- **`CREATE MODEL ... OPTIONS (MODEL_TYPE='TENSORFLOW')` no longer times out on first use.** The
+  TensorFlow converter's image was built by the first `CREATE MODEL` and killed with it when the
+  client's deadline passed, so a client that waits less than a cold build (a minute or more) never
+  imported a model. `up` now builds the image once in the background, and a build is never
+  cancelled by the request waiting for it (#1775).
 
 #### CLI
 
