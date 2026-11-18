@@ -475,16 +475,10 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			}
 			return true
 		}
-		src := sources[0].meta
-		schema, _ := json.Marshal(src.Schema)
-		extra := map[string]any{}
-		if src.TimePartitioning != nil {
-			extra["timePartitioning"] = src.TimePartitioning
-		}
-		if src.RangePartitioning != nil {
-			extra["rangePartitioning"] = src.RangePartitioning
-		}
-		if why := f.makeTableWith(r, *c.DestinationTable, schema, extra); why != "" {
+		schema, _ := json.Marshal(sources[0].meta.Schema)
+		// Partitioned and clustered as the source (#1759, copylayout.go).
+		extra := f.newTableLayout(r, f.copyTableMeta(r, sources[0].base).layout, false, c.DestinationTable.DatasetID)
+		if why := f.makeCopyTable(r, *c.DestinationTable, schema, extra); why != "" {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the copy's destination: "+why)
 			return true
 		}
