@@ -35,7 +35,9 @@ import (
 // is interpolated as the data is; ML.FORECAST and ML.EXPLAIN_FORECAST
 // forecast only the horizon's points whose timestamp the input has (on
 // the model's grid), a NULL future feature taken as its training mean;
-// ML.DETECT_ANOMALIES of an ARIMA_PLUS_XREG model is 501.
+// ML.DETECT_ANOMALIES of an ARIMA_PLUS_XREG model is 501. Custom
+// holidays (modelholiday.go, #1776) are a stage of the residuals'
+// ARIMA_PLUS pipeline, their columns before the attributions.
 
 // xregFeature is one external regressor.
 type xregFeature struct {
@@ -448,7 +450,7 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 	switch c.fn {
 	case "EVALUATE":
 		return f.tsEvaluate(r, q, md, c)
-	case "ARIMA_EVALUATE":
+	case "ARIMA_EVALUATE", "HOLIDAY_INFO":
 		return f.arimaSubquery(r, q, md, c)
 	case "DETECT_ANOMALIES":
 		return "", 501, "Not implemented here: ML.DETECT_ANOMALIES of an ARIMA_PLUS_XREG model (#1766). Nothing was run."
@@ -505,6 +507,7 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 		return "", code, msg
 	}
 	z := normalQuantile(level)
+	names := holidayNames(ts.Holidays) // #1776
 	var attrCols []string
 	for _, ft := range x.Features {
 		attrCols = append(attrCols, sqlIdent("attribution_"+ft.Name)+" FLOAT64")
@@ -557,14 +560,15 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 					steps, other = sqlF(s.Steps[k]), other+s.Steps[k]
 				}
 				data := s.Data[k] + reg
+				hol, each := s.holidayCols(names, k)
 				res, adj, tr := math.NaN(), data-other, math.NaN()
 				if !math.IsNaN(trend[k]) {
 					tr = trend[k] + x.Intercept
-					adj = trend[k] + ssum + reg
+					adj = trend[k] + ssum + s.holidayAt(k) + reg
 					res = data - adj - other
 				}
-				rows = append(rows, fmt.Sprintf("(%s%s, 'history', %s, %s, %s, NULL, NULL, NULL, %s, %s, NULL, %s, %s, %s, %s)",
-					idVal(s), sqlTS(s.Times[k]), sqlF(data), sqlF(adj), sqlF(sigma), sqlNaN(tr), seas, spikes, steps, sqlNaN(res), attrVals(at)))
+				rows = append(rows, fmt.Sprintf("(%s%s, 'history', %s, %s, %s, NULL, NULL, NULL, %s, %s, %s, %s, %s, %s%s, %s)",
+					idVal(s), sqlTS(s.Times[k]), sqlF(data), sqlF(adj), sqlF(sigma), sqlNaN(tr), seas, hol, spikes, steps, sqlNaN(res), joinLead(each), attrVals(at)))
 			}
 		}
 		if fu == nil {
@@ -584,8 +588,9 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 				continue
 			}
 			seas, ssum := seasonCols(last + k + 1)
-			rows = append(rows, fmt.Sprintf("(%s%s, 'forecast', %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL, NULL, %s)",
-				idVal(s), sqlTS(tm), sqlF(v), sqlF(v), sqlF(se[k]), sqlF(level), sqlF(l), sqlF(u), sqlF(fc[k]-ssum+x.Intercept), seas, attrVals(at)))
+			hol, each := s.holidayCols(names, last+k+1)
+			rows = append(rows, fmt.Sprintf("(%s%s, 'forecast', %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL%s, %s)",
+				idVal(s), sqlTS(tm), sqlF(v), sqlF(v), sqlF(se[k]), sqlF(level), sqlF(l), sqlF(u), sqlF(fc[k]-ssum-s.holidayAt(last+k+1)+x.Intercept), seas, hol, joinLead(each), attrVals(at)))
 		}
 	}
 	if c.fn == "FORECAST" {
@@ -597,7 +602,7 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 		"time_series_adjusted_data FLOAT64, standard_error FLOAT64, confidence_level FLOAT64, prediction_interval_lower_bound FLOAT64, "+
 		"prediction_interval_upper_bound FLOAT64, trend FLOAT64, seasonal_period_yearly FLOAT64, seasonal_period_quarterly FLOAT64, "+
 		"seasonal_period_monthly FLOAT64, seasonal_period_weekly FLOAT64, seasonal_period_daily FLOAT64, holiday_effect FLOAT64, "+
-		"spikes_and_dips FLOAT64, step_changes FLOAT64, residual FLOAT64, "+strings.Join(attrCols, ", ")+">", rows), 0, ""
+		"spikes_and_dips FLOAT64, step_changes FLOAT64, residual FLOAT64"+holidayColumnTypes(names)+", "+strings.Join(attrCols, ", ")+">", rows), 0, ""
 }
 
 // tsEvaluate is ML.EVALUATE of an ARIMA_PLUS or ARIMA_PLUS_XREG model
