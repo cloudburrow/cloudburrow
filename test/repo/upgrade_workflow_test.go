@@ -88,6 +88,20 @@ func TestUpgradeWorkflowDownloadsTheReleaseTheTestNames(t *testing.T) {
 			t.Errorf("%s does not contain %q", upgradeWorkflow, want)
 		}
 	}
+	// By hand, the `older` input picks another release: through the
+	// environment, never spliced into the script, and only a release tag.
+	for _, want := range []string{
+		"OLDER_INPUT: ${{ inputs.older }}",
+		`[[ "$OLDER_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]`,
+		`echo "CLOUDBURROW_UPGRADE_OLDER=$OLDER" >> "$GITHUB_ENV"`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("%s does not contain %q", upgradeWorkflow, want)
+		}
+	}
+	if n := strings.Count(readWorkflow(t, upgradeWorkflow), "${{ inputs.older }}"); n != 1 {
+		t.Errorf("%s reads inputs.older %d times; want once, into OLDER_INPUT", upgradeWorkflow, n)
+	}
 	if strings.Contains(all, "releases/download") {
 		t.Errorf("%s downloads a release by URL; use gh release download", upgradeWorkflow)
 	}

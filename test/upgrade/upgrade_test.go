@@ -16,24 +16,82 @@ import (
 
 // OlderRelease is the release whose state this one must load. It is the
 // latest tag; move it forward with each release (docs/install.md,
-// "Upgrading").
-const OlderRelease = "v0.1.0"
+// "Upgrading"), adding it to olderReleases. The Upgrade test workflow reads
+// it, and CLOUDBURROW_UPGRADE_OLDER picks another of olderReleases.
+const OlderRelease = "v0.2.0"
 
 // services is every service both releases serve.
 const services = "storage,pubsub,tasks,run,secretmanager,firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms"
 
-// keptByOlderRelease are the services whose state OlderRelease keeps
-// across a stop in persistent mode. The others ran in memory in that
-// release (Pub/Sub, Firestore, Bigtable, Spanner, BigQuery, Logging), so
-// there is nothing of theirs to upgrade.
-var keptByOlderRelease = map[string]bool{
-	"storage": true, "tasks": true, "secretmanager": true, "kms": true, "scheduler": true, "projects": true,
-	"datastore": true, "cloudsql": true, "cloudsql-mysql": true, "memorystore": true,
+// olderRelease is what one earlier release keeps, for the test to expect.
+type olderRelease struct {
+	// kept are the services whose state the release keeps across a stop
+	// in persistent mode; the others ran in memory in it, so there is
+	// nothing of theirs to upgrade.
+	kept map[string]bool
+	// inArchive are the services its `state save` captures.
+	inArchive map[string]bool
+	// storageBytesOnly: its state directory holds Cloud Storage's buckets
+	// and bytes alone (see bytesOnly).
+	storageBytesOnly bool
+	// portBase: it takes --port-base, which moves every port the fixed
+	// ones do not name off the defaults.
+	portBase bool
 }
 
-// inOlderArchive are the services OlderRelease's `state save` captures.
-var inOlderArchive = map[string]bool{
-	"storage": true, "tasks": true, "secretmanager": true, "projects": true, "cloudsql": true,
+var olderReleases = map[string]olderRelease{
+	// The restart probes of docs/install.md's "What survives a restart":
+	// Firestore is kept now; Pub/Sub, Spanner, BigQuery, Bigtable and
+	// Logging's entries are not. The archive adds Scheduler and Pub/Sub's
+	// resources (#880).
+	"v0.2.0": {
+		kept: map[string]bool{
+			"storage": true, "tasks": true, "secretmanager": true, "kms": true, "scheduler": true, "projects": true,
+			"datastore": true, "firestore": true, "cloudsql": true, "cloudsql-mysql": true, "memorystore": true,
+		},
+		inArchive: map[string]bool{
+			"storage": true, "tasks": true, "secretmanager": true, "projects": true, "cloudsql": true,
+			"scheduler": true, "pubsub": true,
+		},
+		portBase: true,
+	},
+	// Pub/Sub, Firestore, Bigtable, Spanner, BigQuery and Logging ran in
+	// memory, and Cloud Storage on the volume of the server before the
+	// builtin one (#519, migrated by #1606).
+	"v0.1.0": {
+		kept: map[string]bool{
+			"storage": true, "tasks": true, "secretmanager": true, "kms": true, "scheduler": true, "projects": true,
+			"datastore": true, "cloudsql": true, "cloudsql-mysql": true, "memorystore": true,
+		},
+		inArchive: map[string]bool{
+			"storage": true, "tasks": true, "secretmanager": true, "projects": true, "cloudsql": true,
+		},
+		storageBytesOnly: true,
+	},
+}
+
+// older is the release under test: OlderRelease, or the one
+// CLOUDBURROW_UPGRADE_OLDER names.
+func older(t *testing.T) (string, olderRelease) {
+	t.Helper()
+	tag := OlderRelease
+	if v := os.Getenv("CLOUDBURROW_UPGRADE_OLDER"); v != "" {
+		tag = v
+	}
+	r, ok := olderReleases[tag]
+	if !ok {
+		t.Fatalf("no expectations for %s: add it to olderReleases", tag)
+	}
+	return tag, r
+}
+
+// dirExpected is what the state directory brings back from r.
+func (r olderRelease) dirExpected(seeded map[string]error) map[string]bool {
+	want := expected(seeded, r.kept)
+	if r.storageBytesOnly {
+		want = bytesOnly(want)
+	}
+	return want
 }
 
 // ports gives both releases the same fixed ports, so one env reaches both.
@@ -60,9 +118,12 @@ func ports(base int) []string {
 // repository's GitHub release (`gh release download`), as the Upgrade test
 // workflow passes it (#1714); without it the test builds OlderRelease from
 // its tag, in a worktree of this repository.
-// CLOUDBURROW_UPGRADE_PORT_BASE picks the ports (default 29300; this release
-// also takes the hundred after them), and CLOUDBURROW_UPGRADE_NAME the
-// instance's name (default upgrade-<OlderRelease>).
+// CLOUDBURROW_UPGRADE_OLDER tests the upgrade from another release of
+// olderReleases (v0.1.0) instead of OlderRelease.
+// CLOUDBURROW_UPGRADE_PORT_BASE picks the ports (default 29300; this release,
+// and an older one that takes --port-base, also take the hundred after them),
+// and CLOUDBURROW_UPGRADE_NAME the instance's name (default
+// upgrade-<release>).
 func TestUpgradeFromOlderRelease(t *testing.T) {
 	newBin := os.Getenv("CLOUDBURROW_UPGRADE_BIN")
 	if newBin == "" {
@@ -75,12 +136,13 @@ func TestUpgradeFromOlderRelease(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Minute)
 	defer cancel()
 	tmp := t.TempDir()
-	oldBin := olderBinary(t, tmp)
+	tag, rel := older(t)
+	oldBin := olderBinary(t, tag, tmp)
 	stateDir := filepath.Join(tmp, "state")
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	name := "upgrade-" + strings.ReplaceAll(strings.TrimPrefix(OlderRelease, "v"), ".", "-")
+	name := "upgrade-" + strings.ReplaceAll(strings.TrimPrefix(tag, "v"), ".", "-")
 	if v := os.Getenv("CLOUDBURROW_UPGRADE_NAME"); v != "" {
 		name = v
 	}
@@ -102,25 +164,31 @@ func TestUpgradeFromOlderRelease(t *testing.T) {
 		_ = exec.Command(newBin, "delete", "--name", name, "--state-dir", stateDir).Run()
 	})
 
-	up(t, oldBin, append([]string{"--mode", "persistent"}, common...))
-	old := connect(t, oldBin, name, stateDir, common)
+	// This release's other surfaces (it serves more) are moved clear of
+	// the defaults with --port-base, and so are an older release's when it
+	// takes the flag; the two never run at once.
+	moved := append([]string{"--port-base", fmt.Sprint(base + 100)}, common...)
+	olderFlags := common
+	if rel.portBase {
+		olderFlags = moved
+	}
+	up(t, oldBin, append([]string{"--mode", "persistent"}, olderFlags...))
+	old := connect(t, oldBin, name, stateDir, olderFlags)
 	seeded := seed(ctx, t, old)
 	archive := filepath.Join(tmp, "older.tar.gz")
-	cli(t, oldBin, append([]string{"state", "save", archive}, common...)...)
+	cli(t, oldBin, append([]string{"state", "save", archive}, olderFlags...)...)
 	cli(t, oldBin, "stop", "--name", name, "--state-dir", stateDir)
 
-	// The same state directory under this release. Its other surfaces
-	// (this release serves more) are moved clear of the older ones.
-	current := append([]string{"--port-base", fmt.Sprint(base + 100)}, common...)
-	up(t, newBin, append([]string{"--mode", "persistent"}, current...))
-	cur := connect(t, newBin, name, stateDir, current)
-	// Cloud Storage is migrated from the volume the older server kept it
-	// on into the builtin server (#1606), with what that server still had.
-	report(t, "state directory", verify(ctx, t, cur, bytesOnly(expected(seeded, keptByOlderRelease))))
+	// The same state directory under this release. From v0.1.0, Cloud
+	// Storage is migrated from the volume the older server kept it on into
+	// the builtin server (#1606), with what that server still had.
+	up(t, newBin, append([]string{"--mode", "persistent"}, moved...))
+	cur := connect(t, newBin, name, stateDir, moved)
+	report(t, "state directory", verify(ctx, t, cur, rel.dirExpected(seeded)))
 
 	// The older archive, loaded into this release.
-	cli(t, newBin, append([]string{"state", "load", archive}, current...)...)
-	report(t, "state load", verify(ctx, t, cur, expected(seeded, inOlderArchive)))
+	cli(t, newBin, append([]string{"state", "load", archive}, moved...)...)
+	report(t, "state load", verify(ctx, t, cur, expected(seeded, rel.inArchive)))
 }
 
 // expected is the services that were seeded and that kept their state.
@@ -154,21 +222,21 @@ func report(t *testing.T, what string, rs map[string]error) {
 	}
 }
 
-// olderBinary is OlderRelease's CLI: the published one that
-// CLOUDBURROW_UPGRADE_OLD_BIN names, which must say it is OlderRelease, or
+// olderBinary is the older release's CLI: the published one that
+// CLOUDBURROW_UPGRADE_OLD_BIN names, which must say it is that release, or
 // else one built from the tag.
-func olderBinary(t *testing.T, dir string) string {
+func olderBinary(t *testing.T, tag, dir string) string {
 	t.Helper()
 	bin := os.Getenv("CLOUDBURROW_UPGRADE_OLD_BIN")
 	if bin == "" {
-		return buildRelease(t, OlderRelease, dir)
+		return buildRelease(t, tag, dir)
 	}
 	out, err := exec.Command(bin, "version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s version: %v\n%s", bin, err, out)
 	}
-	if !strings.HasPrefix(string(out), "cloudburrow "+OlderRelease+" ") {
-		t.Fatalf("CLOUDBURROW_UPGRADE_OLD_BIN is not %s: %s", OlderRelease, out)
+	if !strings.HasPrefix(string(out), "cloudburrow "+tag+" ") {
+		t.Fatalf("CLOUDBURROW_UPGRADE_OLD_BIN is not %s: %s", tag, out)
 	}
 	return bin
 }
@@ -232,7 +300,8 @@ func redact(b []byte) string { return tokenish.ReplaceAllString(string(b), "$1<r
 //
 //	CLOUDBURROW_UPGRADE_RUNNING="bin|--name x --state-dir y ..." go test -tags upgrade -run TestSeedRunning ./test/upgrade/
 //
-// CLOUDBURROW_UPGRADE_EXPECT is "dir" or "archive", the set TestVerifyRunning checks.
+// CLOUDBURROW_UPGRADE_EXPECT is "dir" or "archive", the set TestVerifyRunning
+// checks, of the release CLOUDBURROW_UPGRADE_OLDER names (default OlderRelease).
 func TestSeedRunning(t *testing.T) {
 	in := running(t)
 	for s, err := range seed(context.Background(), t, in) {
@@ -244,14 +313,14 @@ func TestSeedRunning(t *testing.T) {
 
 func TestVerifyRunning(t *testing.T) {
 	in := running(t)
-	want := map[string]bool{}
-	for s := range keptByOlderRelease {
-		want[s] = true
+	_, rel := older(t)
+	all := map[string]error{}
+	for s := range rel.kept {
+		all[s] = nil
 	}
+	want := rel.dirExpected(all)
 	if os.Getenv("CLOUDBURROW_UPGRADE_EXPECT") == "archive" {
-		want = inOlderArchive
-	} else {
-		want = bytesOnly(want)
+		want = rel.inArchive
 	}
 	report(t, "verify", verify(context.Background(), t, in, want))
 }

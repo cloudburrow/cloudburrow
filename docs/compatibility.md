@@ -1388,12 +1388,13 @@ is touched:** an archive whose manifest version is unknown (`TestARefusedArchive
 one in another format, one that is not an archive, and one holding a service this instance does
 not run.
 
-**An archive from `v0.1.0` loads (#1605).** One `v0.1.0` saved loads here (one from `v0.2.0`,
-the latest release, is not yet tested: #1807), its Cloud
+**An archive from `v0.2.0` or `v0.1.0` loads (#1605, #1807).** One `v0.2.0`, the latest release,
+saved loads here, Cloud Storage, Cloud Scheduler and Pub/Sub's resources included
+(`TestStateArchiveFromV020Loads`, on the archive `v0.2.0` wrote). So does one from `v0.1.0`, its Cloud
 Storage included: that release wrote buckets, objects and notification configurations in the layout
 of the server it ran before the builtin one (#519), and a load of that layout creates each through
 the builtin server's JSON API and checks every object's CRC32C (`TestStateArchiveFromV010Loads`, on
-the archive `v0.1.0` wrote; `test/upgrade` against real instances). See
+the archive `v0.1.0` wrote). `test/upgrade` checks both against real instances. See
 [install.md](install.md#upgrading) for the upgrade promise.
 
 **From the console** (#801): the **Instance** page's **Save state** downloads the archive `state

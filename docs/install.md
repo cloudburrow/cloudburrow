@@ -648,16 +648,18 @@ What this is tested to do, and what it is not:
 
 ## Upgrading
 
-**The upgrade promise (#1605).** State written by `v0.1.0` loads in this one. The promise has
-not yet moved to `v0.2.0`, the latest release: the tests below still write and read `v0.1.0`'s
-state, and moving them is #1807. What is checked: a persistent instance's state directory and
-cluster, brought up again by the new `cloudburrow up` with the same `--name` and `--state-dir`,
-and a `cloudburrow state save` archive, loaded with the new `cloudburrow state load`. What that
-release kept is read back as it was written, with these exceptions:
+**The upgrade promise (#1605, #1807).** State written by `v0.2.0`, the latest release, loads in
+this one, and so does state written by `v0.1.0` before it. What is checked: a persistent
+instance's state directory and cluster, brought up again by the new `cloudburrow up` with the
+same `--name` and `--state-dir`, and a `cloudburrow state save` archive, loaded with the new
+`cloudburrow state load`. What that release kept is read back as it was written, with these
+exceptions:
 
-- **What the older release never kept.** In `v0.1.0`, Pub/Sub, Firestore, Bigtable, Spanner,
-  BigQuery and Cloud Logging ran in memory, so their state is not there to upgrade. Cloud Run
-  services are Knative objects in the cluster, which `up` keeps; the upgrade test deploys none.
+- **What the older release never kept.** In `v0.2.0`, Pub/Sub, Spanner, BigQuery, Bigtable and
+  Cloud Logging's entries are not kept across a `stop` (see
+  [What survives a restart](#what-survives-a-restart)), so their state is not there to upgrade;
+  in `v0.1.0`, Firestore was not kept either. Cloud Run services are Knative objects in the
+  cluster, which `up` keeps; the upgrade test deploys none.
 - **Cloud Storage on the volume, from before the builtin server (#519)** is migrated by `up`
   (#1606, below): `v0.1.0` kept its buckets in the layout of the server it ran then, which the
   builtin server cannot read. Every bucket keeps its location and storage class and every object
@@ -665,19 +667,23 @@ release kept is read back as it was written, with these exceptions:
   an object's content type and custom metadata once its cluster has been stopped (seen with
   `v0.1.0` alone), and never kept bucket labels, so after a `stop` there are none to migrate. A
   `state save` archive taken while the older instance still runs keeps the objects' metadata.
+  `v0.2.0` runs the builtin server, whose volume this release reads as it is, metadata included.
 - **What an archive never held.** The archive captures what the older release's `state save`
-  listed as captured (`v0.1.0`: Cloud Storage, Cloud Tasks, Secret Manager, projects and Cloud SQL
-  for PostgreSQL); its manifest names the rest and why.
+  listed as captured (`v0.2.0`: Cloud Storage, Cloud Tasks, Cloud Scheduler, Secret Manager,
+  projects, Pub/Sub's resources without their messages, and Cloud SQL for PostgreSQL; `v0.1.0`:
+  Cloud Storage, Cloud Tasks, Secret Manager, projects and Cloud SQL for PostgreSQL); its manifest
+  names the rest and why.
 
 Checked against real instances by `test/upgrade` (`go test -tags upgrade ./test/upgrade/`, which
-builds `v0.1.0`, or takes its published binary from `CLOUDBURROW_UPGRADE_OLD_BIN`, seeds every
+builds `v0.2.0`, or takes its published binary from `CLOUDBURROW_UPGRADE_OLD_BIN`, seeds every
 service through the official clients, stops it, and reads everything back with this release, from
-the state directory and from the archive), nightly in CI by the Upgrade test workflow
-([CI](ci.md#the-upgrade-test)), and in every CI run by
+the state directory and from the archive; `CLOUDBURROW_UPGRADE_OLDER=v0.1.0` runs it from
+`v0.1.0`), nightly in CI by the Upgrade test workflow ([CI](ci.md#the-upgrade-test)), and in
+every CI run by `TestStateDirFromV020Loads`, `TestStateArchiveFromV020Loads`,
 `TestStateDirFromV010Loads`, `TestStateArchiveFromV010Loads` and `TestEarlierStorageSpoolLoads`
-against what `v0.1.0` wrote, kept in `cmd/cloudburrow/testdata/state-v0.1.0`. A release that
-changes a stored layout reads the earlier one; the release after this moves the promise to the
-then-latest tag.
+against what each release wrote, kept in `cmd/cloudburrow/testdata/state-v0.2.0` and
+`state-v0.1.0`. A release that changes a stored layout reads the earlier one; the release after
+this moves the promise to the then-latest tag.
 
 Before 1.0 the promise covers one release back: upgrading across several releases goes through
 each, or through `state save` and `state load`.
@@ -753,8 +759,8 @@ That happens only when the earlier server's files reach the volume some other wa
 
 - or keep the objects: with the release that wrote them, `cloudburrow state save <file>`; then
   `cloudburrow delete`, `cloudburrow up` and `cloudburrow state load <file>`. `delete` also
-  removes the volumes of Datastore, Cloud SQL and Memorystore, which the archive of `v0.1.0` does
-  not hold except PostgreSQL's databases: dump those first with their own tools. An archive
+  removes the volumes of Datastore, Cloud SQL and Memorystore, which the archives of `v0.1.0` and
+  `v0.2.0` do not hold except PostgreSQL's databases: dump those first with their own tools. An archive
   from before the builtin server holds its buckets, objects with their metadata, and notification
   configurations as that release wrote them, and this release loads that layout (#1605). Or copy
   them out with a Cloud Storage client and back in.

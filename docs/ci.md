@@ -160,8 +160,9 @@ tag, so each release is tested with the action at its own ref (#679).
 ### The upgrade test
 
 `.github/workflows/upgrade.yml` ("Upgrade test", #1714) runs the end-to-end upgrade test,
-`test/upgrade`, nightly at 05:37 UTC and by hand (`gh workflow run upgrade.yml`). It downloads the
-release the test names (`OlderRelease`, today `v0.1.0`) from this repository's GitHub release with
+`test/upgrade`, nightly at 05:37 UTC and by hand (`gh workflow run upgrade.yml`; `-f
+older=v0.1.0` upgrades from another release the test lists in `olderReleases`). It downloads the
+release the test names (`OlderRelease`, today `v0.2.0`) from this repository's GitHub release with
 `gh release download` and the run's token, checks the archive against the release's
 `checksums.txt`, builds this commit's CLI with `make build`, and runs
 `TestUpgradeFromOlderRelease`: a persistent instance of sixteen services is brought up with the
