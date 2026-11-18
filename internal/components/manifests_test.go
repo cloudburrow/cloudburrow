@@ -517,6 +517,33 @@ func TestBigQuerySignedURLWiring(t *testing.T) {
 	}
 }
 
+// An OS-assigned Cloud Storage port (--port-storage 0, as CI starts every
+// shard) is never named as port 0: the front is given the address `up`
+// sets from the storage tunnel, and none before (main run 44357900271).
+func TestBigQuerySignedURLWiringWithAnOSAssignedPort(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery, config.ServiceStorage}
+	cfg.BindAddress = "127.0.0.1"
+	front := func(c *LifecycleComponent) string {
+		for _, b := range c.Backends() {
+			if b.Name == "bigquery" {
+				return strings.Join(b.Front.Args, " ")
+			}
+		}
+		t.Fatal("no bigquery backend")
+		return ""
+	}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("img")
+	if args := front(c); strings.Contains(args, "--storage-public") {
+		t.Errorf("before the tunnel's port is known, front args %q name a client-facing Cloud Storage", args)
+	}
+	c.SetStoragePublic("http://127.0.0.1:41055")
+	if args := front(c); !strings.Contains(args, "--storage-public http://127.0.0.1:41055") {
+		t.Errorf("front args %q do not name the tunnel's address", args)
+	}
+}
+
 // With Cloud Storage, whether or not Cloud Run or BigQuery is served, the
 // storage server reads IAM service accounts' certificates from the
 // metadata server through cloudburrow-host, whose port its egress policy

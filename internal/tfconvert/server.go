@@ -126,10 +126,25 @@ type Docker struct {
 	Context func() (io.Reader, error)
 	// Docker is the docker binary ("": docker on PATH).
 	Docker string
+	// Logf, when set, is told when a build starts and how it ended.
+	Logf func(format string, args ...any)
 
-	once  sync.Mutex
+	mu    sync.Mutex
 	built bool
+	build *imageBuild // the build under way, nil when none is
 }
+
+// imageBuild is one `docker build` of the converter image; done closes
+// when it ends, with err its outcome.
+type imageBuild struct {
+	done chan struct{}
+	err  error
+}
+
+// BuildTimeout bounds one build of the converter image: pulling the
+// Python base and pip-installing TensorFlow (about 1 GB of wheels). It is
+// not a caller's deadline: see ensure.
+const BuildTimeout = 30 * time.Minute
 
 func (d *Docker) bin() string {
 	if d.Docker != "" {
@@ -138,15 +153,69 @@ func (d *Docker) bin() string {
 	return "docker"
 }
 
-// ensure builds the image when it is missing.
-func (d *Docker) ensure(ctx context.Context) error {
-	d.once.Lock()
-	defer d.once.Unlock()
+func (d *Docker) logf(format string, args ...any) {
+	if d.Logf != nil {
+		d.Logf(format, args...)
+	}
+}
+
+// Build builds the image when it is missing and waits for it, as long as
+// ctx allows (`cloudburrow prefetch --tensorflow-converter`, for an
+// instance that will run offline).
+func (d *Docker) Build(ctx context.Context) error { return d.ensure(ctx) }
+
+// start returns the build under way, starting one when the image is
+// neither built nor being built, or nil once the image is there.
+func (d *Docker) start() *imageBuild {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.built {
 		return nil
 	}
+	if d.build == nil {
+		b := &imageBuild{done: make(chan struct{})}
+		d.build = b
+		go func() {
+			b.err = d.buildImage()
+			d.mu.Lock()
+			d.built, d.build = b.err == nil, nil
+			d.mu.Unlock()
+			close(b.done)
+		}()
+	}
+	return d.build
+}
+
+// ensure waits, at most as long as ctx allows, for the image.
+//
+// The image is built on the first CREATE MODEL … TENSORFLOW, never by
+// `up`: it is 2.3 GB, which an instance that imports no TensorFlow model
+// should not pay. The build itself runs under its own BuildTimeout, never
+// ctx: a cold build takes a minute or more (57 s on a workstation with the
+// base cached, longer on a 4-CPU CI runner), and killing it with the
+// request that started it meant a client with a shorter deadline restarted
+// it from scratch on every attempt and never got a model (main run
+// 44357900271: both TENSORFLOW tests' CREATE MODEL hit the harness's 60 s
+// deadline). A caller that gives up leaves the build running for the next.
+func (d *Docker) ensure(ctx context.Context) error {
+	b := d.start()
+	if b == nil {
+		return nil
+	}
+	select {
+	case <-b.done:
+		return b.err
+	case <-ctx.Done():
+		return &Refusal{Kind: "unavailable", Message: "the TensorFlow converter image " + d.Image +
+			" is still being built (its first use pulls TensorFlow); it goes on building, try again shortly: " + ctx.Err().Error()}
+	}
+}
+
+// buildImage builds the image when it is missing.
+func (d *Docker) buildImage() error {
+	ctx, cancel := context.WithTimeout(context.Background(), BuildTimeout)
+	defer cancel()
 	if exec.CommandContext(ctx, d.bin(), "image", "inspect", d.Image).Run() == nil {
-		d.built = true
 		return nil
 	}
 	if d.Context == nil {
@@ -156,6 +225,8 @@ func (d *Docker) ensure(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	d.logf("tensorflow converter: building %s (TensorFlow, once)", d.Image)
+	began := time.Now()
 	cmd := exec.CommandContext(ctx, d.bin(), "build", "-t", d.Image, "-")
 	cmd.Stdin = tarball
 	var out bytes.Buffer
@@ -165,9 +236,10 @@ func (d *Docker) ensure(ctx context.Context) error {
 		if len(tail) > 2000 {
 			tail = tail[len(tail)-2000:]
 		}
+		d.logf("tensorflow converter: building %s failed after %s: %v", d.Image, time.Since(began).Round(time.Second), err)
 		return &Refusal{Kind: "unavailable", Message: fmt.Sprintf("could not build the TensorFlow converter image %s: %v: %s", d.Image, err, tail)}
 	}
-	d.built = true
+	d.logf("tensorflow converter: built %s in %s", d.Image, time.Since(began).Round(time.Second))
 	return nil
 }
 

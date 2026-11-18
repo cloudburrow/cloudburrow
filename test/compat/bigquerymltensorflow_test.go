@@ -123,7 +123,9 @@ func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
 	name := mlDataset(t, h, c, map[string]string{"rows": strings.Join(sels, " UNION ALL "), "loops": strings.Join(loops, " UNION ALL "),
 		"ops2": strings.Join(ops, " UNION ALL ")})
 
-	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.mlp` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/mlp/*')", name, b)); err != nil {
+	// The instance's first TENSORFLOW import may build the converter
+	// image: tensorflowImportDeadline, not the harness's 60 s.
+	if err := mlRunWithin(h, c, fmt.Sprintf("CREATE MODEL `%s.mlp` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/mlp/*')", name, b), tensorflowImportDeadline); err != nil {
 		t.Fatalf("CREATE MODEL mlp: %v", err)
 	}
 	md, err := c.Dataset(name).Model("mlp").Metadata(ctx)

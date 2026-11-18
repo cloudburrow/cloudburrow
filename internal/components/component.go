@@ -111,6 +111,12 @@ func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStor
 // BigQuery's front (#1392) and the storage server (#1532).
 func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
 
+// SetStoragePublic records the address clients reach Cloud Storage at
+// (http://host:port), which BigQuery's signed URLs name (#1786): the
+// storage tunnel's own host address, so an OS-assigned port is named as
+// bound rather than as configured.
+func (c *LifecycleComponent) SetStoragePublic(endpoint string) { c.storagePublic = endpoint }
+
 // SetONNXRunner records the in-cluster address of the onnx build's ONNX
 // runner, for BigQuery's front (#1711).
 func (c *LifecycleComponent) SetONNXRunner(addr string) { c.onnxRunner = addr }
@@ -159,20 +165,28 @@ func (c *LifecycleComponent) SetFirestoreMongoTLS(cert, key string) {
 
 // NewLifecycleComponent builds the installer component for a configuration.
 func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) *LifecycleComponent {
+	// A configured Cloud Storage port is the one clients reach; an
+	// OS-assigned one (0) is known only once its tunnel has chosen it, and
+	// `up` sets it from there (SetStoragePublic): the configured 0 put
+	// http://127.0.0.1:0 in every signed URL (main run 44357900271).
+	storagePublic := ""
+	if cfg.Endpoints.Storage > 0 {
+		storagePublic = "http://" + net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Storage))
+	}
 	return &LifecycleComponent{
+		storagePublic: storagePublic,
 		installer: &Installer{
 			Kubeconfig: kubeconfig,
 			Namespace:  cfg.Cluster.Namespace,
 			Instance:   cfg.Name,
 			Out:        out,
 		},
-		services:      cfg.EnabledServices(),
-		corsOrigins:   cfg.Storage.CORSAllowOrigins,
-		storagePublic: "http://" + net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Storage)),
-		project:       cfg.DefaultProject(),
-		mode:          cfg.Mode,
-		timeout:       time.Duration(cfg.ReadyTimeout),
-		out:           out,
+		services:    cfg.EnabledServices(),
+		corsOrigins: cfg.Storage.CORSAllowOrigins,
+		project:     cfg.DefaultProject(),
+		mode:        cfg.Mode,
+		timeout:     time.Duration(cfg.ReadyTimeout),
+		out:         out,
 
 		emulatorHeapMiB: cfg.EmulatorHeapMiB,
 		bigQueryHeapMiB: cfg.BigQueryHeapMiB,

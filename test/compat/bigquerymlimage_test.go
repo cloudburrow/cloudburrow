@@ -303,7 +303,9 @@ func TestBigQueryMLImageFunctions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.tfmodel` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/models/tf/*')", ds, bh.BucketName())); err != nil {
+	// The instance's first TENSORFLOW import may build the converter
+	// image: tensorflowImportDeadline, not the harness's 60 s.
+	if err := mlRunWithin(h, c, fmt.Sprintf("CREATE MODEL `%s.tfmodel` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/models/tf/*')", ds, bh.BucketName()), tensorflowImportDeadline); err != nil {
 		t.Fatalf("CREATE MODEL TENSORFLOW: %v", err)
 	}
 	row, _ = one(fmt.Sprintf("SELECT probs FROM ML.PREDICT(MODEL `%s.tfmodel`, (SELECT ML.DECODE_IMAGE(data) AS image %s))", ds, at("small.png")))

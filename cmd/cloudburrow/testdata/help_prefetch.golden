@@ -7,6 +7,12 @@ their pinned sha256) and the images those YAMLs name. up prefers the cached copi
 up --offline uses nothing else. Run it where the network is reachable, then copy
 the state directory. See "Offline and air-gapped use" in docs/install.md.
 
+Flags of prefetch, besides up's:
+  -tensorflow-converter
+    	also build BigQuery ML's TensorFlow converter image (2.3 GB) into the
+    	host's Docker, which CREATE MODEL ... MODEL_TYPE='TENSORFLOW' otherwise
+    	builds on its first use and cannot build offline
+
 Flags:
   -allow-remote
     	permit binding a non-loopback address (unsafe)

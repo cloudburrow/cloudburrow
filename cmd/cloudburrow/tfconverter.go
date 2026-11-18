@@ -40,9 +40,16 @@ func newTFConverter(cfg config.Config, out io.Writer) *tfConverterService {
 	if !tfConverterEnabled(cfg) {
 		return nil
 	}
-	engine := &tfconvert.Docker{Image: tfconvertimage.Tag(), Context: tfconvertimage.Tar}
 	return &tfConverterService{addr: net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.TFConvert)), out: out,
-		h: tfconvert.NewServer(engine, "")}
+		h: tfconvert.NewServer(tfConverterEngine(out), "")}
+}
+
+// tfConverterEngine is the converter image, built on its first use, with
+// the build's start and outcome written to out (up.log, or prefetch's
+// output).
+func tfConverterEngine(out io.Writer) *tfconvert.Docker {
+	return &tfconvert.Docker{Image: tfconvertimage.Tag(), Context: tfconvertimage.Tar,
+		Logf: func(format string, args ...any) { fmt.Fprintf(out, "cloudburrow: "+format+"\n", args...) }}
 }
 
 func (s *tfConverterService) Name() string { return "tf-converter" }

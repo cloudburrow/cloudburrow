@@ -1,6 +1,6 @@
 # Installing CloudBurrow
 
-> **Current release: [v0.2.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.2.0).**
+> **Current release: [v0.3.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.3.0).**
 > Install it with Homebrew or the install script below, or [build from source](#build-and-run).
 
 ## Install a release
@@ -60,14 +60,14 @@ archive whose checksum does not match, or that has no entry in `checksums.txt`.*
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
 # a specific release, elsewhere:
-curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version v0.2.0 --prefix /usr/local
+curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version v0.3.0 --prefix /usr/local
 ```
 
 **Verify a download by hand:**
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing        # shasum -a 256 -c on macOS
-gh attestation verify cloudburrow_v0.2.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+gh attestation verify cloudburrow_v0.3.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
 On macOS, see [Gatekeeper](#gatekeeper) for whether a release's binaries are signed and
@@ -94,7 +94,7 @@ it covers every other archive.
 ```sh
 codesign -dv --verbose=2 cloudburrow   # Authority=Developer ID Application: ... (J4TZ73L264), flags=0x10000(runtime), a Timestamp= line
 spctl -a -vv -t open --context context:primary-signature cloudburrow   # accepted, source=Notarized Developer ID
-gh attestation verify cloudburrow_v0.2.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+gh attestation verify cloudburrow_v0.3.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
 A command-line binary cannot carry a stapled notarization ticket (stapling works only on app
@@ -105,8 +105,8 @@ the first run needs a network connection.
 `spctl -a -t exec`, the form for apps, does not apply to a bare command-line binary: on the
 signed v0.2.0 binary it answers `rejected (the code is valid but does not seem to be an app)`,
 which is not a signing failure. Use the `-t open --context context:primary-signature` form above.
-Checked on 2026-11-18 on macOS (darwin/arm64) against the `cloudburrow_v0.2.0_darwin_arm64`
-archive downloaded from the release: `codesign` printed the Developer ID authority, team
+Checked on 2026-11-18 on macOS (darwin/arm64) against v0.2.0's darwin/arm64 archive, downloaded
+from the release: `codesign` printed the Developer ID authority, team
 J4TZ73L264, the `runtime` flag and a timestamp, and `spctl` printed `accepted` and
 `source=Notarized Developer ID`.
 
@@ -562,6 +562,13 @@ all of it in the state directory, and `up --offline` then needs none of those ho
    `offline cache` line.
 
 Without `--offline`, `up` still prefers what is cached and downloads only what is not.
+
+BigQuery ML's imported TensorFlow models (`CREATE MODEL ... OPTIONS (MODEL_TYPE='TENSORFLOW')`)
+are converted by an image of Google's TensorFlow (2.3 GB). The first such `CREATE MODEL` builds it
+into the host's Docker, which needs the network, so the first import can take as long as the
+build (a minute or more). `prefetch` builds it only when asked, with `--tensorflow-converter`, on
+the machine that will run the instance: the image stays in that machine's Docker and is not copied
+with the cache.
 
 What `prefetch` stores in `<state dir>/cache`, and how:
 
