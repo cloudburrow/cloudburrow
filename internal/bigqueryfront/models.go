@@ -281,11 +281,11 @@ func (md bqModel) resource(full bool) map[string]any {
 		"lastModifiedTime": ms(md.Modified),
 		"modelType": map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA",
 			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION", "BOOSTED_TREE_REGRESSOR": "BOOSTED_TREE_REGRESSOR",
-			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS",
+			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS", "ARIMA_PLUS_XREG": "ARIMA_PLUS_XREG",
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -360,7 +360,7 @@ func (md bqModel) resource(full bool) map[string]any {
 		return nil
 	}
 	switch o.ModelType {
-	case "ARIMA_PLUS":
+	case "ARIMA_PLUS", "ARIMA_PLUS_XREG":
 		var info []map[string]any
 		opts, info = md.arimaResource()
 		// The model's seasonal periods: every series' (#1518).
@@ -734,12 +734,10 @@ type modelDDL struct {
 var unsupportedModelTypes = map[string]string{
 	"AUTOML_REGRESSOR":  "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
 	"AUTOML_CLASSIFIER": "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
-	"ARIMA_PLUS_XREG":   "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	// An imported model (#1562, measured): no CloudBurrow build has a
 	// TensorFlow runtime. An ONNX model runs on the ONNX Runtime of the
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
-	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
@@ -837,7 +835,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
-					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" {
+					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" || up == "TENSORFLOW" {
 						// An imported ONNX or XGBoost model (modelonnx.go,
 						// modelxgb.go, #1711): MODEL_PATH, and no TRANSFORM
 						// or query.
@@ -884,7 +882,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 			return d, true, c, m
 		}
 	}
-	if d.opts.ModelType == "ARIMA_PLUS" {
+	if d.opts.ModelType == "ARIMA_PLUS" || d.opts.ModelType == "ARIMA_PLUS_XREG" {
 		applyArimaDefaults(&d.opts)
 		if c, m := checkArimaOptions(d.opts); c != 0 {
 			return d, true, c, m
@@ -1481,6 +1479,11 @@ var modelTypeOptions = map[string][]string{
 		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
 		"decompose_time_series", "seasonalities", "trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length",
 		"max_time_series_length", "forecast_limit_lower_bound", "forecast_limit_upper_bound"},
+	// ARIMA_PLUS_XREG's page lists no decompose_time_series, seasonalities
+	// or forecast limits, and adds l2_reg (#1766).
+	"ARIMA_PLUS_XREG": {"time_series_timestamp_col", "time_series_data_col", "time_series_id_col", "horizon", "auto_arima", "auto_arima_max_order",
+		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
+		"trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length", "max_time_series_length", "l2_reg"},
 	"RANDOM_FOREST_REGRESSOR": {"input_label_cols", "l1_reg", "l2_reg", "early_stop", "min_rel_progress", "data_split_method",
 		"data_split_eval_fraction", "data_split_col", "enable_global_explain", "max_tree_depth", "min_split_loss", "min_tree_child_weight",
 		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},
@@ -1732,6 +1735,24 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			}
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW_LITE", Created: now, Modified: now,
+				Location: loc, Options: d.opts, TFLite: imp})
+		}
+	case d.opts.ModelType == "TENSORFLOW":
+		// An imported TensorFlow SavedModel, converted to TensorFlow Lite
+		// on the CLI's converter (modeltensorflow.go, #1775).
+		imp, data, c, m := f.importTensorFlow(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's converted TensorFlow Lite file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW", Created: now, Modified: now,
 				Location: loc, Options: d.opts, TFLite: imp})
 		}
 	default:

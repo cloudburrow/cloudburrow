@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -383,10 +384,6 @@ func (f front) mfSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		}
 		return "", 400, "The input of ML.RECOMMEND must have the user column " + m.UserCol + " or the item column " + m.ItemCol
 	case "EVALUATE":
-		if m.Implicit {
-			return "", 501, "Not implemented here: ML.EVALUATE of an IMPLICIT matrix factorization model: its ranking metrics (mean_average_precision, " +
-				"mean_squared_error, normalized_discounted_cumulative_gain, average_rank) are not computed (#1766). Nothing was run."
-		}
 		metrics := t.Eval
 		if c.input != "" {
 			cols, rows, code, msg := f.queryAllRows(r, q, c.input)
@@ -415,6 +412,7 @@ func (f front) mfSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 				iIdx[v] = k
 			}
 			var y, p []float64
+			var obs []mfObs
 			for _, row := range rows {
 				if row[ui] == nil || row[ii] == nil || row[ri] == nil {
 					continue
@@ -426,14 +424,21 @@ func (f front) mfSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 					continue
 				}
 				y, p = append(y, rv), append(p, m.predict(u, i))
+				obs = append(obs, mfObs{u: u, i: i, r: rv})
 			}
 			metrics = map[string]*float64{}
-			if len(y) > 0 {
+			if m.Implicit {
+				metrics = m.rankingMetrics(obs)
+			} else if len(y) > 0 {
 				metrics = regressionMetrics(y, p)
 			}
 		}
+		names := regressionMetricNames
+		if m.Implicit {
+			names = rankingMetricNames
+		}
 		var cols, vals []string
-		for _, n := range regressionMetricNames {
+		for _, n := range names {
 			cols = append(cols, n+" FLOAT64")
 			vals = append(vals, sqlFloat(metrics[n]))
 		}
@@ -482,14 +487,16 @@ func (md bqModel) mfResource(res map[string]any) (opts, metrics map[string]any) 
 	if o.WalsAlpha != nil {
 		opts["walsAlpha"] = *o.WalsAlpha
 	}
-	if t.MF != nil && t.MF.Implicit {
-		return opts, map[string]any{}
-	}
 	num := func(k string) any {
 		if v := t.Eval[k]; v != nil {
 			return *v
 		}
 		return nil
+	}
+	if t.MF != nil && t.MF.Implicit {
+		return opts, map[string]any{"rankingMetrics": map[string]any{"meanAveragePrecision": num("mean_average_precision"),
+			"meanSquaredError": num("mean_squared_error"), "normalizedDiscountedCumulativeGain": num("normalized_discounted_cumulative_gain"),
+			"averageRank": num("average_rank")}}
 	}
 	metrics = map[string]any{"regressionMetrics": map[string]any{"meanAbsoluteError": num("mean_absolute_error"),
 		"meanSquaredError": num("mean_squared_error"), "meanSquaredLogError": num("mean_squared_log_error"),
@@ -520,8 +527,8 @@ type mfObs struct {
 // this detail): ratings of one pair are summed; a rating ≤ 0 is an
 // unobserved pair; there are no intercepts (ML.WEIGHTS answers 0); the
 // loss is the confidence-weighted mean squared error over every pair; the
-// weights start from the same fixed seed as EXPLICIT; no evaluation
-// metrics are kept (ML.EVALUATE's ranking metrics are not computed).
+// weights start from the same fixed seed as EXPLICIT; the evaluation
+// metrics kept are the training rows' ranking metrics (rankingMetrics).
 func trainImplicitMF(t mlTrained, opts mlOptions, cols []mlColumn, ui, ii, ri int, ut, it string, users, items []string, data []mfObs, k int) (mlTrained, *mlFail) {
 	alpha := 40.0
 	if opts.WalsAlpha != nil {
@@ -616,6 +623,134 @@ func trainImplicitMF(t mlTrained, opts mlOptions, cols []mlColumn, ui, ii, ri in
 	t.Label, t.LabelType = cols[ri].Name, "FLOAT64"
 	t.Rows, t.EvalRows = len(data), len(data)
 	t.Features = []mlFeature{{Name: cols[ui].Name, Type: ut}, {Name: cols[ii].Name, Type: it}}
-	t.Eval = map[string]*float64{}
+	t.Eval = t.MF.rankingMetrics(data)
 	return t, nil
+}
+
+// rankingMetricNames are ML.EVALUATE's columns for an IMPLICIT matrix
+// factorization model, in the order of BigQuery's implicit-feedback
+// tutorial (https://docs.cloud.google.com/bigquery/docs/bigqueryml-mf-implicit-tutorial)
+// and of the REST RankingMetrics message.
+//
+// UNVERIFIED (docs re-read 2026-11-17): ML.EVALUATE's reference
+// (https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-evaluate)
+// names the first column recall, linked to precision and recall, while the
+// tutorial's output and the REST RankingMetrics message
+// (https://cloud.google.com/bigquery/docs/reference/rest/v2/models#RankingMetrics)
+// name it mean_average_precision; CloudBurrow answers
+// mean_average_precision. The REST message documents the mean squared
+// error against a preference of 1 or 0 "depending on if the rating exists
+// or not", the NDCG as the predicted ranking against the ideal one of the
+// original ratings, and the mean average precision as a precision per user
+// over every item ranked, averaged over the users. Chosen here, per user of the evaluation data with
+// a positive rating, over the ranking of every item the model knows by
+// its predicted confidence (ties broken by the item's order): the
+// average precision of the user's positively rated items (relevant
+// items), averaged over users; the mean squared error of the predicted
+// confidence against the preference (1 for a positive rating, 0
+// otherwise) over the evaluation pairs; the NDCG with the ratings as
+// gains and log2(rank+1) discounts, over the full ranking, averaged over
+// users; and the expected percentile rank of Hu, Koren and Volinsky's
+// paper, which the reference links for average_rank: Σ r_ui·rank_ui /
+// Σ r_ui, rank_ui 0 for the first item and 1 for the last. Pairs whose
+// user or item the model does not know are skipped; metrics with nothing
+// to average are NULL.
+var rankingMetricNames = []string{"mean_average_precision", "mean_squared_error", "normalized_discounted_cumulative_gain", "average_rank"}
+
+// rankingMetrics computes the ranking metrics of obs (user and item
+// indices of m, and ratings).
+func (m *mfTrained) rankingMetrics(obs []mfObs) map[string]*float64 {
+	out := map[string]*float64{}
+	if len(obs) == 0 {
+		return out
+	}
+	byUser := map[int]map[int]float64{}
+	var users []int
+	var se float64
+	for _, o := range obs {
+		if byUser[o.u] == nil {
+			byUser[o.u] = map[int]float64{}
+			users = append(users, o.u)
+		}
+		byUser[o.u][o.i] += o.r
+	}
+	pairs := 0
+	for _, u := range users {
+		for i, r := range byUser[u] {
+			p := 0.0
+			if r > 0 {
+				p = 1
+			}
+			d := m.predict(u, i) - p
+			se += d * d
+			pairs++
+		}
+	}
+	mse := se / float64(pairs)
+	out["mean_squared_error"] = &mse
+	nItems := len(m.Items)
+	var apSum, ndcgSum, rankNum, rankDen float64
+	nUsers := 0
+	for _, u := range users {
+		rel := byUser[u]
+		pos := 0
+		for _, r := range rel {
+			if r > 0 {
+				pos++
+			}
+		}
+		if pos == 0 {
+			continue
+		}
+		nUsers++
+		order := make([]int, nItems)
+		score := make([]float64, nItems)
+		for i := range order {
+			order[i] = i
+			score[i] = m.predict(u, i)
+		}
+		sortStableBy(order, func(a, b int) bool { return score[a] > score[b] })
+		hits := 0
+		var ap, dcg float64
+		var gains []float64
+		for rank, i := range order {
+			r := rel[i]
+			if r <= 0 {
+				continue
+			}
+			hits++
+			ap += float64(hits) / float64(rank+1)
+			dcg += r / math.Log2(float64(rank+2))
+			gains = append(gains, r)
+			pr := 0.0
+			if nItems > 1 {
+				pr = float64(rank) / float64(nItems-1)
+			}
+			rankNum += r * pr
+			rankDen += r
+		}
+		apSum += ap / float64(pos)
+		sortStableBy(gains, func(a, b float64) bool { return a > b })
+		var idcg float64
+		for k, g := range gains {
+			idcg += g / math.Log2(float64(k+2))
+		}
+		if idcg > 0 {
+			ndcgSum += dcg / idcg
+		}
+	}
+	if nUsers > 0 {
+		mp, nd := apSum/float64(nUsers), ndcgSum/float64(nUsers)
+		out["mean_average_precision"], out["normalized_discounted_cumulative_gain"] = &mp, &nd
+	}
+	if rankDen > 0 {
+		ar := rankNum / rankDen
+		out["average_rank"] = &ar
+	}
+	return out
+}
+
+// sortStableBy sorts s stably by less.
+func sortStableBy[T any](s []T, less func(a, b T) bool) {
+	sort.SliceStable(s, func(a, b int) bool { return less(s[a], s[b]) })
 }

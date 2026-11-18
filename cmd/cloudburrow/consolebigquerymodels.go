@@ -112,7 +112,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the model: " + bigqueryRefusal(err).Error(), Trail: trail}, nil
 	}
-	if md.Type == "ONNX" || md.Type == "XGBOOST" || md.Type == "TENSORFLOW_LITE" {
+	if md.Type == "ONNX" || md.Type == "XGBOOST" || md.Type == "TENSORFLOW_LITE" || md.Type == "TENSORFLOW" {
 		return p.onnxModelDetail(md, datasetID, modelID, trail), nil
 	}
 	if md.Type == "" {
@@ -208,6 +208,13 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 				f("Davies-Bouldin index", cm.DaviesBouldinIndex)
 				f("Mean squared distance", cm.MeanSquaredDistance)
 			}
+			if rk := em.RankingMetrics; rk != nil {
+				// An IMPLICIT matrix factorization's (#1766).
+				f("Mean average precision", rk.MeanAveragePrecision)
+				f("Mean squared error", rk.MeanSquaredError)
+				f("Normalized discounted cumulative gain", rk.NormalizedDiscountedCumulativeGain)
+				f("Average rank", rk.AverageRank)
+			}
 			if dm := em.DimensionalityReductionMetrics; dm != nil {
 				f("Total explained variance ratio", dm.TotalExplainedVarianceRatio)
 			}
@@ -253,7 +260,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	}, nil
 }
 
-// onnxModelDetail is an imported ONNX, XGBoost or TensorFlow Lite model's page (#1711, #1755): its inputs and
+// onnxModelDetail is an imported ONNX, XGBoost, TensorFlow Lite or TensorFlow model's page (#1711, #1755, #1775): its inputs and
 // outputs, which models.get reports as featureColumns and labelColumns,
 // and the Cloud Storage URI it was imported from. It has no training,
 // weights or evaluation: BigQuery imports the model as it is.
@@ -493,8 +500,23 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "importance", Label: "Feature importance", Listing: l}}
-	case "ARIMA_PLUS":
+	case "ARIMA_PLUS", "ARIMA_PLUS_XREG":
 		var out []console.Section
+		if typ == "ARIMA_PLUS_XREG" {
+			// Its regression's weights (ML.ARIMA_COEFFICIENTS, #1766); its
+			// ML.FORECAST needs the future features, so the page shows
+			// none.
+			_, co := read("SELECT DISTINCT processed_input, weight, ARRAY_TO_STRING(ARRAY(SELECT FORMAT('%s=%g', category, weight) FROM " +
+				"UNNEST(category_weights) ORDER BY category), ', ') FROM ML.ARIMA_COEFFICIENTS(" + model + ") ORDER BY processed_input")
+			if len(co) > 0 {
+				l := console.Listing{Columns: []string{"Weight", "Category weights"}, NameColumn: "Regressor", Noun: "regressors"}
+				for _, r := range co {
+					l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Weight": num(r[1]), "Category weights": orDash(fmt.Sprint(r[2]))}})
+				}
+				l.Total = len(l.Items)
+				out = append(out, console.Section{ID: "regressors", Label: "Regressors", Listing: l})
+			}
+		}
 		schema, fc := read("SELECT * FROM ML.FORECAST(" + model + ") ORDER BY 1, 2 LIMIT 100")
 		if len(fc) > 0 {
 			// The series ID, when there is one, comes before

@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/onnxrunner"
+	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
 )
 
 // ServiceName is the cluster Service the front serves: pods dial it as
@@ -47,6 +48,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"and JOBS_BY_ORGANIZATION read a project's ancestry from (#1392); empty: those views are 501")
 	onnx := fs.String("onnx", "", "the ONNX runner of the onnx build's CLI (http://host:port), which runs BigQuery ML's imported "+
 		"ONNX models (#1711); empty: CREATE MODEL of model_type ONNX is 501")
+	tfconvertAddr := fs.String("tfconvert", "", "the TensorFlow SavedModel converter of the CLI (http://host:port), which converts BigQuery ML's imported "+
+		"TENSORFLOW models to TensorFlow Lite (#1775); empty: CREATE MODEL of model_type TENSORFLOW is 501")
 	vertexai := fs.String("vertexai", "", "the instance's local Vertex AI endpoint (http://host:port), which BigQuery ML's remote models "+
 		"run on (#1760); empty: CREATE MODEL … REMOTE WITH CONNECTION is 501. Never Google's")
 	if err := fs.Parse(args); err != nil {
@@ -87,6 +90,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		o.vertexai = *vertexai
 		if *onnx != "" {
 			o.onnx = onnxrunner.NewClient(*onnx, nil)
+		}
+		if *tfconvertAddr != "" {
+			o.tfconvert = tfconvert.NewClient(*tfconvertAddr, nil)
 		}
 		o.streamTimes = true // streamingbuffer.go, #1370
 	})

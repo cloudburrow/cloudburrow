@@ -8,8 +8,9 @@
 // or subgraph 0's inputs and outputs when the model has no signature, with
 // float32 arithmetic as LiteRT's reference kernels do, checked against
 // LiteRT's own interpreter (ai-edge-litert 2.3.0) on models
-// TensorFlow 2.20's TFLiteConverter wrote (tflitemodel_test.go). An
-// operator it does not run, a quantized tensor or a second subgraph is an
+// TensorFlow 2.20's TFLiteConverter wrote (tflitemodel_test.go).
+// Quantized tensors (quant.go) and STRING tensors (strings.go) run too
+// (#1766). An operator it does not run or a second subgraph is an
 // *UnsupportedError, so the caller can refuse it as not implemented
 // rather than as the model's fault.
 package tflitemodel
@@ -72,13 +73,14 @@ func (t Type) IsInt() bool {
 }
 
 // Tensor is a value: its shape, and its elements row-major in F (the
-// float types), I (the integer types) or B (BOOL).
+// float types), I (the integer types), B (BOOL) or S (STRING, #1766).
 type Tensor struct {
 	Type  Type
 	Shape []int
 	F     []float32
 	I     []int64
 	B     []bool
+	S     []string
 }
 
 // Len is the number of elements the shape holds.
@@ -109,6 +111,10 @@ type tensorDef struct {
 	typ   Type
 	shape []int
 	data  *Tensor // a constant
+	// q is a quantized tensor's parameters (quant.go, #1766): its values
+	// are carried as float32, typ is FLOAT32, and stored is its own type.
+	q      *quant
+	stored Type
 }
 
 type op struct {
@@ -121,8 +127,19 @@ type op struct {
 // Model is a loaded .tflite model.
 type Model struct {
 	Inputs, Outputs []Port
-	tensors         []tensorDef
-	ops             []op
+	// tensors and ops are the signature's subgraph's.
+	tensors []tensorDef
+	ops     []op
+	// graphs are every subgraph, which WHILE and IF call (#1775).
+	graphs []*graph
+}
+
+// graph is one subgraph: its tensors, operators, and the tensors its
+// inputs and outputs are.
+type graph struct {
+	tensors []tensorDef
+	ops     []op
+	in, out []int
 }
 
 // builtin operator codes of schema.fbs's BuiltinOperator that Run runs.
@@ -163,6 +180,27 @@ const (
 	opAbs            = 101
 	opBatchMatMul    = 126
 	opGelu           = 150
+	// The convolution, pooling and gather operators (#1766).
+	opAveragePool2D   = 1
+	opConv2D          = 3
+	opDepthwiseConv2D = 4
+	opMaxPool2D       = 17
+	opGather          = 36
+	opQuantize        = 114
+	// Control flow, comparisons, logic and selection (#1775).
+	opLess         = 58
+	opGreater      = 61
+	opGreaterEqual = 62
+	opLessEqual    = 63
+	opSelect       = 64
+	opEqual        = 71
+	opNotEqual     = 72
+	opLogicalOr    = 84
+	opLogicalAnd   = 86
+	opLogicalNot   = 87
+	opIf           = 118
+	opWhile        = 119
+	opSelectV2     = 123
 )
 
 var opNames = map[int32]string{opAdd: "ADD", opConcatenation: "CONCATENATION", opDequantize: "DEQUANTIZE", opFullyConnected: "FULLY_CONNECTED",
@@ -170,7 +208,11 @@ var opNames = map[int32]string{opAdd: "ADD", opConcatenation: "CONCATENATION", o
 	opTanh: "TANH", opTranspose: "TRANSPOSE", opMean: "MEAN", opSub: "SUB", opDiv: "DIV", opSqueeze: "SQUEEZE", opStridedSlice: "STRIDED_SLICE",
 	opExp: "EXP", opCast: "CAST", opMaximum: "MAXIMUM", opMinimum: "MINIMUM", opNeg: "NEG", opExpandDims: "EXPAND_DIMS", opLog: "LOG",
 	opSum: "SUM", opSqrt: "SQRT", opRsqrt: "RSQRT", opPow: "POW", opPack: "PACK", opSquare: "SQUARE", opLeakyRelu: "LEAKY_RELU",
-	opSquaredDiff: "SQUARED_DIFFERENCE", opAbs: "ABS", opBatchMatMul: "BATCH_MATMUL", opGelu: "GELU"}
+	opSquaredDiff: "SQUARED_DIFFERENCE", opAbs: "ABS", opBatchMatMul: "BATCH_MATMUL", opGelu: "GELU",
+	opAveragePool2D: "AVERAGE_POOL_2D", opConv2D: "CONV_2D", opDepthwiseConv2D: "DEPTHWISE_CONV_2D", opMaxPool2D: "MAX_POOL_2D", opGather: "GATHER", opQuantize: "QUANTIZE",
+	opLess: "LESS", opGreater: "GREATER", opGreaterEqual: "GREATER_EQUAL", opLessEqual: "LESS_EQUAL", opSelect: "SELECT", opEqual: "EQUAL",
+	opNotEqual: "NOT_EQUAL", opLogicalOr: "LOGICAL_OR", opLogicalAnd: "LOGICAL_AND", opLogicalNot: "LOGICAL_NOT", opIf: "IF", opWhile: "WHILE",
+	opSelectV2: "SELECT_V2"}
 
 // Ops are the builtin operators Run runs, by schema.fbs name.
 func Ops() []string {
@@ -280,59 +322,27 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 		}
 		sg = subs[subIdx]
 	}
-	if len(subs) > 1 {
-		return nil, &UnsupportedError{fmt.Sprintf("the model has %d subgraphs (control flow such as WHILE or IF): CloudBurrow's TensorFlow Lite interpreter runs one", len(subs))}
-	}
 	m = &Model{}
-	for _, t := range tables(sg, 4) {
-		d := tensorDef{name: str(t, 10), typ: Type(t.GetInt8Slot(6, 0)), shape: ints(t, 4)}
-		if sh := ints(t, 18); sh != nil {
-			d.shape = sh
+	for _, s := range subs {
+		g, err := loadGraph(s, codes, bufs)
+		if err != nil {
+			return nil, err
 		}
-		if qt := sub(t, 12); qt != nil {
-			// QuantizationParameters: scale is its field 8.
-			if field(qt, 8) != 0 && qt.VectorLen(field(qt, 8)) > 0 && !d.typ.IsFloat() {
-				return nil, &UnsupportedError{"the model is quantized (tensor " + d.name + " is " + d.typ.String() + " with a quantization scale): CloudBurrow's TensorFlow Lite interpreter runs float models"}
-			}
-		}
-		if field(t, 16) != 0 {
-			return nil, &UnsupportedError{"tensor " + d.name + " is sparse: sparse tensors are not supported"}
-		}
-		if b := int(t.GetUint32Slot(8, 0)); b > 0 && b < len(bufs) {
-			bp := field(bufs[b], 4)
-			if bp != 0 {
-				raw := bufs[b].ByteVector(bufs[b].Pos + bp)
-				c, err := constant(d.typ, ints(t, 4), raw)
-				if err != nil {
-					return nil, fmt.Errorf("tensor %s: %w", d.name, err)
-				}
-				d.data = c
-			} else if bufs[b].GetUint64Slot(6, 0) > 1 {
-				return nil, &UnsupportedError{"tensor " + d.name + " keeps its data outside the FlatBuffer: CloudBurrow reads models under 2 GB"}
-			}
-		}
-		m.tensors = append(m.tensors, d)
+		m.graphs = append(m.graphs, g)
 	}
-	for _, o := range tables(sg, 10) {
-		idx := int(o.GetUint32Slot(4, 0))
-		if idx >= len(codes) {
-			return nil, errors.New("an operator names an operator code the model does not have")
+	_ = sg
+	main := m.graphs[subIdx]
+	m.tensors, m.ops = main.tensors, main.ops
+	for _, g := range m.graphs {
+		for _, o := range g.ops {
+			if o.code == opWhile || o.code == opIf {
+				for _, slot := range []int{4, 6} {
+					if k := int(o.i32(slot, -1)); k < 0 || k >= len(m.graphs) {
+						return nil, fmt.Errorf("operator %s names subgraph %d, which the model does not have", o.name, k)
+					}
+				}
+			}
 		}
-		c := codes[idx]
-		code := i32(c, 10, 0)
-		if dep := int32(c.GetInt8Slot(4, 0)); dep > code {
-			code = dep
-		}
-		if code == 32 { // CUSTOM
-			return nil, &UnsupportedError{"the model uses the custom operator " + str(c, 6) + ": only TensorFlow core operations are supported"}
-		}
-		name, ok := opNames[code]
-		if !ok {
-			return nil, &UnsupportedError{fmt.Sprintf("the model uses TensorFlow Lite builtin operator %d, which CloudBurrow's interpreter does not run (it runs %v)", code, Ops())}
-		}
-		op := op{code: code, name: name, in: ints(o, 6), out: ints(o, 8)}
-		op.opts = sub(o, 12)
-		m.ops = append(m.ops, op)
 	}
 	port := func(name string, i int) (Port, error) {
 		if i < 0 || i >= len(m.tensors) {
@@ -342,8 +352,13 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 		if name == "" {
 			name = d.name
 		}
-		return Port{Name: name, Type: d.typ, Shape: d.shape, index: i}, nil
+		typ := d.typ
+		if d.q != nil {
+			typ = d.stored // a quantized port takes and gives its integers
+		}
+		return Port{Name: name, Type: typ, Shape: d.shape, index: i}, nil
 	}
+	sg = subs[subIdx]
 	if sig != nil {
 		for k, slot := range []int{4, 6} {
 			for _, tm := range tables(sig, slot) {
@@ -376,9 +391,75 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 	return m, nil
 }
 
+// loadGraph reads one subgraph.
+func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table) (*graph, error) {
+	m := &graph{in: ints(sg, 6), out: ints(sg, 8)}
+	for _, t := range tables(sg, 4) {
+		d := tensorDef{name: str(t, 10), typ: Type(t.GetInt8Slot(6, 0)), shape: ints(t, 4)}
+		if sh := ints(t, 18); sh != nil {
+			d.shape = sh
+		}
+		if qt := sub(t, 12); qt != nil && !d.typ.IsFloat() {
+			q, err := readQuant(qt, d)
+			if err != nil {
+				return nil, err
+			}
+			d.q = q
+		}
+		if field(t, 16) != 0 {
+			return nil, &UnsupportedError{"tensor " + d.name + " is sparse: sparse tensors are not supported"}
+		}
+		if b := int(t.GetUint32Slot(8, 0)); b > 0 && b < len(bufs) {
+			bp := field(bufs[b], 4)
+			if bp != 0 {
+				raw := bufs[b].ByteVector(bufs[b].Pos + bp)
+				c, err := constant(d.typ, ints(t, 4), raw)
+				if err != nil {
+					return nil, fmt.Errorf("tensor %s: %w", d.name, err)
+				}
+				if d.q != nil {
+					c = d.q.dequantize(c)
+				}
+				d.data = c
+			} else if bufs[b].GetUint64Slot(6, 0) > 1 {
+				return nil, &UnsupportedError{"tensor " + d.name + " keeps its data outside the FlatBuffer: CloudBurrow reads models under 2 GB"}
+			}
+		}
+		if d.q != nil {
+			d.stored, d.typ = d.typ, Float32
+		}
+		m.tensors = append(m.tensors, d)
+	}
+	for _, o := range tables(sg, 10) {
+		idx := int(o.GetUint32Slot(4, 0))
+		if idx >= len(codes) {
+			return nil, errors.New("an operator names an operator code the model does not have")
+		}
+		c := codes[idx]
+		code := i32(c, 10, 0)
+		if dep := int32(c.GetInt8Slot(4, 0)); dep > code {
+			code = dep
+		}
+		if code == 32 { // CUSTOM
+			return nil, &UnsupportedError{"the model uses the custom operator " + str(c, 6) + ": only TensorFlow core operations are supported"}
+		}
+		name, ok := opNames[code]
+		if !ok {
+			return nil, &UnsupportedError{fmt.Sprintf("the model uses TensorFlow Lite builtin operator %d, which CloudBurrow's interpreter does not run (it runs %v)", code, Ops())}
+		}
+		op := op{code: code, name: name, in: ints(o, 6), out: ints(o, 8)}
+		op.opts = sub(o, 12)
+		m.ops = append(m.ops, op)
+	}
+	return m, nil
+}
+
 // constant decodes a buffer's little-endian elements.
 func constant(typ Type, shape []int, raw []byte) (*Tensor, error) {
 	t := &Tensor{Type: typ, Shape: shape}
+	if typ == String {
+		return stringConstant(t, raw)
+	}
 	n := prod(shape)
 	size := map[Type]int{Float32: 4, Float16: 2, Float64: 8, Int8: 1, Uint8: 1, Int16: 2, Uint16: 2, Int32: 4, Uint32: 4, Int64: 8, Uint64: 8, Bool: 1}[typ]
 	if size == 0 {
@@ -442,4 +523,21 @@ func prod(s []int) int {
 		n *= d
 	}
 	return n
+}
+
+// Uses are the builtin operators the model's subgraphs use, by schema.fbs
+// name, sorted.
+func (m *Model) Uses() []string {
+	seen := map[string]bool{}
+	for _, g := range m.graphs {
+		for _, o := range g.ops {
+			seen[o.name] = true
+		}
+	}
+	var out []string
+	for n := range seen {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }

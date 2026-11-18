@@ -186,6 +186,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetONNXRunner(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ONNX))
 	}
+	if tfConverterEnabled(cfg) && cfg.Endpoints.TFConvert > 0 {
+		// The TensorFlow SavedModel converter, through cloudburrow-host,
+		// converts BigQuery ML's imported TENSORFLOW models (#1775).
+		comps.SetTFConverter(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.TFConvert))
+	}
 	if serviceEnabled(cfg, config.ServiceBigQuery) && localAIServed(cfg) {
 		if err := pinLocalAIPort(&cfg); err != nil {
 			return err
@@ -723,6 +729,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if onnxRunner != nil {
 		coord.Register(onnxRunner)
 	}
+	// The TensorFlow SavedModel converter (#1775), for BigQuery's front.
+	tfConverter := newTFConverter(cfg, stdout)
+	if tfConverter != nil {
+		coord.Register(tfConverter)
+	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
 	// without Cloud Run or BigQuery.
@@ -766,6 +777,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := onnxRunner.Addr(); a != "" {
 			live["onnx"] = a
 		}
+		if a := tfConverter.Addr(); a != "" {
+			live["tfconvert"] = a
+		}
 		if localAISrv != nil && localAISrv.Addr() != "" {
 			live["localai"] = localAISrv.Addr()
 		}
@@ -791,9 +805,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "localai": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
 		if !runEnabled {
-			published = map[string]bool{"resourcemanager": true, "onnx": true, "localai": true}
+			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates
 			// from the metadata server (#1787).
 			if serviceEnabled(cfg, config.ServiceStorage) {

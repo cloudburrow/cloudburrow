@@ -325,6 +325,12 @@ type Endpoints struct {
 	// Google one: bound only by the onnx build's CLI (make build-onnx),
 	// with BigQuery enabled.
 	ONNX int `json:"onnx"`
+	// TFConvert is the host port of the TensorFlow SavedModel converter
+	// (#1775), which turns BigQuery ML's imported TENSORFLOW models into
+	// TensorFlow Lite for the BigQuery front in a local container,
+	// published to the cluster through cloudburrow-host. CloudBurrow's
+	// own API, not a Google one: bound with BigQuery enabled.
+	TFConvert int `json:"tfconvert"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -384,6 +390,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"serviceusage", &e.ServiceUsage},
 		{"backupdr", &e.BackupDR},
 		{"onnx", &e.ONNX},
+		{"tfconvert", &e.TFConvert},
 	}
 }
 
@@ -742,6 +749,9 @@ func Default() Config {
 			// Firestore with MongoDB compatibility (#1703): the next free
 			// port after the ONNX runner's 9025.
 			FirestoreMongoDB: 9026,
+			// The TensorFlow SavedModel converter (#1775): the next free
+			// port.
+			TFConvert: 9027,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

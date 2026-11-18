@@ -574,7 +574,13 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if typ == "MATRIX_FACTORIZATION" {
 		return f.mfSubquery(r, q, md, c)
 	}
+	if typ == "ARIMA_PLUS_XREG" {
+		return f.xregSubquery(r, q, md, c) // modelxreg.go, #1766
+	}
 	if typ == "ARIMA_PLUS" {
+		if c.fn == "EVALUATE" && c.input != "" {
+			return f.tsEvaluate(r, q, md, c) // modelxreg.go, #1766
+		}
 		return f.arimaSubquery(r, q, md, c)
 	}
 	if typ == "AUTOENCODER" && c.fn != "TRAINING_INFO" && c.fn != "FEATURE_INFO" {
