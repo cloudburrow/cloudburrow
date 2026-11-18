@@ -198,7 +198,6 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.anywhereCaches.update"] = s.anywhereCachesUpdate
 	s.handlers["storage.anywhereCaches.get"] = s.anywhereCachesGet
 	s.handlers["storage.anywhereCaches.list"] = s.anywhereCachesList
-	s.handlers["storage.anywhereCaches.pause"] = s.anywhereCachesState(cachePaused, cacheRunning)
 	s.handlers["storage.anywhereCaches.resume"] = s.anywhereCachesState(cacheRunning, cachePaused, cacheDisabled)
 	s.handlers["storage.anywhereCaches.disable"] = s.anywhereCachesState(cacheDisabled, cacheRunning, cachePaused)
 	s.handlers["storage.buckets.setIamPolicy"] = s.bucketsSetIamPolicy
@@ -331,6 +330,11 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 	}
 	if !upload && r.Method == http.MethodPost && rest == channelsStopPath {
 		s.channelsStop(w, r)
+		return
+	}
+	// Nor is anywhereCaches.pause since revision 20261107 (anywherecache.go).
+	if !upload && r.Method == http.MethodPost && anywhereCachesPauseRE.MatchString(rest) {
+		s.anywhereCachesState(cachePaused, cacheRunning)(w, r)
 		return
 	}
 	for _, m := range s.methods {

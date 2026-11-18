@@ -91,12 +91,15 @@ func waitOp(t *testing.T, s *storagev1.Service, bucket, id string) *storagev1.Go
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.anywhereCaches.update 400: another update while one is pending
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
-// unverified: storage.anywhereCaches.pause 400: a cache that is not running
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
+// (anywhereCaches.pause, sent by hand: a cache that is not running is 400,
+// UNVERIFIED, docs re-read 2026-10-17, still unanswered:
+// https://docs.cloud.google.com/storage/docs/anywhere-cache. Revision
+// 20261107 of the discovery document has no pause, so it is no coverage
+// method, #1791.)
 // unverified: storage.buckets.operations.cancel 400: an Anywhere Cache update's operation, and a done one
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.get, storage.anywhereCaches.list, storage.anywhereCaches.update
-// covers: storage.anywhereCaches.pause, storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
+// covers: storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
 func TestStorageAnywhereCachesJSON(t *testing.T) {
 	h := New(t)
 	s := storageJSON(t, h)
@@ -206,7 +209,7 @@ func storageControlGRPC(t *testing.T, h *Harness) *control.StorageControlClient 
 // cancels a second create through the long-running operation's Cancel.
 //
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.update, storage.anywhereCaches.get, storage.anywhereCaches.list
-// covers: storage.anywhereCaches.pause, storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
+// covers: storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
 func TestStorageAnywhereCachesControl(t *testing.T) {
 	h := New(t)
 	sc := storageControlGRPC(t, h)

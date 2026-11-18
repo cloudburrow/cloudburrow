@@ -11,13 +11,12 @@ const (
 // methodStatus lists every method in the discovery document, and only those
 // (TestStorageDiscoveryDrift). A method moves to built in the issue that
 // implements it; until then it answers 501 notImplemented naming it, never a
-// plausible stub. Buckets are built (#490), objects.insert, get and delete (#491), objects.patch and update (#492), objects.list (#494), and compose, copy, rewrite and move (#495); managed folders, all but update (#828); hierarchical-namespace folders and their operations' get and list (#1203); the three ACL resources, stored and never enforced (#1233); object change notification channels, objects.watchAll and channels.stop, both routed outside the discovery document (#1281, #1700); Anywhere Caches, as records with no cache tier behind them, buckets.relocate, advanceRelocateBucket and operations.cancel (#1444); objects.viewFullContext (#1700).
+// plausible stub. Buckets are built (#490), objects.insert, get and delete (#491), objects.patch and update (#492), objects.list (#494), and compose, copy, rewrite and move (#495); managed folders, all but update (#828); hierarchical-namespace folders and their operations' get and list (#1203); the three ACL resources, stored and never enforced (#1233); object change notification channels, objects.watchAll and channels.stop, both routed outside the discovery document (#1281, #1700); Anywhere Caches, as records with no cache tier behind them (pause routed outside the discovery document since revision 20261107), buckets.relocate, advanceRelocateBucket and operations.cancel (#1444); objects.viewFullContext (#1700).
 var methodStatus = map[string]status{
 	"storage.anywhereCaches.disable":                   built,
 	"storage.anywhereCaches.get":                       built,
 	"storage.anywhereCaches.insert":                    built,
 	"storage.anywhereCaches.list":                      built,
-	"storage.anywhereCaches.pause":                     built,
 	"storage.anywhereCaches.resume":                    built,
 	"storage.anywhereCaches.update":                    built,
 	"storage.bucketAccessControls.delete":              built,

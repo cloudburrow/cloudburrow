@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -65,6 +66,24 @@ func TestRapidCachesAndManagedFolderConfig(t *testing.T) {
 	_, h := sdk(t)
 	b := h.URL + "/storage/v1/b"
 	raw(t, "POST", b+"?project=p", `{"name":"rcb","location":"us-central1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}}`)
+	// storageLayout's rapidCacheInfo (revision 20261107) is there only
+	// while the bucket has a cache that is not disabled.
+	layoutRapid := func(when, want string) {
+		t.Helper()
+		code, resp := raw(t, "GET", b+"/rcb/storageLayout", "")
+		var got struct {
+			RapidCacheInfo *struct {
+				CacheType string `json:"cacheType"`
+			} `json:"rapidCacheInfo"`
+		}
+		if code != 200 || json.Unmarshal([]byte(resp), &got) != nil {
+			t.Fatalf("%s: storageLayout = %d %s", when, code, resp)
+		}
+		if (want == "") != (got.RapidCacheInfo == nil) || (got.RapidCacheInfo != nil && got.RapidCacheInfo.CacheType != want) {
+			t.Errorf("%s: storageLayout = %s, want rapidCacheInfo.cacheType %q", when, resp, want)
+		}
+	}
+	layoutRapid("no cache", "")
 	if code, resp := raw(t, "POST", b+"/rcb/rapidCaches", `{"zone":"us-east1-b"}`); code != 400 {
 		t.Errorf("zone outside location = %d %s", code, resp)
 	}
@@ -82,6 +101,7 @@ func TestRapidCachesAndManagedFolderConfig(t *testing.T) {
 	if code, resp := raw(t, "GET", b+"/rcb/rapidCaches/us-central1-a", ""); code != 200 || !strings.Contains(resp, `"state": "running"`) || !strings.Contains(resp, "rapid-cache-ultra") {
 		t.Errorf("get = %d %s", code, resp)
 	}
+	layoutRapid("running", "rapid-cache-ultra")
 	if code, resp := raw(t, "PATCH", b+"/rcb/rapidCaches/us-central1-a", `{"ttl":"7200s"}`); code != 200 || !strings.Contains(resp, "UpdateRapidCacheMetadata") {
 		t.Errorf("update = %d %s", code, resp)
 	}
@@ -106,6 +126,7 @@ func TestRapidCachesAndManagedFolderConfig(t *testing.T) {
 	if code, resp := raw(t, "GET", b+"/rcb/rapidCaches/us-central1-a", ""); code != 200 || !strings.Contains(resp, `"state": "disabled"`) {
 		t.Errorf("get disabled = %d %s", code, resp)
 	}
+	layoutRapid("disabled", "")
 }
 
 // TestRapidAdmissionSpellings: gcloud alpha storage buckets rapid-caches
