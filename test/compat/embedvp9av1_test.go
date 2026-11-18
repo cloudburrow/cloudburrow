@@ -25,7 +25,11 @@ import (
 // by ffmpeg 9 with libvpx-vp9 (two-pass, hidden alternate reference
 // frames) and SVT-AV1, beside the H.264 encoding of the same frames
 // (internal/embedding/testdata); both decoders are bit-exact against ffmpeg
-// there. Each is the H.264 clip's token count, a vector within cosine 0.98
+// there. Since #1739 VP9 profiles 1 to 3 too: the same frames in 8-bit
+// 4:4:4 (profile 1), 10-bit 4:2:0 (profile 2) and 12-bit 4:2:2 (profile
+// 3), libvpx-vp9 two-pass from the H.264 clip, decoded by govpx's vp9hbd,
+// bit-exact against ffmpeg (internal/embedding's TestVP9ProfilesMatchFFmpeg).
+// Each is the H.264 clip's token count, a vector within cosine 0.98
 // of the H.264 one (the encoders differ), and nearest the turtle query; the
 // console's Embeddings API gives the SDK's vector.
 func TestEmbedContentEmbedsVP9AndAV1ThroughThePredictionClient(t *testing.T) {
@@ -58,7 +62,7 @@ func TestEmbedContentEmbedsVP9AndAV1ThroughThePredictionClient(t *testing.T) {
 	for i, q := range queries {
 		qv[i] = embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_QUERY, &aiplatformpb.Part{Data: &aiplatformpb.Part_Text{Text: q}}).GetEmbedding().GetValues()
 	}
-	for _, file := range []string{"turtle-vp9.mp4", "turtle-av1.mp4"} {
+	for _, file := range []string{"turtle-vp9.mp4", "turtle-av1.mp4", "turtle-vp9-444.mp4", "turtle-vp9-10bit.mp4", "turtle-vp9-422-12bit.mp4"} {
 		r := embed(doc, video(file))
 		v := r.GetEmbedding().GetValues()
 		if len(v) != 768 || math.Abs(norm(v)-1) > 1e-3 {

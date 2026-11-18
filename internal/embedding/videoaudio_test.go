@@ -72,10 +72,16 @@ func TestDecodeVideoAudioTrack(t *testing.T) {
 		}
 		var maxDiff float64
 		for i := range n {
-			want := float64(int16(binary.LittleEndian.Uint16(ref[2*c.channels*i:]))) / 32768
+			l := int16(binary.LittleEndian.Uint16(ref[2*c.channels*i:]))
+			want := float64(l) / 32768
 			if c.channels == 2 {
-				r := float64(int16(binary.LittleEndian.Uint16(ref[2*c.channels*i+2:]))) / 32768
-				want = math.Sqrt2 * (want + r) / 2 // as downmix does
+				r := int16(binary.LittleEndian.Uint16(ref[2*c.channels*i+2:]))
+				// Since #1739 AAC is decoded to float, as ffmpeg decodes it,
+				// unclipped; the 16-bit reference is clipped at full scale.
+				if l == math.MaxInt16 || l == math.MinInt16 || r == math.MaxInt16 || r == math.MinInt16 {
+					continue
+				}
+				want = math.Sqrt2 * (want + float64(r)/32768) / 2 // as downmix does
 			}
 			maxDiff = max(maxDiff, math.Abs(want-float64(got[i])))
 		}
@@ -133,7 +139,7 @@ func TestDecodeVideoAudioTrack(t *testing.T) {
 // refused naming its codec.
 func TestDecodeVideoAudioRefuses(t *testing.T) {
 	for file, want := range map[string]string{
-		"va-heaac.mp4": "HE-AAC",
+		"va-alac.mp4": `codec "alac"`,
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", file))
 		if err != nil {
@@ -145,5 +151,87 @@ func TestDecodeVideoAudioRefuses(t *testing.T) {
 	}
 	if _, err := DecodeVideoAudio("video/mp4", []byte("not a video"), VideoOptions{}); err == nil {
 		t.Error("not a video: no error")
+	}
+}
+
+// TestDecodeVideoAudioTrackCodecs (#1739): HE-AAC (SBR, and SBR with
+// parametric stereo), AC-3, E-AC-3 and surround Opus tracks decode as
+// ffmpeg 9 decodes them, within the stated tolerance. The HE-AAC tracks are compared at
+// their own rate, downmixed (testdata/va-heaac*.ffmpeg-mono.s16: `ffmpeg -i
+// f -vn -ac 1 -f f32le`, then rounded to 16 bits by `ffmpeg -f f32le -ar
+// 44100 -ac 1 -i x.f32 -f s16le`, since a 16-bit -ac 1 normalises the
+// downmix; within half a 16-bit step more);
+// the 5.1 AC-3 and E-AC-3 ones through DecodeVideoAudio, downmixed with the
+// bitstream's centre and surround mix levels as ffmpeg's resampler is given
+// them and resampled to 16 kHz (testdata/va-*ac3.ffmpeg-16k.f32, `ffmpeg -i
+// f -vn -ac 1 -ar 16000 -f f32le`). (The resampler is checked on its own in
+// TestResampleKeepsATone; at 44.1 kHz to 16 kHz its table interpolation
+// and libswresample's polyphase filter differ by up to 1e-2 near the
+// cutoff, which is why the HE-AAC tracks are compared before it.) The
+// files, 1.5 seconds each:
+//
+//	S="aevalsrc=0.3*sin(2*PI*440*t)+0.1*sin(2*PI*7000*t)+0.05*sin(2*PI*(3000+4000*t)*t)|0.3*sin(2*PI*660*t)+0.08*sin(2*PI*9500*t):s=44100:d=1.5"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S" -c:v libx264 -c:a aac_at -profile:a 4 -b:a 48k -shortest -map_metadata -1 va-heaac.mp4
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S" -c:v libx264 -c:a aac_at -profile:a 28 -b:a 32k -shortest -map_metadata -1 va-heaacv2.mp4
+//	S6="aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*660*t)|0.25*sin(2*PI*330*t)|0.2*sin(2*PI*60*t)|0.15*sin(2*PI*1500*t)*sin(2*PI*2*t)|0.15*sin(2*PI*2500*t):s=48000:d=1.5:channel_layout=5.1"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a ac3 -b:a 192k -shortest -map_metadata -1 va-ac3.mp4
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a eac3 -b:a 192k -shortest -map_metadata -1 va-eac3.mp4
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1.5 -f lavfi -i "$S6" -c:v libx264 -c:a libopus -b:a 192k -shortest -map_metadata -1 va-opus51.mp4
+//
+// The 5.1 Opus one (mapping family 1, #1739) is compared with ffmpeg's
+// libopus decode (`ffmpeg -c:a libopus -i f -vn -t 1.5 -ac 1 -ar 16000 -f f32le`),
+// downmixed with the default levels.//
+// (aac_at is macOS's AudioToolbox encoder: profile 4 is HE-AAC, 28 HE-AACv2.)
+func TestDecodeVideoAudioTrackCodecs(t *testing.T) {
+	for _, c := range []struct {
+		file    string
+		maxDiff float64 // per sample, full scale 1
+	}{
+		{"va-heaac.mp4", 5e-4},   // SBR is float: measured 3.2e-4, RMS 3.5e-5
+		{"va-heaacv2.mp4", 1e-3}, // measured 5.8e-4, RMS 7.1e-5
+		{"va-ac3.mp4", 1e-3},     // measured 5.7e-4 (RMS 7.7e-5): ffmpeg's dither differs from ours
+		{"va-eac3.mp4", 1e-3},    // measured 2.7e-4 (RMS 3.3e-5)
+		{"va-opus51.mp4", 1e-4},  // libopus transpiled: measured 3.6e-5, RMS 9.2e-6
+	} {
+		b, err := os.ReadFile(filepath.Join("testdata", c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got, want []float32
+		skip := 0
+		if strings.HasPrefix(c.file, "va-heaac") {
+			got, _ = soundTrackOf(t, c.file)
+			ref := readTestdata(t, strings.TrimSuffix(c.file, ".mp4")+".ffmpeg-mono.s16")
+			want = make([]float32, len(ref)/2)
+			for i := range want {
+				want[i] = float32(int16(binary.LittleEndian.Uint16(ref[2*i:]))) / 32768
+			}
+		} else {
+			if got, err = DecodeVideoAudio("video/mp4", b, VideoOptions{}); err != nil {
+				t.Fatalf("%s: %v", c.file, err)
+			}
+			ref := readTestdata(t, strings.TrimSuffix(c.file, ".mp4")+".ffmpeg-16k.f32")
+			want = make([]float32, len(ref)/4)
+			for i := range want {
+				want[i] = math.Float32frombits(binary.LittleEndian.Uint32(ref[4*i:]))
+			}
+			// The first and last 32 samples (the resampling filter's
+			// half-length), where libswresample's handling of the stream's
+			// ends differs from resample's, are left out.
+			skip = resampleZeros
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d samples, ffmpeg %d", c.file, len(got), len(want))
+		}
+		var maxDiff, ss float64
+		for i := skip; i < len(got)-skip; i++ {
+			d := math.Abs(float64(got[i] - want[i]))
+			maxDiff = max(maxDiff, d)
+			ss += d * d
+		}
+		t.Logf("%s: max %.2e, RMS %.2e from ffmpeg", c.file, maxDiff, math.Sqrt(ss/float64(len(got)-2*skip)))
+		if maxDiff > c.maxDiff {
+			t.Errorf("%s: %.2e from ffmpeg's decode, want at most %.0e", c.file, maxDiff, c.maxDiff)
+		}
 	}
 }

@@ -266,7 +266,10 @@ func resample(in []float32, from, to int) []float32 {
 	ratio := float64(to) / float64(from)
 	fc := resampleCutoff * min(1, ratio) // cutoff in cycles per input sample, x2
 	half := float64(resampleZeros) / fc  // the filter's half width in input samples
-	n := int(math.Ceil(float64(len(in)) * ratio))
+	// As many samples as libswresample gives for the whole stream: the
+	// length times the ratio, rounded (#1739: 71616 samples at 44.1 kHz
+	// are 25983 at 16 kHz, 71936 at 48 kHz 23979).
+	n := int(math.Round(float64(len(in)) * ratio))
 	out := make([]float32, n)
 	at := func(x float64) float64 { // the kernel at x input samples, scaled
 		u := math.Abs(x) * fc * resamplePhases

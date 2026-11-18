@@ -71,6 +71,8 @@ type Decoder struct {
 	prevSeq   []int      // per channel: previous frame's window_sequence
 	prevShape []int      // per channel: previous frame's window shape
 	noise     *rand.Rand // PNS noise source (only the distribution is normative)
+
+	heState // SBR and PS (hev2.go)
 }
 
 // icsInfo is the parsed ics_info() — the window and band layout shared by
@@ -103,13 +105,13 @@ func NewDecoder() (*Decoder, error) {
 	return &Decoder{noise: rand.New(rand.NewSource(1))}, nil
 }
 
-// SampleRate returns the stream's sample rate in Hz, or 0 before the first
-// decoded frame.
-func (d *Decoder) SampleRate() int { return d.sampleRate }
+// SampleRate returns the sample rate of the decoded PCM in Hz (twice the
+// core rate once SBR is decoded), or 0 before the first decoded frame.
+func (d *Decoder) SampleRate() int { return d.OutputSampleRate() }
 
-// Channels returns the stream's channel count, or 0 before the first
-// decoded frame.
-func (d *Decoder) Channels() int { return d.channels }
+// Channels returns the channel count of the decoded PCM (two for an SBR
+// stream coded in mono, as for PS), or 0 before the first decoded frame.
+func (d *Decoder) Channels() int { return d.OutputChannels() }
 
 // Decode consumes ADTS bytes and returns the PCM decoded so far. Input may
 // be sliced arbitrarily: a partial trailing frame is buffered until the
@@ -153,16 +155,22 @@ func (d *Decoder) configure(h adts.Header) error {
 	if h.NumRawDataBlocks != 0 {
 		return unsupportedf("number_of_raw_data_blocks_in_frame %d", h.NumRawDataBlocks)
 	}
-	rate, ok := tables.SamplingFrequency(int(h.SamplingFrequencyIndex))
+	return d.configureCore(int(h.SamplingFrequencyIndex), int(h.ChannelConfiguration))
+}
+
+// configureCore sets up the core decoder for a sampling frequency index
+// and channel configuration.
+func (d *Decoder) configureCore(sfi, channels int) error {
+	rate, ok := tables.SamplingFrequency(sfi)
 	if !ok {
-		return fmt.Errorf("aac: invalid sampling_frequency_index %d", h.SamplingFrequencyIndex)
+		return fmt.Errorf("aac: invalid sampling_frequency_index %d", sfi)
 	}
-	if h.ChannelConfiguration != 1 && h.ChannelConfiguration != 2 {
-		return unsupportedf("channel_configuration %d (mono and stereo only)", h.ChannelConfiguration)
+	if channels != 1 && channels != 2 {
+		return unsupportedf("channel_configuration %d (mono and stereo only)", channels)
 	}
 	d.sampleRate = rate
-	d.samplingFrequencyIndex = int(h.SamplingFrequencyIndex)
-	d.channels = int(h.ChannelConfiguration)
+	d.samplingFrequencyIndex = sfi
+	d.channels = channels
 	d.mdctLong = transform.New(2 * SamplesPerFrame)
 	d.mdctShort = transform.New(2 * SamplesPerFrame / 8)
 	d.longWin[0] = transform.SineWindow(2 * SamplesPerFrame)
@@ -182,9 +190,26 @@ func (d *Decoder) configure(h adts.Header) error {
 // decodeRawDataBlock walks raw_data_block() — ISO/IEC 14496-3 Table 4.3 —
 // decoding elements until ID_END and returning one frame of interleaved PCM.
 func (d *Decoder) decodeRawDataBlock(payload []byte) ([]int16, error) {
+	chans, err := d.decodeFrame(payload)
+	if err != nil {
+		return nil, err
+	}
+	n := len(chans)
+	out := make([]int16, len(chans[0])*n)
+	for c, pcm := range chans {
+		for i, v := range pcm {
+			out[i*n+c] = clampInt16(v)
+		}
+	}
+	return out, nil
+}
+
+// decodeFrame decodes one raw_data_block to per-channel samples at the
+// 16-bit scale, after SBR and PS when the stream carries them.
+func (d *Decoder) decodeFrame(payload []byte) ([][]float64, error) {
 	r := bits.NewReader(payload)
 	var chans []*channelState
-
+	var elems []frameElement
 	for {
 		id, err := r.ReadBits(3)
 		if err != nil {
@@ -196,19 +221,21 @@ func (d *Decoder) decodeRawDataBlock(payload []byte) ([]int16, error) {
 			if err != nil {
 				return nil, err
 			}
+			elems = append(elems, frameElement{first: len(chans)})
 			chans = append(chans, ch)
 		case idCPE:
 			left, right, err := d.decodeCPE(r)
 			if err != nil {
 				return nil, err
 			}
+			elems = append(elems, frameElement{first: len(chans), stereo: true})
 			chans = append(chans, left, right)
 		case idDSE:
 			if err := skipDSE(r); err != nil {
 				return nil, err
 			}
 		case idFIL:
-			if err := skipFIL(r); err != nil {
+			if err := d.readFIL(r, elems); err != nil {
 				return nil, err
 			}
 		case idPCE:
@@ -221,7 +248,11 @@ func (d *Decoder) decodeRawDataBlock(payload []byte) ([]int16, error) {
 			if len(chans) != d.channels {
 				return nil, fmt.Errorf("aac: frame carries %d channels, header says %d", len(chans), d.channels)
 			}
-			return d.reconstruct(chans), nil
+			pcm := make([][]float64, len(chans))
+			for i, ch := range chans {
+				pcm[i] = d.synthesize(i, ch)
+			}
+			return d.applySBR(pcm, elems), nil
 		}
 	}
 }
@@ -806,10 +837,9 @@ func skipDSE(r *bits.BitReader) error {
 	return nil
 }
 
-// skipFIL skips fill_element() — ISO/IEC 14496-3 Table 4.11 — but detects
-// SBR extension payloads: silently skipping them would return the low-band
-// core signal of an HE-AAC stream as if it were the full decode.
-func skipFIL(r *bits.BitReader) error {
+// readFIL reads fill_element() — ISO/IEC 14496-3 Table 4.11 — decoding an
+// SBR extension payload for the element before it and skipping the rest.
+func (d *Decoder) readFIL(r *bits.BitReader, elems []frameElement) error {
 	count, err := r.ReadBits(4)
 	if err != nil {
 		return err
@@ -830,8 +860,8 @@ func skipFIL(r *bits.BitReader) error {
 		return err
 	}
 	const extSBRData, extSBRDataCRC = 0xd, 0xe
-	if extensionType == extSBRData || extensionType == extSBRDataCRC {
-		return unsupportedf("HE-AAC/SBR extension (decode would drop the high band)")
+	if (extensionType == extSBRData || extensionType == extSBRDataCRC) && len(elems) > 0 && !d.noSBR {
+		return d.readSBR(r, elems, extensionType == extSBRDataCRC, int(count)*8-4)
 	}
 	for i := uint64(0); i < count*8-4; i++ {
 		if _, err := r.ReadBits(1); err != nil {

@@ -78,9 +78,10 @@ func embeddingTestdata(t *testing.T, name string) []byte {
 //     describes, and with document_ocr its text too;
 //
 // and refuses, naming it, what Google does not take or this build cannot
-// decode: a second video, a 10-bit VP9 (profile 2), an fps out of range, a PDF of 7 pages, and a
+// decode: a second video, an fps out of range, a PDF of 7 pages, and a
 // scan with document_ocr. (audio_track_extraction is served since #1732,
-// TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient.)
+// TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient, and VP9
+// profiles 1 to 3 since #1739, TestEmbedContentEmbedsVP9AndAV1ThroughThePredictionClient.)
 func TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -222,7 +223,6 @@ func TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient(t *testing.T) {
 		field string
 	}{
 		"two videos":  {[]*aiplatformpb.Part{inline("video/mp4", video), inline("video/mp4", video)}, nil, "at most 1 video"},
-		"vp9 10-bit":  {[]*aiplatformpb.Part{inline("video/mp4", embeddingTestdata(t, "turtle-vp9-10bit.mp4"))}, nil, "VP9 profile 2"},
 		"fps":         {[]*aiplatformpb.Part{badFPS}, nil, "video_metadata.fps"},
 		"seven pages": {[]*aiplatformpb.Part{inline("application/pdf", embeddingTestdata(t, "seven-pages.pdf"))}, nil, "at most 6 pages"},
 	} {
