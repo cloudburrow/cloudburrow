@@ -671,6 +671,9 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 				"file, which CloudBurrow does not reproduce")
 		}
 	}
+	if m := f.refuseGeneratedLoad(*dest, file); m != "" { // #1778, autoembed.go
+		return answer(http.StatusBadRequest, m+".")
+	}
 	if ref := el.ReferenceFileSchemaURI; ref != "" {
 		// The table's schema is the reference file's (#1457,
 		// referencefile.go).

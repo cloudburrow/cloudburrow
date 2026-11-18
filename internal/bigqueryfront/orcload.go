@@ -580,6 +580,9 @@ func (f front) orcLoad(w http.ResponseWriter, r *http.Request, job *jobBody) boo
 				describeFields(refFields)+"; the files': "+describeFields(file)+")"+referenceDiffersWhy)
 		}
 	}
+	if m := f.refuseGeneratedLoad(*dest, file); m != "" { // #1778, autoembed.go
+		return answer(http.StatusBadRequest, m+".")
+	}
 	if l.Schema != nil && !givenFits(l.Schema.Fields, file) {
 		return answer(http.StatusNotImplemented, "whose job gives a schema that is not the file's ("+describeFields(l.Schema.Fields)+
 			"; the file's is "+describeFields(file)+"). BigQuery reads an ORC file by the file's schema; leave the "+

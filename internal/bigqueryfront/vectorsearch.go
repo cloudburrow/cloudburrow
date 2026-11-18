@@ -37,7 +37,7 @@ import (
 //
 // 501, named: lexical_search_columns and lexical_search_query_value
 // (hybrid search needs a search index, which is not made) and an ObjectRef
-// column or query value (#1798). UNVERIFIED (the page quotes no error
+// column or query value (#1798). UNVERIFIED (re-read 2026-11-18; the page quotes no error
 // text): the refusals' words; DOT_PRODUCT's distance as the negative dot
 // product; a base row with an empty (or NULL) array being skipped; a
 // query row whose array's length differs from a base row's failing the

@@ -137,6 +137,8 @@ func TestBigQueryVectorSearch(t *testing.T) {
 // embedded at run time on the local embedding model, and the generated
 // column's documented writes and renames, through the official Go client:
 //
+//   - the background embedding jobs are listed in INFORMATION_SCHEMA.JOBS
+//     with job IDs prefixed gc_, as the page's queries read them;
 //   - the batch form with a STRING query column, and the single form with
 //     a STRING query_value, rank the products page's example as AI.SEARCH;
 //   - ALTER TABLE RENAME COLUMN of the embedding column keeps its
@@ -144,7 +146,10 @@ func TestBigQueryVectorSearch(t *testing.T) {
 //     "you can still drop or rename the generated embedding column";
 //   - a load whose schema gives the generated column, and a WRITE_APPEND
 //     copy (bq copy -a) from a table that has it, are refused, as the page
-//     lists bq load and bq copy -a among the writes it refuses;
+//     lists bq load and bq copy -a among the writes it refuses, and so is
+//     a schemaless JSON load whose record has it, and an Avro load whose
+//     file has the column (one without it loads
+//     and is embedded);
 //   - with the connection's service account's Vertex AI User role revoked,
 //     generation stalls and INFORMATION_SCHEMA.COLUMNS'
 //     async_generation_status.blocking_error.message gives the page's
@@ -188,6 +193,20 @@ func TestBigQueryVectorSearchAutonomousEmbeddings(t *testing.T) {
 	}
 	waitEmbedded("description_embedding", 3)
 
+	// The background jobs are listed, their IDs prefixed gc_, as the page's
+	// INFORMATION_SCHEMA.JOBS queries read them.
+	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT job_id, statement_type, dml_statistics.updated_row_count AS updated, error_result, total_slot_ms, total_bytes_billed FROM `region-us`.INFORMATION_SCHEMA.JOBS "+
+		"WHERE STARTS_WITH(job_id, 'gc_') AND query LIKE '%%%s.products%%'", ds))
+	if len(rows) == 0 {
+		t.Errorf("no gc_ background job in INFORMATION_SCHEMA.JOBS")
+	}
+	for _, r := range rows {
+		if r["error_result"] != nil || r["statement_type"] != "UPDATE" || r["updated"] != int64(3) {
+			t.Errorf("gc_ job %v", r)
+		}
+	}
+	t.Logf("gc_ jobs: %v", rows)
+
 	// The batch form with a STRING query column.
 	got := map[string]string{}
 	for _, r := range mlQuery(t, h, c, fmt.Sprintf("SELECT query.q AS q, base.name AS name, distance FROM VECTOR_SEARCH(TABLE `%s.products`, 'description', "+
@@ -198,7 +217,7 @@ func TestBigQueryVectorSearchAutonomousEmbeddings(t *testing.T) {
 		t.Errorf("VECTOR_SEARCH of STRING queries: %v", got)
 	}
 	// The single form with a STRING query_value.
-	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT base.name AS name, distance FROM VECTOR_SEARCH(TABLE `%s.products`, 'description', "+
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT base.name AS name, distance FROM VECTOR_SEARCH(TABLE `%s.products`, 'description', "+
 		"query_value => 'books', top_k => 3) ORDER BY distance", ds))
 	if len(rows) != 3 || rows[0]["name"] != "Encyclopedia set" {
 		t.Errorf("VECTOR_SEARCH query_value 'books': %v", rows)
@@ -229,6 +248,48 @@ func TestBigQueryVectorSearchAutonomousEmbeddings(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "generated column") {
 		t.Errorf("a load that gives the generated column: %v", err)
 	}
+	// Without a schema: a record that gives the column is refused, one
+	// without it is loaded and embedded.
+	loadJSON := func(data string) error {
+		src := bigquery.NewReaderSource(strings.NewReader(data))
+		src.SourceFormat = bigquery.JSON
+		loader := c.Dataset(ds).Table("products").LoaderFrom(src)
+		loader.WriteDisposition = bigquery.WriteAppend
+		job, err := loader.Run(h.Context())
+		if err != nil {
+			return err
+		}
+		st, err := job.Wait(h.Context())
+		if err != nil {
+			return err
+		}
+		return st.Err()
+	}
+	if err := loadJSON(`{"name":"Drone","description_embedding":{"result":[1.0],"status":""}}` + "\n"); err == nil || !strings.Contains(err.Error(), "generated column") {
+		t.Errorf("a schemaless JSON load that gives the generated column: %v", err)
+	}
+	if err := loadJSON(`{"name":"Puzzle","description":"A jigsaw puzzle of a thousand pieces"}` + "\n"); err != nil {
+		t.Fatalf("a JSON load without the generated column: %v", err)
+	}
+	waitEmbedded("description_embedding", 4)
+	// An Avro file whose columns include it is refused too.
+	avro := avroFile(t, `{"type": "record", "name": "Row", "fields": [{"name": "name", "type": "string"}, `+
+		`{"name": "description_embedding", "type": {"type": "record", "name": "E", "fields": [{"name": "status", "type": "string"}]}}]}`, "",
+		map[string]any{"name": "Ball", "description_embedding": map[string]any{"status": ""}})
+	al := c.Dataset(ds).Table("products").LoaderFrom(avroUpload(avro))
+	al.WriteDisposition = bigquery.WriteAppend
+	if job, err := al.Run(h.Context()); err == nil {
+		st, werr := job.Wait(h.Context())
+		if werr == nil {
+			werr = st.Err()
+		}
+		err = werr
+		if err == nil || !strings.Contains(err.Error(), "generated column") {
+			t.Errorf("an Avro load that gives the generated column: %v", err)
+		}
+	} else if !strings.Contains(err.Error(), "generated column") {
+		t.Errorf("an Avro load that gives the generated column: %v", err)
+	}
 	if err := run(fmt.Sprintf("CREATE TABLE `%s.more` AS SELECT * FROM `%s.products` LIMIT 1", ds, ds)); err != nil {
 		t.Fatalf("CREATE TABLE more: %v", err)
 	}
@@ -253,7 +314,7 @@ func TestBigQueryVectorSearchAutonomousEmbeddings(t *testing.T) {
 	if err := run(fmt.Sprintf("INSERT INTO `%s.products` (name, description) VALUES ('Kite', 'A kite to fly on windy days')", ds)); err != nil {
 		t.Fatalf("INSERT after the rename: %v", err)
 	}
-	waitEmbedded("emb", 4)
+	waitEmbedded("emb", 5)
 	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT column_name FROM `%s`.INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'products' AND is_generated = 'ALWAYS'", ds))
 	if len(rows) != 1 || rows[0]["column_name"] != "emb" {
 		t.Errorf("INFORMATION_SCHEMA.COLUMNS after the rename: %v", rows)
@@ -303,7 +364,7 @@ func TestBigQueryVectorSearchAutonomousEmbeddings(t *testing.T) {
 	if err := editProjectMember(h, pc, project, "roles/aiplatform.user", sa, true); err != nil {
 		t.Fatalf("grant roles/aiplatform.user again: %v", err)
 	}
-	waitEmbedded("emb", 5)
+	waitEmbedded("emb", 6)
 	if rows := mlQuery(t, h, c, status); len(rows) != 1 || rows[0]["m"] != nil {
 		t.Errorf("blocking error not cleared: %v", rows)
 	}

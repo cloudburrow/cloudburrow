@@ -58,10 +58,11 @@ import (
 // page does not say): whether a failed row is retried (here it is not,
 // until its source changes); the exact text of generation_expression;
 // that the default task_type is written into it for every model but
-// gemini-embedding-2. The gc_ background jobs BigQuery lists in
-// INFORMATION_SCHEMA.JOBS, async_generation_status' blocking errors and a
-// BACKGROUND reservation are not kept: the front's own writes are not
-// jobs.
+// gemini-embedding-2. Each pass's write is one UPDATE job whose ID
+// begins gc_, as BigQuery's background jobs' do, listed in jobs.list and
+// INFORMATION_SCHEMA.JOBS (jobPrefixKey, internaljobs.go); the two
+// blocking errors that can arise locally are async_generation_status'
+// (generationBlocked). A BACKGROUND reservation is not kept.
 
 // genEmbedding is a table's generated embedding column.
 type genEmbedding struct {
@@ -819,26 +820,39 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 	}
 	a := aiResolved{rm: &remoteModel{Model: e.Model, Endpoint: e.Endpoint, Location: e.Location, Embedding: true}, taskType: e.TaskType, title: e.Title, dims: e.Dims}
 	ctx := r.Context()
-	for key, s := range todo {
-		var value, where string
+	// One background DML job a pass, its ID prefixed gc_ as BigQuery's
+	// ("Background embedding jobs all have a prefix of gc_"), listed in
+	// INFORMATION_SCHEMA.JOBS as the page reads them.
+	var cases, wheres []string
+	for _, s := range todo {
 		if s == nil {
-			value = "STRUCT(CAST(NULL AS ARRAY<FLOAT64>) AS result, " + sqlString(embedNullStatus) + " AS status)"
-			where = sqlIdent(e.Source) + " IS NULL"
-		} else {
-			v, status := f.embedVector(ctx, e.Project, a, *s)
-			if status != "" {
-				value = "STRUCT(CAST(NULL AS ARRAY<FLOAT64>) AS result, " + sqlString(status) + " AS status)"
-			} else {
-				lits := make([]string, len(v))
-				for i, x := range v {
-					lits[i] = sqlF(x)
-				}
-				value = "STRUCT(ARRAY<FLOAT64>[" + strings.Join(lits, ", ") + "] AS result, '' AS status)"
-			}
-			where = sqlIdent(e.Source) + " = " + sqlString(*s)
-		}
-		if _, _, code, _ := f.queryAllRows(r, queryOptions{}, "UPDATE "+ref+" SET "+sqlIdent(e.Column)+" = "+value+" WHERE "+where); code != 0 {
+			cases = append(cases, "WHEN "+sqlIdent(e.Source)+" IS NULL THEN STRUCT(CAST(NULL AS ARRAY<FLOAT64>) AS result, "+sqlString(embedNullStatus)+" AS status)")
+			wheres = append(wheres, sqlIdent(e.Source)+" IS NULL")
 			continue
+		}
+		var value string
+		v, status := f.embedVector(ctx, e.Project, a, *s)
+		if status != "" {
+			value = "STRUCT(CAST(NULL AS ARRAY<FLOAT64>) AS result, " + sqlString(status) + " AS status)"
+		} else {
+			lits := make([]string, len(v))
+			for i, x := range v {
+				lits[i] = sqlF(x)
+			}
+			value = "STRUCT(ARRAY<FLOAT64>[" + strings.Join(lits, ", ") + "] AS result, '' AS status)"
+		}
+		cases = append(cases, "WHEN "+sqlIdent(e.Source)+" = "+sqlString(*s)+" THEN "+value)
+		wheres = append(wheres, sqlIdent(e.Source)+" = "+sqlString(*s))
+	}
+	gc := r.WithContext(context.WithValue(r.Context(), jobPrefixKey{}, "gc_"))
+	update := "UPDATE " + ref + " SET " + sqlIdent(e.Column) + " = CASE " + strings.Join(cases, " ") + " ELSE " + sqlIdent(e.Column) + " END WHERE " + strings.Join(wheres, " OR ")
+	if !f.runBackgroundUpdate(gc, e.Project, ref, strings.Join(wheres, " OR "), update) {
+		return
+	}
+	for key, s := range todo {
+		where := sqlIdent(e.Source) + " IS NULL"
+		if s != nil {
+			where = sqlIdent(e.Source) + " = " + sqlString(*s)
 		}
 		readBack := "SELECT TO_JSON_STRING(" + sqlIdent(e.Column) + ") FROM " + ref + " WHERE " + where + " LIMIT 1"
 		if _, got, code, _ := f.queryAllRows(r, queryOptions{}, readBack); code == 0 && len(got) == 1 && got[0][0] != nil {
@@ -1029,4 +1043,35 @@ func (f front) generationBlocked(r *http.Request, e genEmbedding) string {
 			"Please follow https://docs.cloud.google.com/bigquery/docs/permissions-for-ai-functions to set up permissions."
 	}
 	return ""
+}
+
+// runBackgroundUpdate runs update, a gc_ background job's UPDATE of ref's
+// rows where where holds, and keeps what it did as a client's DML job's
+// (dml.go: the engine reports statementType SELECT and no counts), so
+// jobs.list and INFORMATION_SCHEMA.JOBS read it as the UPDATE it is.
+func (f front) runBackgroundUpdate(r *http.Request, project, ref, where, update string) bool {
+	own := r.WithContext(context.WithValue(r.Context(), jobPrefixKey{}, "")) // the count is the front's own job
+	n, ok := f.countRows1(own, queryOptions{}, "SELECT COUNT(*) FROM "+ref+" WHERE "+where)
+	if !ok {
+		return false
+	}
+	body, err := json.Marshal(map[string]any{"query": update, "useLegacySql": false, "timeoutMs": 600000})
+	if err != nil {
+		return false
+	}
+	st, got := f.inProject(project).send(r, http.MethodPost, "/queries", body)
+	var res struct {
+		JobReference struct {
+			JobID string `json:"jobId"`
+		} `json:"jobReference"`
+	}
+	if st != http.StatusOK || json.Unmarshal(got, &res) != nil {
+		return false
+	}
+	if f.texts != nil && res.JobReference.JobID != "" {
+		t, _ := f.texts.get(project, res.JobReference.JobID)
+		t.dml = &dmlCounts{statementType: "UPDATE", updated: n[0]}
+		f.texts.add(project, res.JobReference.JobID, t)
+	}
+	return true
 }
