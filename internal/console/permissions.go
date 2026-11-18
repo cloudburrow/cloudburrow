@@ -108,6 +108,18 @@ type PermissionsView struct {
 	PolicyTarget
 	// Note is PermissionsNote, always.
 	Note string `json:"note"`
+	// Resource is the full resource name of the policy, such as
+	// //cloudresourcemanager.googleapis.com/folders/123, which the condition
+	// editor's Run Linter gives LintPolicy (#1756); empty when the provider
+	// names none.
+	Resource string `json:"resource,omitempty"`
+}
+
+// PolicyResourcer is a PolicyEditor that names the full resource name of
+// the policy at a path, as the IAM API's LintPolicy takes it
+// (full_resource_name, #1756).
+type PolicyResourcer interface {
+	PolicyResource(ctx context.Context, project string, path []string) string
 }
 
 // PolicyEditor is a provider whose resources carry an IAM policy.
@@ -138,6 +150,9 @@ func permissionsSection(ctx context.Context, pe PolicyEditor, project string, pa
 		view.PrincipalHelp = DefaultPrincipalHelp
 	}
 	sec.Permissions = view
+	if pr, ok := pe.(PolicyResourcer); ok {
+		view.Resource = pr.PolicyResource(ctx, project, path)
+	}
 	p, err := pe.GetPolicy(ctx, project, path)
 	if err != nil {
 		sec.Unavailable = "cannot read the IAM policy: " + userMessage(err)

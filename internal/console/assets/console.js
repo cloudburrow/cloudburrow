@@ -3009,7 +3009,7 @@ async function renderDetail(view, route, resourcePath) {
                 view.conditions && (row.conditional || !row.condition)
                   ? el("button", { class: "secondary", text: row.conditional ? "Edit condition" : "Add condition",
                       "aria-label": `${row.conditional ? "Edit" : "Add"} the condition of ${row.member}'s ${row.role}`,
-                      onclick: () => openConditionForm(row, name, change, reload) })
+                      onclick: () => openConditionForm(row, name, change, reload, view.resource || "") })
                   : null,
                 el("button", { class: "secondary danger", text: "Remove principal",
                   "aria-label": `Remove ${row.member} from ${row.role}`,
@@ -3423,14 +3423,16 @@ function conditionFrom(values) {
 // openConditionForm is Edit condition (#1742): one principal's role moved to
 // the binding with the condition the form names (none when it is empty), in
 // one SetIamPolicy with the etag the page read.
-function openConditionForm(row, name, change, onDone) {
+function openConditionForm(row, name, change, onDone, resource = "") {
   const fields = buildCreateForm({ label: "Edit condition", fields: conditionFields(row.conditional) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
   // Run Linter (#1756), as Google's condition editor runs it: the IAM API's
   // iamPolicies.lintPolicy of the expression, an error or warning icon for
   // each result with its details on hover, run again while the expression
-  // is edited once it has run; Save is refused while an error stands.
+  // is edited once it has run; Save is refused while an error stands. The
+  // policy's full resource name (the Permissions view's resource) goes as
+  // LintPolicy's full_resource_name.
   const lintList = el("ul", { class: "lint-results", id: "lint-results", "aria-live": "polite" });
   let linted = false, lintErrors = 0, lintTimer = null, lintSeq = 0;
   const lint = async () => {
@@ -3444,7 +3446,7 @@ function openConditionForm(row, name, change, onDone) {
     }
     try {
       const res = await send("/api/iam/lint", "POST",
-        { resource: "", title: (values.conditionTitle || "").trim(), expression });
+        { resource, title: (values.conditionTitle || "").trim(), expression });
       if (seq !== lintSeq) return;
       const results = res.results || [];
       lintErrors = results.filter((r) => r.severity === "ERROR").length;

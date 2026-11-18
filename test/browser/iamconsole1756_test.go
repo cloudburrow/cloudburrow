@@ -20,7 +20,8 @@ import (
 )
 
 // TestIAMConditionEditorRunLinter (#1756): Run Linter in a folder's Edit
-// condition dialog is the IAM API's lintPolicy. A compile error shows an
+// condition dialog is the IAM API's lintPolicy of the folder's full
+// resource name. A compile error shows an
 // error result and Save is refused, the folder's policy unchanged; the
 // linter runs again as the expression is edited, and once the error is
 // gone Save stores the new expression, which the Folders API reads back.
@@ -93,10 +94,21 @@ func TestIAMConditionEditorRunLinter(t *testing.T) {
 			e.value = %q; e.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, v), nil)
 	}
 
+	// The lint requests' bodies, to see the folder's full resource name in
+	// each.
+	p.eval(`(() => { window.__lintBodies = []; const f = window.fetch;
+		window.fetch = (u, o) => { if (String(u).includes("/api/iam/lint")) window.__lintBodies.push(JSON.parse(o.body)); return f(u, o); };
+		return true; })()`, nil)
+
 	// A compile error: Run Linter shows it, and Save is refused.
 	setExpression("1 <")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #run-linter`)))
 	p.waitFor(`document.querySelector("#lint-results .lint-error") !== null`)
+	var resource string
+	p.eval(`(window.__lintBodies[0] || {}).resource || ""`, &resource)
+	if want := "//cloudresourcemanager.googleapis.com/" + f.GetName(); resource != want {
+		t.Errorf("Run Linter sent LintPolicy the resource %q; want the folder's full resource name %q", resource, want)
+	}
 	var got string
 	p.eval(`document.querySelector("#lint-results .lint-error").textContent`, &got)
 	if !strings.Contains(got, "ERROR") || !strings.Contains(got, "ConditionCompileCheck") {
@@ -181,4 +193,177 @@ func TestIAMAuditLogsPage(t *testing.T) {
 	if !strings.Contains(storage, "storage.googleapis.com") || !strings.Contains(storage, "Enabled") || !strings.Contains(storage, "user:ada@example.com") {
 		t.Errorf("storage.googleapis.com's row reads %q; want Data Read Enabled with user:ada@example.com exempted", storage)
 	}
+}
+
+// auditConfigOf is the policy's audit config of service, or nil.
+func auditConfigOf(pol *iampb.Policy, service string) *iampb.AuditConfig {
+	for _, c := range pol.GetAuditConfigs() {
+		if c.GetService() == service {
+			return c
+		}
+	}
+	return nil
+}
+
+// TestIAMAuditLogsFolder (#1756): picking a folder in the Audit Logs
+// page's resource selector lists the folder's auditable services, and Edit
+// log types on Cloud Storage's row saves Data Read with two exempted
+// principals to the folder's policy, through SetIamPolicy with the
+// auditConfigs mask: the Folders API reads the audit config back, and the
+// folder's bindings are as they were.
+func TestIAMAuditLogsFolder(t *testing.T) {
+	needService(t, "iam-audit")
+	opts := rmClientOptions(t)
+	ctx := context.Background()
+	folders, err := resourcemanager.NewFoldersClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgs, err := resourcemanager.NewOrganizationsClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = folders.Close(); _ = orgs.Close() })
+	org, err := orgs.SearchOrganizations(ctx, &rmpb.SearchOrganizationsRequest{}).Next()
+	if err != nil {
+		t.Fatalf("SearchOrganizations: %v", err)
+	}
+	op, err := folders.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{
+		Parent: org.GetName(), DisplayName: fmt.Sprintf("Audit %d", time.Now().UnixNano()%1e8)}})
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	f, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := folders.DeleteFolder(context.Background(), &rmpb.DeleteFolderRequest{Name: f.GetName()}); err == nil {
+			_, _ = op.Wait(context.Background())
+		}
+	})
+	pol, err := folders.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: f.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const kept = "user:kept@example.com"
+	pol.Bindings = []*iampb.Binding{{Role: "roles/resourcemanager.folderViewer", Members: []string{kept}}}
+	if _, err := folders.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: f.GetName(), Policy: pol}); err != nil {
+		t.Fatalf("SetIamPolicy: %v", err)
+	}
+
+	p := open(t)
+	p.navigate("/iam-admin/audit")
+	p.waitFor(fmt.Sprintf(`[...(document.querySelector("#scope-auditResource") || {}).options || []].some((o) => o.value === %q)`, f.GetName()))
+	p.eval(fmt.Sprintf(`(() => { const s = document.querySelector("#scope-auditResource"); s.value = %q;
+		s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, f.GetName()), nil)
+	p.waitFor(fmt.Sprintf(`location.search.includes(%q) && document.querySelectorAll("#view tbody tr").length > 0`, "auditResource="+strings.ReplaceAll(f.GetName(), "/", "%2F")))
+	p.eval(`(() => { const f = document.querySelector("#view input.filter"); f.value = "storage.googleapis.com";
+		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].length < 25`)
+	p.run(chromedp.Click(chromedp.CSS(`#view button[aria-label="Actions for storage.googleapis.com"]`)))
+	p.clickText(".overflow-menu .overflow-item", "Edit log types")
+	p.waitFor(`document.querySelector(".modal.is-open #f-dataRead") !== null`)
+	p.eval(`(() => { const m = document.querySelector(".modal.is-open");
+		m.querySelector("#f-dataRead").click();
+		const e = m.querySelector("#f-dataReadExempted"); e.value = "user:ada@example.com\nuser:bo@example.com";
+		e.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	for _, u := range p.posts("/api/actions/iam-audit") {
+		if !strings.Contains(u, "auditResource="+strings.ReplaceAll(f.GetName(), "/", "%2F")) {
+			t.Errorf("Edit log types was sent to %s; want the folder's resource in the address", u)
+		}
+	}
+	got, err := folders.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: f.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := auditConfigOf(got, "storage.googleapis.com")
+	if len(c.GetAuditLogConfigs()) != 1 || c.GetAuditLogConfigs()[0].GetLogType() != iampb.AuditLogConfig_DATA_READ ||
+		strings.Join(c.GetAuditLogConfigs()[0].GetExemptedMembers(), ",") != "user:ada@example.com,user:bo@example.com" {
+		t.Errorf("the folder's audit config of storage.googleapis.com = %v; want DATA_READ exempting ada and bo", c)
+	}
+	if len(got.GetBindings()) != 1 || got.GetBindings()[0].GetMembers()[0] != kept {
+		t.Errorf("the folder's bindings after Edit log types = %v; want them as they were", got.GetBindings())
+	}
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.startsWith("storage.googleapis.com") && r.textContent.includes("user:bo@example.com"))`)
+}
+
+// TestIAMAuditLogsOrganization (#1756): the organization's Audit Logs
+// page lists the organization's auditable services, and Set default
+// configuration saves Admin Read for allServices to the organization's
+// policy, through SetIamPolicy with the auditConfigs mask: the
+// Organizations API reads it back and every row reads Admin Read Enabled.
+// The organization's audit configs are put back afterwards.
+func TestIAMAuditLogsOrganization(t *testing.T) {
+	needService(t, "iam-audit")
+	opts := rmClientOptions(t)
+	ctx := context.Background()
+	orgs, err := resourcemanager.NewOrganizationsClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orgs.Close() })
+	org, err := orgs.SearchOrganizations(ctx, &rmpb.SearchOrganizationsRequest{}).Next()
+	if err != nil {
+		t.Fatalf("SearchOrganizations: %v", err)
+	}
+	before, err := orgs.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: org.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		now, err := orgs.GetIamPolicy(context.Background(), &iampb.GetIamPolicyRequest{Resource: org.GetName()})
+		if err != nil {
+			return
+		}
+		_, _ = orgs.SetIamPolicy(context.Background(), &iampb.SetIamPolicyRequest{Resource: org.GetName(),
+			Policy:     &iampb.Policy{Version: 3, Etag: now.GetEtag(), AuditConfigs: before.GetAuditConfigs()},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"audit_configs"}}})
+	})
+	iamc, err := admin.NewIamClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = iamc.Close() })
+	want, err := iamc.QueryAuditableServices(ctx, &adminpb.QueryAuditableServicesRequest{
+		FullResourceName: "//cloudresourcemanager.googleapis.com/" + org.GetName()})
+	if err != nil || len(want.GetServices()) == 0 {
+		t.Fatalf("QueryAuditableServices = %v, %v", want, err)
+	}
+
+	p := open(t)
+	p.navigate("/iam-admin/audit?auditResource=" + org.GetName())
+	p.waitFor(`document.querySelectorAll("#view tbody tr").length > 0`)
+	var selected string
+	p.eval(`document.querySelector("#scope-auditResource").value`, &selected)
+	if selected != org.GetName() {
+		t.Errorf("the resource selector reads %q; want %s", selected, org.GetName())
+	}
+	var first string
+	p.eval(`document.querySelector("#view tbody tr").textContent`, &first)
+	if !strings.HasPrefix(first, want.GetServices()[0].GetName()) {
+		t.Errorf("the first row reads %q; queryAuditableServices answers %s first", first, want.GetServices()[0].GetName())
+	}
+	p.clickText("#view button", "Set default configuration")
+	p.waitFor(`document.querySelector(".modal.is-open #f-adminRead") !== null`)
+	p.eval(`(() => { const b = document.querySelector(".modal.is-open #f-adminRead"); if (!b.checked) b.click(); return true; })()`, nil)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	got, err := orgs.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: org.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := false
+	for _, lc := range auditConfigOf(got, "allServices").GetAuditLogConfigs() {
+		enabled = enabled || lc.GetLogType() == iampb.AuditLogConfig_ADMIN_READ
+	}
+	if !enabled {
+		t.Errorf("the organization's allServices audit config = %v; want ADMIN_READ", auditConfigOf(got, "allServices"))
+	}
+	if len(got.GetBindings()) != len(before.GetBindings()) {
+		t.Errorf("the organization's bindings went from %d to %d on Set default configuration", len(before.GetBindings()), len(got.GetBindings()))
+	}
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].every((r) => r.textContent.includes("Enabled"))`)
 }
