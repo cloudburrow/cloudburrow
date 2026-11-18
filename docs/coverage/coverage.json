@@ -3821,9 +3821,10 @@
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdeletedprincipals1751_test.go:134 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:295 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:492 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:137 TestIAMDeletedServiceAccountInEveryServicesPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:298 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:495 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:675 TestIAMDeletedServiceAccountInConnectionPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts",
           "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ]
@@ -3999,9 +4000,10 @@
         "method": "google.iam.admin.v1.IAM/UndeleteServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdeletedprincipals1751_test.go:134 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:295 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:492 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:137 TestIAMDeletedServiceAccountInEveryServicesPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:298 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:495 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:675 TestIAMDeletedServiceAccountInConnectionPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ],
         "unverified": [
@@ -10275,6 +10277,7 @@
           "test/compat/bigquerymlremote_test.go:93 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymlremoteiam_test.go:132 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/bigquerymlremoteiam_test.go:206 TestBigQueryMLRemoteDefaultConnection",
+          "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -10391,6 +10394,7 @@
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:93 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -10879,7 +10883,8 @@
         "method": "bigqueryconnection.projects.locations.connections.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
+          "test/compat/iamdeletedprincipals1751_test.go:675 TestIAMDeletedServiceAccountInConnectionPolicies"
         ]
       },
       {
