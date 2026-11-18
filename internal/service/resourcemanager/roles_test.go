@@ -253,7 +253,8 @@ func TestCustomRolesOverREST(t *testing.T) {
 	if err != nil || len(q.Permissions) != 1000 || q.NextPageToken == "" {
 		t.Fatalf("QueryTestablePermissions = %d, %q, %v", len(q.Permissions), q.NextPageToken, err)
 	}
-	if _, err := svc.Projects.ServiceAccounts.List("projects/rest-roles").Do(); code(err) != 501 {
-		t.Errorf("service accounts = %v, want 501", err)
+	if _, err := svc.Roles.QueryGrantableRoles(&iamv1.QueryGrantableRolesRequest{
+		FullResourceName: "//cloudresourcemanager.googleapis.com/projects/rest-roles"}).Do(); code(err) != 501 {
+		t.Errorf("QueryGrantableRoles = %v, want 501", err)
 	}
 }

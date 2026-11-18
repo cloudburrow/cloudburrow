@@ -143,6 +143,9 @@ func (r *Registry) dropProjectStateLocked(id string) error {
 	if err := r.dropRolesLocked("projects/" + id); err != nil {
 		return err
 	}
+	if err := r.dropServiceAccountsLocked(id); err != nil {
+		return err
+	}
 	if err := r.deletePrefixLocked(orgPolicyPrefix + id + "/"); err != nil {
 		return err
 	}

@@ -109,6 +109,9 @@ type Registry struct {
 	// a project was created or purged since r.mu was taken (numbers.go).
 	onNumbers      []func()
 	numbersChanged bool
+	// saTokenURI is the token endpoint a service account key file names
+	// (serviceaccountkeys.go).
+	saTokenURI string
 	// now is the clock deletion and purging read; a test sets it.
 	now func() time.Time
 }

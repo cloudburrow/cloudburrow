@@ -487,11 +487,12 @@ func (r *Registry) checkCustomRoleBindingsLocked(resource string, current, next 
 		parent := c.Name[:strings.Index(c.Name, "/roles/")]
 		switch {
 		case strings.HasPrefix(parent, "projects/"):
-			if resource != parent {
+			if resource != parent && !strings.HasPrefix(resource, parent+"/") {
 				return refuse
 			}
 		case strings.HasPrefix(resource, "projects/"):
-			p, err := r.load(strings.TrimPrefix(resource, "projects/"))
+			id, _, _ := strings.Cut(strings.TrimPrefix(resource, "projects/"), "/")
+			p, err := r.load(id)
 			if err != nil || p.Parent == "" {
 				return refuse
 			}
@@ -556,9 +557,10 @@ func (r *Registry) QueryTestablePermissions(req *adminpb.QueryTestablePermission
 	return out, nil
 }
 
-// IAMAdminServer serves google.iam.admin.v1.IAM's role and permission
-// methods; the rest (service accounts, keys, grantable roles, lint) are
-// UNIMPLEMENTED.
+// IAMAdminServer serves google.iam.admin.v1.IAM's role, permission,
+// service account (serviceaccounts.go) and key methods; the rest (SignBlob
+// and SignJwt, deprecated for the IAM Credentials API's, grantable roles,
+// auditable services, lint) are UNIMPLEMENTED.
 type IAMAdminServer struct {
 	adminpb.UnimplementedIAMServer
 	reg *Registry
@@ -641,6 +643,25 @@ var iamAdminDesc = &grpc.ServiceDesc{
 		unaryMethod("DeleteRole", (*IAMAdminServer).DeleteRole),
 		unaryMethod("UndeleteRole", (*IAMAdminServer).UndeleteRole),
 		unaryMethod("QueryTestablePermissions", (*IAMAdminServer).QueryTestablePermissions),
+		unaryMethod("CreateServiceAccount", (*IAMAdminServer).CreateServiceAccount),
+		unaryMethod("GetServiceAccount", (*IAMAdminServer).GetServiceAccount),
+		unaryMethod("ListServiceAccounts", (*IAMAdminServer).ListServiceAccounts),
+		unaryMethod("UpdateServiceAccount", (*IAMAdminServer).UpdateServiceAccount),
+		unaryMethod("PatchServiceAccount", (*IAMAdminServer).PatchServiceAccount),
+		unaryMethod("DeleteServiceAccount", (*IAMAdminServer).DeleteServiceAccount),
+		unaryMethod("UndeleteServiceAccount", (*IAMAdminServer).UndeleteServiceAccount),
+		unaryMethod("EnableServiceAccount", (*IAMAdminServer).EnableServiceAccount),
+		unaryMethod("DisableServiceAccount", (*IAMAdminServer).DisableServiceAccount),
+		unaryMethod("CreateServiceAccountKey", (*IAMAdminServer).CreateServiceAccountKey),
+		unaryMethod("UploadServiceAccountKey", (*IAMAdminServer).UploadServiceAccountKey),
+		unaryMethod("ListServiceAccountKeys", (*IAMAdminServer).ListServiceAccountKeys),
+		unaryMethod("GetServiceAccountKey", (*IAMAdminServer).GetServiceAccountKey),
+		unaryMethod("DeleteServiceAccountKey", (*IAMAdminServer).DeleteServiceAccountKey),
+		unaryMethod("DisableServiceAccountKey", (*IAMAdminServer).DisableServiceAccountKey),
+		unaryMethod("EnableServiceAccountKey", (*IAMAdminServer).EnableServiceAccountKey),
+		unaryMethod("GetIamPolicy", (*IAMAdminServer).GetIamPolicy),
+		unaryMethod("SetIamPolicy", (*IAMAdminServer).SetIamPolicy),
+		unaryMethod("TestIamPermissions", (*IAMAdminServer).TestIamPermissions),
 	},
 }
 

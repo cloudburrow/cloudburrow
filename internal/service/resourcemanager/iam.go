@@ -54,6 +54,9 @@ func iamKey(resource string) string { return iamPrefix + resource }
 // pending deletion. The caller holds r.mu.
 func (r *Registry) iamTargetLocked(resource string) (deleting bool, err error) {
 	switch {
+	case isServiceAccountResource(resource):
+		_, err := r.findSALocked(resource, false)
+		return false, err
 	case strings.HasPrefix(resource, "projects/"):
 		p, err := r.load(strings.TrimPrefix(resource, "projects/"))
 		if err != nil {
@@ -152,9 +155,15 @@ func (r *Registry) ResetIAM(project string) error {
 	defer r.unlock()
 	if project != "" {
 		_ = r.st.Delete(iamKey("projects/" + project))
+		if err := r.dropServiceAccountsLocked(project); err != nil {
+			return err
+		}
 		return r.dropRolesLocked("projects/" + project)
 	}
 	if err := r.deletePrefixLocked(rolePrefix); err != nil {
+		return err
+	}
+	if err := r.deletePrefixLocked(saPrefix); err != nil {
 		return err
 	}
 	keys, err := r.st.List(iamPrefix)
@@ -188,6 +197,10 @@ func heldOn(resource string, perms []string) *iampb.TestIamPermissionsResponse {
 	out := &iampb.TestIamPermissionsResponse{}
 	for _, p := range perms {
 		if !permissionPattern.MatchString(p) {
+			continue
+		}
+		// On a service account, its own and its keys' permissions alone.
+		if isServiceAccountResource(resource) && !strings.HasPrefix(p, "iam.serviceAccounts.") && !strings.HasPrefix(p, "iam.serviceAccountKeys.") {
 			continue
 		}
 		// On a tag key or value, the tag permissions alone can be held.
