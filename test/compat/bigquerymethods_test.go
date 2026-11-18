@@ -117,8 +117,9 @@ func TestBigQueryGetQueryResultsPages(t *testing.T) {
 	}
 }
 
-// TestBigQueryProjectsListNamesTheInstancesProject lists the projects: the
-// emulator serves one, the instance's.
+// TestBigQueryProjectsListNamesTheInstancesProject lists the projects:
+// the instance's among them, once each (#1764: every ACTIVE project of
+// Resource Manager is listed, TestBigQueryServesEveryResourceManagerProject).
 //
 // covers: bigquery.projects.list
 func TestBigQueryProjectsListNamesTheInstancesProject(t *testing.T) {
@@ -130,8 +131,14 @@ func TestBigQueryProjectsListNamesTheInstancesProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("projects.list: %v", err)
 	}
-	if len(res.Projects) != 1 || res.Projects[0].Id != project {
-		t.Fatalf("projects.list = %+v, want the one project %s", res.Projects, project)
+	n := 0
+	for _, p := range res.Projects {
+		if p.Id == project {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("projects.list = %+v, want the project %s once", res.Projects, project)
 	}
 }
 

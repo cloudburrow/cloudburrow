@@ -105,7 +105,6 @@ func TestBigQueryMLBoostedTree(t *testing.T) {
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.WEIGHTS(MODEL `%s.bt`)", name)).Read(ctx)
 	wantHTTPStatus(t, "ML.WEIGHTS of a boosted tree model", err, http.StatusBadRequest)
 	for _, sql := range []string{
-		"CREATE MODEL `%s.no` OPTIONS(model_type='boosted_tree_regressor', input_label_cols=['y'], subsample=0.8) AS SELECT x, y FROM `%s.step`",
 		"CREATE MODEL `%s.no` OPTIONS(model_type='boosted_tree_regressor', input_label_cols=['y'], booster_type='dart') AS SELECT x, y FROM `%s.step`",
 	} {
 		_, err := c.Query(fmt.Sprintf(sql, name, name)).Read(ctx)
@@ -179,4 +178,54 @@ func TestBigQueryMLBoostedTreeLabelEncoding(t *testing.T) {
 	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='linear_reg', input_label_cols=['y'], "+
 		"category_encoding_method='LABEL_ENCODING') AS SELECT c, y FROM `%s.cats`", name, name)).Read(ctx)
 	wantHTTPStatus(t, "category_encoding_method LABEL_ENCODING of a linear model", err, http.StatusBadRequest)
+}
+
+// TestBigQueryMLSampledBoostedTree (#1766): a boosted tree model with
+// subsample, colsample_bynode and num_parallel_tree, through the official
+// cloud.google.com/go/bigquery client: it trains, models.get keeps the
+// options, it grows num_parallel_tree trees a round, the same statement
+// trains the same model (a fixed seed), and its predictions fit the step
+// it learned.
+//
+// covers: bigquery.jobs.query, bigquery.models.get
+func TestBigQueryMLSampledBoostedTree(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	name := mlDataset(t, h, c, map[string]string{
+		"step": "SELECT CAST(x AS FLOAT64) AS x, IF(x < 50, 1.0, 9.0) AS y FROM UNNEST(GENERATE_ARRAY(1, 100)) AS x",
+	})
+	ddl := "CREATE OR REPLACE MODEL `%s.%s` OPTIONS(model_type='boosted_tree_regressor', input_label_cols=['y'], subsample=0.8, " +
+		"colsample_bynode=0.9, num_parallel_tree=3, max_iterations=10) AS SELECT x, y FROM `%s.step`"
+	for _, m := range []string{"s1", "s2"} {
+		if err := mlRun(h, c, fmt.Sprintf(ddl, name, m, name)); err != nil {
+			t.Fatalf("CREATE MODEL sampled boosted tree: %v", err)
+		}
+	}
+	md, err := c.Dataset(name).Model("s1").Metadata(ctx)
+	if err != nil {
+		t.Fatalf("Model.Metadata: %v", err)
+	}
+	runs := md.RawTrainingRuns()
+	if len(runs) != 1 || runs[0].TrainingOptions.Subsample != 0.8 || runs[0].TrainingOptions.ColsampleBynode != 0.9 || runs[0].TrainingOptions.NumParallelTree != 3 {
+		t.Errorf("training run: %+v", runs)
+	}
+	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT a.x, a.predicted_y AS p1, b.predicted_y AS p2 FROM ML.PREDICT(MODEL `%s.s1`, (SELECT x FROM `%s.step`)) a "+
+		"JOIN ML.PREDICT(MODEL `%s.s2`, (SELECT x FROM `%s.step`)) b USING (x) ORDER BY x", name, name, name, name))
+	if len(rows) != 100 {
+		t.Fatalf("ML.PREDICT: %d rows", len(rows))
+	}
+	for _, r := range rows {
+		x, p1, p2 := r["x"].(float64), r["p1"].(float64), r["p2"].(float64)
+		want := 1.0
+		if x >= 50 {
+			want = 9
+		}
+		if p1 != p2 {
+			t.Errorf("x %v: %v and %v from the same statement", x, p1, p2)
+		}
+		if math.Abs(p1-want) > 1 {
+			t.Errorf("x %v: predicted %v, the step is %v", x, p1, want)
+		}
+	}
 }

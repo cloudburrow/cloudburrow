@@ -76,6 +76,10 @@ func hostPorts(cfg config.Config) map[string]int {
 		// The onnx build's ONNX runner (#1711).
 		ports["onnx"] = e.ONNX
 	}
+	if tfConverterEnabled(cfg) {
+		// The TensorFlow SavedModel converter (#1775).
+		ports["tfconvert"] = e.TFConvert
+	}
 	for name, port := range ports {
 		// 0 is OS-assigned; a negative console port disables the console.
 		if port <= 0 {

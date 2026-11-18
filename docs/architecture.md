@@ -63,11 +63,13 @@ has failed its own test.
 
 Out of contract, not merely unscheduled:
 
-- **Full IAM enforcement.** No policy evaluation. Google's Pub/Sub emulator returns
-  `Unimplemented` for IAM methods and we do not paper over it.
+- **Full IAM enforcement.** Stored policies are not enforced
+  ([ADR-0006](adr/0006-iam-policy-surface.md)), except by the checks it lists: Memorystore's
+  IAM auth, Firestore with MongoDB compatibility's sign-ins, IAM Credentials on service
+  accounts the IAM API created, and BigQuery's per-project IAM of a minted token's caller, each
+  against this instance's own minted tokens and the project's stored policy (`internal/iamcond`,
+  `internal/iamroles`), and BigQuery remote models' connection permissions.
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
-- **Source builds.** Prebuilt images only. (Cloud Run Jobs were listed here; since #582 they
-  run as Kubernetes batch Jobs, docs/compatibility.md.)
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
   because Google publishes none, built by CloudBurrow with patches to its SQL engine (#1061), and
@@ -132,9 +134,11 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
 | `internal/embedding/` | Runs the community ONNX int8 conversion of EmbeddingGemma for the Vertex-style `:predict` embedding endpoint (#41), labelled as NOT an official Google artifact; the ONNX Runtime and tokenizer need cgo and the `onnx` build tag, and the default build answers 501. |
 | `internal/onnxmodel/` | Runs an imported ONNX model on ONNX Runtime for BigQuery ML's `MODEL_TYPE='ONNX'` (#1711), sharing the runtime `internal/embedding` loads; cgo and the `onnx` build tag, the default build answers `ErrNotCompiled`. `onnxgen/` hand-writes the tiny test models as ONNX protobuf. The BigQuery front, which runs in the cluster without it, reaches it through `internal/onnxrunner`. |
+| `internal/tflitemodel/` | Reads and runs an imported TensorFlow Lite model for BigQuery ML's `MODEL_TYPE='TENSORFLOW_LITE'` (#1755): LiteRT's `schema.fbs` FlatBuffer, its float builtin operators run in float32 as LiteRT runs them, in pure Go, so the CGO-less front runs it in every build. |
 | `internal/xgbmodel/` | Reads and runs an imported XGBoost model for BigQuery ML's `MODEL_TYPE='XGBOOST'` (#1711): XGBoost's documented model document as JSON or UBJSON, predicted as XGBoost 3.1.0 predicts (gbtree, DART, gblinear; categorical splits; each objective's transform), in pure Go, so the CGO-less front runs it in every build. |
 | `internal/onnxrunner/` | The ONNX runner (#1711): a small JSON-over-HTTP API that loads a model's bytes, keyed by their SHA-256, into a cache bounded by bytes (least recently used evicted), and runs it on `internal/onnxmodel`. The onnx build's CLI serves it on `--port-onnx` (default 9025) with BigQuery enabled and publishes it through `cloudburrow-host`, as Resource Manager is (#1392); the BigQuery front calls it with its `Client`, given the address by `--onnx`, and sends a model again when the runner answers that it no longer holds it. |
 | `internal/ocr/` | Tesseract OCR (`third_party/tesseract-wasm`, a WASI module on wazero, no cgo) for EmbedContent's `document_ocr` on scanned PDF pages (#1733): orientation and script detection, then the embedded `eng` model or the tessdata_fast script model `internal/localai` fetches on demand. |
+| `internal/tfconvert/` | The TensorFlow SavedModel converter (#1775): a JSON-over-HTTP API that takes a tar of a SavedModel's files and answers its TensorFlow Lite flatbuffer, or a refusal (`format`, `signature`, `custom`, `flex`, `convert`, `limit`, `unavailable`). The CLI serves it on `--port-tfconvert` (default 9027) with BigQuery enabled and publishes it through `cloudburrow-host`; each conversion is `docker run --network none` of the image built from `deploy/tfconvert` (Google's `tf.lite.TFLiteConverter` from PyPI `tensorflow==2.20.0`), so the CLI stays static. The BigQuery front's `--tfconvert` names it, and `internal/tflitemodel` runs the result. |
 | `internal/frontready/` | The readiness path a front serves for the backend beside it (#1114): the BigQuery and Pub/Sub emulators listen on their pod's loopback alone, so no other pod reaches them past their fronts, and Kubernetes, which probes at the pod's IP, asks their readiness of the front, which dials them on loopback. |
 | `internal/frontstate/` | The state directory the Spanner, Bigtable and Firestore fronts keep their records and data copies in (#1514), on a size-limited emptyDir of their pod: one records file replaced whole by a rename, and a file per backup, snapshot or deleted table, written once; and the reset path `cloudburrow reset` clears it through. |
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
@@ -171,7 +175,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
-| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server and a Valkey server per created instance, which `cmd/cloudburrow` provisions in the cluster (#1302). |
+| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server and a server per created instance (Redis 6.2 or 7.0, or Valkey, by its `redis_version`, #1386), which `cmd/cloudburrow` provisions in the cluster (#1302); the Memorystore for Valkey and Redis Cluster APIs too (#1519). |
+| `internal/redistlsfront/` | The TLS endpoint of a Memorystore for Redis server before Redis 6.0 with in-transit encryption (#1768): `cloudburrow-storage redis-tls-front`, a second container in the server's pod, serving TLS 1.2 or later on port 6378 with the instance CA's server certificate while the server listens on the pod's loopback alone; a Standard tier replica replicates through a loopback relay the front forwards over TLS to its primary. |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |

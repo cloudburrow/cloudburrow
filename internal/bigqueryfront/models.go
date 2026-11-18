@@ -36,8 +36,10 @@ import (
 // detail a faithful result needs, as for DNNs, or Google's
 // infrastructure itself: AUTOML_*, imported TENSORFLOW models read from
 // Cloud Storage (ONNX runs in the onnx build, modelonnx.go, and XGBOOST
-// on internal/xgbmodel, modelxgb.go, #1711), and remote models over a Cloud resource
-// connection, which CloudBurrow has none of); a TRANSFORM clause; and the
+// on internal/xgbmodel, modelxgb.go, #1711; TENSORFLOW_LITE on
+// internal/tflitemodel, modeltflite.go, #1755; #1766), and remote models other than
+// LLM and embedding models on the local Vertex AI (modelremote.go, #1760; #1765); a
+// TRANSFORM clause; and the
 // options CloudBurrow does not carry out.
 
 // bqModel is a model the front keeps.
@@ -70,6 +72,10 @@ type bqModel struct {
 	ONNX *onnxImport `json:"onnx,omitempty"`
 	// XGB is an imported XGBoost model's (modelxgb.go, #1711).
 	XGB *xgbImport `json:"xgboost,omitempty"`
+	// TFLite is an imported TensorFlow Lite model's (modeltflite.go, #1755).
+	TFLite *tfliteImport `json:"tflite,omitempty"`
+	// Remote is a remote model's (modelremote.go, #1760).
+	Remote *remoteModel `json:"remote,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -275,11 +281,11 @@ func (md bqModel) resource(full bool) map[string]any {
 		"lastModifiedTime": ms(md.Modified),
 		"modelType": map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA",
 			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION", "BOOSTED_TREE_REGRESSOR": "BOOSTED_TREE_REGRESSOR",
-			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS",
+			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS", "ARIMA_PLUS_XREG": "ARIMA_PLUS_XREG",
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX", "XGBOOST": "XGBOOST"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -305,6 +311,14 @@ func (md bqModel) resource(full bool) map[string]any {
 	}
 	if md.XGB != nil {
 		md.xgbResource(res) // modelxgb.go, #1711
+		return res
+	}
+	if md.TFLite != nil {
+		md.tfliteResource(res) // modeltflite.go, #1755
+		return res
+	}
+	if md.Remote != nil {
+		md.remoteResource(res) // modelremote.go, #1760
 		return res
 	}
 	var feats []map[string]any
@@ -346,7 +360,7 @@ func (md bqModel) resource(full bool) map[string]any {
 		return nil
 	}
 	switch o.ModelType {
-	case "ARIMA_PLUS":
+	case "ARIMA_PLUS", "ARIMA_PLUS_XREG":
 		var info []map[string]any
 		opts, info = md.arimaResource()
 		// The model's seasonal periods: every series' (#1518).
@@ -367,7 +381,7 @@ func (md bqModel) resource(full bool) map[string]any {
 		var single []map[string]any
 		for _, m := range info {
 			sm := map[string]any{"nonSeasonalOrder": m["nonSeasonalOrder"], "arimaFittingMetrics": m["arimaFittingMetrics"], "hasDrift": m["hasDrift"],
-				"seasonalPeriods": m["seasonalPeriods"], "hasHolidayEffect": false}
+				"seasonalPeriods": m["seasonalPeriods"], "hasHolidayEffect": m["hasHolidayEffect"]}
 			if id, ok := m["timeSeriesId"]; ok {
 				sm["timeSeriesId"] = id
 			}
@@ -704,12 +718,18 @@ type modelDDL struct {
 	path                                 []string
 	opts                                 mlOptions
 	query                                string
-	transform                            []string
+	// holidayQuery is a time series model's custom_holiday query
+	// (modelholiday.go, #1776).
+	holidayQuery string
+	transform    []string
 	// onnxPath is an imported ONNX or XGBoost model's MODEL_PATH
 	// (modelonnx.go, modelxgb.go), and importInputs and importOutputs an
 	// XGBoost model's INPUT and OUTPUT clauses.
 	onnxPath                    string
 	importInputs, importOutputs []importColumn
+	// remote is a remote model's connection and endpoint (modelremote.go,
+	// #1760).
+	remote *remoteDDL
 }
 
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
@@ -717,13 +737,10 @@ type modelDDL struct {
 var unsupportedModelTypes = map[string]string{
 	"AUTOML_REGRESSOR":  "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
 	"AUTOML_CLASSIFIER": "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
-	"ARIMA_PLUS_XREG":   "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	// An imported model (#1562, measured): no CloudBurrow build has a
 	// TensorFlow runtime. An ONNX model runs on the ONNX Runtime of the
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
-	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
-	"TENSORFLOW_LITE":       "an imported TensorFlow Lite model needs the TensorFlow Lite runtime, which CloudBurrow's BigQuery does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
@@ -798,9 +815,12 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 				return d, true, c, m
 			}
 			i = next
-		case stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
-			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Google-hosted Vertex AI or Cloud AI endpoint through a " +
-				"Cloud resource connection of the BigQuery Connection API, which CloudBurrow does not serve. Nothing was run."
+		case stmt[i].is("REMOTE"):
+			// A remote model on the local Vertex AI (modelremote.go, #1760).
+			c, m := parseRemote(stmt, i, &d)
+			return d, true, c, m
+		case stmt[i].is("OUTPUT"):
+			return d, true, 400, "Syntax error: OUTPUT comes after INPUT"
 		}
 	}
 	d.opts = defaultMLOptions()
@@ -818,7 +838,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
-					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" {
+					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" || up == "TENSORFLOW" {
 						// An imported ONNX or XGBoost model (modelonnx.go,
 						// modelxgb.go, #1711): MODEL_PATH, and no TRANSFORM
 						// or query.
@@ -865,7 +885,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 			return d, true, c, m
 		}
 	}
-	if d.opts.ModelType == "ARIMA_PLUS" {
+	if d.opts.ModelType == "ARIMA_PLUS" || d.opts.ModelType == "ARIMA_PLUS_XREG" {
 		applyArimaDefaults(&d.opts)
 		if c, m := checkArimaOptions(d.opts); c != 0 {
 			return d, true, c, m
@@ -878,8 +898,59 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	if i >= len(stmt) {
 		return d, true, 400, "Syntax error: expected a query after AS"
 	}
+	if i+2 < len(stmt) && stmt[i].punct("(") && stmt[i+1].is("TRAINING_DATA") && stmt[i+2].is("AS") {
+		c, m := parseHolidayAs(stmt, i, sql, &d)
+		return d, true, c, m
+	}
 	d.query = strings.TrimSpace(sql[stmt[i].pos:stmt[len(stmt)-1].end])
 	return d, true, 0, ""
+}
+
+// parseHolidayAs reads the AS clause of a time series model with custom
+// holidays, from the ( at open: (training_data AS (query_statement),
+// custom_holiday AS (holiday_statement)) (modelholiday.go, #1776).
+func parseHolidayAs(stmt []token, open int, sql string, d *modelDDL) (int, string) {
+	end := matchParen(stmt, open)
+	if end < 0 {
+		return 400, "Syntax error: unclosed ( after AS"
+	}
+	if end != len(stmt)-1 {
+		return 400, "Syntax error: unexpected " + stmt[end+1].text
+	}
+	part := func(i int, name string) (string, int, int, string) {
+		if i+2 >= end || !stmt[i].is(name) || !stmt[i+1].is("AS") || !stmt[i+2].punct("(") {
+			return "", 0, 400, "Syntax error: expected " + strings.ToLower(name) + " AS (query)"
+		}
+		close := matchParen(stmt, i+2)
+		if close < 0 || close > end || close == i+3 {
+			return "", 0, 400, "Syntax error: expected a query in " + strings.ToLower(name) + " AS (...)"
+		}
+		return strings.TrimSpace(sql[stmt[i+3].pos:stmt[close-1].end]), close + 1, 0, ""
+	}
+	train, next, c, m := part(open+1, "TRAINING_DATA")
+	if c != 0 {
+		return c, m
+	}
+	if next >= end || !stmt[next].punct(",") {
+		return 400, "Syntax error: expected , custom_holiday AS (holiday_statement) after training_data AS (query_statement)"
+	}
+	hol, next, c, m := part(next+1, "CUSTOM_HOLIDAY")
+	if c != 0 {
+		return c, m
+	}
+	if next != end {
+		return 400, "Syntax error: unexpected " + stmt[next].text
+	}
+	switch {
+	case d.opts.ModelType != "ARIMA_PLUS" && d.opts.ModelType != "ARIMA_PLUS_XREG":
+		return 400, "The AS (training_data AS (...), custom_holiday AS (...)) clause is only for time series models (ARIMA_PLUS and ARIMA_PLUS_XREG), not " + d.opts.ModelType
+	case d.opts.TS.Frequency != "DAILY" && d.opts.TS.Frequency != "AUTO_FREQUENCY":
+		return 400, "Custom holiday modeling only works for models that have a data_frequency value of either DAILY or AUTO_FREQUENCY, not " + d.opts.TS.Frequency
+	case len(d.transform) > 0:
+		return 400, "The TRANSFORM clause of the CREATE MODEL statement cannot be used with custom holiday modeling"
+	}
+	d.query, d.holidayQuery = train, hol
+	return 0, ""
 }
 
 // readModelPath reads a [project.]dataset.model name, plain or quoted,
@@ -1015,10 +1086,6 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				return bad()
 			}
 			o.FeedbackType = strings.ToUpper(s)
-			if o.FeedbackType == "IMPLICIT" {
-				return 501, "Not implemented here: feedback_type IMPLICIT: implicit feedback's confidence weighting (wals_alpha) and ranking metrics " +
-					"are not carried out; CloudBurrow trains EXPLICIT matrix factorization. Nothing was run."
-			}
 		case "user_col", "item_col", "rating_col":
 			s, ok := str()
 			if !ok || s == "" {
@@ -1353,6 +1420,14 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			default:
 				o.SplitMethod = s
 			}
+		case "wals_alpha":
+			// An IMPLICIT matrix factorization's confidence weight
+			// (modelmf.go, #1766).
+			v, ok := num()
+			if !ok || v < 0 {
+				return bad()
+			}
+			o.WalsAlpha = &v
 		case "l1_reg", "l2_reg", "learn_rate", "ls_init_learn_rate", "min_rel_progress", "data_split_eval_fraction", "max_iterations":
 			v, ok := num()
 			if !ok || v < 0 {
@@ -1458,6 +1533,11 @@ var modelTypeOptions = map[string][]string{
 		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
 		"decompose_time_series", "seasonalities", "trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length",
 		"max_time_series_length", "forecast_limit_lower_bound", "forecast_limit_upper_bound"},
+	// ARIMA_PLUS_XREG's page lists no decompose_time_series, seasonalities
+	// or forecast limits, and adds l2_reg (#1766).
+	"ARIMA_PLUS_XREG": {"time_series_timestamp_col", "time_series_data_col", "time_series_id_col", "horizon", "auto_arima", "auto_arima_max_order",
+		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
+		"trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length", "max_time_series_length", "l2_reg"},
 	"RANDOM_FOREST_REGRESSOR": {"input_label_cols", "l1_reg", "l2_reg", "early_stop", "min_rel_progress", "data_split_method",
 		"data_split_eval_fraction", "data_split_col", "enable_global_explain", "max_tree_depth", "min_split_loss", "min_tree_child_weight",
 		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},
@@ -1471,7 +1551,7 @@ var modelTypeOptions = map[string][]string{
 		"batch_size", "dropout", "warm_start"},
 	"AUTOENCODER": {"optimizer", "learn_rate", "activation_fn", "batch_size", "dropout", "hidden_units", "early_stop", "min_rel_progress",
 		"max_iterations", "warm_start", "l1_reg_activation"},
-	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
+	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "wals_alpha", "max_iterations", "early_stop",
 		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
 
@@ -1535,9 +1615,11 @@ func checkModelOptions(o mlOptions) (int, string) {
 }
 
 // resolveModel is a model path's project, dataset and ID, with q's
-// default dataset for a bare ID.
-func (f front) resolveModel(path []string, defaultDataset string) (project, dataset, id string, ok bool) {
-	project = projectOf(f.base)
+// default dataset for a bare ID, and its project (else the job's) for a
+// path without a project (#1784).
+func (f front) resolveModel(path []string, q queryOptions) (project, dataset, id string, ok bool) {
+	defaultDataset := defaultDatasetOf(q)
+	project = defaultProjectOf(q, projectOf(f.base))
 	switch len(path) {
 	case 1:
 		if defaultDataset == "" {
@@ -1603,7 +1685,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return false
 	}
 	fail := func(code int, msg string) {
-		reason := map[int]string{400: "invalidQuery", 404: "notFound", 409: "duplicate", 501: "notImplemented"}[code]
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 409: "duplicate", 501: "notImplemented"}[code]
 		if code == 501 {
 			writeError(w, code, reason, msg)
 			return
@@ -1619,7 +1701,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return true
 	}
 	d := *found
-	project, dataset, id, ok := f.resolveModel(d.path, defaultDatasetOf(q))
+	project, dataset, id, ok := f.resolveModel(d.path, q)
 	if !ok {
 		fail(400, "Model name "+strings.Join(d.path, ".")+" missing dataset while no default dataset is set in the request.")
 		return true
@@ -1648,6 +1730,18 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	case had && !d.replace:
 		fail(409, fmt.Sprintf("Already Exists: Model %s:%s.%s", project, dataset, id))
 		return true
+	case d.remote != nil:
+		// A remote model on the local Vertex AI (modelremote.go, #1760).
+		rm, c, m := f.createRemote(r.Context(), d, project, loc)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		if !dry {
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Created: now, Modified: now,
+				Location: loc, Remote: rm})
+		}
 	case d.opts.ModelType == "ONNX":
 		// An imported ONNX model (modelonnx.go, #1711).
 		imp, data, c, m := f.importONNX(r.Context(), d.onnxPath)
@@ -1681,6 +1775,41 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "XGBOOST", Created: now, Modified: now,
 				Location: loc, Options: d.opts, XGB: imp})
+		}
+	case d.opts.ModelType == "TENSORFLOW_LITE":
+		// An imported TensorFlow Lite model (modeltflite.go, #1755).
+		imp, data, c, m := f.importTFLite(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's TensorFlow Lite file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW_LITE", Created: now, Modified: now,
+				Location: loc, Options: d.opts, TFLite: imp})
+		}
+	case d.opts.ModelType == "TENSORFLOW":
+		// An imported TensorFlow SavedModel, converted to TensorFlow Lite
+		// on the CLI's converter (modeltensorflow.go, #1775).
+		imp, data, c, m := f.importTensorFlow(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's converted TensorFlow Lite file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW", Created: now, Modified: now,
+				Location: loc, Options: d.opts, TFLite: imp})
 		}
 	default:
 		trainSQL := d.query
@@ -1717,6 +1846,20 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if c != 0 {
 			fail(c, m)
 			return true
+		}
+		if d.holidayQuery != "" {
+			// The custom holidays (modelholiday.go, #1776).
+			hc, hr, c, m := f.queryAllRows(r, q, d.holidayQuery)
+			if c != 0 {
+				fail(c, m)
+				return true
+			}
+			hs, fe := parseCustomHolidays(hc, hr)
+			if fe != nil {
+				fail(fe.code, fe.msg)
+				return true
+			}
+			d.opts.TS.Holidays = hs
 		}
 		trained, fe := trainModel(d.opts, cols, rows, f.engineFingerprints(r, q))
 		if fe != nil {

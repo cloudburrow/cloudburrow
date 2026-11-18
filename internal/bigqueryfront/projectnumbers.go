@@ -74,6 +74,22 @@ func (p *projectNumbers) of(project string) int64 {
 	return resource.ProjectNumber(project)
 }
 
+// idOf is the project ID whose number is n, as the host sent it: false
+// for a number it did not send (#1770).
+func (p *projectNumbers) idOf(n int64) (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for id, num := range p.byID {
+		if num == n {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 // serve answers POST ProjectNumbersPath: the whole set, replacing the last.
 func (p *projectNumbers) serve(w http.ResponseWriter, r *http.Request) bool {
 	if r.URL.Path != ProjectNumbersPath {

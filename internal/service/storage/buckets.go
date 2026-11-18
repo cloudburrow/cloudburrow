@@ -485,10 +485,17 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 // storage reads before a parallel composite upload (#517): the bucket's
 // location, locationType, customPlacementConfig and hierarchicalNamespace
 // as buckets.get reports them. A bucket without hierarchicalNamespace has
-// it disabled.
+// it disabled. rapidCacheInfo (revision 20261107) is "The Rapid Cache
+// configuration for the bucket", its cacheType "Set to `rapid-cache` or
+// `rapid-cache-ultra`, only if there is a cache present": here the type of
+// the bucket's first Rapid Cache, by zone, that is not disabled, and absent
+// when it has none. UNVERIFIED (docs re-read 2026-11-18: neither the
+// reference nor the Rapid Cache pages say which type a bucket with caches of
+// both types reports).
 func (s *Server) bucketsGetStorageLayout(w http.ResponseWriter, r *http.Request) {
 	name := pathVar(r, jsonPrefix, 1)
 	var b bucketRecord
+	rapidType := ""
 	err := s.meta.View(func(tx Tx) error {
 		var ok bool
 		var gerr error
@@ -496,6 +503,16 @@ func (s *Server) bucketsGetStorageLayout(w http.ResponseWriter, r *http.Request)
 			return gerr
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
+		}
+		for _, k := range tx.List(rapidPrefix + b.Name + "/") {
+			c, ok, err := getRapid(tx, b.Name, strings.TrimPrefix(k, rapidPrefix+b.Name+"/"))
+			if err != nil {
+				return err
+			}
+			if ok && c.State != cacheDisabled {
+				rapidType = c.CacheType
+				break
+			}
 		}
 		return nil
 	})
@@ -510,6 +527,9 @@ func (s *Server) bucketsGetStorageLayout(w http.ResponseWriter, r *http.Request)
 		if v, ok := full[k]; ok {
 			layout[k] = v
 		}
+	}
+	if rapidType != "" {
+		layout["rapidCacheInfo"] = map[string]any{"cacheType": rapidType}
 	}
 	writeResponse(w, r, http.StatusOK, layout)
 }

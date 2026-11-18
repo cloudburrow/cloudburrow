@@ -222,6 +222,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if d := c.Load.DestinationTable; msg == "" && d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a load job") { // #1002
 			return
 		}
+		if d := c.Load.DestinationTable; msg == "" && f.refuseObjectTableJob(w, r, d, nil) { // #1783, objecttables.go
+			return
+		}
 		if msg == "" && !f.parquetSchema(w, r, &job) { // #970
 			return
 		}
@@ -279,6 +282,13 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			reason, msg = "invalid", checkTableID(d.TableID[:strings.Index(d.TableID, "$")])
 		} else {
 			reason, msg = "invalid", check(d)
+		}
+		srcs := c.Copy.SourceTables
+		if c.Copy.SourceTable != nil {
+			srcs = append([]tableRef{*c.Copy.SourceTable}, srcs...)
+		}
+		if msg == "" && f.refuseObjectTableJob(w, r, d, srcs) { // #1783, objecttables.go
+			return
 		}
 		if msg == "" {
 			f.copyJob(w, r, c.Copy) // #987

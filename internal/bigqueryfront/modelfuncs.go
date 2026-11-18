@@ -30,24 +30,31 @@ import (
 // mlFunctionsServed are the ML functions of a model CloudBurrow answers.
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
-	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true,
-	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true}
+	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
+	"ANNOTATE_IMAGE": true} // modelservice.go, #1773
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
 	fn    string
 	path  []string
 	input string // the input query, or ""
+	// table is the TABLE argument's path, or nil (ML.ANNOTATE_IMAGE's
+	// object table, modelservice.go).
+	table []string
 	struc map[string]string
 	// thresholds are ML.ROC_CURVE's GENERATE_ARRAY argument.
 	thresholds []float64
 	pos, end   int
+	// ai is AI.GENERATE_TEXT, ML.GENERATE_TEXT's AI.* twin (#1765), or
+	// AI.GENERATE_TABLE or AI.GENERATE_EMBEDDING (#1771, #1772).
+	ai bool
 }
 
 // findMLCalls finds the ML function calls of a MODEL in sql. msg is a
 // syntax error.
 func findMLCalls(sql string) ([]mlCall, string) {
-	if !strings.Contains(strings.ToUpper(sql), "ML") {
+	if u := strings.ToUpper(sql); !strings.Contains(u, "ML") && !strings.Contains(u, "AI.") {
 		return nil, ""
 	}
 	toks, ok := lex(sql)
@@ -56,14 +63,16 @@ func findMLCalls(sql string) ([]mlCall, string) {
 	}
 	var calls []mlCall
 	for i := 0; i+4 < len(toks); i++ {
-		if !toks[i].is("ML") || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
+		ai := toks[i].is("AI") && (toks[i+2].is("GENERATE_TEXT") || toks[i+2].is("GENERATE_TABLE") || toks[i+2].is("GENERATE_EMBEDDING")) &&
+			(i == 0 || !toks[i-1].punct("."))
+		if !toks[i].is("ML") && !ai || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
 			continue
 		}
 		end := matchParen(toks, i+3)
 		if end < 0 {
 			return nil, "Syntax error: unclosed ML." + toks[i+2].text
 		}
-		c := mlCall{fn: strings.ToUpper(toks[i+2].text), pos: toks[i].pos, end: toks[end].end}
+		c := mlCall{fn: strings.ToUpper(toks[i+2].text), pos: toks[i].pos, end: toks[end].end, ai: ai}
 		path, n := readModelPath(toks[i+5 : end])
 		if n == 0 {
 			return nil, "Syntax error: expected a model name after MODEL"
@@ -115,6 +124,7 @@ func findMLCalls(sql string) ([]mlCall, string) {
 					return nil, "Syntax error: expected a table name after TABLE"
 				}
 				c.input = "SELECT * FROM " + quotePath(p)
+				c.table = p
 			default:
 				return nil, "Syntax error: unexpected " + a[0].text + " in ML." + c.fn
 			}
@@ -221,6 +231,41 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			return true
 		}
 	}
+	// The image functions, evaluated here (mlimagesql.go, #1798).
+	if text, code, msg = f.rewriteImageFunctions(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
+	// The scalar AI functions, evaluated row by row here (aigenerate.go,
+	// #1765, #1771, #1772).
+	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
+	if fn := aiFunction(text); fn != "" {
+		why := map[string]string{
+			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +
+				"and a count made any other way would not be the model's",
+			"AI.AGG":    "the aggregate generative function is not served yet (#1777)",
+			"AI.SEARCH": "it searches tables with autonomous embedding generation, which CloudBurrow does not serve yet (#1778)",
+		}[fn]
+		if why == "" {
+			why = "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
+				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE and AI.CLASSIFY run on the instance's local Vertex AI (#1765, #1771, #1772)"
+		}
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": "+why+". Nothing was run.")
+		return true
+	}
 	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
@@ -232,14 +277,15 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	var b strings.Builder
 	last := 0
 	for _, c := range calls {
-		if !mlFunctionsServed[c.fn] {
+		if !mlFunctionsServed[c.fn] && !(c.ai && c.fn == "GENERATE_TABLE") {
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
-				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN and ML.RECONSTRUCTION_LOSS. Nothing was run.")
+				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.HOLIDAY_INFO, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
+				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING and ML.ANNOTATE_IMAGE. Nothing was run.")
 			return true
 		}
-		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
+		project, dataset, id, ok := f.resolveModel(c.path, q)
 		if !ok {
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
 				Message: "Model name " + strings.Join(c.path, ".") + " missing dataset while no default dataset is set in the request."})
@@ -253,7 +299,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		}
 		sub, code, why := f.mlSubquery(r, q, md, c)
 		if code != 0 {
-			reason := map[int]string{400: "invalidQuery", 501: "notImplemented"}[code]
+			reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 			if code == 501 {
 				writeError(w, code, reason, why)
 				return true
@@ -537,16 +583,38 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
 	}
+	if md.Remote != nil {
+		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
+	}
+	if c.ai && c.fn == "GENERATE_EMBEDDING" {
+		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
+	}
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" {
+		fname := "ML." + c.fn
+		if c.ai {
+			fname = "AI." + c.fn
+		}
+		return "", 400, "Function " + fname + " is only supported for remote models"
+	}
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711
 	}
 	if md.XGB != nil {
 		return f.xgbSubquery(r, q, md, c) // modelxgb.go, #1711
 	}
+	if md.TFLite != nil {
+		return f.tfliteSubquery(r, q, md, c) // modeltflite.go, #1755
+	}
 	if typ == "MATRIX_FACTORIZATION" {
 		return f.mfSubquery(r, q, md, c)
 	}
+	if typ == "ARIMA_PLUS_XREG" {
+		return f.xregSubquery(r, q, md, c) // modelxreg.go, #1766
+	}
 	if typ == "ARIMA_PLUS" {
+		if c.fn == "EVALUATE" && c.input != "" {
+			return f.tsEvaluate(r, q, md, c) // modelxreg.go, #1766
+		}
 		return f.arimaSubquery(r, q, md, c)
 	}
 	if typ == "AUTOENCODER" && c.fn != "TRAINING_INFO" && c.fn != "FEATURE_INFO" {
@@ -562,7 +630,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			return "", 501, "Not implemented here: ML.DETECT_ANOMALIES of a " + typ + " model: CloudBurrow detects anomalies with ARIMA_PLUS models. Nothing was run."
 		}
 		return unsupported()
-	case "RECOMMEND", "FORECAST", "EXPLAIN_FORECAST", "ARIMA_EVALUATE", "ARIMA_COEFFICIENTS":
+	case "RECOMMEND", "FORECAST", "EXPLAIN_FORECAST", "ARIMA_EVALUATE", "ARIMA_COEFFICIENTS", "HOLIDAY_INFO":
 		return unsupported()
 	case "FEATURE_IMPORTANCE":
 		if !isTreeModel(typ) {

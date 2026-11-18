@@ -242,3 +242,83 @@ func TestRestartKnativeTimesOut(t *testing.T) {
 		t.Errorf("the gateway was restarted before CoreDNS was Ready: %v", p)
 	}
 }
+
+// After a warm start without Cloud Run, CoreDNS's pods are replaced once
+// the Service network answers, and the new ones are waited for: up was
+// ready some 30 s before the cluster's DNS was, and the bigquery front
+// could not reach Resource Manager by name (#1781).
+func TestAWarmStartWithoutCloudRunRestartsTheClusterDNS(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	polls := 0
+	w := newWarmCluster(func(dep string) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		if dep == "coredns" {
+			polls++
+		}
+		return polls > 2
+	})
+	r := &recordingRunner{respond: w.respond}
+	c := &LifecycleComponent{installer: newTestInstaller(r), services: []config.Service{config.ServiceBigQuery},
+		timeout: time.Minute, out: &strings.Builder{}}
+	networkUp := false
+	c.SetNodeRestart(func() bool { return true }, func(context.Context) error {
+		if len(w.patched()) > 0 {
+			t.Error("CoreDNS was restarted before the Service network answered")
+		}
+		networkUp = true
+		return nil
+	})
+	if err := c.waitClusterDNS(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !networkUp {
+		t.Fatal("the Service network was not waited for")
+	}
+	if got := strings.Join(w.patched(), " "); got != "kube-system/coredns" {
+		t.Errorf("restarted %q, want kube-system/coredns alone", got)
+	}
+	mu.Lock()
+	if polls < 3 {
+		t.Errorf("returned before CoreDNS's new pods were Ready (%d polls)", polls)
+	}
+	mu.Unlock()
+	if c := r.find("wait --for=condition=Available"); c != "" {
+		t.Errorf("waited on CoreDNS's stale status: %s", c)
+	}
+}
+
+// On a cluster this up did not restart, CoreDNS's Deployment is waited
+// for; with Cloud Run after a warm start, RestartKnative restarts it, and
+// nothing more is done here (#1781).
+func TestTheClusterDNSIsWaitedForOnARunningCluster(t *testing.T) {
+	t.Parallel()
+	w := newWarmCluster(func(string) bool { return true })
+	r := &recordingRunner{respond: w.respond}
+	c := &LifecycleComponent{installer: newTestInstaller(r), services: []config.Service{config.ServiceBigQuery},
+		timeout: time.Minute, out: &strings.Builder{}}
+	c.SetNodeRestart(func() bool { return false }, func(context.Context) error {
+		t.Error("the Service network was waited for on a running cluster")
+		return nil
+	})
+	if err := c.waitClusterDNS(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if r.find("-n kube-system wait --for=condition=Available deployment/coredns") == "" {
+		t.Errorf("did not wait for CoreDNS: %v", r.calls)
+	}
+	if p := w.patched(); len(p) > 0 {
+		t.Errorf("restarted %v on a running cluster", p)
+	}
+
+	r = &recordingRunner{respond: w.respond}
+	c = warmComponent(r)
+	c.SetNodeRestart(func() bool { return true }, func(context.Context) error { return nil })
+	if err := c.waitClusterDNS(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.calls) > 0 {
+		t.Errorf("with Cloud Run, the cluster's DNS is RestartKnative's; called %v", r.calls)
+	}
+}

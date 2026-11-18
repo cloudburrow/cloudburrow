@@ -23,7 +23,8 @@ import (
 // apiv1: a REDIS_6_X instance runs Redis 6.2 (INFO redis_version 6.2.x);
 // UpgradeInstance to REDIS_7_0 runs Redis 7.0 and to REDIS_7_2 Valkey
 // (which reports 7.2.4), each keeping the instance's keys and AUTH; a
-// downgrade is INVALID_ARGUMENT, and REDIS_5_0 is 501.
+// downgrade is INVALID_ARGUMENT. REDIS_3_2 to REDIS_5_0 are
+// TestMemorystoreEndOfLifeVersions (#1524).
 func TestMemorystoreVersionsAndUpgrade(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
@@ -34,10 +35,6 @@ func TestMemorystoreVersionsAndUpgrade(t *testing.T) {
 	parent := "projects/" + project + "/locations/us-central1"
 	id := fmt.Sprintf("upgrade-%d", time.Now().UnixNano()%1e8)
 	name := parent + "/instances/" + id
-	if _, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id + "x",
-		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, RedisVersion: "REDIS_5_0"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("REDIS_5_0 = %v, want UNIMPLEMENTED", err)
-	}
 	op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id,
 		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, AuthEnabled: true, RedisVersion: "REDIS_6_X"}})
 	if err != nil {

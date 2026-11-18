@@ -31,7 +31,8 @@ import (
 //     against an ACTIVE HMAC key (#505);
 //   - V4 GOOG4-RSA-SHA256, and V2 (GoogleAccessId, Expires, Signature),
 //     against a public key the user registered for that service account
-//     (Options.SigningKeys; storage-server --signing-cert).
+//     (Options.SigningKeys; storage-server --signing-cert), or else one of
+//     the account's certificates (signingcerts.go, #1786).
 //
 // Anything else (a bad signature, an unknown key, an expired URL) is 403
 // with the XML API's error, never 200. The canonical request is the verb,
@@ -171,16 +172,16 @@ func (s *Server) checkV4(alg, accessID, sts, sig, date, region, service, kind st
 		}
 		return hmac.Equal([]byte(hex.EncodeToString(hmacSHA256(k, sts))), []byte(strings.ToLower(sig))), nil
 	case "GOOG4-RSA-SHA256":
-		key, ok := s.signingKeys[accessID]
-		if !ok {
-			return false, denied("No signing certificate is registered for %s; register one (storage-server --signing-cert) to verify its signatures.", accessID)
+		keys, err := s.rsaKeys(accessID)
+		if err != nil {
+			return false, err
 		}
 		raw, err := hex.DecodeString(sig)
 		if err != nil {
 			return false, nil
 		}
 		sum := sha256.Sum256([]byte(sts))
-		return rsa.VerifyPKCS1v15(key, crypto.SHA256, sum[:], raw) == nil, nil
+		return verifyAny(keys, sum[:], raw), nil
 	}
 	return false, &signatureError{http.StatusBadRequest, "InvalidArgument", "Unknown signing algorithm " + alg}
 }
@@ -262,9 +263,9 @@ func (s *Server) verifyV2(r *http.Request, q url.Values, resource string) error 
 	if !s.now().Before(time.Unix(e, 0)) {
 		return denied("Request has expired: %s", exp)
 	}
-	key, ok := s.signingKeys[id]
-	if !ok {
-		return denied("No signing certificate is registered for %s; register one (storage-server --signing-cert) to verify its signatures.", id)
+	keys, err := s.rsaKeys(id)
+	if err != nil {
+		return err
 	}
 	raw, err := base64.StdEncoding.DecodeString(sig)
 	if err != nil {
@@ -283,10 +284,21 @@ func (s *Server) verifyV2(r *http.Request, q url.Values, resource string) error 
 	}
 	sts += (&url.URL{Path: resource}).String()
 	sum := sha256.Sum256([]byte(sts))
-	if rsa.VerifyPKCS1v15(key, crypto.SHA256, sum[:], raw) != nil {
+	if !verifyAny(keys, sum[:], raw) {
 		return mismatch()
 	}
 	return nil
+}
+
+// verifyAny reports whether sig is a PKCS#1 v1.5 SHA-256 signature of
+// sum by one of keys.
+func verifyAny(keys []*rsa.PublicKey, sum, sig []byte) bool {
+	for _, k := range keys {
+		if rsa.VerifyPKCS1v15(k, crypto.SHA256, sum, sig) == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func hmacSHA256(key []byte, data string) []byte {

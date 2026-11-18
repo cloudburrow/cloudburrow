@@ -152,7 +152,7 @@ func splitShares(splits []*runpb.InstanceSplit, latestID string, total int32) []
 // latestShare is the latest revision's instance count.
 func latestShare(spec *runpb.WorkerPool) int32 {
 	latestID := revisionID(spec.GetLatestCreatedRevision())
-	return splitShares(spec.GetInstanceSplits(), latestID, spec.GetScaling().GetManualInstanceCount())[0].count
+	return splitShares(spec.GetInstanceSplits(), latestID, poolInstances(spec))[0].count
 }
 
 // splitWorkload is the Deployment a revision's share runs as.
@@ -164,7 +164,7 @@ func splitDeploymentName(w workload, revID string) string { return w.objectName(
 // naming a revision on a pool being created.
 func (s *Server) renderSplits(ctx context.Context, w workload, spec *runpb.WorkerPool, create bool) ([]splitManifest, error) {
 	latestID := revisionID(spec.GetLatestCreatedRevision())
-	shares := splitShares(spec.GetInstanceSplits(), latestID, spec.GetScaling().GetManualInstanceCount())
+	shares := splitShares(spec.GetInstanceSplits(), latestID, poolInstances(spec))
 	if len(shares) == 1 {
 		return nil, nil
 	}
@@ -278,7 +278,7 @@ func (s *Server) splitDeployments(ctx context.Context, w workload) ([]kdeploymen
 func servingRevisions(wp *runpb.WorkerPool) map[string]bool {
 	latestID := revisionID(wp.GetLatestCreatedRevision())
 	out := map[string]bool{wp.GetLatestCreatedRevision(): true}
-	for _, sh := range splitShares(wp.GetInstanceSplits(), latestID, wp.GetScaling().GetManualInstanceCount()) {
+	for _, sh := range splitShares(wp.GetInstanceSplits(), latestID, poolInstances(wp)) {
 		if sh.percent > 0 {
 			out[wp.GetName()+"/revisions/"+sh.revID] = true
 		}
@@ -311,7 +311,7 @@ func revisionID(name string) string { return name[strings.LastIndex(name, "/")+1
 func RevisionInstances(wp *runpb.WorkerPool) map[string]int32 {
 	out := map[string]int32{}
 	latestID := revisionID(wp.GetLatestCreatedRevision())
-	for _, sh := range splitShares(wp.GetInstanceSplits(), latestID, wp.GetScaling().GetManualInstanceCount()) {
+	for _, sh := range splitShares(wp.GetInstanceSplits(), latestID, poolInstances(wp)) {
 		out[wp.GetName()+"/revisions/"+sh.revID] = sh.count
 	}
 	return out

@@ -534,3 +534,56 @@ func TestConsoleMemorystoreRotateServerCA(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 }
+
+// TestConsoleMemorystoreEndOfLifeVersions (#1524): Create instance's
+// Version offers REDIS_3_2, and makes an instance that runs Redis 3.2;
+// its page offers Upgrade to REDIS_4_0 and later, and Upgrade to REDIS_5_0
+// keeps its keys.
+func TestConsoleMemorystoreEndOfLifeVersions(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	q := "?project=" + url.QueryEscape(project)
+	if code, out := consoleDo(t, addr, http.MethodGet, "/api/services", ""); code != http.StatusOK ||
+		!strings.Contains(out, `"REDIS_3_2"`) || !strings.Contains(out, `"REDIS_4_0"`) || !strings.Contains(out, `"REDIS_5_0"`) {
+		t.Fatalf("Create instance's Version = %d: %s; want REDIS_3_2, REDIS_4_0 and REDIS_5_0 offered", code, out)
+	}
+	id := fmt.Sprintf("console-eol-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = waitLRODone(context.Background(), op)
+		}
+	})
+	body, _ := json.Marshal(map[string]string{"id": id, "region": "us-central1", "memorySizeGb": "1", "redisVersion": "REDIS_3_2"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/memorystore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetRedisVersion() != "REDIS_3_2" {
+		t.Fatalf("created from the console: %v, %v", inst, err)
+	}
+	rc := redisAt(inst, "")
+	if info, err := rc.Info(ctx, "server").Result(); err != nil || !strings.Contains(info, "redis_version:3.2.") {
+		t.Errorf("INFO server = %v; want Redis 3.2", err)
+	}
+	rc.Set(ctx, "k", "v", 0)
+	rc.Close()
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, "")
+	if code != http.StatusOK || !strings.Contains(out, `"id":"upgrade"`) || !strings.Contains(out, `"REDIS_4_0"`) {
+		t.Fatalf("instance page = %d: %s; want Upgrade to REDIS_4_0 and later", code, out)
+	}
+	if code, out := consoleAct(t, addr, "memorystore", project, []string{id}, "upgrade", map[string]string{"redisVersion": "REDIS_5_0"}); code != http.StatusOK {
+		t.Fatalf("console Upgrade = %d: %s", code, out)
+	}
+	inst, err = c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetRedisVersion() != "REDIS_5_0" {
+		t.Fatalf("after Upgrade: %v, %v", inst, err)
+	}
+	rc = redisAt(inst, "")
+	defer rc.Close()
+	if v, err := rc.Get(ctx, "k").Result(); err != nil || v != "v" {
+		t.Errorf("after Upgrade GET k = %q, %v", v, err)
+	}
+}

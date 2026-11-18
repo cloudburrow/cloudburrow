@@ -30,8 +30,9 @@ func msHasAction(as []console.Action, id string) bool {
 // TestConsoleMemorystoreTokenAuthBackups (#1549): the Memorystore for
 // Valkey and Redis Cluster pages create a token auth instance and cluster;
 // their pages offer Add token auth user, Add auth token, Back up now,
-// Export and Delete backup (and Create, Update, Delete and Set ACL policy
-// on a cluster, its ACL policies tab showing the attachment); a user and
+// Export and Delete backup, and Create, Update, Delete and Set ACL policy
+// (on an instance too since #1578), the ACL policies tab showing the
+// attachment; a user and
 // its generated token appear on the Token auth tab, a backup on the
 // Backups tab, and Delete backup removes it.
 func TestConsoleMemorystoreTokenAuthBackups(t *testing.T) {
@@ -69,8 +70,8 @@ func TestConsoleMemorystoreTokenAuthBackups(t *testing.T) {
 				t.Errorf("%s's page has no %s action", tc.id, want)
 			}
 		}
-		if msHasAction(acts, "acl-policy") != tc.cluster {
-			t.Errorf("%s's page acl-policy action = %v, want %v", tc.id, !tc.cluster, tc.cluster)
+		if !msHasAction(acts, "acl-policy") {
+			t.Errorf("%s's page has no acl-policy action", tc.id)
 		}
 		for _, a := range []struct {
 			id     string
@@ -91,7 +92,7 @@ func TestConsoleMemorystoreTokenAuthBackups(t *testing.T) {
 		if bk == nil || len(bk.Listing.Items) != 1 || bk.Listing.Items[0].Name != "first" {
 			t.Errorf("%s's Backups tab = %+v", tc.id, bk)
 		}
-		if tc.cluster {
+		{
 			for _, a := range []struct {
 				id     string
 				values map[string]string

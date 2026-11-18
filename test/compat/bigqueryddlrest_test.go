@@ -117,8 +117,8 @@ func TestBigQueryNestedDefaultsAndTruncateDataDefaults(t *testing.T) {
 // with another column or a subquery, in arithmetic, or in a function
 // other than those the page lists; EXTRACT(YEAR …), DATE_SUB of a
 // constant and a parenthesized OR of the column alone do. Before, any
-// WHERE naming the column was enough. And a STRUCT field's data_policies
-// stays 501: Google documents data policies on a column only.
+// WHERE naming the column was enough. (A STRUCT field's data_policies:
+// TestBigQueryStructFieldDataPolicies.)
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryPartitionFilterThatPrunes(t *testing.T) {
@@ -163,14 +163,5 @@ func TestBigQueryPartitionFilterThatPrunes(t *testing.T) {
 	}
 	if got := fmt.Sprint(rows(t, ctx, c, "SELECT f FROM "+ref+" WHERE day = DATE '2024-01-01' AND f = 'a'")); got != "[[a]]" {
 		t.Errorf("rows: %s", got)
-	}
-
-	sql := "CREATE TABLE `" + ds.DatasetID + ".fieldpolicy` (s STRUCT<x STRING OPTIONS (data_policies = " +
-		"[\"{'name':'" + project + ".region-us.p0'}\"])>)"
-	for _, insert := range []bool{false, true} {
-		err := bqRun(ctx, c, sql, insert)
-		if err == nil || !strings.Contains(err.Error(), "data_policies") || !insert && httpStatus(err) != http.StatusNotImplemented {
-			t.Errorf("insert %v: a STRUCT field's data_policies: %v, want 501", insert, err)
-		}
 	}
 }

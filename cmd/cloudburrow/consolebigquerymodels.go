@@ -70,6 +70,9 @@ func (p bigqueryProvider) modelsSection(ctx context.Context, ds *bigquery.Datase
 		fields := map[string]string{"Type": "—", "Created": "—"}
 		if md, err := m.Metadata(ctx); err == nil {
 			fields["Type"] = orDash(md.Type)
+			if md.Type == "" {
+				fields["Type"] = "Remote" // #1760: a remote model has none
+			}
 			if !md.CreationTime.IsZero() {
 				fields["Created"] = md.CreationTime.UTC().Format(time.RFC3339)
 			}
@@ -89,7 +92,8 @@ func (p bigqueryProvider) modelsSection(ctx context.Context, ds *bigquery.Datase
 	out.Total = len(out.Items)
 	if out.Total == 0 && out.Unavailable == "" {
 		out.Note = "This dataset has no models. CREATE MODEL ... OPTIONS(model_type='linear_reg' or 'logistic_reg') AS SELECT ... " +
-			"in the query editor's Read-write mode trains one."
+			"in the query editor's Read-write mode trains one; CREATE MODEL ... REMOTE WITH CONNECTION `project.us.connection` OPTIONS(ENDPOINT = '...') " +
+			"makes a remote model on the instance's local Vertex AI."
 	}
 	return console.Section{ID: "models", Label: "Models", Listing: out}
 }
@@ -108,8 +112,14 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the model: " + bigqueryRefusal(err).Error(), Trail: trail}, nil
 	}
-	if md.Type == "ONNX" || md.Type == "XGBOOST" {
+	if md.Type == "ONNX" || md.Type == "XGBOOST" || md.Type == "TENSORFLOW_LITE" || md.Type == "TENSORFLOW" {
 		return p.onnxModelDetail(md, datasetID, modelID, trail), nil
+	}
+	if md.Type == "" {
+		// A remote model has no model type (#1760).
+		if d, ok := p.remoteModelDetail(ctx, md, datasetID, modelID, trail); ok {
+			return d, nil
+		}
 	}
 	feats := console.Listing{Columns: []string{"Type", "Weight"}, NameColumn: "Feature", Noun: "features"}
 	cols, _ := md.RawFeatureColumns()
@@ -198,6 +208,13 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 				f("Davies-Bouldin index", cm.DaviesBouldinIndex)
 				f("Mean squared distance", cm.MeanSquaredDistance)
 			}
+			if rk := em.RankingMetrics; rk != nil {
+				// An IMPLICIT matrix factorization's (#1766).
+				f("Mean average precision", rk.MeanAveragePrecision)
+				f("Mean squared error", rk.MeanSquaredError)
+				f("Normalized discounted cumulative gain", rk.NormalizedDiscountedCumulativeGain)
+				f("Average rank", rk.AverageRank)
+			}
 			if dm := em.DimensionalityReductionMetrics; dm != nil {
 				f("Total explained variance ratio", dm.TotalExplainedVarianceRatio)
 			}
@@ -243,7 +260,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	}, nil
 }
 
-// onnxModelDetail is an imported ONNX or XGBoost model's page (#1711): its inputs and
+// onnxModelDetail is an imported ONNX, XGBoost, TensorFlow Lite or TensorFlow model's page (#1711, #1755, #1775): its inputs and
 // outputs, which models.get reports as featureColumns and labelColumns,
 // and the Cloud Storage URI it was imported from. It has no training,
 // weights or evaluation: BigQuery imports the model as it is.
@@ -292,6 +309,58 @@ func (p bigqueryProvider) onnxModelDetail(md *bigquery.ModelMetadata, datasetID,
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Model", Properties: props}}},
 		},
 	}
+}
+
+// remoteModelDetail is a remote model's page (#1760): its endpoint and
+// connection, as models.get's remoteModelInfo reads them, and the
+// function that runs it. ok is false when the model is not remote.
+func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.ModelMetadata, datasetID, modelID string, trail []console.Crumb) (console.Detail, bool) {
+	svc, err := p.service(ctx)
+	if err != nil {
+		return console.Detail{}, false
+	}
+	m, err := svc.Models.Get(p.project, datasetID, modelID).Context(ctx).Do()
+	if err != nil || m.RemoteModelInfo == nil {
+		return console.Detail{}, false
+	}
+	ri := m.RemoteModelInfo
+	fn := "ML.GENERATE_TEXT(MODEL `" + datasetID + "." + modelID + "`, (SELECT 'Hello' AS prompt), STRUCT(TRUE AS flatten_json_output))"
+	if strings.Contains(strings.ToLower(ri.Endpoint), "embedding") {
+		fn = "ML.GENERATE_EMBEDDING(MODEL `" + datasetID + "." + modelID + "`, (SELECT 'Hello' AS content))"
+	}
+	// A model over a Cloud AI service names its service type, not an
+	// endpoint (#1773): a Vision model runs ML.ANNOTATE_IMAGE over an
+	// object table.
+	target := console.Property{Label: "Endpoint", Value: ri.Endpoint}
+	if ri.RemoteServiceType != "" {
+		target = console.Property{Label: "Remote service type", Value: ri.RemoteServiceType}
+		fn = "ML.ANNOTATE_IMAGE(MODEL `" + datasetID + "." + modelID + "`, TABLE `" + datasetID + ".OBJECT_TABLE`, STRUCT(['TEXT_DETECTION'] AS vision_features))"
+	}
+	props := []console.Property{
+		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},
+		{Label: "Type", Value: "Remote model"},
+		target,
+		{Label: "Connection", Value: ri.Connection},
+		{Label: "Location", Value: orDash(md.Location)},
+		{Label: "Runs on", Value: "the instance's local Vertex AI endpoint; never Google's"},
+		{Label: "Try it", Value: "SELECT * FROM " + fn},
+	}
+	if md.Description != "" {
+		props = append(props, console.Property{Label: "Description", Value: md.Description})
+	}
+	if md.Name != "" {
+		props = append(props, console.Property{Label: "Friendly name", Value: md.Name})
+	}
+	if !md.CreationTime.IsZero() {
+		props = append(props, console.Property{Label: "Created", Value: md.CreationTime.UTC().Format(time.RFC3339)})
+	}
+	return console.Detail{
+		Trail:   trail,
+		Summary: []console.Property{{Label: "Dataset", Value: datasetID}, {Label: "Type", Value: "Remote"}, target},
+		Sections: []console.Section{
+			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Model", Properties: props}}},
+		},
+	}, true
 }
 
 // modelResultSections are a model's centroids (KMEANS, ML.CENTROIDS),
@@ -439,8 +508,23 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "importance", Label: "Feature importance", Listing: l}}
-	case "ARIMA_PLUS":
+	case "ARIMA_PLUS", "ARIMA_PLUS_XREG":
 		var out []console.Section
+		if typ == "ARIMA_PLUS_XREG" {
+			// Its regression's weights (ML.ARIMA_COEFFICIENTS, #1766); its
+			// ML.FORECAST needs the future features, so the page shows
+			// none.
+			_, co := read("SELECT DISTINCT processed_input, weight, ARRAY_TO_STRING(ARRAY(SELECT FORMAT('%s=%g', category, weight) FROM " +
+				"UNNEST(category_weights) ORDER BY category), ', ') FROM ML.ARIMA_COEFFICIENTS(" + model + ") ORDER BY processed_input")
+			if len(co) > 0 {
+				l := console.Listing{Columns: []string{"Weight", "Category weights"}, NameColumn: "Regressor", Noun: "regressors"}
+				for _, r := range co {
+					l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Weight": num(r[1]), "Category weights": orDash(fmt.Sprint(r[2]))}})
+				}
+				l.Total = len(l.Items)
+				out = append(out, console.Section{ID: "regressors", Label: "Regressors", Listing: l})
+			}
+		}
 		schema, fc := read("SELECT * FROM ML.FORECAST(" + model + ") ORDER BY 1, 2 LIMIT 100")
 		if len(fc) > 0 {
 			// The series ID, when there is one, comes before
@@ -470,22 +554,38 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 			out = append(out, console.Section{ID: "forecast", Label: "Forecast", Listing: l})
 		}
 		_, ev := read("SELECT FORMAT('ARIMA(%d, %d, %d)%s', non_seasonal_p, non_seasonal_d, non_seasonal_q, IF(has_drift, ' with drift', '')), " +
-			"log_likelihood, AIC, variance, ARRAY_TO_STRING(seasonal_periods, ', '), has_spikes_and_dips, has_step_changes " +
+			"log_likelihood, AIC, variance, ARRAY_TO_STRING(seasonal_periods, ', '), has_spikes_and_dips, has_step_changes, has_holiday_effect " +
 			"FROM ML.ARIMA_EVALUATE(" + model + ") WHERE error_message IS NULL")
 		if len(ev) > 0 {
 			// The pipeline's stages too: the seasonal periods found, and
-			// whether spikes and dips or step changes were (#1518).
-			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance", "Seasonal periods", "Spikes and dips", "Step changes"},
+			// whether spikes and dips, step changes (#1518) or a custom
+			// holiday's effect (#1776) were.
+			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance", "Seasonal periods", "Spikes and dips", "Step changes", "Holiday effect"},
 				NameColumn: "Model", Noun: "candidate models"}
 			for _, r := range ev {
 				f := map[string]string{"Log likelihood": num(r[1]), "AIC": num(r[2]), "Variance": num(r[3])}
 				if len(r) >= 7 {
 					f["Seasonal periods"], f["Spikes and dips"], f["Step changes"] = fmt.Sprint(r[4]), fmt.Sprint(r[5]), fmt.Sprint(r[6])
 				}
+				if len(r) >= 8 {
+					f["Holiday effect"] = fmt.Sprint(r[7])
+				}
 				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: f})
 			}
 			l.Total = len(l.Items)
 			out = append(out, console.Section{ID: "candidates", Label: "Candidate models", Listing: l})
+		}
+		// The custom holidays it was trained with (ML.HOLIDAY_INFO, #1776).
+		_, hol := read("SELECT holiday_name, region, CAST(primary_date AS STRING), preholiday_days, postholiday_days FROM ML.HOLIDAY_INFO(" + model +
+			") ORDER BY holiday_name, primary_date LIMIT 500")
+		if len(hol) > 0 {
+			l := console.Listing{Columns: []string{"Region", "Primary date", "Days before", "Days after"}, NameColumn: "Holiday", Noun: "holidays"}
+			for _, r := range hol {
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Region": fmt.Sprint(r[1]),
+					"Primary date": fmt.Sprint(r[2]), "Days before": fmt.Sprint(r[3]), "Days after": fmt.Sprint(r[4])}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "holidays", Label: "Custom holidays", Listing: l})
 		}
 		return out
 	case "MATRIX_FACTORIZATION":

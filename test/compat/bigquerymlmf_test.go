@@ -98,7 +98,6 @@ func TestBigQueryMLMatrixFactorization(t *testing.T) {
 		}
 	}
 	for _, sql := range []string{
-		"CREATE MODEL `%s.imp` OPTIONS(model_type='matrix_factorization', feedback_type='implicit') AS SELECT * FROM `%s.flat`",
 		"CREATE MODEL `%s.imp` OPTIONS(model_type='matrix_factorization', data_split_method='random') AS SELECT * FROM `%s.flat`",
 	} {
 		_, err := c.Query(fmt.Sprintf(sql, name, name)).Read(ctx)
@@ -109,4 +108,93 @@ func TestBigQueryMLMatrixFactorization(t *testing.T) {
 	}
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.PREDICT(MODEL `%s.mf`, (SELECT 1 AS user, 'i1' AS item))", name)).Read(ctx)
 	wantHTTPStatus(t, "ML.PREDICT of a matrix factorization model", err, http.StatusBadRequest)
+}
+
+// TestBigQueryMLImplicitMatrixFactorization (#1766): an IMPLICIT matrix
+// factorization (WALS, wals_alpha), through the official
+// cloud.google.com/go/bigquery client: models.get names feedbackType
+// IMPLICIT and walsAlpha 40 (the documented default) and the label column
+// predicted_rating_confidence; ML.RECOMMEND answers
+// predicted_rating_confidence for every user and item pair, each user's
+// own items above the others'; ML.WEIGHTS answers the factors;
+// wals_alpha on an EXPLICIT model is 400; ML.EVALUATE answers the
+// ranking metrics (mean_average_precision, mean_squared_error,
+// normalized_discounted_cumulative_gain, average_rank) of the training
+// rows and of an input, and models.get names them under rankingMetrics.
+//
+// covers: bigquery.jobs.query, bigquery.models.get
+func TestBigQueryMLImplicitMatrixFactorization(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	name := mlDataset(t, h, c, map[string]string{
+		"views": "SELECT * FROM UNNEST([STRUCT('a' AS user, 'x' AS item, 3 AS rating), ('a', 'y', 1), ('b', 'x', 2), ('b', 'y', 4), " +
+			"('c', 'z', 5), ('d', 'z', 1), ('d', 'w', 2)])",
+	})
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.imp` OPTIONS(model_type='matrix_factorization', feedback_type='implicit', num_factors=2) "+
+		"AS SELECT user, item, rating FROM `%s.views`", name, name)); err != nil {
+		t.Fatalf("CREATE MODEL implicit: %v", err)
+	}
+	md, err := c.Dataset(name).Model("imp").Metadata(ctx)
+	if err != nil {
+		t.Fatalf("Model.Metadata: %v", err)
+	}
+	runs := md.RawTrainingRuns()
+	if len(runs) != 1 || runs[0].TrainingOptions.FeedbackType != "IMPLICIT" || runs[0].TrainingOptions.WalsAlpha != 40 {
+		t.Errorf("training run: %+v", runs)
+	}
+	if labels, _ := md.RawLabelColumns(); len(labels) != 1 || labels[0].Name != "predicted_rating_confidence" {
+		t.Errorf("label columns: %+v", labels)
+	}
+	all := mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.RECOMMEND(MODEL `%s.imp`)", name))
+	if len(all) != 16 {
+		t.Fatalf("ML.RECOMMEND: %d rows; want 16", len(all))
+	}
+	score := map[string]float64{}
+	for _, r := range all {
+		v, ok := r["predicted_rating_confidence"].(float64)
+		if !ok {
+			t.Fatalf("ML.RECOMMEND row %v", r)
+		}
+		score[r["user"].(string)+r["item"].(string)] = v
+	}
+	for _, p := range [][3]string{{"a", "x", "z"}, {"b", "y", "z"}, {"c", "z", "x"}, {"d", "w", "y"}} {
+		if score[p[0]+p[1]] <= score[p[0]+p[2]] {
+			t.Errorf("user %s: %s %.4f is not above %s %.4f", p[0], p[1], score[p[0]+p[1]], p[2], score[p[0]+p[2]])
+		}
+	}
+	if w := mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.WEIGHTS(MODEL `%s.imp`)", name)); len(w) != 8 {
+		t.Errorf("ML.WEIGHTS: %d rows; want 8", len(w))
+	}
+	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.bad` OPTIONS(model_type='matrix_factorization', wals_alpha=2) AS SELECT user, item, rating FROM `%s.views`", name, name)).Read(ctx)
+	wantHTTPStatus(t, "wals_alpha of an EXPLICIT model", err, http.StatusBadRequest)
+	for _, sql := range []string{
+		fmt.Sprintf("SELECT * FROM ML.EVALUATE(MODEL `%s.imp`)", name),
+		fmt.Sprintf("SELECT * FROM ML.EVALUATE(MODEL `%s.imp`, (SELECT user, item, rating FROM `%s.views` WHERE user IN ('a', 'b')))", name, name),
+	} {
+		ev := mlQuery(t, h, c, sql)
+		if len(ev) != 1 {
+			t.Fatalf("%s: %d rows", sql, len(ev))
+		}
+		for _, k := range []string{"mean_average_precision", "mean_squared_error", "normalized_discounted_cumulative_gain", "average_rank"} {
+			v, ok := ev[0][k].(float64)
+			if !ok || v < 0 || k != "mean_squared_error" && v > 1 {
+				t.Errorf("%s: %s = %v", sql, k, ev[0][k])
+			}
+		}
+		if v, _ := ev[0]["mean_average_precision"].(float64); v < 0.7 {
+			t.Errorf("%s: mean_average_precision %v; above chance", sql, v)
+		}
+		if _, ok := ev[0]["mean_absolute_error"]; ok {
+			t.Errorf("%s: a regression metric: %v", sql, ev[0])
+		}
+	}
+	raw, err := c.Dataset(name).Model("imp").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs := raw.RawTrainingRuns(); len(runs) != 1 || runs[0].EvaluationMetrics == nil || runs[0].EvaluationMetrics.RankingMetrics == nil ||
+		runs[0].EvaluationMetrics.RankingMetrics.MeanAveragePrecision < 0.7 {
+		t.Errorf("rankingMetrics: %+v", runs)
+	}
 }

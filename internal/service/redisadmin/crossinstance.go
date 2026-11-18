@@ -526,7 +526,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 	switch {
 	case cur == role.String() && role == memorystorepb.CrossInstanceReplicationConfig_NONE:
 		op := c.newOperation(r.Name, "update")
-		c.finish(op, renderValkey(r), nil)
+		c.finish(op, c.renderValkey(r), nil)
 		return s.api.operation(op)
 	case cur == memorystorepb.CrossInstanceReplicationConfig_NONE.String():
 		return nil, apierror.InvalidArgument("instance %s is not in cross-instance replication: a secondary is created with instance_role SECONDARY and its primary_instance", r.Name)
@@ -637,7 +637,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 				c.unfence(x)
 			}
 		}
-		out := renderValkey(r)
+		out := c.renderValkey(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
 	})
@@ -749,7 +749,7 @@ func (s *MemorystoreServer) StartMigration(ctx context.Context, req *memorystore
 			vf.Migration.State = memorystorepb.MigrationConfig_REPLICATION_ESTABLISHED.String()
 		}
 		_ = c.save(r)
-		out := renderValkey(r)
+		out := c.renderValkey(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
 	})
@@ -792,7 +792,7 @@ func (s *MemorystoreServer) FinishMigration(ctx context.Context, req *memorystor
 			m.State = memorystorepb.MigrationConfig_MIGRATED.String()
 			_ = c.save(r)
 		}
-		out := renderValkey(r)
+		out := c.renderValkey(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
 	})

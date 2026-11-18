@@ -42,9 +42,31 @@ var bigqueryFileSetSpecTypes = []string{"FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH", 
 // bigqueryJSONExtensions are jsonExtension's values, and NONE.
 var bigqueryJSONExtensions = []string{"NONE", "GEOJSON"}
 
+// bigqueryCharacterMaps are columnNameCharacterMap's values (#1547), and
+// DEFAULT for none.
+var bigqueryCharacterMaps = []string{"DEFAULT", "STRICT", "V1", "V2"}
+
+// loadCharacterMap is the form's columnNameCharacterMap, "" for DEFAULT,
+// for the Go client's Loader.ColumnNameCharacterMap.
+func loadCharacterMap(values map[string]string) (bigquery.ColumnNameCharacterMap, error) {
+	m := strings.ToUpper(strings.TrimSpace(values["columnNameCharacterMap"]))
+	switch m {
+	case "", "DEFAULT":
+		return "", nil
+	case "STRICT", "V1", "V2":
+		return bigquery.ColumnNameCharacterMap(m), nil
+	}
+	return "", fmt.Errorf("the column name character map is one of %s, not %q", strings.Join(bigqueryCharacterMaps, ", "), m)
+}
+
 // bigqueryLoadExtraFields are the form's inputs for them.
 func bigqueryLoadExtraFields() []console.Field {
 	return []console.Field{
+		{Name: "columnNameCharacterMap", Label: "Column name character map", Type: "select",
+			Options: bigqueryCharacterMaps, Section: "Schema",
+			Help: "CSV with auto-detect, or Parquet: STRICT (the default) refuses a column name with unsupported " +
+				"characters; V1 replaces each character other than letters, digits and _ with _, V2 each one a " +
+				"flexible column name cannot hold."},
 		{Name: "jsonExtension", Label: "JSON extension", Type: "select", Options: bigqueryJSONExtensions,
 			Section: "JSON options",
 			Help: "Newline-delimited JSON only: GEOJSON reads each line as a GeoJSON Feature, its geometry a " +

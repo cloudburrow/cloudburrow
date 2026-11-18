@@ -1918,6 +1918,13 @@ func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
 	if sess := sessionOf(s.r); sess != nil { // #1459, tempsession.go: the TEMP tables it names
 		bound = sess.rename(bound)
 	}
+	if s.r.Context().Value(metadataReadsKey{}) != nil {
+		// Its SQL is the script's value, not text checkReads read: its
+		// reads are checked (#1763, tableoptions.go).
+		saved := s.r
+		s.r = s.r.WithContext(context.WithValue(s.r.Context(), metadataReadsKey{}, nil))
+		defer func() { s.r = saved }()
+	}
 	if intoAt >= 0 {
 		intoEnd := len(rest)
 		if usingAt > intoAt {

@@ -31,9 +31,6 @@ func droppedFieldGaps(svc *runpb.Service) []string {
 	add(ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED && ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_ALL,
 		"ingress", "only INGRESS_TRAFFIC_ALL is mapped; every service is reachable from the host and the cluster")
 	add(len(svc.GetCustomAudiences()) > 0, "customAudiences", "no ID token is checked locally")
-	s := svc.GetScaling()
-	add(s.GetMinInstanceCount() > 0 || s.GetScalingMode() != runpb.ServiceScaling_SCALING_MODE_UNSPECIFIED || s.GetManualInstanceCount() > 0,
-		"scaling", "service-level scaling is not mapped; set template.scaling")
 	add(svc.GetDefaultUriDisabled(), "defaultUriDisabled", "not mapped")
 	add(svc.GetIapEnabled(), "iapEnabled", "Identity-Aware Proxy does not exist locally")
 	add(svc.GetMultiRegionSettings() != nil, "multiRegionSettings", "there is one region locally")

@@ -404,6 +404,9 @@ func (p bigqueryProvider) loadJob(ctx context.Context, project, datasetID, table
 	if loader.TimePartitioning, loader.Clustering, err = loadTableOptions(values); err != nil {
 		return nil, err
 	}
+	if loader.ColumnNameCharacterMap, err = loadCharacterMap(values); err != nil { // #1547
+		return nil, err
+	}
 	job, err := loader.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)
@@ -491,8 +494,10 @@ func bigqueryCopyFields() []console.Field {
 	return []console.Field{
 		{Name: "operationType", Label: "Operation", Type: "select", Options: bigqueryCopyOperations,
 			Help: "COPY copies the rows; CLONE makes a writable clone of this table, SNAPSHOT a read-only table snapshot, and RESTORE a standard table of this snapshot. Each makes a destination that does not exist."},
+		{Name: "destProject", Label: "Destination project", Type: "text",
+			Help: "Optional: another project of Resource Manager to copy into (#1767); this project when empty."},
 		{Name: "datasetId", Label: "Destination dataset", Type: "text", Required: true, Pattern: bigqueryDatasetIDPattern,
-			Help: "A dataset of this project that exists."},
+			Help: "A dataset of the destination project that exists."},
 		{Name: "tableId", Label: "Destination table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern},
 		{Name: "writeDisposition", Label: "If the destination exists", Type: "select", Options: bigqueryCopyWrites,
 			Help: "WRITE_EMPTY refuses a destination that has rows."},
@@ -532,7 +537,11 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	if dstDataset == "" || dstTable == "" {
 		return nil, errors.New("the destination dataset and table are required")
 	}
-	if dstDataset == datasetID && dstTable == tableID {
+	dstProject := strings.TrimSpace(values["destProject"])
+	if dstProject == "" {
+		dstProject = project
+	}
+	if dstProject == project && dstDataset == datasetID && dstTable == tableID {
 		return nil, errors.New("the destination is the table itself")
 	}
 	write := values["writeDisposition"]
@@ -560,7 +569,7 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 		switch {
 		case s == [2]string{datasetID, tableID}:
 			return nil, fmt.Errorf("%s.%s is this table, already a source", datasetID, tableID)
-		case s == [2]string{dstDataset, dstTable}:
+		case dstProject == project && s == [2]string{dstDataset, dstTable}:
 			return nil, errors.New("a source is the destination")
 		}
 	}
@@ -575,7 +584,7 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	for _, s := range more {
 		sources = append(sources, c.Dataset(s[0]).Table(s[1]))
 	}
-	copier := c.Dataset(dstDataset).Table(dstTable).CopierFrom(sources...)
+	copier := c.DatasetInProject(dstProject, dstDataset).Table(dstTable).CopierFrom(sources...)
 	copier.WriteDisposition = bigquery.TableWriteDisposition(write)
 	if op != "COPY" {
 		copier.OperationType = bigquery.TableCopyOperationType(op)
@@ -731,6 +740,7 @@ func jobRefusal(err error) error {
 // with the job they ran, and Insert rows with Skip invalid rows with the rows
 // it skipped (#994); every other action with nothing.
 func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return nil, err
 	}
@@ -777,6 +787,7 @@ func (p bigqueryJobsProvider) service(ctx context.Context) (*bqv2.Service, error
 }
 
 func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	base := console.Listing{
 		Columns: []string{"Type", "Created", "Error"}, NameColumn: "Job ID", Noun: "jobs",
 		RowsOpenable: true, AlwaysStatus: true,
@@ -802,6 +813,10 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 			call = call.PageToken(token)
 		}
 		page, err := call.Do()
+		if projectNotFound(err, p.bq.project) {
+			base.Prompt = notServed(p.bq.project) // #1764, as the datasets' screen
+			return base, nil
+		}
 		if err != nil {
 			base.Unavailable = "listing jobs: " + bigqueryRefusal(err).Error()
 			return base, nil
@@ -898,6 +913,7 @@ func errorText(e *bqv2.ErrorProto) string {
 
 // Detail opens one job.
 func (p bigqueryJobsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if prompt := p.bq.scope(project); prompt != "" {
 		return console.Detail{Prompt: prompt}, nil
 	}
@@ -907,6 +923,9 @@ func (p bigqueryJobsProvider) Detail(ctx context.Context, project string, path [
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	job, raw, err := p.getJob(ctx, path[0])
+	if err != nil && strings.Contains(err.Error(), "project "+p.bq.project+" is not found") {
+		return console.Detail{Prompt: notServed(p.bq.project)}, nil // #1764, as a dataset's page
+	}
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the job: " + err.Error()}, nil
 	}
@@ -1097,6 +1116,7 @@ func configurationGroups(c *bqv2.JobConfiguration) []console.PropertyGroup {
 		if l.Autodetect {
 			props = add(props, "Auto-detect the schema", "Yes")
 		}
+		props = add(props, "Column name character map", l.ColumnNameCharacterMap) // #1547
 		if l.Schema != nil && len(l.Schema.Fields) > 0 {
 			names := make([]string, len(l.Schema.Fields))
 			for i, f := range l.Schema.Fields {
@@ -1210,6 +1230,7 @@ func dmlProperties(q *bqv2.JobStatistics2, raw rawJob) []console.Property {
 // Delete implements console.Deleter for a job row: jobs.delete, which
 // deletes the job's record and nothing it wrote.
 func (p bigqueryJobsProvider) Delete(ctx context.Context, project, name string) error {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if err := p.bq.writable(project); err != nil {
 		return err
 	}
@@ -1225,6 +1246,7 @@ func (p bigqueryJobsProvider) Delete(ctx context.Context, project, name string) 
 // DetailActions offers Delete job on a job's page, and Cancel job on one
 // that is not done.
 func (p bigqueryJobsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if p.bq.writable(project) != nil || len(path) != 1 {
 		return nil
 	}
@@ -1242,6 +1264,7 @@ func (p bigqueryJobsProvider) DetailActions(ctx context.Context, project string,
 
 // ActAt implements console.PathActor.
 func (p bigqueryJobsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if err := p.bq.writable(project); err != nil {
 		return err
 	}

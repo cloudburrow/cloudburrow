@@ -569,8 +569,8 @@ func writeEnvJSON(w io.Writer, vars []envVar) {
 func printCredentials(w io.Writer, srv *metadata.Server, adcPath string) {
 	fmt.Fprintf(w, "  metadata:   http://%s  (Metadata-Flavor: Google required)\n", srv.Addr())
 	fmt.Fprintf(w, "  credentials: %s\n", adcPath)
-	fmt.Fprintln(w, "              generated locally and authorises nothing; CloudBurrow")
-	fmt.Fprintln(w, "              authenticates no request. `cloudburrow env` exports these.")
+	fmt.Fprintln(w, "              generated locally and authorises nothing; only the checks")
+	fmt.Fprintln(w, "              ADR-0006 lists read a token. `cloudburrow env` exports these.")
 }
 
 func serviceEnabled(cfg config.Config, s config.Service) bool {
@@ -600,6 +600,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"serviceusage":      &e.ServiceUsage,
 		"backupdr":          &e.BackupDR,
 		"onnx":              &e.ONNX,
+		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

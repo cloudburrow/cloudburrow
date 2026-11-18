@@ -3,8 +3,8 @@ package bigqueryfront
 import (
 	"bufio"
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,9 +48,12 @@ import (
 // skipLeadingRows 1, and read as any CSV load with columns (csvLoad), its
 // values converted by the formats and timeZone (csvtimes.go).
 //
-// Only the default dialect is detected: a fieldDelimiter of one character,
-// the double-quote quote, and UTF-8; another, records of different widths
-// and a quoted value across lines in the sample are 501.
+// The sample is read by the load's own dialect (#1547): its
+// fieldDelimiter, quote and encoding, as csvLoad reads the data
+// (dialectOf, withOptions); a dialect withOptions refuses, records of
+// different widths, and a quoted value across lines without
+// allowQuotedNewlines are 501. Under columnNameCharacterMap V1 or V2 a
+// detected name is renamed as charmap.go renames the emulator's (#1547).
 //
 // skipLeadingRows and the header (#1457). BigQuery documents both: "When
 // autodetect is on, the behavior is the following: skipLeadingRows
@@ -128,19 +131,25 @@ func (f front) csvDetect(w http.ResponseWriter, r *http.Request, job *jobBody) b
 		writeError(w, code, "invalid", why)
 		return false
 	}
-	delim := ','
-	if l.FieldDelimiter != "" {
-		d := l.FieldDelimiter
-		if d == `\t` || strings.EqualFold(d, "tab") {
-			d = "\t"
-		}
-		if utf8.RuneCountInString(d) != 1 {
-			return notImplemented("whose fieldDelimiter is not one character")
-		}
-		delim, _ = utf8.DecodeRuneInString(d)
+	// The data is read by the load's own dialect (#1547): its
+	// fieldDelimiter, quote and encoding, as csvLoad reads it
+	// (csvdialect.go), so a dialect of its own is detected by the front.
+	d, why := dialectOf(l.FieldDelimiter, l.Quote, l.AllowJaggedRows, nil)
+	if why != "" {
+		return notImplemented("with a " + why)
 	}
-	if l.Quote != nil && *l.Quote != `"` || o.Encoding != "" && !strings.EqualFold(o.Encoding, "UTF-8") {
-		return notImplemented("with a quote or an encoding of its own")
+	d, code, _, why = d.withOptions(csvOptions{AllowQuotedNewlines: o.AllowQuotedNewlines, Encoding: o.Encoding,
+		PreserveAsciiControlCharacters: true}, false, nil, skip)
+	if code != 0 {
+		if code == http.StatusNotImplemented {
+			return notImplemented(strings.TrimSuffix(strings.TrimPrefix(why, "Not implemented here: a CSV load with "),
+				". Nothing was loaded."))
+		}
+		writeError(w, code, "invalid", why)
+		return false
+	}
+	if l.FieldDelimiter != "" && l.FieldDelimiter != "," || l.Quote != nil && *l.Quote != `"` || d.latin1 || d.wide != "" {
+		must = true // the emulator reads only the default dialect
 	}
 	var sample []byte
 	if len(l.SourceURIs) > 0 {
@@ -174,7 +183,7 @@ func (f front) csvDetect(w http.ResponseWriter, r *http.Request, job *jobBody) b
 	if len(l.SourceURIs) == 0 && sample == nil {
 		return notImplemented("whose data CloudBurrow could not read")
 	}
-	fields, send, header, why := detectCSVHeader(sample, delim, times, skip, skipSet)
+	fields, send, header, why := detectCSVHeader(sample, d, times, skip, skipSet)
 	if why != "" {
 		return notImplemented(why)
 	}
@@ -188,12 +197,26 @@ func (f front) csvDetect(w http.ResponseWriter, r *http.Request, job *jobBody) b
 	}
 	if bad := checkNames(fields, "", nil, check); bad != "" {
 		if charMap == "V1" || charMap == "V2" {
-			return notImplemented("under columnNameCharacterMap " + charMap + ", which would rename a detected column: " +
-				bad + " CloudBurrow does not rename it")
+			// Renamed as the emulator's detected names are (#1547,
+			// charmap.go): each character the map's rule does not take
+			// "replaced with underscores" (LOAD DATA,
+			// column_name_character_map). A name still refused once
+			// replaced, or two the same, BigQuery does not document.
+			names, _, ok := mappedNames(fields, charMap, check)
+			if !ok {
+				return notImplemented("under columnNameCharacterMap " + charMap + ", where a detected column is still " +
+					"refused once its unsupported characters are replaced with underscores, or two are then the same: " +
+					bad + " BigQuery's documentation does not say how it names them (\"Invalid column names will be " +
+					"normalized\")")
+			}
+			for i := range fields {
+				fields[i].Name = names[i]
+			}
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid", bad+" The name was detected from the load's data (autodetect); "+
+				"columnNameCharacterMap STRICT, the default, refuses it rather than renaming it. Nothing was loaded.")
+			return false
 		}
-		writeError(w, http.StatusBadRequest, "invalid", bad+" The name was detected from the load's data (autodetect); "+
-			"columnNameCharacterMap STRICT, the default, refuses it rather than renaming it. Nothing was loaded.")
-		return false
 	}
 	raw := schemaJSON(fields)
 	if !editJob(r, func(j map[string]any) bool {
@@ -216,8 +239,8 @@ func (f front) csvDetect(w http.ResponseWriter, r *http.Request, job *jobBody) b
 
 // detectCSVSchema detects the columns of sample, CSV data with a header,
 // by times' formats (above); or why it cannot.
-func detectCSVSchema(sample []byte, delim rune, times *csvTimes) ([]field, string) {
-	fields, _, header, why := detectCSVHeader(sample, delim, times, 1, true)
+func detectCSVSchema(sample []byte, d csvDialect, times *csvTimes) ([]field, string) {
+	fields, _, header, why := detectCSVHeader(sample, d, times, 1, true)
 	if why == "" && !header {
 		return nil, "whose first row is not a header BigQuery would detect"
 	}
@@ -228,14 +251,22 @@ func detectCSVSchema(sample []byte, delim rune, times *csvTimes) ([]field, strin
 // (set when skipSet), as described above. It returns the columns, the
 // skipLeadingRows to send the load with, and whether a header row named
 // them; or why it cannot.
-func detectCSVHeader(sample []byte, delim rune, times *csvTimes, skip int64, skipSet bool) ([]field, int64, bool, string) {
-	cr := csv.NewReader(bytes.NewReader(sample))
-	cr.Comma = delim
-	cr.FieldsPerRecord = -1
+func detectCSVHeader(sample []byte, d csvDialect, times *csvTimes, skip int64, skipSet bool) ([]field, int64, bool, string) {
+	var in io.Reader = bytes.NewReader(sample)
+	if d.wide != "" {
+		// The sample ends at a line feed's byte, so in little-endian data
+		// the rest of that unit is cut off and read as U+FFFD: dropped.
+		u, err := io.ReadAll(wideReader(in, d.wide))
+		if err != nil {
+			return nil, 0, false, "whose sampled records CloudBurrow could not decode (" + err.Error() + ")"
+		}
+		in = bytes.NewReader(bytes.TrimSuffix(u, []byte(string(utf8.RuneError))))
+	}
+	cr := &csvRecords{r: bufio.NewReader(in), d: d}
 	var recs [][]string
 	for int64(len(recs)) <= skip+jsonSample {
-		rec, err := cr.Read()
-		if err == io.EOF {
+		rec, _, err := cr.next()
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

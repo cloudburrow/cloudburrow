@@ -13,6 +13,33 @@
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
   },
   "components": {
+    "bigqueryml": {
+      "tfconvertBase": {
+        "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
+        "image": "python:3.12-slim",
+        "digest": "sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+        "license": "PSF-2.0 (CPython) and DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by `cloudburrow up` (tag cloudburrow/tfconvert:<context hash>) and run with --network none",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Multi-arch OCI index, resolved 2026-11-18. The Docker official python image, third-party: Google publishes no TensorFlow image for this Python on linux/arm64, and Google's own PyPI tensorflow wheel is what runs.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect python:3.12-slim`."
+      },
+      "tensorflow": {
+        "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
+        "version": "2.20.0",
+        "source": "https://pypi.org/project/tensorflow/2.20.0/",
+        "license": "Apache-2.0",
+        "redistribution": "not published: installed into the locally built converter image; nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "built-and-run",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      }
+    },
     "cluster": {
       "kind": {
         "version": "v0.33.0",
@@ -65,6 +92,25 @@
         "manifests": {
           "kourier.yaml": "sha256:cded0c3c1d7669b1aa9f7484234b454ff3940a2b54a27d5ec4825c2d4003d01d"
         }
+      },
+      "metricsServer": {
+        "image": "registry.k8s.io/metrics-server/metrics-server",
+        "version": "v0.9.1",
+        "digest": "sha256:9b0ba1926e1d3089673f45461c3c1416109dea33b3ba3434048defd380df329b",
+        "source": "https://github.com/kubernetes-sigs/metrics-server",
+        "license": "Apache-2.0",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "The release components.yaml is downloaded from the GitHub release and checked against the sha256 below; the image is pulled from registry.k8s.io by digest. Nothing is vendored.",
+        "updateFeed": "github-releases",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "manifests": {
+          "metrics-server-components.yaml": "sha256:3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1"
+        },
+        "notes": "Third-party (Kubernetes SIG Instrumentation), used because Google offers no component for a cluster's CPU signal (#1789, #1800). Installed by up only when Cloud Run is on; the image is rewritten to this digest and given --kubelet-insecure-tls for kind's self-signed kubelet certificates. Cloud Run's CPU-target scaling reads metrics.k8s.io from it."
       }
     },
     "emulatorBackends": {
@@ -517,7 +563,7 @@
       },
       "goCloudRun": {
         "module": "cloud.google.com/go/run",
-        "version": "v1.22.0",
+        "version": "v1.25.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Generated contract types for the Cloud Run v2 adapter."
@@ -839,8 +885,9 @@
       "litertLM": {
         "$comment": "Built from source: no LiteRT-LM release publishes a Linux artifact, but Linux is a documented, supported build target.",
         "source": "https://github.com/google-ai-edge/LiteRT-LM",
-        "commit": "02e503079dda30b9c2c61289998a069a5099d4ea",
-        "commitDate": "2026-09-21",
+        "commit": "0082833dc28014489ceaa33eacaf5edbffbae518",
+        "commitDate": "2026-11-18",
+        "commitNote": "main, not a release: no release contains a789b7d0 (2026-11-05, 'Apply --max_output_tokens in litert_lm_main'); v0.19.1 was cut from release/v0.19.0, which left main before it (#1797). Move to the first release that contains it.",
         "license": "Apache-2.0",
         "redistribution": "published by each CloudBurrow release as localai.runtimeImage; `make litert-lm` builds the same Dockerfile locally",
         "updateFeed": "github-releases",
@@ -850,7 +897,8 @@
         "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
-        "binaries": "litert_lm_main (generation, verified) and embedding_litert_lm_main (embeddings, runs but has no compatible model)"
+        "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
+        "transitive": "Constrained decoding links upstream's own llguidance dependency (guidance-ai/llguidance, MIT), which LiteRT-LM's Bazel workspace fetches and builds; CloudBurrow adds no dependency of its own"
       },
       "litertLMBase": {
         "$comment": "Both stages of deploy/litert-lm/Dockerfile build FROM this digest (#687). TestDockerfilesPinTheInventory fails when they disagree.",
@@ -1036,7 +1084,7 @@
         "license": "MPL-2.0",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl",
+        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl, except TestTerraformRunServiceScalingControls, which requires 8.5.0 (the first release with google_cloud_run_v2_service template.scaling cpu_utilization and concurrency_utilization, #1802) and inits against test/compat/testdata/terraform-8.5.0/.terraform.lock.hcl",
         "updateFeed": "github-releases",
         "verification": "lock-file-hashes",
         "digest": null,

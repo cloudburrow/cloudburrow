@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 )
 
 // Optional emulator components.
@@ -640,6 +641,16 @@ type MemorystoreSettings struct {
 	// client address per family (cluster-announce-client-ipv4, -ipv6), so
 	// host clients and in-cluster clients are each given one they reach.
 	PodAndLoopback6 bool
+
+	// TLSFront, with TLSCert, serves in-transit encryption from a front
+	// of its own (internal/redistlsfront, #1768), for a Redis before 6.0,
+	// which has no TLS: the server listens on the pod's loopback, and the
+	// front, from FrontImage, serves TLS on TLSPort and relays
+	// replication to the nodes of Instance, in Namespace, over TLS.
+	TLSFront bool
+	// FrontImage, Instance and Namespace are TLSFront's image, the
+	// instance's server name and its Services' namespace.
+	FrontImage, Instance, Namespace string
 }
 
 // memorystoreBindPodAndLoopback6 is the bind PodAndLoopback6 adds:
@@ -662,6 +673,23 @@ const (
 	MemorystoreRedis62Image = "redis:6.2.24-alpine@sha256:b362b5dff9d14d961dc3352db4776aba6a8c53ca2661d7c74ad2c121f82cdaea"
 	MemorystoreRedis70Image = "redis:7.0.15-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
 )
+
+// Redis images of Memorystore's end-of-life versions (#1524), each the
+// last release of its line the Docker official image built (3.2.12 in
+// 2018, 4.0.14 in 2020, 5.0.14 in 2022; Memorystore runs 3.2.13, 4.0.14
+// and 5.0.14), pinned by the index digest (linux/amd64 and linux/arm64
+// among others), BSD-3-Clause.
+const (
+	MemorystoreRedis32Image = "redis:3.2.12-alpine@sha256:e9083e10f5f81d350a3f687d582aefd06e114890b03e7f08a447fa1a1f66d967"
+	MemorystoreRedis40Image = "redis:4.0.14-alpine@sha256:aaf7c123077a5e45ab2328b5ef7e201b5720616efac498d55e65a7afbb96ae20"
+	MemorystoreRedis50Image = "redis:5.0.14-alpine@sha256:1a3c609295332f1ce603948142a132656c92a08149d7096e203058533c415b8c"
+)
+
+// memorystoreBeforeReplicaOf is whether image is a Redis before 5.0,
+// which names replication SLAVEOF only.
+func memorystoreBeforeReplicaOf(image string) bool {
+	return strings.HasPrefix(image, "redis:3.") || strings.HasPrefix(image, "redis:4.")
+}
 
 // Valkey images of Memorystore for Valkey's other engine versions (#1557),
 // each the latest release of its line, pinned by the index digest
@@ -713,7 +741,11 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		args = append(args, "--requirepass", password)
 	}
 	if h, p, err := net.SplitHostPort(o.ReplicaOf); err == nil {
-		args = append(args, "--replicaof", h, p)
+		flag := "--replicaof"
+		if memorystoreBeforeReplicaOf(image) {
+			flag = "--slaveof" // REPLICAOF is new in Redis 5.0
+		}
+		args = append(args, flag, h, p)
 	}
 	dir := ""
 	if persistent && o.Dir != "" && strings.HasPrefix(o.Dir, "/data/") {
@@ -743,12 +775,25 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
-	if dir != "" && o.TLSCert == "" {
+	if dir != "" && (o.TLSCert == "" || o.TLSFront) {
 		// The directory is made, then the image's own entrypoint starts
 		// the server as it always does, owning it.
 		b.Args = append([]string{"sh", "-c", `set -e; mkdir -p "$0"; exec docker-entrypoint.sh "$@"`, dir}, args...)
 	}
-	if o.TLSCert != "" {
+	if o.TLSCert != "" && o.TLSFront {
+		// The server on the pod's loopback alone, the front serving TLS
+		// and relaying replication (#1768).
+		up := MemorystorePort
+		b.Args = append(b.Args, "--port", fmt.Sprint(up), "--bind", "127.0.0.1")
+		args := []string{"redis-tls-front", "--listen", fmt.Sprintf("0.0.0.0:%d", MemorystoreTLSPort),
+			"--upstream", fmt.Sprintf("127.0.0.1:%d", up)}
+		if o.Instance != "" {
+			args = append(args, "--instance", o.Instance, "--namespace", o.Namespace)
+		}
+		b.Port = MemorystoreTLSPort
+		b.Front = &Front{Name: "tls", Image: o.FrontImage, PullPolicy: "Never", Args: args, UpstreamPort: up,
+			Env: map[string]string{redistlsfront.EnvCert: o.TLSCert, redistlsfront.EnvKey: o.TLSKey, redistlsfront.EnvCA: o.TLSCA}}
+	} else if o.TLSCert != "" {
 		// TLS only (--port 0), clients not asked for a certificate
 		// (SERVER_AUTHENTICATION), replication over TLS. The files are
 		// written from the environment, then the image's own entrypoint
@@ -924,8 +969,18 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 		b = cloudSQLBackend(persistent)
 		b.Env["POSTGRES_USER"] = "postgres"
 		b.Env["POSTGRES_DB"] = "postgres"
+		if version == "POSTGRES_9_6" {
+			// PostgreSQL 10's replication defaults, which 9.6 lacks
+			// (wal_level minimal, no WAL senders, hot_standby off): a
+			// Cloud SQL 9.6 instance can have read replicas (#1524).
+			// Database flags, after them, still win.
+			b.Args = []string{"postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10",
+				"-c", "max_replication_slots=10", "-c", "hot_standby=on"}
+		}
 		if len(flags) > 0 {
-			b.Args = []string{"postgres"}
+			if len(b.Args) == 0 {
+				b.Args = []string{"postgres"}
+			}
 			for _, f := range flags {
 				switch f.Name {
 				case "cloudsql.logical_decoding":
@@ -1029,7 +1084,11 @@ if ` + rebuild + `; then
   until PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD" "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` +
 		fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser + ` -D "$PGDATA" -R -X stream -c fast; do
     echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA"/* ; sleep 2
-  done` + mark + `
+  done
+  # Before PostgreSQL 12, -R writes recovery.conf, whose timeline is the
+  # current one: a replica of a replica that is promoted then stops at
+  # the new timeline. 'latest', 12's default, follows it (#1524).
+  if [ -f "$PGDATA/recovery.conf" ]; then echo "recovery_target_timeline = 'latest'" >> "$PGDATA/recovery.conf"; fi` + mark + `
 fi
 exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
@@ -1085,8 +1144,12 @@ if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
 		` -D "$PGDATA" -R -X stream -c fast; do
     echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA" && mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA"; sleep 2
   done
+  # Before PostgreSQL 12 the standby's settings are recovery.conf's, which
+  # -R wrote, and its timeline is the current one unless told (#1524).
+  conf="$PGDATA/postgresql.auto.conf"
+  if [ -f "$PGDATA/recovery.conf" ]; then conf="$PGDATA/recovery.conf"; echo "recovery_target_timeline = 'latest'" >> "$conf"; fi
   echo "primary_conninfo = 'host=$CLOUDSQL_PRIMARY_HOST port=` + fmt.Sprint(CloudSQLPort) + ` user=` + SQLReplicaUser +
-		` application_name=` + SQLStandbyApplicationName + `'" >> "$PGDATA/postgresql.auto.conf"
+		` application_name=` + SQLStandbyApplicationName + `'" >> "$conf"
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
 fi
 exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}

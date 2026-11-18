@@ -175,6 +175,7 @@ func FromKnativeRevision(r krev, serviceName string) *runpb.Revision {
 	if cc := r.Spec.ContainerConcurrency; cc > 0 {
 		out.MaxInstanceRequestConcurrency = int32(cc)
 	}
+	out.Scaling = readRevisionScaling(r.Metadata.Annotations)
 	reconciling := false
 	for _, c := range r.Status.Conditions {
 		cond := &runpb.Condition{Type: c.Type, Message: c.Message}

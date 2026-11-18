@@ -5,7 +5,9 @@ package compat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -89,12 +91,15 @@ func waitOp(t *testing.T, s *storagev1.Service, bucket, id string) *storagev1.Go
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // unverified: storage.anywhereCaches.update 400: another update while one is pending
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
-// unverified: storage.anywhereCaches.pause 400: a cache that is not running
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
+// (anywhereCaches.pause, sent by hand: a cache that is not running is 400,
+// UNVERIFIED, docs re-read 2026-10-17, still unanswered:
+// https://docs.cloud.google.com/storage/docs/anywhere-cache. Revision
+// 20261107 of the discovery document has no pause, so it is no coverage
+// method, #1791.)
 // unverified: storage.buckets.operations.cancel 400: an Anywhere Cache update's operation, and a done one
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.get, storage.anywhereCaches.list, storage.anywhereCaches.update
-// covers: storage.anywhereCaches.pause, storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
+// covers: storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
 func TestStorageAnywhereCachesJSON(t *testing.T) {
 	h := New(t)
 	s := storageJSON(t, h)
@@ -147,7 +152,9 @@ func TestStorageAnywhereCachesJSON(t *testing.T) {
 		do   func(...googleapi.CallOption) (*storagev1.AnywhereCache, error)
 		want string
 	}{
-		{s.AnywhereCaches.Pause(b, "us-central1-a").Do, "paused"},
+		{func(...googleapi.CallOption) (*storagev1.AnywhereCache, error) {
+			return pauseAnywhereCache(s, b, "us-central1-a")
+		}, "paused"},
 		{s.AnywhereCaches.Resume(b, "us-central1-a").Do, "running"},
 		{s.AnywhereCaches.Disable(b, "us-central1-a").Do, "disabled"},
 	} {
@@ -155,7 +162,7 @@ func TestStorageAnywhereCachesJSON(t *testing.T) {
 			t.Errorf("state change = %+v, %v; want %s", c, err, step.want)
 		}
 	}
-	if _, err := s.AnywhereCaches.Pause(b, "us-central1-a").Do(); httpCode(err) != http.StatusBadRequest {
+	if _, err := pauseAnywhereCache(s, b, "us-central1-a"); httpCode(err) != http.StatusBadRequest {
 		t.Errorf("pause a disabled cache = %v; want 400", err)
 	}
 	// The object is read from the bucket, cache or none.
@@ -202,7 +209,7 @@ func storageControlGRPC(t *testing.T, h *Harness) *control.StorageControlClient 
 // cancels a second create through the long-running operation's Cancel.
 //
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.update, storage.anywhereCaches.get, storage.anywhereCaches.list
-// covers: storage.anywhereCaches.pause, storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
+// covers: storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
 func TestStorageAnywhereCachesControl(t *testing.T) {
 	h := New(t)
 	sc := storageControlGRPC(t, h)
@@ -493,4 +500,25 @@ func TestStorageNotificationsWithoutPubSub(t *testing.T) {
 	if _, err := s.Notifications.Get(b, "1").Do(); httpCode(err) != http.StatusNotFound {
 		t.Errorf("get = %v; want 404", err)
 	}
+}
+
+// pauseAnywhereCache calls storage.anywhereCaches.pause, which the storage
+// v1 discovery document lists up to revision 20261009 and google.golang.org/api
+// v0.314.0's (revision 20261107) no longer does (#1791), so the generated
+// client has no Pause: the same request, made by hand against s's endpoint.
+func pauseAnywhereCache(s *storagev1.Service, bucket, id string) (*storagev1.AnywhereCache, error) {
+	if s.BasePath == "" {
+		return nil, errors.New("pauseAnywhereCache: no endpoint")
+	}
+	u := strings.TrimSuffix(s.BasePath, "/") + "/b/" + url.PathEscape(bucket) + "/anywhereCaches/" + url.PathEscape(id) + "/pause"
+	resp, err := http.Post(u, "application/json", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if err := googleapi.CheckResponse(resp); err != nil {
+		return nil, err
+	}
+	var c storagev1.AnywhereCache
+	return &c, json.NewDecoder(resp.Body).Decode(&c)
 }

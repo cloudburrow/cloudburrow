@@ -1,0 +1,178 @@
+CloudBurrow patch 91 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1764).
+
+The emulator served the project it was started with (--project) alone and
+answered every other one 404 "project P is not found", even a project the
+instance's Resource Manager has. A request that carries the header
+X-Cloudburrow-Known-Project now adds the project it names on first use,
+empty, and the emulator serves it from then on as it serves the first:
+datasets, tables, jobs, and queries that name another project's tables
+(the engine keeps every project in one database, so `other.ds.t` already
+resolved once both existed). Without the header nothing changes. The
+front sets it once it has found the project ACTIVE in Resource Manager,
+and removes it from its clients' requests.
+
+cloudburrow_known_projects_test.go (TestKnownProjectAddedOnFirstUse):
+another project is 404 without the header; with it, it is added, and its
+datasets, tables, rows and jobs are served from then on, without the
+header too; a job of the first project reads its table; two first uses
+at once both succeed. It fails without the patch.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/middleware.go
++++ b/server/middleware.go
+@@ -231,7 +231,10 @@
+ 			projectID, exists := projectIDFromParams(params)
+ 			if exists {
+ 				server := serverFromContext(ctx)
+-				project, err := server.metaRepo.FindProject(ctx, projectID)
++				// CloudBurrow patch (cloudburrow/cloudburrow#1764): a
++				// project the front found in Resource Manager is added on
++				// first use.
++				project, err := projectOnFirstUse(ctx, server, r, projectID)
+ 				if err != nil {
+ 					w.WriteHeader(http.StatusInternalServerError)
+ 					fmt.Fprintln(w, err)
+--- /dev/null
++++ b/server/cloudburrow_known_projects.go
+@@ -0,0 +1,36 @@
++package server
++
++import (
++	"context"
++	"net/http"
++
++	"github.com/goccy/bigquery-emulator/internal/metadata"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1764): the emulator served
++// the projects it was started with alone (--project), and answered every
++// other one 404 "project P is not found". A request that carries
++// KnownProjectHeader names a project its caller (CloudBurrow's front) has
++// found in the instance's Resource Manager: the emulator adds the project
++// on first use, empty, and serves it as the one it started with. Without
++// the header nothing changes. The front sets it, and removes it from its
++// clients' requests.
++const KnownProjectHeader = "X-Cloudburrow-Known-Project"
++
++// projectOnFirstUse is the project the request names: the one the
++// emulator has, else, when the request carries KnownProjectHeader, the
++// project added now. nil when there is neither.
++func projectOnFirstUse(ctx context.Context, server *Server, r *http.Request, projectID string) (*metadata.Project, error) {
++	project, err := server.metaRepo.FindProject(ctx, projectID)
++	if err != nil || project != nil || r.Header.Get(KnownProjectHeader) == "" {
++		return project, err
++	}
++	// Two first requests at once: one adds it, the other's insert fails
++	// on the key, and both read it back.
++	addErr := server.SetProject(projectID)
++	project, err = server.metaRepo.FindProject(ctx, projectID)
++	if err == nil && project == nil && addErr != nil {
++		err = addErr
++	}
++	return project, err
++}
+--- /dev/null
++++ b/server/cloudburrow_known_projects_test.go
+@@ -0,0 +1,96 @@
++package server_test
++
++import (
++	"bytes"
++	"context"
++	"io"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestKnownProjectAddedOnFirstUse is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1764): another project than the one the
++// emulator was started with is 404 "project other is not found"; with
++// KnownProjectHeader it is added on first use, and from then on it is
++// served, with or without the header: its datasets, tables and jobs, and a
++// query of the first project's job that reads the other project's table.
++func TestKnownProjectAddedOnFirstUse(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test"))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	do := func(method, path, body string, header bool) (int, string) {
++		t.Helper()
++		var r io.Reader
++		if body != "" {
++			r = bytes.NewReader([]byte(body))
++		}
++		req, _ := http.NewRequestWithContext(ctx, method, testServer.URL+"/bigquery/v2/projects/"+path, r)
++		req.Header.Set("Content-Type", "application/json")
++		if header {
++			req.Header.Set(server.KnownProjectHeader, "1")
++		}
++		resp, err := http.DefaultClient.Do(req)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer resp.Body.Close()
++		b, _ := io.ReadAll(resp.Body)
++		return resp.StatusCode, string(b)
++	}
++	if st, b := do(http.MethodGet, "other/datasets", "", false); st != http.StatusNotFound || !strings.Contains(b, "project other is not found") {
++		t.Fatalf("datasets.list of other without the header = %d %s, want 404 project other is not found", st, b)
++	}
++	if st, b := do(http.MethodPost, "other/datasets", `{"datasetReference":{"projectId":"other","datasetId":"ds"}}`, true); st != http.StatusOK {
++		t.Fatalf("datasets.insert in other with the header = %d %s", st, b)
++	}
++	if st, b := do(http.MethodPost, "other/datasets/ds/tables",
++		`{"tableReference":{"projectId":"other","datasetId":"ds","tableId":"t"},"schema":{"fields":[{"name":"x","type":"INTEGER"}]}}`, false); st != http.StatusOK {
++		t.Fatalf("tables.insert in other without the header = %d %s", st, b)
++	}
++	if st, b := do(http.MethodPost, "other/datasets/ds/tables/t/insertAll", `{"rows":[{"json":{"x":"7"}}]}`, false); st != http.StatusOK {
++		t.Fatalf("tabledata.insertAll = %d %s", st, b)
++	}
++	if st, b := do(http.MethodGet, "other/datasets", "", false); st != http.StatusOK || !strings.Contains(b, `"datasetId":"ds"`) {
++		t.Fatalf("datasets.list of other = %d %s, want ds", st, b)
++	}
++	if st, b := do(http.MethodGet, "test/datasets", "", false); st != http.StatusOK || strings.Contains(b, `"datasetId":"ds"`) {
++		t.Fatalf("datasets.list of test = %d %s, want none of other's", st, b)
++	}
++	st, b := do(http.MethodPost, "test/queries", "{\"query\":\"SELECT x FROM `other.ds.t`\",\"useLegacySql\":false}", false)
++	if st != http.StatusOK || !strings.Contains(b, `"v":"7"`) {
++		t.Fatalf("a query of test's reading other.ds.t = %d %s, want the row 7", st, b)
++	}
++	st, b = do(http.MethodPost, "other/queries", `{"query":"SELECT x FROM ds.t","useLegacySql":false}`, false)
++	if st != http.StatusOK || !strings.Contains(b, `"v":"7"`) || !strings.Contains(b, `"projectId":"other"`) {
++		t.Fatalf("a query of other's = %d %s, want the row 7 in a job of other's", st, b)
++	}
++	// Two first uses at once both succeed.
++	done := make(chan int, 2)
++	for i := 0; i < 2; i++ {
++		go func() {
++			st, _ := do(http.MethodGet, "third/datasets", "", true)
++			done <- st
++		}()
++	}
++	for i := 0; i < 2; i++ {
++		if st := <-done; st != http.StatusOK {
++			t.Fatalf("a concurrent first use of third = %d, want 200", st)
++		}
++	}
++}

@@ -125,43 +125,53 @@ func TestBigQueryRowsAreShapedForInsertAll(t *testing.T) {
 	}
 }
 
-// TestBigQueryWritesStayInTheServedProject (#854).
+// TestBigQueryWritesGoToTheChosenProject (#854, #1764).
 //
-// The emulator serves one project. A write aimed at any other is refused with
-// the prompt that names the served one, before anything is sent — the
-// endpoint here is a port nothing listens on — and no page of another project
-// offers an action.
-func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
+// BigQuery serves every project of the instance's Resource Manager. A write
+// is sent to the project chosen in the toolbar, never to the instance's
+// default; here, to a server that refuses every request, so each write
+// fails with BigQuery's answer for that project. With no project chosen,
+// nothing is sent and no page offers an action.
+func TestBigQueryWritesGoToTheChosenProject(t *testing.T) {
 	ctx := context.Background()
-	p := bigqueryProvider{endpoint: "127.0.0.1:1", project: "served-project"}
+	var sent []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":404,"message":"project other is not found","errors":[{"reason":"notFound","message":"project other is not found"}]}}`))
+	}))
+	defer srv.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(srv.URL, "http://"), project: "served-project"}
 	checks := map[string]error{}
 	_, checks["create dataset"] = p.Create(ctx, "other", map[string]string{"datasetId": "d"})
 	checks["delete dataset"] = p.Delete(ctx, "other", "d")
-	checks["create table"] = p.ActAt(ctx, "other", []string{"d"}, "createtable", nil)
-	checks["insert rows"] = p.ActAt(ctx, "other", []string{"d", "t"}, "insertrows", nil)
 	checks["delete table"] = p.ActAt(ctx, "other", []string{"d", "t"}, "deletetable", nil)
-	checks["edit table"] = p.ActAt(ctx, "other", []string{"d", "t"}, "edittable", nil)
 	_, checks["read-write statement"] = p.WriteReport(ctx, "other", []string{"d"}, "CREATE SCHEMA s")
-	_, checks["load"] = p.ActAtResult(ctx, "other", []string{"d", "t"}, "load", map[string]string{"uris": "gs://b/o"})
-	_, checks["export"] = p.ActAtResult(ctx, "other", []string{"d", "t"}, "export", map[string]string{"uri": "gs://b/o"})
 	jobs := bigqueryJobsProvider{bq: p}
 	checks["delete job"] = jobs.Delete(ctx, "other", "j")
 	checks["cancel job"] = jobs.ActAt(ctx, "other", []string{"j"}, "cancel", nil)
 	for what, err := range checks {
-		if err == nil || !strings.Contains(err.Error(), `"served-project"`) {
-			t.Errorf("%s in another project = %v, want the one-project refusal", what, err)
+		if err == nil {
+			t.Errorf("%s in a project the server refuses succeeded", what)
 		}
 	}
-	for _, path := range [][]string{{"d"}, {"d", "t"}} {
-		if got := p.DetailActions(ctx, "other", path); len(got) != 0 {
-			t.Errorf("another project's %v offers %v", path, got)
+	if len(sent) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	for _, path := range sent {
+		if !strings.Contains(path, "/projects/other/") {
+			t.Errorf("a write in project other was sent to %s", path)
 		}
+	}
+	sent = nil
+	if _, err := p.Create(ctx, "", map[string]string{"datasetId": "d"}); err == nil || len(sent) != 0 {
+		t.Errorf("a write with no project chosen = %v, sent %v", err, sent)
+	}
+	for _, path := range [][]string{{"d"}, {"d", "t"}} {
 		if got := p.DetailActions(ctx, "", path); len(got) != 0 {
 			t.Errorf("no project's %v offers %v", path, got)
 		}
-	}
-	if got := jobs.DetailActions(ctx, "other", []string{"j"}); len(got) != 0 {
-		t.Errorf("another project's job offers %v", got)
 	}
 	// In the served project the dataset page offers Create table, Load from
 	// Cloud Storage and a Delete dataset that asks for the name back and says
@@ -177,7 +187,7 @@ func TestBigQueryWritesStayInTheServedProject(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("d"); !reflect.DeepEqual(got, []string{"createtable", "load", actLoadFile, "deletedataset"}) {
+	if got := ids("d"); !reflect.DeepEqual(got, []string{"createtable", "load", actLoadFile, actCreateObjectTable, "deletedataset"}) {
 		t.Errorf("a dataset page offers %v", got)
 	}
 	if got := ids("d", "t"); !reflect.DeepEqual(got, []string{"insertrows", "load", actLoadFile, "export", actCopyTable, actSnapshotTable, actCloneTable, actCreateRowPolicy, actDeleteAllRowPolicies, "deletetable"}) {

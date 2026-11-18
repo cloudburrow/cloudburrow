@@ -113,10 +113,12 @@ resource "google_storage_bucket" "b" {
 	}
 }
 
-// TestTerraformCloudFunctions2FunctionIAM (#1304):
+// TestTerraformCloudFunctions2FunctionIAM (#1304, #1578):
 // google_cloudfunctions2_function_iam_member, _binding and _policy on a 2nd
 // gen function, through TestTerraformBigQueryIAM's phases, each read back
-// with the official v2 client's GetIamPolicy and planned clean. The
+// with the official v2 client's GetIamPolicy and planned clean, with the
+// data source google_cloudfunctions2_function_iam_policy compared with that
+// read in the member-and-binding and the policy phases. The
 // function is made by the official v2 client from an uploaded source that
 // is not a zip, so it is FAILED (its build fails) and the test runs where
 // no function can be built; a function's IAM policy does not depend on its
@@ -155,7 +157,7 @@ func TestTerraformCloudFunctions2FunctionIAM(t *testing.T) {
 		t.Fatalf("GetFunction = %v, %v; want it FAILED", f, err)
 	}
 	targets := []tfIAMTarget{{
-		kind: "google_cloudfunctions2_function", label: "f",
+		kind: "google_cloudfunctions2_function", label: "f", policyData: true,
 		ref: map[string]string{"project": fmt.Sprintf("%q", h.Project()), "location": `"us-central1"`, "cloud_function": fmt.Sprintf("%q", id)},
 		read: func() map[string][]string {
 			t.Helper()

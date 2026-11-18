@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
@@ -33,26 +35,43 @@ import (
 // #698: a table created today reads back as January 1970 through the official
 // client), and a date that is confidently wrong is worse than none.
 //
-// The emulator serves exactly one project, the instance's default, and answers
-// 404 for every other. A screen that passed that 404 through would read as
-// "broken", and one that showed an empty table would read as "you have no
-// datasets", which is false in real BigQuery and misleading here. So a
-// different project gets a prompt that names the one project served.
+// BigQuery serves every project of the instance's Resource Manager (#1764),
+// and answers 404 "project P is not found" for any other. A screen that
+// passed that 404 through would read as "broken", and one that showed an
+// empty table would read as "you have no datasets". So such a project gets
+// a prompt that says why.
 
 type bigqueryProvider struct {
 	// endpoint is the forwarded REST address, host:port.
 	endpoint string
-	// project is the one project the emulator serves.
+	// project is the project the provider reads: the instance's default,
+	// and in each call the one chosen in the toolbar (in).
 	project string
 }
 
 func (bigqueryProvider) ID() string    { return "bigquery" }
 func (bigqueryProvider) Title() string { return "BigQuery" }
 
-// onlyProject is the explicit state for a project the emulator does not serve.
-func (p bigqueryProvider) onlyProject(project string) string {
-	return fmt.Sprintf("The BigQuery emulator serves one project, %q, and no other, so %q "+
-		"has nothing to show here. Choose %s in the toolbar.", p.project, project, p.project)
+// in is p reading project, the one chosen in the toolbar (#1764).
+func (p bigqueryProvider) in(project string) bigqueryProvider {
+	if project != "" {
+		p.project = project
+	}
+	return p
+}
+
+// notServed is the explicit state for a project BigQuery does not serve:
+// one the instance's Resource Manager does not have ACTIVE.
+func notServed(project string) string {
+	return fmt.Sprintf("BigQuery serves the projects of the instance's Resource Manager, and %q is not one of them "+
+		"(or is not ACTIVE), so it has nothing to show here. Create it in Resource Manager, or choose another in the toolbar.", project)
+}
+
+// projectNotFound reports whether err is BigQuery's 404 for a project it
+// does not serve.
+func projectNotFound(err error, project string) bool {
+	var ge *googleapi.Error
+	return errors.As(err, &ge) && ge.Code == http.StatusNotFound && strings.Contains(ge.Message, "project "+project+" is not found")
 }
 
 // scope reports the prompt a project needs before anything is read, or "".
@@ -60,8 +79,6 @@ func (p bigqueryProvider) scope(project string) string {
 	switch {
 	case project == "":
 		return "BigQuery holds datasets per project. Choose one in the toolbar."
-	case project != p.project:
-		return p.onlyProject(project)
 	}
 	return ""
 }
@@ -76,6 +93,7 @@ func (p bigqueryProvider) client(ctx context.Context) (*bigquery.Client, error) 
 }
 
 func (p bigqueryProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	base := console.Listing{
 		Columns: []string{"Tables", "Location", "Description"},
 		Noun:    "datasets", NameColumn: "Dataset",
@@ -100,6 +118,10 @@ func (p bigqueryProvider) List(ctx context.Context, project string) (console.Lis
 		ds, err := datasets.Next()
 		if errors.Is(err, iterator.Done) {
 			break
+		}
+		if projectNotFound(err, project) {
+			base.Prompt = notServed(project)
+			return base, nil
 		}
 		if err != nil {
 			base.Unavailable = "listing datasets: " + err.Error()
@@ -147,7 +169,7 @@ func (p bigqueryProvider) projectSummary(ctx context.Context, project string) []
 	return []console.PropertyGroup{{Heading: "Project", Properties: []console.Property{
 		{Label: "Project ID", Value: project},
 		{Label: "BigQuery service account", Value: email},
-	}}}
+	}}, p.connectionsSummary(ctx, project)}
 }
 
 func countTables(ctx context.Context, ds *bigquery.Dataset) (int, error) {
@@ -166,9 +188,21 @@ func countTables(ctx context.Context, ds *bigquery.Dataset) (int, error) {
 // Detail opens a dataset (its tables and routines), a table (its schema,
 // details and first rows) or a routine (consolebigqueryroutines.go).
 func (p bigqueryProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if prompt := p.scope(project); prompt != "" {
 		return console.Detail{Prompt: prompt}, nil
 	}
+	if isConnectionPath(path) { // consolebigqueryconnectionpage.go, #1770
+		return p.connectionDetail(ctx, project, path[1], path[2])
+	}
+	d, err := p.detailAt(ctx, path)
+	if err == nil && strings.Contains(d.Unavailable, "project "+project+" is not found") {
+		return console.Detail{Prompt: notServed(project)}, nil // #1764
+	}
+	return d, err
+}
+
+func (p bigqueryProvider) detailAt(ctx context.Context, path []string) (console.Detail, error) {
 	switch len(path) {
 	case 1:
 		return p.datasetDetail(ctx, path[0])
@@ -319,6 +353,7 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		props = append(props, console.Property{Label: "View query", Value: md.ViewQuery})
 	}
 	props = append(props, materializedViewProps(md)...) // #1390, consolebigquerymv.go
+	props = append(props, objectTableProps(md)...)      // #1783, consolebigqueryobjects.go
 	if len(md.Labels) > 0 {
 		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
 	}
@@ -346,6 +381,11 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			},
 			p.previewSection(ctx, t, md.Schema),
 		},
+	}
+	if isObjectTable(md) { // #1783: tabledata.list does not read an external table
+		detail.Sections[2] = p.objectPreviewSection(ctx, c, datasetID, tableID, md.Schema)
+		detail.Sections[0].Note = "An object table's schema is fixed: one row per Cloud Storage object."
+		return detail, nil
 	}
 	if base, part, ok := strings.Cut(tableID, "$"); ok {
 		// A partition's page (#1273): the table's, by the decorated name,
@@ -576,11 +616,9 @@ func (bigqueryProvider) QueryHint() string {
 // can begin a statement that writes — DML and DDL begin with their own verbs —
 // so this refuses every write rather than trying to recognise each one.
 func (p bigqueryProvider) Query(ctx context.Context, project string, path []string, statement string) (console.Listing, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if project == "" {
 		return console.Listing{Prompt: "Choose a project in the toolbar."}, nil
-	}
-	if project != p.project {
-		return console.Listing{}, errors.New(p.onlyProject(project))
 	}
 	if len(path) == 0 {
 		return console.Listing{}, fmt.Errorf("a BigQuery query runs in a dataset: open one first")

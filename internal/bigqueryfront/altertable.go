@@ -271,6 +271,10 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				switch {
 				case what != "":
 					return st, "ALTER COLUMN SET DATA TYPE " + what, ""
+				case fieldHasDataPolicies(f):
+					// The DDL reference documents column options in a
+					// column_schema, not SET DATA TYPE's data_type (#1456).
+					return st, "ALTER COLUMN SET DATA TYPE of a STRUCT field with data_policies", ""
 				case next != len(rest):
 					return st, "", fmt.Sprintf("Syntax error: unexpected %q after SET DATA TYPE", rest[next].text)
 				}
@@ -525,11 +529,18 @@ func fieldTypeOf(t []token, i int, exprs bool) (map[string]any, int, string) {
 					case exprs && o.name == "description" && !ok && len(o.val) > 0: // #1438
 						f[descExprKey] = [2]int{o.val[0].pos, o.val[len(o.val)-1].end}
 					case o.name == "data_policies":
-						// Google documents data policies on a column only
-						// (column-data-masking, "Mask data with data
-						// policies directly on a column"), not on a
-						// STRUCT's field (#1456).
-						return nil, i, "a STRUCT field's option data_policies, which BigQuery documents for a top-level column only"
+						// "column_schema also supports options on top-level
+						// columns and STRUCT fields", and data_policies is a
+						// column option (DDL reference, #column_option_list,
+						// re-read 2026-11-17); masking applies "to leaf
+						// fields of the STRUCT data type" (column-data-masking-intro).
+						// Kept as the field's dataPolicies (#1456); a name
+						// not of its form is 400, by roundingModeRefused.
+						if _, msg := dataPolicyNames(o.val); msg != "" {
+							f[dataPolicyInvalidKey] = msg
+							continue
+						}
+						setDataPolicies(f, alterOption{name: o.name, val: o.val})
 					case o.name != "description" || !ok:
 						return nil, i, "a STRUCT field's option " + o.name + " other than a description or rounding_mode literal"
 					default:

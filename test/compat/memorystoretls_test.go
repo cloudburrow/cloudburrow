@@ -15,8 +15,6 @@ import (
 
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // tlsRedisAt is a go-redis client of inst over TLS, trusting its
@@ -41,7 +39,7 @@ func tlsRedisAt(t *testing.T, inst *redispb.Instance, password string) *redis.Cl
 // that CA reaches it with its AUTH string; a plain TCP client is refused
 // and a TLS client that does not trust the CA fails verification. A
 // STANDARD_HA instance with it replicates over TLS (WAIT 1). The
-// versions with no maintained image are UNIMPLEMENTED.
+// versions before 6.0 are TestMemorystoreInTransitEncryptionBefore60.
 func TestMemorystoreInTransitEncryption(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
@@ -124,12 +122,5 @@ func TestMemorystoreInTransitEncryption(t *testing.T) {
 	}
 	if listed != 2 {
 		t.Errorf("ListInstances lists %d instances with in-transit encryption, want 2", listed)
-	}
-	for _, v := range []string{"REDIS_3_2", "REDIS_4_0", "REDIS_5_0"} {
-		_, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "eol",
-			Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, RedisVersion: v}})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "end of life") {
-			t.Errorf("CreateInstance %s: %v, want UNIMPLEMENTED, end of life", v, err)
-		}
 	}
 }

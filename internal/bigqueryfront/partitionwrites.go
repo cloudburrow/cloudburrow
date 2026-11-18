@@ -56,7 +56,7 @@ import (
 // 2026-11-17, managing-partitioned-tables says only that __NULL__ and
 // __UNPARTITIONED__ cannot be deleted, managing-partitioned-table-data
 // that they can be exported), a destination
-// of another project or that does not exist. A query that is not one
+// that does not exist. A query that is not one
 // SELECT is refused, as BigQuery refuses a destination for a DML statement
 // ("You cannot specify a destination table for the query",
 // https://cloud.google.com/bigquery/docs/updating-data) or a script
@@ -213,7 +213,10 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	}
 	i := strings.Index(dest.TableID, "$")
 	base, dec := dest.TableID[:i], dest.TableID[i+1:]
-	project := projectOf(f.base)
+	// Another project's partition is read and written in its own project
+	// (#1767): df is its front, project its project.
+	project := refProject(*dest, projectOf(f.base))
+	df := f.inProject(project)
 	name := fmt.Sprintf("%s:%s.%s", project, dest.DatasetID, dest.TableID)
 	write := strings.ToUpper(c.WriteDisposition)
 	notImplemented := func(why string) bool {
@@ -221,10 +224,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 			"is the partition "+dest.DatasetID+"."+dest.TableID+", "+why+" (docs/compatibility.md). Nothing was run.")
 		return true
 	}
-	if dest.ProjectID != "" && dest.ProjectID != project {
-		return notImplemented("of another project")
-	}
-	m, ok := f.partitionMetaOf(r, dest.DatasetID, base)
+	m, ok := df.partitionMetaOf(r, dest.DatasetID, base)
 	if !ok {
 		return notImplemented("of a table that does not exist")
 	}
@@ -274,7 +274,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	}) {
 		return notImplemented("which CloudBurrow could not send")
 	}
-	defer f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
+	defer df.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 	client := jobText{dest: dest, queryWrite: c.WriteDisposition}
 	rec := newRecorder()
 	f.runQuery(rec, r, c.queryOptions, true)
@@ -299,7 +299,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	var sm struct {
 		Schema json.RawMessage `json:"schema"`
 	}
-	sstatus, sgot := f.get(r, tablePath(scratch.DatasetID, scratch.TableID))
+	sstatus, sgot := df.get(r, tablePath(scratch.DatasetID, scratch.TableID))
 	if sstatus != http.StatusOK || json.Unmarshal(sgot, &sm) != nil || json.Unmarshal(sm.Schema, &fields) != nil {
 		e.Message = "CloudBurrow could not read the query's result: " + errorMessage(sgot, sstatus)
 	}
@@ -333,7 +333,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		}
 	}
 	if e.Message == "" && changed {
-		if why := f.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
+		if why := df.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
 			e.Message = "CloudBurrow could not update the schema of " + name + ": " + why
 		}
 	}
@@ -376,6 +376,10 @@ func decorated(id string) (table, dec string, ok bool) {
 // reports whether it answered w. write and create are the job's
 // writeDisposition and createDisposition, defaulted.
 func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConfig, srcs []tableRef, write, create string) bool {
+	project := projectOf(f.base)
+	// Each table is read, and the destination made and written, in its
+	// own project (#1767): of returns the front of t's.
+	of := func(t tableRef) front { return f.inProject(refProject(t, project)) }
 	some := false
 	for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
 		if _, _, ok := decorated(t.TableID); ok {
@@ -392,15 +396,14 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			return false
 		}
 		for _, s := range srcs {
-			if m, ok := f.partitionMetaOf(r, s.DatasetID, s.TableID); !ok || !m.ingestion() {
+			if m, ok := of(s).partitionMetaOf(r, s.DatasetID, s.TableID); !ok || !m.ingestion() {
 				return false
 			}
 		}
-		if m, ok := f.partitionMetaOf(r, c.DestinationTable.DatasetID, c.DestinationTable.TableID); ok && !m.ingestion() {
+		if m, ok := of(*c.DestinationTable).partitionMetaOf(r, c.DestinationTable.DatasetID, c.DestinationTable.TableID); ok && !m.ingestion() {
 			return false
 		}
 	}
-	project := projectOf(f.base)
 	notImplemented := func(why string) bool {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a copy job of a partition, "+why+
 			" (docs/compatibility.md). Nothing was copied.")
@@ -423,7 +426,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		var isDec bool
 		p.base.TableID, p.dec, isDec = decorated(t.TableID)
 		ct := f.copyTableMeta(r, p.base)
-		m, ok := f.partitionMetaOf(r, t.DatasetID, p.base.TableID)
+		m, ok := of(t).partitionMetaOf(r, t.DatasetID, p.base.TableID)
 		if !ct.exists || !ok {
 			writeError(w, http.StatusNotFound, "notFound", "Not found: Table "+tableName(project, p.base))
 			return p, false
@@ -468,23 +471,19 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			}
 			return true
 		}
-		if status, _ := f.get(r, "/datasets/"+url.PathEscape(c.DestinationTable.DatasetID)); status == http.StatusNotFound {
+		if status, _ := of(*c.DestinationTable).get(r, "/datasets/"+url.PathEscape(c.DestinationTable.DatasetID)); status == http.StatusNotFound {
 			if j, ok := f.startOwnJob(w, r, "a copy job"); ok {
 				f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: "notFound",
-					Message: "Not found: Dataset " + project + ":" + c.DestinationTable.DatasetID})
+					Message: "Not found: Dataset " + refProject(*c.DestinationTable, project) + ":" + c.DestinationTable.DatasetID})
 			}
 			return true
 		}
-		src := sources[0].meta
-		schema, _ := json.Marshal(src.Schema)
-		extra := map[string]any{}
-		if src.TimePartitioning != nil {
-			extra["timePartitioning"] = src.TimePartitioning
-		}
-		if src.RangePartitioning != nil {
-			extra["rangePartitioning"] = src.RangePartitioning
-		}
-		if why := f.makeTableWith(r, *c.DestinationTable, schema, extra); why != "" {
+		schema, _ := json.Marshal(sources[0].meta.Schema)
+		// Partitioned and clustered as the source (#1759, copylayout.go),
+		// in the destination's project (#1767).
+		in := of(*c.DestinationTable)
+		extra := in.newTableLayout(r, f.copyTableMeta(r, sources[0].base).layout, false, c.DestinationTable.DatasetID)
+		if why := in.makeCopyTable(r, *c.DestinationTable, schema, extra); why != "" {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the copy's destination: "+why)
 			return true
 		}
@@ -508,7 +507,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 	}
 	fail := func(reason, msg string) bool {
 		if made {
-			f.send(r, http.MethodDelete, tablePath(c.DestinationTable.DatasetID, c.DestinationTable.TableID), nil)
+			of(*c.DestinationTable).send(r, http.MethodDelete, tablePath(c.DestinationTable.DatasetID, c.DestinationTable.TableID), nil)
 		}
 		f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: reason, Message: msg})
 		return true
@@ -536,7 +535,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 	}
 	selects := make([]string, len(sources))
 	for i, s := range sources {
-		selects[i] = "SELECT " + list + srcExtra + " FROM " + quotePath([]string{project, s.base.DatasetID, s.base.TableID}) +
+		selects[i] = "SELECT " + list + srcExtra + " FROM " + quotePath([]string{refProject(s.base, project), s.base.DatasetID, s.base.TableID}) +
 			" WHERE " + s.where
 	}
 	rows := "(" + strings.Join(selects, " UNION ALL ") + ")"
@@ -553,7 +552,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 	}
-	bp := quotePath([]string{project, dest.base.DatasetID, dest.base.TableID})
+	bp := quotePath([]string{refProject(dest.base, project), dest.base.DatasetID, dest.base.TableID})
 	if write == "WRITE_EMPTY" {
 		if had, msg := f.scalar(r, "SELECT COUNT(*) FROM "+bp+" WHERE "+dest.where); msg != "" {
 			return fail("backendError", "CloudBurrow could not read the destination: "+msg)
@@ -581,7 +580,10 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	l := job.Configuration.Load
 	dest := *l.DestinationTable
 	base, dec, _ := decorated(dest.TableID)
-	project := projectOf(f.base)
+	// Another project's partition is read and written in its own project
+	// (#1767): df is its front, project its project.
+	project := refProject(dest, projectOf(f.base))
+	df := f.inProject(project)
 	name := tableName(project, dest)
 	write := strings.ToUpper(l.WriteDisposition)
 	truncate := write == "WRITE_TRUNCATE" || write == "WRITE_TRUNCATE_DATA" // a partition's rows; the schema is kept
@@ -590,10 +592,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 			"is the partition "+dest.DatasetID+"."+dest.TableID+", "+why+" (docs/compatibility.md). Nothing was loaded.")
 		return false
 	}
-	if dest.ProjectID != "" && dest.ProjectID != project {
-		return nil, notImplemented("of another project")
-	}
-	m, ok := f.partitionMetaOf(r, dest.DatasetID, base)
+	m, ok := df.partitionMetaOf(r, dest.DatasetID, base)
 	if !ok {
 		return nil, notImplemented("of a table that does not exist")
 	}
@@ -653,7 +652,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	}
 	*job = again
 	return func(w http.ResponseWriter, rec *recorder) {
-		defer f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
+		defer df.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 		text := jobText{load: client}
 		if b := rec.body.Bytes(); bytes.Contains(b, []byte(scratch.TableID)) {
 			b = bytes.ReplaceAll(b, []byte(scratch.TableID), []byte(dest.TableID))
@@ -691,7 +690,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 			}
 		}
 		if e.Message == "" && changed {
-			if why := f.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
+			if why := df.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
 				e.Message = "CloudBurrow could not update the schema of " + name + ": " + why
 			}
 		}

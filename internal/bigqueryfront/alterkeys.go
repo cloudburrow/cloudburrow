@@ -233,13 +233,16 @@ func (s *scriptRun) applyKey(cons *tableConstraints, a alterAction, has func(str
 	if !ok {
 		return bad("Table \"" + strings.Join(a.refPath, ".") + "\" must be qualified with a dataset (e.g. dataset.table).")
 	}
-	project := s.project()
+	// "project_name: The name of the project containing the table with a
+	// primary key. Defaults to the project that runs this DDL statement"
+	// (#1764: every project of Resource Manager is served).
+	project, of := s.project(), s.f
 	if len(a.refPath) > 2 && a.refPath[0] != project {
-		s.notImpl = alterNotImplemented("ADD FOREIGN KEY referencing a table of another project")
-		return false, &scriptFlow{}
+		project = a.refPath[0]
+		of = s.f.inProject(project)
 	}
 	refName := project + ":" + ds + "." + table
-	status, got := s.f.get(s.r, tablePath(ds, table))
+	status, got := of.get(s.r, tablePath(ds, table))
 	if status == http.StatusNotFound {
 		return false, failWith(http.StatusNotFound, "notFound", "Not found: Table "+refName, text)
 	}

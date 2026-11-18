@@ -40,6 +40,9 @@ type LifecycleComponent struct {
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
 	signingKeys map[string][]byte
+	// storagePublic is the address clients reach Cloud Storage at
+	// (http://host:port), for BigQuery's signed URLs (#1786).
+	storagePublic string
 	// corsOrigins are the origins, beyond loopback, whose browser requests
 	// the storage server answers (#677).
 	corsOrigins []string
@@ -51,6 +54,17 @@ type LifecycleComponent struct {
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
+	// serviceAccountCerts is the in-cluster address (host:port) of the
+	// metadata server, which serves IAM service accounts' certificates
+	// (#1750), for the storage server's signed URLs (#1787), or "".
+	serviceAccountCerts string
+	// tfConverter is the TensorFlow SavedModel converter's in-cluster
+	// address (host:port), which BigQuery's front converts imported
+	// TENSORFLOW models on (#1775), or "".
+	tfConverter string
+	// vertexAI is the local Vertex AI endpoint's in-cluster address
+	// (host:port), given to the BigQuery front for remote models (#1760).
+	vertexAI string
 	// knative is the Knative install running in the background, nil
 	// before it starts; knativeJoined says KnativeReady waits for it
 	// rather than Start (#1588).
@@ -101,6 +115,19 @@ func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager
 // runner, for BigQuery's front (#1711).
 func (c *LifecycleComponent) SetONNXRunner(addr string) { c.onnxRunner = addr }
 
+// SetServiceAccountCerts records the in-cluster address of the metadata
+// server, where the storage server reads the certificates of IAM service
+// accounts to verify the URLs they sign (#1787).
+func (c *LifecycleComponent) SetServiceAccountCerts(addr string) { c.serviceAccountCerts = addr }
+
+// SetTFConverter records the in-cluster address of the TensorFlow
+// SavedModel converter, for BigQuery's front (#1775).
+func (c *LifecycleComponent) SetTFConverter(addr string) { c.tfConverter = addr }
+
+// SetVertexAI records the in-cluster address of the instance's local
+// Vertex AI endpoint, which BigQuery ML's remote models run on (#1760).
+func (c *LifecycleComponent) SetVertexAI(addr string) { c.vertexAI = addr }
+
 // SetStorageSigningKeys records the PEM public keys, by service account
 // email, the builtin storage server accepts RSA signed URLs from.
 func (c *LifecycleComponent) SetStorageSigningKeys(keys map[string][]byte) { c.signingKeys = keys }
@@ -109,6 +136,11 @@ func (c *LifecycleComponent) SetStorageSigningKeys(keys map[string][]byte) { c.s
 // Cloud Storage server, which `up` builds and loads before installing. The
 // Pub/Sub front runs from it too (#873).
 func (c *LifecycleComponent) SetBuiltinStorageImage(ref string) { c.storageImage = ref }
+
+// BuiltinStorageImage is the storage image's reference, "" before it is
+// built: the TLS front of a Memorystore for Redis server before 6.0 runs
+// from it (#1768).
+func (c *LifecycleComponent) BuiltinStorageImage() string { return c.storageImage }
 
 // SetBigQueryImage records the locally built image of the BigQuery emulator
 // (#1061), which `up` builds and loads before installing.
@@ -134,12 +166,13 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Instance:   cfg.Name,
 			Out:        out,
 		},
-		services:    cfg.EnabledServices(),
-		corsOrigins: cfg.Storage.CORSAllowOrigins,
-		project:     cfg.DefaultProject(),
-		mode:        cfg.Mode,
-		timeout:     time.Duration(cfg.ReadyTimeout),
-		out:         out,
+		services:      cfg.EnabledServices(),
+		corsOrigins:   cfg.Storage.CORSAllowOrigins,
+		storagePublic: "http://" + net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Storage)),
+		project:       cfg.DefaultProject(),
+		mode:          cfg.Mode,
+		timeout:       time.Duration(cfg.ReadyTimeout),
+		out:           out,
 
 		emulatorHeapMiB: cfg.EmulatorHeapMiB,
 		bigQueryHeapMiB: cfg.BigQueryHeapMiB,
@@ -209,6 +242,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// the same Cloud Storage (#944), and looks an extract's
 					// bucket up there (#939): the emulator creates a missing one.
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+					// EXTERNAL_OBJECT_TRANSFORM's signed URLs name the
+					// address clients reach Cloud Storage at (#1786).
+					if c.storagePublic != "" && c.enabled(config.ServiceStorage) {
+						b.Front.Args = append(b.Front.Args, "--storage-public", c.storagePublic)
+					}
 					// INFORMATION_SCHEMA.JOBS_BY_FOLDER and
 					// JOBS_BY_ORGANIZATION read the project's ancestry
 					// (#1392).
@@ -220,12 +258,42 @@ func (c *LifecycleComponent) Backends() []Backend {
 					if c.onnxRunner != "" {
 						b.Front.Args = append(b.Front.Args, "--onnx", "http://"+c.onnxRunner)
 					}
+					// Imported TensorFlow models convert on the host's
+					// converter (#1775).
+					if c.tfConverter != "" {
+						b.Front.Args = append(b.Front.Args, "--tfconvert", "http://"+c.tfConverter)
+					}
+					// Remote models run on the local Vertex AI (#1760).
+					if c.vertexAI != "" {
+						b.Front.Args = append(b.Front.Args, "--vertexai", "http://"+c.vertexAI)
+					}
 				}
 				out = append(out, b)
 			}
 		case config.ServiceStorage:
 			// One Deployment serves the host and the cluster (#514).
 			b := BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys, c.corsOrigins)
+			// The BigQuery front holds its connections' service agents'
+			// keys and serves their certificates, which signed URLs
+			// signed as them verify against (#1786).
+			if c.enabled(config.ServiceBigQuery) {
+				b.Args = append(b.Args, "--service-account-certs",
+					BigQueryServiceAgentDomain+"=http://"+InClusterBigQueryHost(c.installer.Namespace))
+				b.EgressTo = append(b.EgressTo, "bigquery")
+			}
+			// IAM's service accounts sign URLs with their own keys: the
+			// system-managed one signBlob uses and their user-managed ones,
+			// whose certificates the metadata server serves at
+			// /service_accounts/v1/metadata/x509/EMAIL, through
+			// cloudburrow-host (#1787).
+			if c.serviceAccountCerts != "" {
+				b.Args = append(b.Args, "--service-account-certs", IAMServiceAccountDomains+"=http://"+c.serviceAccountCerts)
+				if _, p, err := net.SplitHostPort(c.serviceAccountCerts); err == nil {
+					if port, err := strconv.Atoi(p); err == nil {
+						b.EgressPorts = append(b.EgressPorts, port)
+					}
+				}
+			}
 			// Storage Intelligence inheritance walks the projects and
 			// folders of Resource Manager, through cloudburrow-host (#1532).
 			if c.resourceManager != "" {
@@ -315,7 +383,14 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	}
 	var err error
 	if backends := c.Backends(); len(backends) > 0 {
+		// The cluster's DNS, beside the backends: up is ready only once
+		// their pods can look up a Service name (#1781).
+		dns := make(chan error, 1)
+		go func() { dns <- c.waitClusterDNS(ctx) }()
 		err = c.installer.InstallBackends(ctx, backends, c.timeout)
+		if derr := <-dns; err == nil {
+			err = derr
+		}
 	}
 	if err == nil && migrate {
 		if ierr := c.earlierStorage.Import(ctx); ierr != nil {
@@ -349,7 +424,20 @@ func (c *LifecycleComponent) startKnative(ctx context.Context) {
 	go func() {
 		defer close(run.done)
 		run.err = c.ensureKnative(kctx)
+		if run.err == nil {
+			c.ensureMetricsServer(kctx)
+		}
 	}()
+}
+
+// ensureMetricsServer installs metrics-server beside Knative (#1789): the
+// CPU signal Cloud Run's CPU-target scaling reads. Without it everything
+// else still works, and a CPU target simply has nothing to read, so a
+// failure is reported rather than failing the start.
+func (c *LifecycleComponent) ensureMetricsServer(ctx context.Context) {
+	if err := c.installer.InstallMetricsServer(ctx, c.timeout); err != nil && ctx.Err() == nil {
+		fmt.Fprintf(c.out, "  warning: metrics-server is not running, so Cloud Run cannot scale on CPU: %v\n", err)
+	}
 }
 
 // joinKnative waits for the background install and returns its result.
@@ -503,6 +591,37 @@ func (c *LifecycleComponent) waitKnativeWarm(ctx context.Context) error {
 		}
 	}
 	return c.installer.RestartKnative(ctx, c.timeout)
+}
+
+// waitClusterDNS waits until CoreDNS serves the cluster's names (#1781).
+//
+// A backend's pod reaches the instance's other services by Service name
+// (cloudburrow-host, for Resource Manager), and before CoreDNS is Ready
+// every such lookup fails. On a cluster this up did not restart, CoreDNS's
+// Deployment status is this boot's and is waited for. After a warm start
+// it predates the stop, and CoreDNS's pods wait out a retry backoff of
+// their own, so they are replaced once the Service network answers, and
+// the new ones are waited for; with Cloud Run, RestartKnative does that
+// with Knative's pods (#1610).
+func (c *LifecycleComponent) waitClusterDNS(ctx context.Context) error {
+	if c.restarted == nil || !c.restarted() {
+		return c.installer.WaitClusterDNS(ctx, c.timeout)
+	}
+	if c.NeedsKnative() {
+		return nil
+	}
+	if c.serviceNetwork != nil {
+		if err := c.serviceNetwork(ctx); err != nil {
+			if ctx.Err() != nil {
+				return err
+			}
+			// As waitKnativeWarm: a probe that cannot run is no reason
+			// to fail the start; CoreDNS comes back late, on its own.
+			fmt.Fprintf(c.out, "  the Service network was not confirmed (%v); the cluster's DNS restarts itself\n", err)
+			return nil
+		}
+	}
+	return c.installer.RestartClusterDNS(ctx, c.timeout)
 }
 
 // Installer exposes the underlying installer.

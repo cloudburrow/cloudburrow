@@ -596,6 +596,17 @@ func (s *Server) anywhereCachesList(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, r, http.StatusOK, out)
 }
 
+// anywhereCachesPauseRE is anywhereCaches.pause's path under /storage/v1/.
+// Google removed the method from the discovery document in revision
+// 20261107 (google.golang.org/api v0.314.0, whose generated client no
+// longer has AnywhereCaches.Pause, and whose resume now "Resumes a paused or
+// disabled Anywhere Cache instance"); google.storage.control.v2 still has
+// PauseAnywhereCache and older JSON clients (and the console) still send
+// it, so it stays
+// served, routed by its path ahead of the discovery methods and out of
+// methodStatus, as objects.watchAll and channels.stop are (channels.go).
+var anywhereCachesPauseRE = pathRE("b/{bucket}/anywhereCaches/{anywhereCacheId}/pause")
+
 // anywhereCachesState is pause, resume or disable: from the states listed to
 // the next one.
 func (s *Server) anywhereCachesState(to string, from ...string) http.HandlerFunc {

@@ -268,7 +268,7 @@ func (c *clusters) prefix() string {
 func (c *clusters) output(r *clusterRecord) proto.Message {
 	if c.valkey {
 		c.openEndpoints(r)
-		return renderValkey(r)
+		return c.renderValkey(r)
 	}
 	return c.render(r)
 }

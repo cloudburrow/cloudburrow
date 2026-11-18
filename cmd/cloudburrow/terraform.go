@@ -160,7 +160,7 @@ var terraformEndpoints = []terraformEndpoint{
 	// reached with its AUTH string, plans clean, updates its size and labels
 	// in place and destroys in TestTerraformRedisInstance, over the admin
 	// API's JSON on its port (Endpoints.MemorystoreAdmin), each instance a
-	// Valkey server of its own.
+	// server of its own, of its redis_version's image.
 	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Memorystore for Valkey (#1519): google_memorystore_instance applies,
 	// plans clean, changes and destroys in TestTerraformMemorystoreInstance,
@@ -191,6 +191,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// services are Resource Manager v3, which the provider reaches through
 	// its own tags_ endpoint, in TestTerraformTagsAndLien.
 	{resourceManagerEndpoint, "tags_custom_endpoint", "GOOGLE_TAGS_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// google_tags_location_tag_binding (#1578): regional tag bindings, which
+	// the provider sends to {{location}}-cloudresourcemanager.googleapis.com
+	// by default; the one v3 server binds any location's resource, in
+	// TestTerraformTagsLocationTagBinding.
+	{resourceManagerEndpoint, "tags_location_custom_endpoint", "GOOGLE_TAGS_LOCATION_CUSTOM_ENDPOINT", "/v3/", true, ""},
 }
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a

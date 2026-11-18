@@ -191,6 +191,10 @@ const ROUTES = [
   // keys and Permissions tab, Create, Edit, Disable, Enable, Delete,
   // Undelete, Create key and Upload key.
   { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", section: "IAM & Admin" },
+  // IAM & Admin > Audit Logs (#1756): the services that can write Data
+  // Access audit logs (queryAuditableServices) and the project policy's
+  // log types for each.
+  { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", section: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
@@ -3005,7 +3009,7 @@ async function renderDetail(view, route, resourcePath) {
                 view.conditions && (row.conditional || !row.condition)
                   ? el("button", { class: "secondary", text: row.conditional ? "Edit condition" : "Add condition",
                       "aria-label": `${row.conditional ? "Edit" : "Add"} the condition of ${row.member}'s ${row.role}`,
-                      onclick: () => openConditionForm(row, name, change, reload) })
+                      onclick: () => openConditionForm(row, name, change, reload, view.resource || "") })
                   : null,
                 el("button", { class: "secondary danger", text: "Remove principal",
                   "aria-label": `Remove ${row.member} from ${row.role}`,
@@ -3419,10 +3423,50 @@ function conditionFrom(values) {
 // openConditionForm is Edit condition (#1742): one principal's role moved to
 // the binding with the condition the form names (none when it is empty), in
 // one SetIamPolicy with the etag the page read.
-function openConditionForm(row, name, change, onDone) {
+function openConditionForm(row, name, change, onDone, resource = "") {
   const fields = buildCreateForm({ label: "Edit condition", fields: conditionFields(row.conditional) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
+  // Run Linter (#1756), as Google's condition editor runs it: the IAM API's
+  // iamPolicies.lintPolicy of the expression, an error or warning icon for
+  // each result with its details on hover, run again while the expression
+  // is edited once it has run; Save is refused while an error stands. The
+  // policy's full resource name (the Permissions view's resource) goes as
+  // LintPolicy's full_resource_name.
+  const lintList = el("ul", { class: "lint-results", id: "lint-results", "aria-live": "polite" });
+  let linted = false, lintErrors = 0, lintTimer = null, lintSeq = 0;
+  const lint = async () => {
+    const values = fields.values();
+    const expression = (values.conditionExpression || "").trim();
+    const seq = ++lintSeq;
+    if (!expression) {
+      lintErrors = 0;
+      setChildren(lintList);
+      return;
+    }
+    try {
+      const res = await send("/api/iam/lint", "POST",
+        { resource, title: (values.conditionTitle || "").trim(), expression });
+      if (seq !== lintSeq) return;
+      const results = res.results || [];
+      lintErrors = results.filter((r) => r.severity === "ERROR").length;
+      setChildren(lintList, ...(results.length ? results.map((r) => {
+        const kind = r.severity === "ERROR" ? "error" : "warning";
+        const unit = (r.unit || "").replace(/^LintValidationUnits\//, "");
+        return el("li", { class: `lint-result lint-${kind}`, title: `${unit}: ${r.message}` },
+          el("span", { class: "lint-icon", "aria-hidden": "true", text: kind === "error" ? "\u26D4" : "\u26A0" }),
+          el("span", { class: "lint-severity", text: r.severity }),
+          el("span", { class: "lint-where", text: ` at character ${r.position} (${unit}): ` }),
+          el("span", { class: "lint-message", text: r.message }));
+      }) : [el("li", { class: "lint-result lint-ok", text: "No issues found." })]));
+      announce(results.length ? `${results.length} linter results, ${lintErrors} errors` : "The linter found no issues");
+    } catch (err) {
+      if (seq !== lintSeq) return;
+      setChildren(lintList, el("li", { class: "lint-result lint-error", text: err.message }));
+    }
+  };
+  const runLinter = el("button", { type: "button", class: "secondary", id: "run-linter", text: "Run Linter",
+    onclick: async () => { linted = true; await lint(); } });
   const { dialog, close } = openModal({ labelledBy: "condition-title", canClose: () => !submitting });
   const primary = el("button", { type: "submit", class: "primary", text: "Save" });
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
@@ -3430,6 +3474,12 @@ function openConditionForm(row, name, change, onDone) {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    if (linted) await lint();
+    if (lintErrors > 0) {
+      error.textContent = "The linter found errors in the expression: fix them before saving.";
+      error.hidden = false;
+      return;
+    }
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Edit the condition of ${row.member}'s ${row.role} on ${name}`);
@@ -3453,7 +3503,17 @@ function openConditionForm(row, name, change, onDone) {
     el("h2", { id: "condition-title", text: `Condition of ${row.member}'s ${row.role}` }),
     error,
     ...fields.nodes,
+    el("div", { class: "action-bar" }, runLinter),
+    lintList,
     el("div", { class: "modal-actions" }, cancel, primary)));
+  const expression = dialog.querySelector("#f-conditionExpression");
+  if (expression) {
+    expression.addEventListener("input", () => {
+      if (!linted) return;
+      clearTimeout(lintTimer);
+      lintTimer = setTimeout(lint, 300);
+    });
+  }
   fields.focusFirst();
 }
 
@@ -8289,12 +8349,54 @@ async function renderPlayground(view) {
   const historyBody = el("tbody");
 
   const refused = el("details", { class: "card" },
-    el("summary", { text: `Generation options are refused, not ignored (${status.refused.length})` }),
+    el("summary", { text: `Options the endpoint refuses rather than ignores (${status.refused.length})` }),
     el("p", { text:
-      "This endpoint honours no generation options. The runtime applies none of them, and a " +
-      "request carrying one is rejected rather than answered as though it applied. These are " +
-      "refused:" }),
+      "The runtime applies none of these, and a request carrying one is rejected rather than " +
+      "answered as though it applied:" }),
     el("p", { class: "mono", text: status.refused.join(", ") }));
+
+  // Generation options (#1797, #1779): sent as generationConfig, only the
+  // fields given. An empty field is absent, not zero: temperature 0 must be
+  // typed to mean greedy decoding.
+  const supported = new Set(status.supported || []);
+  const optInput = (id, label, attrs) => {
+    const input = el("input", Object.assign({ id: "pg-opt-" + id, "aria-label": label }, attrs));
+    return { id, input, field: el("label", { for: "pg-opt-" + id }, label + " ", input) };
+  };
+  const numOpts = [
+    optInput("temperature", "Temperature", { type: "number", step: "0.05", min: "0", max: "2" }),
+    optInput("topP", "Top-p", { type: "number", step: "0.05", min: "0", max: "1" }),
+    optInput("topK", "Top-k", { type: "number", step: "1", min: "1" }),
+    optInput("seed", "Seed", { type: "number", step: "1" }),
+    optInput("maxOutputTokens", "Max output tokens", { type: "number", step: "1", min: "1" }),
+  ].filter((o) => supported.has(o.id));
+  const stops = optInput("stopSequences", "Stop sequences (comma-separated)", { type: "text" });
+  const schema = el("textarea", { id: "pg-opt-responseSchema", rows: "2", class: "mono",
+    placeholder: '{"type":"BOOLEAN"}', "aria-label": "Response schema" });
+  const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
+  const options = el("details", { class: "card", id: "pg-options" },
+    el("summary", { text: "Generation options" }),
+    el("div", { class: "card-actions" }, ...numOpts.map((o) => o.field),
+      ...(supported.has("stopSequences") ? [stops.field] : [])),
+    ...(supported.has("responseMimeType") ? [el("div", {},
+      el("label", { for: "pg-opt-json", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
+        jsonOut, " JSON response (application/json)"),
+      el("label", { for: "pg-opt-responseSchema" }, " Response schema "), schema)] : []));
+  const generationConfig = () => {
+    const cfg = {};
+    for (const o of numOpts) {
+      const v = o.input.value.trim();
+      if (v !== "") cfg[o.id] = Number(v);
+    }
+    const st = stops.input.value.split(",").map((x) => x.trim()).filter((x) => x);
+    if (st.length) cfg.stopSequences = st;
+    if (jsonOut.checked) {
+      cfg.responseMimeType = "application/json";
+      const sc = schema.value.trim();
+      if (sc) cfg.responseSchema = JSON.parse(sc);
+    }
+    return cfg;
+  };
 
   const renderHistory = () => {
     historyBody.replaceChildren();
@@ -8339,7 +8441,7 @@ async function renderPlayground(view) {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody }),
+        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody, generationConfig: generationConfig() }),
         signal: controller.signal,
       });
       if (!resp.ok) {
@@ -8418,6 +8520,7 @@ async function renderPlayground(view) {
     header,
     ...(models ? [models] : []),
     refused,
+    options,
     el("div", { class: "card" },
       prompt,
       el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),

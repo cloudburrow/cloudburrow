@@ -186,6 +186,9 @@ func renderService(svc *runpb.Service, kname, namespace, instance string, secret
 	if err := checkVolumes(tmpl); err != nil {
 		return "", err
 	}
+	if err := checkScaling(svc); err != nil {
+		return "", err
+	}
 	// secretKeyRef env vars, recorded so they read back as set (#581).
 	secretEnv := secretEnvRefs(tmpl.GetContainers())
 
@@ -210,6 +213,10 @@ metadata:
 		raw, _ := protojson.Marshal(ba)
 		fmt.Fprintf(&b, "    %s: %q\n", annBinaryAuthorization, string(raw))
 	}
+	if sc := svc.GetScaling(); serviceScalingSet(sc) {
+		raw, _ := protojson.Marshal(sc)
+		fmt.Fprintf(&b, "    %s: %q\n", annServiceScaling, string(raw))
+	}
 	b.WriteString(`spec:
   template:
     metadata:
@@ -226,16 +233,10 @@ metadata:
 		fmt.Fprintf(&b, "        %s: %q\n", annPodConfig, pc)
 	}
 
-	// Scaling. Cloud Run's min/max instances map onto Knative's autoscaling
-	// annotations, which is one of the few places the two line up directly.
-	if s := tmpl.GetScaling(); s != nil {
-		if s.GetMinInstanceCount() > 0 {
-			fmt.Fprintf(&b, "        autoscaling.knative.dev/min-scale: %q\n", fmt.Sprint(s.GetMinInstanceCount()))
-		}
-		if s.GetMaxInstanceCount() > 0 {
-			fmt.Fprintf(&b, "        autoscaling.knative.dev/max-scale: %q\n", fmt.Sprint(s.GetMaxInstanceCount()))
-		}
-	}
+	// Scaling. Cloud Run's min/max instances and concurrency target map
+	// onto Knative's KPA annotations; service-level scaling is applied to
+	// each revision once it serves (servicescaling.go, #1790).
+	renderRevisionScaling(&b, tmpl.GetScaling(), tmpl.GetMaxInstanceRequestConcurrency())
 	fmt.Fprintf(&b, "        cloudburrow.dev/managed: \"true\"\n")
 
 	b.WriteString("    spec:\n")
@@ -461,7 +462,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	}
 	svc := &runpb.Service{
 		Name:                  name,
-		Uri:                   k.Status.URL,
+		Uri:                   serviceURL(k),
 		Generation:            k.Metadata.Generation,
 		ObservedGeneration:    k.Status.ObservedGeneration,
 		Template:              &runpb.RevisionTemplate{},
@@ -491,12 +492,8 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	readJSONAnnotation(tann, annTemplateAnnotation, &svc.Template.Annotations)
 	secretEnv := map[string]secretEnvRef{}
 	readJSONAnnotation(tann, annSecretEnv, &secretEnv)
-	var scaling runpb.RevisionScaling
-	fmt.Sscan(tann["autoscaling.knative.dev/min-scale"], &scaling.MinInstanceCount)
-	fmt.Sscan(tann["autoscaling.knative.dev/max-scale"], &scaling.MaxInstanceCount)
-	if scaling.MinInstanceCount > 0 || scaling.MaxInstanceCount > 0 {
-		svc.Template.Scaling = &scaling
-	}
+	svc.Template.Scaling = readRevisionScaling(tann)
+	svc.Scaling = readServiceScaling(k.Metadata.Annotations)
 	if ts := k.Spec.Template.Spec.TimeoutSeconds; ts > 0 {
 		svc.Template.Timeout = durationpb.New(time.Duration(ts) * time.Second)
 	}
@@ -579,4 +576,13 @@ func quote(items []string) string {
 		q[i] = fmt.Sprintf("%q", s)
 	}
 	return strings.Join(q, ", ")
+}
+
+// serviceURL is k's URL: the one it had before it was disabled, while it
+// is (servicescaling.go).
+func serviceURL(k ksvc) string {
+	if u := k.Metadata.Annotations[annDisabledURL]; u != "" {
+		return u
+	}
+	return k.Status.URL
 }

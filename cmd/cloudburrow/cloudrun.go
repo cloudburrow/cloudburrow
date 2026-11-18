@@ -40,6 +40,8 @@ type runService struct {
 	requests func(rest.Request)
 	cfg      config.Config
 	server   *grpctransport.Server
+	// stopCPU ends the adapter's CPU-target scaling (#1789).
+	stopCPU context.CancelFunc
 	// storage is the Cloud Storage tunnel SubmitBuild reads its source
 	// through (#1268); nil without Cloud Storage.
 	storage func() *netfwd.Forwarder
@@ -141,6 +143,11 @@ func (r *runService) Start(ctx context.Context) error {
 	kn := &runadapter.Knative{Kube: k8s.New(r.cfg.KubeconfigPath(), "", runadapter.WorkloadNamespace)}
 	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
 	adapter.CollectVolumesInTheBackground()
+	// Cloud Run's CPU utilization driver, on metrics-server's signal
+	// (#1789, #1800); it lives as long as the adapter, not this call.
+	cpuCtx, stopCPU := context.WithCancel(context.WithoutCancel(ctx))
+	r.stopCPU = stopCPU
+	adapter.StartCPUScaling(cpuCtx)
 	if r.secrets != nil {
 		adapter = adapter.WithSecrets(r.secrets)
 	}
@@ -279,6 +286,9 @@ func (r *runService) Start(ctx context.Context) error {
 		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
 			functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
 				adapter.V1Handler(runadapter.NewRESTHandler(register)))))))
+	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
+	// /v1/ path is Cloud Run v1's, and its other calls through the above.
+	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -334,6 +344,9 @@ func (r *runVolumesResetter) ResetProject(ctx context.Context, project string) e
 }
 
 func (r *runService) Stop(ctx context.Context) error {
+	if r.stopCPU != nil {
+		r.stopCPU()
+	}
 	if r.server == nil {
 		return nil
 	}

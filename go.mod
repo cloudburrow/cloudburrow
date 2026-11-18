@@ -20,11 +20,11 @@ require (
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
-	cloud.google.com/go/longrunning v1.3.0
-	cloud.google.com/go/memorystore v1.5.0
+	cloud.google.com/go/longrunning v1.5.0
+	cloud.google.com/go/memorystore v1.7.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
-	cloud.google.com/go/run v1.23.0
+	cloud.google.com/go/run v1.25.0
 	cloud.google.com/go/scheduler v1.17.0
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/securesourcemanager v1.12.0
@@ -46,7 +46,7 @@ require (
 	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/uuid v1.6.0
-	github.com/googleapis/gax-go/v2 v2.26.2
+	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/kazzmir/opus-go v1.7.0
 	github.com/klippa-app/go-pdfium v1.21.4
@@ -69,16 +69,16 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.opentelemetry.io/proto/otlp v1.11.0
 	golang.org/x/image v0.47.0
-	golang.org/x/mod v0.42.0
+	golang.org/x/mod v0.43.0
 	golang.org/x/net v0.62.0
-	golang.org/x/oauth2 v0.37.0
+	golang.org/x/oauth2 v0.38.0
 	golang.org/x/sys v0.49.0
-	google.golang.org/api v0.307.0
+	google.golang.org/api v0.314.0
 	google.golang.org/genai v1.77.0
-	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d
-	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b
-	google.golang.org/grpc v1.84.0
+	google.golang.org/genproto v0.0.0-20261012220534-4341edf3f941
+	google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab
+	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -123,8 +123,8 @@ require (
 )
 
 require (
-	cel.dev/expr v0.25.2 // indirect
-	cloud.google.com/go/auth/oauth2adapt v0.3.0 // indirect
+	cel.dev/expr v0.25.3 // indirect
+	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
 	cloud.google.com/go/monitoring v1.30.0 // indirect
 	cloud.google.com/go/redis v1.27.0
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -137,7 +137,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
-	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
+	github.com/envoyproxy/go-control-plane/envoy v1.39.1-0.20260819172001-e6e3fd93e4be // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
@@ -147,10 +147,10 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/golang/snappy v1.0.0
 	github.com/google/btree v1.1.3 // indirect
-	github.com/google/flatbuffers v25.12.19+incompatible // indirect
+	github.com/google/flatbuffers v25.12.19+incompatible
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.23 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.25 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -173,11 +173,21 @@ require (
 	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/crypto v0.58.0
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/telemetry v0.0.0-20260924152758-ed294f943157 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/telemetry v0.0.0-20261009151841-97e8ea77aa2a // indirect
 	golang.org/x/text v0.43.0
 	golang.org/x/time v0.16.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	rsc.io/binaryregexp v0.2.0 // indirect
 )
+
+// genproto's googleapis/cloud/kms/v1, which tink-go-gcpkms v2.4.0's tests
+// import (test/compat/kmstink_test.go), is gone from genproto after
+// 2026-07-23, and gax-go v2.27.0 (#1788) and cloud.google.com/go/memorystore
+// v1.7.0 (the first with Memorystore for Valkey's ACL policies, #1578)
+// require a later genproto: the root module, whose packages this repo uses
+// are all in this version, stays at the last that has it, so `go mod tidy`
+// resolves every test. googleapis/api and googleapis/rpc are their own
+// modules and stay current.
+replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20260723164925-7274b71286bd

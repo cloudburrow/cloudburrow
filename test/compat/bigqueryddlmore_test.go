@@ -426,3 +426,63 @@ func TestBigQueryDefaultTimeZoneOfCoercedStrings(t *testing.T) {
 		t.Errorf("a US job: %d rows, want 1 (UTC)", got)
 	}
 }
+
+// TestBigQueryStructFieldDataPolicies (#1456): "column_schema also
+// supports options on top-level columns and STRUCT fields", data_policies
+// among them (DDL reference, column_option_list), so a STRUCT field's
+// data_policies, by CREATE TABLE and by ALTER TABLE ADD COLUMN, reads back
+// as that field's dataPolicies through tables.get, and a name not of the
+// "{'name':'project.region-us.policy'}" form is 400. Each through
+// jobs.query and jobs.insert. Before, a STRUCT field's data_policies was
+// 501.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get
+func TestBigQueryStructFieldDataPolicies(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	svc, err := bq.NewService(ctx, option.WithEndpoint(h.Endpoint(EnvBigQuery)), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := func(id string) string { return "[\"{'name':'" + project + ".region-us." + id + "'}\"]" }
+	pol := func(id string) string { return "projects/" + project + "/locations/us/dataPolicies/" + id }
+	for _, insert := range []bool{false, true} {
+		name := fmt.Sprintf("fieldpolicy%v", insert)
+		ref := "`" + ds.DatasetID + "." + name + "`"
+		run := func(sql string) {
+			t.Helper()
+			if err := bqRun(ctx, c, sql, insert); err != nil {
+				t.Fatalf("%s (insert %v): %v", sql, insert, err)
+			}
+		}
+		run("CREATE TABLE " + ref + " (id INT64, s STRUCT<x STRING OPTIONS (data_policies = " + policy("p0") + "), y INT64>)")
+		run("ALTER TABLE " + ref + " ADD COLUMN u STRUCT<v STRING OPTIONS (data_policies = " + policy("p1") + ")>")
+		full, err := svc.Tables.Get(project, ds.DatasetID, name).Context(ctx).Do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]string{}
+		for _, f := range full.Schema.Fields {
+			for _, sub := range f.Fields {
+				var names []string
+				for _, p := range sub.DataPolicies {
+					names = append(names, p.Name)
+				}
+				got[f.Name+"."+sub.Name] = strings.Join(names, ",")
+			}
+		}
+		if want := map[string]string{"s.x": pol("p0"), "s.y": "", "u.v": pol("p1")}; fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("insert %v: field dataPolicies %v, want %v", insert, got, want)
+		}
+		run("INSERT INTO " + ref + " (id, s) VALUES (1, STRUCT('a', 2))")
+		if got := fmt.Sprint(rows(t, ctx, c, "SELECT s.x, s.y FROM "+ref)); got != "[[a 2]]" {
+			t.Errorf("insert %v: rows %s", insert, got)
+		}
+		err = bqRun(ctx, c, "CREATE TABLE `"+ds.DatasetID+".bare"+name+"` (s STRUCT<x STRING OPTIONS (data_policies = ['p'])>)", insert)
+		if httpStatus(err) != http.StatusBadRequest {
+			t.Errorf("insert %v: a STRUCT field's data_policies of a bare name: %v, want 400", insert, err)
+		}
+	}
+}

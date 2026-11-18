@@ -199,6 +199,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// Every project Resource Manager has ACTIVE (knownprojects.go, #1764).
+	known := &knownProjects{rm: o.resourceManager} // numbers: below
+	next = known.engine(next)
 	// A client request's repeated reads of a dataset or table are the
 	// engine's first answer (readmemo.go, #1623).
 	next = memoReads(next)
@@ -218,19 +221,23 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{}                           // iam.go, #1231
-	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
-	settings := &projectOptions{}                   // projectoptions.go, #1375
-	jobRows := &jobsTable{logf: o.logf}             // jobstable.go, #1378
-	newest := &newestJobs{}                         // joblisting.go, #1633
-	open := &openJobs{}                             // jobsopen.go, #1633
-	tables := &tableSettings{}                      // tableoptions.go, #1390
-	linked := &linkedDatasets{}                     // loglinks.go, #1423
-	icebergs := &icebergTables{}                    // iceberg.go, #1427
-	dropped := &droppedStore{}                      // dropped.go, #1460
-	models := &bqModels{}                           // models.go, #1465
+	iam := &iamPolicies{}                                             // iam.go, #1231
+	buffers := &streamBuffers{stamp: o.streamTimes}                   // streamingbuffer.go, #1273, #1370
+	settings := &projectOptions{}                                     // projectoptions.go, #1375
+	jobRows := &jobsTable{logf: o.logf}                               // jobstable.go, #1378
+	newest := &newestJobs{}                                           // joblisting.go, #1633
+	open := &openJobs{}                                               // jobsopen.go, #1633
+	tables := &tableSettings{}                                        // tableoptions.go, #1390
+	linked := &linkedDatasets{}                                       // loglinks.go, #1423
+	icebergs := &icebergTables{}                                      // iceberg.go, #1427
+	dropped := &droppedStore{}                                        // dropped.go, #1460
+	models := &bqModels{}                                             // models.go, #1465
+	connections := &bqConnections{resourceManager: o.resourceManager} // connections.go, #1755
+	objects := &objectTables{storage: storage}                        // objecttables.go, #1783
+	objects.public = o.storagePublic                                  // signedurls.go, #1786
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
+	known.numbers = numbers
 	if o.logf != nil {
 		frontLogf.Store(&o.logf) // serviceclient.go, #1628
 	}
@@ -248,11 +255,14 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		policies.now = clock
 	}
 	models.now = clock
+	connections.now = clock
 	functions := &knownFunctions{started: clock().UnixMilli(), now: clock}
 	if o.stateDir != "" {
 		dropped.keep(droppedStateFile(o.stateDir), o.logf)         // dropped.go, #1460
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
+		connections.keep(connectionsStateFile(o.stateDir), o.logf) // connections.go, #1755
+		objects.keep(o.stateDir, o.logf)                           // objecttables.go, #1783
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -315,7 +325,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
 			return
 		}
-		if iam.serveRewriteMember(w, r) { // iam.go, #1751
+		if objects.agents.serveCerts(w, r) { // signedurls.go, #1786: the service agents' certificates
+			return
+		}
+		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
+			return
+		}
+		if iam.serveRewriteMember(w, r, next, connections) { // iam.go, datasetaccessrewrite.go and connectionrewrite.go, #1751, #1795
 			return
 		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
@@ -401,7 +417,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models,
-				onnx: o.onnx}
+				onnx: o.onnx, tfconvert: o.tfconvert, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -465,12 +481,22 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
 			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
-			dropped: dropped, iam: iam, functions: functions, models: models, open: open} // functions, models: #1483, droppedroutines.go; open: purge.go
+			dropped: dropped, iam: iam, functions: functions, models: models, open: open, // functions, models: #1483, droppedroutines.go; open: purge.go
+			storage: storage, connections: connections, numbers: numbers, objects: objects, resourceManager: o.resourceManager} // #1783, objecttables.go
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
 				datasetInsertDefaults(r, settings, projectOf(f.base)) // #1417, projectdefaults.go
 				f.insertDataset(w, r)
+				return
+			}
+			if r.Method == http.MethodDelete && r.Header.Get(PurgeHeader) != "" {
+				// A purge's deletes carry the linked writer's header too,
+				// so a linked dataset can go (cmd/cloudburrow's
+				// bigqueryResetter): each was sent straight to the engine,
+				// and the dataset's routines, models and row access
+				// policies outlived the purge (#1781).
+				f.deleteDatasetPurging(w, r, dataset)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -499,6 +525,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertDataset(w, r)
 		case r.Method == http.MethodGet && m[3] == "":
 			f.listDatasets(w, r) // #1371, location.go
+		case r.Method == http.MethodPost && m[3] != "" && m[4] == "" && f.insertObjectTable(w, r, dataset): // #1783, objecttables.go
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertIcebergTable(w, r, dataset) // #1427, iceberg.go
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
@@ -507,10 +534,25 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.getDataset(w, r, dataset) // #1205, the front's etag
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
 			f.insertTable(w, r, dataset, table, true)
+		case r.Method == http.MethodGet && m[4] != "" && m[5] == "" && f.serveObjectTableGet(w, r, dataset, table): // #1783, objecttables.go
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
 			f.getTable(w, r, dataset, table) // #1014, #1002
 		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
-			f.listTables(w, r, dataset) // #1002, snapshots.go
+			if !f.objects.any() {
+				f.listTables(w, r, dataset) // #1002, snapshots.go
+				break
+			}
+			rec := newRecorder()
+			f.listTables(rec, r, dataset)
+			if rec.status == 0 || rec.status == http.StatusOK { // #1783: object tables are EXTERNAL
+				b := f.listedObjectTables(dataset, rec.body.Bytes())
+				rec.body.Reset()
+				rec.body.Write(b)
+				rec.header.Del("Content-Length")
+			}
+			rec.copyTo(w)
+		case r.Method == http.MethodPost && m[5] == "insertAll" && f.objects.any() && f.isObjectTable(r, dataset, table): // #1783
+			writeError(w, http.StatusBadRequest, "invalid", readOnlyObjectTable(projectOf(f.base), dataset, table))
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
@@ -527,7 +569,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	// Per-project IAM of a caller with a token the instance minted
+	// (iamcheck.go, #1767).
+	iamChecks := &iamState{policies: iam}
+	engine := next
+	return iamChecks.handler(engine, known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -551,7 +597,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed))
+	}), next, settings, failed))))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -635,6 +681,20 @@ type front struct {
 	// onnx runs imported ONNX models (modelonnx.go, #1711): the runner
 	// of the onnx build's CLI, or nil, and every ONNX model is 501.
 	onnx onnxRunner
+	// tfconvert converts imported TENSORFLOW models to TensorFlow Lite
+	// (modeltensorflow.go, #1775): the CLI's converter, or nil, and every
+	// TENSORFLOW model is 501.
+	tfconvert tfConverter
+	// vertexai is the instance's local Vertex AI endpoint (http://host:port),
+	// which remote models run on (modelremote.go, #1760), or "".
+	vertexai string
+	// connections and numbers are the Connection API's connections and
+	// the project numbers that key them (connections.go), which a remote
+	// model names.
+	connections *bqConnections
+	// objects are the object tables (objecttables.go, #1783), or nil.
+	objects *objectTables
+	numbers *projectNumbers
 }
 
 // Option is an option of Wrap.
@@ -642,6 +702,9 @@ type Option func(*options)
 
 type options struct {
 	storage string
+	// storagePublic is the address clients reach that Cloud Storage at
+	// (http://host:port), which signed URLs name (signedurls.go, #1786).
+	storagePublic string
 	// restarts watches the emulator restart (restart.go, #1016).
 	restarts *emulatorWatch
 	// configs are the configurations of the jobs the emulator ran
@@ -672,6 +735,12 @@ type options struct {
 	resourceManager string
 	// onnx runs imported ONNX models, or nil (modelonnx.go, #1711).
 	onnx onnxRunner
+	// tfconvert converts imported TENSORFLOW models, or nil
+	// (modeltensorflow.go, #1775).
+	tfconvert tfConverter
+	// vertexai is the local Vertex AI endpoint remote models run on, or ""
+	// (modelremote.go, #1760).
+	vertexai string
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
@@ -679,6 +748,13 @@ type options struct {
 // look an extract job's bucket up in (#939).
 func WithStorage(endpoint string) Option {
 	return func(o *options) { o.storage = endpoint }
+}
+
+// WithStoragePublic gives the front the address clients reach the
+// instance's Cloud Storage at (http://host:port), which the signed URLs
+// of EXTERNAL_OBJECT_TRANSFORM name (#1786).
+func WithStoragePublic(endpoint string) Option {
+	return func(o *options) { o.storagePublic = endpoint }
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.
@@ -1138,6 +1214,13 @@ func (f front) sendHeader(r *http.Request, method, path string, body []byte, hea
 }
 
 // projectOf returns the project in a base path.
+// inProject is f with its base in project rather than its own (#1764): the
+// engine reads another project's datasets and tables there.
+func (f front) inProject(project string) front {
+	f.base = f.base[:strings.LastIndex(f.base, "/")+1] + url.PathEscape(project)
+	return f
+}
+
 func projectOf(base string) string {
 	p := base[strings.LastIndex(base, "/")+1:]
 	if u, err := url.PathUnescape(p); err == nil {

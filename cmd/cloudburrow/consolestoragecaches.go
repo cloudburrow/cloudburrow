@@ -13,8 +13,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 
+	"google.golang.org/api/googleapi"
 	storagev1 "google.golang.org/api/storage/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -113,7 +116,7 @@ func (p storageProvider) actOnCaches(ctx context.Context, path []string, action 
 		var err error
 		switch v("change") {
 		case "pause":
-			_, err = s.AnywhereCaches.Pause(b, v("zone")).Context(ctx).Do()
+			err = pauseAnywhereCache(ctx, s, b, v("zone"))
 		case "resume":
 			_, err = s.AnywhereCaches.Resume(b, v("zone")).Context(ctx).Do()
 		case "disable":
@@ -145,4 +148,21 @@ func (p storageProvider) actOnCaches(ctx context.Context, path []string, action 
 		return true, nil, s.Operations.AdvanceRelocateBucket(b, v("operation"), &storagev1.AdvanceRelocateBucketOperationRequest{Ttl: v("ttl")}).Context(ctx).Do()
 	}
 	return true, nil, s.Operations.Cancel(b, v("operation")).Context(ctx).Do()
+}
+
+// pauseAnywhereCache calls storage.anywhereCaches.pause, which
+// google.golang.org/api v0.314.0's storage discovery document (revision
+// 20261107) no longer lists (#1791), so the generated client has no Pause.
+func pauseAnywhereCache(ctx context.Context, s *storagev1.Service, bucket, id string) error {
+	u := strings.TrimSuffix(s.BasePath, "/") + "/b/" + url.PathEscape(bucket) + "/anywhereCaches/" + url.PathEscape(id) + "/pause"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return googleapi.CheckResponse(resp)
 }

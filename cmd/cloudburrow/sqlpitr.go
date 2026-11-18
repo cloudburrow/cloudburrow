@@ -93,6 +93,12 @@ mv "$R/base/.tmp" "$R/base/$(( $(date -u +%s) + 1 )).sql"`)
 	}
 	return d.sh(ctx, t, nil, io.Discard, pgPITRPrelude+`mkdir -p "$R/base" "$R/wal"; chown postgres "$R" "$R/base" "$R/wal"
 rm -rf "$R/base/.tmp"
+# PostgreSQL 9.6's initdb leaves local replication connections out of
+# pg_hba.conf, which 10 and later allow (#1524).
+hba=$(psql -U postgres -XtAc 'SHOW hba_file')
+if ! grep -Eq '^local[[:space:]]+replication' "$hba"; then
+  echo 'local replication all trust' >> "$hba" && psql -U postgres -XtAqc 'SELECT pg_reload_conf()' >/dev/null && sleep 1
+fi
 "$asuser" postgres pg_basebackup -U postgres -D "$R/base/.tmp" -X fetch -c fast
 mv "$R/base/.tmp" "$R/base/$(( $(date -u +%s) + 1 ))"`)
 }
@@ -215,15 +221,27 @@ func (d *sqlDumper) pgCopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, 
 	// archives the segment holding it.
 	start := pgPITRPrelude + `W="$R/restore"
 psql -U postgres -d template1 -AtXq -c 'SELECT txid_current()' >/dev/null
-seg=$(psql -U postgres -d template1 -AtX -c 'SELECT pg_walfile_name(pg_switch_wal())')
+# PostgreSQL 9.6 names its WAL functions after xlog (#1524).
+if [ "$(psql -U postgres -d template1 -AtX -c 'SHOW server_version_num')" -lt 100000 ]; then
+  seg=$(psql -U postgres -d template1 -AtX -c 'SELECT pg_xlogfile_name(pg_switch_xlog())')
+else
+  seg=$(psql -U postgres -d template1 -AtX -c 'SELECT pg_walfile_name(pg_switch_wal())')
+fi
 i=0; until [ -f "$R/wal/$seg" ]; do i=$((i+1)); [ $i -lt 120 ] || { echo "WAL segment $seg was not archived" >&2; exit 1; }; sleep 0.5; done
 rm -rf "$W"; cp -a "$R/base/$1" "$W"; rm -f "$W/postmaster.pid"; chown -R postgres "$W"; chmod 700 "$W"
-cat >> "$W/postgresql.auto.conf" <<EOF
+# Before PostgreSQL 12 the recovery settings are recovery.conf's, whose
+# presence starts recovery; since 12 they are settings, and
+# recovery.signal starts it (#1524).
+case "$(cat "$W/PG_VERSION")" in
+  9.*|10|11) conf="$W/recovery.conf" ;;
+  *) conf="$W/postgresql.auto.conf"; touch "$W/recovery.signal" ;;
+esac
+cat >> "$conf" <<EOF
 restore_command = 'cp $R/wal/%f %p'
 recovery_target_time = '$2'
 recovery_target_action = 'promote'
 EOF
-touch "$W/recovery.signal"
+chown postgres "$conf"
 "$asuser" postgres pg_ctl -D "$W" -l "$W/recovery.log" -w -t 280 -o "-c port=` + pgRecoveryPort + ` -c listen_addresses='' -c unix_socket_directories=$W -c archive_mode=off" start >/dev/null || { tail -5 "$W/recovery.log" >&2; exit 1; }
 i=0; until [ "$("$asuser" postgres psql -h "$W" -p ` + pgRecoveryPort + ` -U postgres -d template1 -AtX -c 'SELECT pg_is_in_recovery()')" = f ]; do
   i=$((i+1)); [ $i -lt 280 ] || { tail -5 "$W/recovery.log" >&2; exit 1; }; sleep 1

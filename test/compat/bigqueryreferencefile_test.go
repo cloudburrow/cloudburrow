@@ -119,7 +119,7 @@ func TestBigQueryLoadReferenceFileSchema(t *testing.T) {
 		return err
 	}
 	read := func(table string) string {
-		return strings.Join(queryRows(t, ctx, c, h.Project(), ds.DatasetID, "SELECT id, s FROM `"+ds.DatasetID+"."+table+"` ORDER BY id"), " / ")
+		return strings.Join(queryRows(t, ctx, c, c.Project(), ds.DatasetID, "SELECT id, s FROM `"+ds.DatasetID+"."+table+"` ORDER BY id"), " / ")
 	}
 	wantCode := func(name string, err error, code int, text string) {
 		t.Helper()

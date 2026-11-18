@@ -95,6 +95,8 @@ type mlOptions struct {
 	UserCol      string `json:"userCol,omitempty"`
 	ItemCol      string `json:"itemCol,omitempty"`
 	RatingCol    string `json:"ratingCol,omitempty"`
+	// WalsAlpha is an IMPLICIT model's wals_alpha, nil before defaults.
+	WalsAlpha *float64 `json:"walsAlpha,omitempty"`
 	// DNN_* (modeldnn.go): HiddenUnits nil is the documented default,
 	// one layer sized by the rows; BatchSize 0 min(32, rows).
 	HiddenUnits []int   `json:"hiddenUnits,omitempty"`
@@ -249,6 +251,9 @@ type mlTrained struct {
 	Global []mlGlobal `json:"global,omitempty"`
 	// Arima is an ARIMA_PLUS model's series and fits (modelarima.go).
 	Arima *arimaTrained `json:"arima,omitempty"`
+	// Xreg is an ARIMA_PLUS_XREG model's regression on its features
+	// (modelxreg.go, #1766); its ARIMA is Arima.
+	Xreg *xregTrained `json:"xreg,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -306,6 +311,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 		return trainMF(opts, cols, rows)
 	case "ARIMA_PLUS":
 		return trainArima(opts, cols, rows)
+	case "ARIMA_PLUS_XREG":
+		return trainXreg(opts, cols, rows)
 	case "AUTOENCODER":
 		return trainAutoencoder(opts, cols, rows)
 	}

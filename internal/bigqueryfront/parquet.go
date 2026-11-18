@@ -137,10 +137,10 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	var extra parquetJob
 	_ = decodeJob(r, &extra)
 	el := extra.Configuration.Load
-	if dest.ProjectID != "" && dest.ProjectID != projectOf(f.base) {
-		return notImplemented("into another project's table, " + dest.ProjectID + ":" + name +
-			", whose schema CloudBurrow does not check the file's columns against")
-	}
+	// Another project's table is read, and the load carried out, there
+	// (crossload.go, #1767).
+	df := f.dataFront(r, dest)
+	cross := df.base != f.base
 	opts := pqOptions{decimalTypes: el.DecimalTargetTypes}
 	if m := strings.ToUpper(l.ColumnNameCharacterMap); m == "V1" || m == "V2" {
 		opts.charMap = m // the file's names, renamed (#1373)
@@ -257,7 +257,7 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	}
 	write := strings.ToUpper(l.WriteDisposition)
 
-	status, got := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
+	status, got := df.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
 	var send []field
 	var raw json.RawMessage
 	switch {
@@ -308,11 +308,11 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		case "WRITE_TRUNCATE_DATA":
 			plan.kind, passes = pqLoadTruncateData, false
 			var m pqMerge
-			plan.target, code, why = mergeParquet(send, file, nil, dest, projectOf(f.base), &m)
+			plan.target, code, why = mergeParquet(send, file, nil, dest, projectOf(df.base), &m)
 		case "", "WRITE_APPEND", "WRITE_EMPTY":
 			plan.kind, plan.writeEmpty = pqLoadAppend, write == "WRITE_EMPTY"
 			var m pqMerge
-			plan.target, code, why = mergeParquet(send, file, l.SchemaUpdateOptions, dest, projectOf(f.base), &m)
+			plan.target, code, why = mergeParquet(send, file, l.SchemaUpdateOptions, dest, projectOf(df.base), &m)
 			plan.relaxed = m.relaxed
 			if m.added {
 				plan.kind = pqLoadAdd
@@ -347,6 +347,9 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	}
 	if hiveFilesOf(r) != nil {
 		passes = false // the keys are the front's to add (#1547)
+	}
+	if cross {
+		passes, plan.project = false, dest.ProjectID // the front's (#1767)
 	}
 	if !passes {
 		f.parquetOwnLoad(w, r, plan)

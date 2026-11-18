@@ -61,8 +61,21 @@ func mergeWorkerPoolMask(current, in *runpb.WorkerPool, paths []string) (*runpb.
 			merged.Name = current.GetName()
 			return merged, nil
 		}
-		if err := mergePath(out.ProtoReflect(), in.ProtoReflect(), p, workerPoolOutputOnly); err != nil {
+		// Through the overlay, so a path may name the added scaling
+		// fields (#1788), e.g. scaling.scaling_mode.
+		dst, err := copyOf(out)
+		if err != nil {
 			return nil, err
+		}
+		src, err := copyOf(in)
+		if err != nil {
+			return nil, err
+		}
+		if err := mergePath(dst, src, p, workerPoolOutputOnly); err != nil {
+			return nil, err
+		}
+		if err := runOverlay.Back(dst.Interface(), out); err != nil {
+			return nil, apierror.Internal(err, "merge %s", p)
 		}
 	}
 	return out, nil

@@ -218,6 +218,9 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	if strings.HasPrefix(method, writeService) {
 		return s.write.handle(ss, method) // storagewrite.go: never the emulator's
 	}
+	if strings.HasPrefix(method, connectionService) {
+		return s.connection(ss, method) // connectiongrpc.go, #1766
+	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {

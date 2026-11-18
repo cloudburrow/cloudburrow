@@ -62,6 +62,18 @@ type memorystoreAdminService struct {
 	creds    *metadata.Credentials
 	registry func() *resourcemanager.Registry
 	cancel   context.CancelFunc
+	// storageImage is the storage image `up` built, or builds when asked
+	// (#1768).
+	storageImage func(context.Context) (string, error)
+}
+
+// frontImage is the storage image's reference (#1768), which `up` builds
+// when it is first asked for.
+func (s *memorystoreAdminService) frontImage(ctx context.Context) (string, error) {
+	if s.storageImage == nil {
+		return "", errors.New("this instance cannot build the cloudburrow-storage image")
+	}
+	return s.storageImage(ctx)
 }
 
 func newMemorystoreAdminService(cfg config.Config, tunnel func() *netfwd.Forwarder) *memorystoreAdminService {
@@ -108,7 +120,8 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	be := memorystoreBackend(s.tunnel)
 	s.api = redisadmin.NewServer(memorystoreInstance(s.cfg, time.Now(), be.Addr), be)
 	s.api.RecordEvents(s.events)
-	// CreateInstance (#1302): a Valkey server per instance, kept across a
+	// CreateInstance (#1302): a server per instance, of its redis_version's
+	// image (memorystoreImages, #1386), kept across a
 	// restart in persistent mode, as the instance `up` runs keeps its data.
 	var db store.Store = store.NewMemory()
 	if s.cfg.Mode == config.ModePersistent {
@@ -122,6 +135,7 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	bg, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.prov = newMemorystoreProvisioner(s.cfg, bg)
+	s.prov.frontImage = s.frontImage
 	s.api.EnableCreate(bg, s.prov, redisadmin.Dial, db, nil)
 	s.api.PersistentMode(s.cfg.Mode == config.ModePersistent)
 	// Memorystore for Redis Cluster (#1519): a real Redis Cluster per
@@ -247,6 +261,10 @@ type memorystoreProvisioner struct {
 	// roleServices are the role Services applied, by base, and their port
 	// (#1614).
 	roleServices map[string]int
+	// frontImage is the storage image's reference, the TLS front of a
+	// Redis before 6.0 with in-transit encryption (#1768), built when it
+	// is first asked for.
+	frontImage func(context.Context) (string, error)
 	// clusterIPs are the cluster nodes' Services' cluster IPs, by server,
 	// the address a node announces to in-cluster clients (#1614).
 	clusterIPs map[string]string
@@ -309,6 +327,19 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	if tlsFiles != nil {
 		settings.TLSCert, settings.TLSKey, settings.TLSCA = tlsFiles.Cert, tlsFiles.Key, tlsFiles.CA
 		port = redisadmin.TLSPort
+		if redisadmin.PreTLS(spec.Version) {
+			// Redis before 6.0 has no TLS: a front serves it (#1768),
+			// from the storage image.
+			if p.frontImage == nil {
+				return "", fmt.Errorf("in-transit encryption on %s needs the cloudburrow-storage image, which this instance cannot build", spec.Version)
+			}
+			img, err := p.frontImage(ctx)
+			if err != nil {
+				return "", fmt.Errorf("in-transit encryption on %s: the cloudburrow-storage image its TLS front runs from: %w", spec.Version, err)
+			}
+			settings.TLSFront, settings.FrontImage = true, img
+			settings.Instance, settings.Namespace = memorystoreNodeSuffix.ReplaceAllString(spec.Server, ""), p.cfg.Cluster.Namespace
+		}
 	}
 	b := components.MemorystoreServerOf(settings)
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
@@ -604,6 +635,9 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 // memorystoreImages are the server images of redis_version (#1386); the
 // Valkey image, REDIS_7_2, is the default.
 var memorystoreImages = map[string]string{
+	"REDIS_3_2": components.MemorystoreRedis32Image,
+	"REDIS_4_0": components.MemorystoreRedis40Image,
+	"REDIS_5_0": components.MemorystoreRedis50Image,
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
 	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 is the

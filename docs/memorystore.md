@@ -5,7 +5,8 @@ server, in the cluster (#296). It follows the [Cloud SQL](cloudsql.md) decision 
 publishes no Memorystore emulator, so what runs is the kind of server Memorystore itself runs,
 giving an application a real data plane at a stable local address. Since #1302 the
 Memorystore admin API describes that server, and creates, resizes and deletes instances of
-your own, each a Valkey server of its own (§4).
+your own, each a server of its own running its `redis_version`: Redis 6.2 for `REDIS_6_X`,
+Redis 7.0 for `REDIS_7_0`, and Valkey 8.1 for `REDIS_7_2`, the default (§4).
 
 ## 1. What you get
 
@@ -48,12 +49,14 @@ the volume.
 ## 3. What you do not get
 
 **Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC or
-STANDARD_HA tier (§5) and `REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`, with or without in-transit
+STANDARD_HA tier (§5) and `REDIS_3_2`, `REDIS_4_0`, `REDIS_5_0`, `REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`, with or without in-transit
 encryption (§6) and with or without a customer-managed key (§7): no maintenance windows and no IAM.
 Each is 501.
-`REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` are 501 too: they are end of life, and the Docker official
-`redis` image no longer builds them (3.2 last in October 2018, 4.0 in April 2020, 5.0 in November
-2022), so there is no maintained image to run. Export and import to and from Cloud Storage RDB
+`REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` (#1524) run Redis 3.2.12, 4.0.14 and 5.0.14, the last
+release of each line the Docker official `redis` image built; what Memorystore documents for later
+versions only is refused as it documents it (LFU policies, `activedefrag` and `lfu-*` need 4.0,
+`stream-node-*` and read replicas 5.0), and in-transit encryption on them is 501, as Redis before 6.0
+has no TLS of its own (#1768). Export and import to and from Cloud Storage RDB
 files, and RDB persistence, are served (#1384) when the instance runs `storage` too.
 
 **No authentication on the server `up` runs.** Protected mode is off and there is no password,
@@ -77,9 +80,11 @@ server (`REDIS_7_2`, 1 GB: the server runs with `--maxmemory 1gb` and Memorystor
 `UpdateInstance` and `DeleteInstance` on it are FAILED_PRECONDITION. Run `up` without
 `memorystore` in `--services` to have none.
 
-**Instances you create** are each a Valkey server of their own: a Deployment and Service in the
-cluster, of the same image and settings, reached from the host through a tunnel of their own on
-an OS-assigned port, which the instance's `host` and `port` report.
+**Instances you create** are each a server of their own: a Deployment and Service in the
+cluster, with the settings of the server `up` runs and the image of the instance's
+`redis_version` (`redis:6.2` for `REDIS_6_X`, `redis:7.0` for `REDIS_7_0`, and the same Valkey 8.1
+image for `REDIS_7_2`, the default), reached from the host through a tunnel of their own on an
+OS-assigned port, which the instance's `host` and `port` report.
 
 ```go
 c, _ := redis.NewCloudRedisClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_MEMORYSTORE_ENDPOINT")),
@@ -123,7 +128,7 @@ The console's Memorystore page lists the instances and has **Create instance**, 
 the instance `up` runs; the API itself has no flush. `ExportInstance` writes a `BGSAVE` snapshot
 to a `gs://` object; `ImportInstance` replaces the instance's data with an RDB file's, loaded by
 the server itself (`--services memorystore,storage`). `persistence_config` RDB sets the server's
-save point to the snapshot period, in place of the append-only file. `UpgradeInstance` moves an instance to a later version (REDIS_6_X is Redis 6.2, REDIS_7_0 Redis
+save point to the snapshot period, in place of the append-only file. `UpgradeInstance` moves an instance to a later version (REDIS_3_2 is Redis 3.2, REDIS_4_0 Redis 4.0, REDIS_5_0 Redis 5.0, REDIS_6_X Redis 6.2, REDIS_7_0 Redis
 7.0, REDIS_7_2 Valkey 8.1) with its data, and **Upgrade** on its page does too (#1386).
 `FailoverInstance` promotes a Standard tier instance's replica (§5); `RescheduleMaintenance` is
 FAILED_PRECONDITION, since no maintenance is ever scheduled. See
@@ -615,7 +620,10 @@ reason.
 `ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and
 restore through `managed_backup_source` or `gcs_source` are a Redis cluster's (§8), for an
 instance in either mode: a `CLUSTER_DISABLED` instance's backup is its primary's file, and a
-restore MIGRATEs the keys to its primary. Memorystore for Valkey has no ACL policies.
+restore MIGRATEs the keys to its primary. ACL policies (`google.cloud.memorystore.v1`
+`aclPolicies`, since #1578) are a Redis cluster's too: an instance's `acl_policy`, at create or
+through `UpdateInstance`, makes each rule a Valkey ACL user on every node; an update of the policy
+sets the new rules on every node of each attached instance (`internal/service/redisadmin/memorystoreacl.go`).
 
 In-transit encryption (`SERVER_AUTHENTICATION`) and `IAM_AUTH` are a Redis cluster's (§8): a CA of
 the instance's own, which `GetCertificateAuthority` returns as `managedServerCa` (gRPC

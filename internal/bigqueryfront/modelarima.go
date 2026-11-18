@@ -55,9 +55,12 @@ import (
 // (modelarimadecomp.go, #1518): the ARIMA is fitted to what is left, and
 // a forecast adds the seasonal components back; forecast_limit_lower_bound
 // and forecast_limit_upper_bound clamp the forecast and its interval
-// (UNVERIFIED). Refused 501: holiday_region (Google's holiday calendar),
-// hierarchical_time_series_cols, more than one time_series_id_col, and
-// ARIMA_PLUS_XREG.
+// (UNVERIFIED). Custom holidays (CREATE MODEL … AS (training_data AS
+// (…), custom_holiday AS (…))) are a stage of their own (modelholiday.go,
+// #1776). Refused 501: holiday_region (Google's holiday calendar),
+// hierarchical_time_series_cols and more than one time_series_id_col.
+// ARIMA_PLUS_XREG is this pipeline on a linear regression's residuals
+// (modelxreg.go, #1766).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
 
 // tsOptions are an ARIMA_PLUS model's options.
@@ -84,6 +87,9 @@ type tsOptions struct {
 	// forecast_limit_upper_bound.
 	LimitLower *float64 `json:"forecastLimitLowerBound,omitempty"`
 	LimitUpper *float64 `json:"forecastLimitUpperBound,omitempty"`
+	// Holidays are the custom_holiday query's rows (modelholiday.go,
+	// #1776).
+	Holidays []customHoliday `json:"customHolidays,omitempty"`
 }
 
 // applyArimaDefaults sets an ARIMA_PLUS model's documented defaults.
@@ -194,6 +200,9 @@ type arimaSeries struct {
 	// which forecasts it (#1600, modelets.go). A model trained before
 	// #1600 has none, and it is fitted when the model is read.
 	ETS []seasonETS `json:"ets,omitempty"`
+	// Holidays are the custom holidays and their effects (modelholiday.go,
+	// #1776).
+	Holidays []arimaHoliday `json:"holidays,omitempty"`
 }
 
 // withETS is s with each seasonal component's smoothing fitted.
@@ -220,6 +229,7 @@ func (s arimaSeries) adjusted() []float64 {
 		if s.Steps != nil {
 			x[k] -= s.Steps[k]
 		}
+		x[k] -= s.holidayAt(k)
 	}
 	return x
 }
@@ -285,7 +295,7 @@ func (s arimaSeries) arimaForecast(ts tsOptions, cond, h int, z float64) (fc, se
 	_, tr, se := s.arimaPath(s.Cands[0], cond, h)
 	n := len(s.Data)
 	for k := 0; k < h; k++ {
-		v := tr[k] + s.seasonalAt(n+k)
+		v := tr[k] + s.seasonalAt(n+k) + s.holidayAt(n+k)
 		fc = append(fc, ts.limit(v))
 		lo = append(lo, ts.limit(v-z*se[k]))
 		hi = append(hi, ts.limit(v+z*se[k]))
@@ -467,6 +477,9 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			}
 		}
 	}
+	if len(ts.Holidays) > 0 && a.Frequency != "DAILY" {
+		return t, mlInvalid("Custom holiday modeling requires daily time series data: with data_frequency AUTO_FREQUENCY, the actual frequency of the data must be daily, not %s", a.Frequency)
+	}
 	// The candidates' orders.
 	type order struct {
 		p, q int
@@ -522,7 +535,10 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			k = r
 		}
 		// The pipeline's stages before the ARIMA (#1518).
-		dc := decomposeSeries(s.Data, a.Frequency, ts)
+		if len(ts.Holidays) > 0 {
+			s.Holidays = seriesHolidays(ts.Holidays, start) // #1776
+		}
+		dc := decomposeSeries(s.Data, a.Frequency, ts, s.Holidays)
 		s.Seasons, s.Seasonal, s.Spikes, s.Steps = dc.Seasons, dc.Seasonal, dc.Spikes, dc.Steps
 		s = s.withETS()
 		// The points the trend is modelled on.
@@ -984,6 +1000,7 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 			return "", 400, "ML.EXPLAIN_FORECAST requires a model trained with decompose_time_series TRUE"
 		}
 		z := normalQuantile(level)
+		names := holidayNames(ts.Holidays)
 		var rows []string
 		for _, s := range a.Series {
 			if len(s.Cands) == 0 {
@@ -1026,13 +1043,15 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 					// The adjusted data: the data cleaned of spikes and dips,
 					// step changes and the residual, the trend plus the
 					// seasonal components.
+					// The holiday effect (#1776) is part of the adjusted data.
+					hol, each := s.holidayCols(names, k)
 					res, adj := math.NaN(), s.Data[k]-other
 					if !math.IsNaN(trend[k]) {
-						adj = trend[k] + sum
+						adj = trend[k] + sum + s.holidayAt(k)
 						res = s.Data[k] - adj - other
 					}
-					rows = append(rows, fmt.Sprintf("(%s%s, 'history', %s, %s, %s, NULL, NULL, NULL, %s, %s, NULL, %s, %s, %s)",
-						idVal(s), sqlTS(s.Times[k]), sqlF(s.Data[k]), sqlF(adj), sqlF(sigma), sqlNaN(trend[k]), seas, spikes, steps, sqlNaN(res)))
+					rows = append(rows, fmt.Sprintf("(%s%s, 'history', %s, %s, %s, NULL, NULL, NULL, %s, %s, %s, %s, %s, %s%s)",
+						idVal(s), sqlTS(s.Times[k]), sqlF(s.Data[k]), sqlF(adj), sqlF(sigma), sqlNaN(trend[k]), seas, hol, spikes, steps, sqlNaN(res), joinLead(each)))
 				}
 			}
 			for k := 0; k < h; k++ {
@@ -1045,8 +1064,9 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 				// A forecast is its trend plus its seasonal components; the
 				// trend takes up what the forecast limits cut off.
 				seas, sum := seasonCols(last + k + 1)
-				rows = append(rows, fmt.Sprintf("(%s%s, 'forecast', %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL, NULL)",
-					idVal(s), sqlTS(tm), sqlF(fc[k]), sqlF(fc[k]), sqlF(se[k]), sqlF(level), sqlF(lo[k]), sqlF(hi[k]), sqlF(fc[k]-sum), seas))
+				hol, each := s.holidayCols(names, last+k+1)
+				rows = append(rows, fmt.Sprintf("(%s%s, 'forecast', %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL%s)",
+					idVal(s), sqlTS(tm), sqlF(fc[k]), sqlF(fc[k]), sqlF(se[k]), sqlF(level), sqlF(lo[k]), sqlF(hi[k]), sqlF(fc[k]-sum-s.holidayAt(last+k+1)), seas, hol, joinLead(each)))
 			}
 		}
 		if c.fn == "FORECAST" {
@@ -1058,7 +1078,9 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 			"time_series_adjusted_data FLOAT64, standard_error FLOAT64, confidence_level FLOAT64, prediction_interval_lower_bound FLOAT64, "+
 			"prediction_interval_upper_bound FLOAT64, trend FLOAT64, seasonal_period_yearly FLOAT64, seasonal_period_quarterly FLOAT64, "+
 			"seasonal_period_monthly FLOAT64, seasonal_period_weekly FLOAT64, seasonal_period_daily FLOAT64, holiday_effect FLOAT64, "+
-			"spikes_and_dips FLOAT64, step_changes FLOAT64, residual FLOAT64>", rows), 0, ""
+			"spikes_and_dips FLOAT64, step_changes FLOAT64, residual FLOAT64"+holidayColumnTypes(names)+">", rows), 0, ""
+	case "HOLIDAY_INFO":
+		return holidayInfo(md, c) // modelholiday.go, #1776
 	case "ARIMA_EVALUATE":
 		all := true
 		if v, ok := c.struc["show_all_candidate_models"]; ok {
@@ -1084,8 +1106,8 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 				if k > 0 && !all {
 					break
 				}
-				rows = append(rows, fmt.Sprintf("(%s%d, %d, %d, %t, %s, %s, %s, [%s], FALSE, %t, %t, NULL)", idVal(s), fit.P, fit.D, fit.Q,
-					fit.Drift, sqlF(fit.LogLik), sqlF(fit.AIC), sqlF(fit.Sigma2), strings.Join(names, ", "), nonZero(s.Spikes), nonZero(s.Steps)))
+				rows = append(rows, fmt.Sprintf("(%s%d, %d, %d, %t, %s, %s, %s, [%s], %t, %t, %t, NULL)", idVal(s), fit.P, fit.D, fit.Q,
+					fit.Drift, sqlF(fit.LogLik), sqlF(fit.AIC), sqlF(fit.Sigma2), strings.Join(names, ", "), s.hasHoliday(), nonZero(s.Spikes), nonZero(s.Steps)))
 			}
 		}
 		return mlRowsSubquery("STRUCT<"+idCol+"non_seasonal_p INT64, non_seasonal_d INT64, non_seasonal_q INT64, has_drift BOOL, log_likelihood FLOAT64, "+
@@ -1141,7 +1163,7 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 					// The expected value: the trend's fit, the seasonal
 					// components and the step changes; a spike or dip is
 					// what stands out from it.
-					fitted[k] += s.seasonalAt(k)
+					fitted[k] += s.seasonalAt(k) + s.holidayAt(k)
 					if s.Steps != nil {
 						fitted[k] += s.Steps[k]
 					}
@@ -1284,6 +1306,12 @@ func (md bqModel) arimaResource() (opts map[string]any, info []map[string]any) {
 	if ts.IDCol != "" {
 		opts["timeSeriesIdColumn"] = ts.IDCol
 	}
+	if md.Options.ModelType == "ARIMA_PLUS_XREG" {
+		// Its regression's (modelxreg.go, #1766); it has no
+		// decomposition or forecast limits.
+		opts["l2Regularization"] = md.Options.L2
+		delete(opts, "decomposeTimeSeries")
+	}
 	if ts.AutoArima {
 		opts["autoArimaMaxOrder"], opts["autoArimaMinOrder"] = strconv.Itoa(ts.MaxOrder), strconv.Itoa(ts.MinOrder)
 	} else {
@@ -1298,7 +1326,7 @@ func (md bqModel) arimaResource() (opts map[string]any, info []map[string]any) {
 			"nonSeasonalOrder":    map[string]string{"p": strconv.Itoa(fit.P), "d": strconv.Itoa(fit.D), "q": strconv.Itoa(fit.Q)},
 			"arimaCoefficients":   map[string]any{"autoRegressiveCoefficients": fit.AR, "movingAverageCoefficients": fit.MA, "interceptCoefficient": fit.Mu},
 			"arimaFittingMetrics": map[string]any{"logLikelihood": fit.LogLik, "aic": fit.AIC, "variance": fit.Sigma2},
-			"hasDrift":            fit.Drift, "seasonalPeriods": s.seasonNames(), "hasHolidayEffect": false,
+			"hasDrift":            fit.Drift, "seasonalPeriods": s.seasonNames(), "hasHolidayEffect": s.hasHoliday(),
 			"hasSpikesAndDips": nonZero(s.Spikes), "hasStepChanges": nonZero(s.Steps),
 		}
 		if s.ID != nil {

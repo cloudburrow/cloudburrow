@@ -213,8 +213,9 @@ func TestBigQueryStorageReadAPIStreamsArrowRows(t *testing.T) {
 	}
 }
 
-// TestBigQueryOtherProjectsAreNotFound records the single-project limit as
-// the client sees it, so a change in it is noticed.
+// TestBigQueryOtherProjectsAreNotFound: a project Resource Manager does not
+// have, the harness's own, is 404 (#1764: one it has is served,
+// TestBigQueryServesEveryResourceManagerProject).
 func TestBigQueryOtherProjectsAreNotFound(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)

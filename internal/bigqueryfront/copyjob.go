@@ -44,6 +44,9 @@ import (
 //   - createDisposition (default CREATE_IF_NEEDED): CREATE_NEVER fails when
 //     the destination does not exist, "Not found".
 //   - Several sources (sourceTables) are copied into one table.
+//   - A new destination is partitioned and clustered as the first source,
+//     and the sources' and an existing destination's partitioning and
+//     clustering must match as BigQuery documents (#1759, copylayout.go).
 //
 // A failure BigQuery reports on the job (a source or the destination's
 // dataset not found, a view as a source, the destination not empty) fails
@@ -65,7 +68,7 @@ import (
 // implies a clone may overwrite one, "If the table clone overwrites an
 // existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration,
 // destinationExpirationTime into a table that exists (whether it changes
-// that table's expiration is not documented), a table of another project, and a WRITE_APPEND (or
+// that table's expiration is not documented), and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
 // from the source's (BigQuery's rules for which differences it accepts
 // are not given in its documentation). A dry run is 501 (startOwnJob).
@@ -106,6 +109,9 @@ type copyTable struct {
 	// table's own; else nil. A destination made from it is partitioned
 	// as it is, and insertSelect keeps each row's _PARTITIONTIME.
 	partitionTime any
+	// layout is the table's partitioning and clustering, as tables.get
+	// gives them (#1759, copylayout.go).
+	layout map[string]json.RawMessage
 }
 
 // partitionExtra returns the Table fields that make a new table
@@ -161,10 +167,19 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		if !strings.Contains(s.TableID, "@") {
 			continue
 		}
-		t, code, reason, msg := f.copySourceAt(r, s)
+		// Another project's table is read as it was in its own project
+		// (#1767): its change history is that project's.
+		sf, sref := f, s
+		if s.ProjectID != "" && s.ProjectID != project {
+			sf, sref.ProjectID = f.inProject(s.ProjectID), ""
+		}
+		t, code, reason, msg := sf.copySourceAt(r, sref)
 		if code != 0 {
 			writeError(w, code, reason, msg)
 			return
+		}
+		if sf.base != f.base {
+			t.ref.ProjectID = s.ProjectID
 		}
 		past[i], srcs[i] = t, t.ref
 	}
@@ -200,9 +215,26 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			invalid("Required parameter is missing: a table reference of the copy job has no datasetId or tableId.")
 			return
 		}
-		if t.ProjectID != "" && t.ProjectID != project {
-			notImplemented(fmt.Sprintf("of a table of project %s, not the job's project %s. CloudBurrow copies "+
-				"tables within the job's project only.", t.ProjectID, project))
+	}
+	// A table of another project than the job's is read or written there
+	// (#1764, #1767): "the source and destination tables ... can be in
+	// different projects" is BigQuery's copy (managing-tables#copy-table),
+	// partitioned or not, and a source read at a past time (table@time)
+	// is read in its own project (above).
+
+	// A table of the job's project is named without it, as before.
+	for i := range srcs {
+		if srcs[i].ProjectID == project {
+			srcs[i].ProjectID = ""
+		}
+	}
+	destRef := *c.DestinationTable
+	if destRef.ProjectID == project {
+		destRef.ProjectID = ""
+	}
+
+	if op == "" || op == "COPY" || op == "OPERATION_TYPE_UNSPECIFIED" {
+		if f.refuseLayout(w, r, srcs, past, *c.DestinationTable) { // #1759, copylayout.go
 			return
 		}
 	}
@@ -219,7 +251,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			continue
 		}
 		sources[i] = f.copyTableMeta(r, s)
-		if win, ok := f.buffers.window(project, s.DatasetID, s.TableID); ok && win.Column {
+		if win, ok := f.buffers.window(refProject(s, project), s.DatasetID, s.TableID); ok && win.Column {
 			// "Recent streaming data isn't present in the destination
 			// table" (#1273, streamingbuffer.go).
 			sources[i].where = bufferedRows + " IS NULL"
@@ -228,7 +260,9 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	if f.refuseLinkedWrite(w, r, c.DestinationTable.DatasetID, "a copy job") { // #1423, loglinks.go
 		return
 	}
-	dest := f.copyTableMeta(r, *c.DestinationTable)
+	dest := f.copyTableMeta(r, destRef)
+	// The destination's own project, where it is made and written.
+	in := f.inProject(refProject(dest.ref, project))
 	if dest.exists && isView(dest.kind) {
 		notImplemented(fmt.Sprintf("into %s, which is a %s.", tableName(project, dest.ref), dest.kind))
 		return
@@ -253,7 +287,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	}
 	appending := dest.exists && write != "WRITE_TRUNCATE"
 	if appending && sources[0].exists && !sameSchema(dest.fields, sources[0].fields) {
-		if write == "WRITE_APPEND" || f.emptyTable(r, dest.ref.DatasetID, dest.ref.TableID, nil) {
+		if write == "WRITE_APPEND" || in.emptyTable(r, dest.ref.DatasetID, dest.ref.TableID, nil) {
 			notImplemented(fmt.Sprintf("with %s into %s, whose schema differs from the source's. BigQuery's documentation "+
 				"does not give which differences it accepts.", write, tableName(project, dest.ref)))
 			return
@@ -309,12 +343,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			fail("notFound", "Not found: Table "+tableName(project, dest.ref))
 			return
 		}
-		if status, _ := f.get(r, "/datasets/"+url.PathEscape(dest.ref.DatasetID)); status == http.StatusNotFound {
-			fail("notFound", "Not found: Dataset "+project+":"+dest.ref.DatasetID)
+		if status, _ := in.get(r, "/datasets/"+url.PathEscape(dest.ref.DatasetID)); status == http.StatusNotFound {
+			fail("notFound", "Not found: Dataset "+refProject(dest.ref, project)+":"+dest.ref.DatasetID)
 			return
 		}
 	}
-	if dest.exists && write == "WRITE_EMPTY" && !f.emptyTable(r, dest.ref.DatasetID, dest.ref.TableID, nil) {
+	if dest.exists && write == "WRITE_EMPTY" && !in.emptyTable(r, dest.ref.DatasetID, dest.ref.TableID, nil) {
 		fail("duplicate", "Already Exists: Table "+tableName(project, dest.ref))
 		return
 	}
@@ -335,7 +369,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			// The emulator keeps a table's snapshotDefinition (measured);
 			// the front answers its type SNAPSHOT and refuses writes to it.
 			extra = map[string]any{"snapshotDefinition": map[string]any{
-				"baseTableReference": map[string]string{"projectId": project, "datasetId": sources[0].ref.DatasetID,
+				"baseTableReference": map[string]string{"projectId": refProject(sources[0].ref, project), "datasetId": sources[0].ref.DatasetID,
 					"tableId": sources[0].ref.TableID},
 				"snapshotTime": j.start.UTC().Format(time.RFC3339Nano),
 			}}
@@ -347,7 +381,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			// The emulator keeps a table's cloneDefinition (measured), and
 			// tables.get answers it, as BigQuery's does for a clone.
 			extra = map[string]any{"cloneDefinition": map[string]any{
-				"baseTableReference": map[string]string{"projectId": project, "datasetId": sources[0].ref.DatasetID,
+				"baseTableReference": map[string]string{"projectId": refProject(sources[0].ref, project), "datasetId": sources[0].ref.DatasetID,
 					"tableId": sources[0].ref.TableID},
 				"cloneTime": j.start.UTC().Format(time.RFC3339Nano),
 			}}
@@ -358,9 +392,18 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			}
 			extra["expirationTime"] = expiration
 		}
-		if err = f.makeTableWith(r, dest.ref, sources[0].schema, partitionExtra(sources, extra)); err == "" {
+		// "All of the partitioning information is copied with the table",
+		// and "all of the clustering information" (#1759, copylayout.go),
+		// in the destination's project (#1767).
+		made := in.newTableLayout(r, sources[0].layout, snapshot, dest.ref.DatasetID)
+		for k, v := range partitionExtra(sources, extra) {
+			if _, ok := made[k]; !ok || k != "timePartitioning" {
+				made[k] = v
+			}
+		}
+		if err = in.makeCopyTable(r, dest.ref, sources[0].schema, made); err == "" {
 			if err = f.insertSelect(r, dest.ref, sources); err != "" {
-				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
+				in.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
 			}
 		}
 	default: // WRITE_TRUNCATE of a table that exists
@@ -368,8 +411,13 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		if err = f.makeTableWith(r, scratch, sources[0].schema, partitionExtra(sources, nil)); err == "" {
 			defer f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 			if err = f.insertSelect(r, scratch, sources); err == "" {
-				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
-				if err = f.makeTableWith(r, dest.ref, sources[0].schema, partitionExtra(sources, nil)); err == "" {
+				in.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
+				// The destination keeps its own partitioning and clustering,
+				// which match the source's or, of a partitioned source into
+				// a table that is not, "remains unpartitioned" (#1759,
+				// copylayout.go).
+				if err = in.makeCopyTable(r, dest.ref, sources[0].schema, in.newTableLayout(r, dest.layout, false,
+					dest.ref.DatasetID)); err == "" {
 					err = f.insertSelect(r, dest.ref, []copyTable{{ref: scratch, fields: sources[0].fields,
 						partitionTime: sources[0].partitionTime}})
 				}
@@ -412,7 +460,11 @@ func copyExpiration(raw json.RawMessage) (millis string, set, ok bool) {
 // copyTableMeta reads a table through tables.get.
 func (f front) copyTableMeta(r *http.Request, ref tableRef) copyTable {
 	t := copyTable{ref: ref}
-	status, got := f.get(r, tablePath(ref.DatasetID, ref.TableID))
+	of := f
+	if ref.ProjectID != "" {
+		of = f.inProject(ref.ProjectID) // #1764
+	}
+	status, got := of.get(r, tablePath(ref.DatasetID, ref.TableID))
 	var meta struct {
 		Type   string          `json:"type"`
 		Schema json.RawMessage `json:"schema"`
@@ -424,11 +476,29 @@ func (f front) copyTableMeta(r *http.Request, ref tableRef) copyTable {
 	_ = json.Unmarshal(meta.Schema, &s)
 	t.exists, t.kind, t.schema, t.fields = true, meta.Type, meta.Schema, s.Fields
 	t.snapshot = snapshotDefinitionOf(got)
+	t.layout = layoutOf(got)
 	return t
 }
 
 func isView(kind string) bool {
 	return strings.EqualFold(kind, "VIEW") || strings.EqualFold(kind, "MATERIALIZED_VIEW")
+}
+
+// refProject is ref's project: its own, else the job's.
+func refProject(ref tableRef, project string) string {
+	if ref.ProjectID != "" {
+		return ref.ProjectID
+	}
+	return project
+}
+
+// refPath is ref as a path a query of project's job names: with its
+// project when that is another (#1764).
+func refPath(ref tableRef, project string) []string {
+	if ref.ProjectID != "" && ref.ProjectID != project {
+		return []string{ref.ProjectID, ref.DatasetID, ref.TableID}
+	}
+	return []string{ref.DatasetID, ref.TableID}
 }
 
 // tableName writes a table as BigQuery's messages name it,
@@ -507,7 +577,7 @@ func (f front) makeTableWith(r *http.Request, ref tableRef, schema json.RawMessa
 // selectAll writes SELECT of the columns of fields FROM each source,
 // joined with UNION ALL; with pt, each row's _PARTITIONTIME too, as _cb_pt
 // (partitionTime).
-func selectAll(fields []field, sources []copyTable, pt bool) string {
+func selectAll(fields []field, sources []copyTable, pt bool, project string) string {
 	cols := make([]string, len(fields))
 	for i, fl := range fields {
 		cols[i] = quoteName(fl.Name)
@@ -515,10 +585,10 @@ func selectAll(fields []field, sources []copyTable, pt bool) string {
 	list := strings.Join(cols, ", ")
 	parts := make([]string, len(sources))
 	for i, s := range sources {
-		parts[i] = "SELECT " + list + " FROM " + quotePath([]string{s.ref.DatasetID, s.ref.TableID})
+		parts[i] = "SELECT " + list + " FROM " + quotePath(refPath(s.ref, project))
 		if pt {
 			parts[i] = "SELECT " + list + ", _PARTITIONTIME AS " + pastPartitionTime + " FROM " +
-				quotePath([]string{s.ref.DatasetID, s.ref.TableID})
+				quotePath(refPath(s.ref, project))
 		}
 		if s.from != "" {
 			extra := ""
@@ -552,17 +622,17 @@ func (f front) insertSelect(r *http.Request, dest tableRef, sources []copyTable)
 	for _, s := range sources {
 		keep = keep && s.partitionTime != nil
 	}
-	rows := selectAll(fields, sources, false)
+	rows := selectAll(fields, sources, false, projectOf(f.base))
 	pcols := ""
 	if keep {
-		if m, ok := f.partitionMetaOf(r, dest.DatasetID, dest.TableID); ok && m.ingestion() {
+		if m, ok := f.inProject(refProject(dest, projectOf(f.base))).partitionMetaOf(r, dest.DatasetID, dest.TableID); ok && m.ingestion() {
 			var pvals string
 			pcols, pvals = ingestionColumns(m, "")
 			rows = "SELECT " + list + strings.ReplaceAll(pvals, "_PARTITIONTIME", pastPartitionTime) +
-				" FROM (" + selectAll(fields, sources, true) + ")"
+				" FROM (" + selectAll(fields, sources, true, projectOf(f.base)) + ")"
 		}
 	}
-	sql := "INSERT INTO " + quotePath([]string{dest.DatasetID, dest.TableID}) + " (" + list + pcols + ") " + rows
+	sql := "INSERT INTO " + quotePath(refPath(dest, projectOf(f.base))) + " (" + list + pcols + ") " + rows
 	legacy := false
 	body, err := json.Marshal(queryOptions{Query: sql, UseLegacySQL: &legacy})
 	if err != nil {
@@ -581,7 +651,7 @@ func (f front) countRows(r *http.Request, sources []copyTable) (int64, string) {
 		return 0, ""
 	}
 	legacy := false
-	body, err := json.Marshal(queryOptions{Query: "SELECT COUNT(*) FROM (" + selectAll(sources[0].fields, sources, false) + ")",
+	body, err := json.Marshal(queryOptions{Query: "SELECT COUNT(*) FROM (" + selectAll(sources[0].fields, sources, false, projectOf(f.base)) + ")",
 		UseLegacySQL: &legacy})
 	if err != nil {
 		return 0, err.Error()

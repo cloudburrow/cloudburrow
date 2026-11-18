@@ -32,11 +32,34 @@ type Generator interface {
 
 // Request is what a generator is asked for.
 //
-// It carries only a prompt. Every generation option the Vertex API defines is
-// refused at the edge, because the runtime honours none of them — so passing
-// one down would be carrying a value nothing reads.
+// The options are set only for a generator that reports HonoursOptions; for
+// any other the edge refuses them (api.go), so a value is never carried down
+// to something that does not read it. Each is a pointer so that "absent" and
+// "zero" differ: temperature 0 is greedy decoding, not "unset".
 type Request struct {
 	Prompt string
+
+	MaxOutputTokens *int32
+	Temperature     *float32
+	TopP            *float32
+	TopK            *int32
+	Seed            *int32
+	// JSONSchema, when set, constrains the output to JSON valid against it
+	// (responseMimeType application/json, #1779).
+	JSONSchema string
+}
+
+// OptionsGenerator is a Generator whose runtime applies Request's sampling
+// options and token limit (cloudburrow_generate, #1797). A Generator that
+// does not implement it, or reports false, has them refused at the edge.
+type OptionsGenerator interface {
+	HonoursOptions() bool
+}
+
+// honoursOptions reports whether gen applies Request's options.
+func honoursOptions(gen Generator) bool {
+	o, ok := gen.(OptionsGenerator)
+	return ok && o.HonoursOptions()
 }
 
 // ErrNoGenerator means generation is not configured.
