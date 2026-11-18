@@ -20,7 +20,7 @@ import { skipUnless } from './guard.mjs';
 
 const skip = skipUnless('FIRESTORE_EMULATOR_HOST');
 
-test('Firebase SDK Write stream over WebChannel: Standard refuses Enterprise-only values, Enterprise stores them', { skip }, async () => {
+test('Firestore Write stream over WebChannel through the Firebase SDK: Standard refuses Enterprise-only values, Enterprise stores them', { skip }, async () => {
   // Every write goes up a WebChannel session, not gRPC.
   const realFetch = globalThis.fetch;
   let channel = 0;

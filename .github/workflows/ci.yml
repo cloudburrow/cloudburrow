@@ -716,7 +716,10 @@ jobs:
           # env` alone. node --test exits 0 when a test skips, and each skips
           # on a missing variable, so every test that ran must have passed:
           # Storage, Pub/Sub, Tasks and Secret Manager here, Firestore in the
-          # emulators shard.
+          # emulators shard: every firestore*.test.mjs file, each test named
+          # "Firestore ..." so storage's skip pattern and emulators' name
+          # pattern both match it (#1785's main run: the Firebase SDK Write
+          # stream tests matched neither, skipped in storage and ran nowhere).
           compat_node() {  # <log> <make args...>
             local log=$1; shift
             NO_COLOR=1 make compat-node CLOUDBURROW_ARGS="${CB[*]}" "$@" | tee "$log"
@@ -726,7 +729,7 @@ jobs:
             fi
           }
           if [ "$SHARD" = emulators ]; then
-            compat_node node.log COMPAT_NODE_TESTS="firestore.test.mjs examples.test.mjs" COMPAT_NODE_FLAGS=--test-name-pattern=Firestore
+            compat_node node.log COMPAT_NODE_TESTS="firestore*.test.mjs examples.test.mjs" COMPAT_NODE_FLAGS=--test-name-pattern=Firestore
           fi
 
           # The flags naming this instance, one per line, for the console

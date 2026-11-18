@@ -18,6 +18,6 @@ import { skipUnless } from './guard.mjs';
 
 const skip = skipUnless('FIRESTORE_EMULATOR_HOST');
 
-test('Firebase SDK Write stream: Standard refuses Enterprise-only values, Enterprise stores them', { skip }, async () => {
+test('Firestore Write stream through the Firebase SDK: Standard refuses Enterprise-only values, Enterprise stores them', { skip }, async () => {
   await writeStream(nodeSDK);
 });
