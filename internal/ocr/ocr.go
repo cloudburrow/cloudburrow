@@ -8,7 +8,10 @@
 // --psm 1: orientation and script detection (the osd model) finds how the
 // page is turned, the page is turned upright, and the LSTM model
 // (tessdata_fast eng, which reads the Latin alphabet) reads it in reading
-// order with automatic page segmentation. A page OSD finds in another
+// order with automatic page segmentation and orientation detection (--psm 1:
+// --psm 3 would save a second detection, about 0.7 s of 6 s a page, but
+// reads a page turned a quarter that the first pass was not confident
+// about, at 0.2 to 0.4, as garbage). A page OSD finds in another
 // script is read with tessdata_fast's model of that script (script/Cyrillic,
 // script/HanS, ...), which SetScriptSource's function fetches on demand
 // (internal/localai pins each by SHA-256 and keeps it in <state-dir>/models).
@@ -26,6 +29,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing/fstest"
@@ -83,8 +87,9 @@ var (
 )
 
 // maxEngines is the most Tesseract instances alive at once; each holds its
-// own linear memory (about 100 MB with both models loaded).
-const maxEngines = 2
+// own linear memory (about 100 MB with both models loaded). Pages are read
+// in parallel up to this many: half the CPUs, at least 2 and at most 4.
+var maxEngines = min(4, max(2, runtime.NumCPU()/2))
 
 func start() error {
 	rtOnce.Do(func() {
@@ -351,10 +356,37 @@ func release(e *engine, ok bool) {
 	<-slots
 }
 
+// Gray is an 8-bit greyscale copy of img, the form Read passes Tesseract;
+// a caller holding several pages for Read keeps them a quarter the size of
+// RGBA.
+func Gray(img image.Image) *image.Gray { return gray(img) }
+
 // gray is an 8-bit greyscale copy of an image, the form Tesseract binarises.
 func gray(img image.Image) *image.Gray {
 	b := img.Bounds()
 	g := image.NewGray(image.Rect(0, 0, b.Dx(), b.Dy()))
+	switch src := img.(type) {
+	case *image.Gray:
+		for y := 0; y < b.Dy(); y++ {
+			copy(g.Pix[y*g.Stride:y*g.Stride+b.Dx()], src.Pix[src.PixOffset(b.Min.X, b.Min.Y+y):])
+		}
+		return g
+	case *image.NRGBA:
+		// What color.GrayModel computes from NRGBA's RGBA (premultiplied
+		// 16-bit values), without an interface call a pixel.
+		for y := 0; y < b.Dy(); y++ {
+			row := src.Pix[src.PixOffset(b.Min.X, b.Min.Y+y):]
+			for x := 0; x < b.Dx(); x++ {
+				p := row[4*x : 4*x+4]
+				a := uint32(p[3])
+				rr := uint32(p[0]) * 0x101 * a / 0xff
+				gg := uint32(p[1]) * 0x101 * a / 0xff
+				bb := uint32(p[2]) * 0x101 * a / 0xff
+				g.Pix[y*g.Stride+x] = uint8((19595*rr + 38470*gg + 7471*bb + 1<<15) >> 24)
+			}
+		}
+		return g
+	}
 	for y := 0; y < b.Dy(); y++ {
 		for x := 0; x < b.Dx(); x++ {
 			g.Pix[y*g.Stride+x] = color.GrayModel.Convert(img.At(b.Min.X+x, b.Min.Y+y)).(color.Gray).Y
@@ -488,7 +520,13 @@ func Read(ctx context.Context, img image.Image, ppi int) (Result, error) {
 		}
 	}
 	h, model := e.lstm, "eng"
-	name, err := scriptModel(ctx, res.Script)
+	// The script of a page OSD is not confident of the orientation of (a
+	// Latin page turned a quarter can be named Devanagari) is not trusted.
+	script = res.Script
+	if res.Confidence < MinConfidence {
+		script = ""
+	}
+	name, err := scriptModel(ctx, script)
 	if err != nil {
 		ok = true // the engine is unharmed
 		return Result{}, err

@@ -124,3 +124,29 @@ func TestReadNonLatinScripts(t *testing.T) {
 		t.Errorf("the Latin scan was found %q and read with %s; want Latin and eng", r.Script, r.Model)
 	}
 }
+
+// TestGrayMatchesColorModel checks gray's fast paths against
+// color.GrayModel, pixel by pixel.
+func TestGrayMatchesColorModel(t *testing.T) {
+	n := image.NewNRGBA(image.Rect(3, 5, 260, 300))
+	for i := range n.Pix {
+		n.Pix[i] = uint8(i*7919 + i/3)
+	}
+	sub := n.SubImage(image.Rect(10, 20, 200, 250))
+	gr := image.NewGray(image.Rect(1, 2, 40, 50))
+	for i := range gr.Pix {
+		gr.Pix[i] = uint8(i * 31)
+	}
+	for _, img := range []image.Image{n, sub, gr, gr.SubImage(image.Rect(5, 6, 30, 40))} {
+		g := gray(img)
+		b := img.Bounds()
+		for y := 0; y < b.Dy(); y++ {
+			for x := 0; x < b.Dx(); x++ {
+				want := color.GrayModel.Convert(img.At(b.Min.X+x, b.Min.Y+y)).(color.Gray).Y
+				if got := g.GrayAt(x, y).Y; got != want {
+					t.Fatalf("%T at %d,%d: %d, want %d", img, x, y, got, want)
+				}
+			}
+		}
+	}
+}

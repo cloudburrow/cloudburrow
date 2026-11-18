@@ -3,6 +3,7 @@ package embedding
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -124,8 +125,9 @@ func DecodePDF(mimeType string, data []byte, text bool) (pages []PDFPage, err er
 	if n > MaxPDFPages {
 		return nil, fmt.Errorf("the PDF has %d pages; at most %d pages are embedded", n, MaxPDFPages)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), ocrTimeout)
-	defer cancel()
+	// Scanned pages are rendered here, one at a time (PDFium's instance is
+	// not shared), and read with OCR together afterwards, in parallel.
+	scans := map[int]*image.Gray{}
 	for i := 0; i < n; i++ {
 		page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}}
 		size, err := inst.FPDF_GetPageSizeByIndex(&requests.FPDF_GetPageSizeByIndex{Document: doc.Document, Index: i})
@@ -149,16 +151,44 @@ func DecodePDF(mimeType string, data []byte, text bool) (pages []PDFPage, err er
 				if err != nil {
 					return nil, fmt.Errorf("page %d: %v", i+1, err)
 				}
-				r, err := ocr.Read(ctx, hi, ocrDPI)
-				if err != nil {
-					return nil, fmt.Errorf("document_ocr: reading page %d: %v", i+1, err)
-				}
-				p.Text = r.Text
+				scans[i] = ocr.Gray(hi)
 			}
 		}
 		pages = append(pages, p)
 	}
+	if err := readScans(pages, scans); err != nil {
+		return nil, err
+	}
 	return pages, nil
+}
+
+// readScans reads every scanned page with OCR, in parallel (internal/ocr
+// bounds how many Tesseract instances run at once), and sets its text.
+func readScans(pages []PDFPage, scans map[int]*image.Gray) error {
+	ctx, cancel := context.WithTimeout(context.Background(), ocrTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
+	errs := make([]error, len(pages))
+	for i, g := range scans {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := ocr.Read(ctx, g, ocrDPI)
+			if err != nil {
+				errs[i] = fmt.Errorf("document_ocr: reading page %d: %v", i+1, err)
+				cancel()
+				return
+			}
+			pages[i].Text = r.Text
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return err
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // renderPage renders a page of w by h points at dpi, smaller when that would

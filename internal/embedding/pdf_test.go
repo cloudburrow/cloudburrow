@@ -1,9 +1,12 @@
 package embedding
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The PDFs in testdata are written by testdata/mkpdf.py (python3 mkpdf.py
@@ -138,4 +141,48 @@ func charErrorRate(got, want string) float64 {
 		prev, cur = cur, prev
 	}
 	return float64(prev[len(b)]) / float64(len(b))
+}
+
+// sixScans is testdata/scan.pdf with an incremental update whose page tree
+// names its page six times: a six-page scan, Google's most.
+func sixScans(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile("testdata/scan.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := bytes.LastIndex(data, []byte("startxref\n"))
+	startxref := strings.TrimSpace(strings.SplitN(string(data[prev+len("startxref\n"):]), "\n", 2)[0])
+	var b bytes.Buffer
+	b.Write(data)
+	off := b.Len()
+	b.WriteString("2 0 obj\n<< /Type /Pages /Kids [ 3 0 R 3 0 R 3 0 R 3 0 R 3 0 R 3 0 R ] /Count 6 >>\nendobj\n")
+	xref := b.Len()
+	fmt.Fprintf(&b, "xref\n0 1\n0000000000 65535 f \n2 1\n%010d 00000 n \ntrailer\n<< /Size 18 /Root 1 0 R /Prev %s >>\nstartxref\n%d\n%%%%EOF\n",
+		off, startxref, xref)
+	return b.Bytes()
+}
+
+// TestDecodePDFOCRSixPages reads six scanned pages, in parallel: each with
+// the one page's CER bound, in well under six times one page's time.
+func TestDecodePDFOCRSixPages(t *testing.T) {
+	want, err := os.ReadFile("testdata/scan.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := sixScans(t)
+	start := time.Now()
+	pages, err := DecodePDF("application/pdf", data, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("six scanned pages in %v", time.Since(start))
+	if len(pages) != 6 {
+		t.Fatalf("%d pages, want 6", len(pages))
+	}
+	for i, p := range pages {
+		if c := charErrorRate(p.Text, string(want)); c > 0.05 {
+			t.Errorf("page %d: CER %.3f over 0.05", i+1, c)
+		}
+	}
 }
