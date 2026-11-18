@@ -13,6 +13,7 @@ import (
 // testdata): pages of Helvetica text, and one page of shapes with no text.
 
 func TestDecodePDF(t *testing.T) {
+	t.Parallel() // the package's slow tests overlap (#1761)
 	data, err := os.ReadFile("testdata/two-pages.pdf")
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +57,7 @@ func TestDecodePDF(t *testing.T) {
 }
 
 func TestDecodePDFRefuses(t *testing.T) {
+	t.Parallel() // the package's slow tests overlap (#1761)
 	read := func(name string) []byte {
 		b, err := os.ReadFile("testdata/" + name)
 		if err != nil {
@@ -89,6 +91,7 @@ func TestDecodePDFRefuses(t *testing.T) {
 // testdata/scan.pdf is a scanned page: one 300 DPI greyscale JPEG of a
 // printed invoice (testdata/scan.txt is its text), with no text layer.
 func TestDecodePDFOCR(t *testing.T) {
+	t.Parallel() // the package's slow tests overlap (#1761)
 	data, err := os.ReadFile("testdata/scan.pdf")
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +169,7 @@ func sixScans(t *testing.T) []byte {
 // TestDecodePDFOCRSixPages reads six scanned pages, in parallel: each with
 // the one page's CER bound, in well under six times one page's time.
 func TestDecodePDFOCRSixPages(t *testing.T) {
+	t.Parallel() // the package's slow tests overlap (#1761)
 	want, err := os.ReadFile("testdata/scan.txt")
 	if err != nil {
 		t.Fatal(err)
