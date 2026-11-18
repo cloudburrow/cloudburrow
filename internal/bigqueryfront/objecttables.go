@@ -273,8 +273,8 @@ func parseObjectTableDDL(sql string) (s objectSpec, ok bool) {
 			s.connection = strings.Join(p, ".")
 			j = k - 1
 		case t[j].is("WITH") && j+3 < end && t[j+1].is("PARTITION") && t[j+2].is("COLUMNS"):
-			if s.unsupported == "" {
-				s.unsupported = "WITH PARTITION COLUMNS"
+			if s.invalid == "" {
+				s.invalid = objectHiveRefusal
 			}
 		case t[j].is("OPTIONS") && j+1 < end && t[j+1].punct("("):
 			opt = j
@@ -293,6 +293,19 @@ func parseObjectTableDDL(sql string) (s objectSpec, ok bool) {
 	}
 	return s, true
 }
+
+// objectHiveRefusal is the 400 of hive partitioning on an object table
+// (WITH PARTITION COLUMNS, hive_partition_uri_prefix,
+// require_hive_partition_filter, hivePartitioningOptions): "Not all
+// storage formats support hive partitioning; requesting hive partitioning
+// on an unsupported format will lead to an error. Currently supported
+// formats are: JSON, CSV, ORC, Avro and Parquet"
+// (https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/tables,
+// HivePartitioningOptions.mode, read 2026-11-18), and an object table has
+// no format ("If ObjectMetadata is set, sourceFormat should be omitted").
+// The text is not measured.
+const objectHiveRefusal = "Hive partitioning is not supported for object tables: it is supported for the formats JSON, CSV, ORC, " +
+	"Avro and Parquet, and an object table (object_metadata) has no format."
 
 // readOptions reads an object table's OPTIONS: false when object_metadata
 // is not among them (another kind of external table, the engine's).
@@ -365,6 +378,10 @@ func (s *objectSpec) readOptions(sql string, t []token) bool {
 				continue
 			}
 			s.cacheMode = v
+		case "hive_partition_uri_prefix", "require_hive_partition_filter":
+			if s.invalid == "" {
+				s.invalid = objectHiveRefusal
+			}
 		case "description", "friendly_name":
 			v, ok := str()
 			if !ok {
@@ -1007,6 +1024,9 @@ func (f front) serveObjectTableStatements(w http.ResponseWriter, r *http.Request
 		}
 		return done(ds, table, "CALL", "")
 	}
+	if code, msg := f.checkObjectTransform(r, q); code != 0 { // EXTERNAL_OBJECT_TRANSFORM
+		return failed(code, msg)
+	}
 	if p := writeTarget(q.Query); p != nil {
 		if ds, table, ok := tableOf(q, p); ok {
 			if _, live := f.objectTable(r, ds, table); live {
@@ -1125,11 +1145,12 @@ func (f front) insertObjectTable(w http.ResponseWriter, r *http.Request, dataset
 			Fields []json.RawMessage `json:"fields"`
 		} `json:"schema"`
 		External *struct {
-			ObjectMetadata    string   `json:"objectMetadata"`
-			SourceURIs        []string `json:"sourceUris"`
-			ConnectionID      string   `json:"connectionId"`
-			MetadataCacheMode string   `json:"metadataCacheMode"`
-			SourceFormat      string   `json:"sourceFormat"`
+			ObjectMetadata    string          `json:"objectMetadata"`
+			SourceURIs        []string        `json:"sourceUris"`
+			ConnectionID      string          `json:"connectionId"`
+			MetadataCacheMode string          `json:"metadataCacheMode"`
+			SourceFormat      string          `json:"sourceFormat"`
+			Hive              json.RawMessage `json:"hivePartitioningOptions"`
 		} `json:"externalDataConfiguration"`
 	}
 	if json.Unmarshal(b, &body) != nil || body.External == nil || body.External.ObjectMetadata == "" {
@@ -1140,6 +1161,9 @@ func (f front) insertObjectTable(w http.ResponseWriter, r *http.Request, dataset
 		description: body.Description, friendlyName: body.FriendlyName, labels: body.Labels}
 	if body.Schema != nil && len(body.Schema.Fields) > 0 {
 		s.invalid = "An object table has a fixed schema: tables.insert of an objectMetadata takes no schema."
+	}
+	if len(e.Hive) > 0 && string(e.Hive) != "null" && s.invalid == "" {
+		s.invalid = objectHiveRefusal
 	}
 	if e.SourceFormat != "" && s.invalid == "" {
 		s.invalid = "An object table takes no sourceFormat: its rows are the objects' metadata."
@@ -1230,4 +1254,112 @@ func objectRowSQL(row map[string]any) string {
 		sqlString(row["uri"].(string)), row["generation"], opt("content_type"), row["size"], opt("md5_hash"), updated,
 		strings.Join(md, ", "), sqlString(ref["uri"].(string)), sqlString(ref["version"].(string)), sqlString(ref["authorizer"].(string)),
 		sqlString(string(details)))
+}
+
+// refuseObjectTableJob refuses a load or copy job (srcs, a copy's
+// sources) that writes dest when dest is an object table, or that copies
+// an object table: "Object tables are read-only" and "You cannot copy an
+// external table" (https://docs.cloud.google.com/bigquery/docs/external-tables),
+// which object tables are subject to ("Object tables are subject to the
+// same limitations as all other BigQuery external tables",
+// object-table-introduction). The source's refusal is copyJob's of any
+// external table; neither text is measured.
+func (f front) refuseObjectTableJob(w http.ResponseWriter, r *http.Request, dest *tableRef, srcs []tableRef) bool {
+	if !f.objects.any() {
+		return false
+	}
+	project := projectOf(f.base)
+	ours := func(t *tableRef) bool {
+		return t != nil && (t.ProjectID == "" || t.ProjectID == project) && t.DatasetID != "" && t.TableID != "" &&
+			!strings.ContainsAny(t.TableID, "@$") && f.isObjectTable(r, t.DatasetID, t.TableID)
+	}
+	for i := range srcs {
+		if ours(&srcs[i]) {
+			writeError(w, http.StatusBadRequest, "invalid", fmt.Sprintf("%s is not allowed for this operation because it is currently a EXTERNAL.",
+				tableName(project, srcs[i])))
+			return true
+		}
+	}
+	if d := dest; d != nil {
+		id := d.TableID
+		if i := strings.IndexAny(id, "$@"); i > 0 {
+			id = id[:i]
+		}
+		t := tableRef{ProjectID: d.ProjectID, DatasetID: d.DatasetID, TableID: id}
+		if ours(&t) {
+			writeError(w, http.StatusBadRequest, "invalid", readOnlyObjectTable(project, d.DatasetID, id))
+			return true
+		}
+	}
+	return false
+}
+
+// checkObjectTransform checks each EXTERNAL_OBJECT_TRANSFORM(TABLE t,
+// transform_types) in q, as Google documents the table function
+// (https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/table-functions-built-in,
+// read 2026-11-18): "This function only supports object tables as
+// inputs. Subqueries or any other types of tables aren't supported",
+// transform_types "is an array of STRING literals", and "the only
+// supported transform_types_array value is SIGNED_URL" (400 otherwise).
+// A valid call is 501: SIGNED_URL's "read-only signed URLs for the
+// objects", valid 6 hours, need a key the instance's Cloud Storage
+// verifies and the address clients reach it at, which the BigQuery front
+// has neither of (#1786). 0 when q has none. The texts are not measured.
+func (f front) checkObjectTransform(r *http.Request, q queryOptions) (int, string) {
+	if !strings.Contains(strings.ToUpper(q.Query), "EXTERNAL_OBJECT_TRANSFORM") {
+		return 0, ""
+	}
+	t, lexed := lex(q.Query)
+	if !lexed {
+		return 0, ""
+	}
+	const notObject = "EXTERNAL_OBJECT_TRANSFORM only supports object tables as inputs: subqueries or any other types of tables aren't supported."
+	found := false
+	for i := 0; i < len(t); i++ {
+		if !t[i].is("EXTERNAL_OBJECT_TRANSFORM") || i+1 >= len(t) || !t[i+1].punct("(") {
+			continue
+		}
+		found = true
+		j := i + 2
+		if j >= len(t) || !t[j].is("TABLE") {
+			return 400, notObject
+		}
+		p, next := path(t, j+1)
+		ds, table, ok := tableOf(q, p)
+		if !ok || len(p) == 3 && p[0] != projectOf(f.base) {
+			return 400, notObject
+		}
+		if _, live := f.objectTable(r, ds, table); !live {
+			if st, got := f.get(r, tablePath(ds, table)); st != http.StatusOK {
+				return 404, errorMessage(got, st)
+			}
+			return 400, notObject
+		}
+		if next >= len(t) || !t[next].punct(",") || next+1 >= len(t) || !t[next+1].punct("[") {
+			return 400, "EXTERNAL_OBJECT_TRANSFORM's second argument, transform_types_array, is an array of STRING literals."
+		}
+		k := next + 2
+		n := 0
+		for ; k < len(t) && !t[k].punct("]"); k++ {
+			if t[k].punct(",") {
+				continue
+			}
+			v, ok := stringLiteral(t[k])
+			if !ok {
+				return 400, "EXTERNAL_OBJECT_TRANSFORM's second argument, transform_types_array, is an array of STRING literals."
+			}
+			if !strings.EqualFold(v, "SIGNED_URL") {
+				return 400, fmt.Sprintf("Invalid transform type %q for EXTERNAL_OBJECT_TRANSFORM: the only supported transform type is SIGNED_URL.", v)
+			}
+			n++
+		}
+		if n == 0 {
+			return 400, "EXTERNAL_OBJECT_TRANSFORM needs a transform type: the only supported transform type is SIGNED_URL."
+		}
+	}
+	if !found {
+		return 0, ""
+	}
+	return 501, "Not implemented here: EXTERNAL_OBJECT_TRANSFORM(TABLE ..., ['SIGNED_URL']). Signing a Cloud Storage URL needs a key the " +
+		"instance's Cloud Storage verifies, and the address clients reach it at, which CloudBurrow's BigQuery does not have yet (#1786). Nothing was run."
 }

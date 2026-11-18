@@ -29,7 +29,12 @@ import (
 // documented refusals (object_metadata other than SIMPLE, a staleness
 // without a cache mode or outside 30 minutes to 7 days, DML into the
 // read-only table, the data pseudocolumn in a query, a refresh of a
-// table without a MANUAL cache).
+// table without a MANUAL cache); ref.details read as JSON (JSON_VALUE);
+// hive partitioning (WITH PARTITION COLUMNS, hivePartitioningOptions)
+// refused; load and copy jobs into an object table, and a copy of one,
+// refused; EXTERNAL_OBJECT_TRANSFORM of anything but an object table, or
+// with a transform other than SIGNED_URL, refused (SIGNED_URL is 501,
+// #1786).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.insert, bigquery.tables.get, bigquery.tables.list
 func TestBigQueryObjectTables(t *testing.T) {
@@ -132,10 +137,18 @@ func TestBigQueryObjectTables(t *testing.T) {
 	want := []bigquery.Value{"gs://" + bh.BucketName() + "/img/a.txt", attrs.Generation, "text/plain", int64(5),
 		attrs.MD5 != nil, true, "k", "v", "gs://" + bh.BucketName() + "/img/a.txt", fmt.Sprint(attrs.Generation), conn}
 	row[4] = row[4] != nil && row[4].(string) != ""
-	// ref.details holds gcs_metadata; the engine keeps a JSON field of a
-	// STRUCT as JSON text (docs/compatibility.md), so it is read as text.
-	if d := fmt.Sprint(row[11]); !strings.Contains(d, "gcs_metadata") || !strings.Contains(d, "text/plain") {
+	if d := fmt.Sprint(row[11]); !strings.HasPrefix(d, `{"gcs_metadata":`) || !strings.Contains(d, "text/plain") {
 		t.Errorf("ref.details %s", d)
+	}
+	// ref.details is JSON inside the STRUCT: JSON_VALUE reads it.
+	jit, err := c.Query(fmt.Sprintf("SELECT JSON_VALUE(ref.details, '$.gcs_metadata.content_type'), "+
+		"INT64(ref.details.gcs_metadata.size), JSON_TYPE(ref.details) FROM `%s.live` WHERE uri LIKE '%%a.txt'", ds)).Read(ctx)
+	if err != nil {
+		t.Fatalf("JSON_VALUE(ref.details): %v", err)
+	}
+	var jrow []bigquery.Value
+	if err := jit.Next(&jrow); err != nil || fmt.Sprint(jrow) != "[text/plain 5 object]" {
+		t.Errorf("JSON_VALUE(ref.details) = %v, %v", jrow, err)
 	}
 	for i := range want {
 		if fmt.Sprint(row[i]) != fmt.Sprint(want[i]) {
@@ -225,6 +238,55 @@ func TestBigQueryObjectTables(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+	if err := c.Dataset(ds).Table("plain0").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "uri", Type: bigquery.StringFieldType}}}); err != nil {
+		t.Fatal(err)
+	}
+	// Hive partitioning is for JSON, CSV, ORC, Avro and Parquet: an object
+	// table refuses it.
+	if err := mlRun(h, c, fmt.Sprintf("CREATE EXTERNAL TABLE `%s.hive` WITH PARTITION COLUMNS WITH CONNECTION `%s` "+
+		"OPTIONS(object_metadata = 'SIMPLE', uris = ['%s'])", ds, conn, uri)); err == nil || !strings.Contains(err.Error(), "Hive partitioning") {
+		t.Errorf("WITH PARTITION COLUMNS: %v", err)
+	}
+	if err := c.Dataset(ds).Table("hive2").Create(ctx, &bigquery.TableMetadata{ExternalDataConfig: &bigquery.ExternalDataConfig{
+		SourceURIs: []string{uri}, ObjectMetadata: bigquery.ObjectMetadataSimple, ConnectionID: conn,
+		HivePartitioningOptions: &bigquery.HivePartitioningOptions{Mode: bigquery.AutoHivePartitioningMode,
+			SourceURIPrefix: "gs://" + bh.BucketName() + "/img"}}}); err == nil || !strings.Contains(err.Error(), "Hive partitioning") {
+		t.Errorf("tables.insert with hivePartitioningOptions: %v", err)
+	}
+
+	// EXTERNAL_OBJECT_TRANSFORM takes an object table and SIGNED_URL only;
+	// SIGNED_URL itself is 501 (#1786).
+	for name, sql := range map[string]string{
+		"a table":       fmt.Sprintf("SELECT * FROM EXTERNAL_OBJECT_TRANSFORM(TABLE `%s.plain0`, ['SIGNED_URL'])", ds),
+		"a subquery":    fmt.Sprintf("SELECT * FROM EXTERNAL_OBJECT_TRANSFORM((SELECT * FROM `%s.live`), ['SIGNED_URL'])", ds),
+		"another value": fmt.Sprintf("SELECT * FROM EXTERNAL_OBJECT_TRANSFORM(TABLE `%s.live`, ['THUMBNAIL'])", ds),
+	} {
+		if _, err := c.Query(sql).Read(ctx); err == nil || !strings.Contains(err.Error(), "400") && !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("EXTERNAL_OBJECT_TRANSFORM of %s: %v", name, err)
+		}
+	}
+	if _, err := c.Query(fmt.Sprintf("SELECT uri FROM EXTERNAL_OBJECT_TRANSFORM(TABLE `%s.live`, ['SIGNED_URL'])", ds)).Read(ctx); err == nil ||
+		!strings.Contains(err.Error(), "501") {
+		t.Errorf("EXTERNAL_OBJECT_TRANSFORM SIGNED_URL: %v", err)
+	}
+
+	// Load and copy jobs: an object table is read-only, and an external
+	// table cannot be copied.
+	put("load.csv", "text/csv", "gs://x/y\n", nil)
+	ld := c.Dataset(ds).Table("live").LoaderFrom(bigquery.NewGCSReference("gs://" + bh.BucketName() + "/load.csv"))
+	if _, err := ld.Run(ctx); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("a load job into an object table: %v", err)
+	}
+	if err := c.Dataset(ds).Table("plain").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "uri", Type: bigquery.StringFieldType}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Dataset(ds).Table("live").CopierFrom(c.Dataset(ds).Table("plain")).Run(ctx); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("a copy job into an object table: %v", err)
+	}
+	if _, err := c.Dataset(ds).Table("copied").CopierFrom(c.Dataset(ds).Table("live")).Run(ctx); err == nil || !strings.Contains(err.Error(), "EXTERNAL") {
+		t.Errorf("a copy job of an object table: %v", err)
+	}
+
 	if err := mlRun(h, c, create); err == nil || !strings.Contains(err.Error(), "Already Exists") {
 		t.Errorf("a second CREATE: %v", err)
 	}

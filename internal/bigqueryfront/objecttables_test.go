@@ -63,3 +63,16 @@ func TestObjectTableIntervals(t *testing.T) {
 		t.Errorf("writeTarget %v", p)
 	}
 }
+
+func TestObjectTableHiveRefused(t *testing.T) {
+	for _, sql := range []string{
+		"CREATE EXTERNAL TABLE d.t WITH PARTITION COLUMNS WITH CONNECTION `p.us.c` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://b/*'])",
+		"CREATE EXTERNAL TABLE d.t WITH PARTITION COLUMNS (k STRING) WITH CONNECTION `p.us.c` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://b/*'])",
+		"CREATE EXTERNAL TABLE d.t WITH CONNECTION `p.us.c` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://b/*'], hive_partition_uri_prefix = 'gs://b')",
+	} {
+		s, ok := parseObjectTableDDL(sql)
+		if !ok || s.check() != objectHiveRefusal {
+			t.Errorf("%s: ok %v, check %q", sql, ok, s.check())
+		}
+	}
+}
