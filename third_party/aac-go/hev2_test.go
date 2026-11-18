@@ -127,32 +127,33 @@ func readS16(t *testing.T, name string) []float64 {
 // rate, so SBR and PS are found in the stream (implicit signalling).
 //
 // The tolerances are the measured differences (max, RMS) with a margin.
-// The goal of 1e-4 is met only by he-stereo-48k. The larger differences sit
-// in SBR bands whose source is near silent (energies 80 to 90 dB below the
-// frame's peak) and whose gains are tens of dB (the limiter's G_max reaches
-// 7866 in he-implicit-44k): there the output follows the core's last bits.
-// Adding noise of 1e-3 of a 16-bit step (3e-8 of full scale, below
-// ffmpeg's float32 precision) to our core output moves he-lim1-44k's max
-// difference from 2.8e-3 to 3.7e-3, so differences of this size are
-// ffmpeg's float32 arithmetic, amplified, rather than a different
-// algorithm; every alternative reading of the gain, limiter, sinusoid,
-// noise and chirp rules tried made the match worse.
+// The goal of 1e-4 is met by six of the ten, and their RMS (1.8e-5) is the
+// rounding of ffmpeg's 16-bit output. The larger differences sit in SBR
+// bands whose source is near silent (energies 80 to 90 dB below the frame's
+// peak) and whose gains are tens of dB (the limiter's G_max reaches 7866 in
+// he-implicit-44k), where the output follows the core's last bits and any
+// error in the QMF window is amplified. Taking the window's c[64k] from
+// OpenCORE instead of interpolating them (see sbr_tables.go) cut these two
+// to four times (he-lim1-44k from 2.84e-3 to 1.38e-3, he-implicit-44k from
+// 1.58e-3 to 5.67e-4); the
+// window's odd coefficients are still interpolated (about 1e-5 off), which
+// is the one known remaining source.
 func TestHEAACMatchesFFmpeg(t *testing.T) {
 	for _, c := range []struct {
 		file     string
 		rate     int
 		tol, rms float64
 	}{
-		{"he-mono-44k.m4a", 44100, 2.5e-4, 3.5e-5},   // measured 1.77e-4, 2.72e-5
-		{"he-stereo-48k.m4a", 48000, 1e-4, 2.5e-5},   // measured 6.62e-5, 1.81e-5
-		{"hev2-44k.m4a", 44100, 1.2e-3, 1.1e-4},      // measured 8.83e-4, 8.15e-5
-		{"he-implicit-44k.aac", 44100, 2e-3, 2e-4},   // measured 1.58e-3, 1.59e-4
-		{"hev2-implicit-48k.aac", 48000, 2e-4, 3e-5}, // measured 1.30e-4, 2.01e-5
-		{"he-ds-22k.m4a", 22050, 2.5e-4, 3.5e-5},     // measured 1.70e-4, 2.72e-5
-		{"he-lim0-44k.aac", 44100, 1e-3, 8e-5},       // measured 7.84e-4, 5.93e-5
-		{"he-lim1-44k.aac", 44100, 3.5e-3, 4e-4},     // measured 2.84e-3, 3.05e-4
-		{"he-lim3-44k.aac", 44100, 3.5e-3, 4e-4},     // measured 2.85e-3, 2.99e-4
-		{"hev2-speech-44k.m4a", 44100, 1e-4, 2.5e-5}, // measured 7.61e-5, 1.80e-5
+		{"he-mono-44k.m4a", 44100, 6e-5, 2.5e-5},     // measured 4.52e-5, 1.82e-5
+		{"he-stereo-48k.m4a", 48000, 5e-5, 2.5e-5},   // measured 3.78e-5, 1.80e-5
+		{"hev2-44k.m4a", 44100, 3e-4, 3e-5},          // measured 2.05e-4, 2.01e-5
+		{"he-implicit-44k.aac", 44100, 8e-4, 6e-5},   // measured 5.67e-4, 4.03e-5
+		{"hev2-implicit-48k.aac", 48000, 2e-4, 3e-5}, // measured 1.31e-4, 1.95e-5
+		{"he-ds-22k.m4a", 22050, 6e-5, 2.5e-5},       // measured 4.23e-5, 1.81e-5
+		{"he-lim0-44k.aac", 44100, 6e-4, 4.5e-5},     // measured 4.19e-4, 3.11e-5
+		{"he-lim1-44k.aac", 44100, 2e-3, 1.3e-4},     // measured 1.38e-3, 9.16e-5
+		{"he-lim3-44k.aac", 44100, 1e-3, 7e-5},       // measured 6.84e-4, 5.08e-5
+		{"hev2-speech-44k.m4a", 44100, 6e-5, 2.5e-5}, // measured 4.43e-5, 1.78e-5
 	} {
 		asc, aus := heFixture(t, c.file)
 		d, err := NewDecoderASC(asc)

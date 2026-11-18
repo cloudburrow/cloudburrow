@@ -39,18 +39,42 @@ New files, written for CloudBurrow from ISO/IEC 14496-3 (§4.6.18 SBR, §8.6.4 P
   hybrid filterbank, decorrelation (fractional-delay all-pass, delays, transient ducking) and
   mixing procedure A with time interpolation.
 - `sbr_huff.go`, `sbr_tables.go`: the Huffman trees and tables. The tables come from PacketVideo's
-  OpenCORE AAC decoder, Apache License 2.0, as Android ships it
-  (https://android.googlesource.com/platform/frameworks/av/+/android-4.1.1_r1/media/libstagefright/codecs/aacdec/):
-  the SBR Huffman trees from `sbr_code_book_envlevel.cpp`, the PS ones from `ps_read_data.cpp`,
-  the noise table from `sbr_envelope_calc_tbl.cpp` (Q15), and the QMF window from
-  `qmf_filterbank_coeff.cpp`, whose 155 even coefficients give the rest of the 640 by the window's
-  symmetry and 8-point Lagrange interpolation (leave-one-out error below 1.3e-5, 3.7e-5 at c[2];
-  `sbr_tables.go`'s header says how). The exact table (ISO/IEC 14496-3 Table 4.A.90) was looked
-  for and not found in an allowed source: ETSI TS 126 404 V18.0.0 §5.2 refers to a figure that
-  does not carry it, OpenCORE has only the even coefficients (above) and 16-bit ones, US 8775193's
-  annex is the low-delay window, and the only other copy found is ffmpeg's (LGPL, not read). Only
-  these tables were taken; OpenCORE's code was not used. No GPL or LGPL decoder (ffmpeg, FAAD2) or FDK source was read; ffmpeg was only run, to make
-  the fixtures and the reference decodes.
+  OpenCORE AAC decoder, Apache License 2.0, as Android ships it: the SBR Huffman trees from
+  `sbr_code_book_envlevel.cpp`, the PS ones from `ps_read_data.cpp`, the noise table from
+  `sbr_envelope_calc_tbl.cpp` (Q15), and the QMF window from `qmf_filterbank_coeff.cpp` and
+  `calc_sbr_synfilterbank.cpp` (below). Only these tables were taken; OpenCORE's code was not used.
+  No GPL or LGPL decoder (ffmpeg, FAAD2) or FDK source was read; ffmpeg was only run, to make the
+  fixtures and the reference decodes.
+
+### OpenCORE (the tables' source)
+
+Downloaded 2026-11-17, read only as data (never built or run), with the user's approval of that
+day: `https://android.googlesource.com/platform/frameworks/av/+archive/android-4.1.1_r1/media/libstagefright/codecs/aacdec.tar.gz`
+(the directory `media/libstagefright/codecs/aacdec` at tag `android-4.1.1_r1`, with its `NOTICE`
+and `MODULE_LICENSE_APACHE2`). The tables had earlier been obtained file by file; with the whole
+directory at hand:
+
+- Every Huffman tree in `sbr_tables.go` (the ten SBR books, `bookSbrEnvLevel10T` to
+  `bookSbrNoiseBalance11T`, and the six PS books, `aBookPsIidTimeDecode` to
+  `aBookPsIidFineFreqDecode`) and the noise table (`rPxx`) were compared entry by entry with the
+  files: all identical. The limiter gains and the gain smoothing filter in `sbr_dsp.go` match
+  `sbr_envelope_calc_tbl.cpp`'s `limGains` and `fir_table[4]`.
+- The QMF window (ISO/IEC 14496-3 Table 4.A.90) is not in OpenCORE in full. It has the even
+  coefficients c[2n+128j], 1 <= n <= 31, to nine digits (`sbrDecoderFilterbankCoefficients_an_filt`;
+  `_an_filt_LC` is the same values times sqrt(2), to within 4e-15, so no more precise), the
+  coefficients c[64k] to nine digits as constants in `calc_sbr_synfilterbank.cpp`, and
+  c[n+64m], n = 1 to 31, in 16 bits (times 10/9, `sbrDecoderFilterbankCoefficients`). The table
+  had interpolated c[64k]; they are now OpenCORE's, which cut the larger HE-AAC differences from
+  ffmpeg two to four times (table below). c[1] is now the 16-bit value less that table's mean
+  rounding offset; the other odd coefficients stay interpolated (8-point Lagrange on the even
+  ones), and the 16-bit table confirms them to its precision (their rounding offsets match the even
+  coefficients' in every 64-coefficient segment, to within 0.2 of a 16-bit step). The exact table
+  was looked for and not found in an allowed source: ETSI TS 126 404 V18.0.0 §5.2 refers to a
+  figure that does not carry it, US 8775193's annex is the low-delay window, and the only other copy
+  found is ffmpeg's (LGPL, not read).
+- `third_party/aac-go/NOTICE` carries OpenCORE's copyright line, the opening of its `NOTICE`, and
+  the ISO/IEC software copyright notice its table files require in derivative works (Apache-2.0
+  §4(d)); the root `NOTICE` names it.
 
 Changed: `decoder.go` splits `configure` (`configureCore`) and `decodeRawDataBlock`
 (`decodeFrame`, float samples) so both entry points share them, and reads SBR fill elements
@@ -84,27 +108,26 @@ decoded to silence), and four derived from the tone fixtures (downsampled SBR, a
 gain smoothing on), against ffmpeg 9's native decoder, sample by sample; how each was made is in
 `TestHEAACMatchesFFmpeg`'s comment. Measured max and RMS differences (full scale 1.0):
 
-| fixture | max | RMS | test tolerance |
-|---|---|---|---|
-| he-mono-44k.m4a | 1.77e-4 | 2.72e-5 | 2.5e-4, 3.5e-5 |
-| he-stereo-48k.m4a | 6.62e-5 | 1.81e-5 | 1e-4, 2.5e-5 |
-| hev2-44k.m4a | 8.83e-4 | 8.15e-5 | 1.2e-3, 1.1e-4 |
-| he-implicit-44k.aac | 1.58e-3 | 1.59e-4 | 2e-3, 2e-4 |
-| hev2-implicit-48k.aac | 1.30e-4 | 2.01e-5 | 2e-4, 3e-5 |
-| he-ds-22k.m4a (downsampled) | 1.70e-4 | 2.72e-5 | 2.5e-4, 3.5e-5 |
-| he-lim0-44k.aac (limiter 0/0, interpol 0, smoothing) | 7.84e-4 | 5.93e-5 | 1e-3, 8e-5 |
-| he-lim1-44k.aac (limiter 1/3, smoothing) | 2.84e-3 | 3.05e-4 | 3.5e-3, 4e-4 |
-| he-lim3-44k.aac (limiter 3/1, interpol 0) | 2.85e-3 | 2.99e-4 | 3.5e-3, 4e-4 |
-| hev2-speech-44k.m4a (1.5 s of speech) | 7.61e-5 | 1.80e-5 | 1e-4, 2.5e-5 |
+| fixture | max | RMS | before c[64k] (max, RMS) | test tolerance |
+|---|---|---|---|---|
+| he-mono-44k.m4a | 4.52e-5 | 1.82e-5 | 1.77e-4, 2.72e-5 | 6e-5, 2.5e-5 |
+| he-stereo-48k.m4a | 3.78e-5 | 1.80e-5 | 6.62e-5, 1.81e-5 | 5e-5, 2.5e-5 |
+| hev2-44k.m4a | 2.05e-4 | 2.01e-5 | 8.83e-4, 8.15e-5 | 3e-4, 3e-5 |
+| he-implicit-44k.aac | 5.67e-4 | 4.03e-5 | 1.58e-3, 1.59e-4 | 8e-4, 6e-5 |
+| hev2-implicit-48k.aac | 1.31e-4 | 1.95e-5 | 1.30e-4, 2.01e-5 | 2e-4, 3e-5 |
+| he-ds-22k.m4a (downsampled) | 4.23e-5 | 1.81e-5 | 1.70e-4, 2.72e-5 | 6e-5, 2.5e-5 |
+| he-lim0-44k.aac (limiter 0/0, interpol 0, smoothing) | 4.19e-4 | 3.11e-5 | 7.84e-4, 5.93e-5 | 6e-4, 4.5e-5 |
+| he-lim1-44k.aac (limiter 1/3, smoothing) | 1.38e-3 | 9.16e-5 | 2.84e-3, 3.05e-4 | 2e-3, 1.3e-4 |
+| he-lim3-44k.aac (limiter 3/1, interpol 0) | 6.84e-4 | 5.08e-5 | 2.85e-3, 2.99e-4 | 1e-3, 7e-5 |
+| hev2-speech-44k.m4a (1.5 s of speech) | 4.43e-5 | 1.78e-5 | 7.61e-5, 1.80e-5 | 6e-5, 2.5e-5 |
 
+Six of the ten are within 1e-4, with an RMS (1.8e-5) at the rounding of ffmpeg's 16-bit output.
 The larger differences are in SBR bands whose source is near silent (80 to 90 dB below the
 frame's peak) and whose gains are tens of dB (the limiter's G_max reaches 7866 in
-he-implicit-44k), where the output follows the core decoder's last bits: adding noise of 1e-3 of
-a 16-bit step (3e-8 of full scale, below ffmpeg's float32 precision) to the core output moves
-he-lim1-44k's max difference from 2.8e-3 to 3.7e-3. They are ffmpeg's float32 arithmetic,
-amplified, rather than a different algorithm, as far as could be found: every alternative
-reading tried of the gain, limiter, sinusoid, noise-floor, chirp and energy-estimation rules made
-the match worse. `TestHEAACImplicitADTS` checks that `Decode` matches `DecodeAU` on the ADTS
+he-implicit-44k), where the output follows the core decoder's last bits and any window error is
+amplified. They were blamed earlier on ffmpeg's float32 arithmetic; the c[64k] fix shows that most
+of them were the interpolated window, and the odd coefficients, still interpolated (about 1e-5
+off), are the one known remaining source. `TestHEAACImplicitADTS` checks that `Decode` matches `DecodeAU` on the ADTS
 fixtures; `TestDecodeAUMatchesDecodeLC` checks that plain AAC-LC through `DecodeAU` matches
 `Decode`; `TestPSRefusals` checks the refusals above.
 
