@@ -74,6 +74,11 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 		e.in.Parts[2].Image == nil || !strings.Contains(e.in.Parts[3].Text, "sea turtle") {
 		t.Fatalf("PDF with document_ocr: embedder got %+v, want each page and its text", e.in.Parts)
 	}
+	// A scanned page has no text layer: document_ocr reads it with OCR.
+	post(`{"content":{"parts":[` + inline("application/pdf", testdataB64(t, "scan.pdf")) + `]},"embedContentConfig":{"documentOcr":true}}`)
+	if len(e.in.Parts) != 2 || e.in.Parts[0].Image == nil || !strings.Contains(e.in.Parts[1].Text, "Northwind Traders") {
+		t.Fatalf("scanned PDF with document_ocr: embedder got %+v, want the page and its OCR text", e.in.Parts)
+	}
 	// document_ocr without a PDF changes nothing.
 	post(`{"content":{"parts":[{"text":"x"}]},"embedContentConfig":{"documentOcr":true}}`)
 
@@ -84,7 +89,6 @@ func TestEmbedContentVideoAndPDFOnEmbeddingGemma2(t *testing.T) {
 		"frames":     {`{"content":{"parts":[{"inlineData":{"mimeType":"video/mp4","data":"` + video + `"},"videoMetadata":{"fps":24,"endOffset":"200s"}}]}}`, ""},
 		"two pdfs":   {`{"content":{"parts":[` + inline("application/pdf", pdf) + `,` + inline("application/pdf", pdf) + `]}}`, "at most 1 PDF"},
 		"7 pages":    {`{"content":{"parts":[` + inline("application/pdf", testdataB64(t, "seven-pages.pdf")) + `]}}`, "at most 6 pages"},
-		"scan ocr":   {`{"content":{"parts":[` + inline("application/pdf", testdataB64(t, "no-text.pdf")) + `]},"embedContentConfig":{"documentOcr":true}}`, "no OCR engine"},
 		"audio track": {`{"content":{"parts":[` + inline("video/mp4", video) + `]},"embedContentConfig":{"audioTrackExtraction":true}}`,
 			"audio_track_extraction"},
 	} {

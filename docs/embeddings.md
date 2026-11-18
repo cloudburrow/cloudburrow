@@ -402,3 +402,20 @@ docker run --rm -v "$PWD:/models" \
 ```
 
 `pip install litert-lm` provides `litert-lm-peek` and `litert-lm-builder`.
+
+> **Update 2026-11-17 (#1733): `document_ocr` on scanned PDFs.** A PDF page with no text layer (a
+> scan) is no longer refused with `document_ocr`: it is rendered again at 300 DPI and read with
+> Tesseract OCR (5.5.4, compiled to WebAssembly and run on wazero, `internal/ocr`), and its text
+> follows the page's image as text tokens, counted against the request's token limit like any
+> other text. A page with a text layer keeps PDFium's text. The models are tessdata_fast `eng`
+> and `osd`, embedded in the binary; an upside-down page is turned back first. A page in another
+> script (orientation and script detection names it) is read with tessdata_fast 4.1.0's model of
+> that script (`script/Cyrillic`, `script/HanS` for Han, `script/Hangul` for Korean, ...), fetched
+> the first time one is needed into `<state-dir>/models` and checked against the SHA-256 pinned in
+> `internal/localai/tessdata.go`. About 6 seconds a page on one Tesseract instance (orientation
+> and script detection 1.6 s, recognition 4.4 s on an A4 page); a PDF's scanned pages are read in
+> parallel on up to four instances (half the CPUs, at least two), so Google's most, six pages, take
+> about 14 s on a 16-core Apple M-series machine rather than 36 s. **Verified** 2026-11-17 with the official `aiplatform`
+> client (`TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient`: the scanned invoice gains 195
+> tokens of OCR text). The console's Embeddings page has a **PDFs' text (OCR)** box that sends
+> `document_ocr` with each PDF (`TestEmbeddingsPageReadsAScannedPDFWithOCR`).

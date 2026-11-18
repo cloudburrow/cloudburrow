@@ -1,0 +1,11 @@
+INVOICE No. 2026-0417
+Date: 14 March 2026
+Bill to: Northwind Traders Ltd, 221 Harbour Street, Leeds LS1 4AB
+Description of services: quarterly maintenance of the cooling system,
+replacement of two compressor valves and a full pressure test.
+Labour (12.5 hours at 85.00 per hour) 1,062.50
+Parts and materials 348.20
+Subtotal 1,410.70  VAT (20%) 282.14  Total due 1,692.84
+Payment is due within 30 days. Please quote the invoice number
+on all correspondence. Thank you for your business.
+Remarque : le paiement doit être effectué avant la fin du mois.
