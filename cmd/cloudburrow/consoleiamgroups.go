@@ -6,6 +6,14 @@ package main
 // accounts and nested groups), Add member and Remove member, over the same
 // registry Cloud Identity's groups and memberships API serves, so a group
 // made here is one the official client and IAM see.
+//
+// #1817 adds the rest of the API: the list's search box (groups.search),
+// Change roles and a MEMBER expiry on a member's row
+// (modifyMembershipRoles), Add member with an expiry, the group's
+// Transitive members tab (searchTransitiveMemberships), and a member's page
+// with its membership graph up to the group (getMembershipGraph) and the
+// groups it belongs to directly (searchDirectGroups); see
+// consoleiamgroupsmembers.go.
 
 import (
 	"context"
@@ -47,11 +55,29 @@ func groupType(g *resourcemanager.Group) string {
 	return "Google Group"
 }
 
-func (p iamGroupsProvider) List(_ context.Context, _ string) (console.Listing, error) {
-	l := console.Listing{NameColumn: "Email", Columns: []string{"Display name", "Type", "Members"}, Noun: "groups", Note: iamGroupsNote}
-	gs, err := p.registry.ListGroups(resourcemanager.CustomerName)
-	if err != nil {
-		l.Unavailable = consoleErr(err)
+func (p iamGroupsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	return p.ListFiltered(ctx, project, "")
+}
+
+// ListFiltered is the customer's groups, or with a search the ones
+// groups.search finds (#1817): a word is matched against the group's
+// email (group_key.startsWith) and display name (display_name.contains),
+// as the Groups page's search box matches either; a groups.search query
+// is evaluated as it is, its parent supplied when it names none.
+func (p iamGroupsProvider) ListFiltered(_ context.Context, _ string, filter string) (console.Listing, error) {
+	l := console.Listing{NameColumn: "Email", Columns: []string{"Display name", "Type", "Members"}, Noun: "groups", Note: iamGroupsNote,
+		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: "eng, or group_key.startsWith('eng') && '" + resourcemanager.LabelSecurity + "' in labels",
+			Help: iamGroupsSearchHelp}}
+	var gs []*resourcemanager.Group
+	var err error
+	if strings.TrimSpace(filter) == "" {
+		gs, err = p.registry.ListGroups(resourcemanager.CustomerName)
+		if err != nil {
+			l.Unavailable = consoleErr(err)
+			return l, nil
+		}
+	} else if gs, err = searchGroups(p.registry, filter); err != nil {
+		l.ServerFilter.Error = consoleErr(err)
 		return l, nil
 	}
 	for _, g := range gs {
@@ -89,19 +115,23 @@ func (p iamGroupsProvider) Create(_ context.Context, _ string, values map[string
 }
 
 func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (console.Detail, error) {
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
 	}
 	g, err := p.group(path[0])
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the group: " + consoleErr(err)}, nil
 	}
-	members := console.Listing{NameColumn: "Member", Columns: []string{"Type", "Roles"}, Noun: "members"}
+	if len(path) == 2 {
+		return p.memberDetail(g, path[1]), nil
+	}
+	members := console.Listing{NameColumn: "Member", Columns: []string{"Type", "Roles", "Expires"}, Noun: "members", RowsOpenable: true}
 	ms := append([]resourcemanager.GroupMember(nil), g.Members...)
 	sort.Slice(ms, func(i, j int) bool { return ms[i].Email < ms[j].Email })
 	for _, m := range ms {
 		members.Items = append(members.Items, console.Resource{Name: m.Email,
-			Fields: map[string]string{"Type": m.Type, "Roles": strings.Join(m.Roles, ", ")}})
+			Fields:  map[string]string{"Type": m.Type, "Roles": strings.Join(m.Roles, ", "), "Expires": memberExpiry(m)},
+			Actions: memberActions(m)})
 	}
 	members.Total = len(members.Items)
 	var labels []string
@@ -122,19 +152,13 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 	parents := console.Listing{NameColumn: "Group", Columns: []string{"Relation"}, Noun: "groups"}
 	if rels, err := p.registry.TransitiveGroups(g.Email); err == nil {
 		for _, x := range rels {
-			rel := "Indirect"
-			switch {
-			case x.Direct && x.Indirect:
-				rel = "Direct and indirect"
-			case x.Direct:
-				rel = "Direct"
-			}
-			parents.Items = append(parents.Items, console.Resource{Name: x.Group.Email, Fields: map[string]string{"Relation": rel}})
+			parents.Items = append(parents.Items, console.Resource{Name: x.Group.Email, Fields: map[string]string{"Relation": relationLabel(x.Direct, x.Indirect)}})
 		}
 	}
 	parents.Total = len(parents.Items)
 	return console.Detail{Summary: props[:2], Sections: []console.Section{
 		{ID: "members", Label: "Members", Listing: members},
+		p.transitiveSection(g),
 		{ID: "member-of", Label: "Member of", Listing: parents},
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Group", Properties: props}}},
 	}, Edit: &console.EditForm{Label: "Edit group", Fields: []console.Field{
@@ -143,19 +167,24 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 		{Name: "add", Label: "Add member", Type: "text",
 			Help: "A user's, a service account's or another group's email. A nested group's members are this group's too."},
 		{Name: "role", Label: "Role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"}, Default: "MEMBER"},
+		{Name: "expire", Label: "Member expiry", Type: "text",
+			Help: "Optional: when the added member's MEMBER role expires, RFC 3339 (2027-01-31T00:00:00Z), in the future. Only the MEMBER role takes an expiry."},
 		{Name: "remove", Label: "Remove member", Type: "text", Help: "The email of a member to remove."},
-	}, Note: "Add member and Remove member are optional."}}, nil
+	}, Note: "Add member and Remove member are optional. Change a member's roles or expiry from its row in Members."}}, nil
 }
 
 func (p iamGroupsProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {
 	if len(path) != 1 {
-		return fmt.Errorf("only a group can be edited")
+		return fmt.Errorf("only a group can be edited; change a member's roles from its row")
 	}
 	g, err := p.group(path[0])
 	if err != nil {
 		return err
 	}
 	add, remove := strings.TrimSpace(values["add"]), strings.TrimSpace(values["remove"])
+	if add == "" && strings.TrimSpace(values["expire"]) != "" {
+		return errors.New("a member expiry needs a member to add; change an existing member's expiry from its row in Members")
+	}
 	if dn, ok := values["displayName"]; ok && (dn != g.DisplayName || values["description"] != g.Description) {
 		if _, err := p.registry.UpdateGroup(g.Name(), resourcemanager.GroupInput{DisplayName: dn, Description: values["description"]},
 			[]string{"display_name", "description"}); err != nil {
@@ -178,7 +207,11 @@ func (p iamGroupsProvider) Edit(_ context.Context, _ string, path []string, valu
 		if r := values["role"]; r != "" && r != "MEMBER" {
 			roles = []string{r, "MEMBER"}
 		}
-		if _, _, err := p.registry.CreateMembership(g.Name(), add, "", roles); err != nil {
+		expire, err := parseMemberExpiry(values["expire"])
+		if err != nil {
+			return err
+		}
+		if _, _, err := p.registry.CreateMembershipExpiring(g.Name(), add, "", roles, expire); err != nil {
 			return err
 		}
 	}
@@ -198,3 +231,5 @@ var _ console.PageCreator = iamGroupsProvider{}
 var _ console.Deleter = iamGroupsProvider{}
 var _ console.Driller = iamGroupsProvider{}
 var _ console.Editor = iamGroupsProvider{}
+var _ console.FilterLister = iamGroupsProvider{}
+var _ console.PathActor = iamGroupsProvider{}

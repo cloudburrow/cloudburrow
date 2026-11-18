@@ -227,9 +227,14 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	if _, err := d.projects.EnsureExists(blankProject); err != nil {
 		t.Fatal(err)
 	}
-	// A Cloud Identity group with no display name or description (#1812).
-	if _, err := d.projects.CreateGroup(resourcemanager.GroupInput{Email: "blank@" + resourcemanager.OrganizationDomain,
-		Parent: resourcemanager.CustomerName, Labels: map[string]string{resourcemanager.LabelDiscussionForum: ""}}); err != nil {
+	// A Cloud Identity group with no display name or description (#1812),
+	// with a member, so its member page and graph are walked (#1817).
+	blankGroup, err := d.projects.CreateGroup(resourcemanager.GroupInput{Email: "blank@" + resourcemanager.OrganizationDomain,
+		Parent: resourcemanager.CustomerName, Labels: map[string]string{resourcemanager.LabelDiscussionForum: ""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.projects.CreateMembership(blankGroup.Name(), "member@example.com", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.projects.Create(resourcemanager.Project{

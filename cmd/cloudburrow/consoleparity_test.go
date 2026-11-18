@@ -626,7 +626,10 @@ var parityRows = []parityRow{
 	{Resource: "Cloud Identity searches and role changes", Service: "cloudidentity",
 		Methods: []string{"cloudidentity.groups.search", "cloudidentity.groups.memberships.modifyMembershipRoles", "cloudidentity.groups.memberships.searchDirectGroups",
 			"cloudidentity.groups.memberships.searchTransitiveMemberships", "cloudidentity.groups.memberships.getMembershipGraph"},
-		Issue: 1817},
+		Provider: "iam-groups", Offers: "IAM & Admin > Groups (#1817): the list's search box (groups.search: a word matched against the email and display name, or a query on group_key, display_name, labels and domain_name), " +
+			"Change roles on a member's row and page (OWNER and MANAGER added or removed, the MEMBER role's expiry set or cleared), Add member with an expiry, the group's Transitive members tab (direct and indirect), " +
+			"and a member's page with its membership graph up to the group, drawn as a tree and listed by membership, and the groups it is a direct member of",
+		Tests: []string{"TestConsoleIAMGroupsSearchRolesGraph", "TestNoDetailShowsABlankProperty"}},
 	{Resource: "IAM service accounts", Service: "iam",
 		Methods: []string{"IAM/CreateServiceAccount", "IAM/GetServiceAccount", "IAM/ListServiceAccounts", "IAM/UpdateServiceAccount", "IAM/PatchServiceAccount",
 			"IAM/DeleteServiceAccount", "IAM/UndeleteServiceAccount", "IAM/EnableServiceAccount", "IAM/DisableServiceAccount"},
