@@ -106,6 +106,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -259,6 +260,9 @@ type Front struct {
 	// watchIdle, when set, replaces how long the watch holds a connection
 	// before it dials again (tests).
 	watchIdle time.Duration
+	// grpcOptions are extra options for the gRPC server (tests: a stats
+	// handler).
+	grpcOptions []grpc.ServerOption
 }
 
 // subscriptionAdmin is the part of the emulator's Subscriber service a sweep
@@ -295,9 +299,11 @@ func (f *Front) Close() error { return f.upstream.Close() }
 // Server returns the gRPC server that serves the front: every method is
 // forwarded, with no size limit of its own, since the emulator applies
 // Pub/Sub's. Serve gives it every connection whose first request is gRPC
-// (mux.go), and Handler the gRPC requests on any other.
+// (mux.go), and Handler the gRPC requests on any other, through ServeHTTP:
+// the server is grpchttp's, so stopping it waits for every call's handler
+// (#1804), on either.
 func (f *Front) Server() *grpc.Server {
-	return grpc.NewServer(
+	return grpchttp.NewServer(append([]grpc.ServerOption{
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(f.handle),
 		// Every call is recorded for the CLI's metrics, request log and
@@ -308,7 +314,7 @@ func (f *Front) Server() *grpc.Server {
 		// policy would answer a ping more often than every five minutes by
 		// closing the connection.
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
-	)
+	}, f.grpcOptions...)...)
 }
 
 // Handler serves gRPC and the REST API on the connections net/http serves,
@@ -352,6 +358,10 @@ func isGRPCContentType(ct string) bool {
 	const grpcType = "application/grpc"
 	return ct == grpcType || strings.HasPrefix(ct, grpcType+"+") || strings.HasPrefix(ct, grpcType+";")
 }
+
+// stopWait bounds how long Serve waits, once ctx ends, for the handlers of
+// the calls it cuts off to return.
+const stopWait = 5 * time.Second
 
 // Serve serves the front on l, gRPC and REST alike (mux.go), and sweeps
 // every interval, until ctx ends.
@@ -406,7 +416,13 @@ func (f *Front) Serve(ctx context.Context, l net.Listener, interval time.Duratio
 	}
 	// Not a graceful stop: an open StreamingPull would hold it forever.
 	srv.Close()
-	grpcSrv.Stop()
+	// Stop cuts off every call, then waits for each one's handler to
+	// return (#1804), which records it and may change the state the flush
+	// below writes; a handler that ignores its call's end holds it no
+	// longer than stopWait.
+	sctx, cancel := context.WithTimeout(context.Background(), stopWait)
+	_ = grpchttp.Stop(sctx, grpcSrv)
+	cancel()
 	_ = l.Close()
 	// The activity since the last flush.
 	f.flush()

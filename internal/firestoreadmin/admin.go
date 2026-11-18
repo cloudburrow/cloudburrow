@@ -61,6 +61,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 )
 
 // DefaultLocation is the location `(default)` is described in: the emulator
@@ -126,7 +127,12 @@ type Admin struct {
 }
 
 // New returns the API for the emulator at emulator (host:port).
-func New(emulator string) *Admin {
+func New(emulator string) *Admin { return newWith(emulator) }
+
+// newWith is New with extra gRPC server options (tests). The server is
+// served through ServeHTTP: grpchttp's, so Stop waits for every call's
+// handler (#1804).
+func newWith(emulator string, opts ...grpc.ServerOption) *Admin {
 	a := &Admin{
 		emulator:  emulator,
 		client:    &http.Client{Timeout: 30 * time.Second},
@@ -145,12 +151,17 @@ func New(emulator string) *Admin {
 
 		mongoIndexNames: map[string]string{},
 	}
-	a.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(a.persistAfter))
+	a.grpc = grpchttp.NewServer(append([]grpc.ServerOption{grpc.ChainUnaryInterceptor(a.persistAfter)}, opts...)...)
 	adminpb.RegisterFirestoreAdminServer(a.grpc, a)
 	longrunningpb.RegisterOperationsServer(a.grpc, a)
 	firestorepb.RegisterFirestoreServer(a.grpc, pipelineServer{a: a})
 	return a
 }
+
+// Stop stops the gRPC server, once the HTTP server the API is served by
+// has shut down, waiting for every call's handler, and the state it
+// persists, until ctx ends (#1804).
+func (a *Admin) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, a.grpc) }
 
 // GRPCServer is the gRPC server of the API alone.
 func (a *Admin) GRPCServer() *grpc.Server { return a.grpc }

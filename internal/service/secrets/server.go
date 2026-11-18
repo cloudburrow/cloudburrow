@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -120,7 +121,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if len(unary) > 0 {
 		opts = append(opts, grpc.ChainUnaryInterceptor(unary...))
 	}
-	grpcSrv := grpc.NewServer(append(opts, s.options...)...)
+	// grpchttp: Stop waits for every call's handler goroutine, where a
+	// call's trace span ends, though ServeHTTP has returned (#1804).
+	grpcSrv := grpchttp.NewServer(append(opts, s.options...)...)
 	NewGRPCServer(s.store).Register(grpcSrv)
 
 	var lc net.ListenConfig
@@ -160,10 +163,9 @@ func (s *Server) Stop(ctx context.Context) error {
 		_ = srv.Close()
 	}
 	// The gRPC server holds no listener of its own here, but it does hold
-	// in-flight streams; stopping it releases them.
-	if grpcSrv != nil {
-		grpcSrv.Stop()
-	}
+	// in-flight streams; stopping it releases them, and waits for their
+	// handlers to return, until ctx ends.
+	_ = grpchttp.Stop(ctx, grpcSrv)
 	if done != nil {
 		select {
 		case <-done:

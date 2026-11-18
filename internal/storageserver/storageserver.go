@@ -166,7 +166,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case <-ctx.Done():
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := hs.Shutdown(sctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		err := hs.Shutdown(sctx)
+		// Shutdown waits for ServeHTTP, which can return before a gRPC
+		// call's handler has; Stop waits for those too, so none is still
+		// at the stores when they are closed (#1804).
+		_ = srv.Stop(sctx)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
 		return nil

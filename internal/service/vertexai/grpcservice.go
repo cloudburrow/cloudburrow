@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
 
@@ -38,12 +39,13 @@ type predictionService struct {
 	s *Server
 }
 
-// newGRPCServer builds the gRPC server for this endpoint.
+// newGRPCServer builds the gRPC server for this endpoint, served through
+// ServeHTTP: grpchttp's, so Stop waits for every call's handler (#1804).
 func (s *Server) newGRPCServer() *grpc.Server {
-	srv := grpc.NewServer(
+	srv := grpchttp.NewServer(append([]grpc.ServerOption{
 		grpc.MaxRecvMsgSize(grpctransport.MaxMessageBytes),
 		grpc.MaxSendMsgSize(grpctransport.MaxMessageBytes),
-	)
+	}, s.lis.options...)...)
 	s.RegisterGRPC(srv)
 	return srv
 }

@@ -14,6 +14,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 )
 
 const datastoreAggregation = "/google.datastore.v1.Datastore/RunAggregationQuery"
@@ -35,12 +37,22 @@ type Datastore struct {
 
 // NewDatastore returns the front for the Datastore emulator at emulator
 // (host:port).
-func NewDatastore(emulator string) *Datastore {
+func NewDatastore(emulator string) *Datastore { return newDatastoreWith(emulator) }
+
+// newDatastoreWith is NewDatastore with extra gRPC server options (tests). The
+// server is served through ServeHTTP: grpchttp's, so Stop waits for every
+// call's handler (#1804).
+func newDatastoreWith(emulator string, opts ...grpc.ServerOption) *Datastore {
 	d := &Datastore{up: upstream{addr: emulator}}
-	d.grpc = grpc.NewServer()
+	d.grpc = grpchttp.NewServer(opts...)
 	pb.RegisterDatastoreServer(d.grpc, d)
 	return d
 }
+
+// Stop stops the gRPC server, once the HTTP server the front is served by
+// has shut down, waiting for every call's handler to return, until ctx
+// ends (#1804).
+func (d *Datastore) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, d.grpc) }
 
 // Claims reports whether r is a RunAggregationQuery call, or a RunQuery
 // call with explain_options (explain.go), over gRPC or REST.

@@ -35,6 +35,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	pb "github.com/cloudburrow/cloudburrow/internal/service/storage/storagev2pb"
 )
 
@@ -48,9 +49,10 @@ type grpcStorage struct {
 	s *Server
 }
 
-// newGRPCServer returns the gRPC server for s.
-func newGRPCServer(s *Server) *grpc.Server {
-	gs := grpc.NewServer(grpc.MaxRecvMsgSize(64 << 20))
+// newGRPCServer returns the gRPC server for s, served through ServeHTTP:
+// grpchttp's, so Stop waits for every call's handler (#1804).
+func newGRPCServer(s *Server, opts ...grpc.ServerOption) *grpc.Server {
+	gs := grpchttp.NewServer(append([]grpc.ServerOption{grpc.MaxRecvMsgSize(64 << 20)}, opts...)...)
 	g := &grpcStorage{s: s}
 	pb.RegisterStorageServer(gs, g)
 	controlpb.RegisterStorageControlServer(gs, &grpcControl{g: g})
