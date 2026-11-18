@@ -218,8 +218,6 @@ func TestCloudIdentityInitialOwner1812(t *testing.T) {
 	}
 }
 
-// covers: google.iam.credentials.v1.IAMCredentials/GenerateAccessToken
-//
 // TestIAMCredentialsGroupMember1812 (#1812), with the official
 // cloud.google.com/go/iam/credentials/apiv1 and cloudidentity/v1 clients:
 // a service account's Token Creator binding to group:outer lets an account

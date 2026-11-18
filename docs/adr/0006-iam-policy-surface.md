@@ -521,6 +521,12 @@ per-project IAM above (project, folder and organization policies, table and rout
 dataset entries), Memorystore's IAM auth, Firestore with MongoDB compatibility and IAM Credentials.
 BigQuery remote models' connection checks (#1765) expand `group:` members too: the front asks
 Cloud Identity (on Resource Manager's port) for the transitive groups of the account it checks.
+Since #1812 the groups' own API also serves groups.search, searchDirectGroups,
+searchTransitiveMemberships, getMembershipGraph and modifyMembershipRoles; a MEMBER role's
+expiryDetail ends the membership, and so the grants through the group, when it passes; and
+WITH_INITIAL_OWNER makes the account the bearer token was minted for the new group's owner.
+Official-client compat tests show the expansion in IAM Credentials, Memorystore's IAM auth and
+Firestore with MongoDB compatibility; BigQuery's connection checks' test is gated on local AI.
 
 ### Firestore with MongoDB compatibility and IAM Credentials (#1738, #1747, #1751)
 

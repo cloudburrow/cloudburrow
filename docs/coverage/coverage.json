@@ -5579,6 +5579,7 @@
           "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/groupmembers1812_test.go:40 TestMemorystoreIAMAuthGroupMember1812",
           "test/compat/iamconditions1748_test.go:162 TestMemorystoreIAMConditions",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
@@ -8234,7 +8235,8 @@
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
-          "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart"
+          "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/groupmembers1812_test.go:99 TestFirestoreMongoDBGroupMember1812"
         ]
       },
       {
@@ -10240,6 +10242,7 @@
           "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigqueryconnectiongroups1812_test.go:27 TestBigQueryConnectionGroupMembers1812",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycreateexisting_test.go:38 TestBigQueryCreateOfAnExistingName",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
@@ -10998,6 +11001,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
+          "test/compat/bigqueryconnectiongroups1812_test.go:27 TestBigQueryConnectionGroupMembers1812",
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions"
         ]
       },
@@ -12535,8 +12539,8 @@
     "Key": "cloudidentity",
     "Title": "Cloud Identity API (v1)",
     "counts": {
-      "Unimplemented": 57,
-      "Verified": 13
+      "Unimplemented": 52,
+      "Verified": 18
     },
     "rows": [
       {
@@ -12673,7 +12677,8 @@
         "method": "cloudidentity.groups.create",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentitysearch1812_test.go:178 TestCloudIdentityInitialOwner1812"
         ]
       },
       {
@@ -12739,8 +12744,10 @@
       },
       {
         "method": "cloudidentity.groups.memberships.getMembershipGraph",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
       },
       {
         "method": "cloudidentity.groups.memberships.list",
@@ -12758,13 +12765,17 @@
       },
       {
         "method": "cloudidentity.groups.memberships.modifyMembershipRoles",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
       },
       {
         "method": "cloudidentity.groups.memberships.searchDirectGroups",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
       },
       {
         "method": "cloudidentity.groups.memberships.searchTransitiveGroups",
@@ -12775,8 +12786,10 @@
       },
       {
         "method": "cloudidentity.groups.memberships.searchTransitiveMemberships",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
       },
       {
         "method": "cloudidentity.groups.patch",
@@ -12787,8 +12800,10 @@
       },
       {
         "method": "cloudidentity.groups.search",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
       },
       {
         "method": "cloudidentity.groups.updateSecuritySettings",
