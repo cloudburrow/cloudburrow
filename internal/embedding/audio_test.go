@@ -92,7 +92,7 @@ func TestDecodeAudioFormats(t *testing.T) {
 	for mt, data := range map[string][]byte{
 		"audio/mpeg":  {0xff, 0xfb},
 		"audio/wav":   []byte("RIFF\x04\x00\x00\x00WAVE"),
-		"audio/wav ":  wavFile(t, tone(10, 16000, 1, 1), 3, 16000, 1, 16),
+		"audio/wav ":  wavFile(t, tone(10, 16000, 1, 1), 9, 16000, 1, 16), // nine channels, no mask (three decode since #1651)
 		"audio/wave":  wavFile(t, tone(10, 16000, 1, 1), 1, 16000, 1, 12),
 		"audio/vnd.x": {1},
 	} {

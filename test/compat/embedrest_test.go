@@ -1,0 +1,203 @@
+//go:build compat
+
+package compat
+
+import (
+	"context"
+	"encoding/binary"
+	"math"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+)
+
+// covers: google.cloud.aiplatform.v1.PredictionService/EmbedContent
+//
+// TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient
+// (#1651) embeds, through the official aiplatform PredictionClient's
+// EmbedContent, the WAVs and videos Google takes that were refused before:
+//
+//   - the model card's jfk.wav (44.1 kHz stereo) rewritten in-test as a
+//     six-channel WAV (WAVE_FORMAT_EXTENSIBLE 5.1, its two channels in FL
+//     and FR, the rest silent), downmixed as ffmpeg's resampler does: the
+//     stereo WAV's vector;
+//   - testdata/jfk-alaw.wav, the same clip as G.711 A-law at 16 kHz mono
+//     (`ffmpeg -i jfk.wav -ac 1 -ar 16000 -c:a pcm_alaw`): its token count,
+//     within cosine 0.99 of the WAV's vector;
+//   - a monochrome H.265 copy of the sea turtle clip (libx265 -pix_fmt gray,
+//     internal/embedding/testdata/turtle-h265-gray.mp4), converted as
+//     ffmpeg converts gray: the colour clip's token count, nearest the
+//     turtle query;
+//   - a QuickTime clip with a 5.1 PCM track under audio_track_extraction
+//     (va-pcm51.mov), which was taken as pairs of channels before.
+//
+// And valid input this build does not serve is UNIMPLEMENTED, not
+// INVALID_ARGUMENT: an HTTP file_uri (an instance fetches nothing), an
+// ADPCM WAV and a video's ALAC audio track.
+func TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient(t *testing.T) {
+	h := New(t)
+	pc := predictionClientAt(t, h, EnvEmbeddings)
+	addr := consoleAddr(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	wav := fetchJFK(t, ctx)
+	alaw, err := os.ReadFile("testdata/jfk-alaw.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadEmbeddingModel2(t, ctx, addr)
+	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel2
+	embed := func(track bool, parts ...*aiplatformpb.Part) (*aiplatformpb.EmbedContentResponse, error) {
+		return pc.EmbedContent(ctx, &aiplatformpb.EmbedContentRequest{
+			Model: proto.String(name), Content: &aiplatformpb.Content{Role: "user", Parts: parts},
+			EmbedContentConfig: &aiplatformpb.EmbedContentRequest_EmbedContentConfig{AudioTrackExtraction: proto.Bool(track)},
+		})
+	}
+	must := func(what string, track bool, parts ...*aiplatformpb.Part) *aiplatformpb.EmbedContentResponse {
+		t.Helper()
+		r, err := embed(track, parts...)
+		if err != nil {
+			t.Fatalf("%s: EmbedContent: %v", what, err)
+		}
+		if v := r.GetEmbedding().GetValues(); len(v) != 768 || math.Abs(norm(v)-1) > 1e-3 {
+			t.Fatalf("%s: %d values, norm %.6f", what, len(v), norm(v))
+		}
+		return r
+	}
+	inline := func(mt string, data []byte) *aiplatformpb.Part {
+		return &aiplatformpb.Part{Data: &aiplatformpb.Part_InlineData{InlineData: &aiplatformpb.Blob{MimeType: mt, Data: data}}}
+	}
+
+	// Multichannel and A-law WAV.
+	ref := must("jfk.wav", false, inline("audio/wav", wav))
+	refTokens := ref.GetUsageMetadata().GetPromptTokenCount()
+	six := must("5.1 WAV", false, inline("audio/wav", stereoAs51(t, wav)))
+	if n := six.GetUsageMetadata().GetPromptTokenCount(); n != refTokens {
+		t.Errorf("5.1 WAV: %d tokens, the stereo WAV's %d", n, refTokens)
+	}
+	if c := cosine(six.GetEmbedding().GetValues(), ref.GetEmbedding().GetValues()); c < 0.99999 {
+		t.Errorf("5.1 WAV against the stereo WAV: cosine %.6f, want the same vector", c)
+	}
+	a := must("A-law WAV", false, inline("audio/wav", alaw))
+	if n := a.GetUsageMetadata().GetPromptTokenCount(); n != refTokens {
+		t.Errorf("A-law WAV: %d tokens, the WAV's %d", n, refTokens)
+	}
+	ca := cosine(a.GetEmbedding().GetValues(), ref.GetEmbedding().GetValues())
+	if ca < 0.99 {
+		t.Errorf("A-law WAV against the WAV: cosine %.4f, want at least 0.99", ca)
+	}
+	t.Logf("jfk.wav: %d tokens; 5.1 copy the same vector; A-law at cosine %.6f", refTokens, ca)
+
+	// Monochrome H.265.
+	color := must("H.264 clip", false, inline("video/mp4", embeddingTestdata(t, "turtle-h264.mp4")))
+	gray := must("gray H.265 clip", false, inline("video/mp4", embeddingTestdata(t, "turtle-h265-gray.mp4")))
+	if n, want := gray.GetUsageMetadata().GetPromptTokenCount(), color.GetUsageMetadata().GetPromptTokenCount(); n != want {
+		t.Errorf("gray H.265: %d tokens, the colour clip's %d", n, want)
+	}
+	queries := []string{"cats sleeping on a couch", "a president's speech about serving your country", "a turtle swimming in the ocean"}
+	scores := make([]float64, len(queries))
+	for i, q := range queries {
+		task := aiplatformpb.EmbedContentRequest_RETRIEVAL_QUERY
+		r, err := pc.EmbedContent(ctx, &aiplatformpb.EmbedContentRequest{
+			Model: proto.String(name), Content: &aiplatformpb.Content{Role: "user", Parts: []*aiplatformpb.Part{{Data: &aiplatformpb.Part_Text{Text: q}}}},
+			EmbedContentConfig: &aiplatformpb.EmbedContentRequest_EmbedContentConfig{TaskType: &task},
+		})
+		if err != nil {
+			t.Fatalf("query %q: %v", q, err)
+		}
+		scores[i] = cosine(r.GetEmbedding().GetValues(), gray.GetEmbedding().GetValues())
+	}
+	if scores[2] <= scores[0] || scores[2] <= scores[1] {
+		t.Errorf("gray H.265 against %q: %.3f, want the turtle query nearest", queries, scores)
+	}
+	t.Logf("gray H.265: %d tokens, cosine %.6f to the colour clip, %.3f against %q", gray.GetUsageMetadata().GetPromptTokenCount(),
+		cosine(gray.GetEmbedding().GetValues(), color.GetEmbedding().GetValues()), scores, queries)
+
+	// A 5.1 PCM audio track.
+	pcm := embeddingTestdata(t, "va-pcm51.mov")
+	frames := must("5.1 PCM MOV", false, inline("video/quicktime", pcm))
+	withTrack := must("5.1 PCM MOV with its track", true, inline("video/quicktime", pcm))
+	// 0.5 seconds of audio: 12 or 13 soft tokens and the two markers.
+	if d := withTrack.GetUsageMetadata().GetPromptTokenCount() - frames.GetUsageMetadata().GetPromptTokenCount(); d < 14 || d > 16 {
+		t.Errorf("5.1 PCM track: %d tokens more than the frames, want 14 to 16", d)
+	}
+
+	// Valid input not served: UNIMPLEMENTED.
+	for _, c := range []struct {
+		name  string
+		track bool
+		part  *aiplatformpb.Part
+		want  string
+	}{
+		{"an HTTP file_uri", false, &aiplatformpb.Part{Data: &aiplatformpb.Part_FileData{FileData: &aiplatformpb.FileData{
+			MimeType: "audio/wav", FileUri: "https://storage.googleapis.com/b/jfk.wav"}}}, "HTTP URLs are not fetched"},
+		{"an ADPCM WAV", false, inline("audio/wav", adpcmWAVFile()), "WAVE format 2"},
+		{"an ALAC audio track", true, inline("video/mp4", embeddingTestdata(t, "va-alac.mp4")), "alac"},
+	} {
+		_, err := embed(c.track, c.part)
+		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want Unimplemented naming %q", c.name, err, c.want)
+		}
+	}
+}
+
+// stereoAs51 rewrites a 16-bit stereo WAV as a WAVE_FORMAT_EXTENSIBLE 5.1
+// one (mask 0x3f: FL, FR, FC, LFE, BL, BR), the two channels in FL and FR.
+func stereoAs51(t *testing.T, b []byte) []byte {
+	t.Helper()
+	var rate uint32
+	var data []byte
+	for p := 12; p+8 <= len(b); {
+		id, size := string(b[p:p+4]), int(binary.LittleEndian.Uint32(b[p+4:]))
+		body := b[p+8 : min(p+8+size, len(b))]
+		switch id {
+		case "fmt ":
+			if binary.LittleEndian.Uint16(body[0:]) != 1 || binary.LittleEndian.Uint16(body[2:]) != 2 || binary.LittleEndian.Uint16(body[14:]) != 16 {
+				t.Fatal("jfk.wav is not 16-bit stereo PCM")
+			}
+			rate = binary.LittleEndian.Uint32(body[4:])
+		case "data":
+			data = body
+		}
+		p += 8 + size + size&1
+	}
+	if rate == 0 || data == nil {
+		t.Fatal("jfk.wav has no fmt or data chunk")
+	}
+	frames := len(data) / 4
+	out := make([]byte, frames*12)
+	for i := range frames {
+		copy(out[12*i:], data[4*i:4*i+4])
+	}
+	f := binary.LittleEndian.AppendUint16(nil, 0xFFFE)
+	f = binary.LittleEndian.AppendUint16(f, 6)
+	f = binary.LittleEndian.AppendUint32(f, rate)
+	f = binary.LittleEndian.AppendUint32(f, rate*12)
+	f = binary.LittleEndian.AppendUint16(f, 12)
+	f = binary.LittleEndian.AppendUint16(f, 16)
+	f = binary.LittleEndian.AppendUint16(f, 22)
+	f = binary.LittleEndian.AppendUint16(f, 16)
+	f = binary.LittleEndian.AppendUint32(f, 0x3f)
+	f = append(f, 1, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71) // KSDATAFORMAT_SUBTYPE_PCM
+	w := append([]byte("WAVEfmt "), binary.LittleEndian.AppendUint32(nil, uint32(len(f)))...)
+	w = append(w, f...)
+	w = append(append(w, "data"...), binary.LittleEndian.AppendUint32(nil, uint32(len(out)))...)
+	w = append(w, out...)
+	return append(append([]byte("RIFF"), binary.LittleEndian.AppendUint32(nil, uint32(len(w)))...), w...)
+}
+
+// adpcmWAVFile is a mono Microsoft ADPCM WAV (format 2), valid and not
+// decoded here.
+func adpcmWAVFile() []byte {
+	f := []byte{2, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x7d, 0, 0, 0, 1, 4, 0}
+	w := append([]byte("WAVEfmt "), byte(len(f)), 0, 0, 0)
+	w = append(append(w, f...), 'd', 'a', 't', 'a', 64, 0, 0, 0)
+	w = append(w, make([]byte, 64)...)
+	return append(append([]byte("RIFF"), binary.LittleEndian.AppendUint32(nil, uint32(len(w)))...), w...)
+}

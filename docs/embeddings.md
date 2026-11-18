@@ -432,3 +432,15 @@ docker run --rm -v "$PWD:/models" \
 > client (`TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient`: the scanned invoice gains 195
 > tokens of OCR text). The console's Embeddings page has a **PDFs' text (OCR)** box that sends
 > `document_ocr` with each PDF (`TestEmbeddingsPageReadsAScannedPDFWithOCR`).
+
+> **Update 2026-11-18 (#1651): multichannel and G.711 WAV, monochrome H.265, and 501 for the
+> rest.** A WAV of 3 to 8 channels (or of as many as its `WAVE_FORMAT_EXTENSIBLE` channel mask
+> names) is downmixed to mono as ffmpeg's resampler downmixes it (`-ac 1`, its weights measured
+> with ffmpeg 9 one channel at a time), and 8-bit A-law and µ-law WAV are decoded as ffmpeg's
+> G.711 decoders decode them; a video's 3- to 8-channel PCM track is downmixed the same way (it
+> was taken as pairs of channels before). Monochrome (4:0:0) H.265 video is converted as ffmpeg
+> converts gray. Valid media of a type Google takes that this build does not decode (an ALAC or
+> FLAC audio track, a multichannel AAC track, HE-AACv2's 34-band or IPD/OPD parametric stereo, an
+> ADPCM WAV, a 12-bit JPEG, a frame over 8K...) is now `UNIMPLEMENTED` (501) naming it, not
+> `INVALID_ARGUMENT`, as is an `http(s)://` `file_uri`: an instance fetches nothing from outside
+> the machine. See [compatibility.md](compatibility.md).

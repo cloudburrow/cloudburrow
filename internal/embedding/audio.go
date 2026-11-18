@@ -90,12 +90,18 @@ func DecodeAudio(mimeType string, data []byte) ([]float32, error) {
 	} else {
 		w, err := decodeWAV(data)
 		if err != nil {
+			if errors.Is(err, ErrNotDecoded) {
+				return nil, fmt.Errorf("the WAV file: %w", err)
+			}
 			return nil, fmt.Errorf("the data is not a valid WAV file: %v", err)
 		}
 		if secs := float64(len(w.samples)) / float64(w.channels) / float64(w.rate); secs > MaxAudioSeconds {
 			return nil, &tooLongError{secs}
 		}
-		mono, rate = downmix(w.samples, w.channels), w.rate
+		if mono, err = downmixNamed(w.samples, w.layout); err != nil {
+			return nil, fmt.Errorf("the WAV file: %w", err)
+		}
+		rate = w.rate
 	}
 	if secs := float64(len(mono)) / float64(rate); secs > MaxAudioSeconds {
 		return nil, &tooLongError{secs}
@@ -113,17 +119,153 @@ type wav struct {
 	samples  []float32 // interleaved, in [-1, 1]
 	channels int
 	rate     int
+	layout   []string // each channel's name, as ffmpeg names them
 }
 
-// decodeWAV reads a RIFF WAVE file of integer PCM (8, 16, 24 or 32 bits) or
-// IEEE float (32 or 64 bits), plain or WAVE_FORMAT_EXTENSIBLE.
+// WAVE format tags (the extensible sub-format GUID's first two bytes).
+const (
+	wavePCM   = 1
+	waveFloat = 3
+	waveALaw  = 6
+	waveMuLaw = 7
+)
+
+// waveSpeakers are WAVE_FORMAT_EXTENSIBLE's dwChannelMask bits, in order,
+// by ffmpeg's channel names.
+var waveSpeakers = []string{"FL", "FR", "FC", "LFE", "BL", "BR", "FLC", "FRC", "BC", "SL", "SR",
+	"TC", "TFL", "TFC", "TFR", "TBL", "TBC", "TBR"}
+
+// defaultLayouts are the channels ffmpeg assumes for a WAV of n channels
+// with no channel mask (or one that does not match n), measured with
+// ffmpeg 9: mono, stereo, 2.1, 4.0, 5.0, 5.1, 6.1 and 7.1.
+var defaultLayouts = [9][]string{
+	1: {"FC"},
+	2: {"FL", "FR"},
+	3: {"FL", "FR", "LFE"},
+	4: {"FL", "FR", "FC", "BC"},
+	5: {"FL", "FR", "FC", "BL", "BR"},
+	6: {"FL", "FR", "FC", "LFE", "BL", "BR"},
+	7: {"FL", "FR", "FC", "LFE", "BC", "SL", "SR"},
+	8: {"FL", "FR", "FC", "LFE", "BL", "BR", "SL", "SR"},
+}
+
+// wavLayout names a WAV's channels from its channel mask, when the mask
+// names exactly as many speakers as there are channels (as ffmpeg reads
+// it), or else from ffmpeg's default layout for the count.
+func wavLayout(channels int, mask uint32) ([]string, error) {
+	if channels <= 2 {
+		// Mono is itself and stereo √2·(L + R)/2 whatever the mask says,
+		// as Transformers.js's load_audio takes them.
+		return defaultLayouts[channels], nil
+	}
+	if mask != 0 && mask>>len(waveSpeakers) == 0 && bitsSet(mask) == channels {
+		var names []string
+		for i, n := range waveSpeakers {
+			if mask&(1<<i) != 0 {
+				names = append(names, n)
+			}
+		}
+		return names, nil
+	}
+	if channels < len(defaultLayouts) {
+		return defaultLayouts[channels], nil
+	}
+	return nil, notDecodedf("%d channels with no channel mask naming them are not decoded; up to 8 channels, or as many as the mask names, are", channels)
+}
+
+func bitsSet(m uint32) int {
+	n := 0
+	for ; m != 0; m &= m - 1 {
+		n++
+	}
+	return n
+}
+
+// monoWeights are each channel's weight in ffmpeg's downmix to mono (`-ac 1`,
+// its default centre and surround mix levels of -3 dB), measured with
+// ffmpeg 9 one channel at a time: the front, front-of-centre and top front
+// pairs at √½, the centre at 1, the back, side and back centre at ½, the
+// LFE and the other top channels dropped. A stereo pair is √2·(L + R)/2, as
+// Transformers.js's load_audio makes stereo mono.
+var monoWeights = map[string]float64{
+	"FL": math.Sqrt2 / 2, "FR": math.Sqrt2 / 2, "FLC": math.Sqrt2 / 2, "FRC": math.Sqrt2 / 2,
+	"TFL": math.Sqrt2 / 2, "TFR": math.Sqrt2 / 2, "FC": 1,
+	"BL": 0.5, "BR": 0.5, "SL": 0.5, "SR": 0.5, "BC": 0.5,
+	"LFE": 0, "TC": 0, "TFC": 0, "TBL": 0, "TBC": 0, "TBR": 0,
+}
+
+// speakerPairs are the left and right channels ffmpeg's resampler takes only
+// together: a layout with one and not the other it refuses to downmix.
+var speakerPairs = [][2]string{{"FL", "FR"}, {"BL", "BR"}, {"FLC", "FRC"}, {"SL", "SR"}, {"TFL", "TFR"}, {"TBL", "TBR"}}
+
+// downmixNamed makes interleaved samples of the named channels mono as
+// ffmpeg's resampler does; one channel is itself.
+func downmixNamed(s []float32, names []string) ([]float32, error) {
+	channels := len(names)
+	if channels == 1 {
+		return s, nil
+	}
+	have := map[string]bool{}
+	for _, n := range names {
+		have[n] = true
+	}
+	for _, p := range speakerPairs {
+		if have[p[0]] != have[p[1]] {
+			return nil, notDecodedf("its channel layout (%s) has %s without %s, which is not downmixed",
+				strings.Join(names, "+"), map[bool]string{true: p[0], false: p[1]}[have[p[0]]], map[bool]string{true: p[1], false: p[0]}[have[p[0]]])
+		}
+	}
+	w := make([]float64, channels)
+	for c, n := range names {
+		w[c] = monoWeights[n]
+	}
+	out := make([]float32, len(s)/channels)
+	for i := range out {
+		var v float64
+		for c, wc := range w {
+			v += wc * float64(s[i*channels+c])
+		}
+		out[i] = float32(v)
+	}
+	return out, nil
+}
+
+// g711 decodes an 8-bit A-law or µ-law sample to 16-bit linear PCM, as
+// ffmpeg's pcm_alaw and pcm_mulaw decoders do (ITU-T G.711).
+func g711(b byte, alaw bool) int {
+	if alaw {
+		b ^= 0x55
+		t := int(b & 0x0f)
+		if seg := int(b&0x70) >> 4; seg != 0 {
+			t = (t + t + 1 + 32) << (seg + 2)
+		} else {
+			t = (t + t + 1) << 3
+		}
+		if b&0x80 != 0 {
+			return t
+		}
+		return -t
+	}
+	b = ^b
+	t := (int(b&0x0f) << 3) + 0x84
+	t <<= int(b&0x70) >> 4
+	if b&0x80 != 0 {
+		return 0x84 - t
+	}
+	return t - 0x84
+}
+
+// decodeWAV reads a RIFF WAVE file of integer PCM (8, 16, 24 or 32 bits),
+// IEEE float (32 or 64 bits) or (#1651) G.711 A-law or µ-law, plain or
+// WAVE_FORMAT_EXTENSIBLE, of up to 8 channels (or as many as its channel
+// mask names).
 func decodeWAV(b []byte) (wav, error) {
 	if len(b) < 12 || string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" {
 		return wav{}, fmt.Errorf("no RIFF WAVE header")
 	}
 	var (
 		format, channels, bits uint16
-		rate                   uint32
+		rate, mask             uint32
 		haveFmt                bool
 		data                   []byte
 	)
@@ -150,6 +292,7 @@ func decodeWAV(b []byte) (wav, error) {
 				if size < 26 {
 					return wav{}, fmt.Errorf("extensible fmt chunk of %d bytes", size)
 				}
+				mask = binary.LittleEndian.Uint32(body[20:24])
 				format = binary.LittleEndian.Uint16(body[24:26]) // the sub-format GUID's first two bytes
 			}
 			haveFmt = true
@@ -164,18 +307,26 @@ func decodeWAV(b []byte) (wav, error) {
 	if data == nil {
 		return wav{}, fmt.Errorf("no data chunk")
 	}
-	if channels != 1 && channels != 2 {
-		return wav{}, fmt.Errorf("%d channels; mono and stereo are embedded", channels)
+	if channels == 0 {
+		return wav{}, fmt.Errorf("the fmt chunk says 0 channels")
+	}
+	layout, err := wavLayout(int(channels), mask)
+	if err != nil {
+		return wav{}, err
+	}
+	if rate == 0 {
+		return wav{}, fmt.Errorf("the fmt chunk says a sample rate of 0 Hz")
 	}
 	if rate < 8000 || rate > 192000 {
-		return wav{}, fmt.Errorf("a sample rate of %d Hz; 8000 to 192000 Hz are embedded", rate)
+		return wav{}, notDecodedf("a sample rate of %d Hz is not decoded; 8000 to 192000 Hz are", rate)
 	}
 	width := int(bits) / 8
 	switch {
-	case format == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32):
-	case format == 3 && (bits == 32 || bits == 64):
+	case format == wavePCM && (bits == 8 || bits == 16 || bits == 24 || bits == 32):
+	case format == waveFloat && (bits == 32 || bits == 64):
+	case (format == waveALaw || format == waveMuLaw) && bits == 8:
 	default:
-		return wav{}, fmt.Errorf("format %d with %d bits per sample; integer PCM of 8, 16, 24 or 32 bits and float of 32 or 64 bits are embedded", format, bits)
+		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 8, 16, 24 or 32 bits, float of 32 or 64 bits and 8-bit A-law and µ-law are", format, bits)
 	}
 	frame := width * int(channels)
 	n := len(data) / frame * int(channels)
@@ -183,9 +334,11 @@ func decodeWAV(b []byte) (wav, error) {
 	for i := range out {
 		s := data[i*width:]
 		switch {
-		case format == 3 && bits == 32:
+		case format == waveALaw || format == waveMuLaw:
+			out[i] = float32(g711(s[0], format == waveALaw)) / 32768
+		case format == waveFloat && bits == 32:
 			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(s))
-		case format == 3:
+		case format == waveFloat:
 			out[i] = float32(math.Float64frombits(binary.LittleEndian.Uint64(s)))
 		case bits == 8:
 			out[i] = (float32(s[0]) - 128) / 128
@@ -198,14 +351,21 @@ func decodeWAV(b []byte) (wav, error) {
 			out[i] = float32(float64(int32(binary.LittleEndian.Uint32(s))) / 2147483648)
 		}
 	}
-	return wav{samples: out, channels: int(channels), rate: int(rate)}, nil
+	return wav{samples: out, channels: int(channels), rate: int(rate), layout: layout}, nil
 }
 
 // downmix makes stereo mono as Transformers.js's load_audio does (after
-// Hugging Face's ffmpeg_read): sqrt(2) * (left + right) / 2.
+// Hugging Face's ffmpeg_read): sqrt(2) * (left + right) / 2. More channels
+// (a video's 3- to 8-channel PCM track) are downmixed as ffmpeg's default
+// layout for their count is (#1651; they were taken as pairs before).
 func downmix(s []float32, channels int) []float32 {
 	if channels == 1 {
 		return s
+	}
+	if channels > 2 && channels < len(defaultLayouts) {
+		if mono, err := downmixNamed(s, defaultLayouts[channels]); err == nil {
+			return mono
+		}
 	}
 	out := make([]float32, len(s)/2)
 	for i := range out {

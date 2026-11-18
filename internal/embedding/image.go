@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -78,7 +79,7 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 	// Check the size before decoding the pixels.
 	cfg, err := dec.config(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)
+		return nil, imageError(mt, err)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > MaxImageSide || cfg.Height > MaxImageSide {
 		return nil, fmt.Errorf("the image is %dx%d; each side must be 1 to %d pixels", cfg.Width, cfg.Height, MaxImageSide)
@@ -92,9 +93,21 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 		img, err = dec.decode(bytes.NewReader(data))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("the data is not a valid %s image: %v", mt, err)
+		return nil, imageError(mt, err)
 	}
 	return img, nil
+}
+
+// imageError is a decoder's refusal: a valid image using a feature the
+// decoder does not implement (a 12-bit or arithmetic-coded JPEG, an
+// RLE-compressed BMP...) is ErrNotDecoded, anything else invalid data.
+func imageError(mt string, err error) error {
+	var jpegErr jpeg.UnsupportedError
+	var pngErr png.UnsupportedError
+	if errors.Is(err, bmp.ErrUnsupported) || errors.As(err, &jpegErr) || errors.As(err, &pngErr) {
+		return notDecodedf("the %s image uses a feature this build does not decode: %v", mt, err)
+	}
+	return fmt.Errorf("the data is not a valid %s image: %v", mt, err)
 }
 
 // imageTargetSize is the processor's get_aspect_ratio_preserving_size.
