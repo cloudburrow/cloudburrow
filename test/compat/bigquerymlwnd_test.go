@@ -153,12 +153,13 @@ func TestBigQueryMLWideAndDeep(t *testing.T) {
 // TestBigQueryMLImportedXGBoostModel; an ONNX one in the `-tags onnx`
 // build since #1711,
 // TestBigQueryMLImportedONNXModel, and the default build's refusal is
-// TestBigQueryMLONNXNeedsTheOnnxBuild); a
-// remote model names a Cloud resource connection (the BigQuery Connection
-// API, not served) and a Google-hosted endpoint; holiday_region reads
+// TestBigQueryMLONNXNeedsTheOnnxBuild); holiday_region reads
 // Google's holiday calendar
 // (bigquery-public-data.ml_datasets.holidays_and_events_for_forecasting),
-// which CloudBurrow does not have.
+// which CloudBurrow does not have. A remote model is no longer refused
+// (#1760, #1765): on the DEFAULT connection, with no default connection
+// and no bigquery.connections.create, it is 403 as Google documents
+// (wantDefaultConnectionRefused).
 //
 // covers: bigquery.jobs.query, bigquery.models.get
 func TestBigQueryMLHostedModelsRefused(t *testing.T) {
@@ -173,14 +174,15 @@ func TestBigQueryMLHostedModelsRefused(t *testing.T) {
 		"AUTOML_REGRESSOR": {"CREATE MODEL `%s.no` OPTIONS(model_type='automl_regressor', input_label_cols=['y'], budget_hours=1.0) AS SELECT x, y FROM `%[1]s.two`",
 			"AutoML"},
 		"AUTOML_CLASSIFIER": {"CREATE MODEL `%s.no` OPTIONS(model_type='automl_classifier', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`", "AutoML"},
-		"a remote model": {"CREATE MODEL `%s.no` REMOTE WITH CONNECTION DEFAULT OPTIONS(endpoint='gemini-2.0-flash')",
-			"connection"},
 		"holiday_region": {"CREATE MODEL `%s.no` OPTIONS(model_type='arima_plus', time_series_timestamp_col='d', time_series_data_col='v', " +
 			"holiday_region='US') AS SELECT d, v FROM `%[1]s.walk`", "holiday calendar"},
 	} {
 		_, err := c.Query(fmt.Sprintf(c2.sql, name)).Read(ctx)
 		wantAPIError(t, what, err, http.StatusNotImplemented, c2.want)
 	}
+	// A remote model is no hosted model CloudBurrow lacks: it runs on the
+	// local Vertex AI since #1760, on the DEFAULT connection since #1765.
+	wantDefaultConnectionRefused(t, h, c, fmt.Sprintf("CREATE MODEL `%s.no` REMOTE WITH CONNECTION DEFAULT OPTIONS(endpoint='gemini-2.0-flash')", name))
 	_, err := c.Dataset(name).Model("no").Metadata(ctx)
 	wantHTTPStatus(t, "Model.Metadata after the refusals", err, http.StatusNotFound)
 }

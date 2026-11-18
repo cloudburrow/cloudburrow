@@ -4,11 +4,13 @@ package compat
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/bigquery"
 	connection "cloud.google.com/go/bigquery/connection/apiv1"
 	"cloud.google.com/go/bigquery/connection/apiv1/connectionpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -95,6 +97,36 @@ func grantProject(t *testing.T, h *Harness, pc *resourcemanager.ProjectsClient, 
 			t.Errorf("revoke %s from %s on %s: %v", role, member, project, err)
 		}
 	})
+}
+
+// wantDefaultConnectionRefused runs sql, a CREATE MODEL … REMOTE WITH
+// CONNECTION DEFAULT in a US dataset, as a caller without
+// bigquery.connections.create on a project with no default connection in
+// the US: BigQuery cannot make the default connection, so the statement is
+// refused 403 naming the permission (default connections page: "you need
+// the BigQuery Connection Admin role"; #1765 serves DEFAULT, which was 501
+// before). An instance that serves no local Vertex AI to BigQuery (no
+// CLOUDBURROW_TEST_LOCALAI: the emulators shard, which has no Cloud Run)
+// runs no remote model at all, so there it is 501 naming that (#1760),
+// before any connection is read. It skips the 403 when the project
+// already has a default connection, which another test may be making.
+func wantDefaultConnectionRefused(t *testing.T, h *Harness, c *bigquery.Client, sql string) {
+	t.Helper()
+	if strings.TrimSpace(os.Getenv(EnvLocalAI)) == "" {
+		_, err := c.Query(sql).Read(h.Context())
+		wantAPIError(t, sql+" with no local Vertex AI", err, http.StatusNotImplemented, "local Vertex AI")
+		return
+	}
+	cc, project := remoteConnectionClient(t, h)
+	name := "projects/" + project + "/locations/us/connections/__default_cloudresource_connection__"
+	if _, err := cc.GetConnection(h.Context(), &connectionpb.GetConnectionRequest{Name: name}); err == nil {
+		t.Logf("the project has a default connection in the US; not checking %s", sql)
+		return
+	}
+	_, err := c.Query(sql).Read(h.Context())
+	if err == nil || !strings.Contains(err.Error(), "403") || !strings.Contains(err.Error(), "bigquery.connections.create") {
+		t.Errorf("%s with no default connection and no bigquery.connections.create: %v; want 403 naming it", sql, err)
+	}
 }
 
 // callerMember is the identity the BigQuery front takes every caller to
