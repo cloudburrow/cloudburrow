@@ -751,11 +751,14 @@
         "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Copied into third_party/aac-go since #1739 (import path github.com/cloudburrow/cloudburrow/third_party/aac-go; non-test sources without cmd/ and scripts/, imports rewritten; third_party/aac-go/PROVENANCE.md) so CloudBurrow owns its fixes: one release, no activity since. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md). Its HE-AAC tables (sbr_tables.go) are taken from PacketVideo's OpenCORE AAC decoder (Apache-2.0, Android platform/frameworks/av android-4.1.1_r1, media/libstagefright/codecs/aacdec; downloaded 2026-11-17), attributed in third_party/aac-go/NOTICE."
       },
       "goOpus": {
-        "module": "github.com/kazzmir/opus-go",
-        "version": "v1.7.0",
-        "license": "BSD-3-Clause",
-        "verification": "go.sum",
-        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): libopus (BSD-3-Clause) transpiled to Go with ccgo, no cgo and no dependencies. Within 0.71 of a 16-bit step of ffmpeg 9's libopus decode here. Chosen over thesyncim/gopus (BSD-3-Clause, but its go.mod needs Go 1.27.3) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
+        "module": "github.com/darui3018823/opus",
+        "version": "v1.8.0",
+        "sum": "h1:EMvPScorjJNK5cu9s+V+kgt1ilRVVAuNeY5xI+FpxNI=",
+        "pinnedCommit": "28d4cc3a1ede19ca5a3e96c3f7598a9f4b6989d1",
+        "source": "https://github.com/darui3018823/opus",
+        "license": "BSD-2-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go): a pure Go Opus decoder (RFC 6716 / RFC 8251; CELT, SILK, hybrid; multistream mapping family 1), standard library only, no cgo and no unsafe in the packages linked (its libopus comparison harness is cgo behind the opusref build tag, not built here), go 1.24.11. #1811 replaced github.com/kazzmir/opus-go v1.7.0 with it: opus-go (libopus transpiled) kept uintptrs to goroutine-stack variables and grew its libc shim's pseudo-stack by copying (kazzmir/opus-go#79, unfixed on its master), so a stack that moved mid-decode corrupted the samples (0.76 of full scale from ffmpeg under -d=maymorestack=runtime.mayMoreStackMove), and -race needed checkptr off for it (#1808). This decoder is within 1.9e-7 of opus-go's samples on every test track and its 5.1 and 7.1 downmixes within 6e-5 of ffmpeg 9's libopus decode at 48 kHz, and gives identical samples with the stack moved at every function entry (TestDecodeOpusOnMovingStacks). Chosen over thesyncim/gopus and tphakala/go-opus (both need Go 1.27; CI builds with 1.26) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
       },
       "govpx": {
         "module": "github.com/thesyncim/govpx",

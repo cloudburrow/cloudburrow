@@ -916,6 +916,30 @@ each is written for CloudBurrow, standard library only, from a public specificat
   (with Annex E), within 3e-5 of ffmpeg 9's float decode at high bit rates.
 - **Surround Opus**: `opus-go`'s multistream decoder, mapping family 1.
 
+## Amendment: replacing opus-go (#1811)
+
+`github.com/kazzmir/opus-go` v1.7.0 (its newest release and its master, 2026-11-18) is unsafe in
+any build, not only under `-race` (kazzmir/opus-go#79, open): its libc shim grows the decoder's
+pseudo-stack by copying it, leaving the addresses already handed out pointing at the freed old one,
+and the transpiled decoder passes `uintptr(unsafe.Pointer(&local))` down its call chains, which a
+goroutine stack that grows or shrinks mid-call leaves pointing at the old stack. Built with
+`-gcflags=github.com/kazzmir/opus-go/...=-d=maymorestack=runtime.mayMoreStackMove` (the runtime
+moves the stack at every function entry), it decoded va-opus51.mp4 0.76 of full scale from ffmpeg,
+va-opus.mp4 17947 16-bit steps, and aborted on a deeper stack. Compared on 2026-11-18:
+
+| Option | Verdict |
+|---|---|
+| Wait for upstream | Rejected: master still fails as above; its uintptr-to-typed-pointer conversions (#73 to #83) are partial |
+| Patch a copy of opus-go in third_party | Rejected: the pseudo-stack is one function, but its 46,500-line transpiled decoder (`opuscc`) has 442 `uintptr(unsafe.Pointer(&...))` conversions, the locals among them to be told from globals and heap fields and each moved to non-moving memory by hand, and again on each upstream release, and checkptr still rejects the shim's uintptr memory |
+| `github.com/thesyncim/gopus` v0.2.3, `github.com/tphakala/go-opus` v1.4.0 (BSD 3-Clause) | Not usable: their `go.mod` need Go 1.27.3 and 1.27, and CI builds with 1.26 |
+| `github.com/darui3018823/opus` v1.8.0 (BSD 2-Clause) | **Adopted**: pure Go written for Go (no transpiled C, no `unsafe`, no cgo in what is linked; its libopus harness is behind the `opusref` tag), standard library only, `go 1.24.11`; CELT, SILK, hybrid, multistream families 0, 1 and 255; its README reports sample-exact output against libopus 1.6.1's float decoder on all 12 RFC 8251 vectors |
+
+Measured here: within 1.9e-7 of opus-go's samples (unmoved) on every Opus test track (5.1, 7.1 and
+stereo CELT, stereo hybrid), its 5.1 and 7.1 downmixes within 6e-5 of ffmpeg 9's libopus decode at
+48 kHz, identical samples at every stack depth with the collector running and with the stack moved at
+every function entry (`TestDecodeOpusOnMovingStacks`), 400,000 random packets without a panic, and
+`make test-race` with checkptr on everywhere, so #1808's checkptr exemption is gone.
+
 ## Amendment: OCR for `document_ocr` on scanned PDFs (#1733)
 
 Google documents that `document_ocr` adds the text OCR reads from each PDF page. CloudBurrow now

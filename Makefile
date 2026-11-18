@@ -215,16 +215,14 @@ vet:
 test:
 	go test -timeout $(TEST_TIMEOUT) ./...
 
-## test-race: Run unit tests with the race detector
-# -race turns on checkptr everywhere. github.com/kazzmir/opus-go is C
-# translated to Go, and computes struct sizes by pointer arithmetic on a
-# nil pointer (silk_Get_Decoder_Size), which never dereferences it but
-# which checkptr treats as fatal. Turn checkptr off for that one module
-# only; the race detector still covers it, and checkptr the rest.
-RACE_GCFLAGS := github.com/kazzmir/opus-go/...=-d=checkptr=0
+## test-race: Run unit tests with the race detector (RACE_PKGS=./internal/x/ for one package)
+# Every package runs with checkptr, -race's default: since #1811 the Opus
+# decoder is pure Go without unsafe, so no exemption is needed (#1808 had
+# turned checkptr off for the transpiled github.com/kazzmir/opus-go).
+RACE_PKGS ?= ./...
 .PHONY: test-race
 test-race:
-	go test -race -gcflags='$(RACE_GCFLAGS)' -timeout $(TEST_TIMEOUT) ./...
+	go test -race -timeout $(TEST_TIMEOUT) $(RACE_PKGS)
 
 ## test-cover: Run unit tests and report coverage
 .PHONY: test-cover

@@ -39,6 +39,11 @@ License, with the Alliance for Open Media Patent License 1.0 its PATENTS file
 carries. (AVIF was decoded until #1736 by libavif, dav1d, aom and libyuv
 compiled to WebAssembly; none of them is in the binary now.)
 
+The binary is linked with darui3018823/opus v1.8.0
+(https://github.com/darui3018823/opus), a pure Go Opus decoder,
+Copyright (c) 2026, darui3018823, under the BSD 2-Clause License. (Opus
+was decoded until #1811 by kazzmir/opus-go, which is not in the binary now.)
+
 The binary is linked with a copy of thesyncim/govpx
 (https://github.com/thesyncim/govpx), a pure Go port of libvpx's VP9 decoder,
 under the BSD 3-Clause License, with libvpx's BSD 3-Clause licence and patent

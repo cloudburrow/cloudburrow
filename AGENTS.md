@@ -122,7 +122,7 @@ See the [Makefile](Makefile). `make check` runs what CI runs.
 | `make vet` | `go vet` |
 | `make cross` | `go build` + `go vet` for darwin/linux on amd64/arm64 (`CGO_ENABLED=0`) |
 | `make test` | Unit tests |
-| `make test-race` | Unit tests with the race detector |
+| `make test-race` | Unit tests with the race detector; `RACE_PKGS=./internal/x/` for one package |
 | `make test-integration` | Tests requiring Docker (build tag `integration`) |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`) |
 | `make test-upstream` | Probes measuring upstream components (tag `upstream`) |
