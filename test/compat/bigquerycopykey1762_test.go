@@ -144,4 +144,40 @@ func TestBigQueryCopyKey1762(t *testing.T) {
 	if err := copyJob("version", key+"/cryptoKeyVersions/1", ""); err == nil || !strings.Contains(err.Error(), "cryptoKeyVersions") {
 		t.Errorf("copy with a key version: %v, want it refused", err)
 	}
+
+	// An ingestion-time partitioned source, whose rows keep their
+	// _PARTITIONTIME (copied another way, #1273), the same.
+	exec("CREATE TABLE " + p("ing") + " (n INT64) PARTITION BY _PARTITIONDATE")
+	exec("INSERT INTO " + p("ing") + " (n) VALUES (7)")
+	ingCopy := func(dst, key string, write bigquery.TableWriteDisposition) error {
+		t.Helper()
+		cp := ds.Table(dst).CopierFrom(ds.Table("ing"))
+		cp.WriteDisposition = write
+		if key != "" {
+			cp.DestinationEncryptionConfig = &bigquery.EncryptionConfig{KMSKeyName: key}
+		}
+		j, err := cp.Run(ctx)
+		return waitJob(ctx, j, err)
+	}
+	if err := ingCopy("ingkeyed", key, ""); err != nil {
+		t.Fatalf("copy of an ingestion-time partitioned table with a key: %v", err)
+	}
+	if got := keyOf("ingkeyed"); got != key {
+		t.Errorf("ingkeyed's key %q, want %q", got, key)
+	}
+	if err := ingCopy("ingkeyed", other, bigquery.WriteAppend); err == nil || !strings.Contains(err.Error(), "Existing table encryption settings") {
+		t.Errorf("WRITE_APPEND of an ingestion-time partitioned table with another key: %v, want the job to fail", err)
+	}
+	if err := ingCopy("ingkeyed", "", bigquery.WriteTruncate); err != nil {
+		t.Fatalf("WRITE_TRUNCATE of an ingestion-time partitioned table with no key: %v", err)
+	}
+	if got, n := keyOf("ingkeyed"), len(rows("ingkeyed")); got != "" || n != 1 {
+		t.Errorf("ingkeyed after WRITE_TRUNCATE with no key: key %q, %d rows, want default encryption, 1", got, n)
+	}
+	if err := ingCopy("ingfar", far, ""); err == nil || !strings.Contains(err.Error(), "This region is not supported") {
+		t.Errorf("copy of an ingestion-time partitioned table with a key of another region: %v, want the job to fail", err)
+	}
+	if _, err := ds.Table("ingfar").Metadata(ctx); err == nil {
+		t.Errorf("the failed copy made ingfar")
+	}
 }

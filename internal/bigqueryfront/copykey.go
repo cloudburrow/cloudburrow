@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 )
 
@@ -62,12 +63,12 @@ func copyKeyName(raw json.RawMessage) (key, why string) {
 		return "", ""
 	}
 	if strings.Contains(c.KmsKeyName, "/cryptoKeyVersions/") {
-		// UNVERIFIED wording (above).
+		// UNVERIFIED wording (docs re-read 2026-11-18, above: https://docs.cloud.google.com/bigquery/docs/customer-managed-encryption).
 		return "", "Invalid value for destinationEncryptionConfiguration.kmsKeyName: " + c.KmsKeyName +
 			". A key resource ID cannot include /cryptoKeyVersions/."
 	}
 	if keyLocation(c.KmsKeyName) == "" {
-		// UNVERIFIED wording (above).
+		// UNVERIFIED wording (docs re-read 2026-11-18, above: https://docs.cloud.google.com/bigquery/docs/customer-managed-encryption).
 		return "", "Invalid value for destinationEncryptionConfiguration.kmsKeyName: " + c.KmsKeyName +
 			". The key is in the form projects/KMS_PROJECT_ID/locations/LOCATION/keyRings/KEY_RING/cryptoKeys/KEY."
 	}
@@ -123,4 +124,25 @@ func tableKeyOf(got []byte) string {
 		return ""
 	}
 	return t.EncryptionConfiguration.KmsKeyName
+}
+
+// setTableKey makes dataset.table's encryptionConfiguration key, or none
+// when key is "", by tables.update (as giveTableKey), when it differs.
+func (f front) setTableKey(r *http.Request, dataset, table, key string) {
+	st, got := f.get(r, tablePath(dataset, table))
+	if st != http.StatusOK || tableKeyOf(got) == key {
+		return
+	}
+	var tb map[string]json.RawMessage
+	if json.Unmarshal(got, &tb) != nil {
+		return
+	}
+	if key == "" {
+		delete(tb, "encryptionConfiguration")
+	} else {
+		tb["encryptionConfiguration"], _ = json.Marshal(map[string]string{"kmsKeyName": key})
+	}
+	if body, err := json.Marshal(tb); err == nil {
+		f.send(r, http.MethodPut, tablePath(dataset, table), body)
+	}
 }
