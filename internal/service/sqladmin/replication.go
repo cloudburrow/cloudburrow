@@ -88,7 +88,43 @@ func (p *Postgres) Promote(ctx context.Context) error {
 	if p.Logical {
 		return p.promoteLogical(ctx)
 	}
+	if pgBefore12(p.Version) {
+		return p.promoteBefore12(ctx)
+	}
 	return p.exec(ctx, "SELECT pg_promote(true, 60)")
+}
+
+// promoteBefore12 ends recovery on a PostgreSQL before 12 (#1524), which
+// has no pg_promote(): pg_ctl promote, run by the server itself, as the
+// recovery.conf pg_basebackup -R wrote names no trigger file; then it
+// waits, as pg_promote(true, 60) does, for recovery to end (9.6's pg_ctl
+// promote does not wait).
+func (p *Postgres) promoteBefore12(ctx context.Context) error {
+	dir, err := p.queryText(ctx, "SELECT current_setting('data_directory')")
+	if err != nil {
+		return err
+	}
+	// COPY's program is a literal: the directory is quoted for the shell,
+	// then the command for SQL.
+	cmd := "pg_ctl promote -D '" + strings.ReplaceAll(dir, "'", `'\''`) + "'"
+	if err := p.exec(ctx, "COPY (SELECT 1) TO PROGRAM "+quotePGString(cmd)); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		rec, err := p.queryText(ctx, "SELECT pg_is_in_recovery()::text")
+		if err == nil && rec == "false" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the server is still in recovery 60s after pg_ctl promote (%v)", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 // PauseReplication pauses or resumes replay of the primary's WAL.
@@ -97,9 +133,9 @@ func (p *Postgres) PauseReplication(ctx context.Context, pause bool) error {
 		return p.pauseLogical(ctx, pause)
 	}
 	if pause {
-		return p.exec(ctx, "SELECT pg_wal_replay_pause()")
+		return p.exec(ctx, "SELECT pg_"+p.walWord()+"_replay_pause()")
 	}
-	return p.exec(ctx, "SELECT pg_wal_replay_resume()")
+	return p.exec(ctx, "SELECT pg_"+p.walWord()+"_replay_resume()")
 }
 
 // PrepareReplicationSource turns GTIDs on, by MySQL's online procedure,
@@ -461,4 +497,13 @@ func (s *Server) replicaVerb(base, project, name, verb string) (any, error) {
 		return nil, err
 	}
 	return s.done(base, project, c.engine, opType, name), nil
+}
+
+// walWord is what the server's WAL functions are named after: xlog before
+// PostgreSQL 10 (pg_xlog_replay_pause), wal since.
+func (p *Postgres) walWord() string {
+	if p.Version == "POSTGRES_9_6" {
+		return "xlog"
+	}
+	return "wal"
 }

@@ -227,6 +227,17 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 // and Create read replica, a cascading replica (#1381); Stop replication and then Start replication are read back as
 // databaseReplicationEnabled, and Promote leaves a standalone primary.
 func TestConsoleCloudSQLReadReplica(t *testing.T) {
+	consoleCloudSQLReadReplica(t, "POSTGRES_17", "console-rp-")
+}
+
+// TestConsoleCloudSQLReadReplicaPostgres96 (#1524): the same on a
+// PostgreSQL 9.6 instance, whose replica is promoted with pg_ctl promote.
+// covers: sql.instances.insert, sql.instances.promoteReplica, sql.instances.stopReplica, sql.instances.startReplica
+func TestConsoleCloudSQLReadReplicaPostgres96(t *testing.T) {
+	consoleCloudSQLReadReplica(t, "POSTGRES_9_6", "console-rp96-")
+}
+
+func consoleCloudSQLReadReplica(t *testing.T, version, prefix string) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("needs --services cloudsql")
@@ -234,9 +245,9 @@ func TestConsoleCloudSQLReadReplica(t *testing.T) {
 	addr := consoleAddr(t, h)
 	svc := sqlAdminService(t, h)
 	project := h.Project()
-	name := fmt.Sprintf("console-rp-%d", time.Now().UnixNano()%1e6)
+	name := fmt.Sprintf("%s%d", prefix, time.Now().UnixNano()%1e6)
 	replica := name + "-r"
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version,
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 	if err != nil {
 		t.Fatal(err)

@@ -587,9 +587,6 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 			return nil, err
 		}
 		b.DatabaseVersion = spec.DatabaseVersion
-		if err := pgBefore12Why(spec.DatabaseVersion, "a read replica"); err != nil {
-			return nil, err
-		}
 	} else if b.Settings == nil || b.Settings.Tier == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}

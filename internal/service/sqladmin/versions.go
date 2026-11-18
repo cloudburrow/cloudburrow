@@ -80,9 +80,11 @@ const sqlServerVersionWhy = "SQL Server has no Docker Hub official image; Micros
 	"2017, 2019 and 2022) is linux/amd64 only, so a linux/arm64 node cannot run it; CloudBurrow runs PostgreSQL and MySQL"
 
 // pgBefore12 is whether version is a PostgreSQL version before 12 (#1462),
-// whose servers lack what high availability, read replicas and
-// point-in-time recovery are built on here: pg_promote() and the
-// recovery.signal file, both new in PostgreSQL 12.
+// whose servers lack what high availability and point-in-time recovery
+// are built on here: pg_promote() and the standby.signal and
+// recovery.signal files, all new in PostgreSQL 12. Their read replicas
+// are served (#1524): pg_basebackup -R writes recovery.conf, and a
+// promotion runs pg_ctl promote.
 func pgBefore12(version string) bool {
 	return engineOf(version) == "POSTGRES" && versionIndex(version) >= 0 && versionIndex(version) < versionIndex("POSTGRES_12")
 }
@@ -93,9 +95,10 @@ func pgBefore12Why(version, what string) error {
 	if !pgBefore12(version) {
 		return nil
 	}
-	return unimplemented(what+" on "+version, "CloudBurrow promotes a PostgreSQL standby with pg_promote() and recovers to a point in time "+
-		"with recovery.signal, which PostgreSQL 12 introduced; "+version+" serves a primary instance's databases, users, backups, "+
-		"imports, exports and major version upgrades. Upgrade it to POSTGRES_12 or later for this")
+	return unimplemented(what+" on "+version, "CloudBurrow builds a high-availability standby and point-in-time recovery on "+
+		"PostgreSQL 12's standby.signal, recovery.signal and pg_promote(), and their recovery.conf form for "+version+" is not built yet "+
+		"(#1769, re-read 2026-11-17); "+version+" serves a primary instance's databases, users, backups, imports, exports, read "+
+		"replicas and major version upgrades. Upgrade it to POSTGRES_12 or later for this")
 }
 
 // upgradable is the upgradableDatabaseVersions of an instance of version:

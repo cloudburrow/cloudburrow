@@ -105,8 +105,8 @@ func eventually(t *testing.T, what string, f func() error) {
 // and its upgradableDatabaseVersions, flags.list answers that version's
 // flags, and through the official connector, with pgx or the MySQL driver,
 // SELECT version() is that major version's server. PostgreSQL 9.6 to 12
-// are served (#1462), and 9.6 to 11 refuse high availability and read
-// replicas with why; MYSQL_5_7, MYSQL_5_6 and SQL Server (whose images
+// are served (#1462), and 9.6 to 11 refuse high availability with why
+// (their read replicas are served since #1524); MYSQL_5_7, MYSQL_5_6 and SQL Server (whose images
 // are linux/amd64 only) and a version Cloud SQL no longer offers are 501.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.flags.list, sql.databases.insert, sql.databases.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLDatabaseVersions(t *testing.T) {
@@ -177,13 +177,11 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 			}
 			if v.name == "POSTGRES_9_6" || v.name == "POSTGRES_11" {
 				// Before PostgreSQL 12 (no pg_promote, no recovery.signal):
-				// high availability and read replicas are 501 with why.
+				// high availability is 501 with why. Read replicas are
+				// TestCloudSQLReadReplicasBeforePostgres12 (#1524).
 				_, err := svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{
 					Settings: &sqladmin.Settings{AvailabilityType: "REGIONAL"}}).Do()
 				wantHTTP(t, "REGIONAL on "+v.name, err, 501)
-				_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name + "-r", MasterInstanceName: name,
-					Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
-				wantHTTP(t, "a read replica of "+v.name, err, 501)
 				// Its databases and users are served.
 				op, err := svc.Databases.Insert(project, name, &sqladmin.Database{Name: "app"}).Do()
 				if err != nil {

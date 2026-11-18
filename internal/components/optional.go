@@ -945,8 +945,18 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 		b = cloudSQLBackend(persistent)
 		b.Env["POSTGRES_USER"] = "postgres"
 		b.Env["POSTGRES_DB"] = "postgres"
+		if version == "POSTGRES_9_6" {
+			// PostgreSQL 10's replication defaults, which 9.6 lacks
+			// (wal_level minimal, no WAL senders, hot_standby off): a
+			// Cloud SQL 9.6 instance can have read replicas (#1524).
+			// Database flags, after them, still win.
+			b.Args = []string{"postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10",
+				"-c", "max_replication_slots=10", "-c", "hot_standby=on"}
+		}
 		if len(flags) > 0 {
-			b.Args = []string{"postgres"}
+			if len(b.Args) == 0 {
+				b.Args = []string{"postgres"}
+			}
 			for _, f := range flags {
 				switch f.Name {
 				case "cloudsql.logical_decoding":
@@ -1050,7 +1060,11 @@ if ` + rebuild + `; then
   until PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD" "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` +
 		fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser + ` -D "$PGDATA" -R -X stream -c fast; do
     echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA"/* ; sleep 2
-  done` + mark + `
+  done
+  # Before PostgreSQL 12, -R writes recovery.conf, whose timeline is the
+  # current one: a replica of a replica that is promoted then stops at
+  # the new timeline. 'latest', 12's default, follows it (#1524).
+  if [ -f "$PGDATA/recovery.conf" ]; then echo "recovery_target_timeline = 'latest'" >> "$PGDATA/recovery.conf"; fi` + mark + `
 fi
 exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
