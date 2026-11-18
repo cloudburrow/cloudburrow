@@ -1,0 +1,143 @@
+CloudBurrow patch 98 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1814). Applies after patch 0096; needs
+googlesqlite patch 0097.
+
+A query parameter in the select list has its declared type in BigQuery
+(https://cloud.google.com/bigquery/docs/parameterized-queries). The REST
+API gives every scalar parameter as text; INT64, FLOAT64, BOOL and
+TIMESTAMP were bound as Go values of their type, the others as strings, so
+`SELECT @p` of a BYTES, NUMERIC, BIGNUMERIC, DATE, TIME, GEOGRAPHY, JSON or
+INTERVAL was a STRING and of a DATETIME a TIMESTAMP. They are bound as
+googlesqlite.TypedParameter (googlesqlite patch 0097), a value of their own
+type.
+
+server/cloudburrow_typed_parameters_test.go (TestTypedScalarParameters:
+every scalar type, positional and named, alone in the select list).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -441,19 +441,15 @@
+ 		} {
+ 			if t, err := time.Parse(layout, s); err == nil {
+ 				return t.UTC()
+-			}
+-		}
+-	case "DATETIME":
+-		for _, layout := range []string{
+-			"2006-01-02T15:04:05.999999999",
+-			"2006-01-02 15:04:05.999999999",
+-			"2006-01-02T15:04:05",
+-			"2006-01-02 15:04:05",
+-		} {
+-			if t, err := time.Parse(layout, s); err == nil {
+-				return t
+ 			}
+ 		}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1814): a parameter of a
++	// type no Go value has (a DATETIME's time.Time was a TIMESTAMP, the
++	// others' strings STRINGs) is bound as a value of its own type, so in
++	// the select list it has the type BigQuery gives it.
++	case "BYTES", "NUMERIC", "BIGNUMERIC", "DECIMAL", "BIGDECIMAL",
++		"DATE", "TIME", "DATETIME", "GEOGRAPHY", "JSON", "INTERVAL":
++		return googlesqlite.TypedParameter{Type: upper, Value: s}
+ 	}
+ 	return value
+ }
+--- /dev/null
++++ b/server/cloudburrow_typed_parameters_test.go
+@@ -0,0 +1,89 @@
++package server_test
++
++import (
++	"context"
++	"fmt"
++	"testing"
++
++	"cloud.google.com/go/bigquery"
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++	"google.golang.org/api/option"
++)
++
++// TestTypedScalarParameters is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1814): a positional or named parameter alone in
++// the select list has its declared type, as in BigQuery. `SELECT ? AS a`
++// with a STRING failed ("strconv.ParseInt ... invalid syntax"), a FLOAT64
++// or BOOL was an INTEGER, and a named BYTES, NUMERIC, BIGNUMERIC, DATE,
++// TIME, GEOGRAPHY, JSON or INTERVAL was a STRING and a DATETIME a
++// TIMESTAMP.
++func TestTypedScalarParameters(t *testing.T) {
++	ctx := context.Background()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test"))); err != nil {
++		t.Fatal(err)
++	}
++	ts := bqServer.TestServer()
++	defer func() {
++		ts.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(ts.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	for _, tc := range []struct {
++		typ, value string
++		schema     bigquery.FieldType
++		want       string
++	}{
++		{"STRING", "hello", bigquery.StringFieldType, "hello"},
++		{"INT64", "42", bigquery.IntegerFieldType, "42"},
++		{"FLOAT64", "3.5", bigquery.FloatFieldType, "3.5"},
++		{"BOOL", "true", bigquery.BooleanFieldType, "true"},
++		{"BYTES", "aGk=", bigquery.BytesFieldType, "[104 105]"},
++		{"NUMERIC", "1.25", bigquery.NumericFieldType, "5/4"},
++		{"BIGNUMERIC", "1.5", bigquery.BigNumericFieldType, "3/2"},
++		{"DATE", "2024-01-02", bigquery.DateFieldType, "2024-01-02"},
++		{"TIME", "03:04:05.123456", bigquery.TimeFieldType, "03:04:05.123456000"},
++		{"DATETIME", "2024-01-02 03:04:05.123456", bigquery.DateTimeFieldType, "2024-01-02T03:04:05.123456000"},
++		{"TIMESTAMP", "2024-01-02 03:04:05.123456+00:00", bigquery.TimestampFieldType, "2024-01-02 03:04:05.123456 +0000 UTC"},
++		{"GEOGRAPHY", "POINT(1 2)", bigquery.GeographyFieldType, "POINT(1 2)"},
++		{"JSON", `{"a":1}`, bigquery.JSONFieldType, `{"a":1}`},
++		{"INTERVAL", "1-2 3 4:5:6", bigquery.IntervalFieldType, "1-2 3 4:5:6"},
++	} {
++		for _, named := range []bool{false, true} {
++			sql := "SELECT ? AS a"
++			p := bigquery.QueryParameter{Value: &bigquery.QueryParameterValue{
++				Type:  bigquery.StandardSQLDataType{TypeKind: tc.typ},
++				Value: tc.value,
++			}}
++			if named {
++				sql, p.Name = "SELECT @p AS a", "p"
++			}
++			q := client.Query(sql)
++			q.Parameters = []bigquery.QueryParameter{p}
++			it, err := q.Read(ctx)
++			if err != nil {
++				t.Errorf("%s with a %s: %v", sql, tc.typ, err)
++				continue
++			}
++			var row []bigquery.Value
++			if err := it.Next(&row); err != nil {
++				t.Errorf("%s with a %s: %v", sql, tc.typ, err)
++				continue
++			}
++			if got := it.Schema[0].Type; got != tc.schema {
++				t.Errorf("%s with a %s: column type %s, want %s", sql, tc.typ, got, tc.schema)
++			}
++			if got := fmt.Sprint(row[0]); got != tc.want {
++				t.Errorf("%s with a %s = %s, want %s", sql, tc.typ, got, tc.want)
++			}
++		}
++	}
++}

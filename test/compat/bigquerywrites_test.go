@@ -195,8 +195,10 @@ func TestBigQueryBytesParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("INSERT: %v", err)
 	}
-	if st, err := job.Wait(ctx); err != nil || st.Err() != nil {
-		t.Fatalf("INSERT: %v %v", err, st.Err())
+	if st, err := job.Wait(ctx); err != nil {
+		t.Fatalf("INSERT: %v", err)
+	} else if st.Err() != nil {
+		t.Fatalf("INSERT: %v", st.Err())
 	}
 	if got := fmt.Sprint(read(query("SELECT id, TO_HEX(b), TO_HEX(a[OFFSET(0)]) FROM DS.bt"))); got != "[[1 ff0061 ff0061]]" {
 		t.Errorf("the inserted row: %s", got)
@@ -295,8 +297,10 @@ func TestBigQueryBytesParameters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("INSERT of STRUCTs: %v", err)
 	}
-	if st, err := job.Wait(ctx); err != nil || st.Err() != nil {
-		t.Fatalf("INSERT of STRUCTs: %v %v", err, st.Err())
+	if st, err := job.Wait(ctx); err != nil {
+		t.Fatalf("INSERT of STRUCTs: %v", err)
+	} else if st.Err() != nil {
+		t.Fatalf("INSERT of STRUCTs: %v", st.Err())
 	}
 	if got := fmt.Sprint(read(query("SELECT TO_HEX(r.Z), r.N, ARRAY(SELECT TO_HEX(e.Z) FROM UNNEST(rr) e WITH OFFSET o ORDER BY o), " +
 		"rr[OFFSET(1)].N FROM DS.rt"))); got != "[[ff0061 5 [01 ff0061] 7]]" {
