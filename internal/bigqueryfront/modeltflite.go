@@ -50,8 +50,9 @@ import (
 // runs as a batch of one; a NULL input is 400 (a TensorFlow Lite tensor
 // has no missing value); the create-tflite page's "You can only use an
 // imported TensorFlow Lite model with an object table" is not enforced,
-// as the ML.PREDICT page takes any query whose columns convert, and
-// CloudBurrow serves no object tables.
+// as the ML.PREDICT page takes any query whose columns convert. An image
+// STRUCT column (ML.DECODE_IMAGE's over an object table, mlimage.go,
+// #1798) is reshaped to an image input's tensor (tfliteImageTensor).
 
 // maxTFLiteModelBytes is BigQuery's "Models are limited to 450 MB in size".
 const maxTFLiteModelBytes = 450 << 20

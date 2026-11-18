@@ -56,7 +56,7 @@ import (
 // two levels of 255; tf.io.decode_image's default fast IDCT differs by up
 // to six.
 //
-// UNVERIFIED (the pages say nothing of them): which IDCT BigQuery runs; the channels decode gives
+// UNVERIFIED (re-read 2026-11-18: the four pages above, which say nothing of them): which IDCT BigQuery runs; the channels decode gives
 // (the file's own, as tf.io.decode_image: 1 for grey, 3 for colour, 4
 // with alpha); the INT64 form of a resized INT64 image (rounded); an
 // INT64 image's colour conversion (its values over 255 first); and every
