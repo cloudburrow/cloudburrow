@@ -53,7 +53,9 @@ import (
 // option is 501.
 //
 // 501, nothing done: OR REPLACE (not in the
-// documented syntax), a table of another project, a dry run, legacy SQL,
+// documented syntax), a table of another project read FOR SYSTEM_TIME AS
+// OF a past time (another project's table is otherwise read, or made, in
+// its own project, #1767), a dry run, legacy SQL,
 // any of these statements inside a multi-statement script with a TEMP table
 // or function (checkDDL; another script is carried out a statement at a
 // time since #1459, scriptflow.go), and
@@ -221,21 +223,24 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			return
 		}
 	}
-	for _, t := range []tableRef{dest, src} {
-		if t.ProjectID != "" && t.ProjectID != project {
-			notImplemented(fmt.Sprintf("%s of a table of project %s, not the job's project %s", what, t.ProjectID, project))
-			return
-		}
+	// Another project's table is read, or made and written, in its own
+	// project (#1767): in is the destination's front. A table read at a
+	// past time is read within the job's project only.
+	in := f.inProject(refProject(dest, project))
+	if st.kind != "drop" && st.asOf != "" && refProject(src, project) != project {
+		notImplemented(fmt.Sprintf("%s of a table of project %s, not the job's project %s, FOR SYSTEM_TIME AS OF a past "+
+			"time", what, src.ProjectID, project))
+		return
 	}
 	if st.kind != "drop" {
-		if why := f.protectedRead(r, project, src.DatasetID, src.TableID, what); why != "" { // #1218
+		if why := f.protectedRead(r, refProject(src, project), src.DatasetID, src.TableID, what); why != "" { // #1218
 			writeError(w, http.StatusNotImplemented, "notImplemented", why)
 			return
 		}
 	}
 	d := f.copyTableMeta(r, dest)
 	done := func(op string) {
-		ddl := &ownDDL{target: tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: dest.TableID}, operation: op}
+		ddl := &ownDDL{target: tableRef{ProjectID: refProject(dest, project), DatasetID: dest.DatasetID, TableID: dest.TableID}, operation: op}
 		switch st.kind {
 		case "clone":
 			ddl.statementType = "CREATE_TABLE"
@@ -261,7 +266,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			notImplemented(fmt.Sprintf("DROP SNAPSHOT TABLE of %s, which is not a table snapshot. BigQuery's "+
 				"documentation does not say what it does; DROP TABLE deletes it", tableName(project, dest)))
 		default:
-			if status, got := f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil); status/100 != 2 {
+			if status, got := in.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil); status/100 != 2 {
 				failed(status, "backendError", errorMessage(got, status))
 				return
 			}
@@ -290,8 +295,8 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		failed(http.StatusConflict, "duplicate", "Already Exists: Table "+tableName(project, dest))
 		return
 	}
-	if status, _ := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)); status == http.StatusNotFound {
-		failed(http.StatusNotFound, "notFound", "Not found: Dataset "+project+":"+dest.DatasetID)
+	if status, _ := in.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)); status == http.StatusNotFound {
+		failed(http.StatusNotFound, "notFound", "Not found: Dataset "+refProject(dest, project)+":"+dest.DatasetID)
 		return
 	}
 	asOf := time.Time{}
@@ -343,7 +348,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	if !asOf.IsZero() {
 		start = asOf.Format(time.RFC3339Nano) // the snapshot's or clone's time (#1460)
 	}
-	base := map[string]string{"projectId": project, "datasetId": src.DatasetID, "tableId": src.TableID}
+	base := map[string]string{"projectId": refProject(src, project), "datasetId": src.DatasetID, "tableId": src.TableID}
 	var extra map[string]any
 	switch {
 	case st.kind == "snapshot":
@@ -351,18 +356,18 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	case s.snapshot == nil:
 		extra = map[string]any{"cloneDefinition": map[string]any{"baseTableReference": base, "cloneTime": start}}
 	}
-	if msg := f.makeTableWith(r, dest, s.schema, partitionExtra([]copyTable{s}, extra)); msg != "" {
+	if msg := in.makeTableWith(r, dest, s.schema, partitionExtra([]copyTable{s}, extra)); msg != "" {
 		failed(http.StatusBadRequest, "invalidQuery", msg)
 		return
 	}
 	if msg := f.insertSelect(r, dest, []copyTable{s}); msg != "" {
-		f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
+		in.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 		failed(http.StatusInternalServerError, "backendError", msg)
 		return
 	}
 	if st.options != nil && st.options.sets() {
-		if msg := f.setTableOptions(r, dest.DatasetID, dest.TableID, *st.options, expiration, setExpiration); msg != "" {
-			f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
+		if msg := in.setTableOptions(r, dest.DatasetID, dest.TableID, *st.options, expiration, setExpiration); msg != "" {
+			in.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 			failed(http.StatusInternalServerError, "backendError", msg)
 			return
 		}

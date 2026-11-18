@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -47,14 +48,19 @@ func TestKnownProjectsMarkTheEngine(t *testing.T) {
 		{"/bigquery/v2/projects/other/datasets", false, "1"},
 		{"/bigquery/v2/projects/other/datasets", false, "1"},
 		{"/upload/bigquery/v2/projects/other/jobs", false, "1"},
-		{"/bigquery/v2/projects/gone/datasets", false, ""},
+		{"/bigquery/v2/projects/gone/datasets", false, "unreached"}, // 403 (#1767)
 		{"/bigquery/v2/projects/nowhere/datasets", true, ""},
 	} {
 		req := httptest.NewRequest(http.MethodGet, c.path, nil)
 		if c.client {
 			req.Header.Set(KnownProjectHeader, "1")
 		}
-		h.ServeHTTP(httptest.NewRecorder(), req)
+		marked.Store("unreached")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if c.want == "unreached" && rec.Code != http.StatusForbidden {
+			t.Errorf("%s: HTTP %d, want 403 of a project shut down", c.path, rec.Code)
+		}
 		if got, _ := marked.Load().(string); got != c.want {
 			t.Errorf("%s (client header %v): the engine's header %q, want %q", c.path, c.client, got, c.want)
 		}
@@ -142,5 +148,41 @@ func TestUnreachableResourceManagerIsAskedOnce(t *testing.T) {
 	}
 	if n := asked.Load(); n != 1 {
 		t.Errorf("Resource Manager was asked %d times, want 1", n)
+	}
+}
+
+// TestShutDownProjectIsRefused (#1767): a project BigQuery has served is
+// refused once Resource Manager has it DELETE_REQUESTED, after the ACTIVE
+// answer is asked again, and served again once it is restored.
+func TestShutDownProjectIsRefused(t *testing.T) {
+	var state atomic.Value
+	state.Store("ACTIVE")
+	rm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"projectId":"p","state":"` + state.Load().(string) + `"}`))
+	}))
+	defer rm.Close()
+	k := &knownProjects{rm: rm.URL}
+	h := k.client(k.engine(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{}`)) })))
+	do := func() int {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/bigquery/v2/projects/p/datasets", nil))
+		return rec.Code
+	}
+	if c := do(); c != http.StatusOK {
+		t.Fatalf("ACTIVE: HTTP %d", c)
+	}
+	state.Store("DELETE_REQUESTED")
+	k.mu.Lock()
+	k.fresh["p"] = time.Now().Add(-time.Second) // as if activeProjectTTL had passed
+	k.mu.Unlock()
+	if c := do(); c != http.StatusForbidden {
+		t.Errorf("DELETE_REQUESTED: HTTP %d, want 403", c)
+	}
+	state.Store("ACTIVE")
+	k.mu.Lock()
+	k.unknown["p"] = time.Now().Add(-time.Second)
+	k.mu.Unlock()
+	if c := do(); c != http.StatusOK {
+		t.Errorf("restored: HTTP %d, want 200", c)
 	}
 }

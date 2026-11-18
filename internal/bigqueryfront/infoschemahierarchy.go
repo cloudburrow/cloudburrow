@@ -19,9 +19,11 @@ import (
 // -jobs-by-organization). The project's folders and organization are the
 // instance's Resource Manager's (#1294), read with v1 projects.getAncestry
 // for each query, through the cloudburrow-host Service (the front is given
-// its address with --resourcemanager). The rows are the query's own
-// project's JOBS rows; the other projects' under the folder or the
-// organization, which BigQuery serves since #1764, are not added (#1767). JOBS_BY_FOLDER adds
+// its address with --resourcemanager). The rows are the JOBS rows of
+// every ACTIVE project of Resource Manager under the folder (in it, or in
+// a folder under it) or the organization: the query's own and, since
+// #1767, the other projects' BigQuery serves (#1764), each read as its own
+// project's JOBS is and named by project_id. JOBS_BY_FOLDER adds
 // folder_numbers, "Number IDs of folders that contain the project,
 // starting with the folder that immediately contains the project";
 // JOBS_BY_ORGANIZATION has JOBS' columns.
@@ -101,9 +103,99 @@ func (f front) hierarchyJobsRows(r *http.Request, view string, filter *jobsFilte
 		return "", http.StatusBadRequest, fmt.Sprintf("Project %s is not in an organization: "+
 			"INFORMATION_SCHEMA.JOBS_BY_ORGANIZATION reads the jobs of the project's organization", project)
 	}
-	sub, st, msg := f.jobsRows(r, filter)
-	if st != 0 || view != "JOBS_BY_FOLDER" {
-		return sub, st, msg
+	// The scope: the folder that holds the project, or its organization.
+	scope := ancestor{}
+	if view == "JOBS_BY_FOLDER" {
+		scope = chain[1]
+	} else {
+		scope.ResourceID.Type, scope.ResourceID.ID = "organization", org
 	}
-	return "(SELECT *, ARRAY<INT64>[" + strings.Join(folders, ", ") + "] AS folder_numbers FROM " + sub + ")", 0, ""
+	sub, st, msg := f.jobsRows(r, filter)
+	if st != 0 {
+		return "", st, msg
+	}
+	parts := []string{withFolders(view, sub, folders)}
+	others, st, msg := f.activeProjects(r.Context())
+	if st != 0 {
+		return "", st, msg
+	}
+	for _, other := range others {
+		if other == project {
+			continue
+		}
+		oc, st, msg := f.ancestry(r.Context(), other)
+		if st != 0 {
+			return "", st, msg
+		}
+		var ofolders []string
+		in := false
+		for i, a := range oc {
+			if i > 0 && a.ResourceID.Type == "folder" {
+				ofolders = append(ofolders, a.ResourceID.ID)
+			}
+			in = in || i > 0 && a.ResourceID == scope.ResourceID
+		}
+		if !in {
+			continue
+		}
+		osub, st, msg := f.inProject(other).jobsRows(r, filter)
+		if st != 0 {
+			return "", st, msg
+		}
+		// Its table of JOBS rows is the other project's (jobstable.go).
+		osub = strings.ReplaceAll(osub, jobsTablePath(), quoteName(other)+"."+jobsTablePath())
+		parts = append(parts, withFolders(view, osub, ofolders))
+	}
+	if len(parts) == 1 {
+		return parts[0], 0, ""
+	}
+	for i, p := range parts {
+		parts[i] = "SELECT * FROM " + p
+	}
+	return "(" + strings.Join(parts, " UNION ALL ") + ")", 0, ""
+}
+
+// withFolders is sub with JOBS_BY_FOLDER's folder_numbers, the project's
+// folders nearest first; sub itself for JOBS_BY_ORGANIZATION.
+func withFolders(view, sub string, folders []string) string {
+	if view != "JOBS_BY_FOLDER" {
+		return sub
+	}
+	return "(SELECT *, ARRAY<INT64>[" + strings.Join(folders, ", ") + "] AS folder_numbers FROM " + sub + ")"
+}
+
+// activeProjects lists the ACTIVE projects of Resource Manager (v3
+// projects.search, every page), by ID.
+func (f front) activeProjects(ctx context.Context) ([]string, int, string) {
+	var out []string
+	token := ""
+	for {
+		u := strings.TrimRight(f.resourceManager, "/") + "/v3/projects:search?pageSize=1000"
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		status, body, err := serviceCall(ctx, "Resource Manager projects.search", http.MethodGet, u, "", nil)
+		var page struct {
+			Projects []struct {
+				ProjectID string `json:"projectId"`
+				State     string `json:"state"`
+			} `json:"projects"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if err != nil {
+			return nil, http.StatusInternalServerError, "cloudburrow: could not list the projects of Resource Manager: " + err.Error()
+		}
+		if status != http.StatusOK || json.Unmarshal(body, &page) != nil {
+			return nil, http.StatusInternalServerError, "cloudburrow: could not list the projects of Resource Manager: " +
+				errorMessage(body, status)
+		}
+		for _, p := range page.Projects {
+			if p.State == "ACTIVE" {
+				out = append(out, p.ProjectID)
+			}
+		}
+		if token = page.NextPageToken; token == "" {
+			return out, 0, ""
+		}
+	}
 }

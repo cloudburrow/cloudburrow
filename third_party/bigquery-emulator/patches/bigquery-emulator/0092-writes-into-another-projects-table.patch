@@ -1,0 +1,200 @@
+CloudBurrow patch 92 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1767).
+
+A load job's destination table, and a query job's, can be in another
+project than the job's (BigQuery: "the destination table can be in a
+different project"). The emulator looked the destination's dataset up in
+the job's project: it answered a load into `other.ds.t` 404 dataset "ds"
+is not found, and a query whose destinationTable is `other.ds.q` "failed
+to find destination dataset: ds". Both now look the dataset up, and make
+a table that does not exist, in the table's own project (one the
+emulator has; 404 "project P is not found" otherwise); the rows were
+already written by the table reference's project.
+
+cloudburrow_load_other_project_test.go (TestLoadIntoAnotherProjectsTable):
+two CSV loads of a job of project test into other.ds.t, a new table then
+WRITE_APPEND, write the other project's table and none in test, and a
+query of test's job with destination other.ds.q writes it. It fails
+without the patch.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -454,7 +454,22 @@
+ 	if tableRef == nil {
+ 		return errInvalid("load job is missing configuration.load.destinationTable")
+ 	}
+-	dataset := r.project.Dataset(tableRef.DatasetId)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1767): a load writes its
++	// destination table in the table's own project, which may be another
++	// than the job's ("the destination table can be in a different
++	// project"); the emulator looked the dataset up in the job's.
++	project := r.project
++	if tableRef.ProjectId != "" && tableRef.ProjectId != project.ID {
++		other, err := r.server.metaRepo.FindProject(ctx, tableRef.ProjectId)
++		if err != nil {
++			return err
++		}
++		if other == nil {
++			return errNotFound(fmt.Sprintf("project %s is not found", tableRef.ProjectId))
++		}
++		project = other
++	}
++	dataset := project.Dataset(tableRef.DatasetId)
+ 	if dataset == nil {
+ 		return errNotFound(fmt.Sprintf("dataset %q is not found", tableRef.DatasetId))
+ 	}
+@@ -486,7 +501,7 @@
+ 		}
+ 		if _, err := (&tablesInsertHandler{}).Handle(ctx, &tablesInsertRequest{
+ 			server:  r.server,
+-			project: r.project,
++			project: project,
+ 			dataset: dataset,
+ 			table: &bigqueryv2.Table{
+ 				Schema:         load.Schema,
+@@ -1807,7 +1822,22 @@
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			destinationDataset := r.project.Dataset(tableRef.DatasetId)
++			// CloudBurrow patch (cloudburrow/cloudburrow#1767): the
++			// destination is written in its own project, which may be
++			// another than the job's; the emulator looked it up in the
++			// job's.
++			destinationProject := r.project
++			if tableRef.ProjectId != "" && tableRef.ProjectId != destinationProject.ID {
++				other, err := r.server.metaRepo.FindProjectWithConn(ctx, tx.Tx(), tableRef.ProjectId)
++				if err != nil {
++					return nil, err
++				}
++				if other == nil {
++					return nil, errNotFound(fmt.Sprintf("project %s is not found", tableRef.ProjectId))
++				}
++				destinationProject = other
++			}
++			destinationDataset := destinationProject.Dataset(tableRef.DatasetId)
+ 			if destinationDataset == nil {
+ 				return nil, fmt.Errorf("failed to find destination dataset: %s", tableRef.DatasetId)
+ 			}
+@@ -1830,11 +1860,11 @@
+ 						tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId,
+ 					))
+ 				}
+-				_, err := createTableMetadata(ctx, tx, r.server, r.project, destinationDataset, tableDef.ToBigqueryV2(r.project.ID, tableRef.DatasetId))
++				_, err := createTableMetadata(ctx, tx, r.server, destinationProject, destinationDataset, tableDef.ToBigqueryV2(destinationProject.ID, tableRef.DatasetId))
+ 				if err != nil {
+ 					return nil, fmt.Errorf("failed to create table: %w", err)
+ 				}
+-				serverErr := r.server.contentRepo.CreateTable(ctx, tx, tableDef.ToBigqueryV2(r.project.ID, tableRef.DatasetId))
++				serverErr := r.server.contentRepo.CreateTable(ctx, tx, tableDef.ToBigqueryV2(destinationProject.ID, tableRef.DatasetId))
+ 				if serverErr != nil {
+ 					return nil, fmt.Errorf("failed to create table: %w", serverErr)
+ 				}
+--- /dev/null
++++ b/server/cloudburrow_load_other_project_test.go
+@@ -0,0 +1,105 @@
++package server_test
++
++import (
++	"context"
++	"net/http"
++	"strings"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/iterator"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestLoadIntoAnotherProjectsTable is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1767): a load job of one project whose
++// destination is a table of another writes that project's table, made on
++// the way when it does not exist; the emulator answered 404 dataset "ds"
++// is not found, looking the dataset up in the job's project. A query job's
++// destination of another project, which it answered "failed to find
++// destination dataset: ds", is written there too.
++func TestLoadIntoAnotherProjectsTable(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(
++		types.NewProject("test"),
++		types.NewProject("other", types.NewDataset("ds")),
++	)); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication(),
++		option.WithHTTPClient(http.DefaultClient))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	for i, write := range []bigquery.TableWriteDisposition{bigquery.WriteEmpty, bigquery.WriteAppend} {
++		src := bigquery.NewReaderSource(strings.NewReader("x,s\n1,a\n2,b\n"))
++		src.SourceFormat = bigquery.CSV
++		src.SkipLeadingRows = 1
++		src.Schema = bigquery.Schema{{Name: "x", Type: bigquery.IntegerFieldType}, {Name: "s", Type: bigquery.StringFieldType}}
++		l := client.DatasetInProject("other", "ds").Table("t").LoaderFrom(src)
++		l.WriteDisposition = write
++		job, err := l.Run(ctx)
++		if err != nil {
++			t.Fatalf("load %d: %v", i, err)
++		}
++		if job.ProjectID() != "test" {
++			t.Errorf("load %d: the job is in %s, want test", i, job.ProjectID())
++		}
++		status, err := job.Wait(ctx)
++		if err == nil {
++			err = status.Err()
++		}
++		if err != nil {
++			t.Fatalf("load %d into other.ds.t: %v", i, err)
++		}
++	}
++	it, err := client.Query("SELECT COUNT(*), SUM(x) FROM `other.ds.t`").Read(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var row []bigquery.Value
++	if err := it.Next(&row); err != nil && err != iterator.Done {
++		t.Fatal(err)
++	}
++	if len(row) != 2 || row[0] != int64(4) || row[1] != int64(6) {
++		t.Errorf("other.ds.t after two loads = %v, want 4 rows summing to 6", row)
++	}
++	if _, err := client.Dataset("ds").Table("t").Metadata(ctx); err == nil {
++		t.Errorf("the load made test.ds.t too")
++	}
++	q := client.Query("SELECT 5 AS x, 'q' AS s")
++	q.Dst = client.DatasetInProject("other", "ds").Table("q")
++	job, err := q.Run(ctx)
++	if err != nil {
++		t.Fatalf("query into other.ds.q: %v", err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("query into other.ds.q: %v %v", err, status.Err())
++	}
++	it, err = client.Query("SELECT COUNT(*), SUM(x) FROM `other.ds.q`").Read(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	row = nil
++	if err := it.Next(&row); err != nil {
++		t.Fatal(err)
++	}
++	if len(row) != 2 || row[0] != int64(1) || row[1] != int64(5) {
++		t.Errorf("other.ds.q = %v, want 1 row of 5", row)
++	}
++}

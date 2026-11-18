@@ -28,11 +28,13 @@ import (
 // own KnownProjectHeader is removed. With no Resource Manager to ask, the
 // instance's project alone is served, as before.
 //
-// An ACTIVE answer is kept: once the engine has the project, the header
-// no longer matters. Any other answer is asked again after
-// unknownProjectTTL, and a Resource Manager that did not answer after
-// unreachableTTL. Each ask is one attempt bounded by projectAskTimeout,
-// so a Resource Manager that is down slows no request for long; the
+// An ACTIVE answer is kept for activeProjectTTL, and the project asked
+// again after it: once the engine has the project, the header no longer
+// matters, but a project shut down since is not served (#1767). Any other
+// answer is asked again after unknownProjectTTL, and a Resource Manager that did not answer after
+// unreachableTTL. Each ask is an attempt bounded by projectAskTimeout and,
+// when it fails, one more bounded by twice that, so a Resource Manager
+// that is down slows no request for long; the
 // instance's own project, which the engine has from the start, is served
 // all the same.
 
@@ -42,6 +44,7 @@ const KnownProjectHeader = "X-Cloudburrow-Known-Project"
 // unknownProjectTTL is how long an answer other than ACTIVE is kept, and
 // unreachableTTL how long Resource Manager's silence is.
 const (
+	activeProjectTTL  = 2 * time.Second
 	unknownProjectTTL = 2 * time.Second
 	unreachableTTL    = 10 * time.Second
 )
@@ -58,7 +61,12 @@ type knownProjects struct {
 	numbers *projectNumbers
 	mu      sync.Mutex
 	active  map[string]bool
+	// fresh is when each ACTIVE answer is asked again.
+	fresh   map[string]time.Time
 	unknown map[string]time.Time
+	// shutDown is the projects Resource Manager last answered
+	// DELETE_REQUESTED of (#1767, refuseShutDown).
+	shutDown map[string]bool
 }
 
 func pathProject(r *http.Request) string {
@@ -79,7 +87,7 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 		return false
 	}
 	k.mu.Lock()
-	if k.active[project] {
+	if k.active[project] && time.Now().Before(k.fresh[project]) {
 		k.mu.Unlock()
 		return true
 	}
@@ -92,24 +100,61 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 	actx, cancel := context.WithTimeout(ctx, projectAskTimeout)
 	status, body, err := serviceAttempt(actx, http.MethodGet, u, "", nil)
 	cancel()
+	if err != nil && ctx.Err() == nil {
+		// Once more (#1767): the front's first connection to Resource
+		// Manager after the pod starts was measured taking over
+		// projectAskTimeout, and a project asked then was answered 404.
+		actx, cancel = context.WithTimeout(ctx, 2*projectAskTimeout)
+		status, body, err = serviceAttempt(actx, http.MethodGet, u, "", nil)
+		cancel()
+	}
 	var p struct {
 		State string `json:"state"`
 	}
-	active := err == nil && status == http.StatusOK && json.Unmarshal(body, &p) == nil && p.State == "ACTIVE"
+	read := err == nil && status == http.StatusOK && json.Unmarshal(body, &p) == nil
+	active := read && p.State == "ACTIVE"
 	ttl := unknownProjectTTL
 	if err != nil || status/100 == 5 {
+		k.mu.Lock()
+		was := k.active[project]
+		if was {
+			// Resource Manager is silent: an ACTIVE project stays served.
+			if k.fresh == nil {
+				k.fresh = map[string]time.Time{}
+			}
+			k.fresh[project] = time.Now().Add(unreachableTTL)
+		}
+		k.mu.Unlock()
+		if was {
+			return true
+		}
 		logFront("bigquery front: Resource Manager projects.get of %s: %s; asked again in %s", project, describeAttempt(status, err), unreachableTTL)
 		ttl = unreachableTTL
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if k.shutDown == nil {
+		k.shutDown = map[string]bool{}
+	}
+	if read {
+		k.shutDown[project] = p.State == "DELETE_REQUESTED"
+	} else if status == http.StatusNotFound || status == http.StatusForbidden {
+		delete(k.shutDown, project) // purged, or not the instance's
+	}
 	if active {
 		if k.active == nil {
 			k.active = map[string]bool{}
 		}
+		if k.fresh == nil {
+			k.fresh = map[string]time.Time{}
+		}
 		k.active[project] = true
+		k.fresh[project] = time.Now().Add(activeProjectTTL)
 		delete(k.unknown, project)
 	} else {
+		if status != 0 && status/100 != 5 {
+			delete(k.active, project)
+		}
 		if k.unknown == nil {
 			k.unknown = map[string]time.Time{}
 		}
@@ -217,7 +262,11 @@ func (k *knownProjects) client(next http.Handler) http.Handler {
 			r = r.Clone(r.Context())
 			r.Header.Del(KnownProjectHeader)
 		}
-		k.isActive(r.Context(), pathProject(r))
+		p := pathProject(r)
+		k.isActive(r.Context(), p)
+		if k.refuseShutDown(w, p) {
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -232,4 +281,27 @@ func (k *knownProjects) engine(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// refuseShutDown answers a request of a project Resource Manager has in
+// DELETE_REQUESTED, which BigQuery has served before (#1767), reporting
+// true. A project shut down "is not usable" until it is restored, and its
+// "resources ... are shut down" (https://cloud.google.com/resource-manager/docs/creating-managing-projects#shutting_down_projects);
+// what BigQuery answers a request of one is not documented: 403
+// accessDenied "Access Denied: Project P: the project has been deleted
+// (DELETE_REQUESTED)" is CloudBurrow's.
+// UNVERIFIED wording and code; docs re-read 2026-11-17: https://cloud.google.com/resource-manager/docs/creating-managing-projects#shutting_down_projects
+func (k *knownProjects) refuseShutDown(w http.ResponseWriter, project string) bool {
+	if k == nil || project == "" {
+		return false
+	}
+	k.mu.Lock()
+	down := k.shutDown[project]
+	k.mu.Unlock()
+	if !down {
+		return false
+	}
+	writeError(w, http.StatusForbidden, "accessDenied", "Access Denied: Project "+project+": the project has been "+
+		"deleted (DELETE_REQUESTED); it is served again once it is restored.")
+	return true
 }

@@ -65,7 +65,7 @@ import (
 // implies a clone may overwrite one, "If the table clone overwrites an
 // existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration,
 // destinationExpirationTime into a table that exists (whether it changes
-// that table's expiration is not documented), a table of another project, and a WRITE_APPEND (or
+// that table's expiration is not documented), and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
 // from the source's (BigQuery's rules for which differences it accepts
 // are not given in its documentation). A dry run is 501 (startOwnJob).
@@ -106,16 +106,27 @@ type copyTable struct {
 	// table's own; else nil. A destination made from it is partitioned
 	// as it is, and insertSelect keeps each row's _PARTITIONTIME.
 	partitionTime any
+	// layout is the table's partitioning by a column (timePartitioning
+	// with a field, rangePartitioning) and clustering, as tables.get
+	// gives them: a copy's new destination is made with them, as
+	// BigQuery's copy keeps them (#1767).
+	layout map[string]json.RawMessage
 }
 
 // partitionExtra returns the Table fields that make a new table
 // partitioned as the sources are when they keep _PARTITIONTIME
 // (partitionTime), with extra's, or extra.
 func partitionExtra(sources []copyTable, extra map[string]any) map[string]any {
-	if len(sources) == 0 || sources[0].partitionTime == nil {
+	if len(sources) == 0 || sources[0].partitionTime == nil && len(sources[0].layout) == 0 {
 		return extra
 	}
-	out := map[string]any{"timePartitioning": sources[0].partitionTime}
+	out := map[string]any{}
+	for k, v := range sources[0].layout {
+		out[k] = v
+	}
+	if sources[0].partitionTime != nil {
+		out["timePartitioning"] = sources[0].partitionTime
+	}
 	for k, v := range extra {
 		out[k] = v
 	}
@@ -161,10 +172,19 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		if !strings.Contains(s.TableID, "@") {
 			continue
 		}
-		t, code, reason, msg := f.copySourceAt(r, s)
+		// Another project's table is read as it was in its own project
+		// (#1767): its change history is that project's.
+		sf, sref := f, s
+		if s.ProjectID != "" && s.ProjectID != project {
+			sf, sref.ProjectID = f.inProject(s.ProjectID), ""
+		}
+		t, code, reason, msg := sf.copySourceAt(r, sref)
 		if code != 0 {
 			writeError(w, code, reason, msg)
 			return
+		}
+		if sf.base != f.base {
+			t.ref.ProjectID = s.ProjectID
 		}
 		past[i], srcs[i] = t, t.ref
 	}
@@ -202,27 +222,10 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		}
 	}
 	// A table of another project than the job's is read or written there
-	// (#1764): "the source and destination tables ... can be in different
-	// projects" is BigQuery's copy (managing-tables#copy-table). The
-	// partitioned copies, and a source read at a past time, are carried
-	// out within the job's project only.
-	cross := false
-	for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
-		cross = cross || (t.ProjectID != "" && t.ProjectID != project)
-	}
-	if cross {
-		if len(past) > 0 {
-			notImplemented("of a table of another project than the job's, read at a past time (table@time).")
-			return
-		}
-		for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
-			if m, ok := f.inProject(refProject(t, project)).partitionMetaOf(r, t.DatasetID, t.TableID); strings.Contains(t.TableID, "$") || (ok && (m.TimePartitioning != nil || m.RangePartitioning != nil)) {
-				notImplemented(fmt.Sprintf("of the partitioned table %s, with a table of another project than the "+
-					"job's.", tableName(project, t)))
-				return
-			}
-		}
-	}
+	// (#1764, #1767): "the source and destination tables ... can be in
+	// different projects" is BigQuery's copy (managing-tables#copy-table),
+	// partitioned or not, and a source read at a past time (table@time)
+	// is read in its own project (above).
 
 	// A table of the job's project is named without it, as before.
 	for i := range srcs {
@@ -235,7 +238,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		destRef.ProjectID = ""
 	}
 
-	if len(past) == 0 && !cross && f.partitionCopy(w, r, c, srcs, write, create) { // #1273, partitionwrites.go
+	if len(past) == 0 && f.partitionCopy(w, r, c, srcs, write, create) { // #1273, partitionwrites.go
 		return
 	}
 
@@ -450,9 +453,28 @@ func (f front) copyTableMeta(r *http.Request, ref tableRef) copyTable {
 	var meta struct {
 		Type   string          `json:"type"`
 		Schema json.RawMessage `json:"schema"`
+		Time   *struct {
+			Field string `json:"field"`
+		} `json:"timePartitioning"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &meta) != nil {
 		return t
+	}
+	var all map[string]json.RawMessage
+	_ = json.Unmarshal(got, &all)
+	for _, k := range []string{"rangePartitioning", "clustering"} {
+		if v, ok := all[k]; ok && string(v) != "null" {
+			if t.layout == nil {
+				t.layout = map[string]json.RawMessage{}
+			}
+			t.layout[k] = v
+		}
+	}
+	if meta.Time != nil && meta.Time.Field != "" {
+		if t.layout == nil {
+			t.layout = map[string]json.RawMessage{}
+		}
+		t.layout["timePartitioning"] = all["timePartitioning"]
 	}
 	var s tableSchema
 	_ = json.Unmarshal(meta.Schema, &s)
