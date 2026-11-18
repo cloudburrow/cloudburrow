@@ -224,6 +224,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceKMS] && d.kms != nil {
 		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
+	// Certificate Authority Service (#1834) runs in this process too.
+	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
+		providers = append(providers, privateCAProvider{svc: d.privateCA})
+	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
 	}

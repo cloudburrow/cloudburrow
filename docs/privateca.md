@@ -27,6 +27,10 @@ or `NewCertificateAuthorityRESTClient` with `http://` before the address.
 
 Every long-running method answers an operation that is already done. Not served yet, and answered 501: subordinate CAs, certificate templates, CRLs, CA keys in Cloud KMS, and CMEK pools. [compatibility.md](compatibility.md#certificate-authority-service--googlecloudsecurityprivatecav1) has each claim and [coverage/privateca.md](coverage/privateca.md) each method.
 
+## Console
+
+The console's Certificate Authority Service page (`/security/cas`, under Security and identity) lists a project's CA pools in every region and creates them; a pool's page lists its CAs and certificates and its trust anchors, and offers Create CA, Request certificate (from a CSR or from a subject and public key), Edit labels, Delete pool and the pool's Permissions tab. A CA's page offers Enable, Disable, Delete (with or without the grace period) and Undelete; a certificate's page Revoke and Edit labels.
+
 ## State
 
 In persistent mode the records, the CAs' private keys among them, are kept in `privateca.json` in the instance directory. They are unencrypted: like every CloudBurrow key, they are not a security boundary ([ADR-0004](adr/0004-local-access-and-no-authentication.md)). `/admin/reset?service=privateca` deletes them, and `project=` one project's.

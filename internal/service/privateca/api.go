@@ -456,7 +456,9 @@ func (a *API) EnableCertificateAuthority(_ context.Context, req *privatecapb.Ena
 }
 
 // DisableCertificateAuthority disables an ENABLED or STAGED CA. Which
-// states Google disables from is UNVERIFIED: managing-ca-state names none.
+// states Google disables from is UNVERIFIED (docs re-read 2026-11-18:
+// <https://docs.cloud.google.com/certificate-authority-service/docs/managing-ca-state>
+// names none).
 func (a *API) DisableCertificateAuthority(_ context.Context, req *privatecapb.DisableCertificateAuthorityRequest) (*longrunningpb.Operation, error) {
 	return a.s.transition(req.GetName(), "disable", privatecapb.CertificateAuthority_DISABLED,
 		privatecapb.CertificateAuthority_ENABLED, privatecapb.CertificateAuthority_STAGED)
@@ -470,8 +472,10 @@ func (a *API) UndeleteCertificateAuthority(_ context.Context, req *privatecapb.U
 
 // DeleteCertificateAuthority soft-deletes a DISABLED, STAGED or
 // AWAITING_USER_ACTIVATION CA for the 30-day grace period, or purges it
-// with skip_grace_period. An ENABLED CA is refused (UNVERIFIED: Google's
-// delete page states no state precondition; gcloud disables first). A CA
+// with skip_grace_period. An ENABLED CA is refused (UNVERIFIED (docs
+// re-read 2026-11-18:
+// <https://docs.cloud.google.com/certificate-authority-service/docs/reference/rest/v1/projects.locations.caPools.certificateAuthorities/delete>
+// states no state precondition; gcloud disables first). A CA
 // with active certificates, "both unrevoked and unexpired", is refused
 // unless ignore_active_certificates.
 func (a *API) DeleteCertificateAuthority(_ context.Context, req *privatecapb.DeleteCertificateAuthorityRequest) (*longrunningpb.Operation, error) {
@@ -782,7 +786,9 @@ func (a *API) ListCertificates(_ context.Context, req *privatecapb.ListCertifica
 }
 
 // RevokeCertificate revokes a certificate once; a second revocation is
-// FAILED_PRECONDITION (UNVERIFIED).
+// FAILED_PRECONDITION (UNVERIFIED (docs re-read 2026-11-18:
+// <https://docs.cloud.google.com/certificate-authority-service/docs/revoking-certificates>
+// says nothing of a second revocation)).
 func (a *API) RevokeCertificate(_ context.Context, req *privatecapb.RevokeCertificateRequest) (*privatecapb.Certificate, error) {
 	s := a.s
 	s.mu.Lock()

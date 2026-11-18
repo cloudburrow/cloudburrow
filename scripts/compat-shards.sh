@@ -107,7 +107,10 @@ compat_shard() {
   TEST_VARS=CREDENTIALS,KUBECONFIG,CLUSTER,CONTROL,METADATA,CONSOLE,ADMIN_TOKEN,CLI,CLI_ARGS
   case "$1" in
     storage)
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging
+      # privateca for the console's Certificate Authority Service page
+      # (TestPrivateCAThroughThePage, #1834): PRIVATECA is not exported,
+      # so its compat suite stays in served.
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.

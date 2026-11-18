@@ -305,3 +305,17 @@ func parsePEMCert(s string) (*x509.Certificate, error) {
 func pemCert(der []byte) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
+
+// PoolsInProject is every CA pool of a project, in every location, for the
+// console's list page, which Google's console draws across locations.
+func (s *Server) PoolsInProject(project string) []*privatecapb.CaPool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*privatecapb.CaPool
+	for _, k := range sortedKeys(s.pools, "projects/"+project+"/locations/") {
+		if poolRE.MatchString(k) {
+			out = append(out, clone(s.pools[k].Pool))
+		}
+	}
+	return out
+}

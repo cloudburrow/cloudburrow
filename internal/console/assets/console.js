@@ -180,6 +180,9 @@ const ROUTES = [
   { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "Cloud KMS EKM connections", section: "Security and identity" },
   { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Cloud KMS Autokey", section: "Security and identity" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Cloud KMS single-tenant HSM", section: "Security and identity" },
+  // Certificate Authority Service (#1834): CA pools, their CAs and the
+  // certificates they issue, at Google's own path.
+  { path: "/security/cas", service: "privateca", title: "Certificate Authority Service", section: "Security and identity" },
   // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
   // never enforced (ADR-0006); Grant access and Remove principal on its
   // Permissions tab.
@@ -312,6 +315,8 @@ const ICONS = {
   secrets:   '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21"/><path d="M18 12v3M15 12v2.5"/>',
   // Cloud KMS: a key inside a shield.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
+  // Certificate Authority Service: a certificate with a seal.
+  privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
   // BigQuery: a magnifier over a bar chart.
   bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
   // Cloud Scheduler: a clock.
