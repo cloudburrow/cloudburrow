@@ -3,6 +3,9 @@ package run
 import (
 	"testing"
 	"time"
+
+	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/protobuf/proto"
 )
 
 // The CPU driver's arithmetic (#1789, #1800): usage over allocated CPUs
@@ -55,6 +58,10 @@ func TestCPURecommendation(t *testing.T) {
 	}
 	if !c.setFloor("r", 2) || c.floor("r") != 2 || c.setFloor("r", 2) || !c.setFloor("r", 0) || c.floor("r") != 0 {
 		t.Error("floors do not record what was set")
+	}
+	if revisionCPUTarget(nil) != 0.6 || revisionCPUTarget(&runpb.RevisionScaling{}) != 0.6 ||
+		revisionCPUTarget(&runpb.RevisionScaling{CpuUtilization: proto.Float32(0)}) != 0 {
+		t.Error("a revision's CPU target is not Cloud Run's default, or 0 does not turn it off")
 	}
 	var none *cpuScaler
 	if none.floor("r") != 0 {

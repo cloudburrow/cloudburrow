@@ -44,9 +44,21 @@ func TestEffectiveScale(t *testing.T) {
 	if got["a"] != (revisionScale{3, 3}) || got["b"] != (revisionScale{2, 2}) || got["t"] != (revisionScale{0, 1}) {
 		t.Fatalf("manual = %v", got)
 	}
-	if _, err := effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)},
+	// MANUAL 0 disables the service (#1800): no instance for a revision with
+	// traffic, at most one for a tag-only one.
+	got, err = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)},
+		append(shares, revisionShare{"t", 0}), get)
+	if err != nil || got["a"] != (revisionScale{0, 1}) || got["b"] != (revisionScale{0, 1}) || got["t"] != (revisionScale{0, 1}) {
+		t.Fatalf("manual 0 = %v, %v", got, err)
+	}
+	// So does MANUAL with no count, as Terraform sends manual_instance_count = 0.
+	if got, _ = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL}, shares, get); got["a"] != (revisionScale{0, 1}) {
+		t.Fatalf("manual with no count = %v", got)
+	}
+	// A count that leaves one serving revision at zero is still refused.
+	if _, err := effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(1)},
 		shares, get); err == nil {
-		t.Fatal("manual 0 accepted")
+		t.Fatal("manual 1 over two serving revisions accepted")
 	}
 	// No service scaling: each revision's own.
 	got, _ = effectiveScale(nil, shares, get)
@@ -72,7 +84,7 @@ func TestCheckScalingLimits(t *testing.T) {
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{MinInstanceCount: 3, MaxInstanceCount: 2}}}, "must not exceed"},
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0.6)}}}, ""}, // the CPU driver (#1800)
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: f(0)}}}, "not supported locally"},
-		{&runpb.Service{Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)}}, "not supported locally"},
+		{&runpb.Service{Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)}}, ""}, // disabled (#1800)
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0), ConcurrencyUtilization: f(0.95)}},
 			Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(2)}}, ""},
 	} {

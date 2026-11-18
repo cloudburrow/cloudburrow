@@ -462,7 +462,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	}
 	svc := &runpb.Service{
 		Name:                  name,
-		Uri:                   k.Status.URL,
+		Uri:                   serviceURL(k),
 		Generation:            k.Metadata.Generation,
 		ObservedGeneration:    k.Status.ObservedGeneration,
 		Template:              &runpb.RevisionTemplate{},
@@ -576,4 +576,13 @@ func quote(items []string) string {
 		q[i] = fmt.Sprintf("%q", s)
 	}
 	return strings.Join(q, ", ")
+}
+
+// serviceURL is k's URL: the one it had before it was disabled, while it
+// is (servicescaling.go).
+func serviceURL(k ksvc) string {
+	if u := k.Metadata.Annotations[annDisabledURL]; u != "" {
+		return u
+	}
+	return k.Status.URL
 }

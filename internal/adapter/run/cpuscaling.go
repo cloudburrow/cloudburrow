@@ -269,6 +269,15 @@ func cpuTarget(set *float32) float64 {
 	return float64(*set)
 }
 
+// revisionCPUTarget is a revision's CPU target; a revision with no scaling
+// of its own has Cloud Run's default.
+func revisionCPUTarget(sc *runpb.RevisionScaling) float64 {
+	if sc == nil {
+		return defaultCPUTarget
+	}
+	return cpuTarget(sc.CpuUtilization)
+}
+
 // StartCPUScaling runs the CPU driver until ctx ends (an instance calls it;
 // tests drive scaleOnCPU themselves).
 func (s *Server) StartCPUScaling(ctx context.Context) {
@@ -285,7 +294,7 @@ func (s *Server) StartCPUScaling(ctx context.Context) {
 				return
 			case <-t.C:
 			}
-			if err := s.scaleOnCPU(ctx); err != nil && ctx.Err() == nil && !warned {
+			if err := s.scaleOnCPUSafely(ctx); err != nil && ctx.Err() == nil && !warned {
 				// Once: without metrics-server every pass fails the same way.
 				slog.Warn("Cloud Run could not scale on CPU utilization", "err", err)
 				warned = true
@@ -294,6 +303,17 @@ func (s *Server) StartCPUScaling(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// scaleOnCPUSafely is scaleOnCPU, with a panic turned into an error: the
+// driver runs in the instance's process, which a bug here must not end.
+func (s *Server) scaleOnCPUSafely(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("CPU scaling pass panicked: %v", r)
+		}
+	}()
+	return s.scaleOnCPU(ctx)
 }
 
 // scaleOnCPU is one pass over services and worker pools.
@@ -323,7 +343,7 @@ func (s *Server) scaleServicesOnCPU(ctx context.Context) error {
 			var target float64
 			for _, r := range revs {
 				if r.Metadata.Name == share.revision {
-					target = cpuTarget(readRevisionScaling(r.Metadata.Annotations).CpuUtilization)
+					target = revisionCPUTarget(readRevisionScaling(r.Metadata.Annotations))
 				}
 			}
 			n := int32(0)

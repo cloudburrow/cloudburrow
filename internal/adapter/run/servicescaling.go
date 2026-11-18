@@ -217,6 +217,20 @@ type revisionScale struct{ min, max int32 }
 // instances, which Knative cannot express: its smallest maximum is one.
 func effectiveScale(svc *runpb.ServiceScaling, shares []revisionShare, own func(string) *runpb.RevisionScaling) (map[string]revisionScale, error) {
 	out := map[string]revisionScale{}
+	if disabledService(svc) {
+		// A disabled service (#1800): every revision with traffic runs no
+		// instance; one reached only through a tag is "not disabled" and
+		// runs at most one, as under any MANUAL count. Knative's smallest
+		// max-scale is 1, so a serving revision gets min 0 and max 1 and
+		// the route stops taking requests (applyDisabled), which is what
+		// holds it at zero.
+		for _, s := range shares {
+			if _, seen := out[s.revision]; !seen || s.percent > 0 {
+				out[s.revision] = revisionScale{0, 1}
+			}
+		}
+		return out, nil
+	}
 	if svc.GetScalingMode() == runpb.ServiceScaling_MANUAL {
 		counts := splitCount(svc.GetManualInstanceCount(), shares)
 		for i, s := range shares {
@@ -303,6 +317,9 @@ func (s *Server) applyServiceScaling(ctx context.Context, k ksvc) error {
 	}
 	scales, err := effectiveScale(svc, trafficShares(k), own)
 	if err != nil {
+		return err
+	}
+	if err := s.applyDisabled(ctx, k, disabledService(svc)); err != nil {
 		return err
 	}
 	for _, r := range revs {
@@ -459,4 +476,54 @@ func ReadServiceScaling(ann map[string]string) *runpb.ServiceScaling { return re
 // Run scaling, nil when it has none.
 func ReadRevisionScaling(ann map[string]string) *runpb.RevisionScaling {
 	return readRevisionScaling(ann)
+}
+
+// Disabled services (#1800). Google (https://docs.cloud.google.com/run/docs/configuring/services/manual-scaling,
+// read 2026-11-18): "Specify a value of 0 to disable the service";
+// "requests that are currently being processed will be allowed to
+// complete. However, any further requests to the service URL will fail";
+// revisions reached only through a tag "are not disabled".
+//
+// Locally the Knative Service is made cluster-local
+// (networking.knative.dev/visibility), so the instance's gateway stops
+// routing its URL, its serving revisions get no instances and scale to zero
+// once their requests finish; setting a count again makes it public again.
+// The URL it had is kept in annDisabledURL, so the service reads back with
+// the same uri while disabled.
+const (
+	labelVisibility     = "networking.knative.dev/visibility"
+	visibilityClusterOn = "cluster-local"
+	annDisabledURL      = "cloudburrow.dev/disabled-url"
+)
+
+// disabledService reports whether s disables the service: MANUAL with a
+// manualInstanceCount of 0. An unset count is 0 too: hashicorp/google
+// (8.4.0) omits manual_instance_count = 0, Google's own Terraform example
+// of a disabled service, from the request.
+func disabledService(s *runpb.ServiceScaling) bool {
+	return s.GetScalingMode() == runpb.ServiceScaling_MANUAL && s.GetManualInstanceCount() == 0
+}
+
+// applyDisabled makes k's route cluster-local when disabled, and public
+// again when not; it changes nothing that is already so.
+func (s *Server) applyDisabled(ctx context.Context, k ksvc, disabled bool) error {
+	_, marked := k.Metadata.Annotations[annDisabledURL]
+	if disabled == marked {
+		return nil
+	}
+	var patch map[string]any
+	if disabled {
+		patch = map[string]any{"metadata": map[string]any{
+			"labels":      map[string]any{labelVisibility: visibilityClusterOn},
+			"annotations": map[string]any{annDisabledURL: k.Status.URL}}}
+	} else {
+		patch = map[string]any{"metadata": map[string]any{
+			"labels":      map[string]any{labelVisibility: nil},
+			"annotations": map[string]any{annDisabledURL: nil}}}
+	}
+	raw, _ := json.Marshal(patch)
+	if err := s.kn.Kube.Patch(ctx, "ksvc", k.Metadata.Name, string(raw)); err != nil {
+		return apierror.Internal(err, "disable service %s", k.Metadata.Name)
+	}
+	return nil
 }
