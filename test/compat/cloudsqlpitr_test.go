@@ -34,7 +34,7 @@ func sqlServerTime(t *testing.T, h *Harness, c sqlBackupCase, conn string) time.
 	ctx, cancel := context.WithTimeout(h.Context(), time.Minute)
 	defer cancel()
 	q := `SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
-	if c.version != "POSTGRES_17" {
+	if !strings.HasPrefix(c.version, "POSTGRES_") {
 		q = `SELECT DATE_FORMAT(UTC_TIMESTAMP(6), '%Y-%m-%dT%H:%i:%s.%fZ')`
 	}
 	var s string
@@ -101,11 +101,39 @@ func TestCloudSQLPointInTimeRecovery(t *testing.T) {
 				return fmt.Sprintf("root:Root-pass1@%s(%s)/mysql", drv, conn)
 			}, register: mysqlRegister})
 	}
+	testPointInTimeRecovery(t, h, svc, project, cases)
+}
+
+// TestCloudSQLPointInTimeRecoveryBeforePostgres12 (#1524): what
+// TestCloudSQLPointInTimeRecovery does for PostgreSQL 17, on 9.6 and 11,
+// whose recovery settings are recovery.conf's and 9.6's WAL functions are
+// named after xlog.
+// covers: sql.instances.clone, sql.projects.instances.getLatestRecoveryTime, sql.instances.insert
+func TestCloudSQLPointInTimeRecoveryBeforePostgres12(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
+	var cases []sqlBackupCase
+	for _, v := range []string{"POSTGRES_9_6", "POSTGRES_11"} {
+		short := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(v, "POSTGRES_"), "_", ""))
+		cases = append(cases, sqlBackupCase{name: v, version: v, instance: "pitr-pg" + short + "-" + suffix, created: true,
+			table: "pitr_rows", dsn: func(_, conn string) string {
+				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+			}, register: pgRegister})
+	}
+	testPointInTimeRecovery(t, h, svc, project, cases)
+}
+
+func testPointInTimeRecovery(t *testing.T, h *Harness, svc *sqladmin.Service, project string, cases []sqlBackupCase) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := h.For(t)
 			bc := &sqladmin.BackupConfiguration{Enabled: true, StartTime: "03:00"}
-			if c.version == "POSTGRES_17" {
+			if strings.HasPrefix(c.version, "POSTGRES_") {
 				bc.PointInTimeRecoveryEnabled = true
 			} else {
 				bc.BinaryLogEnabled = true

@@ -110,6 +110,11 @@ func (c *LifecycleComponent) SetStorageSigningKeys(keys map[string][]byte) { c.s
 // Pub/Sub front runs from it too (#873).
 func (c *LifecycleComponent) SetBuiltinStorageImage(ref string) { c.storageImage = ref }
 
+// BuiltinStorageImage is the storage image's reference, "" before it is
+// built: the TLS front of a Memorystore for Redis server before 6.0 runs
+// from it (#1768).
+func (c *LifecycleComponent) BuiltinStorageImage() string { return c.storageImage }
+
 // SetBigQueryImage records the locally built image of the BigQuery emulator
 // (#1061), which `up` builds and loads before installing.
 func (c *LifecycleComponent) SetBigQueryImage(ref string) { c.bigQueryImage = ref }

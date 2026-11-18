@@ -17,6 +17,7 @@ import (
 	"time"
 
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
+	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -60,7 +61,16 @@ func (r *record) caPEM() string { return r.TransitCA + r.PreviousCAs }
 
 // clusterAddr is where r's server (or Service) server is reached in the
 // cluster: on TLSPort with in-transit encryption.
+//
+// A Redis before 6.0, which has no TLS, is served in-transit encryption by
+// a front in its pod (#1768): its server replicates from the relay on its
+// pod's loopback that the front forwards over TLS to server.
 func (r *record) clusterAddr(rs ReplicaSet, server string) (string, int) {
+	if r.tlsOn() && preTLS(r.version()) {
+		if port, ok := redistlsfront.RelayPort(server); ok {
+			return "127.0.0.1", port
+		}
+	}
 	host, port := rs.ClusterAddr(server)
 	if r.tlsOn() {
 		port = TLSPort

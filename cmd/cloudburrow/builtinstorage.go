@@ -288,3 +288,23 @@ func (s *storageChannelRelay) relayOnce(ctx context.Context) bool {
 	}
 	return true
 }
+
+// lazyStorageImage is the storage image's reference, built and loaded by
+// s the first time it is asked for when `up` has not built it: an instance
+// without a service that needs it still runs the TLS front of a
+// Memorystore for Redis server before 6.0 from it (#1768), so it is built
+// only once such an instance is created.
+func lazyStorageImage(s *storageImageComponent, comps *components.LifecycleComponent) func(context.Context) (string, error) {
+	var mu sync.Mutex
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if ref := comps.BuiltinStorageImage(); ref != "" {
+			return ref, nil
+		}
+		if err := s.Start(ctx); err != nil {
+			return "", err
+		}
+		return comps.BuiltinStorageImage(), nil
+	}
+}

@@ -105,7 +105,59 @@ END$$;
 // replica that reconnects after a failover, or while the standby is
 // rebuilt, finds what it has not received (no replication slot is used,
 // so a replica that is gone holds none back).
-const pgKeepWAL = "ALTER SYSTEM SET wal_keep_size = '256MB';\nSELECT pg_reload_conf();\n"
+// Before PostgreSQL 13 the setting is a count of 16 MB segments,
+// wal_keep_segments (#1524).
+func pgKeepWAL(version string) string {
+	if pgBefore13(version) {
+		return "ALTER SYSTEM SET wal_keep_segments = 16;\nSELECT pg_reload_conf();\n"
+	}
+	return "ALTER SYSTEM SET wal_keep_size = '256MB';\nSELECT pg_reload_conf();\n"
+}
+
+// pgBefore13 is whether version is a PostgreSQL before 13.
+func pgBefore13(version string) bool {
+	switch version {
+	case "POSTGRES_9_6", "POSTGRES_10", "POSTGRES_11", "POSTGRES_12":
+		return true
+	}
+	return false
+}
+
+// pgBefore12 is whether version is a PostgreSQL before 12, which has no
+// pg_promote() (#1524).
+func pgBefore12(version string) bool { return pgBefore13(version) && version != "POSTGRES_12" }
+
+// pgPromoteStandby ends recovery on deployment's server: pg_promote(true,
+// 60), or before PostgreSQL 12, which has none, pg_ctl promote as postgres
+// and a wait, as pg_promote's, for recovery to end (#1524).
+func (p *sqlProvisioner) pgPromoteStandby(ctx context.Context, deployment, version string) error {
+	if !pgBefore12(version) {
+		if out, err := p.psql(ctx, deployment, "SELECT pg_promote(true, 60);\n"); err != nil || out != "t" {
+			return fmt.Errorf("promote the standby %s: %v %s", deployment, err, out)
+		}
+		return nil
+	}
+	var o strings.Builder
+	if err := nodeExec(p.cfg, deployment)(ctx, nil, &o, "sh", "-c",
+		`asuser=$(command -v su-exec || command -v gosu); "$asuser" postgres pg_ctl promote -D "$PGDATA"`); err != nil {
+		return fmt.Errorf("promote the standby %s: %w %s", deployment, err, o.String())
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		out, err := p.psql(ctx, deployment, "SELECT pg_is_in_recovery();\n")
+		if err == nil && out == "f" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("promote the standby %s: still in recovery after 60s (%v %s)", deployment, err, out)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
 
 // standby makes spec's standby, for a REGIONAL instance, or removes it,
 // for a ZONAL one, and sets the primary's synchronous replication to
@@ -130,7 +182,7 @@ func (p *sqlProvisioner) standby(ctx context.Context, spec sqladmin.Spec) error 
 		_, err := p.inst.Kubectl(ctx, append(append([]string{"-n", p.inst.Namespace, "delete"}, obj...), "--ignore-not-found", "--wait=true")...)
 		return err
 	}
-	if _, err := p.psql(ctx, primary, pgKeepWAL); err != nil {
+	if _, err := p.psql(ctx, primary, pgKeepWAL(spec.DatabaseVersion)); err != nil {
 		return err
 	}
 	if _, err := p.psql(ctx, primary, pgStandbySource); err != nil {
@@ -206,12 +258,12 @@ func (p *sqlProvisioner) Failover(ctx context.Context, from, to sqladmin.Spec) e
 			return fmt.Errorf("promote the standby %s: %v %s", newPrimary, err, out)
 		}
 	} else {
-		if out, err := p.psql(ctx, newPrimary, "SELECT pg_promote(true, 60);\n"); err != nil || out != "t" {
-			return fmt.Errorf("promote the standby %s: %v %s", newPrimary, err, out)
+		if err := p.pgPromoteStandby(ctx, newPrimary, to.DatabaseVersion); err != nil {
+			return err
 		}
 		// Before the old primary is rebuilt, whose base backup checkpoints:
 		// the read replicas still need the WAL from the promotion on.
-		if _, err := p.psql(ctx, newPrimary, pgKeepWAL); err != nil {
+		if _, err := p.psql(ctx, newPrimary, pgKeepWAL(to.DatabaseVersion)); err != nil {
 			return err
 		}
 	}

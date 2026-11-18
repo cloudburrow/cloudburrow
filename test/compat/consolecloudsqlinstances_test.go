@@ -227,6 +227,17 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 // and Create read replica, a cascading replica (#1381); Stop replication and then Start replication are read back as
 // databaseReplicationEnabled, and Promote leaves a standalone primary.
 func TestConsoleCloudSQLReadReplica(t *testing.T) {
+	consoleCloudSQLReadReplica(t, "POSTGRES_17", "console-rp-")
+}
+
+// TestConsoleCloudSQLReadReplicaPostgres96 (#1524): the same on a
+// PostgreSQL 9.6 instance, whose replica is promoted with pg_ctl promote.
+// covers: sql.instances.insert, sql.instances.promoteReplica, sql.instances.stopReplica, sql.instances.startReplica
+func TestConsoleCloudSQLReadReplicaPostgres96(t *testing.T) {
+	consoleCloudSQLReadReplica(t, "POSTGRES_9_6", "console-rp96-")
+}
+
+func consoleCloudSQLReadReplica(t *testing.T, version, prefix string) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("needs --services cloudsql")
@@ -234,9 +245,9 @@ func TestConsoleCloudSQLReadReplica(t *testing.T) {
 	addr := consoleAddr(t, h)
 	svc := sqlAdminService(t, h)
 	project := h.Project()
-	name := fmt.Sprintf("console-rp-%d", time.Now().UnixNano()%1e6)
+	name := fmt.Sprintf("%s%d", prefix, time.Now().UnixNano()%1e6)
 	replica := name + "-r"
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version,
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 	if err != nil {
 		t.Fatal(err)
@@ -472,4 +483,56 @@ func TestConsoleCloudSQLVersionsAndUpgrade(t *testing.T) {
 	if d := consoleDetailOf(t, addr, "cloudsql-instances", project, "postgres"); d.offers("upgrade") {
 		t.Errorf("the page of the server up runs offers Upgrade")
 	}
+}
+
+// TestConsoleCloudSQLHighAvailabilityPostgres11 (#1524): Create instance
+// with Zonal availability REGIONAL makes a PostgreSQL 11 instance with a
+// standby in a second zone, as the official client reads it; its page
+// offers Failover, which swaps the zones and keeps the instance RUNNABLE.
+// covers: sql.instances.insert, sql.instances.failover
+func TestConsoleCloudSQLHighAvailabilityPostgres11(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	addr := consoleAddr(t, h)
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	name := fmt.Sprintf("console-ha11-%d", time.Now().UnixNano()%1e6)
+	code, out := consoleCreate(t, addr, "cloudsql-instances", project, map[string]string{
+		"name": name, "databaseVersion": "POSTGRES_11", "tier": "db-custom-1-3840", "availabilityType": "REGIONAL"})
+	if code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	t.Cleanup(func() {
+		if d, err := svc.Instances.Delete(project, name).Do(); err == nil {
+			waitSQLOp(t, svc, project, d)
+		}
+	})
+	get := func(want func(*sqladmin.DatabaseInstance) bool) *sqladmin.DatabaseInstance {
+		t.Helper()
+		var in *sqladmin.DatabaseInstance
+		var err error
+		for i := 0; i < 240; i++ {
+			if in, err = svc.Instances.Get(project, name).Do(); err == nil && in.State == "RUNNABLE" && want(in) {
+				return in
+			}
+			time.Sleep(time.Second)
+		}
+		t.Fatalf("instance: %+v %v", in, err)
+		return nil
+	}
+	in := get(func(in *sqladmin.DatabaseInstance) bool {
+		return in.Settings.AvailabilityType == "REGIONAL" && in.SecondaryGceZone != "" && in.SecondaryGceZone != in.GceZone
+	})
+	if d := consoleDetailOf(t, addr, "cloudsql-instances", project, name); !d.offers("failover") {
+		t.Fatalf("a REGIONAL instance's page offers %+v", d.Actions)
+	}
+	body, _ := json.Marshal(map[string]any{"Path": []string{name}, "Action": "failover", "Values": map[string]string{}})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/cloudsql-instances?project="+project, string(body)); code != http.StatusOK {
+		t.Fatalf("console failover = %d: %s", code, out)
+	}
+	get(func(got *sqladmin.DatabaseInstance) bool {
+		return got.GceZone == in.SecondaryGceZone && got.SecondaryGceZone == in.GceZone
+	})
 }
