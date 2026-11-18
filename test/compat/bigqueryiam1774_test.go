@@ -383,3 +383,144 @@ func bindOn[O any](t *testing.T, get func(context.Context, *iampb.GetIamPolicyRe
 		}
 	}
 }
+
+// TestBigQueryPerProjectIAMViewsAndRoutines (#1774): with a token the
+// instance minted and a dataset READER entry on the views' dataset alone,
+// a query of a view whose table the caller cannot read is 403
+// bigquery.tables.getData on that table; an authorized view (an access
+// entry of the table's dataset naming the view) and a view of an
+// authorized dataset run; a call of another project's function needs
+// bigquery.routines.get on it. Official Go client.
+//
+// covers: bigquery.jobs.query, bigquery.datasets.patch
+func TestBigQueryPerProjectIAMViewsAndRoutines(t *testing.T) {
+	h := New(t)
+	control := h.Endpoint(EnvControl)
+	endpoint := h.Endpoint(EnvBigQuery)
+	if endpoint == "" || h.Endpoint(EnvMetadata) == "" {
+		t.Skip("no BigQuery or metadata endpoint")
+	}
+	rmEndpoint := shardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)
+	_, home := bigqueryClient(t, h)
+	ctx := h.Context()
+	_, _, pc := foldersClientsAt(t, h, rmOptionsAt(rmEndpoint))
+	other := v1ID(h, "bqiamv-")
+	op, err := pc.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: other}})
+	if err == nil {
+		_, err = waitLRO(ctx, op)
+	}
+	if err != nil {
+		t.Fatalf("CreateProject %s: %v", other, err)
+	}
+	t.Cleanup(func() {
+		_, _ = pc.DeleteProject(context.Background(), &rmpb.DeleteProjectRequest{Name: "projects/" + other})
+		_, _ = adminDo(t, http.MethodPost, fmt.Sprintf("http://%s/admin/purge?project=%s", control, other), "", nil)
+	})
+	ocl, err := bigquery.NewClient(ctx, other, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ocl.Close() })
+	exec := func(cl *bigquery.Client, sql string) error {
+		q := cl.Query(sql)
+		q.Location = "US"
+		j, err := q.Run(ctx)
+		if err != nil {
+			return err
+		}
+		st, err := j.Wait(ctx)
+		if err != nil {
+			return err
+		}
+		return st.Err()
+	}
+	for _, d := range []string{"src", "authsrc", "views", "authviews"} {
+		if err := ocl.Dataset(d).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
+			t.Fatalf("datasets.insert %s: %v", d, err)
+		}
+	}
+	tb := "`" + other + "."
+	for _, sql := range []string{
+		"CREATE TABLE src.t AS SELECT 1 AS x UNION ALL SELECT 2",
+		"CREATE TABLE authsrc.t AS SELECT 10 AS x",
+		"CREATE VIEW views.plain AS SELECT x FROM " + tb + "src.t`",
+		"CREATE VIEW views.authorized AS SELECT x FROM " + tb + "authsrc.t`",
+		"CREATE VIEW authviews.v AS SELECT x FROM " + tb + "authsrc.t`",
+		"CREATE OR REPLACE FUNCTION views.inc(x INT64) AS (x + 1)",
+		"CREATE OR REPLACE FUNCTION src.inc(x INT64) AS (x + 1)",
+	} {
+		if err := exec(ocl, sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	p := newIAMPrincipal(t, h, home, "bqiamv")
+	p.grant("roles/bigquery.jobUser")
+	grantDataset := func(d string, e *bigquery.AccessEntry) {
+		t.Helper()
+		md, err := ocl.Dataset(d).Metadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ocl.Dataset(d).Update(ctx, bigquery.DatasetMetadataToUpdate{Access: append(md.Access, e)}, md.ETag); err != nil {
+			t.Fatalf("datasets.patch %s: %v", d, err)
+		}
+	}
+	for _, d := range []string{"views", "authviews"} {
+		grantDataset(d, &bigquery.AccessEntry{Role: bigquery.ReaderRole, EntityType: bigquery.UserEmailEntity, Entity: p.email})
+	}
+	// authsrc authorizes the view views.authorized and the dataset authviews.
+	grantDataset("authsrc", &bigquery.AccessEntry{EntityType: bigquery.ViewEntity, View: ocl.Dataset("views").Table("authorized")})
+	grantDataset("authsrc", &bigquery.AccessEntry{EntityType: bigquery.DatasetEntity, Dataset: &bigquery.DatasetAccessEntry{
+		Dataset: ocl.Dataset("authviews"), TargetTypes: []string{"VIEWS"}}})
+
+	tc, err := bigquery.NewClient(ctx, home, option.WithEndpoint(endpoint),
+		option.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{AccessToken: p.token, TokenType: "Bearer"})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tc.Close() })
+	sum := func(sql string) (int64, error) {
+		q := tc.Query(sql)
+		q.Location = "US"
+		it, err := q.Read(ctx)
+		if err != nil {
+			return 0, err
+		}
+		var row []bigquery.Value
+		if err := it.Next(&row); err != nil {
+			return 0, err
+		}
+		n, _ := row[0].(int64)
+		return n, nil
+	}
+	denied := func(err error, msg string) (bool, string) {
+		var ge *googleapi.Error
+		return errors.As(err, &ge) && ge.Code == http.StatusForbidden && strings.Contains(ge.Message, msg), fmt.Sprintf("%v", err)
+	}
+	// The grants reach the front within seconds.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		n, err := sum("SELECT SUM(x) FROM " + tb + "views.authorized`")
+		if err == nil && n == 10 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("an authorized view: %d, %v; want 10", n, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if n, err := sum("SELECT SUM(x) FROM " + tb + "authviews.v`"); err != nil || n != 10 {
+		t.Errorf("a view of an authorized dataset: %d, %v; want 10", n, err)
+	}
+	_, err = sum("SELECT SUM(x) FROM " + tb + "views.plain`")
+	if ok, got := denied(err, "Permission bigquery.tables.getData denied on table "+other+":src.t"); !ok {
+		t.Errorf("a view of a table the caller cannot read = %s, want 403 bigquery.tables.getData on %s:src.t", got, other)
+	}
+	if n, err := sum("SELECT " + tb + "views.inc`(1)"); err != nil || n != 2 {
+		t.Errorf("a call of views.inc with READER on views: %d, %v; want 2", n, err)
+	}
+	_, err = sum("SELECT " + tb + "src.inc`(1)")
+	if ok, got := denied(err, "Permission bigquery.routines.get denied on routine "+other+":src.inc"); !ok {
+		t.Errorf("a call of src.inc without a role on src = %s, want 403 bigquery.routines.get", got)
+	}
+}

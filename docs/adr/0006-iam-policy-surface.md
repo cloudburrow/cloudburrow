@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -469,9 +469,22 @@ by their `bigquery.` permissions) and which the front completes with the dataset
 A request with no bearer token, with one the instance did not mint, or with one minted for the
 instance's own account (the ADC fixture's) is served as before, as the instance's ADC account with
 every permission: CloudBurrow cannot otherwise tell who sent it, and every client, test and console
-page that does not mint a token for another account keeps working. Not read: inheritance from
-folders and the organization, conditions, a table's own policy, and the tables a view or routine
-reads. Its compatibility.md row says what is checked.
+page that does not mint a token for another account keeps working. Its compatibility.md row says
+what is checked.
+
+Amended 2026-11-18 by #1774: the host now gives the front each project's roles with those
+inherited from its folders and its organization (Resource Manager's ancestry), and conditional
+bindings with their expressions, which the front evaluates with `internal/iamcond` for the resource
+it checks (BigQuery's `resource.name`, `resource.type` and `resource.service`, and
+`request.time`). A table's or a routine's own IAM policy (#1231), until then stored and returned
+and never read, now grants on that resource to a minted token's caller: the first exception to
+#1231's "nothing reads a table's or a routine's policy", for those callers alone. Jobs follow
+BigQuery's creator rule: the front records which minted caller ran each job, and that caller reads,
+lists and cancels it with `bigquery.jobs.create`; anyone else needs `bigquery.jobs.get`,
+`listAll` or `update`. The tables a view or a SQL routine reads are checked for the caller unless
+the source dataset authorizes the view, the routine or the view's dataset. Still not read (#1780):
+tags in conditions, `group:` and `domain:` members, and the creators of jobs run before the front
+last started.
 
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row

@@ -61,8 +61,12 @@ import (
 // (internal/iamcond) holds for the checked resource now: resource.name,
 // resource.type and resource.service as BigQuery gives them, and
 // request.time; a tag condition grants nothing. A job's creator is known
-// for the jobs a minted caller ran since the front started. Not checked:
-// the tables a view or a routine reads.
+// for the jobs a minted caller ran since the front started. The tables a
+// view reads need bigquery.tables.getData of the caller unless they
+// authorize the view or its dataset (checkView); a routine a query calls
+// by its three-part name needs bigquery.routines.get, and the tables its
+// SQL body reads are checked as a view's, an authorized routine's excepted
+// (checkRoutines).
 
 // BigQueryIAMPath is where the host pushes BigQueryIAM to the front.
 const BigQueryIAMPath = "/cloudburrow/v1/bigqueryIAM"
@@ -155,6 +159,9 @@ type iamState struct {
 	now func() time.Time
 	// policies are the tables' and routines' own IAM policies (iam.go).
 	policies *iamPolicies
+	// full serves a view's metadata with its query as the client wrote it
+	// (views.go); handler sets it.
+	full http.Handler
 	// creators are the accounts that made the jobs a minted caller ran,
 	// by project and job ID (jobs.get, jobs.list and jobs.cancel let a
 	// job's creator read and cancel it).
@@ -453,7 +460,12 @@ func (s *iamState) check(w http.ResponseWriter, r *http.Request, next http.Handl
 		if !s.onProject(email, project, "bigquery.jobs.create") {
 			return denyProject("bigquery.jobs.create")
 		}
-		return s.checkJob(r, project, onTable, denyTable)
+		if s.checkJob(r, project, onTable, denyTable, func(t tableRef) bool {
+			return s.checkView(r, t, 0, onTable, denyTable)
+		}) {
+			return true
+		}
+		return s.checkRoutines(r, next, email, jobSQL(r), onTable, denyTable, denyIn)
 	case len(parts) == 1 && parts[0] == "jobs" && m == http.MethodGet:
 		return s.checkListJobs(r, email, project, denyProject)
 	case len(parts) >= 2 && (parts[0] == "jobs" || parts[0] == "queries"):
@@ -627,7 +639,7 @@ var sqlTables = regexp.MustCompile("(?i)\\b(?:FROM|JOIN)\\s+(`[^`]+`(?:\\.`[^`]+
 // checkJob checks the job's tables: a load's or a query's destination, a
 // copy's sources and destination, an extract's source, a query's tables.
 func (s *iamState) checkJob(r *http.Request, project string, onTable func(t tableRef, perm string) bool,
-	deny func(tableRef, string) bool) bool {
+	deny func(tableRef, string) bool, viewReads func(tableRef) bool) bool {
 	var job struct {
 		Configuration struct {
 			Query *struct {
@@ -736,7 +748,7 @@ func (s *iamState) checkJob(r *http.Request, project string, onTable func(t tabl
 			strings.EqualFold(t.TableID, "INFORMATION_SCHEMA") {
 			continue
 		}
-		if need(&t, "bigquery.tables.getData") {
+		if need(&t, "bigquery.tables.getData") || viewReads(t) {
 			return true
 		}
 	}
@@ -747,6 +759,7 @@ func (s *iamState) checkJob(r *http.Request, project string, onTable func(t tabl
 // the creator of the jobs a minted caller runs, and filters a minted
 // caller's jobs.list to the jobs it may see.
 func (s *iamState) handler(engine, rest http.Handler) http.Handler {
+	s.full = rest
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.check(w, r, engine) {
 			return
@@ -851,4 +864,181 @@ func (s *iamState) serveProjects(w http.ResponseWriter, r *http.Request, rest ht
 	rec.body.Reset()
 	rec.body.Write(out)
 	rec.copyTo(w)
+}
+
+// maxViewDepth is how many views deep checkView reads.
+const maxViewDepth = 16
+
+// checkView checks the tables a view a query names reads, when t is a view
+// (#1774): each needs bigquery.tables.getData of the caller, unless the
+// table's dataset authorizes the view (an access entry's view naming it,
+// an authorized view) or the view's dataset (an access entry's dataset,
+// an authorized dataset), which grants the view's readers its rows
+// ("Authorized views", "Authorized datasets",
+// https://docs.cloud.google.com/bigquery/docs/authorized-views,
+// https://docs.cloud.google.com/bigquery/docs/authorized-datasets). A view
+// reading a view is checked the same way. It answers 403 and reports true
+// when one is denied.
+func (s *iamState) checkView(r *http.Request, t tableRef, depth int, onTable func(tableRef, string) bool,
+	deny func(tableRef, string) bool) bool {
+	if depth >= maxViewDepth || s.full == nil {
+		return false
+	}
+	get := func(path string, v any) bool {
+		rec := newRecorder()
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, path, nil)
+		if err != nil {
+			return false
+		}
+		s.full.ServeHTTP(rec, req)
+		return rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), v) == nil
+	}
+	var meta struct {
+		Type string `json:"type"`
+		View *struct {
+			Query string `json:"query"`
+		} `json:"view"`
+	}
+	if !get("/bigquery/v2/projects/"+url.PathEscape(t.ProjectID)+"/datasets/"+url.PathEscape(t.DatasetID)+"/tables/"+
+		url.PathEscape(t.TableID), &meta) || meta.Type != "VIEW" || meta.View == nil {
+		return false
+	}
+	return s.checkReads(r, "tables", t, meta.View.Query, depth, onTable, deny)
+}
+
+// checkReads checks the tables sql reads, sql being the query of the view
+// or the body of the routine owner (kind "tables" or "routines"), as
+// checkView says: an access entry naming owner (view, routine) or its
+// dataset authorizes it.
+func (s *iamState) checkReads(r *http.Request, kind string, owner tableRef, sql string, depth int,
+	onTable func(tableRef, string) bool, deny func(tableRef, string) bool) bool {
+	t := owner
+	get := func(path string, v any) bool {
+		rec := newRecorder()
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, path, nil)
+		if err != nil {
+			return false
+		}
+		s.full.ServeHTTP(rec, req)
+		return rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), v) == nil
+	}
+	for _, m := range sqlTables.FindAllStringSubmatch(sql, -1) {
+		path := strings.Split(strings.ReplaceAll(m[1], "`", ""), ".")
+		var u tableRef
+		switch len(path) {
+		case 3:
+			u = tableRef{ProjectID: path[0], DatasetID: path[1], TableID: path[2]}
+		case 2:
+			u = tableRef{ProjectID: t.ProjectID, DatasetID: path[0], TableID: path[1]}
+		default:
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(u.DatasetID), "region-") || strings.EqualFold(u.DatasetID, "INFORMATION_SCHEMA") ||
+			strings.EqualFold(u.TableID, "INFORMATION_SCHEMA") {
+			continue
+		}
+		var ds struct {
+			Access []struct {
+				View    *tableRef `json:"view"`
+				Routine *struct {
+					ProjectID string `json:"projectId"`
+					DatasetID string `json:"datasetId"`
+					RoutineID string `json:"routineId"`
+				} `json:"routine"`
+				Dataset *struct {
+					Dataset struct {
+						ProjectID string `json:"projectId"`
+						DatasetID string `json:"datasetId"`
+					} `json:"dataset"`
+				} `json:"dataset"`
+			} `json:"access"`
+		}
+		authorized := false
+		if get("/bigquery/v2/projects/"+url.PathEscape(u.ProjectID)+"/datasets/"+url.PathEscape(u.DatasetID), &ds) {
+			for _, a := range ds.Access {
+				if v := a.Routine; kind == "routines" && v != nil && v.ProjectID == t.ProjectID && v.DatasetID == t.DatasetID &&
+					v.RoutineID == t.TableID {
+					authorized = true
+				}
+				if v := a.View; kind == "tables" && v != nil && v.ProjectID == t.ProjectID && v.DatasetID == t.DatasetID && v.TableID == t.TableID {
+					authorized = true
+				}
+				if d := a.Dataset; d != nil && d.Dataset.ProjectID == t.ProjectID && d.Dataset.DatasetID == t.DatasetID {
+					authorized = true
+				}
+			}
+		}
+		if authorized {
+			continue
+		}
+		if !onTable(u, "bigquery.tables.getData") {
+			return deny(u, "bigquery.tables.getData")
+		}
+		if s.checkView(r, u, depth+1, onTable, deny) {
+			return true
+		}
+	}
+	return false
+}
+
+// sqlRoutines are the persistent functions a query calls by a three-part
+// name: `p.d.f`(, p.d.f(, `p`.`d`.`f`(.
+var sqlRoutines = regexp.MustCompile("(`[^`]+`(?:\\.`[^`]+`)*|[A-Za-z_][\\w-]*\\.[A-Za-z_]\\w*\\.[A-Za-z_]\\w*)\\s*\\(")
+
+// checkRoutines checks the routines sql calls (#1774): each needs
+// bigquery.routines.get on it, and the tables its body reads are checked
+// as a view's (checkReads), an authorized routine's excepted.
+func (s *iamState) checkRoutines(r *http.Request, next http.Handler, email, sql string, onTable func(tableRef, string) bool,
+	deny func(tableRef, string) bool, denyIn func(string, bqResource, string) bool) bool {
+	for _, m := range sqlRoutines.FindAllStringSubmatch(sql, -1) {
+		path := strings.Split(strings.ReplaceAll(m[1], "`", ""), ".")
+		if len(path) != 3 {
+			continue
+		}
+		res := bqResource{project: path[0], dataset: path[1], kind: "routines", id: path[2]}
+		if !s.allowed(r, next, email, res, "bigquery.routines.get") {
+			return denyIn("Routine", res, "bigquery.routines.get")
+		}
+		if s.full == nil {
+			continue
+		}
+		rec := newRecorder()
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "/bigquery/v2/projects/"+url.PathEscape(res.project)+
+			"/datasets/"+url.PathEscape(res.dataset)+"/routines/"+url.PathEscape(res.id), nil)
+		if err != nil {
+			continue
+		}
+		s.full.ServeHTTP(rec, req)
+		var def struct {
+			DefinitionBody string `json:"definitionBody"`
+			Language       string `json:"language"`
+		}
+		if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &def) != nil || (def.Language != "" && def.Language != "SQL") {
+			continue
+		}
+		owner := tableRef{ProjectID: res.project, DatasetID: res.dataset, TableID: res.id}
+		if s.checkReads(r, "routines", owner, def.DefinitionBody, 0, onTable, deny) {
+			return true
+		}
+	}
+	return false
+}
+
+// jobSQL is the query of the job in r's body, "" for none.
+func jobSQL(r *http.Request) string {
+	var job struct {
+		Configuration struct {
+			Query *struct {
+				Query string `json:"query"`
+			} `json:"query"`
+		} `json:"configuration"`
+		Query string `json:"query"`
+	}
+	if !decodeJob(r, &job) {
+		return ""
+	}
+	if q := job.Configuration.Query; q != nil {
+		return q.Query
+	}
+	return job.Query
 }

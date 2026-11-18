@@ -9712,6 +9712,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerychangehistory1503_test.go:101 TestBigQueryChangeHistoryRetention",
+          "test/compat/bigqueryiam1774_test.go:396 TestBigQueryPerProjectIAMViewsAndRoutines",
           "test/compat/bigquerymethods_test.go:177 TestBigQueryDatasetUpdatesAreSaved",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
@@ -9742,6 +9743,7 @@
         "method": "bigquery.jobs.cancel",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -9772,6 +9774,7 @@
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
           "test/compat/bigquerygeoparquet_test.go:62 TestBigQueryParquetExtractOfNativeGeography",
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryjobretry_test.go:29 TestBigQueryInsertOfAnExistingJobIs409",
           "test/compat/bigqueryjsonunknown_test.go:34 TestBigQueryLoadFieldsOutsideTheSchema",
@@ -9970,6 +9973,8 @@
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigquerymultiproject1764_test.go:43 TestBigQueryServesEveryResourceManagerProject",
           "test/compat/bigquerymultiproject1767_test.go:41 TestBigQueryAcrossProjectsLoadsAndPartitionCopies",
+          "test/compat/bigquerymultiproject1774_test.go:147 TestBigQueryCloneAsOfAndShutDownAcrossProjects",
+          "test/compat/bigquerymultiproject1774_test.go:89 TestBigQueryParquetAndORCLoadsAcrossProjects",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -10047,6 +10052,7 @@
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryexecimmediate_test.go:157 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigquerymultiproject1764_test.go:43 TestBigQueryServesEveryResourceManagerProject",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
@@ -10139,6 +10145,7 @@
           "test/compat/bigqueryhistory1522_test.go:276 TestBigQueryChangeHistoryOfChangeNamedColumns",
           "test/compat/bigqueryhistory1522_test.go:335 TestBigQueryAlterSchemaTimeTravelLetsGoFirst",
           "test/compat/bigqueryiam1767_test.go:34 TestBigQueryPerProjectIAM",
+          "test/compat/bigqueryiam1774_test.go:396 TestBigQueryPerProjectIAMViewsAndRoutines",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryicebergdefaultconnection_test.go:26 TestBigQueryIcebergDefaultConnection",
           "test/compat/bigqueryicebergdefaults1456_test.go:27 TestBigQueryStorageURIMakesIcebergTable",
@@ -10200,6 +10207,7 @@
           "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigquerymultiproject1767_test.go:306 TestBigQueryJobsByFolderAcrossProjects",
+          "test/compat/bigquerymultiproject1774_test.go:147 TestBigQueryCloneAsOfAndShutDownAcrossProjects",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -10282,6 +10290,7 @@
         "tests": [
           "test/compat/bigquery1562_test.go:181 TestBigQueryMLHashBucketize",
           "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigquerymethods_test.go:151 TestBigQueryModelsOfADatasetWithNone",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",
@@ -10334,6 +10343,7 @@
         "method": "bigquery.projects.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigquerymethods_test.go:125 TestBigQueryProjectsListNamesTheInstancesProject",
           "test/compat/bigquerymultiproject1764_test.go:43 TestBigQueryServesEveryResourceManagerProject"
         ]
@@ -10352,6 +10362,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryhistory1522_test.go:135 TestBigQueryUndeleteKeepsRoutinesTheFrontDidNotSee",
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
           "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
@@ -10383,6 +10394,7 @@
         "method": "bigquery.routines.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
           "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
@@ -10452,6 +10464,7 @@
         "method": "bigquery.rowAccessPolicies.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigquerymethods_test.go:281 TestBigQueryRowAccessPolicies",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore"
         ]
@@ -10606,6 +10619,8 @@
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
           "test/compat/bigquerymultiproject1767_test.go:41 TestBigQueryAcrossProjectsLoadsAndPartitionCopies",
+          "test/compat/bigquerymultiproject1774_test.go:147 TestBigQueryCloneAsOfAndShutDownAcrossProjects",
+          "test/compat/bigquerymultiproject1774_test.go:89 TestBigQueryParquetAndORCLoadsAcrossProjects",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -10645,6 +10660,7 @@
         "method": "bigquery.tables.getIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/iamconditions1748_test.go:77 TestBigQueryTableIAMConditions",
@@ -10726,6 +10742,7 @@
         "method": "bigquery.tables.setIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",

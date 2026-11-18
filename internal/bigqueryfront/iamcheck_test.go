@@ -216,3 +216,72 @@ func TestIAMProjectsList(t *testing.T) {
 		}
 	}
 }
+
+// TestIAMCheckViewsAndRoutines (#1774): a view's tables need the caller's
+// getData unless they authorize the view or its dataset; a routine a query
+// calls needs routines.get, and its body's tables are checked the same
+// way, an authorized routine's excepted.
+func TestIAMCheckViewsAndRoutines(t *testing.T) {
+	sum := sha256.Sum256([]byte("tok"))
+	email := "sa@p.iam.gserviceaccount.com"
+	s := &iamState{iam: &BigQueryIAM{Tokens: []BigQueryIAMToken{{Hash: hex.EncodeToString(sum[:]), Email: email, Expires: time.Now().Add(time.Hour)}},
+		Roles: map[string]map[string][]string{email: {"p": {"roles/bigquery.jobUser"}, "v": {"roles/bigquery.dataViewer"}}}}}
+	meta := map[string]string{
+		"/bigquery/v2/projects/v/datasets/views/tables/plain":   `{"type":"VIEW","view":{"query":"SELECT * FROM ` + "`src.data.t`" + `"}}`,
+		"/bigquery/v2/projects/v/datasets/views/tables/authv":   `{"type":"VIEW","view":{"query":"SELECT * FROM src.authv.t"}}`,
+		"/bigquery/v2/projects/v/datasets/views/tables/authd":   `{"type":"VIEW","view":{"query":"SELECT * FROM src.authd.t"}}`,
+		"/bigquery/v2/projects/v/datasets/views/tables/t":       `{"type":"TABLE"}`,
+		"/bigquery/v2/projects/src/datasets/authv":              `{"access":[{"view":{"projectId":"v","datasetId":"views","tableId":"authv"}}]}`,
+		"/bigquery/v2/projects/src/datasets/authd":              `{"access":[{"dataset":{"dataset":{"projectId":"v","datasetId":"views"}}}]}`,
+		"/bigquery/v2/projects/src/datasets/authr":              `{"access":[{"routine":{"projectId":"v","datasetId":"views","routineId":"tf"}}]}`,
+		"/bigquery/v2/projects/v/datasets/views/routines/tf":    `{"language":"SQL","definitionBody":"SELECT * FROM src.authr.t"}`,
+		"/bigquery/v2/projects/v/datasets/views/routines/bad":   `{"language":"SQL","definitionBody":"SELECT * FROM src.data.t"}`,
+		"/bigquery/v2/projects/v/datasets/views/routines/plain": `{"language":"SQL","definitionBody":"x + 1"}`,
+	}
+	serve := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if b, ok := meta[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(b))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	})
+	reached := false
+	h := s.handler(serve, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			reached = true
+			return
+		}
+		serve.ServeHTTP(w, r)
+	}))
+	for _, c := range []struct {
+		name, sql string
+		code      int
+		msg       string
+	}{
+		{"a table", "SELECT * FROM `v.views.t`", 200, ""},
+		{"a view of a table the caller cannot read", "SELECT * FROM `v.views.plain`", 403, "Permission bigquery.tables.getData denied on table src:data.t"},
+		{"an authorized view", "SELECT * FROM `v.views.authv`", 200, ""},
+		{"an authorized dataset's view", "SELECT * FROM v.views.authd", 200, ""},
+		{"an authorized routine", "SELECT * FROM `v.views.tf`()", 200, ""},
+		{"a routine reading a table the caller cannot", "SELECT * FROM v.views.bad()", 403, "bigquery.tables.getData denied on table src:data.t"},
+		{"a scalar routine", "SELECT v.views.plain(1)", 200, ""},
+		{"a routine of a project with no role", "SELECT q.d.f(1)", 403, "Access Denied: Routine q:d.f: Permission bigquery.routines.get denied"},
+	} {
+		reached = false
+		req := httptest.NewRequest(http.MethodPost, "/bigquery/v2/projects/p/jobs", strings.NewReader(`{"configuration":{"query":{"query":`+
+			strconvQuote(c.sql)+`}}}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		code, body := rec.Code, rec.Body.String()
+		if reached {
+			code, body = 200, ""
+		}
+		if code != c.code || !strings.Contains(body, c.msg) {
+			t.Errorf("%s: %d %s, want %d %q", c.name, code, body, c.code, c.msg)
+		}
+	}
+}
+
+func strconvQuote(s string) string { b, _ := json.Marshal(s); return string(b) }
