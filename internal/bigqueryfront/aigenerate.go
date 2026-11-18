@@ -421,11 +421,12 @@ func (c aiCall) output(a aiResolved) ([]string, bool) {
 // rewriteAIGenerate evaluates text's AI function calls and writes their
 // answers into it: the scalar ones first, then AI.AGG (aiagg.go, #1777),
 // whose groups' rows may hold the scalars' answers; text is returned as it
-// was when it has none.
-func (f front) rewriteAIGenerate(r *http.Request, q queryOptions, text string) (string, int, string) {
+// was when it has none. The parameters returned are the ones the text
+// holds then (rewriteAIAgg, #1810).
+func (f front) rewriteAIGenerate(r *http.Request, q queryOptions, text string) (string, queryOptions, int, string) {
 	text, code, msg := f.rewriteAIScalars(r, q, text)
 	if code != 0 {
-		return "", code, msg
+		return "", q, code, msg
 	}
 	return f.rewriteAIAgg(r, q, text)
 }

@@ -188,3 +188,69 @@ func TestAIAggProbeParameters(t *testing.T) {
 		t.Errorf("none used: %s %s", got.QueryParameters, got.ParameterMode)
 	}
 }
+
+// TestAIAggParameterInstruction (#1810): an instruction that is a query
+// parameter is read from the request's parameters, and must be a non-NULL
+// STRING; other expressions stay 501.
+func TestAIAggParameterInstruction(t *testing.T) {
+	f := front{}
+	r := httptest.NewRequest("POST", "/bigquery/v2/projects/p/queries", nil)
+	q := queryOptions{ParameterMode: "NAMED", QueryParameters: json.RawMessage(`[{"name":"instr","parameterType":{"type":"STRING"},` +
+		`"parameterValue":{"value":"Summarize these."}},{"name":"n","parameterType":{"type":"INT64"},"parameterValue":{"value":"3"}},` +
+		`{"name":"none","parameterType":{"type":"STRING"},"parameterValue":{}},{"name":"unset","parameterType":{"type":"STRING"}}]`)}
+	for expr, want := range map[string]string{"@instr": "Summarize these.", "@`instr`": "Summarize these.", "@INSTR": "Summarize these.", "'lit'": "lit"} {
+		if got, code, msg := f.aggInstruction(r, q, expr); code != 0 || got != want {
+			t.Errorf("%s: %q %d %s", expr, got, code, msg)
+		}
+	}
+	for expr, want := range map[string]string{"@n": "must be a STRING, not INT64", "@none": "NULL", "@unset": "NULL", "@missing": "Query parameter 'missing' not found"} {
+		if _, code, msg := f.aggInstruction(r, q, expr); code != 400 || !strings.Contains(msg, want) {
+			t.Errorf("%s: %d %s, want %q", expr, code, msg, want)
+		}
+	}
+	for _, expr := range []string{"CONCAT(@instr, '!')", "@@x", "review", "@ instr"} {
+		if _, code, _ := f.aggInstruction(r, q, expr); code != 501 {
+			t.Errorf("%s: %d, want 501", expr, code)
+		}
+	}
+}
+
+// TestAIAggPositionalParameters (#1810): positional parameters are named
+// in order, so the probes and the answered query keep the ones they use.
+func TestAIAggPositionalParameters(t *testing.T) {
+	text := "SELECT AI.AGG(CONCAT(review, ?), ?) FROM t WHERE movie = ? AND note = '?'"
+	toks, _ := lex(text)
+	q := queryOptions{ParameterMode: "POSITIONAL", QueryParameters: json.RawMessage(`[{"parameterValue":{"value":"a"}},` +
+		`{"parameterValue":{"value":"b"}},{"parameterValue":{"value":"c"}}]`)}
+	named, nq, ok := namePositional(q, text, toks)
+	if !ok || named != "SELECT AI.AGG(CONCAT(review, @cbai_p1), @cbai_p2) FROM t WHERE movie = @cbai_p3 AND note = '?'" || nq.ParameterMode != "NAMED" {
+		t.Fatalf("%v %s %s", ok, named, nq.ParameterMode)
+	}
+	var ps []struct {
+		Name  string `json:"name"`
+		Value struct {
+			Value string `json:"value"`
+		} `json:"parameterValue"`
+	}
+	if json.Unmarshal(nq.QueryParameters, &ps) != nil || len(ps) != 3 || ps[1].Name != "cbai_p2" || ps[1].Value.Value != "b" {
+		t.Errorf("params %s", nq.QueryParameters)
+	}
+	if _, _, ok := namePositional(queryOptions{ParameterMode: "NAMED", QueryParameters: q.QueryParameters}, text, toks); ok {
+		t.Error("named mode renamed")
+	}
+	// No parameterMode, as the Go client sends: positional unless named.
+	if again, _, ok := namePositional(queryOptions{QueryParameters: q.QueryParameters}, text, toks); !ok || again != named {
+		t.Errorf("no mode: %v %s", ok, again)
+	}
+	if _, _, ok := namePositional(queryOptions{QueryParameters: json.RawMessage(`[{"name":"x","parameterValue":{"value":"a"}}]`)}, text, toks); ok {
+		t.Error("named parameters with no mode renamed")
+	}
+	// The answered query no longer holds the instruction's parameter.
+	used := usedParams(nq, "SELECT (CASE FARM_FINGERPRINT(CONCAT(review, @cbai_p1)) END) FROM t WHERE movie = @cbai_p3")
+	if strings.Contains(string(used.QueryParameters), "cbai_p2") || !strings.Contains(string(used.QueryParameters), "cbai_p3") {
+		t.Errorf("used %s", used.QueryParameters)
+	}
+	if none := usedParams(nq, "SELECT 1"); string(none.QueryParameters) != "[]" || none.ParameterMode != "NAMED" {
+		t.Errorf("none used: %s %s", none.QueryParameters, none.ParameterMode)
+	}
+}

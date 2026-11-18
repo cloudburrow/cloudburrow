@@ -10206,7 +10206,7 @@
           "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryaiagg_test.go:21 TestBigQueryAIAgg",
+          "test/compat/bigqueryaiagg_test.go:26 TestBigQueryAIAgg",
           "test/compat/bigqueryaifunctions_test.go:143 TestBigQueryAIManagedFunctions",
           "test/compat/bigqueryaifunctions_test.go:228 TestBigQueryAIEmbed",
           "test/compat/bigqueryaifunctions_test.go:47 TestBigQueryAIGenerateStructured",
