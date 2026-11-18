@@ -29,14 +29,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 4 | 2 | 0 | 2 | 0 |
-| IAM custom roles | 10 | 1 | 1 | 8 | 0 |
+| IAM custom roles | 10 | 2 | 1 | 7 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **63** | **5** | **19** | **33** | **6** |
+| **Total** | **63** | **6** | **19** | **32** | **6** |
 
 ## Cloud Storage
 
@@ -181,8 +181,8 @@ service account resources (#1747). Impersonation through any predefined role and
 | Gap | Why open | Size |
 |---|---|---|
 | `LintPolicy` (#1751): Google's page shows one example per unit, so these are CloudBurrow's: HasOnlyListConstCheck's offset (CEL's position of the non-constant element, 62 for the page's example, where the page gives 59, which is no node of that expression); a compile error other than the page's (the ANTLR message for a missing `)` or a trailing token, and for a type-check error the checker's own text after `ERROR: Parse expression:`); DateTimeCheck's message for a malformed timestamp and for an always-true comparison; EffectiveTimeRangeCheck's message for comparisons joined by `||` that cover a function's whole range (`results in full ranges`), and that it needs two comparisons of one function; RestrictedAttributesCheck warns of `request.auth.access_levels` alone, the one attribute the page names; results of one severity are in the page's unit order. The caller's permissions on the resource are not read | not documented by Google | S |
-| A deleted service account's bindings (#1751): managed folders, Pub/Sub snapshots, Bigtable authorized views and backups, Spanner databases and backups, BigQuery routines, Cloud Run services and worker pools and Secure Source Manager instances and repositories are rewritten by the same code as the resources `TestIAMDeletedServiceAccountInEveryServicesPolicies` checks, but no compat test reads them yet | not built yet | S |
-| A BigQuery dataset's access entries are not rewritten when an account they name is deleted: Google documents `deleted:serviceAccount:EMAIL?uid=ID` for allow policies, but not how a dataset's access list (`userByEmail`, `iamMember`) shows a deleted account (searched 2026-11-17) (#1751) | not documented by Google | S |
+| A deleted service account's bindings (#1751): Bigtable authorized views and backups, Spanner backups, BigQuery routines, and Cloud Run services and worker pools are rewritten by the same code (in the same stores) as the resources `TestIAMDeletedServiceAccountInEveryServicesPolicies` checks, but no compat test reads them yet | not built yet | S |
+| A BigQuery dataset's access entries are not rewritten when an account they name is deleted, undeleted or purged: they are kept by the BigQuery engine, not the front, and how Google shows a deleted account in a dataset's access list (`userByEmail` or `iamMember`) is not yet measured against Google's documentation (#1751) | not built yet | S |
 | `QueryAuditableServices` (#1751) answers Google's documented audit-log service list whatever the project enables, which Google does not say it filters | not documented by Google | S |
 | A service account's certificate URLs (#1750): Google's body for an unknown account (404 `NOT_FOUND` here), and whether disabled keys or a disabled account's keys are listed (not here); the codes for an unknown private key type or key algorithm (`INVALID_ARGUMENT` here) | not documented by Google | S |
 | Service accounts (#1747): the per-project account quota (100 here; Google's "varies depending on the project"), the code for a disabled account in IAM Credentials (`FAILED_PRECONDITION` here), whether self-impersonation is checked before the permission, the messages for an invalid account ID, display name or description, and the code for deleting a system-managed key | not documented by Google | S |

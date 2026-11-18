@@ -19,9 +19,12 @@ import (
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
+	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
+	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	logging "google.golang.org/api/logging/v2"
+	storagev1 "google.golang.org/api/storage/v1"
 )
 
 // policyRW reads and writes one resource's allow policy through its
@@ -56,7 +59,8 @@ func handleRW(ctx context.Context, h *iam.Handle) policyRW {
 // Bigtable instance, a Spanner instance and a BigQuery table (their
 // fronts, other processes, which the host reaches through their tunnels),
 // a Logging view, a Cloud Run job and an Artifact Registry repository;
-// and a Pub/Sub schema and a Bigtable table.
+// and a managed folder, a Pub/Sub snapshot and schema, a Bigtable table, a Spanner database and a Secure
+// Source Manager instance and repository.
 // Another member of the same binding is kept. (Purge, 30 days after the
 // delete, drops the member: unit-tested, TestMemberRewriteHooks.)
 func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
@@ -87,6 +91,35 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bucket.Delete(context.Background()) })
 	res["bucket"] = handleRW(ctx, bucket.IAM())
+
+	// A managed folder, over the JSON API.
+	sj := storageJSON(t, h)
+	mfb := managedFolderBucket(t, h, sc, sj).BucketName()
+	if _, err := sj.ManagedFolders.Insert(mfb, &storagev1.ManagedFolder{Name: "dse-" + suffix + "/"}).Context(ctx).Do(); err != nil {
+		t.Fatalf("managedFolders.insert: %v", err)
+	}
+	mf := "dse-" + suffix + "/"
+	res["managed folder"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			p, err := sj.ManagedFolders.GetIamPolicy(mfb, mf).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			out := &iampb.Policy{Version: int32(p.Version), Etag: []byte(p.Etag)}
+			for _, b := range p.Bindings {
+				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
+			}
+			return out, nil
+		},
+		set: func(p *iampb.Policy) error {
+			in := &storagev1.Policy{Etag: string(p.GetEtag())}
+			for _, b := range p.GetBindings() {
+				in.Bindings = append(in.Bindings, &storagev1.PolicyBindings{Role: b.GetRole(), Members: b.GetMembers()})
+			}
+			_, err := sj.ManagedFolders.SetIamPolicy(mfb, mf, in).Context(ctx).Do()
+			return err
+		},
+	}
 
 	// Pub/Sub.
 	pc := pubsubClient(t, h)
@@ -123,6 +156,22 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 		},
 	}
 
+	snap, err := pc.SubscriptionAdminClient.CreateSnapshot(ctx, &pubsubpb.CreateSnapshotRequest{Name: "projects/" + h.Project() + "/snapshots/dse-" + suffix, Subscription: sub.GetName()})
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = pc.SubscriptionAdminClient.DeleteSnapshot(context.Background(), &pubsubpb.DeleteSnapshotRequest{Snapshot: snap.GetName()})
+	})
+	res["snapshot"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return pc.SubscriptionAdminClient.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: snap.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := pc.SubscriptionAdminClient.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: snap.GetName(), Policy: p})
+			return err
+		},
+	}
 	sch := schemaClient(t, h)
 	schema, err := sch.CreateSchema(ctx, &pubsubpb.CreateSchemaRequest{Parent: "projects/" + h.Project(), SchemaId: "dse-" + suffix,
 		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_AVRO, Definition: avroSchemaV1}})
@@ -273,6 +322,66 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 		},
 		set: func(p *iampb.Policy) error {
 			_, err := ar.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: repo.GetName(), Policy: p})
+			return err
+		},
+	}
+
+	// Secure Source Manager.
+	ssm := ssmClient(t, h)
+	iop, err := ssm.CreateInstance(ctx, &ssmpb.CreateInstanceRequest{Parent: runParent(h), InstanceId: "dse-" + suffix})
+	if err != nil {
+		t.Fatalf("SSM CreateInstance: %v", err)
+	}
+	inst, err := iop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("SSM CreateInstance.Wait: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := ssm.DeleteInstance(context.Background(), &ssmpb.DeleteInstanceRequest{Name: inst.GetName(), Force: true}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	srop, err := ssm.CreateRepository(ctx, &ssmpb.CreateRepositoryRequest{Parent: runParent(h), RepositoryId: "r-" + suffix,
+		Repository: &ssmpb.Repository{Instance: inst.GetName()}})
+	if err != nil {
+		t.Fatalf("SSM CreateRepository: %v", err)
+	}
+	srepo, err := srop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("SSM CreateRepository.Wait: %v", err)
+	}
+	res["ssm instance"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return ssm.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: inst.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := ssm.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: inst.GetName(), Policy: p})
+			return err
+		},
+	}
+	res["ssm repository"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return ssm.GetIamPolicyRepo(ctx, &iampb.GetIamPolicyRequest{Resource: srepo.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := ssm.SetIamPolicyRepo(ctx, &iampb.SetIamPolicyRequest{Resource: srepo.GetName(), Policy: p})
+			return err
+		},
+	}
+
+	// A Spanner database.
+	dbName := spannerDatabase(t, ctx, h.Endpoint(EnvSpanner), h.Project(), spID, "dse", "CREATE TABLE t (id INT64) PRIMARY KEY (id)")
+	dba, err := database.NewDatabaseAdminClient(ctx, spannerOpts(h.Endpoint(EnvSpanner))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dba.Close() })
+	res["spanner database"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return dba.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: dbName})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := dba.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: dbName, Policy: p})
 			return err
 		},
 	}
