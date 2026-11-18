@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -90,13 +91,35 @@ func (p iamGroupsProvider) ListFiltered(_ context.Context, _ string, filter stri
 
 func (iamGroupsProvider) CreateForm() (string, []console.Field) {
 	return "Create group", []console.Field{
-		{Name: "email", Label: "Group email", Type: "text", Required: true,
-			Help: "NAME@" + resourcemanager.OrganizationDomain + ": the customer's groups are in its domain."},
-		{Name: "displayName", Label: "Display name", Type: "text"},
+		{Name: "email", Label: "Group email", Type: "text", Required: true, Pattern: groupEmailPattern,
+			Help: "NAME@" + resourcemanager.OrganizationDomain + ": the customer's groups are in its domain. NAME follows a username's rules: " +
+				"at most 64 characters, no period at the start or end or two in a row, and no = & < > + , or !."},
+		groupDisplayNameField(""),
 		{Name: "description", Label: "Description", Type: "text", Help: "At most 4,096 characters."},
 		{Name: "security", Label: "Security group", Type: "select", Options: []string{"No", "Yes"}, Default: "No",
 			Help: "Adds the groups.security label, which cannot be removed afterwards."},
 	}
+}
+
+// groupEmailPattern is a group email's shape in the instance's domain:
+// periods only between other characters, none of = & < > + , !
+// (checkGroupEmail has the length and the sources).
+var groupEmailPattern = `[^\s.=&<>+,!@]+(\.[^\s.=&<>+,!@]+)*@` + regexp.QuoteMeta(resourcemanager.OrganizationDomain)
+
+// groupDisplayNameField is the display name, "up to 73 characters".
+func groupDisplayNameField(def string) console.Field {
+	return console.Field{Name: "displayName", Label: "Display name", Type: "text", Default: def, Pattern: `.{0,73}`,
+		Help: "At most 73 characters."}
+}
+
+// addMemberHelp explains who the group can take: a security group holds
+// users, service accounts and security groups only.
+func addMemberHelp(g *resourcemanager.Group) string {
+	h := "A user's, a service account's or another group's email. A nested group's members are this group's too."
+	if _, ok := g.Labels[resourcemanager.LabelSecurity]; ok {
+		h += " This is a security group: it can only contain users, service accounts and security groups, so a group that is not a security group is refused."
+	}
+	return h
 }
 
 func (iamGroupsProvider) CreateOnPage() bool { return true }
@@ -162,10 +185,10 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 		{ID: "member-of", Label: "Member of", Listing: parents},
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Group", Properties: props}}},
 	}, Edit: &console.EditForm{Label: "Edit group", Fields: []console.Field{
-		{Name: "displayName", Label: "Display name", Type: "text", Default: g.DisplayName},
+		groupDisplayNameField(g.DisplayName),
 		{Name: "description", Label: "Description", Type: "text", Default: g.Description, Help: "At most 4,096 characters."},
 		{Name: "add", Label: "Add member", Type: "text",
-			Help: "A user's, a service account's or another group's email. A nested group's members are this group's too."},
+			Help: addMemberHelp(g)},
 		{Name: "role", Label: "Role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"}, Default: "MEMBER"},
 		{Name: "expire", Label: "Member expiry", Type: "text",
 			Help: "Optional: when the added member's MEMBER role expires, RFC 3339 (2027-01-31T00:00:00Z), in the future. Only the MEMBER role takes an expiry."},

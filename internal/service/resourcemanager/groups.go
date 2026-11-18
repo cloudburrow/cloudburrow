@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 
@@ -44,6 +45,14 @@ const (
 	// maxGroupDescription is Group.description's limit ("Must not be
 	// longer than 4,096 characters").
 	maxGroupDescription = 4096
+	// maxGroupDisplayName is a group name's limit: "Can be up to 73
+	// characters" (Name guidelines for users & groups,
+	// https://support.google.com/a/answer/9193374, read 2026-11-18).
+	maxGroupDisplayName = 73
+	// maxGroupEmailLocal is the part of a group's email before the @: "Use
+	// no more than 64 characters before the at sign (@) in a group email
+	// address" (the same guidelines).
+	maxGroupEmailLocal = 64
 )
 
 // Group is a stored Cloud Identity group with its direct memberships.
@@ -106,9 +115,73 @@ func customerParent(p string) string {
 func normEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
 // validEmail is a minimal check of a group or member key: local@domain.
+// An apostrophe is allowed: a username "can contain letters (a-z), numbers
+// (0-9), dashes (-), underscores (_), apostrophes ('), and periods (.)"
+// (https://support.google.com/a/answer/9193374, read 2026-11-18).
 func validEmail(s string) bool {
 	local, domain, ok := strings.Cut(s, "@")
-	return ok && local != "" && domain != "" && strings.Contains(domain, ".") && !strings.ContainsAny(s, " /\\,;:\"'<>()[]")
+	return ok && local != "" && domain != "" && strings.Contains(domain, ".") && !strings.ContainsAny(s, " /\\,;:\"<>()[]")
+}
+
+// checkGroupEmail applies a username's rules to a group's email, as
+// Google's Directory API states them: "Group email addresses are subject to
+// the same character usage rules as usernames"
+// (https://developers.google.com/workspace/admin/directory/reference/rest/v1/groups,
+// read 2026-11-18). From the name guidelines
+// (https://support.google.com/a/answer/9193374): no more than 64
+// characters before the @; no period at the start or the end; never two
+// periods in a row; no equal sign, ampersand, angle bracket, plus sign,
+// comma or exclamation point.
+func checkGroupEmail(raw, email string) error {
+	if !validEmail(email) {
+		return apierror.InvalidArgument("Invalid group email %q.", raw)
+	}
+	local, _, _ := strings.Cut(email, "@")
+	switch {
+	case utf8.RuneCountInString(local) > maxGroupEmailLocal:
+		return apierror.InvalidArgument("Invalid group email %q: use no more than %d characters before the at sign (@).", raw, maxGroupEmailLocal)
+	case strings.HasPrefix(local, ".") || strings.HasSuffix(local, "."):
+		return apierror.InvalidArgument("Invalid group email %q: the part before the at sign (@) cannot begin or end with a period (.).", raw)
+	case strings.Contains(local, ".."):
+		return apierror.InvalidArgument("Invalid group email %q: it cannot contain more than one period (.) in a row.", raw)
+	case strings.ContainsAny(local, "=&<>+,!"):
+		return apierror.InvalidArgument("Invalid group email %q: it cannot contain an equal sign (=), ampersand (&), angle brackets (<, >), plus sign (+), comma (,) or exclamation point (!).", raw)
+	}
+	return nil
+}
+
+// checkGroupText checks a group's display name ("Can be up to 73
+// characters") and description ("Must not be longer than 4,096
+// characters"), counted in characters.
+func checkGroupText(displayName, description string) error {
+	if utf8.RuneCountInString(displayName) > maxGroupDisplayName {
+		return apierror.InvalidArgument("The display name must not be longer than %d characters.", maxGroupDisplayName)
+	}
+	if utf8.RuneCountInString(description) > maxGroupDescription {
+		return apierror.InvalidArgument("The description must not be longer than %d characters.", maxGroupDescription)
+	}
+	return nil
+}
+
+// securityMemberLocked refuses a group member that a security group
+// cannot hold. "Security groups can only contain the following: Users
+// inside or outside of your domain ...; Service accounts inside or outside
+// of your domain; Security groups inside of your domain"
+// (https://docs.cloud.google.com/identity/docs/how-to/update-group-to-security-group,
+// read 2026-11-18). Google states no error for it; this is
+// FAILED_PRECONDITION.
+func (r *Registry) securityMemberLocked(g *Group, email string) error {
+	if _, ok := g.Labels[LabelSecurity]; !ok {
+		return nil
+	}
+	inner, err := r.groupByEmailLocked(email)
+	if err != nil || inner == nil {
+		return err
+	}
+	if _, ok := inner.Labels[LabelSecurity]; !ok {
+		return apierror.FailedPrecondition("Security groups can only contain users, service accounts and security groups inside of your domain: %s is a group that is not a security group.", email)
+	}
+	return nil
 }
 
 func (r *Registry) loadGroupLocked(id string) (*Group, error) {
@@ -215,8 +288,8 @@ func (r *Registry) CreateGroup(in GroupInput) (*Group, error) {
 	if email == "" {
 		return nil, apierror.InvalidArgument("Request contains an invalid argument: groupKey.id is required.")
 	}
-	if !validEmail(email) {
-		return nil, apierror.InvalidArgument("Invalid group email %q.", in.Email)
+	if err := checkGroupEmail(in.Email, email); err != nil {
+		return nil, err
 	}
 	if _, d, _ := strings.Cut(email, "@"); d != OrganizationDomain {
 		return nil, apierror.InvalidArgument("Invalid group email %q: the customer's groups are created in its domain, %s.", in.Email, OrganizationDomain)
@@ -234,8 +307,8 @@ func (r *Registry) CreateGroup(in GroupInput) (*Group, error) {
 			return nil, apierror.InvalidArgument("Invalid label %q: a group label's value is empty.", k)
 		}
 	}
-	if len(in.Description) > maxGroupDescription {
-		return nil, apierror.InvalidArgument("The description must not be longer than %d characters.", maxGroupDescription)
+	if err := checkGroupText(in.DisplayName, in.Description); err != nil {
+		return nil, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -318,10 +391,13 @@ func (r *Registry) UpdateGroup(name string, in GroupInput, mask []string) (*Grou
 	for _, f := range mask {
 		switch f {
 		case "display_name", "displayName":
+			if err := checkGroupText(in.DisplayName, ""); err != nil {
+				return nil, err
+			}
 			g.DisplayName = in.DisplayName
 		case "description":
-			if len(in.Description) > maxGroupDescription {
-				return nil, apierror.InvalidArgument("The description must not be longer than %d characters.", maxGroupDescription)
+			if err := checkGroupText("", in.Description); err != nil {
+				return nil, err
 			}
 			g.Description = in.Description
 		case "labels":
@@ -331,6 +407,18 @@ func (r *Registry) UpdateGroup(name string, in GroupInput, mask []string) (*Grou
 			if _, had := g.Labels[LabelSecurity]; had {
 				if _, ok := in.Labels[LabelSecurity]; !ok {
 					return nil, apierror.InvalidArgument("The %s label cannot be removed once added.", LabelSecurity)
+				}
+			}
+			if _, had := g.Labels[LabelSecurity]; !had {
+				if _, adds := in.Labels[LabelSecurity]; adds {
+					// "You can't apply the security group label to a
+					// Google Group that doesn't meet these conditions."
+					probe := &Group{Labels: map[string]string{LabelSecurity: ""}}
+					for _, m := range g.Members {
+						if err := r.securityMemberLocked(probe, m.Email); err != nil {
+							return nil, err
+						}
+					}
 				}
 			}
 			labels := map[string]string{}
@@ -472,6 +560,9 @@ func (r *Registry) CreateMembershipExpiring(parent, email, namespace string, rol
 		if m.Email == email {
 			return nil, GroupMember{}, apierror.AlreadyExists("Error(4003): Member already exists.")
 		}
+	}
+	if err := r.securityMemberLocked(g, email); err != nil {
+		return nil, GroupMember{}, err
 	}
 	typ, err := r.memberTypeLocked(email)
 	if err != nil {

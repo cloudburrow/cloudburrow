@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -148,6 +149,18 @@ func TestConsoleIAMGroupsSearchRolesGraph(t *testing.T) {
 	if err := p.Edit(ctx, "", []string{"eng-infra" + d}, map[string]string{"expire": future.Format(time.RFC3339)}); err == nil {
 		t.Error("an expiry without a member to add was accepted")
 	}
+	// eng is a security group: it takes security groups only
+	// (update-group-to-security-group), so eng-infra joins once it is one.
+	if err := p.Edit(ctx, "", []string{"eng" + d}, map[string]string{"add": "eng-infra" + d}); err == nil {
+		t.Error("a Google Group was added to a security group")
+	}
+	if !strings.Contains(det0Help(t, p, "eng"+d), "security group") {
+		t.Error("a security group's Add member does not explain what it can contain")
+	}
+	if _, err := p.registry.UpdateGroup(mustGroup(t, p, "eng-infra"+d).Name(), resourcemanager.GroupInput{
+		Labels: map[string]string{resourcemanager.LabelDiscussionForum: "", resourcemanager.LabelSecurity: ""}}, []string{"labels"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := p.Edit(ctx, "", []string{"eng" + d}, map[string]string{"add": "eng-infra" + d}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,5 +249,57 @@ func TestConsoleIAMGroupsSearchRolesGraph(t *testing.T) {
 	}
 	if _, _, ok, _ := p.member(path); ok {
 		t.Error("Remove member left the membership")
+	}
+}
+
+func mustGroup(t *testing.T, p iamGroupsProvider, row string) *resourcemanager.Group {
+	t.Helper()
+	g, err := p.group(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
+// det0Help is the help of a group's Edit group > Add member field.
+func det0Help(t *testing.T, p iamGroupsProvider, row string) string {
+	t.Helper()
+	det, err := p.Detail(context.Background(), "", []string{row})
+	if err != nil || det.Edit == nil {
+		t.Fatalf("Detail %s: %v", row, err)
+	}
+	for _, f := range det.Edit.Fields {
+		if f.Name == "add" {
+			return f.Help
+		}
+	}
+	return ""
+}
+
+// TestConsoleIAMGroupsNameRules: the create and edit forms carry the
+// group email's and display name's rules, and the API's refusal reaches
+// the operator.
+func TestConsoleIAMGroupsNameRules(t *testing.T) {
+	p := iamGroupsProvider{registry: resourcemanager.New(store.NewMemory())}
+	_, fields := p.CreateForm()
+	re := map[string]*regexp.Regexp{}
+	for _, f := range fields {
+		if f.Pattern != "" {
+			re[f.Name] = regexp.MustCompile("^(?:" + f.Pattern + ")$")
+		}
+	}
+	d := "@" + resourcemanager.OrganizationDomain
+	for email, ok := range map[string]bool{"eng" + d: true, "o'brien.team" + d: true, ".eng" + d: false, "a..b" + d: false,
+		"a+b" + d: false, "eng@example.com": false} {
+		if re["email"].MatchString(email) != ok {
+			t.Errorf("email pattern on %q = %v, want %v", email, !ok, ok)
+		}
+	}
+	if !re["displayName"].MatchString(strings.Repeat("é", 73)) || re["displayName"].MatchString(strings.Repeat("a", 74)) {
+		t.Error("the display name pattern is not 73 characters")
+	}
+	if _, err := p.Create(context.Background(), "", map[string]string{"email": strings.Repeat("a", 65) + d}); err == nil ||
+		!strings.Contains(err.Error(), "64 characters") {
+		t.Errorf("a 65-character name = %v, want the 64-character refusal", err)
 	}
 }

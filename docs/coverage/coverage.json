@@ -12678,6 +12678,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
           "test/compat/cloudidentitysearch1812_test.go:178 TestCloudIdentityInitialOwner1812"
         ]
       },
@@ -12725,7 +12726,8 @@
         "method": "cloudidentity.groups.memberships.create",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules"
         ]
       },
       {
@@ -12767,6 +12769,7 @@
         "method": "cloudidentity.groups.memberships.modifyMembershipRoles",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
           "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
         ]
       },
@@ -12795,7 +12798,8 @@
         "method": "cloudidentity.groups.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules"
         ]
       },
       {
