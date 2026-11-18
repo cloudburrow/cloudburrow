@@ -557,8 +557,9 @@ type Server struct {
 	done chan struct{}
 	// inflight counts gRPC calls being served. gRPC arrives over h2c, which
 	// hijacks the connection, so http.Server.Shutdown does not wait for
-	// them; Stop does, so a call (and its trace span, #1159) finishes
-	// before the server is gone.
+	// them; Stop does, so a call finishes before the server is gone. Its
+	// handler goroutine, which ends its trace span (#1159), can outlive
+	// that count; Stop waits for it through grpc.WaitForHandlers.
 	inflight sync.WaitGroup
 	stopping bool // set by Stop under mu; no call is counted after it
 }
@@ -598,7 +599,11 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	opts := append([]grpc.ServerOption(nil), s.options...)
+	// WaitForHandlers: gRPC served through ServeHTTP runs each call's
+	// handler on a goroutine of its own, and ServeHTTP (so inflight) can
+	// return once the answer is written, before that goroutine has ended
+	// the call's trace span; Stop then waits for those goroutines too.
+	opts := append([]grpc.ServerOption{grpc.WaitForHandlers(true)}, s.options...)
 	if s.calls != nil {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(grpcx.UnaryObserver(s.calls)),
@@ -700,7 +705,15 @@ func (s *Server) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 	}
 	if g != nil {
-		g.Stop()
+		// g.Stop waits for every call's handler goroutine (WaitForHandlers
+		// in Start), and with it for its trace span to end, unless ctx
+		// ends first.
+		stopped := make(chan struct{})
+		go func() { g.Stop(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-ctx.Done():
+		}
 	}
 	if done != nil {
 		select {
