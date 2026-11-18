@@ -213,6 +213,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && r.Context().Value(optionsKey{}) == nil && f.serveObjectTableStatements(w, r, q, insert) { // #1783, objecttables.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.checkReads(w, r, q, insert) { // #1390, tableoptions.go
 		return
 	}

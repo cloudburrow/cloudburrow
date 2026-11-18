@@ -230,6 +230,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
 	connections := &bqConnections{}                 // connections.go, #1755
+	objects := &objectTables{storage: storage}      // objecttables.go, #1783
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.logf != nil {
@@ -256,6 +257,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
 		connections.keep(connectionsStateFile(o.stateDir), o.logf) // connections.go, #1755
+		objects.keep(o.stateDir, o.logf)                           // objecttables.go, #1783
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -407,7 +409,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models,
-				onnx: o.onnx, vertexai: o.vertexai, connections: connections, numbers: numbers}
+				onnx: o.onnx, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -471,7 +473,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
 			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
-			dropped: dropped, iam: iam, functions: functions, models: models, open: open} // functions, models: #1483, droppedroutines.go; open: purge.go
+			dropped: dropped, iam: iam, functions: functions, models: models, open: open, // functions, models: #1483, droppedroutines.go; open: purge.go
+			storage: storage, connections: connections, numbers: numbers, objects: objects, resourceManager: o.resourceManager} // #1783, objecttables.go
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -505,6 +508,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertDataset(w, r)
 		case r.Method == http.MethodGet && m[3] == "":
 			f.listDatasets(w, r) // #1371, location.go
+		case r.Method == http.MethodPost && m[3] != "" && m[4] == "" && f.insertObjectTable(w, r, dataset): // #1783, objecttables.go
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertIcebergTable(w, r, dataset) // #1427, iceberg.go
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
@@ -513,10 +517,25 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.getDataset(w, r, dataset) // #1205, the front's etag
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
 			f.insertTable(w, r, dataset, table, true)
+		case r.Method == http.MethodGet && m[4] != "" && m[5] == "" && f.serveObjectTableGet(w, r, dataset, table): // #1783, objecttables.go
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
 			f.getTable(w, r, dataset, table) // #1014, #1002
 		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
-			f.listTables(w, r, dataset) // #1002, snapshots.go
+			if !f.objects.any() {
+				f.listTables(w, r, dataset) // #1002, snapshots.go
+				break
+			}
+			rec := newRecorder()
+			f.listTables(rec, r, dataset)
+			if rec.status == 0 || rec.status == http.StatusOK { // #1783: object tables are EXTERNAL
+				b := f.listedObjectTables(dataset, rec.body.Bytes())
+				rec.body.Reset()
+				rec.body.Write(b)
+				rec.header.Del("Content-Length")
+			}
+			rec.copyTo(w)
+		case r.Method == http.MethodPost && m[5] == "insertAll" && f.objects.any() && f.isObjectTable(r, dataset, table): // #1783
+			writeError(w, http.StatusBadRequest, "invalid", readOnlyObjectTable(projectOf(f.base), dataset, table))
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
@@ -648,7 +667,9 @@ type front struct {
 	// the project numbers that key them (connections.go), which a remote
 	// model names.
 	connections *bqConnections
-	numbers     *projectNumbers
+	// objects are the object tables (objecttables.go, #1783), or nil.
+	objects *objectTables
+	numbers *projectNumbers
 }
 
 // Option is an option of Wrap.
