@@ -1,0 +1,77 @@
+CloudBurrow patch 101 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1819).
+
+The bug: on BigQuery a jobs.query waits at most timeoutMs (10 s by
+default) and then answers jobComplete false with the jobReference of the
+job, which "will be present even if the original request timed out"
+(https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query); the
+client polls jobs.getQueryResults with it. The engine makes a jobs.query's
+job ID itself, as it runs the query, so CloudBurrow's front could not name
+a job still running, and answered every jobs.query only once it was done.
+
+The patch reads the header X-Cloudburrow-Job-Id (a job ID: letters,
+digits, underscores and dashes, at most 1,024), which the front sends with
+a client's jobs.query, and gives the job the engine makes for that request
+that ID. A request without it is unchanged.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/middleware.go
++++ b/server/middleware.go
+@@ -128,6 +128,11 @@
+ 			if prefix := r.Header.Get(JobIDPrefixHeader); validJobIDPrefix(prefix) {
+ 				ctx = context.WithValue(ctx, jobIDPrefixKey{}, prefix)
+ 			}
++			// CloudBurrow patch (cloudburrow/cloudburrow#1819): the job ID
++			// CloudBurrow's front gave a client's jobs.query.
++			if id := r.Header.Get(JobIDHeader); validJobID(id) {
++				ctx = context.WithValue(ctx, jobIDKey{}, id)
++			}
+ 			next.ServeHTTP(w, r.WithContext(ctx))
+ 		})
+ 	}
+@@ -146,6 +151,30 @@
+ const JobIDPrefixHeader = "X-Cloudburrow-Job-Id-Prefix"
+ 
+ type jobIDPrefixKey struct{}
++
++// JobIDHeader carries the ID of the job a jobs.query makes: CloudBurrow's
++// front gives each client's jobs.query one before it runs, so that a
++// query that outlasts its timeoutMs can be answered with the jobReference
++// of its job (jobComplete false) while it runs. CloudBurrow patch
++// (cloudburrow/cloudburrow#1819).
++const JobIDHeader = "X-Cloudburrow-Job-Id"
++
++type jobIDKey struct{}
++
++// validJobID reports whether id is a job ID: BigQuery's "letters (a-z,
++// A-Z), numbers (0-9), underscores (_), or dashes (-). The maximum length
++// is 1,024 characters".
++func validJobID(id string) bool {
++	if id == "" || len(id) > 1024 {
++		return false
++	}
++	for _, c := range id {
++		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
++			return false
++		}
++	}
++	return true
++}
+ 
+ // validJobIDPrefix reports whether p may begin a job ID: BigQuery's "only
+ // letters (a-z, A-Z), numbers (0-9), underscores (_), or dashes (-)", and
+@@ -165,6 +194,9 @@
+ // newJobID is a job ID the engine makes for a job of ctx's request: a
+ // random one, after the request's JobIDPrefixHeader if it sent one.
+ func newJobID(ctx context.Context) string {
++	if id, _ := ctx.Value(jobIDKey{}).(string); id != "" {
++		return id // CloudBurrow patch (cloudburrow/cloudburrow#1819)
++	}
+ 	prefix, _ := ctx.Value(jobIDPrefixKey{}).(string)
+ 	return prefix + randomID()
+ }

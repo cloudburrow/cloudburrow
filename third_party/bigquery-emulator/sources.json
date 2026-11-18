@@ -64,7 +64,8 @@
         "patches/bigquery-emulator/0094-repeated-json-column-insert.patch",
         "patches/bigquery-emulator/0096-names-in-the-default-datasets-project.patch",
         "patches/bigquery-emulator/0098-typed-scalar-parameters.patch",
-        "patches/bigquery-emulator/0100-typed-null-array-struct-parameters.patch"
+        "patches/bigquery-emulator/0100-typed-null-array-struct-parameters.patch",
+        "patches/bigquery-emulator/0101-exact-query-job-id.patch"
       ]
     },
     {
