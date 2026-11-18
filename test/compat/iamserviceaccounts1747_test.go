@@ -125,6 +125,11 @@ func iamCredentialsAs(t *testing.T, h *Harness, ts oauth2.TokenSource) *credenti
 // its unique ID. Google's refusals: an ID outside 6 to 30 lowercase
 // letters, digits and dashes, a display name over 100 bytes, a description
 // over 256, a taken ID (ALREADY_EXISTS), and undelete by email.
+//
+// unverified: google.iam.admin.v1.IAM/UndeleteServiceAccount INVALID_ARGUMENT: an account named by email rather than unique ID
+// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/iam/docs/service-accounts-delete-undelete
+// unverified: google.iam.admin.v1.IAM/PatchServiceAccount ABORTED: a stale etag
+// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts
 func TestIAMServiceAccounts(t *testing.T) {
 	h := New(t)
 	c := iamAdmin(t, h)
@@ -245,6 +250,9 @@ func TestIAMServiceAccounts(t *testing.T) {
 // and shows the system-managed key; a certificate uploads; at most 10
 // user-managed keys; delete removes it. The key material is never
 // printed.
+//
+// unverified: google.iam.admin.v1.IAM/CreateServiceAccountKey FAILED_PRECONDITION: an 11th user-managed key
+// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/iam/docs/keys-create-delete
 func TestIAMServiceAccountKeys(t *testing.T) {
 	h := New(t)
 	c := iamAdmin(t, h)
@@ -358,7 +366,7 @@ func uploadCert(t *testing.T) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-// covers: google.iam.admin.v1.IAM/GetIamPolicy, google.iam.admin.v1.IAM/SetIamPolicy, google.iam.admin.v1.IAM/TestIamPermissions, google.iam.credentials.v1.IAMCredentials/GenerateAccessToken, google.iam.credentials.v1.IAMCredentials/GenerateIdToken, google.iam.credentials.v1.IAMCredentials/SignBlob, google.iam.credentials.v1.IAMCredentials/SignJwt
+// covers: google.iam.admin.v1.IAM/GetIamPolicy, google.iam.admin.v1.IAM/SetIamPolicy, google.iam.admin.v1.IAM/TestIamPermissions
 //
 // TestIAMCredentialsImpersonation (#1747), with the official
 // cloud.google.com/go/iam/credentials/apiv1 client, calling as the ADC

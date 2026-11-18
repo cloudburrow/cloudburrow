@@ -169,6 +169,10 @@ func TestServiceAccountsThroughTheOfficialClient(t *testing.T) {
 	}
 }
 
+// A project's 101st account.
+//
+// unverified: google.iam.admin.v1.IAM/CreateServiceAccount RESOURCE_EXHAUSTED: a project's 101st account
+// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/iam/quotas
 func TestServiceAccountLimit(t *testing.T) {
 	reg, _, c := startIAMAdmin(t)
 	ctx := context.Background()

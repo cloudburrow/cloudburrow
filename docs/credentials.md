@@ -142,16 +142,31 @@ in production.
 ## Service-account impersonation (IAM Credentials)
 
 The metadata server also serves the IAM Credentials methods that impersonation calls (#303):
-`generateAccessToken`, `generateIdToken` and `signJwt` under
-`/v1/projects/-/serviceAccounts/{account}:{method}`. `signBlob` returns UNIMPLEMENTED: a local
-signature would produce signed URLs that no Google service accepts.
+`generateAccessToken`, `generateIdToken`, `signBlob` and `signJwt` under
+`/v1/projects/-/serviceAccounts/{account}:{method}`.
 
-**Everything here is local, and no permission is checked.** Any caller can impersonate any
-account name. The access tokens are opaque local tokens. The ID tokens carry the requested
-audience and the impersonated account's email, are signed with this instance's key, and verify
-against this instance's `/certs` and never against Google's. What runs is the code path that
-asks for a token as another identity. The security impersonation provides in production does
-not exist here.
+**On a service account of the IAM API, the call is checked as Google checks it (#1747).** Create
+the account first (`gcloud iam service-accounts create`, Terraform's `google_service_account`, or
+the IAM client at the Resource Manager endpoint), and grant the caller
+`roles/iam.serviceAccountTokenCreator` on it or on its project. The caller is the account the
+request's bearer token was minted for: the ADC fixture's account
+(`cloudburrow-local@PROJECT.iam.gserviceaccount.com`) when the source credential is the fixture.
+Without the grant, or for an account that does not exist, the answer is Google's 403; an account
+may not mint a token for itself; a disabled account is refused. The token is minted for the target
+account, so the services that check roles (Memorystore's IAM auth, Firestore with MongoDB
+compatibility) check the target's. `signBlob` and `signJwt` sign with the account's
+system-managed key, whose certificate `gcloud iam service-accounts keys get-public-key` (or
+`GetServiceAccountKey`) returns; a signed URL made with it is accepted by no Google service.
+
+A key file from `keys create` names this instance's token endpoint, so a client that loads it
+signs in locally, as that account; a disabled or deleted key is refused (`invalid_grant`).
+
+The instance's own account (`-`, or the fixture's email) is not an IAM service account, and keeps
+the earlier behaviour: **no permission is checked** for it, and `signBlob` as it is UNIMPLEMENTED.
+
+Everything here is local. The access tokens are opaque local tokens. The ID tokens carry the
+requested audience and the account's email, are signed with this instance's key, and verify against
+this instance's `/certs` and never against Google's.
 
 - **gcloud** reads `CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS`, which `cloudburrow env`
   exports, but `--impersonate-service-account` also needs a source credential, and neither
@@ -172,10 +187,15 @@ func (t toLocal) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
+// The source credential: the ADC fixture, whose account is granted
+// roles/iam.serviceAccountTokenCreator on worker@.
+src, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+// ...
 ts, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
 	TargetPrincipal: "worker@my-project.iam.gserviceaccount.com",
 	Scopes:          []string{"https://www.googleapis.com/auth/cloud-platform"},
-}, option.WithHTTPClient(&http.Client{Transport: toLocal{os.Getenv("GCE_METADATA_HOST")}}))
+}, option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: src.TokenSource,
+	Base: toLocal{os.Getenv("GCE_METADATA_HOST")}}}))
 ```
 
 `TestImpersonatedTokenUsedWithACloudBurrowClient` does exactly this. It uses the token on an

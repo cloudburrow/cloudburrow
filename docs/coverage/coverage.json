@@ -3746,10 +3746,10 @@
   },
   {
     "Key": "iam",
-    "Title": "IAM (custom roles)",
+    "Title": "IAM (custom roles, service accounts)",
     "counts": {
-      "Unimplemented": 24,
-      "Verified": 7
+      "Unimplemented": 5,
+      "Verified": 26
     },
     "rows": [
       {
@@ -3761,13 +3761,31 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/CreateServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ],
+        "unverified": [
+          {
+            "code": "RESOURCE_EXHAUSTED",
+            "case": "a project's 101st account",
+            "test": "internal/service/resourcemanager/serviceaccounts_test.go:176 TestServiceAccountLimit"
+          }
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/CreateServiceAccountKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ],
+        "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "an 11th user-managed key",
+            "test": "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+          }
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/DeleteRole",
@@ -3778,38 +3796,52 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccountKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/DisableServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/DisableServiceAccountKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/EnableServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/EnableServiceAccountKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:382 TestIAMCredentialsImpersonation"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/GetRole",
@@ -3820,13 +3852,17 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/GetServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/GetServiceAccountKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/LintPolicy",
@@ -3842,18 +3878,31 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/ListServiceAccountKeys",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/ListServiceAccounts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/PatchServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ],
+        "unverified": [
+          {
+            "code": "ABORTED",
+            "case": "a stale etag",
+            "test": "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+          }
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/QueryAuditableServices",
@@ -3874,23 +3923,27 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:382 TestIAMCredentialsImpersonation"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/SignBlob",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1747)"
       },
       {
         "method": "google.iam.admin.v1.IAM/SignJwt",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1747)"
       },
       {
         "method": "google.iam.admin.v1.IAM/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:382 TestIAMCredentialsImpersonation"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/UndeleteRole",
@@ -3901,8 +3954,17 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/UndeleteServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "an account named by email rather than unique ID",
+            "test": "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+          }
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/UpdateRole",
@@ -3913,13 +3975,17 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/UpdateServiceAccount",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/UploadServiceAccountKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): IAM service accounts are not served (#1743 serves custom roles only): a workload's service account is the email it is told it runs as, and access tokens are minted by the metadata server's IAM Credentials API"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
       }
     ]
   },
@@ -5414,7 +5480,7 @@
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
           "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
-          "test/compat/memorystoreiam1614_test.go:101 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:110 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
@@ -5648,7 +5714,7 @@
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:266 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption",
-          "test/compat/memorystoreiam1614_test.go:101 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:110 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
@@ -5839,7 +5905,7 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
-          "test/compat/memorystoreiam1614_test.go:101 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:110 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },

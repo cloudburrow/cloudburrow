@@ -139,7 +139,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
-			projectIAMProvider{registry: d.projects}, iamRolesProvider{registry: d.projects})
+			projectIAMProvider{registry: d.projects}, iamRolesProvider{registry: d.projects},
+			iamServiceAccountsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted

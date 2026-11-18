@@ -29,14 +29,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 1 | 0 | 0 | 1 | 0 |
-| IAM custom roles | 3 | 2 | 0 | 1 | 0 |
+| IAM custom roles | 4 | 2 | 0 | 2 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **53** | **4** | **18** | **25** | **6** |
+| **Total** | **54** | **4** | **18** | **26** | **6** |
 
 ## Cloud Storage
 
@@ -163,11 +163,14 @@ and never enforced (#1368).
 
 Closed: `projects.roles` and `organizations.roles` (create, get, list, patch, delete, undelete),
 `permissions.queryTestablePermissions`, custom roles in bindings and in every permission check,
-gcloud iam roles and Terraform's custom role resources (#1743).
+gcloud iam roles and Terraform's custom role resources (#1743); service accounts, their keys and IAM
+policies, IAM Credentials' checks and signBlob, key-file sign-in, gcloud iam service-accounts and
+Terraform's service account resources (#1747).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Predefined roles (`roles/...`) through `GetRole`, `ListRoles` with no parent, `QueryGrantableRoles`, and service accounts, keys, `SignBlob`, `SignJwt`, `QueryAuditableServices`, `LintPolicy`: 501 (#1743) | not built yet | L |
+| Predefined roles (`roles/...`) through `GetRole`, `ListRoles` with no parent, `QueryGrantableRoles`, and the IAM API's deprecated `SignBlob` and `SignJwt`, `QueryAuditableServices`, `LintPolicy`: 501 (#1743, #1747); impersonation checks know only the predefined roles that grant IAM Credentials' permissions (Token Creator, OpenID Token Creator, Workload Identity User), not folder or organization grants, and bindings naming a deleted account are not rewritten to `deleted:serviceAccount:...?uid=` | not built yet | L |
+| Service accounts (#1747): the per-project account quota (100 here; Google's "varies depending on the project"), the code for a disabled account in IAM Credentials (`FAILED_PRECONDITION` here), whether self-impersonation is checked before the permission, the messages for an invalid account ID, display name or description, and the code for deleting a system-managed key | not documented by Google | S |
 | The code for a 301st role (`FAILED_PRECONDITION`), whether deleted roles count toward the 300, the codes for deleting a deleted role and undeleting a live one, which permissions beyond the organization and folder ones a project role may not hold, and a testable permission's `stage` (#1743) | not documented by Google | S |
 | When a custom role's deletion completes Google removes its bindings; here they stay in policies and grant nothing (#1743) | not built yet | S |
 

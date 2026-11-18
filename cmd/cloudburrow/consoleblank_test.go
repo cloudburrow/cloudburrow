@@ -233,6 +233,13 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		IncludedPermissions: []string{"datastore.entities.get"}}); err != nil {
 		t.Fatal(err)
 	}
+	// A service account (#1747), with a key.
+	if sa, err := d.projects.CreateServiceAccount(&adminpb.CreateServiceAccountRequest{Name: "projects/" + blankProject, AccountId: "blank-account",
+		ServiceAccount: &adminpb.ServiceAccount{DisplayName: "Blank account", Description: "Blank account"}}); err != nil {
+		t.Fatal(err)
+	} else if _, err := d.projects.CreateServiceAccountKey(&adminpb.CreateServiceAccountKeyRequest{Name: sa.GetName()}); err != nil {
+		t.Fatal(err)
+	}
 	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)
 	if err != nil {
 		t.Fatal(err)
