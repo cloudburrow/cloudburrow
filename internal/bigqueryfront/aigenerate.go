@@ -174,25 +174,7 @@ func findAICalls(sql string, toks []token, depth []int) ([]aiCall, int, string) 
 			return nil, 400, "Syntax error: unclosed " + name + "("
 		}
 		c := aiCall{fn: fn, start: toks[i].pos, end: toks[end].end, args: map[string]string{}, block: -1}
-		var args [][]token
-		k0 := i + 4
-		brackets := 0 // [ ] of ARRAY literals and < > of their types, which are not parens
-		for k := k0; k <= end; k++ {
-			switch {
-			case toks[k].punct("["):
-				brackets++
-			case toks[k].punct("]"):
-				brackets--
-			case toks[k].punct("<") && (toks[k-1].is("ARRAY") || toks[k-1].is("STRUCT")):
-				brackets++
-			case toks[k].punct(">") && brackets > 0 && !toks[k-1].punct("="):
-				brackets--
-			}
-			if k == end || toks[k].punct(",") && depth[k] == depth[i+3]+1 && brackets == 0 {
-				args = append(args, toks[k0:k])
-				k0 = k + 1
-			}
-		}
+		args := splitCallArgs(toks, depth, i+3, end)
 		npos := 0
 		for _, a := range args {
 			if len(a) == 0 {
@@ -227,16 +209,7 @@ func findAICalls(sql string, toks []token, depth []int) ([]aiCall, int, string) 
 				return nil, 400, name + " requires its " + k + " argument"
 			}
 		}
-		// The enclosing query block: the nearest SELECT before the call
-		// at the lowest depth seen walking back.
-		m := depth[i]
-		for k := i - 1; k >= 0; k-- {
-			m = min(m, depth[k])
-			if toks[k].is("SELECT") && depth[k] == m {
-				c.block = k
-				break
-			}
-		}
+		c.block = enclosingSelect(toks, depth, i)
 		if c.block < 0 {
 			return nil, 501, "Not implemented here: " + name + " outside a SELECT query block. Nothing was run."
 		}
@@ -244,6 +217,45 @@ func findAICalls(sql string, toks []token, depth []int) ([]aiCall, int, string) 
 		i = end
 	}
 	return calls, 0, ""
+}
+
+// enclosingSelect is the index of the SELECT of the query block holding
+// toks[i]: the nearest SELECT before it at the lowest depth seen walking
+// back, or -1.
+func enclosingSelect(toks []token, depth []int, i int) int {
+	m := depth[i]
+	for k := i - 1; k >= 0; k-- {
+		m = min(m, depth[k])
+		if toks[k].is("SELECT") && depth[k] == m {
+			return k
+		}
+	}
+	return -1
+}
+
+// splitCallArgs splits the arguments of the call whose parens are toks[open]
+// and toks[end] at its top-level commas.
+func splitCallArgs(toks []token, depth []int, open, end int) [][]token {
+	var args [][]token
+	k0 := open + 1
+	brackets := 0 // [ ] of ARRAY literals and < > of their types, which are not parens
+	for k := k0; k <= end; k++ {
+		switch {
+		case toks[k].punct("["):
+			brackets++
+		case toks[k].punct("]"):
+			brackets--
+		case toks[k].punct("<") && (toks[k-1].is("ARRAY") || toks[k-1].is("STRUCT")):
+			brackets++
+		case toks[k].punct(">") && brackets > 0 && !toks[k-1].punct("="):
+			brackets--
+		}
+		if k == end || toks[k].punct(",") && depth[k] == depth[open]+1 && brackets == 0 {
+			args = append(args, toks[k0:k])
+			k0 = k + 1
+		}
+	}
+	return args
 }
 
 // blockSource is the text the prompts of a block are read over: the
@@ -406,9 +418,20 @@ func (c aiCall) output(a aiResolved) ([]string, bool) {
 	return nil, false
 }
 
-// rewriteAIGenerate evaluates text's scalar AI function calls and writes
-// their answers into it; text is returned as it was when it has none.
+// rewriteAIGenerate evaluates text's AI function calls and writes their
+// answers into it: the scalar ones first, then AI.AGG (aiagg.go, #1777),
+// whose groups' rows may hold the scalars' answers; text is returned as it
+// was when it has none.
 func (f front) rewriteAIGenerate(r *http.Request, q queryOptions, text string) (string, int, string) {
+	text, code, msg := f.rewriteAIScalars(r, q, text)
+	if code != 0 {
+		return "", code, msg
+	}
+	return f.rewriteAIAgg(r, q, text)
+}
+
+// rewriteAIScalars evaluates text's scalar AI function calls.
+func (f front) rewriteAIScalars(r *http.Request, q queryOptions, text string) (string, int, string) {
 	if !strings.Contains(strings.ToUpper(text), "AI") {
 		return text, 0, ""
 	}
@@ -508,7 +531,7 @@ func (f front) resolveAICall(r *http.Request, q queryOptions, project string, c 
 	_, hasRatio := c.args["max_error_ratio"]
 	for arg, v := range c.args {
 		switch arg {
-		case "prompt", "input", "content", "content1", "content2":
+		case "prompt", "input", "content", "content1", "content2", "instruction":
 		case "endpoint":
 			s, ok := str(arg)
 			if !ok || strings.TrimSpace(s) == "" {
