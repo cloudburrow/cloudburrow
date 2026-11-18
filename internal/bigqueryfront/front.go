@@ -533,7 +533,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	})
 	// Per-project IAM of a caller with a token the instance minted
 	// (iamcheck.go, #1767).
-	iamChecks := &iamState{}
+	iamChecks := &iamState{policies: iam}
 	engine := next
 	return iamChecks.handler(engine, known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept

@@ -264,7 +264,7 @@ func (k *knownProjects) client(next http.Handler) http.Handler {
 		}
 		p := pathProject(r)
 		k.isActive(r.Context(), p)
-		if k.refuseShutDown(w, p) {
+		if k.refuseShutDown(w, p) || k.refuseShutDownJob(w, r, p) { // #1767, #1774 (shutdownjobs.go)
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -52,10 +52,11 @@ import (
 // emulator does not delete a table when its expiration passes. Any other
 // option is 501.
 //
+// Another project's table is read, and the new table made, in its own
+// project (#1767), at a past time too (#1774): its history is read there.
+//
 // 501, nothing done: OR REPLACE (not in the
-// documented syntax), a table of another project read FOR SYSTEM_TIME AS
-// OF a past time (another project's table is otherwise read, or made, in
-// its own project, #1767), a dry run, legacy SQL,
+// documented syntax), a dry run, legacy SQL,
 // any of these statements inside a multi-statement script with a TEMP table
 // or function (checkDDL; another script is carried out a statement at a
 // time since #1459, scriptflow.go), and
@@ -227,11 +228,6 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	// project (#1767): in is the destination's front. A table read at a
 	// past time is read within the job's project only.
 	in := f.inProject(refProject(dest, project))
-	if st.kind != "drop" && st.asOf != "" && refProject(src, project) != project {
-		notImplemented(fmt.Sprintf("%s of a table of project %s, not the job's project %s, FOR SYSTEM_TIME AS OF a past "+
-			"time", what, src.ProjectID, project))
-		return
-	}
 	if st.kind != "drop" {
 		if why := f.protectedRead(r, refProject(src, project), src.DatasetID, src.TableID, what); why != "" { // #1218
 			writeError(w, http.StatusNotImplemented, "notImplemented", why)
@@ -305,11 +301,18 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		// before the time travel window fails, now is the table as it is,
 		// and a past time inside it is read from the table's change
 		// history (timetravel.go, #1460).
+		// Another project's table is read as it was in its own project
+		// (#1774), as a copy job's table@time of one is (copyjob.go): its
+		// change history is that project's.
+		sf := f
+		if refProject(src, project) != project {
+			sf = f.inProject(src.ProjectID)
+		}
 		var m partitionMeta
-		if status, got := f.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
+		if status, got := sf.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
 			_ = json.Unmarshal(got, &m)
 		}
-		past, code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf)
+		past, code, msg := sf.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf)
 		switch {
 		case code == http.StatusNotImplemented:
 			writeError(w, code, "notImplemented", msg)
@@ -318,7 +321,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			failed(code, "invalidQuery", msg)
 			return
 		case past != 0:
-			sub, code, msg := f.historySubquery(r, src.DatasetID, src.TableID, m, tableName(project, src), past, "TRUE")
+			sub, code, msg := sf.historySubquery(r, src.DatasetID, src.TableID, m, tableName(project, src), past, "TRUE")
 			if code != 0 {
 				writeError(w, code, "notImplemented", msg)
 				return

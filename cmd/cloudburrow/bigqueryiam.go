@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
@@ -24,7 +26,9 @@ import (
 // roles each of their accounts holds on each project in the registry's
 // IAM policies (serviceAccount: and user: members of the roles
 // bigqueryfront.BigQueryRoles names, and of custom roles with bigquery.
-// permissions). A conditional binding grants nothing here. The tokens of
+// permissions), with those inherited from the project's folders and
+// organization, and conditional bindings with their expressions (#1774),
+// which the front evaluates. The tokens of
 // the instance's own account, which the ADC fixture holds, are left out:
 // its requests keep their behaviour, every permission. It pushes them
 // every bigqueryIAMEvery when they changed, every bigqueryIAMRefresh
@@ -50,7 +54,7 @@ const (
 // payload is what the front is given now.
 func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 	m := bigqueryfront.BigQueryIAM{Tokens: []bigqueryfront.BigQueryIAMToken{}, Roles: map[string]map[string][]string{},
-		CustomRoles: map[string][]string{}}
+		CustomRoles: map[string][]string{}, Conditional: map[string]map[string][]bigqueryfront.BigQueryIAMCondition{}}
 	emails := map[string]bool{}
 	for _, t := range b.creds.LiveTokens(now) {
 		// The instance's own account (the ADC fixture's) is served as
@@ -73,45 +77,90 @@ func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 	if err != nil {
 		return m
 	}
-	for _, p := range projects {
-		pol, err := reg.IAMPolicy("projects/" + p.ProjectID)
-		if err != nil || pol == nil {
-			continue
+	// A project's roles are its own policy's and, inherited, those of its
+	// folders and its organization (Resource Manager's hierarchy: "the
+	// effective policy for a resource is the union of the policy set on
+	// that resource and the policy inherited from its parent"). A
+	// conditional binding (#1774) is given with its expression, which the
+	// front evaluates for the resource it checks (internal/iamcond).
+	policies := map[string]*iampolicy.Stored{}
+	policyOf := func(resource string) *iampolicy.Stored {
+		if pol, ok := policies[resource]; ok {
+			return pol
 		}
-		for _, bd := range pol.Bindings {
-			if bd.Condition != nil {
+		pol, err := reg.IAMPolicy(resource)
+		if err != nil {
+			pol = nil
+		}
+		policies[resource] = pol
+		return pol
+	}
+	for _, p := range projects {
+		resources := []string{"projects/" + p.ProjectID}
+		if anc, err := reg.Ancestry(p.ProjectID); err == nil {
+			for _, a := range anc[1:] {
+				switch a.Type {
+				case "folder":
+					resources = append(resources, "folders/"+a.ID)
+				case "organization":
+					resources = append(resources, "organizations/"+a.ID)
+				}
+			}
+		}
+		for _, res := range resources {
+			pol := policyOf(res)
+			if pol == nil {
 				continue
 			}
-			if _, ok := bigqueryfront.BigQueryRoles[bd.Role]; !ok {
-				perms, custom := reg.RolePermissions(bd.Role)
-				if !custom {
-					continue
-				}
-				var bq []string
-				for _, p := range perms {
-					if strings.HasPrefix(p, "bigquery.") {
-						bq = append(bq, p)
-					}
-				}
-				if len(bq) == 0 {
-					continue
-				}
-				m.CustomRoles[bd.Role] = bq
-			}
-			for _, member := range bd.Members {
-				kind, email, ok := strings.Cut(member, ":")
-				email = strings.ToLower(email)
-				if !ok || (kind != "serviceAccount" && kind != "user") || !emails[email] {
-					continue
-				}
-				if m.Roles[email] == nil {
-					m.Roles[email] = map[string][]string{}
-				}
-				m.Roles[email][p.ProjectID] = append(m.Roles[email][p.ProjectID], bd.Role)
-			}
+			b.addBindings(&m, reg, emails, p.ProjectID, pol.Bindings)
 		}
 	}
 	return m
+}
+
+// addBindings adds bindings' roles, on project, to m for the accounts
+// emails names.
+func (b *bigqueryIAM) addBindings(m *bigqueryfront.BigQueryIAM, reg *resourcemanager.Registry, emails map[string]bool,
+	project string, bindings []iampolicy.Binding) {
+	for _, bd := range bindings {
+		if _, ok := bigqueryfront.BigQueryRoles[bd.Role]; !ok {
+			perms, custom := reg.RolePermissions(bd.Role)
+			if !custom {
+				continue
+			}
+			var bq []string
+			for _, p := range perms {
+				if strings.HasPrefix(p, "bigquery.") {
+					bq = append(bq, p)
+				}
+			}
+			if len(bq) == 0 {
+				continue
+			}
+			m.CustomRoles[bd.Role] = bq
+		}
+		for _, member := range bd.Members {
+			kind, email, ok := strings.Cut(member, ":")
+			email = strings.ToLower(email)
+			if !ok || (kind != "serviceAccount" && kind != "user") || !emails[email] {
+				continue
+			}
+			if bd.Condition != nil {
+				if m.Conditional[email] == nil {
+					m.Conditional[email] = map[string][]bigqueryfront.BigQueryIAMCondition{}
+				}
+				m.Conditional[email][project] = append(m.Conditional[email][project],
+					bigqueryfront.BigQueryIAMCondition{Role: bd.Role, Expression: bd.Condition.Expression})
+				continue
+			}
+			if m.Roles[email] == nil {
+				m.Roles[email] = map[string][]string{}
+			}
+			if !slices.Contains(m.Roles[email][project], bd.Role) {
+				m.Roles[email][project] = append(m.Roles[email][project], bd.Role)
+			}
+		}
+	}
 }
 
 // sync pushes the payload when it changed, or when force or the refresh
