@@ -52,8 +52,10 @@ func TestQueueIamPolicyIsStoredNotEnforced(t *testing.T) {
 	_, err = c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{Version: 3,
 		Bindings: []*iampb.Binding{{Role: "roles/cloudtasks.enqueuer", Members: []string{member},
 			Condition: &expr.Expr{Title: "later", Expression: `request.time > timestamp("2030-01-01T00:00:00Z")`}}}}})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "condition") {
-		t.Errorf("a conditional binding: %v, want UNIMPLEMENTED naming the condition", err)
+	// #1745: Cloud Tasks is not among the services Google lists as
+	// allowing conditions.
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "condition") {
+		t.Errorf("a conditional binding: %v, want INVALID_ARGUMENT naming the condition", err)
 	}
 	perms := []string{"cloudtasks.tasks.create", "cloudtasks.queues.delete"}
 	tp, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name, Permissions: perms})

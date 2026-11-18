@@ -15,8 +15,9 @@ package firestoreadmin
 //     console see the same documents (mql/bson.go has the mapping), and
 //     the front exports them as it exports every other write.
 //
-// TLS is not served: like every other CloudBurrow endpoint it is
-// cleartext on loopback, so the connection string sets tls=false.
+// It serves TLS only, as Google requires (mongotls.go, #1738), with a
+// certificate of the instance's own CA; the connection string sets
+// tls=true and tlsCAFile.
 
 import (
 	"context"
@@ -66,6 +67,11 @@ type MongoServer struct {
 	nextConn atomic.Int32
 	cmu      sync.Mutex
 	cursors  map[int64]*mongoCursor
+
+	// smu guards sessions, the logical sessions' transactions (mongotxn.go),
+	// by database and lsid.
+	smu      sync.Mutex
+	sessions map[string]*mongoSession
 }
 
 // mongoCursor is a query's results not yet returned.
@@ -80,7 +86,11 @@ type mongoCursor struct {
 // writes through the Firestore documents API at upstream: the front's own
 // port, so its writes are kept as every other call's are.
 func (a *Admin) NewMongoServer(upstream string, logf func(string, ...any)) *MongoServer {
-	return &MongoServer{a: a, upstream: upstream, logf: logf, cursors: map[int64]*mongoCursor{}}
+	s := &MongoServer{a: a, upstream: upstream, logf: logf, cursors: map[int64]*mongoCursor{}, sessions: map[string]*mongoSession{}}
+	a.mu.Lock()
+	a.mongoServer = s
+	a.mu.Unlock()
+	return s
 }
 
 func (s *MongoServer) docs() (firestorepb.FirestoreClient, error) {
@@ -127,6 +137,12 @@ type mongoConn struct {
 	// names no database: the first command's database is the
 	// connection's.
 	token bool
+	// principal is a token sign-in's account, or a SCRAM sign-in's user
+	// credentials as an IAM principal, whose roles each command is
+	// checked against (mongoiam.go, #1738).
+	principal string
+	// tx is the transaction the command being run is part of, if any.
+	tx *mongoTxn
 }
 
 func (s *MongoServer) serveConn(ctx context.Context, c net.Conn) {
@@ -335,7 +351,16 @@ func errorReply(err error) bson.D {
 	if !errors.As(err, &me) {
 		me = mql.Errorf(1, "InternalError", "%v", err)
 	}
-	return bson.D{{Key: "ok", Value: 0.0}, {Key: "errmsg", Value: me.Msg}, {Key: "code", Value: me.Code}, {Key: "codeName", Value: me.Name}}
+	out := bson.D{{Key: "ok", Value: 0.0}, {Key: "errmsg", Value: me.Msg}, {Key: "code", Value: me.Code}, {Key: "codeName", Value: me.Name}}
+	var l *labeled
+	if errors.As(err, &l) {
+		labels := bson.A{}
+		for _, x := range l.labels {
+			labels = append(labels, x)
+		}
+		out = append(out, bson.E{Key: "errorLabels", Value: labels})
+	}
+	return out
 }
 
 // noAuth are the commands an unauthenticated connection may run.
@@ -357,11 +382,14 @@ func (s *MongoServer) dispatch(ctx context.Context, mc *mongoConn, cmd bson.D) b
 			}
 			mc.db = db
 		}
-		if dbName != mc.db.id {
+		if dbName != mc.db.id && !(dbName == "admin" && (lname == "committransaction" || lname == "aborttransaction")) {
 			return errorReply(mql.Errorf(13, "Unauthorized", "not authorized on %s to execute command %s: each connection is limited to a single database, %s", dbName, name, mc.db.id))
 		}
 	}
 	if err := checkCommonOptions(cmd); err != nil {
+		return errorReply(err)
+	}
+	if err := s.checkMongoIAM(mc, lname, name, cmd); err != nil {
 		return errorReply(err)
 	}
 	var resp bson.D
@@ -387,9 +415,23 @@ func (s *MongoServer) dispatch(ctx context.Context, mc *mongoConn, cmd bson.D) b
 	case "saslcontinue":
 		resp, err = s.saslContinue(mc, cmd)
 	case "endsessions":
+		s.endSessions(mc, cmd)
 		resp = bson.D{}
 	default:
-		resp, err = s.command(ctx, mc, lname, name, cmd)
+		tx, done, terr := s.txnFor(ctx, mc, lname, cmd)
+		switch {
+		case terr == errCommitted || terr == errAborted:
+			resp = bson.D{}
+		case terr != nil:
+			err = terr
+		case lname == "committransaction" || lname == "aborttransaction":
+			err = mql.Errorf(251, "NoSuchTransaction", "%s needs a transaction: autocommit false, a txnNumber and an lsid.", name)
+		default:
+			mc.tx = tx
+			resp, err = s.command(ctx, mc, lname, name, cmd)
+			mc.tx = nil
+			done(err != nil || mql.Lookup(resp, "writeErrors") != nil)
+		}
 	}
 	if err != nil {
 		return errorReply(err)
@@ -397,12 +439,9 @@ func (s *MongoServer) dispatch(ctx context.Context, mc *mongoConn, cmd bson.D) b
 	return append(resp, bson.E{Key: "ok", Value: 1.0})
 }
 
-// checkCommonOptions refuses the transactions, write concerns, read
-// concerns and read preferences Google does not support.
+// checkCommonOptions refuses the write concerns, read concerns and read
+// preferences Google does not support.
 func checkCommonOptions(cmd bson.D) error {
-	if v, ok := mql.LookupE(cmd, "startTransaction"); ok && mql.Truthy(v) {
-		return mql.Errorf(20, "IllegalOperation", "Transactions are not supported by CloudBurrow's Firestore with MongoDB compatibility endpoint.")
-	}
 	if wc, ok := mql.Lookup(cmd, "writeConcern").(bson.D); ok {
 		if w, ok := mql.LookupE(wc, "w"); ok {
 			n, isNum := mql.NumberOf(w)
@@ -476,17 +515,26 @@ func (s *MongoServer) saslStart(mc *mongoConn, cmd bson.D, dbName string) (bson.
 		if dbName != "$external" || len(parts) != 3 || parts[1] != "access_token" || parts[2] == "" {
 			return nil, authFailed()
 		}
-		mc.token = true
+		email, ok := s.a.mongoTokenEmail(parts[2])
+		if !ok {
+			return nil, authFailed()
+		}
+		mc.token, mc.principal = true, email
 		return bson.D{{Key: "conversationId", Value: int32(1)}, {Key: "done", Value: true}, {Key: "payload", Value: bson.Binary{Data: []byte{}}}}, nil
 	case "MONGODB-OIDC":
 		var p bson.D
 		if dbName != "$external" || bson.Unmarshal(payload, &p) != nil {
 			return nil, authFailed()
 		}
-		if jwt, _ := mql.Lookup(p, "jwt").(string); jwt == "" {
+		jwt, _ := mql.Lookup(p, "jwt").(string)
+		if jwt == "" {
 			return nil, authFailed()
 		}
-		mc.token = true
+		email, ok := s.a.mongoTokenEmail(jwt)
+		if !ok {
+			return nil, authFailed()
+		}
+		mc.token, mc.principal = true, email
 		return bson.D{{Key: "conversationId", Value: int32(1)}, {Key: "done", Value: true}, {Key: "payload", Value: bson.Binary{Data: []byte{}}}}, nil
 	}
 	return nil, mql.Errorf(334, "MechanismUnavailable", "Received authentication for mechanism %s which is unknown or not enabled", mech)
@@ -506,6 +554,7 @@ func (s *MongoServer) saslContinue(mc *mongoConn, cmd bson.D) (bson.D, error) {
 		return nil, err
 	}
 	mc.db = conv.db
+	mc.principal = UserCredsPrincipal(conv.db.name, conv.user)
 	return bson.D{{Key: "conversationId", Value: int32(1)}, {Key: "done", Value: true}, {Key: "payload", Value: bson.Binary{Data: final}}}, nil
 }
 

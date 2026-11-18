@@ -66,9 +66,11 @@ func TestTableIAMPolicyIsStoredAndGoesWithItsTable(t *testing.T) {
 		t.Errorf("a stale etag answered %d, want 409", code)
 	}
 	if code, m := iamCall(t, h, "POST", tb+":setIamPolicy",
-		`{"policy":{"version":3,"bindings":[{"role":"r","members":["allUsers"],"condition":{"expression":"true"}}]}}`); code != http.StatusNotImplemented ||
+		`{"policy":{"version":3,"bindings":[{"role":"r","members":["allUsers"],"condition":{"expression":"true"}}]}}`); code != http.StatusBadRequest ||
 		!strings.Contains(m["error"].(map[string]any)["message"].(string), "condition") {
-		t.Errorf("a condition answered %d %v, want 501 naming it", code, m)
+		// Conditions are served on tables since #1745; one without a
+		// title is refused.
+		t.Errorf("a condition without a title answered %d %v, want 400 naming it", code, m)
 	}
 	code, perms := iamCall(t, h, "POST", tb+":testIamPermissions", `{"permissions":["bigquery.tables.get","bigquery.tables.getData"]}`)
 	if code != http.StatusOK || len(perms["permissions"].([]any)) != 2 {

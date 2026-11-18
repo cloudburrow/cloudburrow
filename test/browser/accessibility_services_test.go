@@ -356,7 +356,7 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 	for _, l := range []struct{ name, path string }{
 		{"Secret Manager", "/secrets"}, {"Cloud Scheduler", "/scheduler/jobs"}, {"Cloud Tasks", "/tasks/queues"},
 		{"projects", "/projects"}, {"resource hierarchy", "/resource-hierarchy"}, {"tags", "/tags"},
-		{"IAM", "/iam-admin/iam"}, {"APIs & Services", "/apis"},
+		{"IAM", "/iam-admin/iam"}, {"IAM roles", "/iam-admin/roles"}, {"IAM service accounts", "/iam-admin/serviceaccounts"}, {"APIs & Services", "/apis"},
 		{"Kubernetes workloads", "/kubernetes/workloads"}, {"pods", "/kubernetes/pods"},
 		{"Kubernetes services", "/kubernetes/services"}, {"Kubernetes jobs", "/kubernetes/jobs"},
 		{"deleted buckets", "/storage/deleted"},

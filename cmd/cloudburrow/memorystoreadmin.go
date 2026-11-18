@@ -17,12 +17,15 @@ import (
 	"time"
 
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/iamcond"
+	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
@@ -714,6 +717,13 @@ func (p *memorystoreProvisioner) stopTunnels(ctx context.Context) {
 	}
 }
 
+// connectPermission is the permission each connection role grants, from
+// Google's IAM roles reference (redis.clusters.connect, memorystore.instances.connect).
+var connectPermission = map[string]string{
+	"roles/redis.dbConnectionUser":       "redis.clusters.connect",
+	"roles/memorystore.dbConnectionUser": "memorystore.instances.connect",
+}
+
 // memorystoreIAM is IAM auth's token source (#1614): the access tokens
 // creds minted, and the members of a project's bindings of a role in the
 // registry's policies (none while the registry is not open).
@@ -727,7 +737,7 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 			}
 			return out
 		},
-		Members: func(project, role string) []string {
+		Members: func(project, resource, role string) []string {
 			var reg *resourcemanager.Registry
 			if registry != nil {
 				reg = registry()
@@ -739,13 +749,50 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 			if err != nil || p == nil {
 				return nil
 			}
+			// A custom role (#1743) grants the connection when it holds the
+			// permission the predefined role does.
 			var out []string
+			// A conditional binding (#1742, #1745) counts where its
+			// condition holds now for this cluster or instance: request.time
+			// and its effective tags are evaluated; resource.* is not
+			// (Google: Memorystore does not recognize resource
+			// attributes), and grants nothing.
+			attrs := iamcond.Attributes{RequestTime: time.Now(), TagsKnown: true}
+			service := "//redis.googleapis.com/"
+			if strings.Contains(resource, "/instances/") {
+				service = "//memorystore.googleapis.com/"
+			}
+			if tags, err := reg.EffectiveTags(service + resource); err == nil {
+				attrs.Tags = condTags(tags)
+			} else {
+				attrs.TagsKnown = false
+			}
 			for _, b := range p.Bindings {
+				if !b.Grants(attrs) {
+					continue
+				}
 				if b.Role == role {
+					out = append(out, b.Members...)
+					continue
+				}
+				if perms, ok := reg.RolePermissions(b.Role); ok && iamroles.Grants(perms, connectPermission[role]) {
 					out = append(out, b.Members...)
 				}
 			}
 			return out
 		},
 	}
+}
+
+// condTags are effective tags as internal/iamcond reads them.
+func condTags(tags []*rmpb.EffectiveTag) []iamcond.Tag {
+	out := make([]iamcond.Tag, 0, len(tags))
+	for _, t := range tags {
+		short := t.GetNamespacedTagValue()
+		if i := strings.LastIndex(short, "/"); i >= 0 {
+			short = short[i+1:]
+		}
+		out = append(out, iamcond.Tag{NamespacedKey: t.GetNamespacedTagKey(), ShortValue: short, KeyID: t.GetTagKey(), ValueID: t.GetTagValue()})
+	}
+	return out
 }

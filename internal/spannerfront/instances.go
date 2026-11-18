@@ -162,7 +162,7 @@ func (s *Instances) ownOperation(name string) bool {
 
 // Claims reports whether r is one of the instance calls the front answers.
 func (s *Instances) Claims(r *http.Request) bool {
-	if r.URL.Path == frontstate.ResetPath {
+	if r.URL.Path == frontstate.ResetPath || r.URL.Path == iampolicy.RewriteMemberPath {
 		return true
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
@@ -193,6 +193,10 @@ func (s *Instances) Claims(r *http.Request) bool {
 
 // ServeHTTP answers a call Claims claimed.
 func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == iampolicy.RewriteMemberPath {
+		iampolicy.ServeRewriteMember(w, r, s.RewriteIAMMember)
+		return
+	}
 	if r.URL.Path == frontstate.ResetPath {
 		frontstate.ServeReset(w, r, func(project string) error {
 			if project == "" {
@@ -436,4 +440,18 @@ func snake(p string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every instance's, database's and backup's policy kept
+// here: a deleted service account's bindings (#1751), which the host
+// sends to iampolicy.RewriteMemberPath.
+func (s *Instances) RewriteIAMMember(from, to string) error {
+	s.mu.Lock()
+	changed := iampolicy.RewriteMemberIn(s.policies, from, to)
+	s.mu.Unlock()
+	if changed {
+		return s.save()
+	}
+	return nil
 }

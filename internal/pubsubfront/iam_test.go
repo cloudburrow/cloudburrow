@@ -74,8 +74,10 @@ func TestIAMPolicyOnATopicAndASubscription(t *testing.T) {
 		}
 		_, err = tc.set(ctx, &iampb.SetIamPolicyRequest{Resource: tc.name, Policy: &iampb.Policy{Version: 3,
 			Bindings: []*iampb.Binding{{Role: tc.role, Members: []string{"user:ada@example.com"}, Condition: &expr.Expr{Expression: "true"}}}}})
-		if status.Code(err) != codes.Unimplemented {
-			t.Errorf("%s: a condition: %v, want UNIMPLEMENTED", tc.name, err)
+		if status.Code(err) != codes.InvalidArgument {
+			// #1745: Pub/Sub is not among the services Google lists as
+			// allowing conditions.
+			t.Errorf("%s: a condition: %v, want INVALID_ARGUMENT", tc.name, err)
 		}
 		tp, err := tc.test(ctx, &iampb.TestIamPermissionsRequest{Resource: tc.name, Permissions: tc.perms})
 		if err != nil || strings.Join(tp.GetPermissions(), ",") != tc.want {

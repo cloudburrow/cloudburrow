@@ -15,7 +15,7 @@ import (
 
 // TestSecretIamPolicyIsStoredNotEnforced (#365, ADR-0006) drives the three IAM
 // methods through the official client: a set policy reads back, a stale etag
-// is ABORTED, a conditional binding is UNIMPLEMENTED, and TestIamPermissions
+// is ABORTED, a conditional binding needs version 3 (#1745), and TestIamPermissions
 // returns what was asked. It asserts nothing about access: nothing is
 // enforced, which is the point.
 // covers: google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions
@@ -63,11 +63,13 @@ func TestSecretIamPolicyIsStoredNotEnforced(t *testing.T) {
 	if status.Code(err) != codes.Aborted {
 		t.Errorf("SetIamPolicy with a stale etag: %v, want ABORTED", err)
 	}
-	_, err = c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: sec.Name, Policy: &iampb.Policy{Version: 3,
+	// #1745: Secret Manager takes conditions, in a version 3 policy only
+	// (TestIAMConditionsOnServicePolicies).
+	_, err = c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: sec.Name, Policy: &iampb.Policy{Version: 1,
 		Bindings: []*iampb.Binding{{Role: "roles/secretmanager.secretAccessor", Members: []string{member},
 			Condition: &expr.Expr{Title: "later", Expression: `request.time > timestamp("2030-01-01T00:00:00Z")`}}}}})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "condition") {
-		t.Errorf("a conditional binding: %v, want UNIMPLEMENTED naming the condition", err)
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "condition") {
+		t.Errorf("a conditional binding in a version 1 policy: %v, want INVALID_ARGUMENT naming the condition", err)
 	}
 
 	perms := []string{"secretmanager.versions.access", "secretmanager.secrets.delete"}

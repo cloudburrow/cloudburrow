@@ -7,8 +7,13 @@
 //   - SetIamPolicy stores the bindings and returns them with a new etag. A
 //     request whose policy carries an etag that is not the stored one is
 //     ABORTED, as on Google, so read-modify-write loops behave.
-//   - IAM Conditions are UNIMPLEMENTED, with the field named. They are never
-//     stored and ignored. Audit configs are UNIMPLEMENTED too, except through
+//   - IAM Conditions (#1742) are stored on the resources whose policies
+//     Resource Manager keeps (projects, folders and the organization,
+//     through SetWithAuditConfigs), with Google's policy version rules
+//     (conditions.go), and (#1745) on the resources of the services Google
+//     lists as allowing conditions (SetConditional); every other service
+//     refuses them INVALID_ARGUMENT, with the field named, as Google refuses
+//     a condition where it does not accept one. Audit configs are UNIMPLEMENTED too, except through
 //     SetWithAuditConfigs, which the resources Google keeps them on (projects,
 //     folders and the organization, #1486) call: there they are stored, as
 //     update_mask says, and, as everything here, configure nothing. A version 3 policy without
@@ -17,12 +22,16 @@
 //   - TestIamPermissions returns every requested permission: nothing is
 //     enforced, so nothing is denied.
 //
-// Nothing here, or anywhere in CloudBurrow, consults a stored policy.
+// A few checks consult a stored project policy (Firestore with MongoDB
+// compatibility's and Memorystore's IAM sign-ins); they evaluate a
+// binding's condition with internal/iamcond.
 package iampolicy
 
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
+	"strconv"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 
@@ -51,10 +60,12 @@ type AuditLogConfig struct {
 	ExemptedMembers []string `json:"exemptedMembers,omitempty"`
 }
 
-// Binding is one role and its members.
+// Binding is one role and its members, granted only where its condition,
+// if it has one, evaluates to true.
 type Binding struct {
-	Role    string   `json:"role"`
-	Members []string `json:"members"`
+	Role      string     `json:"role"`
+	Members   []string   `json:"members"`
+	Condition *Condition `json:"condition,omitempty"`
 }
 
 // emptyEtag is the etag of a resource that has never had a policy set: the
@@ -71,13 +82,28 @@ func (s *Stored) etag() []byte {
 }
 
 // Proto renders the policy. A nil Stored is the empty policy.
-func (s *Stored) Proto() *iampb.Policy {
+// A policy with a conditional binding is version 3, as Google returns it.
+func (s *Stored) Proto() *iampb.Policy { return s.proto(3) }
+
+// proto renders the policy for a reader that asked for version: below 3, a
+// conditional binding's role carries "_withcond_" and its condition's hash,
+// and the condition is left out, as Google's "Policy versions" documents.
+func (s *Stored) proto(version int32) *iampb.Policy {
 	p := &iampb.Policy{Version: 1, Etag: s.etag()}
 	if s == nil {
 		return p
 	}
 	for _, b := range s.Bindings {
-		p.Bindings = append(p.Bindings, &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
+		pb := &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)}
+		if b.Condition != nil {
+			if version < 3 {
+				pb.Role = b.Role + withCond + b.Condition.hash(b.Role)
+			} else {
+				pb.Condition = b.Condition.proto()
+				p.Version = 3
+			}
+		}
+		p.Bindings = append(p.Bindings, pb)
 	}
 	for _, a := range s.AuditConfigs {
 		ac := &iampb.AuditConfig{Service: a.Service}
@@ -92,24 +118,44 @@ func (s *Stored) Proto() *iampb.Policy {
 	return p
 }
 
-// Get validates GetIamPolicy's options and returns the policy. Version 3 may
-// be requested, since a client asks for it without using conditions; the
-// answer is version 1 because nothing stored has a condition.
+// Get validates GetIamPolicy's options and returns the policy. A policy
+// with no conditional binding is version 1 whatever was requested; one
+// with a conditional binding is version 3 when 3 was requested, and
+// otherwise version 1 with each conditional role renamed
+// ROLE_withcond_HASH and its condition left out, as Google answers.
 func Get(current *Stored, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
-	switch v := opts.GetRequestedPolicyVersion(); v {
+	v := opts.GetRequestedPolicyVersion()
+	switch v {
 	case 0, 1, 3:
 	default:
 		return nil, apierror.InvalidArgument("options.requested_policy_version %d is not 0, 1 or 3", v)
 	}
-	return current.Proto(), nil
+	return current.proto(v), nil
 }
 
 // Set applies a SetIamPolicy request to the current policy and returns the
 // policy to store. The caller stores it only when this returns no error.
-// Audit configs are UNIMPLEMENTED, naming the field.
+// Audit configs are UNIMPLEMENTED, naming the field. It is for a resource
+// whose service Google does not list under "Services that allow
+// conditions" (docs.cloud.google.com/iam/docs/resource-types-with-conditional-roles):
+// a conditional binding is INVALID_ARGUMENT, naming it (#1745).
 func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
-	return apply(current, req, false)
+	return apply(current, req, scopeNoConditions)
 }
+
+// SetConditional is Set for a resource whose service Google lists as
+// allowing conditions in its resources' allow policies (#1745): Bigtable,
+// BigQuery, Cloud KMS, Cloud Logging, Cloud Run, Secret Manager, Spanner,
+// and Cloud Storage buckets with uniform bucket-level access. Conditional
+// bindings are stored with the version rules of conditions.go, except the
+// iam.googleapis.com/modifiedGrantsByRole API attribute, which Google's
+// attribute reference accepts on projects, folders and organizations only.
+func SetConditional(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
+	return apply(current, req, scopeResource)
+}
+
+// SetWithAuditConfigs also stores conditions (#1742): the resources that
+// keep audit configs are the ones whose conditional bindings are served.
 
 // SetWithAuditConfigs is Set for a resource whose policy carries audit
 // configs on Google: a project, a folder or an organization (#1486). As
@@ -118,10 +164,20 @@ func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
 // whose mask does not name audit_configs, keeps the stored audit configs.
 // They are stored, never acted on: no audit log is written or withheld.
 func SetWithAuditConfigs(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
-	return apply(current, req, true)
+	return apply(current, req, scopeHierarchy)
 }
 
-func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored, error) {
+// scope is what a resource's policy accepts.
+type scope int
+
+const (
+	scopeNoConditions scope = iota // no conditions, no audit configs
+	scopeResource                  // conditions, no audit configs
+	scopeHierarchy                 // conditions and audit configs
+)
+
+func apply(current *Stored, req *iampb.SetIamPolicyRequest, sc scope) (Stored, error) {
+	audit := sc == scopeHierarchy
 	masked := map[string]bool{}
 	for _, path := range req.GetUpdateMask().GetPaths() {
 		switch path {
@@ -147,8 +203,7 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		return Stored{}, apierror.InvalidArgument("policy is required")
 	}
 	// Any valid version is accepted for a policy without conditions, as on
-	// Google. Conditions themselves are refused below, so a version 3 policy
-	// stored here never holds one.
+	// Google; a conditional binding needs version 3 (conditions.go).
 	switch p.GetVersion() {
 	case 0, 1, 3:
 	default:
@@ -158,10 +213,10 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		return Stored{}, apierror.Unimplemented("policy.audit_configs: audit configs are not supported")
 	}
 	var bindings []Binding
+	if err := checkConditions(p, sc); err != nil {
+		return Stored{}, err
+	}
 	for i, b := range p.GetBindings() {
-		if b.GetCondition() != nil {
-			return Stored{}, apierror.Unimplemented("policy.bindings[%d].condition: IAM Conditions are not supported", i)
-		}
 		if b.GetRole() == "" {
 			return Stored{}, apierror.InvalidArgument("policy.bindings[%d].role is required", i)
 		}
@@ -169,7 +224,14 @@ func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored,
 		if len(b.GetMembers()) == 0 {
 			continue
 		}
-		bindings = append(bindings, Binding{Role: b.GetRole(), Members: append([]string(nil), b.GetMembers()...)})
+		nb, err := binding(i, b, current, sc)
+		if err != nil {
+			return Stored{}, err
+		}
+		bindings = mergeBinding(bindings, nb)
+	}
+	if err := checkSameRoleAndPrincipal(bindings); err != nil {
+		return Stored{}, err
 	}
 	audits, err := auditConfigs(p.GetAuditConfigs())
 	if err != nil {
@@ -223,4 +285,85 @@ func auditConfigs(in []*iampb.AuditConfig) ([]AuditConfig, error) {
 // nothing is enforced and so nothing is denied.
 func Permissions(req *iampb.TestIamPermissionsRequest) *iampb.TestIamPermissionsResponse {
 	return &iampb.TestIamPermissionsResponse{Permissions: append([]string(nil), req.GetPermissions()...)}
+}
+
+// RewriteMember replaces the member from with to in every binding (to
+// empty drops it, and a binding left with no member), giving the policy a
+// new etag when anything changed; it reports whether anything did. A
+// deleted service account's bindings go through it (#1750, #1751): Google
+// shows serviceAccount:EMAIL as deleted:serviceAccount:EMAIL?uid=ID in
+// every policy that names it, turns it back on undelete and drops it when
+// the account is purged. A nil policy is unchanged.
+func (s *Stored) RewriteMember(from, to string) bool {
+	if s == nil {
+		return false
+	}
+	changed := false
+	var kept []Binding
+	for _, bd := range s.Bindings {
+		if !hasMember(bd.Members, from) {
+			kept = append(kept, bd)
+			continue
+		}
+		changed = true
+		var members []string
+		for _, m := range bd.Members {
+			if m == from {
+				m = to
+			}
+			if m != "" && !hasMember(members, m) {
+				members = append(members, m)
+			}
+		}
+		if len(members) > 0 {
+			nb := bd // keeps the role and the condition (#1742)
+			nb.Members = members
+			kept = append(kept, nb)
+		}
+	}
+	if !changed {
+		return false
+	}
+	s.Bindings = kept
+	s.Etag = make([]byte, 8)
+	_, _ = rand.Read(s.Etag)
+	return true
+}
+
+func hasMember(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
+}
+
+// RewriteMemberInRecord rewrites the member in the policy a JSON record
+// keeps under field (as a service's resource record keeps its
+// iampolicy.Stored), leaving every other field as it was. It returns the
+// new record and true when the policy changed.
+func RewriteMemberInRecord(raw []byte, field, from, to string) ([]byte, bool, error) {
+	var rec map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, false, err
+	}
+	p, ok := rec[field]
+	if !ok || !bytes.Contains(p, []byte(strconv.Quote(from)[1:len(strconv.Quote(from))-1])) {
+		return nil, false, nil
+	}
+	var s Stored
+	if err := json.Unmarshal(p, &s); err != nil {
+		return nil, false, err
+	}
+	if !s.RewriteMember(from, to) {
+		return nil, false, nil
+	}
+	b, err := json.Marshal(&s)
+	if err != nil {
+		return nil, false, err
+	}
+	rec[field] = b
+	out, err := json.Marshal(rec)
+	return out, err == nil, err
 }

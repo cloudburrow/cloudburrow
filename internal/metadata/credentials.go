@@ -53,6 +53,10 @@ type Credentials struct {
 	// log is the minted access tokens (issued.go).
 	issuedOnce sync.Once
 	log        *issuedLog
+
+	// dir is the IAM service accounts (serviceaccounts.go), nil until set.
+	dirMu sync.Mutex
+	dir   ServiceAccountDirectory
 }
 
 // adcFile is the JSON layout Google's clients expect for a service account.

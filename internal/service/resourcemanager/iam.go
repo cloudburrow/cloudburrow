@@ -54,6 +54,9 @@ func iamKey(resource string) string { return iamPrefix + resource }
 // pending deletion. The caller holds r.mu.
 func (r *Registry) iamTargetLocked(resource string) (deleting bool, err error) {
 	switch {
+	case isServiceAccountResource(resource):
+		_, err := r.findSALocked(resource, false)
+		return false, err
 	case strings.HasPrefix(resource, "projects/"):
 		p, err := r.load(strings.TrimPrefix(resource, "projects/"))
 		if err != nil {
@@ -125,10 +128,16 @@ func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest)
 	}
 	set := iampolicy.SetWithAuditConfigs
 	if isTag(resource) {
-		set = iampolicy.Set
+		// A tag key's or value's policy keeps no audit configs; Resource
+		// Manager is among the services Google lists as allowing
+		// conditions, so it takes conditional bindings (#1745).
+		set = iampolicy.SetConditional
 	}
 	next, err := set(current, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.checkCustomRoleBindingsLocked(resource, bindingRoles(current), bindingRoles(&next)); err != nil {
 		return nil, err
 	}
 	b, err := json.Marshal(next)
@@ -149,7 +158,16 @@ func (r *Registry) ResetIAM(project string) error {
 	defer r.unlock()
 	if project != "" {
 		_ = r.st.Delete(iamKey("projects/" + project))
-		return nil
+		if err := r.dropServiceAccountsLocked(project); err != nil {
+			return err
+		}
+		return r.dropRolesLocked("projects/" + project)
+	}
+	if err := r.deletePrefixLocked(rolePrefix); err != nil {
+		return err
+	}
+	if err := r.deletePrefixLocked(saPrefix); err != nil {
+		return err
 	}
 	keys, err := r.st.List(iamPrefix)
 	if err != nil {
@@ -182,6 +200,10 @@ func heldOn(resource string, perms []string) *iampb.TestIamPermissionsResponse {
 	out := &iampb.TestIamPermissionsResponse{}
 	for _, p := range perms {
 		if !permissionPattern.MatchString(p) {
+			continue
+		}
+		// On a service account, its own and its keys' permissions alone.
+		if isServiceAccountResource(resource) && !strings.HasPrefix(p, "iam.serviceAccounts.") && !strings.HasPrefix(p, "iam.serviceAccountKeys.") {
 			continue
 		}
 		// On a tag key or value, the tag permissions alone can be held.

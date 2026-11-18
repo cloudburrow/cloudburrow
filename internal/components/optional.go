@@ -1126,3 +1126,11 @@ exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
+
+// The environment Firestore's front reads Firestore with MongoDB
+// compatibility's TLS server certificate and key from (#1738); the same
+// names as firestoreadmin.MongoTLSCertEnv and MongoTLSKeyEnv.
+const (
+	FirestoreMongoTLSCertEnv = "FIRESTORE_MONGODB_TLS_CERT"
+	FirestoreMongoTLSKeyEnv  = "FIRESTORE_MONGODB_TLS_KEY"
+)

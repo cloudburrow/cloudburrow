@@ -101,6 +101,9 @@ const keyPrefix = "resourcemanager/projects/"
 type Registry struct {
 	mu sync.Mutex
 	st store.Store
+	// signAuthz checks the caller of the deprecated SignBlob and SignJwt
+	// (iamlegacy.go); nil signs for any caller.
+	signAuthz SignAuthorizer
 	// onPurge are the OnPurge hooks, and purged the projects purged since
 	// r.mu was taken, whose hooks unlock runs (purge.go).
 	onPurge []func(projectID string) error
@@ -109,6 +112,14 @@ type Registry struct {
 	// a project was created or purged since r.mu was taken (numbers.go).
 	onNumbers      []func()
 	numbersChanged bool
+	// onRewrite are the OnMemberRewrite hooks, and rewrites the member
+	// rewrites since r.mu was taken, which unlock passes to them
+	// (serviceaccountprincipals.go).
+	onRewrite []func(from, to string) error
+	rewrites  []memberRewrite
+	// saTokenURI is the token endpoint a service account key file names
+	// (serviceaccountkeys.go).
+	saTokenURI string
 	// now is the clock deletion and purging read; a test sets it.
 	now func() time.Time
 }

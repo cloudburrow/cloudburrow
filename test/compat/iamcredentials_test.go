@@ -42,17 +42,24 @@ func (l localOnly) RoundTrip(r *http.Request) (*http.Response, error) {
 // TestImpersonatedTokenUsedWithACloudBurrowClient (#303): an impersonated
 // token source from google.golang.org/api/impersonate, served by the local
 // IAM Credentials endpoint, drives an official Storage client against
-// CloudBurrow. The token is not validated — nothing here validates tokens —
-// and no request leaves the machine.
+// CloudBurrow. The caller is the ADC fixture's account, which holds
+// roles/iam.serviceAccountTokenCreator on the service account it
+// impersonates (#1747); Storage does not validate the token, and no request
+// leaves the machine.
 func TestImpersonatedTokenUsedWithACloudBurrowClient(t *testing.T) {
 	h := New(t)
 	meta := h.Endpoint(EnvMetadata)
 	guard := localOnly{t: t, local: &url.URL{Host: meta}}
 	ctx := h.Context()
+	// The caller is the ADC fixture's account, granted the Token Creator
+	// role on a service account of the project (#1747).
+	me, source := instanceAccount(t)
+	worker := newServiceAccount(t, h, iamProject(t, h, "imp-"), "worker")
+	grantOn(t, h, worker.GetName(), "roles/iam.serviceAccountTokenCreator", "serviceAccount:"+me)
 	ts, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
-		TargetPrincipal: "worker@" + h.Project() + ".iam.gserviceaccount.com",
+		TargetPrincipal: worker.GetEmail(),
 		Scopes:          []string{"https://www.googleapis.com/auth/devstorage.read_write"},
-	}, option.WithHTTPClient(&http.Client{Transport: guard}))
+	}, option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: source, Base: guard}}))
 	if err != nil {
 		t.Fatalf("impersonate.CredentialsTokenSource: %v", err)
 	}

@@ -82,7 +82,7 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 	}
 	first := res.Items[0].Fields["Password"]
 	// #1703: the connection string a MongoDB driver authenticates with.
-	const wantCS = "mongodb://app-user:PASSWORD@127.0.0.1:9026/entdb?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=false&retryWrites=false"
+	const wantCS = "mongodb://app-user:PASSWORD@127.0.0.1:9026/entdb?loadBalanced=true&authMechanism=SCRAM-SHA-256&tls=true&retryWrites=false"
 	if cs := res.Items[0].Fields["Connection string"]; cs != wantCS {
 		t.Errorf("Create user credentials' connection string = %q, want %q", cs, wantCS)
 	}

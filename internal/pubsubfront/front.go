@@ -339,6 +339,10 @@ func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
 			f.serveCalls(w, r)
 			return
 		}
+		if r.URL.Path == iampolicy.RewriteMemberPath {
+			iampolicy.ServeRewriteMember(w, r, f.RewriteIAMMember)
+			return
+		}
 		rest.ServeHTTP(w, r)
 	})
 }
