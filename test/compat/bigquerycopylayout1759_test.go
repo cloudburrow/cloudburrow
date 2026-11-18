@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -30,7 +31,9 @@ import (
 //     supported for ingestion-time partitioning"), and clustered otherwise
 //     fail the job; a non-partitioned source into an ingestion-time
 //     partitioned table lands in today's partition; a partitioned source into
-//     a non-partitioned table, WRITE_TRUNCATE, "remains unpartitioned";
+//     a non-partitioned table, WRITE_TRUNCATE, "remains unpartitioned", but
+//     fails the job, reason "invalid" (error-messages), when the source is
+//     clustered: "the cluster specifications ... must match" (#1762);
 //   - a SNAPSHOT does not keep the partition expiration
 //     (table-snapshots-intro).
 //
@@ -182,7 +185,18 @@ func TestBigQueryCopyLayout1759(t *testing.T) {
 		t.Errorf("pingest rows in today's partition: %v, want true", got)
 	}
 	exec("CREATE TABLE " + p("unpart") + " (n INT64, d DATE, s STRING)")
-	if err := copyJob("unpart", bigquery.WriteTruncate, "", "pd"); err != nil {
+	// pd is clustered: "the cluster specifications for the source and
+	// destination tables must match", unpart's being none (#1762); the
+	// reason is "invalid", error-messages' "invalid input other than an
+	// invalid query".
+	err := copyJob("unpart", bigquery.WriteTruncate, "", "pd")
+	var bqErr *bigquery.Error
+	if err == nil || !strings.Contains(err.Error(), "clustering") || !errors.As(err, &bqErr) || bqErr.Reason != "invalid" {
+		t.Errorf("copy of a partitioned, clustered table into a table not clustered: %v, want the job to fail invalid", err)
+	}
+	exec("CREATE TABLE " + p("pdu") + " (n INT64, d DATE, s STRING) PARTITION BY d")
+	exec("INSERT INTO " + p("pdu") + " (n, d, s) VALUES (1, CURRENT_DATE(), 'a'), (2, DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY), 'b')")
+	if err := copyJob("unpart", bigquery.WriteTruncate, "", "pdu"); err != nil {
 		t.Fatalf("copy of a partitioned table into a non-partitioned one: %v", err)
 	}
 	if md := meta("unpart"); md.TimePartitioning != nil || md.RangePartitioning != nil || md.Clustering != nil {

@@ -40,24 +40,36 @@ import (
 //     "If you copy into a new table, all of the clustering information is
 //     copied with the table"; "If you copy into an existing table, then the
 //     cluster specifications for the source and destination tables must
-//     match."
+//     match": a partitioned, clustered source into any table that exists
+//     and is clustered otherwise, or not at all (one not partitioned
+//     included), fails the job (#1762).
+//   - A new destination's partition expiration: table-snapshots-intro,
+//     having said a snapshot does not keep it, "To retain the partition
+//     expiration information, copy the table instead": a copy keeps it.
+//   - The job's error reason, "invalid": error-messages documents it as
+//     "any type of invalid input other than an invalid query".
 //
 // A table snapshot (operationType SNAPSHOT): "the partition expiration
 // information isn't retained in the snapshot. The snapshotted table uses
 // the destination dataset's default partition expiration instead"
 // (https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro).
 //
-// UNVERIFIED (2026-11-17): the documentation does not define "partition
-// specification" or name the error of a mismatch. CloudBurrow compares the
-// partitioning type, its unit, column and integer range, and the
-// clustering columns, not partition expiration or require_partition_filter,
-// and fails the job "invalid" with its own wording. It takes "all of the
-// partitioning information" of a new destination to be the whole
-// timePartitioning (with expirationMs) or rangePartitioning and
-// requirePartitionFilter. CLONE and RESTORE, which the documentation does
-// not address, make their new table the same way. A table's description and
-// labels are not copied: the copy-table pages name neither (re-read
-// 2026-11-17; docs/gaps.md).
+// UNVERIFIED (docs re-read 2026-11-17: managing-partitioned-tables,
+// managing-tables, bq-cli-reference's bq cp, the copy samples, the Job
+// resource's JobConfigurationTableCopy, error-messages, table-clones-intro,
+// table-clones-create, table-snapshots-intro, table-snapshots-restore,
+// https://docs.cloud.google.com/bigquery/docs/managing-partitioned-tables):
+// none defines "partition specification" or gives the message of a
+// mismatch. CloudBurrow compares the partitioning type, its unit, column and
+// integer range, and the clustering columns, not partition expiration or
+// require_partition_filter, with its own wording. It carries a new
+// destination's requirePartitionFilter, which no copy page names. A
+// non-partitioned clustered source into a table neither partitioned nor
+// clustered is copied, the clustering rule naming partitioned sources only.
+// CLONE and RESTORE, which no page gives a layout rule for, make their new
+// table the same way. A table's description and labels are not copied by a
+// copy job: no copy page names them (DDL's CREATE TABLE COPY inherits "the
+// table options metadata", but it is a statement, not a copy job).
 
 // layoutFields are the Table fields of partitioning and clustering that a
 // copy carries into a new destination.
@@ -80,7 +92,7 @@ func layoutOf(got []byte) map[string]json.RawMessage {
 }
 
 // layoutSpec is what of a table's layout two tables must share
-// (UNVERIFIED, above): partitioning and clustering.
+// (UNVERIFIED, docs re-read 2026-11-17, above): partitioning and clustering.
 type layoutSpec struct {
 	partition string // "" when not partitioned
 	cluster   string // "" when not clustered
@@ -141,13 +153,13 @@ func layoutMismatch(project string, sources []tableRef, layouts []map[string]jso
 	for i := 1; i < len(sources); i++ {
 		s := specOf(layouts[i])
 		if (s.partition == "") != (first.partition == "") {
-			// UNVERIFIED wording (2026-11-17).
+			// UNVERIFIED wording (docs re-read 2026-11-17, above).
 			return fmt.Sprintf("Invalid copy job: the source tables can't contain a mixture of partitioned and "+
 				"non-partitioned tables, and %s is %s but %s is %s.", tableName(project, sources[0]),
 				partitionedWord(first), tableName(project, sources[i]), partitionedWord(s))
 		}
 		if s != first {
-			// UNVERIFIED wording (2026-11-17).
+			// UNVERIFIED wording (docs re-read 2026-11-17, above).
 			return fmt.Sprintf("Invalid copy job: the source tables must have identical schemas, including any "+
 				"partitioning or clustering; %s has partitioning %s and clustering %s, and %s has partitioning %s "+
 				"and clustering %s.", tableName(project, sources[0]), specText(first.partition), specText(first.cluster),
@@ -161,19 +173,21 @@ func layoutMismatch(project string, sources []tableRef, layouts []map[string]jso
 	ingestion := strings.HasSuffix(d.partition, "field:_partitiontime)")
 	switch {
 	case first.partition == "" && d.partition != "" && !ingestion:
-		// UNVERIFIED wording (2026-11-17).
+		// UNVERIFIED wording (docs re-read 2026-11-17, above).
 		return fmt.Sprintf("Incompatible table partitioning specification. Copying a non-partitioned table into "+
 			"%s, which is partitioned by %s, is only supported for ingestion-time partitioning.",
 			tableName(project, dest), d.partition)
 	case first.partition != "" && d.partition != "" && first.partition != d.partition:
-		// UNVERIFIED wording (2026-11-17).
+		// UNVERIFIED wording (docs re-read 2026-11-17, above).
 		return fmt.Sprintf("Incompatible table partitioning specification. Expects partitioning specification %s, "+
 			"but input partitioning specification is %s.", d.partition, first.partition)
-	case first.cluster != "" && first.cluster != d.cluster && (d.partition != "" || d.cluster != ""):
-		// UNVERIFIED (2026-11-17): into a table neither partitioned nor
-		// clustered, which "remains unpartitioned", the clustering is not
-		// compared; the documentation names no case for it. UNVERIFIED
-		// wording.
+	case first.cluster != "" && first.cluster != d.cluster && (first.partition != "" || d.partition != "" || d.cluster != ""):
+		// A partitioned, clustered source: "the cluster specifications for
+		// the source and destination tables must match", into a table not
+		// clustered too (#1762). A non-partitioned one into a table neither
+		// partitioned nor clustered is not compared: UNVERIFIED (docs
+		// re-read 2026-11-17, above), the rule naming partitioned sources
+		// only. UNVERIFIED wording.
 		return fmt.Sprintf("Incompatible table clustering specification. Expects clustering specification %s, but "+
 			"input clustering specification is %s.", specText(d.cluster), first.cluster)
 	}
