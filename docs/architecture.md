@@ -174,6 +174,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
 | `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server and a Valkey server per created instance, which `cmd/cloudburrow` provisions in the cluster (#1302). |
+| `internal/redistlsfront/` | The TLS endpoint of a Memorystore for Redis server before Redis 6.0 with in-transit encryption (#1768): `cloudburrow-storage redis-tls-front`, a second container in the server's pod, serving TLS 1.2 or later on port 6378 with the instance CA's server certificate while the server listens on the pod's loopback alone; a Standard tier replica replicates through a loopback relay the front forwards over TLS to its primary. |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
