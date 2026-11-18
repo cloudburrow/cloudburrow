@@ -36,7 +36,7 @@ func TestColumnDescriptions(t *testing.T) {
 		t.Errorf("schema %s", got)
 	}
 	// A column's data_policies (#1456): kept; one not a policy's
-	// {'name': ...} is 400. A STRUCT field's stays 501.
+	// {'name': ...} is 400.
 	if d, msg, ok := parseDDLOptions("CREATE TABLE ds.t (a STRING OPTIONS (data_policies = [\"{'name':'p.region-us.dp'}\"]))"); !ok || msg != "" ||
 		len(d.decimals) != 1 || len(d.decimals[0].dataPolicies) != 1 {
 		t.Errorf("data_policies: %+v %q %v", d.decimals, msg, ok)
@@ -44,12 +44,18 @@ func TestColumnDescriptions(t *testing.T) {
 	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a STRING OPTIONS (data_policies = ['x']))"); !strings.Contains(d.invalid, "data_policies") {
 		t.Errorf("data_policies of a bare name: invalid %q", d.invalid)
 	}
-	for _, bad := range []string{
-		"CREATE TABLE ds.t (s STRUCT<a STRING OPTIONS (data_policies = ['x'])>)",
-	} {
-		if _, msg, ok := parseDDLOptions(bad); !ok || !strings.Contains(msg, "data_policies") {
-			t.Errorf("%s: ok %v, msg %q", bad, ok, msg)
-		}
+	// A STRUCT field's data_policies is kept too (#1456), and one not a
+	// policy's {'name': ...} is 400.
+	if d, msg, ok := parseDDLOptions("CREATE TABLE ds.t (s STRUCT<a STRING OPTIONS (data_policies = [\"{'name':'p.region-us.dp'}\"])>)"); !ok || msg != "" ||
+		d.invalid != "" || len(d.decimals) != 1 || len(d.decimals[0].fields) != 1 || len(d.decimals[0].fields[0].dataPolicies) != 1 {
+		t.Errorf("STRUCT field data_policies: %+v %q %v", d.decimals, msg, ok)
+	}
+	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (s STRUCT<a STRING OPTIONS (data_policies = ['x'])>)"); !strings.Contains(d.invalid, "data_policies") {
+		t.Errorf("STRUCT field data_policies of a bare name: invalid %q", d.invalid)
+	}
+	toks0, _ := lex("ALTER TABLE ds.t ALTER COLUMN s SET DATA TYPE STRUCT<a STRING OPTIONS (data_policies = [\"{'name':'p.region-us.dp'}\"])>")
+	if _, unsupported, _ := parseAlter(toks0); unsupported == "" {
+		t.Error("SET DATA TYPE of a STRUCT field with data_policies is not refused")
 	}
 	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a INT64 OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'))"); !strings.Contains(d.invalid, "not a NUMERIC") {
 		t.Errorf("rounding_mode of an INT64: invalid %q", d.invalid)
