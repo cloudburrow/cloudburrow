@@ -175,3 +175,16 @@ func TestAIAggGroupBatches(t *testing.T) {
 		t.Errorf("output_schema: %s %v %d %v", lit, ok, failed, cfgs)
 	}
 }
+
+// TestAIAggProbeParameters: a probe is sent only the named parameters it
+// uses, as the engine refuses one it does not reference.
+func TestAIAggProbeParameters(t *testing.T) {
+	q := queryOptions{ParameterMode: "NAMED", QueryParameters: json.RawMessage(`[{"name":"instruction","parameterValue":{"value":"x"}},` +
+		`{"name":"m","parameterValue":{"value":"Beta"}}]`)}
+	if got := paramsOf(q, "SELECT a FROM t WHERE movie = @m AND instruction = @@x"); string(got.QueryParameters) != `[{"name":"m","parameterValue":{"value":"Beta"}}]` {
+		t.Errorf("one used: %s", got.QueryParameters)
+	}
+	if got := paramsOf(q, "SELECT instruction FROM t"); got.QueryParameters != nil || got.ParameterMode != "" {
+		t.Errorf("none used: %s %s", got.QueryParameters, got.ParameterMode)
+	}
+}

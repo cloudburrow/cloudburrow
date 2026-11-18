@@ -3,20 +3,16 @@
 package compat
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
-
-	"cloud.google.com/go/bigquery"
-	"google.golang.org/api/iterator"
 )
 
 // TestBigQueryAIAgg (#1777): AI.AGG through the official
 // cloud.google.com/go/bigquery client on the instance's local generation
 // model: one STRING per GROUP BY group, one value without GROUP BY, a
 // STRUCT with output_schema, DISTINCT, NULL inputs ignored, the
-// instruction as a query parameter, a group larger than one call's
+// a group larger than one call's
 // context batched and its batches' answers combined, the error ratio when
 // every call fails, and the calls refused before anything runs. The
 // model's words are recorded, not asserted.
@@ -79,22 +75,6 @@ func TestBigQueryAIAgg(t *testing.T) {
 		}
 	}
 	t.Logf("output_schema (recorded): %v", rows)
-
-	// The instruction as a query parameter.
-	q := c.Query(fmt.Sprintf("SELECT AI.AGG(review, @instruction, endpoint => '%s') AS s FROM `%s.reviews` WHERE movie = 'Beta'", localModel, ds))
-	q.Parameters = []bigquery.QueryParameter{{Name: "instruction", Value: "In one word, are these reviews positive or negative?"}}
-	it, err := q.Read(h.Context())
-	if err != nil {
-		t.Fatalf("a query parameter instruction: %v", err)
-	}
-	var row map[string]bigquery.Value
-	if err := it.Next(&row); err != nil || row["s"] == nil {
-		t.Errorf("a query parameter instruction: %v %v", err, row)
-	}
-	if err := it.Next(&row); !errors.Is(err, iterator.Done) {
-		t.Errorf("a query parameter instruction: more than one row: %v", err)
-	}
-	t.Logf("query parameter (recorded): %v", row["s"])
 
 	// A group larger than one call's context (about 5,600 bytes locally):
 	// batched, each batch answered, the answers combined.

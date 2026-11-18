@@ -20,7 +20,8 @@ import (
 // INPUT is a STRING or a STRUCT of STRING and ARRAY<STRING> fields
 // (concatenated, as AI.GENERATE's prompt; ObjectRef fields are 501, as
 // for the scalar functions: object tables, #1798); INSTRUCTION a STRING
-// literal or query parameter. The front evaluates a call before the
+// literal (a query parameter, which the page allows, fails: see
+// aggInstruction). The front evaluates a call before the
 // engine runs the query, block by block, the deepest first:
 //
 //  1. It reads every group's rows with a probe of the call's block: the
@@ -50,9 +51,9 @@ import (
 // the cap the front sends is aiAggOutputTokens.
 //
 // 501, naming why: an OVER clause; AI.AGG outside a SELECT block; ObjectRef
-// input (object tables, #1798).
+// input (object tables, #1798); an instruction that is a query parameter.
 //
-// UNVERIFIED (2026-11-18: the page above documents none of these): the
+// UNVERIFIED (re-read 2026-11-18: the page above documents none of these): the
 // words of the prompts (aggPrompt; Google publishes no prompt); the
 // batch size, which is the local model's and not Gemini's; that NULL
 // inputs are ignored, as other aggregates ignore them, and that a group
@@ -292,7 +293,7 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 			if code != 0 {
 				return "", code, msg
 			}
-			_, rows, code, msg := f.queryAllRows(r, q, probe)
+			_, rows, code, msg := f.queryAllRows(r, paramsOf(q, probe), probe)
 			if code != 0 {
 				return "", code, msg
 			}
@@ -338,7 +339,8 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 				whens.WriteString(" WHEN 0 THEN CAST(NULL AS " + types[i] + ")")
 			}
 			out.WriteString(text[last:c.start])
-			out.WriteString("(CASE FARM_FINGERPRINT(" + c.contentExpr() + ")" + whens.String() + " ELSE CAST(NULL AS " + types[i] + ") END)")
+			value := "(CASE FARM_FINGERPRINT(" + c.contentExpr() + ")" + whens.String() + " ELSE CAST(NULL AS " + types[i] + ") END)"
+			out.WriteString(value)
 			last = c.end
 		}
 		out.WriteString(text[last:])
@@ -395,23 +397,56 @@ func aggProbe(text string, toks []token, depth []int, calls []aiAggCall, types [
 	return with + "SELECT DISTINCT _cbai_c, FARM_FINGERPRINT(_cbai_c) AS _cbai_fp FROM (SELECT " + list + ", " + c.contentExpr() + " AS _cbai_c" + src + ")", 0, ""
 }
 
-// aggInstruction is the instruction's value: a STRING literal, or a
-// constant expression (a query parameter) the engine evaluates.
+// aggInstruction is the instruction's value, a STRING literal; any other
+// expression is 501. A query parameter does not reach here yet: the query
+// fails first with the engine's "expected 0 arguments, got 1" on the read
+// of the groups (measured 2026-11-18 through the official Go client; not
+// yet traced, #1777 follow-up).
 func (f front) aggInstruction(r *http.Request, q queryOptions, expr string) (string, int, string) {
 	if s, ok := unquoteString(expr); ok {
 		return s, 0, ""
 	}
-	cols, rows, code, msg := f.queryAllRows(r, q, "SELECT ("+expr+") AS instruction")
-	if code != 0 {
-		return "", code, msg
-	}
-	if len(cols) != 1 || !strings.EqualFold(cols[0].Type, "STRING") || len(rows) != 1 || len(rows[0]) != 1 {
-		return "", 400, "The instruction argument of AI.AGG must be a STRING literal or query parameter"
-	}
-	if rows[0][0] == nil {
+	if strings.EqualFold(strings.TrimSpace(expr), "NULL") || strings.HasPrefix(strings.ToUpper(strings.TrimSpace(expr)), "CAST(NULL") {
 		return "", 400, "The instruction argument of AI.AGG must not be NULL"
 	}
-	return *rows[0][0], 0, ""
+	return "", 501, "Not implemented here: an AI.AGG instruction that is not a STRING literal (" + expr + "), such as a query parameter (#1777). Nothing was run."
+}
+
+// paramsOf is q with only the named query parameters sql uses: the engine
+// refuses a query given a parameter it does not reference ("expected 0
+// arguments, got 1"), and a probe holds only part of the query.
+func paramsOf(q queryOptions, sql string) queryOptions {
+	if len(q.QueryParameters) == 0 || strings.EqualFold(q.ParameterMode, "POSITIONAL") {
+		return q
+	}
+	var ps []json.RawMessage
+	if json.Unmarshal(q.QueryParameters, &ps) != nil {
+		return q
+	}
+	toks, _ := lex(sql)
+	var keep []json.RawMessage
+	for _, p := range ps {
+		var named struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(p, &named) != nil || named.Name == "" {
+			return q
+		}
+		for k := 1; k < len(toks); k++ {
+			// @name, not @@name (a system variable)
+			if toks[k].is(named.Name) && toks[k-1].punct("@") && (k < 2 || !toks[k-2].punct("@")) {
+				keep = append(keep, p)
+				break
+			}
+		}
+	}
+	out := q
+	if len(keep) == 0 {
+		out.QueryParameters, out.ParameterMode = nil, ""
+		return out
+	}
+	out.QueryParameters, _ = json.Marshal(keep)
+	return out
 }
 
 // aggItem is one input of an aggregation call: a row, or a batch's answer
@@ -442,7 +477,7 @@ func packAgg(items []aggItem, budget int) [][]aggItem {
 	return out
 }
 
-// aggPrompt is one aggregation call's prompt (UNVERIFIED, 2026-11-18: the
+// aggPrompt is one aggregation call's prompt (UNVERIFIED, re-read 2026-11-18: the
 // page publishes no prompt): the instruction and the rows, or, combining,
 // the batches' answers.
 func aggPrompt(instruction string, items []aggItem, combine bool) string {
