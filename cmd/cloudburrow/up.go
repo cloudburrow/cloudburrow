@@ -227,6 +227,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// observable while the cluster comes up, then the cluster, then the
 	// components that need it, then the tunnels that need those.
 	forwarders := buildForwarders(cfg)
+	// BigQuery's signed URLs name the address clients reach Cloud Storage
+	// at (#1786): the storage tunnel's, which New has already chosen when
+	// --port-storage is 0. The configured port was 0 there, and every
+	// signed URL named http://127.0.0.1:0 (main run 44357900271), as
+	// fake-gcs-server's public host once did (#269).
+	if f := forwarderFor(forwarders, "storage"); f != nil && f.HostAddr() != "" {
+		comps.SetStoragePublic("http://" + f.HostAddr())
+	}
 	// A database's tunnel is up once its user logs in through it (#1262).
 	for _, s := range []config.Service{config.ServiceCloudSQLMySQL, config.ServiceCloudSQL} {
 		if f := forwarderFor(forwarders, string(s)); f != nil {
