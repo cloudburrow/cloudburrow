@@ -63,7 +63,7 @@ func TestNightlySQLEphemeralRunsTheSQLShardEphemeral(t *testing.T) {
 		". scripts/compat-shards.sh",
 		`compat_shard "$SHARD"`,
 		"--mode ephemeral",
-		"grep -qE '^mode: +ephemeral$'",
+		"grep -qE ' mode: +ephemeral$'",
 		"scripts/compat-env.sh --strict",
 		"go test -tags=compat -timeout 60m -v ./test/compat/...",
 		"TestCloudSQLInstanceWrites",

@@ -111,12 +111,12 @@ jobs:
             --services "$SERVICES")
           ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
           ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
-          # The running instance's own banner names its mode; `wait` can
+          # The running instance's own banner, a timestamp then "mode:", names its mode; `wait` can
           # return a moment before `up` has written it.
           UPLOG="$RUNNER_TEMP/cb/ci/up.log"
           for _ in $(seq 1 30); do grep -q 'press Ctrl-C to stop' "$UPLOG" && break; sleep 1; done
-          grep -qE '^mode: +ephemeral$' "$UPLOG" ||
-            { echo "the instance is not in ephemeral mode"; grep -E '^mode:' "$UPLOG"; exit 1; }
+          grep -qE ' mode: +ephemeral$' "$UPLOG" ||
+            { echo "the instance is not in ephemeral mode"; grep -E ' mode:' "$UPLOG"; exit 1; }
 
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
           # --strict: every variable named must be non-empty and no port 0.
