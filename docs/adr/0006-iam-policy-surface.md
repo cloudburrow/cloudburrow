@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -454,6 +454,24 @@ policy (unconditioned bindings of those two roles, `serviceAccount:` and `user:`
 roles, inheritance or conditions). Nothing else reads a stored policy; every other service still
 serves any caller (ADR-0004). The test that a principal without the role is refused proves only
 that this instance's own rule is applied, and its compatibility.md row says so.
+
+### BigQuery per-project IAM of a minted token (amended 2026-11-17 by #1767)
+
+A second exception to rule 1, decided with #1767, which asked BigQuery to enforce "BigQuery's
+documented permissions on the job's project (`bigquery.jobs.create`) and on the data's project
+and dataset (`bigquery.tables.getData`, and the rest)" when a request carries a bearer token the
+instance minted, and to keep today's behaviour for every other request. The caller is known as
+Memorystore's IAM auth knows it: the SHA-256 of the request's bearer token against the instance's
+log of the access tokens it minted, which the host pushes to BigQuery's front with each account's
+roles on each project (the project's stored policy: unconditioned bindings, `serviceAccount:` and
+`user:` members, the predefined roles `internal/bigqueryfront/iamcheck.go` lists and custom roles
+by their `bigquery.` permissions) and which the front completes with the dataset's access entries.
+A request with no bearer token, with one the instance did not mint, or with one minted for the
+instance's own account (the ADC fixture's) is served as before, as the instance's ADC account with
+every permission: CloudBurrow cannot otherwise tell who sent it, and every client, test and console
+page that does not mint a token for another account keeps working. Not read: inheritance from
+folders and the organization, conditions, a table's own policy, and the tables a view or routine
+reads. Its compatibility.md row says what is checked.
 
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row

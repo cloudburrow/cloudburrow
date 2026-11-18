@@ -531,7 +531,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	// Per-project IAM of a caller with a token the instance minted
+	// (iamcheck.go, #1767).
+	iamChecks := &iamState{}
+	engine := next
+	return iamChecks.handler(engine, known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -555,7 +559,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed)))
+	}), next, settings, failed))))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow

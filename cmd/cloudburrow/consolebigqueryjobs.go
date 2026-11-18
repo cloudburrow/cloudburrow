@@ -491,8 +491,10 @@ func bigqueryCopyFields() []console.Field {
 	return []console.Field{
 		{Name: "operationType", Label: "Operation", Type: "select", Options: bigqueryCopyOperations,
 			Help: "COPY copies the rows; CLONE makes a writable clone of this table, SNAPSHOT a read-only table snapshot, and RESTORE a standard table of this snapshot. Each makes a destination that does not exist."},
+		{Name: "destProject", Label: "Destination project", Type: "text",
+			Help: "Optional: another project of Resource Manager to copy into (#1767); this project when empty."},
 		{Name: "datasetId", Label: "Destination dataset", Type: "text", Required: true, Pattern: bigqueryDatasetIDPattern,
-			Help: "A dataset of this project that exists."},
+			Help: "A dataset of the destination project that exists."},
 		{Name: "tableId", Label: "Destination table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern},
 		{Name: "writeDisposition", Label: "If the destination exists", Type: "select", Options: bigqueryCopyWrites,
 			Help: "WRITE_EMPTY refuses a destination that has rows."},
@@ -532,7 +534,11 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	if dstDataset == "" || dstTable == "" {
 		return nil, errors.New("the destination dataset and table are required")
 	}
-	if dstDataset == datasetID && dstTable == tableID {
+	dstProject := strings.TrimSpace(values["destProject"])
+	if dstProject == "" {
+		dstProject = project
+	}
+	if dstProject == project && dstDataset == datasetID && dstTable == tableID {
 		return nil, errors.New("the destination is the table itself")
 	}
 	write := values["writeDisposition"]
@@ -560,7 +566,7 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 		switch {
 		case s == [2]string{datasetID, tableID}:
 			return nil, fmt.Errorf("%s.%s is this table, already a source", datasetID, tableID)
-		case s == [2]string{dstDataset, dstTable}:
+		case dstProject == project && s == [2]string{dstDataset, dstTable}:
 			return nil, errors.New("a source is the destination")
 		}
 	}
@@ -575,7 +581,7 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	for _, s := range more {
 		sources = append(sources, c.Dataset(s[0]).Table(s[1]))
 	}
-	copier := c.Dataset(dstDataset).Table(dstTable).CopierFrom(sources...)
+	copier := c.DatasetInProject(dstProject, dstDataset).Table(dstTable).CopierFrom(sources...)
 	copier.WriteDisposition = bigquery.TableWriteDisposition(write)
 	if op != "COPY" {
 		copier.OperationType = bigquery.TableCopyOperationType(op)

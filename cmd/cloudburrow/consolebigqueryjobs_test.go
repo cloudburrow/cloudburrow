@@ -410,6 +410,14 @@ func TestBigQueryCopyTableFormRunsACopyJob(t *testing.T) {
 		map[string]string{"datasetId": "d", "tableId": "t"}); err == nil {
 		t.Error("a copy of a table onto itself was sent")
 	}
+	// Into another project (#1767): its destinationTable names it.
+	if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable,
+		map[string]string{"destProject": "other", "datasetId": "d", "tableId": "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sent, `"projectId":"other"`) {
+		t.Errorf("the copy into another project sent %s", sent)
+	}
 }
 
 // TestBigQueryCopyTableSendsEveryMoreSource (#782): Copy table's More source
