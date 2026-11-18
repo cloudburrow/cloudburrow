@@ -285,7 +285,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -738,7 +738,6 @@ var unsupportedModelTypes = map[string]string{
 	// TensorFlow runtime. An ONNX model runs on the ONNX Runtime of the
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
-	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
@@ -836,7 +835,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
-					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" {
+					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" || up == "TENSORFLOW" {
 						// An imported ONNX or XGBoost model (modelonnx.go,
 						// modelxgb.go, #1711): MODEL_PATH, and no TRANSFORM
 						// or query.
@@ -1736,6 +1735,24 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			}
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW_LITE", Created: now, Modified: now,
+				Location: loc, Options: d.opts, TFLite: imp})
+		}
+	case d.opts.ModelType == "TENSORFLOW":
+		// An imported TensorFlow SavedModel, converted to TensorFlow Lite
+		// on the CLI's converter (modeltensorflow.go, #1775).
+		imp, data, c, m := f.importTensorFlow(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's converted TensorFlow Lite file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW", Created: now, Modified: now,
 				Location: loc, Options: d.opts, TFLite: imp})
 		}
 	default:

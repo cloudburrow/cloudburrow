@@ -1,8 +1,6 @@
 package bigqueryfront
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -134,19 +132,29 @@ func (f front) importTFLite(r *http.Request, d modelDDL) (*tfliteImport, []byte,
 	if code != 0 {
 		return nil, nil, code, msg
 	}
-	m, err := tflitemodel.Load(data)
-	if err != nil {
-		code, msg := tfliteRefusal(o.uri(), err)
+	imp, code, msg := tflitePorts(o.uri(), data, "TensorFlow Lite")
+	if code != 0 {
 		return nil, nil, code, msg
 	}
-	sum := sha256.Sum256(data)
-	imp := &tfliteImport{URI: o.uri(), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
+	return imp, data, 0, ""
+}
+
+// tflitePorts loads a TensorFlow Lite flatbuffer and maps its ports to
+// columns; kind names the model in a refusal ("TensorFlow Lite", or
+// "TensorFlow" for a converted SavedModel).
+func tflitePorts(uri string, data []byte, kind string) (*tfliteImport, int, string) {
+	m, err := tflitemodel.Load(data)
+	if err != nil {
+		code, msg := tfliteRefusal(uri, err)
+		return nil, code, strings.Replace(msg, "TensorFlow Lite model", kind+" model", 1)
+	}
+	imp := &tfliteImport{URI: uri, SHA256: tfliteSum(data), Size: int64(len(data))}
 	for k, ports := range [][]tflitemodel.Port{m.Inputs, m.Outputs} {
 		what := []string{"input", "output"}[k]
 		for _, p := range ports {
 			c, code, msg := tfliteColumnOf(p, what)
 			if code != 0 {
-				return nil, nil, code, msg
+				return nil, code, strings.Replace(msg, "TensorFlow Lite model", kind+" model", 1)
 			}
 			if k == 0 {
 				imp.Inputs = append(imp.Inputs, c)
@@ -156,9 +164,9 @@ func (f front) importTFLite(r *http.Request, d modelDDL) (*tfliteImport, []byte,
 		}
 	}
 	if len(imp.Inputs) == 0 || len(imp.Outputs) == 0 {
-		return nil, nil, 400, "Failed to load the TensorFlow Lite model " + o.uri() + ": it has no inputs or no outputs"
+		return nil, 400, "Failed to load the " + kind + " model " + uri + ": it has no inputs or no outputs"
 	}
-	return imp, data, 0, ""
+	return imp, 0, ""
 }
 
 // tfliteResource fills a model resource's columns and import run.
@@ -321,14 +329,22 @@ func tfliteLiteral(c tflitePortCol, t tflitemodel.Tensor) string {
 // Lite model.
 func (f front) tfliteSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	imp := md.TFLite
-	if c.fn != "PREDICT" {
+	switch {
+	case c.fn == "PREDICT":
+	case md.Type == "TENSORFLOW" && tensorflowUnsupportedFns[c.fn]:
+		// modeltensorflow.go, #1775: the functions the create-tensorflow
+		// page names.
+		return "", 400, "ML." + c.fn + " is not supported for model type TENSORFLOW"
+	case md.Type == "TENSORFLOW":
+		return "", 501, "Not implemented here: ML." + c.fn + " of an imported TensorFlow model; CloudBurrow runs ML.PREDICT of it. Nothing was run."
+	default:
 		return "", 400, "ML." + c.fn + " is not supported for model type TENSORFLOW_LITE: you can only use TensorFlow Lite models with the ML.PREDICT function"
 	}
 	if c.input == "" {
 		return "", 400, "ML.PREDICT requires an input: a query in parentheses or TABLE name"
 	}
 	if len(c.struc) > 0 {
-		return "", 400, "ML.PREDICT of an imported TensorFlow Lite model takes no STRUCT of options"
+		return "", 400, "ML.PREDICT of an imported " + map[bool]string{true: "TensorFlow", false: "TensorFlow Lite"}[md.Type == "TENSORFLOW"] + " model takes no STRUCT of options"
 	}
 	data, err := f.models.blob(imp.SHA256)
 	if err != nil {

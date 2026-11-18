@@ -48,6 +48,10 @@ type LifecycleComponent struct {
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
+	// tfConverter is the TensorFlow SavedModel converter's in-cluster
+	// address (host:port), which BigQuery's front converts imported
+	// TENSORFLOW models on (#1775), or "".
+	tfConverter string
 	// vertexAI is the local Vertex AI endpoint's in-cluster address
 	// (host:port), given to the BigQuery front for remote models (#1760).
 	vertexAI string
@@ -100,6 +104,10 @@ func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager
 // SetONNXRunner records the in-cluster address of the onnx build's ONNX
 // runner, for BigQuery's front (#1711).
 func (c *LifecycleComponent) SetONNXRunner(addr string) { c.onnxRunner = addr }
+
+// SetTFConverter records the in-cluster address of the TensorFlow
+// SavedModel converter, for BigQuery's front (#1775).
+func (c *LifecycleComponent) SetTFConverter(addr string) { c.tfConverter = addr }
 
 // SetVertexAI records the in-cluster address of the instance's local
 // Vertex AI endpoint, which BigQuery ML's remote models run on (#1760).
@@ -208,6 +216,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// runner, through cloudburrow-host (#1711).
 					if c.onnxRunner != "" {
 						b.Front.Args = append(b.Front.Args, "--onnx", "http://"+c.onnxRunner)
+					}
+					// Imported TensorFlow models convert on the host's
+					// converter (#1775).
+					if c.tfConverter != "" {
+						b.Front.Args = append(b.Front.Args, "--tfconvert", "http://"+c.tfConverter)
 					}
 					// Remote models run on the local Vertex AI (#1760).
 					if c.vertexAI != "" {

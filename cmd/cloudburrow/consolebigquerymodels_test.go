@@ -346,3 +346,39 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 		}
 	}
 }
+
+// TestBigQueryTensorFlowModelPage (#1775): an imported TensorFlow
+// SavedModel's page is an imported model's, its type TENSORFLOW, its
+// serving_default inputs and outputs listed and its SavedModel folder
+// named.
+func TestBigQueryTensorFlowModelPage(t *testing.T) {
+	const model = `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"tf"},"modelType":"TENSORFLOW",
+"creationTime":"1700000000000","lastModifiedTime":"1700000000000","location":"US","etag":"e",
+"featureColumns":[{"name":"k","type":{"typeKind":"INT64"}},{"name":"x","type":{"typeKind":"ARRAY","arrayElementType":{"typeKind":"FLOAT64"}}}],
+"labelColumns":[{"name":"probs","type":{"typeKind":"ARRAY","arrayElementType":{"typeKind":"FLOAT64"}}},{"name":"score","type":{"typeKind":"FLOAT64"}}],
+"trainingRuns":[{"trainingOptions":{"modelUri":"gs://b/tf/mlp/*"},"startTime":"2023-11-14T22:13:20Z"}]}`
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/datasets/d/models/tf") {
+			fmt.Fprint(w, model)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	d, err := p.Detail(context.Background(), "p", []string{"d", "models", "tf"})
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 {
+		t.Fatalf("the model's page: %v %+v", err, d)
+	}
+	var details []string
+	for _, g := range d.Sections[2].Groups {
+		for _, p := range g.Properties {
+			details = append(details, p.Label+"="+p.Value)
+		}
+	}
+	if d.Summary[1].Value != "TENSORFLOW" || d.Sections[0].Listing.Items[1].Fields["Type"] != "ARRAY<FLOAT64>" ||
+		d.Sections[1].Listing.Items[0].Name != "probs" || !strings.Contains(strings.Join(details, ";"), "Imported from=gs://b/tf/mlp/*") {
+		t.Errorf("page %+v", d)
+	}
+}

@@ -112,7 +112,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the model: " + bigqueryRefusal(err).Error(), Trail: trail}, nil
 	}
-	if md.Type == "ONNX" || md.Type == "XGBOOST" || md.Type == "TENSORFLOW_LITE" {
+	if md.Type == "ONNX" || md.Type == "XGBOOST" || md.Type == "TENSORFLOW_LITE" || md.Type == "TENSORFLOW" {
 		return p.onnxModelDetail(md, datasetID, modelID, trail), nil
 	}
 	if md.Type == "" {
@@ -260,7 +260,7 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	}, nil
 }
 
-// onnxModelDetail is an imported ONNX, XGBoost or TensorFlow Lite model's page (#1711, #1755): its inputs and
+// onnxModelDetail is an imported ONNX, XGBoost, TensorFlow Lite or TensorFlow model's page (#1711, #1755, #1775): its inputs and
 // outputs, which models.get reports as featureColumns and labelColumns,
 // and the Cloud Storage URI it was imported from. It has no training,
 // weights or evaluation: BigQuery imports the model as it is.

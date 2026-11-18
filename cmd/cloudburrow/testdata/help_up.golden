@@ -126,6 +126,8 @@ Flags:
     	Cloud Storage host port (0 = OS-assigned)
   -port-tasks int
     	Cloud Tasks host port (0 = OS-assigned)
+  -port-tfconvert int
+    	TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)
   -project string
     	default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)
   -ready-timeout duration
