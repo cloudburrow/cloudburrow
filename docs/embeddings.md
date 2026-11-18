@@ -409,5 +409,7 @@ docker run --rm -v "$PWD:/models" \
 > follows the page's image as text tokens, counted against the request's token limit like any
 > other text. A page with a text layer keeps PDFium's text. The models are tessdata_fast `eng`
 > and `osd`, embedded in the binary, so only the Latin script is read; an upside-down page is
-> turned back first. About 5 seconds a page. The compatibility test for it is written but has not
-> yet run, so it is not marked Verified.
+> turned back first. About 5 seconds a page. **Verified** 2026-11-17 with the official `aiplatform`
+> client (`TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient`: the scanned invoice gains 195
+> tokens of OCR text). The console's Embeddings page has a **PDFs' text (OCR)** box that sends
+> `document_ocr` with each PDF (`TestEmbeddingsPageReadsAScannedPDFWithOCR`).

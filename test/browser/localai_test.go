@@ -341,3 +341,75 @@ func TestEmbeddingsPageEmbedsAudioAndCloudStorage(t *testing.T) {
 		t.Errorf("the requests shown are %q; want an inlineData and a fileData EmbedContent request", request)
 	}
 }
+
+// TestEmbeddingsPageReadsAScannedPDFWithOCR (#1733) needs EmbeddingGemma 2
+// loaded (TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient in
+// test/compat loads it). The scanned invoice in internal/embedding/testdata,
+// a PDF with no text layer, is embedded twice from the Embeddings page:
+// once as it is, and once with the PDFs' text (OCR) box ticked, which sends
+// embed_content_config.document_ocr. The second row counts the OCR text's
+// tokens on top of the page's image tokens, and only its request carries
+// documentOcr.
+func TestEmbeddingsPageReadsAScannedPDFWithOCR(t *testing.T) {
+	needService(t, "ai-local")
+	needService(t, "ai-embed")
+	const model2 = "embeddinggemma-2-onnx-community"
+	_, body := consoleDo(t, http.MethodGet, "/api/ai/local-models", "")
+	var list struct {
+		Models []struct {
+			ID     string
+			Loaded bool
+		}
+	}
+	_ = json.Unmarshal([]byte(body), &list)
+	loaded := false
+	for _, m := range list.Models {
+		loaded = loaded || (m.ID == model2 && m.Loaded)
+	}
+	if !loaded {
+		t.Skipf("%s is not loaded; load it on the Local models page", model2)
+	}
+	scan, err := os.ReadFile("../../internal/embedding/testdata/scan.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := open(t)
+	embed := func(ocr bool) ([]string, string) {
+		p.navigate("/ai/embeddings")
+		p.waitFor(`document.querySelector("#emb-document-ocr") !== null`)
+		p.eval(fmt.Sprintf(`(() => {
+			const dt = new DataTransfer();
+			dt.items.add(new File([Uint8Array.from(atob(%q), (c) => c.charCodeAt(0))], "scan.pdf", { type: "application/pdf" }));
+			const input = document.querySelector("#emb-images");
+			input.files = dt.files;
+			input.dispatchEvent(new Event("change"));
+			document.querySelector("#emb-document-ocr").checked = %t;
+			return true;
+		})()`, base64.StdEncoding.EncodeToString(scan), ocr), new(bool))
+		p.clickText("button", "Embed")
+		p.waitFor(`document.querySelectorAll("#emb-results tbody tr").length === 1 || /\[error\]/.test(document.body.textContent)`)
+		var rows [][]string
+		p.eval(`[...document.querySelectorAll("#emb-results tbody tr")].map((tr) => [...tr.children].map((td) => td.textContent.trim()))`, &rows)
+		if len(rows) != 1 {
+			var text string
+			p.eval(`document.querySelector("main").textContent`, &text)
+			t.Fatalf("the Embeddings view shows %d results: %s", len(rows), text)
+		}
+		var request string
+		p.eval(`document.querySelector("#emb-request").textContent`, &request)
+		return rows[0], request
+	}
+	plain, plainReq := embed(false)
+	read, readReq := embed(true)
+	if plain[0] != "[pdf] scan.pdf" || plain[1] != "768" || read[0] != "[pdf] scan.pdf" || read[1] != "768" {
+		t.Fatalf("the rows read %v and %v; want [pdf] scan.pdf with 768 values", plain, read)
+	}
+	pt, err1 := strconv.Atoi(plain[2])
+	rt, err2 := strconv.Atoi(read[2])
+	if err1 != nil || err2 != nil || rt-pt < 100 {
+		t.Errorf("the scan has %s tokens, and %s with document_ocr; want the OCR text's tokens (about 190) added", plain[2], read[2])
+	}
+	if strings.Contains(plainReq, "documentOcr") || !strings.Contains(readReq, `"documentOcr": true`) {
+		t.Errorf("the requests shown are %q and %q; want documentOcr only on the second", plainReq, readReq)
+	}
+}

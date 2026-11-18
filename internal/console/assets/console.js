@@ -8461,6 +8461,10 @@ async function renderEmbeddings(view) {
   // on each video's request, off by default as on Google.
   const audioTrack = el("input", { id: "emb-audio-track", type: "checkbox",
     "aria-label": "Embed each video's audio track (audio_track_extraction)" });
+  // A PDF's text (#1733): embed_content_config.document_ocr on each PDF's
+  // request, off by default as on Google; a scanned page is read with OCR.
+  const documentOcr = el("input", { id: "emb-document-ocr", type: "checkbox",
+    "aria-label": "Embed each PDF's text, read with OCR from a scanned page (document_ocr)" });
   const gcs = el("textarea", { id: "emb-gcs", rows: 2, cols: 60, class: "mono",
     placeholder: "gs://bucket/object.wav, one per line", "aria-label": "Cloud Storage objects to embed (file_data)" });
   const toMultimodal = () => {
@@ -8529,10 +8533,12 @@ async function renderEmbeddings(view) {
         }
         for (const file of files) {
           const isVideo = (file.type || mediaTypeOf(file.name) || "").startsWith("video/");
+          const isPDF = (file.type || mediaTypeOf(file.name)) === "application/pdf";
           const data = await post("embedContent", {
             content: { role: "user", parts: [{ inlineData: { mimeType: file.type || mediaTypeOf(file.name), data: await readBase64(file) } }] },
             embedContentConfig: { outputDimensionality: Number(dim.value),
-              ...(isVideo && audioTrack.checked ? { audioTrackExtraction: true } : {}) },
+              ...(isVideo && audioTrack.checked ? { audioTrackExtraction: true } : {}),
+              ...(isPDF && documentOcr.checked ? { documentOcr: true } : {}) },
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
           const type = file.type || mediaTypeOf(file.name) || "";
@@ -8548,9 +8554,12 @@ async function renderEmbeddings(view) {
           }]),
         ];
         for (const [label, part] of media) {
+          const p = await part();
+          const isPDF = p.fileData?.mimeType === "application/pdf";
           const data = await post("embedContent", {
-            content: { role: "user", parts: [await part()] },
-            embedContentConfig: { outputDimensionality: Number(dim.value) },
+            content: { role: "user", parts: [p] },
+            embedContentConfig: { outputDimensionality: Number(dim.value),
+              ...(isPDF && documentOcr.checked ? { documentOcr: true } : {}) },
           });
           got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "", data.truncated === true]);
           lines.push(label);
@@ -8625,7 +8634,8 @@ async function renderEmbeddings(view) {
     el("div", { class: "card" }, texts,
       ...(status.imageModel ? [el("div", {}, el("label", { for: "emb-images", text: "Images " }), images,
         el("label", { for: "emb-audio", text: " Audio " }), audio,
-        el("label", { for: "emb-audio-track", text: " Videos' audio track " }), audioTrack),
+        el("label", { for: "emb-audio-track", text: " Videos' audio track " }), audioTrack,
+        el("label", { for: "emb-document-ocr", text: " PDFs' text (OCR) " }), documentOcr),
         el("div", {}, el("label", { for: "emb-gcs", text: "Cloud Storage objects " }), gcs),
         el("p", { class: "unavailable", id: "emb-image-note", text: status.imageModelNote })] : []),
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
