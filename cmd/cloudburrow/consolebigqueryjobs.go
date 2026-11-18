@@ -404,6 +404,9 @@ func (p bigqueryProvider) loadJob(ctx context.Context, project, datasetID, table
 	if loader.TimePartitioning, loader.Clustering, err = loadTableOptions(values); err != nil {
 		return nil, err
 	}
+	if loader.ColumnNameCharacterMap, err = loadCharacterMap(values); err != nil { // #1547
+		return nil, err
+	}
 	job, err := loader.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)
@@ -1097,6 +1100,7 @@ func configurationGroups(c *bqv2.JobConfiguration) []console.PropertyGroup {
 		if l.Autodetect {
 			props = add(props, "Auto-detect the schema", "Yes")
 		}
+		props = add(props, "Column name character map", l.ColumnNameCharacterMap) // #1547
 		if l.Schema != nil && len(l.Schema.Fields) > 0 {
 			names := make([]string, len(l.Schema.Fields))
 			for i, f := range l.Schema.Fields {
