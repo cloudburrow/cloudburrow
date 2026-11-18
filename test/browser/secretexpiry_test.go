@@ -51,7 +51,7 @@ func TestSecretExpiryThroughTheForms(t *testing.T) {
 		t.Errorf("Edit secret is prefilled with expire time %q, want %q", prefilled, got["expireTime"])
 	}
 	setField(p, ".modal", "f-expireTime", "")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if got := editDefaults(t, "secrets", project, name); got["Expire time"] != "Never" || got["expireTime"] != "" {
 		t.Errorf("after clearing in Edit secret the secret reads expire time %q, form %q", got["Expire time"], got["expireTime"])

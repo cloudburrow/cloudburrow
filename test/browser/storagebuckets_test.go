@@ -105,7 +105,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	// The API's refusal, on the form.
 	openEdit()
 	setValue(".modal #f-softDeleteSeconds", "5")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -118,7 +118,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	setValue(".modal #f-labels", "team=blue")
 	setValue(".modal #f-retentionPeriod", "60")
 	setValue(".modal #f-lifecycle", `[{"action":{"type":"Delete"},"condition":{"age":30}}]`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if n := patches(); n != 2 {
 		t.Errorf("the refused and the saved edit sent %d PATCHes, want 2", n)
@@ -228,7 +228,7 @@ func TestStorageManagedFoldersThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Create managed folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(listed)
 	if n := actionPosts(); n != 1 {

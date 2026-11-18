@@ -3905,6 +3905,13 @@ function listingSummary(data) {
 // a form with typed input in it should survive one of them.
 
 function openModal({ labelledBy, canClose = () => true }) {
+  // A dialog still fading out goes at once when another opens. Left for its
+  // exit, it holds the same IDs as the new one, so the new dialog's
+  // aria-labelledby would name it by the old title, and a script looking for
+  // the new dialog's fields or buttons would find the old, inert ones, which
+  // vanish under it: back-to-back confirmations, such as the BigQuery
+  // editor's Run statement, open within that exit.
+  for (const old of document.querySelectorAll(".modal.is-closing")) old.remove();
   const dialog = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
                              "aria-labelledby": labelledBy });
   const opener = document.activeElement;
@@ -3930,6 +3937,7 @@ function openModal({ labelledBy, canClose = () => true }) {
     // a dialog that is on its way out must not still be clickable, and the
     // page behind it must come back immediately.
     dialog.classList.remove("is-open");
+    dialog.classList.add("is-closing");
     dialog.inert = true;
     setTimeout(() => dialog.remove(), OVERLAY_EXIT_MS);
     for (const n of inerted) n.inert = false;

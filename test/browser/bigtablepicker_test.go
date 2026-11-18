@@ -83,7 +83,7 @@ func TestBigtableInstancePickerThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-table") !== null`)
 	p.setField(".modal #f-table", table)
 	p.setField(".modal #f-families", "cf")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if tables, err := admin.Tables(ctx); err != nil || strings.Join(tables, ",") != table {
 		t.Fatalf("after Create table in %s, its tables are %v, %v", id, tables, err)

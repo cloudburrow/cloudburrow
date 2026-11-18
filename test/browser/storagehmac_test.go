@@ -77,7 +77,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.clickText("#view button", "Create key")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal.is-open #one-time-value") !== null`)
 	var shown struct {
 		Secret, Note, Title string

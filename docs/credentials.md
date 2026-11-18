@@ -401,6 +401,7 @@ with application default credentials it would fetch a token from `oauth2.googlea
 google-auth-library's `PassThroughClient`, which sends none:
 
 ```js
+import { Storage } from '@google-cloud/storage';
 import { PassThroughClient } from 'google-auth-library';
 
 const apiEndpoint = process.env.STORAGE_EMULATOR_HOST;

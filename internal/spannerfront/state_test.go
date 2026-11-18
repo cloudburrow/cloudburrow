@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestStateRoundTripsThroughItsDirectory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.KeepState(ctx, dir, t.Logf); err != nil {
+		if err := s.KeepState(ctx, dir, quietLogf(t)); err != nil {
 			t.Fatal(err)
 		}
 		return s
@@ -99,5 +100,20 @@ func TestStateRoundTripsThroughItsDirectory(t *testing.T) {
 	}
 	if c := newFront(); len(c.backups) != 0 || len(c.schedules) != 0 || len(c.configs) != 0 {
 		t.Errorf("after the reset a new front holds %d backups, %d schedules, %d configs", len(c.backups), len(c.schedules), len(c.configs))
+	}
+}
+
+// quietLogf is t.Logf until the test's cleanups start: the state's saver
+// writes once more when its context ends, and may run after the test.
+func quietLogf(t *testing.T) func(string, ...any) {
+	var mu sync.Mutex
+	done := false
+	t.Cleanup(func() { mu.Lock(); done = true; mu.Unlock() })
+	return func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !done {
+			t.Logf(format, args...)
+		}
 	}
 }
