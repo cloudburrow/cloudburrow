@@ -11,7 +11,9 @@ import (
 // The DDL reference: data_policies, ARRAY<STRING>, "Applies a data policy
 // to a column", each "{'name':'myproject.region-us.data_policy_name1'}",
 // and "The ALTER TABLE ALTER COLUMN statement supports the = and +=
-// operators for this option"; NULL clears it ("Setting the VALUE to NULL
+// operators for this option"; NULL clears it. A STRUCT field's too, in
+// CREATE TABLE and ADD COLUMN: "column_schema also supports options on
+// top-level columns and STRUCT fields" (re-read 2026-11-17) ("Setting the VALUE to NULL
 // clears the column's value for that option"). The table resource keeps
 // them as the field's dataPolicies, each {"name": "projects/P/locations/
 // L/dataPolicies/ID"} (TableFieldSchema, DataPolicyOption), which the
@@ -21,6 +23,10 @@ import (
 // A data policy is a resource of the BigQuery Data Policy API, which
 // CloudBurrow does not serve: a policy is not looked up, and no masking
 // or access rule of one is applied to the column's reads.
+
+// dataPolicyInvalidKey holds, on a STRUCT field fieldTypeOf read, the 400
+// for its data_policies, which roundingModeRefused answers (#1456).
+const dataPolicyInvalidKey = "\x00dataPolicyInvalid"
 
 // dataPolicyName reads one entry, {'name':'project.region-r.id'}.
 var dataPolicyName = regexp.MustCompile(`^\{\s*['"]name['"]\s*:\s*['"]([^'"]+)['"]\s*\}$`)
@@ -91,4 +97,19 @@ func setDataPolicies(f map[string]any, o alterOption) {
 		return
 	}
 	f["dataPolicies"] = out
+}
+
+// fieldHasDataPolicies reports whether f, a field fieldTypeOf read, or a
+// field of it at any depth, has data_policies (#1456).
+func fieldHasDataPolicies(f map[string]any) bool {
+	if _, ok := f[dataPolicyInvalidKey]; ok || f["dataPolicies"] != nil {
+		return true
+	}
+	subs, _ := f["fields"].([]any)
+	for _, sub := range subs {
+		if m, ok := sub.(map[string]any); ok && fieldHasDataPolicies(m) {
+			return true
+		}
+	}
+	return false
 }

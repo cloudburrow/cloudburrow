@@ -235,6 +235,7 @@ func (s *scriptRun) applyKey(cons *tableConstraints, a alterAction, has func(str
 	}
 	project := s.project()
 	if len(a.refPath) > 2 && a.refPath[0] != project {
+		// BigQuery serves the instance's project only (#1764).
 		s.notImpl = alterNotImplemented("ADD FOREIGN KEY referencing a table of another project")
 		return false, &scriptFlow{}
 	}

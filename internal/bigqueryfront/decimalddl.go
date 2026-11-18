@@ -70,6 +70,9 @@ const roundingModeInvalid = "Invalid value for rounding_mode: expected 'ROUND_HA
 // BIGNUMERIC type", https://cloud.google.com/bigquery/docs/schemas#rounding_mode),
 // or "".
 func roundingModeRefused(f map[string]any) string {
+	if msg, ok := f[dataPolicyInvalidKey].(string); ok { // a STRUCT field's data_policies (#1456)
+		return msg
+	}
 	if m, ok := f["roundingMode"].(string); ok {
 		if m != "ROUND_HALF_AWAY_FROM_ZERO" && m != "ROUND_HALF_EVEN" {
 			return roundingModeInvalid
