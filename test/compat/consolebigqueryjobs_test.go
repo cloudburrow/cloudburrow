@@ -414,8 +414,11 @@ func TestConsoleBigQueryLoadExportAndJobHistory(t *testing.T) {
 
 	var other consoleListing
 	consoleJSON(t, addr, http.MethodGet, "/api/resources/bigquery-jobs?project=another-project", "", &other)
-	if !strings.Contains(other.Prompt, project) || len(other.Items) != 0 {
-		t.Errorf("another project's Job history = %+v, want the prompt naming %s", other, project)
+	// BigQuery serves the projects of Resource Manager (#1764), which has
+	// no another-project: its screen says so, as the datasets' screen does.
+	if !strings.Contains(other.Prompt, `"another-project"`) || !strings.Contains(other.Prompt, "Resource Manager") ||
+		other.Unavailable != "" || len(other.Items) != 0 {
+		t.Errorf("another project's Job history = %+v, want the prompt that it is not a project of Resource Manager", other)
 	}
 }
 

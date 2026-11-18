@@ -105,4 +105,16 @@ func TestBigQueryOtherProjectsAreRead(t *testing.T) {
 	if list, _ := p.List(ctx, ""); list.Prompt == "" || list.Unavailable != "" {
 		t.Errorf("no project selected: %+v", list)
 	}
+
+	// The Job history screen and a job's page say so too, not "listing
+	// jobs: project other-project is not found".
+	jobs := bigqueryJobsProvider{bq: p}
+	if list, err := jobs.List(ctx, "other-project"); err != nil || list.Unavailable != "" || len(list.Items) != 0 ||
+		!strings.Contains(list.Prompt, `"other-project"`) || !strings.Contains(list.Prompt, "Resource Manager") {
+		t.Errorf("Job history of a project BigQuery does not serve = %+v, %v; want the prompt", list, err)
+	}
+	if d, err := jobs.Detail(ctx, "other-project", []string{"j"}); err != nil || d.Unavailable != "" ||
+		!strings.Contains(d.Prompt, `"other-project"`) {
+		t.Errorf("a job's page in a project BigQuery does not serve = %+v, %v; want the prompt", d, err)
+	}
 }

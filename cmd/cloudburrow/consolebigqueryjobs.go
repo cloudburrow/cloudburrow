@@ -810,6 +810,10 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 			call = call.PageToken(token)
 		}
 		page, err := call.Do()
+		if projectNotFound(err, p.bq.project) {
+			base.Prompt = notServed(p.bq.project) // #1764, as the datasets' screen
+			return base, nil
+		}
 		if err != nil {
 			base.Unavailable = "listing jobs: " + bigqueryRefusal(err).Error()
 			return base, nil
@@ -916,6 +920,9 @@ func (p bigqueryJobsProvider) Detail(ctx context.Context, project string, path [
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	job, raw, err := p.getJob(ctx, path[0])
+	if err != nil && strings.Contains(err.Error(), "project "+p.bq.project+" is not found") {
+		return console.Detail{Prompt: notServed(p.bq.project)}, nil // #1764, as a dataset's page
+	}
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the job: " + err.Error()}, nil
 	}
