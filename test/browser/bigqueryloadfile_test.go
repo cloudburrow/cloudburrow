@@ -61,14 +61,14 @@ func TestBigQueryLoadFromAFileThroughTheForm(t *testing.T) {
 	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2 name")), "name"))
 	p.setField(".modal #f-skipLeadingRows", "1")
 
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal #e-file").hidden`)
 	if sent := p.sent(http.MethodPost, "/api/actions/bigquery/upload"); len(sent) != 0 {
 		t.Fatalf("the form with no file sent %v", sent)
 	}
 
 	p.run(chromedp.SetUploadFiles(chromedp.CSS(`.modal #f-file`), []string{file}))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	var link struct{ Text, Href string }
 	p.eval(`(() => { const a = document.querySelector("#action-result-table a");

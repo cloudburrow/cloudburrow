@@ -135,7 +135,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.clickText(".modal button", "Add field")
 	p.run(chromedp.SendKeys(chromedp.CSS(row(3, "name")), "ID"))
 
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .schema-field .form-field-error").hidden`)
 	var fieldError string
 	p.eval(`document.querySelector(".modal .schema-field .form-field-error").textContent`, &fieldError)
@@ -145,9 +145,9 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	if sent := p.sent(http.MethodPost, "/api/actions/bigquery"); len(sent) != 0 {
 		t.Fatalf("the refused schema was sent: %v", sent)
 	}
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[aria-label="Remove field 3"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[aria-label="Remove field 3"]`)))
 	p.waitFor(`document.querySelectorAll(".modal .schema-row").length === 2 && document.querySelector(".modal .schema-field .form-field-error").hidden`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	schema := readDataPage(t, "bigquery", project, ds, "events").rows("schema")
@@ -165,7 +165,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 	p.clickText("#view .page-actions button", "Insert rows")
 	p.waitFor(`document.querySelector(".modal #f-rows") !== null`)
 	p.setField(".modal #f-rows", `{"id": 1, "tag": ["a"]}`+"\n"+`{"tag": ["b"]}`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -177,7 +177,7 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 		t.Errorf("the refused insert wrote %v", preview)
 	}
 	p.setField(".modal #f-rows", `{"id": 1, "tag": ["a"]}`+"\n"+`{"id": 2, "tag": ["b", "c"]}`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if preview := readDataPage(t, "bigquery", project, ds, "events").rows("preview"); len(preview) != 2 {
 		t.Errorf("the table previews %v after two rows were inserted", preview)
@@ -225,7 +225,7 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 	p.waitFor(`document.querySelector(` + fmt.Sprintf("%q", field("Field 2.1 name")) + `) !== null`)
 
 	// A RECORD with no nested field named is refused on the form.
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .schema-field .form-field-error").hidden`)
 	var fieldError string
 	p.eval(`document.querySelector(".modal .schema-field .form-field-error").textContent`, &fieldError)
@@ -246,7 +246,7 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2.2.1 name")), "lat"))
 	p.setField(field("Field 2.2.1 type"), "FLOAT")
 	p.waitFor(`document.querySelector(".modal .schema-field .form-field-error").hidden`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	schema := readDataPage(t, "bigquery", project, ds, "people").rows("schema")
@@ -266,7 +266,7 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 	p.clickText("#view .page-actions button", "Insert rows")
 	p.waitFor(`document.querySelector(".modal #f-rows") !== null`)
 	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`+"\n"+`{"id": 2, "addr": {"geo": {"lat": 1}}}`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -278,7 +278,7 @@ func TestBigQueryRecordColumnsThroughTheSchemaEditor(t *testing.T) {
 		t.Errorf("the refused insert wrote %v", preview)
 	}
 	p.setField(".modal #f-rows", `{"id": 1, "addr": {"city": "Paris", "geo": {"lat": 48.85}}}`)
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	preview := readDataPage(t, "bigquery", project, ds, "people").rows("preview")
 	if got := preview["1"]["addr"]; got != `{"city":"Paris","geo":{"lat":"48.85"}}` {
@@ -306,7 +306,7 @@ func TestFirestoreStartASubcollectionOnADocumentPage(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-collection") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-collection`), "orders"))
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-documentId`), "o1"))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	p.run(chromedp.Click(chromedp.CSS(`#tab-collections`)))
@@ -358,7 +358,7 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-kind") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-kind`), "Part"))
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-key`), "p1"))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	// Listed by its Name/ID on the Children tab, headed by its key path in

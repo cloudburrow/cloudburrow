@@ -80,7 +80,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Create folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.waitFor(listed("reports/"))
 
@@ -88,7 +88,7 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	menu("reports/", "Rename folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-destination") !== null`)
 	setField(p, ".modal.is-open", "f-destination", "renamed/")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal #action-result") !== null`)
 	var answer string
 	p.eval(`document.querySelector(".modal #action-result").textContent`, &answer)

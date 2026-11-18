@@ -62,7 +62,7 @@ func TestBigQueryLoadExportAndJobHistoryThroughTheForms(t *testing.T) {
 	p.clickText(".modal button", "Add field")
 	p.run(chromedp.SendKeys(chromedp.CSS(field("Field 2 name")), "name"))
 	p.setField(".modal #f-skipLeadingRows", "1")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector(".modal .form-error").textContent`, &refusal)
@@ -75,7 +75,7 @@ func TestBigQueryLoadExportAndJobHistoryThroughTheForms(t *testing.T) {
 	}
 
 	p.setField(".modal #f-uris", "gs://"+bucket+"/people.csv")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	var link struct{ Text, Href string }
 	p.eval(`(() => { const a = document.querySelector("#action-result-table a");
@@ -100,7 +100,7 @@ func TestBigQueryLoadExportAndJobHistoryThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal #f-uri") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-uri`), "gs://"+bucket+"/out.csv"))
 	p.setField(".modal #f-fieldDelimiter", "|")
-	p.run(chromedp.Click(chromedp.CSS(`.modal button[type="submit"]`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector("#action-result-table a") !== null`)
 	var exportID string
 	p.eval(`document.querySelector("#action-result-table a").textContent`, &exportID)
