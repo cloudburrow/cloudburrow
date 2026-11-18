@@ -117,8 +117,10 @@ and a rough size, is in [gaps.md](gaps.md).
   API's `SignBlob` and `SignJwt`, on a service account the IAM API created (#1747, #1751), and
   BigQuery's per-project IAM of a caller with a minted token: jobs (with the creator rule),
   datasets, tables, routines, models, row access policies, table and routine policies, views
-  and authorized views, with folder and organization inheritance and conditions (#1767, #1774;
-  what is left is #1780). The instance's own account is not such an account and is not checked
+  and authorized views, with folder and organization inheritance and conditions, tag conditions
+  on datasets and tables, job creators kept across a restart of the front, custom roles in table
+  and routine policies, and stored procedures' bodies (#1767, #1774, #1780; `group:` and
+  `domain:` members still grant nothing, [gaps.md](gaps.md)). The instance's own account is not such an account and is not checked
   ([credentials.md](credentials.md)); a BigQuery request without a minted token is served as it.
   The fifth is BigQuery remote models' connection permissions (#1765): `CREATE MODEL … REMOTE
   WITH CONNECTION` and each query of a remote model need `bigquery.connections.use` on the

@@ -277,7 +277,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {
-			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}
+			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects}
 		}},
 		// Job history, BigQuery's second screen (#993).
 		{config.ServiceBigQuery, func(a string) console.Provider {

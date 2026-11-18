@@ -121,8 +121,8 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
   compatibility's sign-ins and per-command permissions (#1738), IAM Credentials' (and the IAM
   API's) token minting and signing on a service account the IAM API created (#1747), and
   BigQuery's per-project IAM of a caller with such a token: jobs, datasets, tables, routines,
-  models and their own policies, with folder and organization inheritance and conditions
-  (#1767, #1774). The fifth, BigQuery remote models' connection permissions (#1765), checks
+  models and their own policies, with folder and organization inheritance and conditions,
+  tag conditions included (#1767, #1774, #1780). The fifth, BigQuery remote models' connection permissions (#1765), checks
   `bigquery.connections.use` on the connection and its service account's Vertex AI User role.
   They prove this instance applies its own rule, not that your policy is right on Google.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter

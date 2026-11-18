@@ -4,8 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -60,12 +64,16 @@ import (
 // hierarchy), and a conditional binding counts where its condition
 // (internal/iamcond) holds for the checked resource now: resource.name,
 // resource.type and resource.service as BigQuery gives them, and
-// request.time; a tag condition grants nothing. A job's creator is known
-// for the jobs a minted caller ran since the front started. The tables a
+// request.time, and the resource's effective tags (tagsFor, #1780). A
+// job's creator is kept in the front's state directory (keepCreators,
+// #1780). Custom roles are every one with bigquery. permissions the host
+// gives. group: and domain: members grant nothing: there are no Cloud
+// Identity groups here (docs/gaps.md). The tables a
 // view reads need bigquery.tables.getData of the caller unless they
 // authorize the view or its dataset (checkView); a routine a query calls
-// by its three-part name needs bigquery.routines.get, and the tables its
-// SQL body reads are checked as a view's, an authorized routine's excepted
+// by its three- or two-part name needs bigquery.routines.get, and the
+// tables its SQL body reads are checked as a view's, an authorized
+// routine's excepted, a procedure's body for the routines it calls too
 // (checkRoutines).
 
 // BigQueryIAMPath is where the host pushes BigQueryIAM to the front.
@@ -81,7 +89,21 @@ type BigQueryIAM struct {
 	// Conditional are each account's conditional bindings by project,
 	// their own and inherited (#1774).
 	Conditional map[string]map[string][]BigQueryIAMCondition `json:"conditional,omitempty"`
+	// Tags are effective tags (#1780): a project's ("projects/P", its own
+	// and its folders' and organization's), and the tags bound to a
+	// dataset or a table itself (BigQueryTagPrefix+"projects/P/datasets/D"
+	// [+"/tables/T"]), which the front completes with their resourceTags.
+	Tags map[string][]iamcond.Tag `json:"tags,omitempty"`
+	// TagValues are every tag value by its namespaced name
+	// ("P/env/prod"), by which resourceTags name theirs.
+	TagValues map[string]iamcond.Tag `json:"tagValues,omitempty"`
 }
+
+// BigQueryTagPrefix is the service part of a BigQuery dataset's or
+// table's full resource name, which a Resource Manager tag binding names
+// ("//bigquery.googleapis.com/projects/P/datasets/D/tables/T",
+// https://docs.cloud.google.com/bigquery/docs/tags).
+const BigQueryTagPrefix = "//bigquery.googleapis.com/"
 
 // BigQueryIAMToken is a minted access token: its SHA-256 in hex, its
 // account and its expiry.
@@ -166,6 +188,72 @@ type iamState struct {
 	// by project and job ID (jobs.get, jobs.list and jobs.cancel let a
 	// job's creator read and cancel it).
 	creators map[string]string
+	// creatorsPath is the file the creators are kept in (#1780), "" for
+	// none; logf reports a failure to write it.
+	creatorsPath string
+	logf         func(string, ...any)
+}
+
+// jobCreatorsStateFile is the file a job's creator is kept in, in dir.
+func jobCreatorsStateFile(dir string) string { return filepath.Join(dir, "jobcreators.json") }
+
+// keepCreators reads the creators kept at path and keeps them there
+// (#1780): a job's creator outlives a restart of the front, as the job
+// does in the emulator ("user_email", the job's creator, is part of the
+// job, https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job).
+func (s *iamState) keepCreators(path string, logf func(string, ...any)) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	saved := map[string]string{}
+	b, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		logf("bigquery front: read %s: %v; starting without the job creators it kept", path, err)
+	case json.Unmarshal(b, &saved) != nil:
+		logf("bigquery front: %s is unreadable; starting without the job creators it kept", path)
+		saved = map[string]string{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.creators == nil {
+		s.creators = map[string]string{}
+	}
+	for k, v := range saved {
+		if _, ok := s.creators[k]; !ok {
+			s.creators[k] = v
+		}
+	}
+	s.creatorsPath, s.logf = path, logf
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		logf("bigquery front: %v", err)
+	}
+	s.saveCreatorsLocked()
+}
+
+func (s *iamState) saveCreatorsLocked() {
+	if s.creatorsPath == "" {
+		return
+	}
+	b, err := json.Marshal(s.creators)
+	if err == nil {
+		tmp := s.creatorsPath + ".tmp"
+		if err = os.WriteFile(tmp, b, 0o600); err == nil {
+			err = os.Rename(tmp, s.creatorsPath)
+		}
+	}
+	if err != nil && s.logf != nil {
+		s.logf("bigquery front: keep the job creators: %v", err)
+	}
+}
+
+// resetCreators forgets every creator (the emulator restarted, empty).
+func (s *iamState) resetCreators() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.creators = nil
+	s.saveCreatorsLocked()
 }
 
 func (s *iamState) serve(w http.ResponseWriter, r *http.Request) {
@@ -245,9 +333,10 @@ type bqResource struct {
 // resource.service bigquery.googleapis.com; a project's are Resource
 // Manager's (https://docs.cloud.google.com/bigquery/docs/conditions,
 // https://docs.cloud.google.com/iam/docs/conditions-resource-attributes).
-// Tags are not known here: a tag condition grants nothing.
-func (res bqResource) attrs(now time.Time) iamcond.Attributes {
-	a := iamcond.Attributes{RequestTime: now, ResourceService: "bigquery.googleapis.com"}
+// Its effective tags are tags when known (s.tagsFor), else a tag
+// condition grants nothing.
+func (res bqResource) attrs(now time.Time, tags []iamcond.Tag, known bool) iamcond.Attributes {
+	a := iamcond.Attributes{RequestTime: now, ResourceService: "bigquery.googleapis.com", Tags: tags, TagsKnown: known}
 	if res.dataset == "" {
 		a.ResourceName = "projects/" + res.project
 		a.ResourceType = "cloudresourcemanager.googleapis.com/Project"
@@ -267,29 +356,133 @@ func (res bqResource) attrs(now time.Time) iamcond.Attributes {
 // onProjectFor is whether email's roles on res's project (its own, its
 // folders' and its organization's, and the conditional ones whose
 // condition holds for res now) grant perm.
-func (s *iamState) onProjectFor(email string, res bqResource, perm string) bool {
+func (s *iamState) onProjectFor(r *http.Request, email string, res bqResource, perm string) bool {
 	now := s.clock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.iam == nil {
+		s.mu.Unlock()
 		return false
 	}
 	for _, role := range s.iam.Roles[email][res.project] {
 		if s.roleGrants(role, perm) {
+			s.mu.Unlock()
 			return true
 		}
 	}
+	var conds []BigQueryIAMCondition
 	for _, c := range s.iam.Conditional[email][res.project] {
-		if s.roleGrants(c.Role, perm) && iamcond.Eval(c.Expression, res.attrs(now)) {
+		if s.roleGrants(c.Role, perm) {
+			conds = append(conds, c)
+		}
+	}
+	s.mu.Unlock()
+	if len(conds) == 0 {
+		return false
+	}
+	var attrs *iamcond.Attributes
+	for _, c := range conds {
+		if attrs == nil {
+			a := res.attrs(now, nil, false)
+			if usesTags(c.Expression) {
+				a = s.tagAttrs(r, res, now)
+			}
+			attrs = &a
+		} else if !attrs.TagsKnown && usesTags(c.Expression) {
+			a := s.tagAttrs(r, res, now)
+			attrs = &a
+		}
+		if iamcond.Eval(c.Expression, *attrs) {
 			return true
 		}
 	}
 	return false
 }
 
+// usesTags is whether a condition reads the resource's tags.
+func usesTags(expr string) bool { return strings.Contains(expr, "Tag") }
+
+// tagsFor are res's effective tags (#1780) and whether they are known: the
+// tags bound to it, and its resourceTags, a nearer value of a key
+// replacing a farther one, up through a table's dataset to the project's
+// effective tags (its folders' and organization's), as Resource Manager's
+// tags are inherited down the hierarchy ("Tags can be attached directly to
+// a resource or inherited from parent resources",
+// https://docs.cloud.google.com/bigquery/docs/tags, read 2026-11-18). A
+// routine or a model carries its dataset's. With r nil only the bound
+// tags are read, not resourceTags.
+func (s *iamState) tagsFor(r *http.Request, res bqResource) []iamcond.Tag {
+	own := func(path, name string) []iamcond.Tag {
+		var meta struct {
+			ResourceTags map[string]string `json:"resourceTags"`
+		}
+		var out []iamcond.Tag
+		if r != nil && s.full != nil {
+			rec := newRecorder()
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, path, nil)
+			if err == nil {
+				s.full.ServeHTTP(rec, req)
+				if rec.status == http.StatusOK {
+					_ = json.Unmarshal(rec.body.Bytes(), &meta)
+				}
+			}
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.iam == nil {
+			return nil
+		}
+		out = append(out, s.iam.Tags[name]...)
+		keys := make([]string, 0, len(meta.ResourceTags))
+		for k := range meta.ResourceTags {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			v := meta.ResourceTags[k]
+			t, ok := s.iam.TagValues[k+"/"+v]
+			if !ok {
+				t = iamcond.Tag{NamespacedKey: k, ShortValue: v}
+			}
+			out = append(out, t)
+		}
+		return out
+	}
+	var chain [][]iamcond.Tag
+	if res.dataset != "" {
+		dsPath := "/bigquery/v2/projects/" + url.PathEscape(res.project) + "/datasets/" + url.PathEscape(res.dataset)
+		dsName := BigQueryTagPrefix + "projects/" + res.project + "/datasets/" + res.dataset
+		if res.kind == "tables" && res.id != "" {
+			chain = append(chain, own(dsPath+"/tables/"+url.PathEscape(res.id), dsName+"/tables/"+res.id))
+		}
+		chain = append(chain, own(dsPath, dsName))
+	}
+	s.mu.Lock()
+	if s.iam != nil {
+		chain = append(chain, s.iam.Tags["projects/"+res.project])
+	}
+	s.mu.Unlock()
+	seen := map[string]bool{}
+	var out []iamcond.Tag
+	for _, level := range chain {
+		for _, t := range level {
+			if seen[t.NamespacedKey] {
+				continue
+			}
+			seen[t.NamespacedKey] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// tagAttrs are res's attributes with its effective tags.
+func (s *iamState) tagAttrs(r *http.Request, res bqResource, now time.Time) iamcond.Attributes {
+	return res.attrs(now, s.tagsFor(r, res), true)
+}
+
 // onProject is whether email's roles on project grant perm.
 func (s *iamState) onProject(email, project, perm string) bool {
-	return s.onProjectFor(email, bqResource{project: project}, perm)
+	return s.onProjectFor(nil, email, bqResource{project: project}, perm)
 }
 
 // memberIs is whether a policy member names email.
@@ -306,7 +499,7 @@ func memberIs(member, email string) bool {
 // a routine, that resource's own IAM policy (tables.setIamPolicy,
 // routines.setIamPolicy), conditions evaluated for res.
 func (s *iamState) allowed(r *http.Request, next http.Handler, email string, res bqResource, perm string) bool {
-	if s.onProjectFor(email, res, perm) {
+	if s.onProjectFor(r, email, res, perm) {
 		return true
 	}
 	get := func(path string, v any) bool {
@@ -331,7 +524,14 @@ func (s *iamState) allowed(r *http.Request, next http.Handler, email string, res
 		} `json:"access"`
 	}
 	if get("", &ds) {
-		dsAttrs := bqResource{project: res.project, dataset: res.dataset}.attrs(now)
+		dsRes := bqResource{project: res.project, dataset: res.dataset}
+		dsAttrs := dsRes.attrs(now, nil, false)
+		for _, a := range ds.Access {
+			if a.Condition != nil && usesTags(a.Condition.Expression) {
+				dsAttrs = s.tagAttrs(r, dsRes, now)
+				break
+			}
+		}
 		s.mu.Lock()
 		for _, a := range ds.Access {
 			if !strings.EqualFold(a.UserByEmail, email) && (a.IAMMember == "" || !memberIs(a.IAMMember, email)) {
@@ -361,7 +561,13 @@ func (s *iamState) allowed(r *http.Request, next http.Handler, email string, res
 		return false
 	}
 	bindings := s.policies.bindings(iamKey(res.project, res.dataset, res.kind, res.id), made.CreationTime)
-	attrs := res.attrs(now)
+	attrs := res.attrs(now, nil, false)
+	for _, b := range bindings {
+		if b.Condition != nil && usesTags(b.Condition.Expression) {
+			attrs = s.tagAttrs(r, res, now)
+			break
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, b := range bindings {
@@ -396,7 +602,11 @@ func (s *iamState) recordCreator(project, job, email string) {
 	if s.creators == nil {
 		s.creators = map[string]string{}
 	}
+	if s.creators[jobKey(project, job)] == email {
+		return
+	}
 	s.creators[jobKey(project, job)] = email
+	s.saveCreatorsLocked()
 }
 
 // iamCheck answers r 403 when its caller (above) lacks a permission it
@@ -465,7 +675,7 @@ func (s *iamState) check(w http.ResponseWriter, r *http.Request, next http.Handl
 		}) {
 			return true
 		}
-		return s.checkRoutines(r, next, email, jobSQL(r), onTable, denyTable, denyIn)
+		return s.checkRoutines(r, next, email, jobSQL(r), project, 0, onTable, denyTable, denyIn)
 	case len(parts) == 1 && parts[0] == "jobs" && m == http.MethodGet:
 		return s.checkListJobs(r, email, project, denyProject)
 	case len(parts) >= 2 && (parts[0] == "jobs" || parts[0] == "queries"):
@@ -981,43 +1191,85 @@ func (s *iamState) checkReads(r *http.Request, kind string, owner tableRef, sql 
 	return false
 }
 
-// sqlRoutines are the persistent functions a query calls by a three-part
-// name: `p.d.f`(, p.d.f(, `p`.`d`.`f`(.
-var sqlRoutines = regexp.MustCompile("(`[^`]+`(?:\\.`[^`]+`)*|[A-Za-z_][\\w-]*\\.[A-Za-z_]\\w*\\.[A-Za-z_]\\w*)\\s*\\(")
+// sqlRoutines are the persistent functions and procedures a query calls:
+// by a three-part name (`p.d.f`(, p.d.f(, `p`.`d`.`f`() or a two-part one
+// (d.f(, the job's project's). A one-part name is not a persistent
+// routine's: the emulator answers "Function not found" for a dataset's
+// function called so, a default dataset or not, as Google requires a
+// persistent UDF's name to be qualified with its dataset ("you must
+// qualify the name with the dataset",
+// https://docs.cloud.google.com/bigquery/docs/user-defined-functions, read
+// 2026-11-18).
+var sqlRoutines = regexp.MustCompile("(`[^`]+`(?:\\.`[^`]+`)*|[A-Za-z_][\\w-]*(?:\\.[A-Za-z_]\\w*){1,2})\\s*\\(")
 
-// checkRoutines checks the routines sql calls (#1774): each needs
-// bigquery.routines.get on it, and the tables its body reads are checked
-// as a view's (checkReads), an authorized routine's excepted.
-func (s *iamState) checkRoutines(r *http.Request, next http.Handler, email, sql string, onTable func(tableRef, string) bool,
-	deny func(tableRef, string) bool, denyIn func(string, bqResource, string) bool) bool {
+// maxCallDepth is how many procedures deep checkRoutines reads.
+const maxCallDepth = 8
+
+// checkRoutines checks the routines sql calls (#1774, #1780): each needs
+// bigquery.routines.get on it ("bigquery.routines.get on the dataset" to
+// invoke a UDF, https://docs.cloud.google.com/bigquery/docs/user-defined-functions-python,
+// read 2026-11-18), and the tables a SQL function's body or a stored
+// procedure's body reads are checked as a view's (checkReads), an
+// authorized routine's excepted ("You can authorize table functions,
+// user-defined functions (UDFs), and stored procedures",
+// https://docs.cloud.google.com/bigquery/docs/authorized-routines, read
+// 2026-11-18). A procedure's body is checked for the routines it calls in
+// turn. A JavaScript or Python routine's body is code, not SQL: it reads
+// no table, and calling it needs bigquery.routines.get alone. A two-part
+// name is resolved in the project; one that names no routine there (a
+// built-in function's SAFE.f, NET.f, ...) is not a routine call.
+func (s *iamState) checkRoutines(r *http.Request, next http.Handler, email, sql, project string,
+	depth int, onTable func(tableRef, string) bool, deny func(tableRef, string) bool, denyIn func(string, bqResource, string) bool) bool {
+	if depth >= maxCallDepth {
+		return false
+	}
+	seen := map[bqResource]bool{}
 	for _, m := range sqlRoutines.FindAllStringSubmatch(sql, -1) {
-		path := strings.Split(strings.ReplaceAll(m[1], "`", ""), ".")
-		if len(path) != 3 {
+		raw := strings.ReplaceAll(m[1], "`", "")
+		path := strings.Split(raw, ".")
+		var res bqResource
+		switch len(path) {
+		case 3:
+			res = bqResource{project: path[0], dataset: path[1], kind: "routines", id: path[2]}
+		case 2:
+			res = bqResource{project: project, dataset: path[0], kind: "routines", id: path[1]}
+		default:
 			continue
 		}
-		res := bqResource{project: path[0], dataset: path[1], kind: "routines", id: path[2]}
-		if !s.allowed(r, next, email, res, "bigquery.routines.get") {
-			return denyIn("Routine", res, "bigquery.routines.get")
-		}
-		if s.full == nil {
+		if seen[res] || res.project == "" || res.dataset == "" || res.id == "" {
 			continue
 		}
-		rec := newRecorder()
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "/bigquery/v2/projects/"+url.PathEscape(res.project)+
-			"/datasets/"+url.PathEscape(res.dataset)+"/routines/"+url.PathEscape(res.id), nil)
-		if err != nil {
-			continue
-		}
-		s.full.ServeHTTP(rec, req)
+		seen[res] = true
 		var def struct {
 			DefinitionBody string `json:"definitionBody"`
 			Language       string `json:"language"`
+			RoutineType    string `json:"routineType"`
 		}
-		if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &def) != nil || (def.Language != "" && def.Language != "SQL") {
+		found := false
+		if s.full != nil {
+			rec := newRecorder()
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "/bigquery/v2/projects/"+url.PathEscape(res.project)+
+				"/datasets/"+url.PathEscape(res.dataset)+"/routines/"+url.PathEscape(res.id), nil)
+			if err == nil {
+				s.full.ServeHTTP(rec, req)
+				found = rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), &def) == nil
+			}
+		}
+		if !found && len(path) != 3 {
+			continue
+		}
+		if !s.allowed(r, next, email, res, "bigquery.routines.get") {
+			return denyIn("Routine", res, "bigquery.routines.get")
+		}
+		if !found || (def.Language != "" && def.Language != "SQL") {
 			continue
 		}
 		owner := tableRef{ProjectID: res.project, DatasetID: res.dataset, TableID: res.id}
 		if s.checkReads(r, "routines", owner, def.DefinitionBody, 0, onTable, deny) {
+			return true
+		}
+		if def.RoutineType == "PROCEDURE" && s.checkRoutines(r, next, email, def.DefinitionBody, res.project, depth+1,
+			onTable, deny, denyIn) {
 			return true
 		}
 	}

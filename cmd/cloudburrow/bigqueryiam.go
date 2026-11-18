@@ -10,11 +10,15 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	adminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
+
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
+	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -28,7 +32,9 @@ import (
 // bigqueryfront.BigQueryRoles names, and of custom roles with bigquery.
 // permissions), with those inherited from the project's folders and
 // organization, and conditional bindings with their expressions (#1774),
-// which the front evaluates. The tokens of
+// which the front evaluates; every custom role with bigquery. permissions,
+// and the effective tags of each project and the tags bound to BigQuery's
+// datasets and tables (#1780), which those conditions read. The tokens of
 // the instance's own account, which the ADC fixture holds, are left out:
 // its requests keep their behaviour, every permission. It pushes them
 // every bigqueryIAMEvery when they changed, every bigqueryIAMRefresh
@@ -54,7 +60,8 @@ const (
 // payload is what the front is given now.
 func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 	m := bigqueryfront.BigQueryIAM{Tokens: []bigqueryfront.BigQueryIAMToken{}, Roles: map[string]map[string][]string{},
-		CustomRoles: map[string][]string{}, Conditional: map[string]map[string][]bigqueryfront.BigQueryIAMCondition{}}
+		CustomRoles: map[string][]string{}, Conditional: map[string]map[string][]bigqueryfront.BigQueryIAMCondition{},
+		Tags: map[string][]iamcond.Tag{}, TagValues: map[string]iamcond.Tag{}}
 	emails := map[string]bool{}
 	for _, t := range b.creds.LiveTokens(now) {
 		// The instance's own account (the ADC fixture's) is served as
@@ -95,6 +102,7 @@ func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 		policies[resource] = pol
 		return pol
 	}
+	orgs := map[string]bool{}
 	for _, p := range projects {
 		resources := []string{"projects/" + p.ProjectID}
 		if anc, err := reg.Ancestry(p.ProjectID); err == nil {
@@ -104,8 +112,14 @@ func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 					resources = append(resources, "folders/"+a.ID)
 				case "organization":
 					resources = append(resources, "organizations/"+a.ID)
+					orgs["organizations/"+a.ID] = true
 				}
 			}
+		}
+		// A project's effective tags (its own and its ancestors'), which
+		// its datasets and tables inherit (#1780).
+		if tags, err := reg.EffectiveTags(resourcemanager.CRMPrefix + "projects/" + p.ProjectID); err == nil && len(tags) > 0 {
+			m.Tags["projects/"+p.ProjectID] = condTags(tags)
 		}
 		for _, res := range resources {
 			pol := policyOf(res)
@@ -115,7 +129,103 @@ func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 			b.addBindings(&m, reg, emails, p.ProjectID, pol.Bindings)
 		}
 	}
+	b.addTags(&m, reg, projects)
+	// Every custom role with BigQuery permissions, of each project and of
+	// the organization, so that a role a table's or a routine's own policy
+	// names grants too (#1780), not only those the hierarchy's policies
+	// name.
+	parents := make([]string, 0, len(projects)+len(orgs))
+	for _, p := range projects {
+		parents = append(parents, "projects/"+p.ProjectID)
+	}
+	for o := range orgs {
+		parents = append(parents, o)
+	}
+	sort.Strings(parents)
+	for _, parent := range parents {
+		token := ""
+		for {
+			resp, err := reg.ListRoles(&adminpb.ListRolesRequest{Parent: parent, PageSize: 1000, PageToken: token})
+			if err != nil {
+				break
+			}
+			for _, role := range resp.GetRoles() {
+				if _, done := m.CustomRoles[role.GetName()]; done {
+					continue
+				}
+				if bq := bigqueryPerms(reg, role.GetName()); len(bq) > 0 {
+					m.CustomRoles[role.GetName()] = bq
+				}
+			}
+			if token = resp.GetNextPageToken(); token == "" {
+				break
+			}
+		}
+	}
 	return m
+}
+
+// bigqueryPerms are the bigquery. permissions custom role grants now.
+func bigqueryPerms(reg *resourcemanager.Registry, role string) []string {
+	perms, _ := reg.RolePermissions(role)
+	var bq []string
+	for _, p := range perms {
+		if strings.HasPrefix(p, "bigquery.") {
+			bq = append(bq, p)
+		}
+	}
+	return bq
+}
+
+// addTags gives the front the tags bound to BigQuery's datasets and tables
+// (Resource Manager tag bindings on //bigquery.googleapis.com/projects/P/
+// datasets/D[/tables/T], each resource's own, keyed by that name with the
+// project named by its ID), and every tag value by its namespaced name, by
+// which a dataset's or table's resourceTags name theirs (#1780).
+func (b *bigqueryIAM) addTags(m *bigqueryfront.BigQueryIAM, reg *resourcemanager.Registry, projects []resourcemanager.Project) {
+	keys, err := reg.AllTagKeys()
+	if err != nil {
+		return
+	}
+	byValue := map[string]iamcond.Tag{}
+	for _, k := range keys {
+		values, err := reg.TagValues(k.GetName())
+		if err != nil {
+			continue
+		}
+		for _, v := range values {
+			t := iamcond.Tag{NamespacedKey: k.GetNamespacedName(), ShortValue: v.GetShortName(), KeyID: k.GetName(), ValueID: v.GetName()}
+			byValue[v.GetName()] = t
+			m.TagValues[v.GetNamespacedName()] = t
+		}
+	}
+	bindings, err := reg.TagBindingsUnder(bigqueryfront.BigQueryTagPrefix)
+	if err != nil {
+		return
+	}
+	ids := map[string]string{}
+	for _, p := range projects {
+		ids[p.ProjectID] = p.ProjectID
+		if p.Number != 0 {
+			ids[strconv.FormatInt(p.Number, 10)] = p.ProjectID
+		}
+	}
+	for _, bd := range bindings {
+		t, ok := byValue[bd.GetTagValue()]
+		if !ok {
+			continue
+		}
+		rest, ok := strings.CutPrefix(bd.GetParent(), bigqueryfront.BigQueryTagPrefix+"projects/")
+		if !ok {
+			continue
+		}
+		id, tail, _ := strings.Cut(rest, "/")
+		if pid, ok := ids[id]; ok {
+			id = pid
+		}
+		name := bigqueryfront.BigQueryTagPrefix + "projects/" + id + "/" + tail
+		m.Tags[name] = append(m.Tags[name], t)
+	}
 }
 
 // addBindings adds bindings' roles, on project, to m for the accounts
@@ -124,16 +234,10 @@ func (b *bigqueryIAM) addBindings(m *bigqueryfront.BigQueryIAM, reg *resourceman
 	project string, bindings []iampolicy.Binding) {
 	for _, bd := range bindings {
 		if _, ok := bigqueryfront.BigQueryRoles[bd.Role]; !ok {
-			perms, custom := reg.RolePermissions(bd.Role)
-			if !custom {
+			if !resourcemanager.IsCustomRole(bd.Role) {
 				continue
 			}
-			var bq []string
-			for _, p := range perms {
-				if strings.HasPrefix(p, "bigquery.") {
-					bq = append(bq, p)
-				}
-			}
+			bq := bigqueryPerms(reg, bd.Role)
 			if len(bq) == 0 {
 				continue
 			}

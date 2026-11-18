@@ -496,9 +496,20 @@ and never read, now grants on that resource to a minted token's caller: the firs
 BigQuery's creator rule: the front records which minted caller ran each job, and that caller reads,
 lists and cancels it with `bigquery.jobs.create`; anyone else needs `bigquery.jobs.get`,
 `listAll` or `update`. The tables a view or a SQL routine reads are checked for the caller unless
-the source dataset authorizes the view, the routine or the view's dataset. Still not read (#1780):
-tags in conditions, `group:` and `domain:` members, and the creators of jobs run before the front
-last started.
+the source dataset authorizes the view, the routine or the view's dataset.
+
+Amended 2026-11-18 by #1780: a condition on resource tags (`resource.matchTag`, `hasTagKey`, and
+their ID forms) is evaluated over a dataset's or a table's effective tags: Resource Manager tag
+bindings on `//bigquery.googleapis.com/projects/P/datasets/D[/tables/T]` and the resource's
+`resourceTags`, a nearer value of a key replacing a farther one, down from the project's effective
+tags (its folders' and organization's). The front keeps each job's creator in its state directory,
+so a caller's jobs stay its own across a restart of the front (the emulator's reset forgets them,
+as it does the jobs). The host gives the front every custom role with `bigquery.` permissions of
+each project and the organization, so a custom role named only in a table's or a routine's own
+policy grants. A routine called by a two-part name is checked as one called by three parts, and a
+stored procedure's body is checked for the tables it reads and the routines it calls. Still not
+read: `group:` and `domain:` members (and a dataset's `groupByEmail` and `domain` entries), as the
+instance has no Cloud Identity groups or domains to expand them with ([gaps.md](../gaps.md)).
 
 ### Firestore with MongoDB compatibility and IAM Credentials (#1738, #1747, #1751)
 
