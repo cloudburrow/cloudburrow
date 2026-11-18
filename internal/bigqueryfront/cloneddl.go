@@ -359,7 +359,16 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	case s.snapshot == nil:
 		extra = map[string]any{"cloneDefinition": map[string]any{"baseTableReference": base, "cloneTime": start}}
 	}
-	if msg := in.makeTableWith(r, dest, s.schema, partitionExtra([]copyTable{s}, extra)); msg != "" {
+	// Partitioned and clustered as the base table, as a copy job's new
+	// destination is (#1759, copylayout.go), in the destination's project
+	// (#1767).
+	made := in.newTableLayout(r, s.layout, st.kind == "snapshot", dest.DatasetID)
+	for k, v := range partitionExtra([]copyTable{s}, extra) {
+		if _, ok := made[k]; !ok || k != "timePartitioning" {
+			made[k] = v
+		}
+	}
+	if msg := in.makeCopyTable(r, dest, s.schema, made); msg != "" {
 		failed(http.StatusBadRequest, "invalidQuery", msg)
 		return
 	}
