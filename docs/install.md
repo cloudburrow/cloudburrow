@@ -1,6 +1,6 @@
 # Installing CloudBurrow
 
-> **Current release: [v0.1.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0).**
+> **Current release: [v0.2.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.2.0).**
 > Install it with Homebrew or the install script below, or [build from source](#build-and-run).
 
 ## Install a release
@@ -60,14 +60,14 @@ archive whose checksum does not match, or that has no entry in `checksums.txt`.*
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
 # a specific release, elsewhere:
-curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version v0.1.0 --prefix /usr/local
+curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version v0.2.0 --prefix /usr/local
 ```
 
 **Verify a download by hand:**
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing        # shasum -a 256 -c on macOS
-gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+gh attestation verify cloudburrow_v0.2.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
 On macOS, see [Gatekeeper](#gatekeeper) for whether a release's binaries are signed and
@@ -75,13 +75,15 @@ notarized, and what to do with one that is not.
 
 ## Gatekeeper
 
-**What is signed.** The release workflow can sign both macOS binaries (darwin arm64 and amd64)
+**What is signed.** The release workflow signs both macOS binaries (darwin arm64 and amd64)
 with a Developer ID Application certificate, with the hardened runtime and a secure timestamp,
-and have Apple notarize them. It does so **only once the maintainer has added the Apple signing
-secrets to the repository** (listed below). Until then, and for any release built without them,
-the macOS binaries are **unsigned and not notarized**; each release's notes say which it is. Only
-the archives published by this repository's release workflow are ever signed: a binary you build
-from source, or one from a fork's release, is not.
+and has Apple notarize them, when the Apple signing secrets (listed below) are set. **From
+v0.2.0 on, the macOS binaries of this repository's releases are signed and notarized**, as
+`Developer ID Application: Wael El Ghazzawi (J4TZ73L264)`. v0.1.0's were not, and a release built
+without the secrets is not either; each release's notes say which it is. Only the archives
+published by this repository's release workflow are ever signed: a binary you build from source,
+or one from a fork's release, is not. The Linux binaries are not signed by Apple's tools; verify
+them with the checksum and the attestation.
 
 Signing happens before `checksums.txt`, the Homebrew formula and the build attestations are
 computed, so all three describe the signed archives, and `gh attestation verify` covers them as
@@ -90,17 +92,30 @@ it covers every other archive.
 **How to check a release binary**, after extracting the archive:
 
 ```sh
-codesign -dv --verbose=2 cloudburrow   # Authority=Developer ID Application: ..., and a Timestamp= line
-spctl -a -t exec -vv cloudburrow       # accepted, source=Notarized Developer ID
-gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+codesign -dv --verbose=2 cloudburrow   # Authority=Developer ID Application: ... (J4TZ73L264), flags=0x10000(runtime), a Timestamp= line
+spctl -a -vv -t open --context context:primary-signature cloudburrow   # accepted, source=Notarized Developer ID
+gh attestation verify cloudburrow_v0.2.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
 A command-line binary cannot carry a stapled notarization ticket (stapling works only on app
 bundles, disk images and installer packages), so the release staples nothing. The first time a
-downloaded binary runs, Gatekeeper looks its ticket up online,, and `spctl` does the same, so
+downloaded binary runs, Gatekeeper looks its ticket up online, and `spctl` does the same, so
 the first run needs a network connection.
 
-**An unsigned binary** (a release from before signing was configured, a fork's release, or your
+`spctl -a -t exec`, the form for apps, does not apply to a bare command-line binary: on the
+signed v0.2.0 binary it answers `rejected (the code is valid but does not seem to be an app)`,
+which is not a signing failure. Use the `-t open --context context:primary-signature` form above.
+Checked on 2026-11-18 on macOS (darwin/arm64) against the `cloudburrow_v0.2.0_darwin_arm64`
+archive downloaded from the release: `codesign` printed the Developer ID authority, team
+J4TZ73L264, the `runtime` flag and a timestamp, and `spctl` printed `accepted` and
+`source=Notarized Developer ID`.
+
+**Gatekeeper on a signed release.** Gatekeeper accepts a notarized binary (the `spctl` verdict
+above), so a signed release needs neither `xattr` nor the Privacy & Security override. If macOS
+blocks one anyway, do not override it: check it with the commands above, and treat a binary that
+fails them as tampered with.
+
+**An unsigned binary** (v0.1.0, a release built without the secrets, a fork's release, or your
 own `make build`) is not blocked when you build it yourself: a binary compiled on your Mac carries
 no quarantine attribute. A downloaded unsigned archive does, and macOS refuses to run it. Verify
 it first, with the checksum and `gh attestation verify` above, and only then remove the
@@ -411,9 +426,10 @@ export BIGTABLE_EMULATOR_HOST=127.0.0.1:...
 export SPANNER_EMULATOR_HOST=127.0.0.1:...
 ```
 
-**Firestore, Bigtable and Spanner are in-memory**: nothing they hold survives a restart, whatever
-`--mode` says. **Datastore keeps its data in persistent mode**, on a volume; in ephemeral mode it
-starts empty too. See [compatibility.md](compatibility.md#optional-services).
+**Bigtable and Spanner are in-memory**: nothing they hold survives a restart, whatever `--mode`
+says. **Datastore and Firestore keep their data in persistent mode**, on a volume; in ephemeral
+mode they start empty too. See [What survives a restart](#what-survives-a-restart) and
+[compatibility.md](compatibility.md#optional-services).
 
 Bigtable, like the others, starts from its pinned image with no network access (#611).
 
@@ -460,20 +476,44 @@ fixed port, the ingress and console included. Pass both to every command for tha
 port is still taken, `up` names each one before creating a cluster. See
 [Running two instances](configuration.md#running-two-instances).
 
-## What is not persisted
+## What survives a restart
 
-`--mode persistent` provisions volumes **for backends that can use them**:
+What `cloudburrow stop` then `cloudburrow up` (the same `--name` and `--state-dir`) keeps. Every
+**Yes** below is a restart probe CI runs in its shard (`PROBE_TESTS` in
+`scripts/compat-shards.sh`): the shard's suite leaves the state, CI stops the instance, brings it
+up again in persistent mode (the default) and wants the state back, then brings it up with
+`--mode ephemeral` and wants it gone. **In `--mode ephemeral` nothing survives**, for every
+service.
 
-| Service | Survives restart? |
-|---|---|
-| Cloud Storage | Yes |
-| Cloud Tasks | Yes |
-| Cloud Run | Workload definitions live in the Kubernetes API |
-| **Pub/Sub** | **No — never** |
+| Service | Survives `stop`/`up` in persistent mode? | Restart probe |
+|---|---|---|
+| Cloud Storage | **Yes**: a bucket, a versioned object, an unfinished resumable upload, a notification configuration and a managed folder with its IAM policy | `TestStorageAcrossRestart` |
+| Cloud Tasks | **Yes**: a paused queue, still paused, and its task | `TestTasksAcrossRestart` |
+| Secret Manager | **Yes**: a secret and its latest version | `TestSecretManagerAcrossRestart` |
+| Cloud Scheduler | **Yes**: an enabled and a paused job, with schedule, time zone, target and state | `TestSchedulerAcrossRestart` |
+| Cloud KMS | **Yes**: a key, its versions' states (enabled, disabled, scheduled for destruction) and a ciphertext it decrypts | `TestKMSAcrossRestart` |
+| Datastore | **Yes**: an entity | `TestDatastoreAcrossRestart` |
+| Firestore | **Yes**: documents in the default database and in a named one, which the Admin API still lists | `TestFirestoreAcrossRestart` |
+| Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string and its key, with append-only or with RDB persistence; Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
+| Cloud SQL for PostgreSQL | **Yes**: a table's row | `TestCloudSQLAcrossRestart` |
+| Cloud SQL for MySQL | **Yes**: a table's row | `TestCloudSQLMySQLAcrossRestart` |
+| **Pub/Sub** | **No**, as `cloudburrow status` says: Google's emulator loses its state on restart even when given `--data-dir`, which we measured | none |
+| **Spanner** | **No**: the emulator is in memory, and a restart of it loses a row | none; `TestSpannerStateDoesNotSurviveARestart` restarts the emulator alone |
+| **BigQuery** | **No**: the emulator keeps its data in memory, and a restart of it loses a dataset | none; `TestBigQueryEmulatorRestartsPromptly` restarts the emulator alone |
+| **Bigtable** | **No**: the emulator is in memory, as Google documents, and is given no volume | none |
+| **Cloud Logging** | **Entries, no**: they are held in memory. Its log-based metrics, sinks and exclusions are written to `<state-dir>/<name>/logging` in persistent mode, but no test restarts an instance and reads it back | none |
+| Cloud Run | **Not measured**: services are Knative objects in the cluster, which `stop` keeps, but no restart probe deploys one | none |
+| Backup and DR, Resource Manager's projects, the Cloud SQL Admin API's created instances and backups | **Not measured**: written to the state directory in persistent mode, but no restart probe reads them back | none |
 
-Google's Pub/Sub emulator loses state on restart even when given `--data-dir`; we measured it.
-CloudBurrow cannot inherit durability its backend lacks, so `cloudburrow status` says so
-plainly.
+A restart of one emulator's container alone, which Kubernetes does when it crashes, is a
+different case: several services' fronts keep what their emulator cannot and give it back, such
+as Pub/Sub's topics, subscriptions, schemas and snapshots
+(`TestPubSubDefinitionsSurviveAnEmulatorRestart`; messages not yet acknowledged are lost), and
+Logging remakes a linked dataset BigQuery lost (`TestLoggingLinkedDatasetAcrossRestarts`). That
+is not a `stop`/`up`, and the table does not count it.
+
+`cloudburrow status` reports each service's persistence; it names Pub/Sub, Spanner, BigQuery,
+Bigtable and Cloud Logging as not kept, whatever `--mode` says.
 
 ## Safety
 
@@ -608,15 +648,18 @@ What this is tested to do, and what it is not:
 
 ## Upgrading
 
-**The upgrade promise (#1605).** State written by the latest release, today `v0.1.0`, loads in
-this one: a persistent instance's state directory and cluster, brought up again by the new
-`cloudburrow up` with the same `--name` and `--state-dir`, and a `cloudburrow state save`
-archive, loaded with the new `cloudburrow state load`. What that release kept is read back as it
-was written, with these exceptions:
+**The upgrade promise (#1605, #1807).** State written by `v0.2.0`, the latest release, loads in
+this one, and so does state written by `v0.1.0` before it. What is checked: a persistent
+instance's state directory and cluster, brought up again by the new `cloudburrow up` with the
+same `--name` and `--state-dir`, and a `cloudburrow state save` archive, loaded with the new
+`cloudburrow state load`. What that release kept is read back as it was written, with these
+exceptions:
 
-- **What the older release never kept.** In `v0.1.0`, Pub/Sub, Firestore, Bigtable, Spanner,
-  BigQuery and Cloud Logging ran in memory, so their state is not there to upgrade. Cloud Run
-  services are Knative objects in the cluster, which `up` keeps; the upgrade test deploys none.
+- **What the older release never kept.** In `v0.2.0`, Pub/Sub, Spanner, BigQuery, Bigtable and
+  Cloud Logging's entries are not kept across a `stop` (see
+  [What survives a restart](#what-survives-a-restart)), so their state is not there to upgrade;
+  in `v0.1.0`, Firestore was not kept either. Cloud Run services are Knative objects in the
+  cluster, which `up` keeps; the upgrade test deploys none.
 - **Cloud Storage on the volume, from before the builtin server (#519)** is migrated by `up`
   (#1606, below): `v0.1.0` kept its buckets in the layout of the server it ran then, which the
   builtin server cannot read. Every bucket keeps its location and storage class and every object
@@ -624,19 +667,23 @@ was written, with these exceptions:
   an object's content type and custom metadata once its cluster has been stopped (seen with
   `v0.1.0` alone), and never kept bucket labels, so after a `stop` there are none to migrate. A
   `state save` archive taken while the older instance still runs keeps the objects' metadata.
+  `v0.2.0` runs the builtin server, whose volume this release reads as it is, metadata included.
 - **What an archive never held.** The archive captures what the older release's `state save`
-  listed as captured (`v0.1.0`: Cloud Storage, Cloud Tasks, Secret Manager, projects and Cloud SQL
-  for PostgreSQL); its manifest names the rest and why.
+  listed as captured (`v0.2.0`: Cloud Storage, Cloud Tasks, Cloud Scheduler, Secret Manager,
+  projects, Pub/Sub's resources without their messages, and Cloud SQL for PostgreSQL; `v0.1.0`:
+  Cloud Storage, Cloud Tasks, Secret Manager, projects and Cloud SQL for PostgreSQL); its manifest
+  names the rest and why.
 
 Checked against real instances by `test/upgrade` (`go test -tags upgrade ./test/upgrade/`, which
-builds `v0.1.0`, or takes its published binary from `CLOUDBURROW_UPGRADE_OLD_BIN`, seeds every
+builds `v0.2.0`, or takes its published binary from `CLOUDBURROW_UPGRADE_OLD_BIN`, seeds every
 service through the official clients, stops it, and reads everything back with this release, from
-the state directory and from the archive), nightly in CI by the Upgrade test workflow
-([CI](ci.md#the-upgrade-test)), and in every CI run by
+the state directory and from the archive; `CLOUDBURROW_UPGRADE_OLDER=v0.1.0` runs it from
+`v0.1.0`), nightly in CI by the Upgrade test workflow ([CI](ci.md#the-upgrade-test)), and in
+every CI run by `TestStateDirFromV020Loads`, `TestStateArchiveFromV020Loads`,
 `TestStateDirFromV010Loads`, `TestStateArchiveFromV010Loads` and `TestEarlierStorageSpoolLoads`
-against what `v0.1.0` wrote, kept in `cmd/cloudburrow/testdata/state-v0.1.0`. A release that
-changes a stored layout reads the earlier one; the release after this moves the promise to the
-then-latest tag.
+against what each release wrote, kept in `cmd/cloudburrow/testdata/state-v0.2.0` and
+`state-v0.1.0`. A release that changes a stored layout reads the earlier one; the release after
+this moves the promise to the then-latest tag.
 
 Before 1.0 the promise covers one release back: upgrading across several releases goes through
 each, or through `state save` and `state load`.
@@ -712,8 +759,8 @@ That happens only when the earlier server's files reach the volume some other wa
 
 - or keep the objects: with the release that wrote them, `cloudburrow state save <file>`; then
   `cloudburrow delete`, `cloudburrow up` and `cloudburrow state load <file>`. `delete` also
-  removes the volumes of Datastore, Cloud SQL and Memorystore, which the archive of `v0.1.0` does
-  not hold except PostgreSQL's databases: dump those first with their own tools. An archive
+  removes the volumes of Datastore, Cloud SQL and Memorystore, which the archives of `v0.1.0` and
+  `v0.2.0` do not hold except PostgreSQL's databases: dump those first with their own tools. An archive
   from before the builtin server holds its buckets, objects with their metadata, and notification
   configurations as that release wrote them, and this release loads that layout (#1605). Or copy
   them out with a Cloud Storage client and back in.

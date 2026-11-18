@@ -29,7 +29,7 @@ jobs:
       # Pin the action by commit SHA, as for any third-party action.
       - uses: cloudburrow/cloudburrow@<commit-sha>
         with:
-          version: v0.1.0            # or latest, or source (needs actions/setup-go)
+          version: v0.2.0            # or latest, or source (needs actions/setup-go)
           services: storage,pubsub   # default: CloudBurrow's defaults
 
       # STORAGE_EMULATOR_HOST, PUBSUB_EMULATOR_HOST, GOOGLE_CLOUD_PROJECT and the
@@ -80,15 +80,15 @@ naming v0.1.0.
 | What the action passes | CLI that has it | With an older CLI |
 | --- | --- | --- |
 | `up --detach --detach-timeout`, `wait --timeout`, `env --format plain`, `status --format json`, `logs --tail`, `delete`; `--name`, `--mode`, `--services` | v0.1.0 | refused before `up`: the action needs v0.1.0 or later |
-| `up --trust` (#598, #619) | the first release after v0.1.0 | left out. v0.1.0 has no trust gate and reads a discovered `cloudburrow.json` and `.cloudburrow/hooks` without it, which is what `--trust` asks for |
-| `--port-base`, from the `port-base` input (#584) | the first release after v0.1.0 | the step fails before `up`, saying the input needs a CLI newer than v0.1.0. v0.1.0 moves ports only one by one, so there is nothing to translate it to |
+| `up --trust` (#598, #619) | v0.2.0 | left out. v0.1.0 has no trust gate and reads a discovered `cloudburrow.json` and `.cloudburrow/hooks` without it, which is what `--trust` asks for |
+| `--port-base`, from the `port-base` input (#584) | v0.2.0 | the step fails before `up`, saying the input needs a CLI newer than v0.1.0. v0.1.0 moves ports only one by one, so there is nothing to translate it to |
 
 `version: source` builds the CLI from the action's own checkout, which is the same commit, so it
 gets every flag. A CLI whose version cannot be read, such as a local `dev` build, is taken to be
 current and gets every flag, with a warning.
 
 Action refs from before #679 always pass `--trust`, which v0.1.0 rejects ("flag provided but not
-defined: -trust"). Use such a ref with `version: source` or a release after v0.1.0, or move to a
+defined: -trust"). Use such a ref with `version: source` or v0.2.0 or later, or move to a
 later ref. To keep a pinned action from picking up a newer CLI unannounced, set `version` to a
 tag rather than relying on `latest`.
 
@@ -160,8 +160,9 @@ tag, so each release is tested with the action at its own ref (#679).
 ### The upgrade test
 
 `.github/workflows/upgrade.yml` ("Upgrade test", #1714) runs the end-to-end upgrade test,
-`test/upgrade`, nightly at 05:37 UTC and by hand (`gh workflow run upgrade.yml`). It downloads the
-release the test names (`OlderRelease`, today `v0.1.0`) from this repository's GitHub release with
+`test/upgrade`, nightly at 05:37 UTC and by hand (`gh workflow run upgrade.yml`; `-f
+older=v0.1.0` upgrades from another release the test lists in `olderReleases`). It downloads the
+release the test names (`OlderRelease`, today `v0.2.0`) from this repository's GitHub release with
 `gh release download` and the run's token, checks the archive against the release's
 `checksums.txt`, builds this commit's CLI with `make build`, and runs
 `TestUpgradeFromOlderRelease`: a persistent instance of sixteen services is brought up with the

@@ -17,6 +17,11 @@ on:
     # 05:37 UTC, off the hour and clear of the other nightlies.
     - cron: "37 5 * * *"
   workflow_dispatch:
+    inputs:
+      older:
+        description: "The release to upgrade from, one test/upgrade's olderReleases lists (empty: OlderRelease)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -65,18 +70,25 @@ jobs:
           install_only: true
           version: v0.33.0
 
-      # The older release is the one test/upgrade names (OlderRelease), as
-      # this repository published it: its linux/amd64 archive from the
-      # GitHub release, with the run's own token, checked against the
-      # release's checksums.txt before it is unpacked. The test then checks
-      # that the binary says it is that release.
+      # The older release is the one test/upgrade names (OlderRelease), or
+      # by hand another its olderReleases lists (the `older` input, such as
+      # v0.1.0), as this repository published it: its linux/amd64 archive
+      # from the GitHub release, with the run's own token, checked against
+      # the release's checksums.txt before it is unpacked. The test then
+      # checks that the binary says it is that release.
       - name: Download the older release
         env:
           GH_TOKEN: ${{ github.token }}
+          OLDER_INPUT: ${{ inputs.older }}
         run: |
           set -euo pipefail
           OLDER=$(sed -n 's/^const OlderRelease = "\(v[0-9][^"]*\)"$/\1/p' test/upgrade/upgrade_test.go)
           [ -n "$OLDER" ] || { echo "test/upgrade names no OlderRelease"; exit 1; }
+          if [ -n "${OLDER_INPUT:-}" ]; then
+            [[ "$OLDER_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "older must be a release tag, such as v0.1.0"; exit 1; }
+            OLDER="$OLDER_INPUT"
+            echo "CLOUDBURROW_UPGRADE_OLDER=$OLDER" >> "$GITHUB_ENV"
+          fi
           ARCHIVE="cloudburrow_${OLDER}_linux_amd64.tar.gz"
           mkdir -p "$RUNNER_TEMP/older"
           cd "$RUNNER_TEMP/older"
