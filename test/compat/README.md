@@ -93,6 +93,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
 | `CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER` | as `RESOURCEMANAGER` | BigQuery's `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1392) and the purged project's emulator data (#1568), in the emulators shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the principals the Memorystore IAM auth tests grant the connect roles to (#1614), in the memorystore shard, so the Resource Manager tests stay in storage |
+| `CLOUDBURROW_TEST_FIRESTORE_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the roles the Firestore with MongoDB compatibility tests grant a sign-in's principal (#1738, #1742, #1743), in the emulators shard, so the Resource Manager tests stay in storage (#1761) |
 | `CLOUDBURROW_TEST_SQL_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the purged project's Cloud SQL, Backup and DR and Artifact Registry, and Backup and DR's folder and organization fetch (#1568), in the sql shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_RUN_RESOURCEMANAGER`, `CLOUDBURROW_TEST_RUN_SERVICEUSAGE` | as `RESOURCEMANAGER` and `SERVICEUSAGE` | gcloud's Resource Manager and Service Usage overrides in the run shard: `gcloud functions deploy --trigger-service-account` reads the project number through the one and checks `run.googleapis.com` is enabled through the other (main run 38929852240), so neither suite runs twice |
 | `CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the Cloud Logging folder and organization tests, which make a folder (#1395), in the served shard, so the Resource Manager tests stay in storage |
@@ -101,6 +102,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_CLOUDSQL_SECRETS` | as `SECRETS` | Cloud SQL's Data API, whose password is a secret version, in the sql shard (#1568), so the Secret Manager tests stay in storage and run |
 | `CLOUDBURROW_TEST_NOPUBSUB_STORAGE` | as `STORAGE` | Cloud Storage notifications refused 501 on an instance without Pub/Sub, in the sql shard, the one that serves none (#1568) |
 | `CLOUDBURROW_TEST_FIRESTORE_STORAGE` | as `STORAGE` | the Cloud Storage Firestore's exports and imports go through (#1500), in the emulators shard beside Firestore |
+| `CLOUDBURROW_TEST_BQML_STORAGE` | as `STORAGE` | the bucket BigQuery ML's imported models are read from (`TestBigQueryMLImportedXGBoostModel`), in the emulators shard beside BigQuery (#1761) |
 | `CLOUDBURROW_TEST_RUN_BIGQUERY` | as `BIGQUERY` | the Cloud Run revision refused by the BigQuery front (#874); see below |
 | `CLOUDBURROW_TEST_RUN_SQLADMIN` | as `SQLADMIN` | the Cloud Run services and job with a Cloud SQL volume (#1346), without the Cloud SQL suite |
 | `CLOUDBURROW_TEST_RUN_MYSQL` | as `MYSQL` | the Cloud Run service with a Cloud SQL for MySQL volume (#1346, #1568), without the MySQL suite |

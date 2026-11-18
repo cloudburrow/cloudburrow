@@ -214,4 +214,8 @@ const (
 	// Resource Manager for the memorystore shard's IAM auth tests, which
 	// grant a principal the connect role (#1614).
 	envMemorystoreResourceManager = "CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER"
+	// Resource Manager for the emulators shard's Firestore with MongoDB
+	// compatibility tests, which grant the roles a sign-in's principal
+	// needs (#1738, #1742, #1743; #1761).
+	envFirestoreResourceManager = "CLOUDBURROW_TEST_FIRESTORE_RESOURCEMANAGER"
 )

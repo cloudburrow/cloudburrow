@@ -367,6 +367,8 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 
 		// A group of its own, so its long name leaves the others' alignment.
 		"MEMORYSTORE_RESOURCEMANAGER": "127.0.0.1:9007",
+		"FIRESTORE_RESOURCEMANAGER":   "127.0.0.1:9007",
+		"BQML_STORAGE":                "http://127.0.0.1:50003",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {

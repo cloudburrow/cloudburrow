@@ -14,6 +14,7 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/iam"
+	admin "cloud.google.com/go/iam/admin/apiv1"
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
@@ -48,39 +49,88 @@ func handleRW(ctx context.Context, h *iam.Handle) policyRW {
 	}
 }
 
+// deletedAccountFixture is a service account in a project of its own,
+// whose deletion the tests below watch in other services' policies, the
+// IAM admin client, and a suffix for the resources' names.
+func deletedAccountFixture(t *testing.T, h *Harness) (*admin.IamClient, *adminpb.ServiceAccount, string) {
+	t.Helper()
+	adm := iamAdmin(t, h)
+	project := iamProject(t, h, "dse-")
+	return adm, newServiceAccount(t, h, project, "every-svc"), fmt.Sprint(time.Now().UnixNano() % 1e8)
+}
+
+// deletedAccountRoundTrip grants victim and another member roles/viewer on
+// every resource of res, through each service's official client, and
+// checks that each binding reads deleted:serviceAccount:EMAIL?uid=ID after
+// the delete and serviceAccount:EMAIL again after undelete, the other
+// member kept.
+func deletedAccountRoundTrip(t *testing.T, h *Harness, adm *admin.IamClient, victim *adminpb.ServiceAccount, res map[string]policyRW) {
+	t.Helper()
+	ctx := h.Context()
+	live := "serviceAccount:" + victim.GetEmail()
+	deleted := "deleted:serviceAccount:" + victim.GetEmail() + "?uid=" + victim.GetUniqueId()
+	const role = "roles/viewer"
+	for name, rw := range res {
+		p, err := rw.get()
+		if err != nil {
+			t.Fatalf("%s GetIamPolicy: %v", name, err)
+		}
+		pol := &iam.Policy{InternalProto: p}
+		pol.Add(live, role)
+		pol.Add("user:keep@example.com", role)
+		if err := rw.set(pol.InternalProto); err != nil {
+			t.Fatalf("%s SetIamPolicy: %v", name, err)
+		}
+	}
+	check := func(when, want string) {
+		t.Helper()
+		for name, rw := range res {
+			p, err := rw.get()
+			if err != nil {
+				t.Fatalf("%s GetIamPolicy: %v", name, err)
+			}
+			members := (&iam.Policy{InternalProto: p}).Members(role)
+			if !slices.Contains(members, want) || !slices.Contains(members, "user:keep@example.com") || len(members) != 2 {
+				t.Errorf("%s, %s: members %q, want %q and user:keep@example.com", when, name, members, want)
+			}
+		}
+	}
+	check("before delete", live)
+	if err := adm.DeleteServiceAccount(ctx, &adminpb.DeleteServiceAccountRequest{Name: victim.GetName()}); err != nil {
+		t.Fatal(err)
+	}
+	check("after delete", deleted)
+	if _, err := adm.UndeleteServiceAccount(ctx, &adminpb.UndeleteServiceAccountRequest{Name: "projects/-/serviceAccounts/" + victim.GetUniqueId()}); err != nil {
+		t.Fatal(err)
+	}
+	check("after undelete", live)
+}
+
 // covers: google.iam.admin.v1.IAM/DeleteServiceAccount, google.iam.admin.v1.IAM/UndeleteServiceAccount
 //
 // TestIAMDeletedServiceAccountInEveryServicesPolicies (#1751): a deleted
 // account's bindings read deleted:serviceAccount:EMAIL?uid=ID, and
-// serviceAccount:EMAIL again after undelete, in the allow policies every
-// other service keeps on its own resources, each read and written through
-// that service's official client: a Cloud Storage bucket (the storage
-// server, another process), a Pub/Sub topic, subscription and schema, a
-// Bigtable instance, a Spanner instance and a BigQuery table (their
-// fronts, other processes, which the host reaches through their tunnels),
-// a Logging view, a Cloud Run job and an Artifact Registry repository;
-// and a managed folder, a Pub/Sub snapshot and schema, a Bigtable table, a Spanner database and a Secure
-// Source Manager instance and repository.
-// Another member of the same binding is kept. (Purge, 30 days after the
-// delete, drops the member: unit-tested, TestMemberRewriteHooks.)
+// serviceAccount:EMAIL again after undelete, in the allow policies the
+// other services keep on their own resources, each read and written
+// through that service's official client: here a Cloud Storage bucket and
+// managed folder (the storage server, another process), a Pub/Sub topic,
+// subscription, snapshot and schema, and a Logging view; Bigtable, Spanner
+// and BigQuery in TestIAMDeletedServiceAccountInEmulatorFrontsPolicies,
+// and Cloud Run, Artifact Registry and Secure Source Manager in
+// TestIAMDeletedServiceAccountInRunShardPolicies, so each runs in the CI
+// shard that serves its services (#1761). Another member of the same
+// binding is kept. (Purge, 30 days after the delete, drops the member:
+// unit-tested, TestMemberRewriteHooks.)
 func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager)
 	h.Endpoint(EnvStorage)
 	h.Endpoint(EnvPubSub)
-	h.Endpoint(EnvBigtable)
-	h.Endpoint(EnvSpanner)
-	h.Endpoint(EnvBigQuery)
-	h.Endpoint(EnvLogging)
-	h.Endpoint(EnvRun)
-	adm := iamAdmin(t, h)
+	// The storage shard serves Logging under the name Cloud Tasks' logs
+	// test reads, so the Logging suite stays in served.
+	shardEndpoint(h, "CLOUDBURROW_TEST_TASKS_LOGGING", EnvLogging)
+	adm, victim, suffix := deletedAccountFixture(t, h)
 	ctx := h.Context()
-	project := iamProject(t, h, "dse-")
-	victim := newServiceAccount(t, h, project, "every-svc")
-	live := "serviceAccount:" + victim.GetEmail()
-	deleted := "deleted:serviceAccount:" + victim.GetEmail() + "?uid=" + victim.GetUniqueId()
-	const role = "roles/viewer"
-	suffix := fmt.Sprint(time.Now().UnixNano() % 1e8)
 	res := map[string]policyRW{}
 
 	// Cloud Storage.
@@ -191,6 +241,52 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 		},
 	}
 
+	// Logging, over its JSON API (the IAMPolicy mixin is not in the
+	// logging protos).
+	views := loggingJSONService(t, h).Projects.Locations.Buckets.Views
+	view := loggingView(t, h, "dse-"+suffix)
+	res["log view"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			p, err := views.GetIamPolicy(view, &logging.GetIamPolicyRequest{}).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			out := &iampb.Policy{Version: int32(p.Version), Etag: []byte(p.Etag)}
+			for _, b := range p.Bindings {
+				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
+			}
+			return out, nil
+		},
+		set: func(p *iampb.Policy) error {
+			in := &logging.Policy{Etag: string(p.GetEtag())}
+			for _, b := range p.GetBindings() {
+				in.Bindings = append(in.Bindings, &logging.Binding{Role: b.GetRole(), Members: b.GetMembers()})
+			}
+			_, err := views.SetIamPolicy(view, &logging.SetIamPolicyRequest{Policy: in}).Context(ctx).Do()
+			return err
+		},
+	}
+
+	deletedAccountRoundTrip(t, h, adm, victim, res)
+}
+
+// covers: google.iam.admin.v1.IAM/DeleteServiceAccount, google.iam.admin.v1.IAM/UndeleteServiceAccount
+//
+// TestIAMDeletedServiceAccountInEmulatorFrontsPolicies (#1751): as
+// TestIAMDeletedServiceAccountInEveryServicesPolicies, for a Bigtable
+// instance and table, a Spanner instance and database and a BigQuery
+// table (their fronts, other processes, which the host reaches through
+// their tunnels), in the emulators shard.
+func TestIAMDeletedServiceAccountInEmulatorFrontsPolicies(t *testing.T) {
+	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)
+	h.Endpoint(EnvBigtable)
+	h.Endpoint(EnvSpanner)
+	h.Endpoint(EnvBigQuery)
+	adm, victim, suffix := deletedAccountFixture(t, h)
+	ctx := h.Context()
+	res := map[string]policyRW{}
+
 	// Bigtable.
 	btAdmin, _ := bigtableTable(t, h, "dse-"+suffix)
 	res["bigtable table"] = handleRW(ctx, btAdmin.TableIAM("dse-"+suffix))
@@ -229,6 +325,23 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 		},
 	}
 
+	// A Spanner database.
+	dbName := spannerDatabase(t, ctx, h.Endpoint(EnvSpanner), h.Project(), spID, "dse", "CREATE TABLE t (id INT64) PRIMARY KEY (id)")
+	dba, err := database.NewDatabaseAdminClient(ctx, spannerOpts(h.Endpoint(EnvSpanner))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dba.Close() })
+	res["spanner database"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return dba.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: dbName})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := dba.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: dbName, Policy: p})
+			return err
+		},
+	}
+
 	// BigQuery.
 	bq, bqProject := bigqueryClient(t, h)
 	ds := bq.DatasetInProject(bqProject, "dse_"+suffix)
@@ -242,31 +355,22 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 	}
 	res["bigquery table"] = handleRW(ctx, tbl.IAM())
 
-	// Logging, over its JSON API (the IAMPolicy mixin is not in the
-	// logging protos).
-	views := loggingJSONService(t, h).Projects.Locations.Buckets.Views
-	view := loggingView(t, h, "dse-"+suffix)
-	res["log view"] = policyRW{
-		get: func() (*iampb.Policy, error) {
-			p, err := views.GetIamPolicy(view, &logging.GetIamPolicyRequest{}).Context(ctx).Do()
-			if err != nil {
-				return nil, err
-			}
-			out := &iampb.Policy{Version: int32(p.Version), Etag: []byte(p.Etag)}
-			for _, b := range p.Bindings {
-				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
-			}
-			return out, nil
-		},
-		set: func(p *iampb.Policy) error {
-			in := &logging.Policy{Etag: string(p.GetEtag())}
-			for _, b := range p.GetBindings() {
-				in.Bindings = append(in.Bindings, &logging.Binding{Role: b.GetRole(), Members: b.GetMembers()})
-			}
-			_, err := views.SetIamPolicy(view, &logging.SetIamPolicyRequest{Policy: in}).Context(ctx).Do()
-			return err
-		},
-	}
+	deletedAccountRoundTrip(t, h, adm, victim, res)
+}
+
+// covers: google.iam.admin.v1.IAM/DeleteServiceAccount, google.iam.admin.v1.IAM/UndeleteServiceAccount
+//
+// TestIAMDeletedServiceAccountInRunShardPolicies (#1751): as
+// TestIAMDeletedServiceAccountInEveryServicesPolicies, for a Cloud Run
+// job, an Artifact Registry repository and a Secure Source Manager
+// instance and repository, in the run shard.
+func TestIAMDeletedServiceAccountInRunShardPolicies(t *testing.T) {
+	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER", EnvResourceManager)
+	h.Endpoint(EnvRun)
+	adm, victim, suffix := deletedAccountFixture(t, h)
+	ctx := h.Context()
+	res := map[string]policyRW{}
 
 	// Cloud Run and Artifact Registry.
 	jobs, err := run.NewJobsClient(ctx, runClientOptions(h)...)
@@ -369,55 +473,5 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 		},
 	}
 
-	// A Spanner database.
-	dbName := spannerDatabase(t, ctx, h.Endpoint(EnvSpanner), h.Project(), spID, "dse", "CREATE TABLE t (id INT64) PRIMARY KEY (id)")
-	dba, err := database.NewDatabaseAdminClient(ctx, spannerOpts(h.Endpoint(EnvSpanner))...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = dba.Close() })
-	res["spanner database"] = policyRW{
-		get: func() (*iampb.Policy, error) {
-			return dba.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: dbName})
-		},
-		set: func(p *iampb.Policy) error {
-			_, err := dba.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: dbName, Policy: p})
-			return err
-		},
-	}
-
-	for name, rw := range res {
-		p, err := rw.get()
-		if err != nil {
-			t.Fatalf("%s GetIamPolicy: %v", name, err)
-		}
-		pol := &iam.Policy{InternalProto: p}
-		pol.Add(live, role)
-		pol.Add("user:keep@example.com", role)
-		if err := rw.set(pol.InternalProto); err != nil {
-			t.Fatalf("%s SetIamPolicy: %v", name, err)
-		}
-	}
-	check := func(when, want string) {
-		t.Helper()
-		for name, rw := range res {
-			p, err := rw.get()
-			if err != nil {
-				t.Fatalf("%s GetIamPolicy: %v", name, err)
-			}
-			members := (&iam.Policy{InternalProto: p}).Members(role)
-			if !slices.Contains(members, want) || !slices.Contains(members, "user:keep@example.com") || len(members) != 2 {
-				t.Errorf("%s, %s: members %q, want %q and user:keep@example.com", when, name, members, want)
-			}
-		}
-	}
-	check("before delete", live)
-	if err := adm.DeleteServiceAccount(ctx, &adminpb.DeleteServiceAccountRequest{Name: victim.GetName()}); err != nil {
-		t.Fatal(err)
-	}
-	check("after delete", deleted)
-	if _, err := adm.UndeleteServiceAccount(ctx, &adminpb.UndeleteServiceAccountRequest{Name: "projects/-/serviceAccounts/" + victim.GetUniqueId()}); err != nil {
-		t.Fatal(err)
-	}
-	check("after undelete", live)
+	deletedAccountRoundTrip(t, h, adm, victim, res)
 }

@@ -268,12 +268,15 @@ func TestIAMQueryAuditableServices(t *testing.T) {
 // account's bindings read deleted:serviceAccount:EMAIL?uid=ID in the
 // policies other services keep on their own resources (a secret's, a key
 // ring's, a queue's), as in the hierarchy's (#1750), and serviceAccount:EMAIL
-// again after undelete, through each service's official client.
+// again after undelete, through each service's official client. It runs
+// in CI's run shard, the one that serves Secret Manager, Cloud KMS and
+// Cloud Tasks together, under its names for KMS and Resource Manager
+// (#1761).
 func TestIAMDeletedServiceAccountInOtherServicesPolicies(t *testing.T) {
 	h := New(t)
-	h.Endpoint(EnvResourceManager)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER", EnvResourceManager)
 	h.Endpoint(EnvSecrets)
-	h.Endpoint(EnvKMS)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	h.Endpoint(EnvTasks)
 	adm := iamAdmin(t, h)
 	ctx := h.Context()

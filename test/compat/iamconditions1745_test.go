@@ -75,10 +75,13 @@ func conditionalPolicy(t *testing.T, ctx context.Context, what string, c gaxIAMC
 
 // TestIAMConditionsOnServicePolicies (#1745): Secret Manager's secrets and
 // Cloud KMS's key rings and keys, through their official clients, take
-// conditional role bindings.
+// conditional role bindings. It runs in CI's run shard, which serves both,
+// KMS under its own name (#1761).
 // covers: google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy, google.iam.v1.IAMPolicy/GetIamPolicy, google.iam.v1.IAMPolicy/SetIamPolicy
 func TestIAMConditionsOnServicePolicies(t *testing.T) {
 	h := New(t)
+	h.Endpoint(EnvSecrets)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
 	ctx := h.Context()
 	sc := secretsClient(t, h)
 	sec, err := sc.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{

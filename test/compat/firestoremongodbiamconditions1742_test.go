@@ -65,6 +65,7 @@ func conditionalRole(t *testing.T, h *Harness, project, member, role string) fun
 // Firestore's documented values.
 func TestFirestoreMongoDBIAMConditions(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	h.Endpoint(EnvResourceManager)

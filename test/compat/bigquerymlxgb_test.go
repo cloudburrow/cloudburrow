@@ -37,6 +37,10 @@ import (
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.models.get, bigquery.models.delete
 func TestBigQueryMLImportedXGBoostModel(t *testing.T) {
 	h := New(t)
+	// The models are uploaded to the instance's Cloud Storage, which CI's
+	// emulators shard serves under a name of its own so the Cloud Storage
+	// suite stays in the storage shard (#1761).
+	shardEndpoint(h, "CLOUDBURROW_TEST_BQML_STORAGE", EnvStorage)
 	c, _ := bigqueryClient(t, h)
 	sc := storageClient(t, h)
 	ctx := h.Context()

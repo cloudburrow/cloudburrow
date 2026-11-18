@@ -286,6 +286,7 @@ resource "google_project_iam_member" "m" {
 // Google's IAM page lists each command's permissions.
 func TestFirestoreMongoDBIAMCustomRole(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	c := iamAdmin(t, h)

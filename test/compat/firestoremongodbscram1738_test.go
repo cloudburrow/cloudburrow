@@ -95,6 +95,7 @@ func waitMongo(t *testing.T, f func() error, ok bool) {
 // datastore.databases.getMetadata, and lists the database with it.
 func TestFirestoreMongoDBIAMUserCreds(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	ep, ca := mongoEndpoint(h)
 	h.Endpoint(EnvFirestore)
 	h.Endpoint(EnvResourceManager)
