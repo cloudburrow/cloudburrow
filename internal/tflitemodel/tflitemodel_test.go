@@ -201,3 +201,66 @@ func TestStringsMatchLiteRT(t *testing.T) {
 		t.Errorf("ADD of strings: %v", err)
 	}
 }
+
+// TestControlFlow (#1775): loop.tflite, TensorFlow 2.20's TFLiteConverter
+// of testdata/savedmodel/loop (gen_savedmodel.py), runs its WHILE, IF,
+// LESS, GREATER and SELECT_V2 to TensorFlow's own serving_default output
+// for the SavedModel (tensorflow_predictions.json's "loop").
+func TestControlFlow(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "loop.tflite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref struct {
+		Loop []struct {
+			Inputs  map[string][]float32 `json:"inputs"`
+			Outputs map[string][]float64 `json:"outputs"`
+		} `json:"loop"`
+	}
+	b, err := os.ReadFile(filepath.Join("testdata", "tensorflow_predictions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &ref); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range ref.Loop {
+		var ins []Tensor
+		for _, p := range m.Inputs {
+			vs := row.Inputs[p.Name]
+			shape := []int{1, len(vs)}
+			if len(p.Shape) == 1 {
+				shape = []int{len(vs)}
+			}
+			ins = append(ins, Tensor{Type: Float32, Shape: shape, F: vs})
+		}
+		outs, err := m.Run(ins)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, p := range m.Outputs {
+			for i, w := range row.Outputs[p.Name] {
+				if g := float64(outs[k].f(i)); math.Abs(g-w) > 1e-5*math.Max(1, math.Abs(w)) {
+					t.Errorf("%v %s[%d] = %v, TensorFlow %v", row.Inputs, p.Name, i, g, w)
+				}
+			}
+		}
+	}
+}
+
+// A WHILE whose condition never turns false is stopped, not run forever.
+func TestWhileBounded(t *testing.T) {
+	m := &Model{graphs: []*graph{
+		{tensors: []tensorDef{{name: "c", typ: Bool, data: &Tensor{Type: Bool, Shape: []int{}, B: []bool{true}}}, {name: "x", typ: Float32}},
+			in: []int{1}, out: []int{0}},
+		{tensors: []tensorDef{{name: "x", typ: Float32}}, in: []int{0}, out: []int{0}},
+	}}
+	_, err := m.while(0, 1, []*Tensor{{Type: Float32, Shape: []int{1}, F: []float32{1}}}, 0)
+	if err == nil {
+		t.Fatal("an endless WHILE returned")
+	}
+}

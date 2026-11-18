@@ -28,6 +28,8 @@ import (
 // it on internal/tflitemodel. models.get answers modelType TENSORFLOW,
 // the signature's inputs as featureColumns and outputs as labelColumns;
 // the model is frozen at creation (deleting the folder changes nothing);
+// a SavedModel with tf.while_loop and tf.cond converts to WHILE and IF
+// subgraphs, which run to TensorFlow's output (#1775);
 // the functions the page says do not take a TensorFlow model are 400; a
 // folder that is not a SavedModel is 400; a graph TensorFlow Lite has no
 // builtin for (an SVD) is 501, never a result.
@@ -64,17 +66,20 @@ func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
 		}
 	}
 	upload("mlp")
+	upload("loop")
 	upload("flex")
 	w := bh.Object("tf/notsaved/README.txt").NewWriter(ctx)
 	_, _ = w.Write([]byte("not a SavedModel"))
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
+	type rowsRef []struct {
+		Inputs  map[string][]float64 `json:"inputs"`
+		Outputs map[string][]float64 `json:"outputs"`
+	}
 	var ref struct {
-		Rows []struct {
-			Inputs  map[string][]float64 `json:"inputs"`
-			Outputs map[string][]float64 `json:"outputs"`
-		} `json:"rows"`
+		Rows rowsRef `json:"rows"`
+		Loop rowsRef `json:"loop"`
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "tensorflow_predictions.json"))
 	if err != nil {
@@ -91,7 +96,11 @@ func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
 		}
 		sels = append(sels, fmt.Sprintf("SELECT %d AS id, ARRAY<FLOAT64>[%s] AS x, %d AS k, 'kept' AS note", i, strings.Join(xs, ", "), int64(r.Inputs["k"][0])))
 	}
-	name := mlDataset(t, h, c, map[string]string{"rows": strings.Join(sels, " UNION ALL ")})
+	var loops []string
+	for i, r := range ref.Loop {
+		loops = append(loops, fmt.Sprintf("SELECT %d AS id, ARRAY<FLOAT64>[%v, %v] AS x, %v AS `limit`", i, r.Inputs["x"][0], r.Inputs["x"][1], r.Inputs["limit"][0]))
+	}
+	name := mlDataset(t, h, c, map[string]string{"rows": strings.Join(sels, " UNION ALL "), "loops": strings.Join(loops, " UNION ALL ")})
 
 	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.mlp` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/mlp/*')", name, b)); err != nil {
 		t.Fatalf("CREATE MODEL mlp: %v", err)
@@ -154,6 +163,30 @@ func TestBigQueryMLImportedTensorFlowModel(t *testing.T) {
 		}
 		for j, p := range ps {
 			near("probs", i, p, want["probs"][j])
+		}
+	}
+
+	// Control flow (#1775): the converter writes WHILE and IF subgraphs,
+	// with LESS, GREATER and SELECT_V2, which run as TensorFlow runs them.
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.loop` OPTIONS(model_type='TENSORFLOW', model_path='gs://%s/tf/loop')", name, b)); err != nil {
+		t.Fatalf("CREATE MODEL loop: %v", err)
+	}
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT id, y, steps, big, pos FROM ML.PREDICT(MODEL `%s.loop`, TABLE `%[1]s.loops`) ORDER BY id", name))
+	if len(rows) != len(ref.Loop) {
+		t.Fatalf("loop: %d rows, want %d", len(rows), len(ref.Loop))
+	}
+	for i, r := range rows {
+		want := ref.Loop[i].Outputs
+		near("steps", i, r["steps"], want["steps"][0])
+		near("big", i, r["big"], want["big"][0])
+		for _, col := range []string{"y", "pos"} {
+			vs, _ := r[col].([]bigquery.Value)
+			if len(vs) != len(want[col]) {
+				t.Fatalf("loop %s row %d: %v, TensorFlow %v", col, i, r[col], want[col])
+			}
+			for j, v := range vs {
+				near(col, i, v, want[col][j])
+			}
 		}
 	}
 

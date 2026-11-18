@@ -127,8 +127,19 @@ type op struct {
 // Model is a loaded .tflite model.
 type Model struct {
 	Inputs, Outputs []Port
-	tensors         []tensorDef
-	ops             []op
+	// tensors and ops are the signature's subgraph's.
+	tensors []tensorDef
+	ops     []op
+	// graphs are every subgraph, which WHILE and IF call (#1775).
+	graphs []*graph
+}
+
+// graph is one subgraph: its tensors, operators, and the tensors its
+// inputs and outputs are.
+type graph struct {
+	tensors []tensorDef
+	ops     []op
+	in, out []int
 }
 
 // builtin operator codes of schema.fbs's BuiltinOperator that Run runs.
@@ -176,6 +187,20 @@ const (
 	opMaxPool2D       = 17
 	opGather          = 36
 	opQuantize        = 114
+	// Control flow, comparisons, logic and selection (#1775).
+	opLess         = 58
+	opGreater      = 61
+	opGreaterEqual = 62
+	opLessEqual    = 63
+	opSelect       = 64
+	opEqual        = 71
+	opNotEqual     = 72
+	opLogicalOr    = 84
+	opLogicalAnd   = 86
+	opLogicalNot   = 87
+	opIf           = 118
+	opWhile        = 119
+	opSelectV2     = 123
 )
 
 var opNames = map[int32]string{opAdd: "ADD", opConcatenation: "CONCATENATION", opDequantize: "DEQUANTIZE", opFullyConnected: "FULLY_CONNECTED",
@@ -184,7 +209,10 @@ var opNames = map[int32]string{opAdd: "ADD", opConcatenation: "CONCATENATION", o
 	opExp: "EXP", opCast: "CAST", opMaximum: "MAXIMUM", opMinimum: "MINIMUM", opNeg: "NEG", opExpandDims: "EXPAND_DIMS", opLog: "LOG",
 	opSum: "SUM", opSqrt: "SQRT", opRsqrt: "RSQRT", opPow: "POW", opPack: "PACK", opSquare: "SQUARE", opLeakyRelu: "LEAKY_RELU",
 	opSquaredDiff: "SQUARED_DIFFERENCE", opAbs: "ABS", opBatchMatMul: "BATCH_MATMUL", opGelu: "GELU",
-	opAveragePool2D: "AVERAGE_POOL_2D", opConv2D: "CONV_2D", opDepthwiseConv2D: "DEPTHWISE_CONV_2D", opMaxPool2D: "MAX_POOL_2D", opGather: "GATHER", opQuantize: "QUANTIZE"}
+	opAveragePool2D: "AVERAGE_POOL_2D", opConv2D: "CONV_2D", opDepthwiseConv2D: "DEPTHWISE_CONV_2D", opMaxPool2D: "MAX_POOL_2D", opGather: "GATHER", opQuantize: "QUANTIZE",
+	opLess: "LESS", opGreater: "GREATER", opGreaterEqual: "GREATER_EQUAL", opLessEqual: "LESS_EQUAL", opSelect: "SELECT", opEqual: "EQUAL",
+	opNotEqual: "NOT_EQUAL", opLogicalOr: "LOGICAL_OR", opLogicalAnd: "LOGICAL_AND", opLogicalNot: "LOGICAL_NOT", opIf: "IF", opWhile: "WHILE",
+	opSelectV2: "SELECT_V2"}
 
 // Ops are the builtin operators Run runs, by schema.fbs name.
 func Ops() []string {
@@ -294,10 +322,78 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 		}
 		sg = subs[subIdx]
 	}
-	if len(subs) > 1 {
-		return nil, &UnsupportedError{fmt.Sprintf("the model has %d subgraphs (control flow such as WHILE or IF): CloudBurrow's TensorFlow Lite interpreter runs one", len(subs))}
-	}
 	m = &Model{}
+	for _, s := range subs {
+		g, err := loadGraph(s, codes, bufs)
+		if err != nil {
+			return nil, err
+		}
+		m.graphs = append(m.graphs, g)
+	}
+	_ = sg
+	main := m.graphs[subIdx]
+	m.tensors, m.ops = main.tensors, main.ops
+	for _, g := range m.graphs {
+		for _, o := range g.ops {
+			if o.code == opWhile || o.code == opIf {
+				for _, slot := range []int{4, 6} {
+					if k := int(o.i32(slot, -1)); k < 0 || k >= len(m.graphs) {
+						return nil, fmt.Errorf("operator %s names subgraph %d, which the model does not have", o.name, k)
+					}
+				}
+			}
+		}
+	}
+	port := func(name string, i int) (Port, error) {
+		if i < 0 || i >= len(m.tensors) {
+			return Port{}, errors.New("the model names a tensor it does not have")
+		}
+		d := m.tensors[i]
+		if name == "" {
+			name = d.name
+		}
+		typ := d.typ
+		if d.q != nil {
+			typ = d.stored // a quantized port takes and gives its integers
+		}
+		return Port{Name: name, Type: typ, Shape: d.shape, index: i}, nil
+	}
+	sg = subs[subIdx]
+	if sig != nil {
+		for k, slot := range []int{4, 6} {
+			for _, tm := range tables(sig, slot) {
+				p, err := port(str(tm, 4), int(tm.GetUint32Slot(6, 0)))
+				if err != nil {
+					return nil, err
+				}
+				if k == 0 {
+					m.Inputs = append(m.Inputs, p)
+				} else {
+					m.Outputs = append(m.Outputs, p)
+				}
+			}
+		}
+	} else {
+		for k, slot := range []int{6, 8} {
+			for _, i := range ints(sg, slot) {
+				p, err := port("", i)
+				if err != nil {
+					return nil, err
+				}
+				if k == 0 {
+					m.Inputs = append(m.Inputs, p)
+				} else {
+					m.Outputs = append(m.Outputs, p)
+				}
+			}
+		}
+	}
+	return m, nil
+}
+
+// loadGraph reads one subgraph.
+func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table) (*graph, error) {
+	m := &graph{in: ints(sg, 6), out: ints(sg, 8)}
 	for _, t := range tables(sg, 4) {
 		d := tensorDef{name: str(t, 10), typ: Type(t.GetInt8Slot(6, 0)), shape: ints(t, 4)}
 		if sh := ints(t, 18); sh != nil {
@@ -354,49 +450,6 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 		op := op{code: code, name: name, in: ints(o, 6), out: ints(o, 8)}
 		op.opts = sub(o, 12)
 		m.ops = append(m.ops, op)
-	}
-	port := func(name string, i int) (Port, error) {
-		if i < 0 || i >= len(m.tensors) {
-			return Port{}, errors.New("the model names a tensor it does not have")
-		}
-		d := m.tensors[i]
-		if name == "" {
-			name = d.name
-		}
-		typ := d.typ
-		if d.q != nil {
-			typ = d.stored // a quantized port takes and gives its integers
-		}
-		return Port{Name: name, Type: typ, Shape: d.shape, index: i}, nil
-	}
-	if sig != nil {
-		for k, slot := range []int{4, 6} {
-			for _, tm := range tables(sig, slot) {
-				p, err := port(str(tm, 4), int(tm.GetUint32Slot(6, 0)))
-				if err != nil {
-					return nil, err
-				}
-				if k == 0 {
-					m.Inputs = append(m.Inputs, p)
-				} else {
-					m.Outputs = append(m.Outputs, p)
-				}
-			}
-		}
-	} else {
-		for k, slot := range []int{6, 8} {
-			for _, i := range ints(sg, slot) {
-				p, err := port("", i)
-				if err != nil {
-					return nil, err
-				}
-				if k == 0 {
-					m.Inputs = append(m.Inputs, p)
-				} else {
-					m.Outputs = append(m.Outputs, p)
-				}
-			}
-		}
 	}
 	return m, nil
 }
@@ -470,4 +523,21 @@ func prod(s []int) int {
 		n *= d
 	}
 	return n
+}
+
+// Uses are the builtin operators the model's subgraphs use, by schema.fbs
+// name, sorted.
+func (m *Model) Uses() []string {
+	seen := map[string]bool{}
+	for _, g := range m.graphs {
+		for _, o := range g.ops {
+			seen[o.name] = true
+		}
+	}
+	var out []string
+	for n := range seen {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -1,8 +1,10 @@
 package tflitemodel
 
 import (
+	"cmp"
 	"fmt"
 	"math"
+	"strings"
 
 	flatbuffers "github.com/google/flatbuffers/go"
 )
@@ -38,32 +40,8 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 		}
 		vals[p.index] = &t
 	}
-	for _, o := range m.ops {
-		args := make([]*Tensor, len(o.in))
-		for j, i := range o.in {
-			if i >= 0 {
-				if vals[i] == nil {
-					return nil, fmt.Errorf("operator %s reads tensor %s before any operator writes it", o.name, m.tensors[i].name)
-				}
-				args[j] = vals[i]
-			}
-		}
-		if len(o.out) != 1 {
-			return nil, &UnsupportedError{fmt.Sprintf("operator %s has %d outputs", o.name, len(o.out))}
-		}
-		r, err := m.eval(o, args)
-		if err != nil {
-			return nil, err
-		}
-		want := m.tensors[o.out[0]].typ
-		if r.Type != want {
-			c := convert(*r, want)
-			r = &c
-		}
-		if q := m.tensors[o.out[0]].q; q != nil {
-			r = q.round(r)
-		}
-		vals[o.out[0]] = r
+	if err := m.runGraph(&graph{tensors: m.tensors, ops: m.ops}, vals, 0); err != nil {
+		return nil, err
 	}
 	for _, p := range m.Outputs {
 		if vals[p.index] == nil {
@@ -121,6 +99,233 @@ func convert(t Tensor, typ Type) Tensor {
 		}
 	}
 	return r
+}
+
+// maxDepth bounds nested WHILE and IF calls, and maxIterations one
+// WHILE's iterations, so a model cannot run forever (#1775).
+const (
+	maxDepth      = 64
+	maxIterations = 1 << 20
+)
+
+// runGraph runs g's operators on vals, its tensors' values, in order.
+func (m *Model) runGraph(g *graph, vals []*Tensor, depth int) error {
+	for _, o := range g.ops {
+		args := make([]*Tensor, len(o.in))
+		for j, i := range o.in {
+			if i >= 0 {
+				if vals[i] == nil {
+					return fmt.Errorf("operator %s reads tensor %s before any operator writes it", o.name, g.tensors[i].name)
+				}
+				args[j] = vals[i]
+			}
+		}
+		if o.code == opWhile || o.code == opIf {
+			outs, err := m.control(o, args, depth)
+			if err != nil {
+				return err
+			}
+			if len(outs) != len(o.out) {
+				return fmt.Errorf("operator %s gives %d values for %d outputs", o.name, len(outs), len(o.out))
+			}
+			for k, i := range o.out {
+				if i >= 0 {
+					vals[i] = outs[k]
+				}
+			}
+			continue
+		}
+		if len(o.out) != 1 {
+			return &UnsupportedError{fmt.Sprintf("operator %s has %d outputs", o.name, len(o.out))}
+		}
+		r, err := m.eval(o, args)
+		if err != nil {
+			return err
+		}
+		want := g.tensors[o.out[0]].typ
+		if r.Type != want {
+			c := convert(*r, want)
+			r = &c
+		}
+		if q := g.tensors[o.out[0]].q; q != nil {
+			r = q.round(r)
+		}
+		vals[o.out[0]] = r
+	}
+	return nil
+}
+
+// call runs subgraph k on args, one per its inputs, and returns its
+// outputs.
+func (m *Model) call(k int, args []*Tensor, depth int) ([]*Tensor, error) {
+	if depth >= maxDepth {
+		return nil, fmt.Errorf("control flow nests deeper than %d calls", maxDepth)
+	}
+	g := m.graphs[k]
+	if len(args) != len(g.in) {
+		return nil, fmt.Errorf("subgraph %d takes %d inputs, not %d", k, len(g.in), len(args))
+	}
+	vals := make([]*Tensor, len(g.tensors))
+	for i, d := range g.tensors {
+		vals[i] = d.data
+	}
+	for j, i := range g.in {
+		a := args[j]
+		if want := g.tensors[i].typ; a != nil && a.Type != want && !(a.Type.IsFloat() && want.IsFloat()) {
+			c := convert(*a, want)
+			a = &c
+		}
+		vals[i] = a
+	}
+	if err := m.runGraph(g, vals, depth+1); err != nil {
+		return nil, err
+	}
+	out := make([]*Tensor, len(g.out))
+	for j, i := range g.out {
+		if vals[i] == nil {
+			return nil, fmt.Errorf("subgraph %d does not write its output %s", k, g.tensors[i].name)
+		}
+		out[j] = vals[i]
+	}
+	return out, nil
+}
+
+// truth is a condition tensor's one value.
+func truth(t *Tensor) (bool, error) {
+	if t == nil || t.Len() != 1 {
+		return false, fmt.Errorf("a condition must hold one value")
+	}
+	return t.f(0) != 0, nil
+}
+
+// control runs WHILE (WhileOptions: cond_subgraph_index,
+// body_subgraph_index) and IF (IfOptions: then_subgraph_index,
+// else_subgraph_index), as LiteRT's kernels do.
+func (m *Model) control(o op, args []*Tensor, depth int) ([]*Tensor, error) {
+	a, b := int(o.i32(4, -1)), int(o.i32(6, -1))
+	if o.code == opIf {
+		if len(args) == 0 {
+			return nil, fmt.Errorf("operator IF has no condition")
+		}
+		c, err := truth(args[0])
+		if err != nil {
+			return nil, fmt.Errorf("operator IF: %w", err)
+		}
+		if c {
+			return m.call(a, args[1:], depth)
+		}
+		return m.call(b, args[1:], depth)
+	}
+	return m.while(a, b, args, depth)
+}
+
+// while runs WHILE: body subgraph b on its state for as long as cond
+// subgraph a says.
+func (m *Model) while(a, b int, state []*Tensor, depth int) ([]*Tensor, error) {
+	for n := 0; ; n++ {
+		if n >= maxIterations {
+			return nil, fmt.Errorf("operator WHILE ran %d iterations without its condition turning false", maxIterations)
+		}
+		cond, err := m.call(a, state, depth)
+		if err != nil {
+			return nil, err
+		}
+		if len(cond) != 1 {
+			return nil, fmt.Errorf("operator WHILE's condition gives %d values, not 1", len(cond))
+		}
+		c, err := truth(cond[0])
+		if err != nil {
+			return nil, fmt.Errorf("operator WHILE: %w", err)
+		}
+		if !c {
+			return state, nil
+		}
+		if state, err = m.call(b, state, depth); err != nil {
+			return nil, err
+		}
+	}
+}
+
+// compare is a comparison operator's BOOL result, broadcast.
+func compare(o op, x, y *Tensor) (*Tensor, error) {
+	if y == nil {
+		return nil, fmt.Errorf("operator %s takes two inputs", o.name)
+	}
+	shape, err := broadcastShape(x.Shape, y.Shape)
+	if err != nil {
+		return nil, fmt.Errorf("operator %s: %w", o.name, err)
+	}
+	n := prod(shape)
+	r := &Tensor{Type: Bool, Shape: shape, B: make([]bool, n)}
+	for i := range n {
+		xi, yi := broadcastIndex(i, shape, x.Shape), broadcastIndex(i, shape, y.Shape)
+		var c int
+		switch {
+		case x.Type == String && y.Type == String:
+			c = strings.Compare(x.S[xi], y.S[yi])
+		case x.I != nil && y.I != nil:
+			c = cmp.Compare(x.I[xi], y.I[yi])
+		default:
+			c = cmp.Compare(x.f(xi), y.f(yi))
+		}
+		switch o.code {
+		case opLess:
+			r.B[i] = c < 0
+		case opLessEqual:
+			r.B[i] = c <= 0
+		case opGreater:
+			r.B[i] = c > 0
+		case opGreaterEqual:
+			r.B[i] = c >= 0
+		case opEqual:
+			r.B[i] = c == 0
+		case opNotEqual:
+			r.B[i] = c != 0
+		case opLogicalAnd:
+			r.B[i] = x.f(xi) != 0 && y.f(yi) != 0
+		case opLogicalOr:
+			r.B[i] = x.f(xi) != 0 || y.f(yi) != 0
+		}
+	}
+	return r, nil
+}
+
+// selectOp is SELECT and SELECT_V2: x where cond, else y, broadcast (SELECT
+// also takes a condition of rank 1 that picks whole rows).
+func selectOp(o op, cond, x, y *Tensor) (*Tensor, error) {
+	if x == nil || y == nil {
+		return nil, fmt.Errorf("operator %s takes three inputs", o.name)
+	}
+	shape, err := broadcastShape(x.Shape, y.Shape)
+	if err != nil {
+		return nil, fmt.Errorf("operator %s: %w", o.name, err)
+	}
+	rowwise := o.code == opSelect && len(cond.Shape) == 1 && len(shape) > 1 && cond.Shape[0] == shape[0]
+	if !rowwise {
+		if shape, err = broadcastShape(cond.Shape, shape); err != nil {
+			return nil, fmt.Errorf("operator %s: %w", o.name, err)
+		}
+	}
+	r := alloc(x, shape)
+	n := prod(shape)
+	row := 1
+	if rowwise {
+		row = n / shape[0]
+	}
+	for i := range n {
+		var c bool
+		if rowwise {
+			c = cond.f(i/row) != 0
+		} else {
+			c = cond.f(broadcastIndex(i, shape, cond.Shape)) != 0
+		}
+		if c {
+			at(r, i, x, broadcastIndex(i, shape, x.Shape))
+		} else {
+			at(r, i, y, broadcastIndex(i, shape, y.Shape))
+		}
+	}
+	return r, nil
 }
 
 // f is element i as float32.
@@ -211,7 +416,8 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 	}
 	if x.Type == String {
 		switch o.code {
-		case opReshape, opSqueeze, opExpandDims, opTranspose, opConcatenation, opPack, opStridedSlice, opGather:
+		case opReshape, opSqueeze, opExpandDims, opTranspose, opConcatenation, opPack, opStridedSlice, opGather,
+			opEqual, opNotEqual, opLess, opLessEqual, opGreater, opGreaterEqual:
 		default:
 			return nil, &UnsupportedError{fmt.Sprintf("operator %s on STRING tensors is not supported", o.name)}
 		}
@@ -230,6 +436,16 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 		return func(v float32) float32 { return float32(fn(float64(v))) }
 	}
 	switch o.code {
+	case opLess, opLessEqual, opGreater, opGreaterEqual, opEqual, opNotEqual, opLogicalAnd, opLogicalOr:
+		return compare(o, x, arg(1))
+	case opLogicalNot:
+		r := &Tensor{Type: Bool, Shape: x.Shape, B: make([]bool, x.Len())}
+		for i := range r.B {
+			r.B[i] = x.f(i) == 0
+		}
+		return r, nil
+	case opSelect, opSelectV2:
+		return selectOp(o, x, arg(1), arg(2))
 	case opAdd, opSub, opMul, opDiv, opMaximum, opMinimum, opPow, opSquaredDiff:
 		act := int8(0)
 		if o.code == opAdd || o.code == opSub || o.code == opMul || o.code == opDiv {

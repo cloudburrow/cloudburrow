@@ -42,8 +42,9 @@ import (
 // How it runs: on internal/tflitemodel, a pure-Go interpreter of LiteRT's
 // builtin operators checked against LiteRT's own output, so every build
 // (and the CGO-less in-cluster front) runs it: float, quantized (int8,
-// uint8; #1766) and STRING tensors (#1766). An operator it does not run
-// or control flow is 501, naming what is missing.
+// uint8; #1766) and STRING tensors (#1766), and control flow (WHILE and
+// IF over the model's other subgraphs, #1775). An operator it does not
+// run is 501, naming what is missing.
 //
 // UNVERIFIED (docs re-read 2026-11-17: bigqueryml-syntax-create-tflite), chosen here as Google does not say: each row
 // runs as a batch of one; a NULL input is 400 (a TensorFlow Lite tensor

@@ -43,8 +43,28 @@ class Flex(tf.Module):
         return {"s": tf.linalg.svd(m, compute_uv=False)}
 
 
+class Loop(tf.Module):
+    """Control flow: a WHILE that doubles x until its sum passes limit,
+    counting the steps, and an IF on the count."""
+
+    @tf.function(input_signature=[tf.TensorSpec([None, 2], tf.float32, name="x"), tf.TensorSpec([None], tf.float32, name="limit")])
+    def serve(self, x, limit):
+        def cond(i, v):
+            return tf.reduce_sum(v) < tf.reduce_sum(limit)
+
+        def body(i, v):
+            return i + 1, v * 2.0
+
+        n, y = tf.while_loop(cond, body, [tf.constant(0, tf.int32), x])
+        big = tf.cond(n > 2, lambda: tf.reduce_sum(y) * 10.0, lambda: tf.reduce_sum(y) - 1.0)
+        return {"y": y, "steps": tf.reshape(tf.cast(n, tf.int64), [1]), "big": tf.reshape(big, [1]),
+                "pos": tf.where(x > 0.0, x, -x)}
+
+
 mlp = MLP()
 tf.saved_model.save(mlp, "/out/savedmodel/mlp", signatures={"serving_default": mlp.serve})
+loop = Loop()
+tf.saved_model.save(loop, "/out/savedmodel/loop", signatures={"serving_default": loop.serve})
 flex = Flex()
 tf.saved_model.save(flex, "/out/savedmodel/flex", signatures={"serving_default": flex.serve})
 
@@ -58,5 +78,10 @@ out = []
 for r in rows:
     o = fn(x=tf.constant([r["x"]], tf.float32), k=tf.constant([r["k"]], tf.int64))
     out.append({"inputs": r, "outputs": {k: v.numpy()[0].tolist() for k, v in o.items()}})
+fn = tf.saved_model.load("/out/savedmodel/loop").signatures["serving_default"]
+loops = []
+for r in [{"x": [0.5, -0.25], "limit": [3.0]}, {"x": [1.0, 2.0], "limit": [2.0]}, {"x": [-0.125, 0.5], "limit": [40.0]}]:
+    o = fn(x=tf.constant([r["x"]], tf.float32), limit=tf.constant(r["limit"], tf.float32))
+    loops.append({"inputs": r, "outputs": {k: v.numpy().reshape(-1).tolist() for k, v in o.items()}})
 with open("/out/tensorflow_predictions.json", "w") as f:
-    json.dump({"tensorflow": tf.__version__, "rows": out}, f, indent=1)
+    json.dump({"tensorflow": tf.__version__, "rows": out, "loop": loops}, f, indent=1)

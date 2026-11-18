@@ -70,8 +70,9 @@ func TestServerRoundTrip(t *testing.T) {
 
 // TestDockerConverter runs the real converter image (deploy/tfconvert) on
 // the testdata SavedModels when CLOUDBURROW_TFCONVERT_IMAGE names it: the
-// converted mlp, run on internal/tflitemodel, gives TensorFlow's own
-// serving_default output (tensorflow_predictions.json), and the SVD model
+// converted mlp and loop (WHILE, IF, comparisons and SELECT_V2, #1775),
+// run on internal/tflitemodel, give TensorFlow's own serving_default
+// output (tensorflow_predictions.json), and the SVD model
 // is refused as needing Flex.
 func TestDockerConverter(t *testing.T) {
 	image := os.Getenv("CLOUDBURROW_TFCONVERT_IMAGE")
@@ -95,61 +96,74 @@ func TestDockerConverter(t *testing.T) {
 		})
 		return d.Convert(context.Background(), model)
 	}
-	data, err := conv("mlp")
-	if err != nil {
-		t.Fatalf("convert mlp: %v", err)
-	}
-	m, err := tflitemodel.Load(data)
-	if err != nil {
-		t.Fatal(err)
+	type rows []struct {
+		Inputs  map[string][]float64 `json:"inputs"`
+		Outputs map[string][]float64 `json:"outputs"`
 	}
 	var ref struct {
-		Rows []struct {
-			Inputs  map[string][]float64 `json:"inputs"`
-			Outputs map[string][]float64 `json:"outputs"`
-		} `json:"rows"`
+		Rows rows `json:"rows"`
+		Loop rows `json:"loop"`
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "tensorflow_predictions.json"))
 	if err := json.Unmarshal(b, &ref); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range ref.Rows {
-		var ins []tflitemodel.Tensor
-		for _, p := range m.Inputs {
-			vs := row.Inputs[p.Name]
-			tn := tflitemodel.Tensor{Type: p.Type, Shape: []int{1, len(vs)}}
-			for _, v := range vs {
-				if p.Type.IsInt() {
-					tn.I = append(tn.I, int64(v))
-				} else {
-					tn.F = append(tn.F, float32(v))
-				}
-			}
-			ins = append(ins, tn)
-		}
-		outs, err := m.Run(ins)
+	for model, want := range map[string]rows{"mlp": ref.Rows, "loop": ref.Loop} {
+		data, err := conv(model)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("convert %s: %v", model, err)
 		}
-		for k, p := range m.Outputs {
-			want := row.Outputs[p.Name]
-			if len(want) != outs[k].Len() {
-				t.Fatalf("%s: %d values, TensorFlow %d", p.Name, outs[k].Len(), len(want))
-			}
-			for i, w := range want {
-				var g float64
-				if outs[k].I != nil {
-					g = float64(outs[k].I[i])
-				} else {
-					g = float64(outs[k].F[i])
+		m, err := tflitemodel.Load(data)
+		if err != nil {
+			t.Fatalf("%s: %v", model, err)
+		}
+		for _, row := range want {
+			var ins []tflitemodel.Tensor
+			for _, p := range m.Inputs {
+				vs := row.Inputs[p.Name]
+				shape := []int{1, len(vs)}
+				if len(p.Shape) == 1 {
+					shape = []int{len(vs)}
 				}
-				if math.Abs(g-w) > 1e-5 {
-					t.Errorf("%s[%d] = %v, TensorFlow %v", p.Name, i, g, w)
+				tn := tflitemodel.Tensor{Type: p.Type, Shape: shape}
+				for _, v := range vs {
+					if p.Type.IsInt() {
+						tn.I = append(tn.I, int64(v))
+					} else {
+						tn.F = append(tn.F, float32(v))
+					}
+				}
+				ins = append(ins, tn)
+			}
+			outs, err := m.Run(ins)
+			if err != nil {
+				t.Fatalf("%s: %v", model, err)
+			}
+			for k, p := range m.Outputs {
+				w := row.Outputs[p.Name]
+				if len(w) != outs[k].Len() {
+					t.Fatalf("%s %s: %d values, TensorFlow %d", model, p.Name, outs[k].Len(), len(w))
+				}
+				for i, wv := range w {
+					var g float64
+					if outs[k].I != nil {
+						g = float64(outs[k].I[i])
+					} else {
+						g = float64(outs[k].F[i])
+					}
+					if math.Abs(g-wv) > 1e-5*max(1, math.Abs(wv)) {
+						t.Errorf("%s %s[%d] = %v, TensorFlow %v", model, p.Name, i, g, wv)
+					}
 				}
 			}
 		}
+		uses := strings.Join(m.Uses(), " ")
+		if model == "loop" && (!strings.Contains(uses, "WHILE") || !strings.Contains(uses, "IF")) {
+			t.Errorf("loop converted without WHILE and IF: %s", uses)
+		}
+		t.Logf("%s ran, as TensorFlow does: %s", model, uses)
 	}
-	_, err = conv("flex")
+	_, err := conv("flex")
 	var rf *Refusal
 	if !errors.As(err, &rf) || rf.Kind != "flex" {
 		t.Fatalf("flex: %#v", err)

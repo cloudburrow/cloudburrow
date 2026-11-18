@@ -55,7 +55,7 @@ import (
 // with the converter's message; an operator internal/tflitemodel does not
 // run; and every model without the CLI's converter.
 //
-// UNVERIFIED, as Google does not say: BigQuery's own error texts (the
+// UNVERIFIED (docs re-read 2026-11-18: bigqueryml-syntax-create-tensorflow), as Google does not say: BigQuery's own error texts (the
 // page names none but the out-of-memory one); "Models trained using a
 // version of GraphDef earlier than version 20 aren't supported" is not
 // checked; tf.train.Example inputs and SparseTensor inputs are 501 (the
