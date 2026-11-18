@@ -373,9 +373,43 @@ func renderContainers(b *strings.Builder, containers []*runpb.Container, o conta
 			for _, k := range sortedKeys(r.GetLimits()) {
 				fmt.Fprintf(b, "              %s: %q\n", k, r.GetLimits()[k])
 			}
+			if req, ok := cpuRequest(r.GetLimits()["cpu"]); ok {
+				fmt.Fprintf(b, "            requests:\n              cpu: %q\n", req)
+			}
 		}
 	}
 	return nil
+}
+
+// instanceCPURequest is the CPU an instance asks the node to reserve.
+//
+// A container with limits and no requests gets requests equal to its
+// limits, so each instance of a 1-CPU service reserved a whole core of the
+// one kind node, and a service could run only as many instances as the
+// machine has cores free: on CI's 4-CPU runner, after the cluster's,
+// Knative's and the emulators' own requests, one (main run 44326182935:
+// TestRunServiceCPUUtilizationScaling, TestRunWorkerPoolCPUScaling and
+// TestRunServiceCPUOnlyScaling each "grew to 1"; their next instances could
+// not be scheduled). Cloud Run never refuses an instance for want of a
+// host, so the request is small and the limit, which the CPU driver reads
+// and the kernel enforces, stays the instance's CPU.
+const instanceCPURequest = "10m"
+
+// cpuRequest is the CPU request rendered beside a CPU limit: the smaller of
+// instanceCPURequest and the limit, which Kubernetes requires a request not
+// to exceed.
+func cpuRequest(limit string) (string, bool) {
+	if limit == "" {
+		return "", false
+	}
+	cpus, err := parseCPU(limit)
+	if err != nil {
+		return "", false
+	}
+	if req, _ := parseCPU(instanceCPURequest); cpus < req {
+		return limit, true
+	}
+	return instanceCPURequest, true
 }
 
 // batchContainerName is a container's name in a batch Job's pod: the one
