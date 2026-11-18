@@ -38,7 +38,7 @@ func (f front) dryCall(r *http.Request, q queryOptions, insert bool, orig []byte
 	if flow != nil {
 		return flow.status, "invalidQuery", flow.msg
 	}
-	project := s.project()
+	project := s.procProject(parts) // #1784
 	proc, ok := f.functions.proc(project, p)
 	if !ok {
 		return http.StatusNotFound, "notFound", "Not found: Procedure " + project + ":" + p[0] + "." + p[1]

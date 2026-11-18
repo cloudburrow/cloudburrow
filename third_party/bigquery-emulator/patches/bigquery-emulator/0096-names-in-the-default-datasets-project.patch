@@ -1,0 +1,90 @@
+CloudBurrow patch 96 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1784). Applies after patch 0092; needs
+googlesqlite patch 0095.
+
+A query's default dataset names a project too: BigQuery's defaultDataset
+"specifies the default datasetId and projectId to assume for any
+unqualified table names in the query"
+(https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#jobconfigurationquery).
+jobs.query and a query job ran the query in the job's project whatever
+the default dataset's project, so `ds.t` with another project's default
+dataset named the job's project's table. The engine's name path (which
+googlesqlite patch 0095 reads a name of two parts in) is now the default
+dataset's project when it gives one, the job's otherwise (namesProject).
+
+cloudburrow_names_project_test.go (TestNamesProject).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- /dev/null
++++ b/server/cloudburrow_names_project.go
+@@ -0,0 +1,17 @@
++package server
++
++import bigqueryv2 "google.golang.org/api/bigquery/v2"
++
++// namesProject is the project a query's names without a project are read
++// in: its default dataset's project when it has one, the job's otherwise.
++// BigQuery's defaultDataset "specifies the default datasetId and
++// projectId to assume for any unqualified table names in the query"
++// (https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#jobconfigurationquery).
++// The engine reads a name of two parts in this project (googlesqlite
++// patch 0095). CloudBurrow patch (cloudburrow/cloudburrow#1784).
++func namesProject(jobProject string, defaultDataset *bigqueryv2.DatasetReference) string {
++	if defaultDataset != nil && defaultDataset.ProjectId != "" {
++		return defaultDataset.ProjectId
++	}
++	return jobProject
++}
+--- /dev/null
++++ b/server/cloudburrow_names_project_test.go
+@@ -0,0 +1,25 @@
++package server
++
++import (
++	"testing"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// TestNamesProject is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1784): a query's names without a project are
++// read in its default dataset's project, the job's when it has none.
++func TestNamesProject(t *testing.T) {
++	for _, tc := range []struct {
++		ds   *bigqueryv2.DatasetReference
++		want string
++	}{
++		{nil, "job"},
++		{&bigqueryv2.DatasetReference{DatasetId: "ds"}, "job"},
++		{&bigqueryv2.DatasetReference{ProjectId: "other", DatasetId: "ds"}, "other"},
++	} {
++		if got := namesProject("job", tc.ds); got != tc.want {
++			t.Errorf("namesProject(job, %+v) = %q, want %q", tc.ds, got, tc.want)
++		}
++	}
++}
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1793,7 +1793,7 @@
+ 	response, jobErr := r.server.contentRepo.Query(
+ 		ctx,
+ 		tx,
+-		r.project.ID,
++		namesProject(r.project.ID, job.Configuration.Query.DefaultDataset), // CloudBurrow patch (#1784)
+ 		"",
+ 		job.Configuration.Query.Query,
+ 		job.Configuration.Query.QueryParameters,
+@@ -2372,7 +2372,7 @@
+ 	response, queryErr := r.server.contentRepo.Query(
+ 		ctx,
+ 		tx,
+-		r.project.ID,
++		namesProject(r.project.ID, r.queryRequest.DefaultDataset), // CloudBurrow patch (#1784)
+ 		datasetID,
+ 		r.queryRequest.Query,
+ 		r.queryRequest.QueryParameters,

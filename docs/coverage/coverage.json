@@ -9977,6 +9977,7 @@
           "test/compat/bigquerymultiproject1774_test.go:147 TestBigQueryCloneAsOfAndShutDownAcrossProjects",
           "test/compat/bigquerymultiproject1774_test.go:89 TestBigQueryParquetAndORCLoadsAcrossProjects",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
+          "test/compat/bigquerynames1784_test.go:36 TestBigQueryNamesOfTheJobsProject",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
@@ -10211,6 +10212,7 @@
           "test/compat/bigquerymultiproject1767_test.go:306 TestBigQueryJobsByFolderAcrossProjects",
           "test/compat/bigquerymultiproject1774_test.go:147 TestBigQueryCloneAsOfAndShutDownAcrossProjects",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
+          "test/compat/bigquerynames1784_test.go:36 TestBigQueryNamesOfTheJobsProject",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
@@ -10400,6 +10402,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
+          "test/compat/bigquerynames1784_test.go:36 TestBigQueryNamesOfTheJobsProject",
           "test/compat/bigquerypurge1781_test.go:36 TestBigQueryPurgedProjectStartsEmpty",
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
           "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",

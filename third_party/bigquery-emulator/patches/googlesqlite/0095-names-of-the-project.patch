@@ -1,0 +1,666 @@
+CloudBurrow patch 95 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1784). Applies after patch 0090.
+
+BigQuery reads a name that gives no project in the project of the query,
+and a name of one part in its default dataset
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical#table_names).
+The catalog held every object of every project in one root catalog, under
+every suffix of its path ("project.dataset.name", "dataset.name", "name"),
+the first object made under a name keeping it (existsTable,
+existsFunction, existsTVF). So in a query of project B, `ds.t`, `ds.f(x)`,
+`ds.tvf()`, `ds.t_*` and `ds.INFORMATION_SCHEMA.TABLES` named project A's
+objects when A had made them first: B read A's rows and ran A's function,
+and INFORMATION_SCHEMA listed both projects' tables of a dataset ID.
+
+An object of a project's path (three parts, projectScoped) is now
+registered in the root catalog under its own path alone ("p.ds.t", and
+the sub-catalogs p, then ds, which hold "ds.t" and "t"); the aliases
+without the project go to a catalog of their own (Catalog.aliases). A
+statement is analyzed in lookupCatalog: for a connection of a project, a
+MultiCatalog of the project's sub-catalog, its default dataset's and the
+root catalog; for a connection with no name path (googlesqlite's own
+tests), the root catalog and the aliases. A wildcard path is merged with
+the name path and matches the tables of its project and dataset by their
+paths; an INFORMATION_SCHEMA view's vtab filter is "project.dataset".
+A view's and a SQL function's body are formatted when they are made, so
+they keep the names of their own project.
+
+The regression test is names_of_the_project_test.go.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1344,7 +1344,7 @@
+ 	if loc == nil || loc.SetBytePosition(pos) != nil {
+ 		return err
+ 	}
+-	_, located := googlesql.AnalyzeNextStatement(loc, a.opt, a.catalog.catalog, tf())
++	_, located := googlesql.AnalyzeNextStatement(loc, a.opt, a.catalog.lookupCatalog(a.namePath.path), tf()) // CloudBurrow patch (#1784)
+ 	if located == nil || !strings.HasPrefix(located.Error(), err.Error()+" [at ") {
+ 		return err
+ 	}
+@@ -1731,7 +1731,7 @@
+ 	if err := a.declareParameterTypes(mode, args); err != nil {
+ 		return nil, fmt.Errorf("failed to declare parameter types: %w", err)
+ 	}
+-	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
++	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.lookupCatalog(a.namePath.path), tf()) // CloudBurrow patch (#1784)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to analyze: %w", err)
+ 	}
+@@ -1820,7 +1820,9 @@
+ 				return nil, stmtFacts.castErr
+ 			}
+ 			for _, ids := range stmtFacts.wildcardTables {
+-				a.catalog.registerWildcardTableByPath(ids)
++				// CloudBurrow patch (cloudburrow/cloudburrow#1784): the
++				// wildcard of the statement's project (project_scope.go).
++				a.catalog.registerWildcardTableByPath(a.namePath.mergePath(ids))
+ 			}
+ 			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, zoned)
+ 			if err != nil {
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -99,10 +99,19 @@
+ 	// cloudburrow/cloudburrow#1458, change_history_kept.go).
+ 	keptMigrated bool
+ 	mu           sync.Mutex
+-	tables       []*TableSpec
+-	functions    []*FunctionSpec
+-	tvfs         []*TVFSpec
+-	catalog      *googlesql.SimpleCatalog
++	// lookupCatalogs: the catalog a statement of one project (and default
++	// dataset) is analyzed in, by "project\x00dataset" (CloudBurrow patch,
++	// cloudburrow/cloudburrow#1784, lookupCatalog). Dropped whenever a
++	// sub-catalog is made or the catalog is rebuilt.
++	lookupCatalogs map[string]*googlesql.MultiCatalog
++	// aliases: the names of a project's objects without their project
++	// ("dataset.name", "name"), for a statement of no project
++	// (lookupCatalog). CloudBurrow patch (#1784).
++	aliases   *googlesql.SimpleCatalog
++	tables    []*TableSpec
++	functions []*FunctionSpec
++	tvfs      []*TVFSpec
++	catalog   *googlesql.SimpleCatalog
+ 	// descriptorPool is the protobuf DescriptorPool attached to the
+ 	// SimpleCatalog at construction time. Consumers register FileDescriptorProto
+ 	// payloads through Catalog.RegisterProto (Conn.RegisterProto on the
+@@ -1527,6 +1536,7 @@
+ 	c := &Catalog{
+ 		db:                   db,
+ 		catalog:              sc,
++		aliases:              newAliasCatalog(), // CloudBurrow patch (#1784)
+ 		descriptorPool:       pool,
+ 		registeredProtos:     map[string]*googlesql.ProtoType{},
+ 		registeredEnums:      map[string]*googlesql.EnumType{},
+@@ -1761,6 +1771,7 @@
+ 	}
+ 	_ = parent.AddCatalog(sub)
+ 	subs[name] = sub
++	c.lookupCatalogs = nil // CloudBurrow patch (#1784)
+ 	return sub
+ }
+ 
+@@ -1804,13 +1815,13 @@
+ 	// Install into the wasm-side catalog tree. Walk the leading path
+ 	// segments as sub-catalogs so the analyzer resolves the reference
+ 	// in either form (fully-qualified or dataset-qualified).
+-	c.installWildcardIntoCatalog(c.catalog, path, simpleTable)
++	c.installWildcardIntoCatalog(c.catalog, path, simpleTable, projectScoped(path))
+ }
+ 
+ // installWildcardIntoCatalog adds `table` under each leading namespace
+ // prefix of `path`, so `project.dataset.table_*` resolves regardless
+ // of whether the query omits the project identifier.
+-func (c *Catalog) installWildcardIntoCatalog(cat *googlesql.SimpleCatalog, path []string, table *googlesql.SimpleTable) {
++func (c *Catalog) installWildcardIntoCatalog(cat *googlesql.SimpleCatalog, path []string, table *googlesql.SimpleTable, scoped bool) {
+ 	if len(path) == 0 {
+ 		return
+ 	}
+@@ -1823,8 +1834,16 @@
+ 	}
+ 	subName := path[0]
+ 	sub := c.getOrCreateSubCatalog(cat, subName)
+-	c.installWildcardIntoCatalog(cat, path[1:], table)
+-	c.installWildcardIntoCatalog(sub, path[1:], table)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1784): also by its whole
++	// path as one name (`dataset.table_*`), as a table is: the analyzer
++	// sends the wildcard path split (mergePath).
++	if full := strings.Join(path, "."); !c.existsTable(cat, full) {
++		_ = c.addTableName(cat, full, table)
++	}
++	if alias := c.suffixCatalog(cat, scoped); alias != nil { // CloudBurrow patch (#1784)
++		c.installWildcardIntoCatalog(alias, path[1:], table, false)
++	}
++	c.installWildcardIntoCatalog(sub, path[1:], table, scoped)
+ }
+ 
+ func (c *Catalog) normalizeTablePath(path []string) []string {
+@@ -2226,6 +2245,8 @@
+ 	// it exhausts and `wasm_alloc` starts returning OOB.
+ 	c.subCatalogs = map[*googlesql.SimpleCatalog]map[string]*googlesql.SimpleCatalog{}
+ 	c.tableNames = map[*googlesql.SimpleCatalog]map[string]struct{}{}
++	c.lookupCatalogs = nil // CloudBurrow patch (#1784)
++	c.aliases = newAliasCatalog()
+ 	// The handles of the tables kept, and none of the others'.
+ 	handles := make(map[*TableSpec]*googlesql.SimpleTable, len(tables))
+ 	for _, spec := range tables {
+@@ -2481,7 +2502,7 @@
+ 		}
+ 		c.tableHandles[spec] = table
+ 	}
+-	return c.addTableSpecRecursiveImpl(cat, spec, table)
++	return c.addTableSpecRecursiveImpl(cat, spec, table, projectScoped(spec.NamePath))
+ }
+ 
+ // addTableSpecRecursiveImpl aliases the same SimpleTable handle into
+@@ -2492,7 +2513,7 @@
+ // SimpleCatalog.AddTable2(name, table) which accepts a caller-provided
+ // lookup key instead of using table.Name(); the table's own Name()
+ // stays pinned to the storage path for the formatter.
+-func (c *Catalog) addTableSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *TableSpec, table *googlesql.SimpleTable) error {
++func (c *Catalog) addTableSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *TableSpec, table *googlesql.SimpleTable, scoped bool) error {
+ 	if len(spec.NamePath) > 1 {
+ 		subCatalogName := spec.NamePath[0]
+ 		// Reuse the previously-added sub-catalog when the same name
+@@ -2511,12 +2532,15 @@
+ 			}
+ 		}
+ 		newNamePath := spec.NamePath[1:]
+-		// add sub catalog to root catalog
+-		if err := c.addTableSpecRecursiveImpl(cat, c.copyTableSpec(spec, newNamePath), table); err != nil {
+-			return fmt.Errorf("failed to add table spec to root catalog: %w", err)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1784): the alias by the
++		// rest of the path, see suffixCatalog.
++		if alias := c.suffixCatalog(cat, scoped); alias != nil {
++			if err := c.addTableSpecRecursiveImpl(alias, c.copyTableSpec(spec, newNamePath), table, false); err != nil {
++				return fmt.Errorf("failed to add table spec to root catalog: %w", err)
++			}
+ 		}
+ 		// add sub catalog to parent catalog
+-		if err := c.addTableSpecRecursiveImpl(subCatalog, c.copyTableSpec(spec, newNamePath), table); err != nil {
++		if err := c.addTableSpecRecursiveImpl(subCatalog, c.copyTableSpec(spec, newNamePath), table, scoped); err != nil {
+ 			return fmt.Errorf("failed to add table spec to parent catalog: %w", err)
+ 		}
+ 		return nil
+@@ -2687,7 +2711,7 @@
+ 	if err != nil {
+ 		return err
+ 	}
+-	if err := c.addFunctionSpecRecursiveImpl(cat, spec, fn); err != nil {
++	if err := c.addFunctionSpecRecursiveImpl(cat, spec, fn, projectScoped(spec.NamePath)); err != nil {
+ 		return err
+ 	}
+ 	// Alias the same Function handle under the `bqutil.fn.<name>`
+@@ -2697,7 +2721,7 @@
+ 	// specs already encode their own dataset prefix.
+ 	if len(spec.NamePath) == 1 {
+ 		bqutilSpec := c.copyFunctionSpec(spec, []string{"bqutil", "fn", spec.NamePath[0]})
+-		if err := c.addFunctionSpecRecursiveImpl(cat, bqutilSpec, fn); err != nil {
++		if err := c.addFunctionSpecRecursiveImpl(cat, bqutilSpec, fn, false); err != nil {
+ 			return err
+ 		}
+ 	}
+@@ -2709,7 +2733,7 @@
+ // through. The Function's own Name() stays the storage path; the
+ // SimpleCatalog.AddFunction2(lookupName, fn) call provides the
+ // per-level lookup key without needing a new Function handle.
+-func (c *Catalog) addFunctionSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *FunctionSpec, fn *googlesql.Function) error {
++func (c *Catalog) addFunctionSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *FunctionSpec, fn *googlesql.Function, scoped bool) error {
+ 	if len(spec.NamePath) > 1 {
+ 		subCatalogName := spec.NamePath[0]
+ 		subCatalog := c.getOrCreateSubCatalog(cat, subCatalogName)
+@@ -2722,12 +2746,15 @@
+ 			_ = cat.AddFunction2(fullName, fn)
+ 		}
+ 		newNamePath := spec.NamePath[1:]
+-		// add sub catalog to root catalog
+-		if err := c.addFunctionSpecRecursiveImpl(cat, c.copyFunctionSpec(spec, newNamePath), fn); err != nil {
+-			return fmt.Errorf("failed to add function spec to root catalog: %w", err)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1784): the alias by the
++		// rest of the path, see suffixCatalog.
++		if alias := c.suffixCatalog(cat, scoped); alias != nil {
++			if err := c.addFunctionSpecRecursiveImpl(alias, c.copyFunctionSpec(spec, newNamePath), fn, false); err != nil {
++				return fmt.Errorf("failed to add function spec to root catalog: %w", err)
++			}
+ 		}
+ 		// add sub catalog to parent catalog
+-		if err := c.addFunctionSpecRecursiveImpl(subCatalog, c.copyFunctionSpec(spec, newNamePath), fn); err != nil {
++		if err := c.addFunctionSpecRecursiveImpl(subCatalog, c.copyFunctionSpec(spec, newNamePath), fn, scoped); err != nil {
+ 			return fmt.Errorf("failed to add function spec to parent catalog: %w", err)
+ 		}
+ 		return nil
+@@ -2782,10 +2809,10 @@
+ 	if tvf == nil {
+ 		return fmt.Errorf("failed to build TVF %q", spec.TVFName())
+ 	}
+-	return c.addTVFSpecRecursiveImpl(cat, spec, tvf)
++	return c.addTVFSpecRecursiveImpl(cat, spec, tvf, projectScoped(spec.NamePath))
+ }
+ 
+-func (c *Catalog) addTVFSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *TVFSpec, tvf *googlesql.TableValuedFunction) error {
++func (c *Catalog) addTVFSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *TVFSpec, tvf *googlesql.TableValuedFunction, scoped bool) error {
+ 	if len(spec.NamePath) > 1 {
+ 		subCatalogName := spec.NamePath[0]
+ 		subCatalog := c.getOrCreateSubCatalog(cat, subCatalogName)
+@@ -2796,10 +2823,14 @@
+ 			_ = cat.AddTableValuedFunction2(fullName, tvf)
+ 		}
+ 		newNamePath := spec.NamePath[1:]
+-		if err := c.addTVFSpecRecursiveImpl(cat, c.copyTVFSpec(spec, newNamePath), tvf); err != nil {
+-			return fmt.Errorf("failed to add TVF spec to root catalog: %w", err)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1784): the alias by the
++		// rest of the path, see suffixCatalog.
++		if alias := c.suffixCatalog(cat, scoped); alias != nil {
++			if err := c.addTVFSpecRecursiveImpl(alias, c.copyTVFSpec(spec, newNamePath), tvf, false); err != nil {
++				return fmt.Errorf("failed to add TVF spec to root catalog: %w", err)
++			}
+ 		}
+-		if err := c.addTVFSpecRecursiveImpl(subCatalog, c.copyTVFSpec(spec, newNamePath), tvf); err != nil {
++		if err := c.addTVFSpecRecursiveImpl(subCatalog, c.copyTVFSpec(spec, newNamePath), tvf, scoped); err != nil {
+ 			return fmt.Errorf("failed to add TVF spec to parent catalog: %w", err)
+ 		}
+ 		return nil
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -1684,7 +1684,7 @@
+ 				"(SELECT %s FROM %s WHERE __schema = '%s')",
+ 				strings.Join(columns, ","),
+ 				meta.view.Module,
+-				strings.ReplaceAll(meta.dataset, "'", "''"),
++				strings.ReplaceAll(meta.schemaFilter(), "'", "''"), // CloudBurrow patch (#1784)
+ 			), nil
+ 		}
+ 	}
+--- a/internal/info_schema.go
++++ b/internal/info_schema.go
+@@ -164,17 +164,27 @@
+ 		cat = namePath[len(namePath)-3]
+ 		sch = namePath[len(namePath)-2]
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1784): a filter of a
++	// project's dataset (schemaFilter) matches that project's alone.
++	project, filter := splitSchemaFilter(filter)
+ 	if filter != "" && !strings.EqualFold(filter, sch) {
+ 		return "", "", false
+ 	}
++	if project != "" && project != cat {
++		return "", "", false
++	}
+ 	return cat, sch, true
+ }
+ 
+ func buildSchemataRows(c *Catalog, schema string) []map[string]value.Value {
+ 	pairs := catalogProjectAndSchemas(c)
+ 	out := make([]map[string]value.Value, 0, len(pairs))
++	project, schema := splitSchemaFilter(schema) // CloudBurrow patch (#1784)
+ 	for _, p := range pairs {
+ 		if schema != "" && !strings.EqualFold(schema, p.schema) {
++			continue
++		}
++		if project != "" && project != p.catalog {
+ 			continue
+ 		}
+ 		out = append(out, map[string]value.Value{
+--- a/internal/info_schema_catalog.go
++++ b/internal/info_schema_catalog.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"fmt"
++	"strings"
+ 
+ 	googlesql "github.com/goccy/go-googlesql"
+ )
+@@ -15,8 +16,31 @@
+ type infoSchemaTableMeta struct {
+ 	view    *infoSchemaView
+ 	dataset string
++	// project: the dataset's project, "" for a dataset of no project
++	// (CloudBurrow patch, cloudburrow/cloudburrow#1784, schemaFilter).
++	project string
+ }
+ 
++// schemaFilter is the vtab's __schema filter of meta: the dataset, or
++// "project.dataset" for a dataset of a project, so that a project's
++// INFORMATION_SCHEMA does not list another project's dataset of the same
++// name. A dataset ID has no dot (CloudBurrow patch, #1784).
++func (meta *infoSchemaTableMeta) schemaFilter() string {
++	if meta.project == "" {
++		return meta.dataset
++	}
++	return meta.project + "." + meta.dataset
++}
++
++// splitSchemaFilter is the project and dataset of a __schema filter
++// (schemaFilter): the project is "" for a filter of a dataset alone.
++func splitSchemaFilter(filter string) (project, dataset string) {
++	if k := strings.LastIndex(filter, "."); k >= 0 {
++		return filter[:k], filter[k+1:]
++	}
++	return "", filter
++}
++
+ // ensureInfoSchemaForDataset auto-registers every INFORMATION_SCHEMA
+ // view as a SimpleTable under <project>.<dataset>.INFORMATION_SCHEMA
+ // so the analyzer accepts the path at parse time. Each registration
+@@ -76,15 +100,15 @@
+ 	// The SimpleTable's Name() is its registry key. Each
+ 	// (project, dataset, view) trio maps to a unique storageName,
+ 	// so name-keyed lookups stay stable across analyzer descents.
+-	c.infoSchemaTables[storageName] = &infoSchemaTableMeta{view: view, dataset: dataset}
++	c.infoSchemaTables[storageName] = &infoSchemaTableMeta{view: view, dataset: dataset, project: project}
+ 	// Alias the same handle through every catalog level the analyzer
+ 	// can descend through, mirroring addTableSpecRecursiveImpl. Path
+ 	// is [project, dataset, "INFORMATION_SCHEMA", view.Name].
+ 	path := []string{project, dataset, "INFORMATION_SCHEMA", view.Name}
+-	return c.aliasInfoSchemaTable(c.catalog, path, tbl)
++	return c.aliasInfoSchemaTable(c.catalog, path, tbl, project != "") // CloudBurrow patch (#1784)
+ }
+ 
+-func (c *Catalog) aliasInfoSchemaTable(cat *googlesql.SimpleCatalog, path []string, tbl *googlesql.SimpleTable) error {
++func (c *Catalog) aliasInfoSchemaTable(cat *googlesql.SimpleCatalog, path []string, tbl *googlesql.SimpleTable, scoped bool) error {
+ 	if len(path) > 1 {
+ 		head := path[0]
+ 		sub := c.getOrCreateSubCatalog(cat, head)
+@@ -95,11 +119,13 @@
+ 			}
+ 		}
+ 		rest := path[1:]
+-		if err := c.aliasInfoSchemaTable(cat, rest, tbl); err != nil {
+-			return err
++		if alias := c.suffixCatalog(cat, scoped); alias != nil { // CloudBurrow patch (#1784)
++			if err := c.aliasInfoSchemaTable(alias, rest, tbl, false); err != nil {
++				return err
++			}
+ 		}
+ 		if sub != nil {
+-			if err := c.aliasInfoSchemaTable(sub, rest, tbl); err != nil {
++			if err := c.aliasInfoSchemaTable(sub, rest, tbl, scoped); err != nil {
+ 				return err
+ 			}
+ 		}
+--- /dev/null
++++ b/internal/project_scope.go
+@@ -0,0 +1,115 @@
++package internal
++
++import (
++	googlesql "github.com/goccy/go-googlesql"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1784): names by the project
++// of the statement.
++//
++// BigQuery reads a table, view, function or table function name that
++// gives no project in the project of the query
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical#table_names),
++// and a name of one part in the default dataset. The catalog held every
++// object of every project in one root catalog, under every suffix of its
++// path ("project.dataset.name", "dataset.name", "name"), the first object
++// made under a name keeping it: so in project B, `dataset.name` named
++// project A's object when A had made it first, and B read A's rows and ran
++// A's function.
++//
++// An object of a project's path (projectScoped) is now registered in the
++// root catalog under its own path alone: as "project.dataset.name" and
++// under the project's sub-catalog, which holds "dataset.name" and the
++// dataset's sub-catalog with "name". A statement of a project is analyzed
++// in lookupCatalog: the project's sub-catalog first, then its default
++// dataset's, then the root catalog, so a two-part name is the project's
++// and a one-part name its default dataset's, and three parts name any
++// project's object. The names without the project the root catalog held
++// are kept in a catalog of their own (Catalog.aliases), which only a
++// statement of no project (a connection with no name path, as
++// googlesqlite's own tests use) reads after the root catalog.
++
++// projectScoped reports whether path names an object of a project:
++// project, dataset and name, as every table, view and routine the
++// emulator makes is (its connections' name path is [project, dataset],
++// with at most three parts).
++func projectScoped(path []string) bool {
++	return len(path) >= 3
++}
++
++// lookupCatalog is the catalog a statement of namePath ([project] or
++// [project, dataset]) is analyzed in; the root catalog when namePath has
++// no project, or the project has no object yet.
++func (c *Catalog) lookupCatalog(namePath []string) googlesql.CatalogNode {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.catalog == nil {
++		return c.catalog
++	}
++	if len(namePath) == 0 {
++		return c.multiCatalog("", c.catalog, c.aliases)
++	}
++	project := c.subCatalogs[c.catalog][namePath[0]]
++	if project == nil {
++		return c.catalog
++	}
++	key := "\x00" + namePath[0]
++	var dataset *googlesql.SimpleCatalog
++	if len(namePath) > 1 {
++		if dataset = c.subCatalogs[project][namePath[1]]; dataset != nil {
++			key += "\x00" + namePath[1]
++		}
++	}
++	list := []*googlesql.SimpleCatalog{project}
++	if dataset != nil {
++		list = append(list, dataset)
++	}
++	return c.multiCatalog(key, append(list, c.catalog)...)
++}
++
++// multiCatalog is the MultiCatalog of list kept by key, made on first
++// use; the root catalog if it cannot be made.
++func (c *Catalog) multiCatalog(key string, list ...*googlesql.SimpleCatalog) googlesql.CatalogNode {
++	if m := c.lookupCatalogs[key]; m != nil {
++		return m
++	}
++	nodes := make([]googlesql.CatalogNode, 0, len(list))
++	for _, cat := range list {
++		if cat != nil {
++			nodes = append(nodes, cat)
++		}
++	}
++	m, err := googlesql.NewMultiCatalogCreate(catalogName, nodes)
++	if err != nil || m == nil {
++		return c.catalog
++	}
++	if c.lookupCatalogs == nil {
++		c.lookupCatalogs = map[string]*googlesql.MultiCatalog{}
++	}
++	c.lookupCatalogs[key] = m
++	return m
++}
++
++// suffixCatalog is the catalog the rest of an object's path is registered
++// in besides cat's sub-catalog (the alias "dataset.name" of
++// "project.dataset.name"): cat itself for a path of no project; for a
++// project's path, the aliases catalog in place of the root catalog, and
++// none below it.
++func (c *Catalog) suffixCatalog(cat *googlesql.SimpleCatalog, scoped bool) *googlesql.SimpleCatalog {
++	switch {
++	case !scoped:
++		return cat
++	case cat == c.catalog:
++		return c.aliases
++	}
++	return nil
++}
++
++// newAliasCatalog is an empty Catalog.aliases.
++func newAliasCatalog() *googlesql.SimpleCatalog {
++	cat, err := googlesql.NewSimpleCatalog(catalogName, tf())
++	if err != nil {
++		return nil
++	}
++	return cat
++}
+--- a/internal/wildcard_table.go
++++ b/internal/wildcard_table.go
+@@ -145,7 +145,14 @@
+ 	for name, spec := range c.tableMap {
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1418): a table's
+ 		// change table (change_history.go) is no table of the dataset.
+-		if re.MatchString(name) && !isChangeTableName(name) {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1784): a path of a
++		// project's (projectScoped) matches the tables of its project and
++		// dataset alone, by their paths.
++		matched := re.MatchString(name)
++		if projectScoped(path) {
++			matched = wildcardPathMatches(path, spec.NamePath)
++		}
++		if matched && !isChangeTableName(name) {
+ 			matchedSpecs = append(matchedSpecs, spec)
+ 		}
+ 	}
+@@ -173,7 +180,9 @@
+ 	// firstIdentifier may be omitted, so we need to check it.
+ 	prefix := name
+ 	firstIdentifier := spec.NamePath[0]
+-	if !strings.HasPrefix(prefix, firstIdentifier+".") {
++	if projectScoped(path) {
++		prefix = strings.TrimRight(strings.Join(path, "."), "*") // CloudBurrow patch (#1784)
++	} else if !strings.HasPrefix(prefix, firstIdentifier+".") {
+ 		prefix = firstIdentifier + "." + prefix
+ 	}
+ 
+@@ -182,4 +191,20 @@
+ 		tables: matchedSpecs,
+ 		prefix: prefix,
+ 	}, nil
++}
++
++// wildcardPathMatches reports whether a table of path tablePath is one of
++// the wildcard path's: of its project and dataset, its ID starting with
++// the wildcard's prefix (CloudBurrow patch, cloudburrow/cloudburrow#1784).
++func wildcardPathMatches(path, tablePath []string) bool {
++	if len(path) != len(tablePath) {
++		return false
++	}
++	last := len(path) - 1
++	for i := 0; i < last; i++ {
++		if path[i] != tablePath[i] {
++			return false
++		}
++	}
++	return strings.HasPrefix(tablePath[last], strings.TrimRight(path[last], "*"))
+ }
+--- /dev/null
++++ b/names_of_the_project_test.go
+@@ -0,0 +1,108 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestNamesOfTheProject is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1784): two projects with the same dataset and
++// object names. A name without a project (`ds.t`, `ds.f`) named the first
++// project's object, whatever project the statement ran in: project B read
++// A's rows and ran A's function.
++func TestNamesOfTheProject(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=names_of_the_project")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	t.Cleanup(func() { db.Close() })
++	ctx := context.Background()
++	conn, err := db.Conn(ctx)
++	if err != nil {
++		t.Fatalf("Conn: %v", err)
++	}
++	t.Cleanup(func() { conn.Close() })
++	in := func(path ...string) {
++		t.Helper()
++		withRawConn(t, conn, func(c *googlesqlite.Conn) {
++			c.SetMaxNamePath(3)
++			if err := c.SetNamePath(path); err != nil {
++				t.Fatalf("SetNamePath: %v", err)
++			}
++		})
++	}
++	exec := func(q string) {
++		t.Helper()
++		if _, err := conn.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for _, p := range []struct {
++		project string
++		n       string
++	}{{"proj-a", "1"}, {"proj-b", "2"}} {
++		in(p.project)
++		exec("CREATE TABLE ds.t AS SELECT " + p.n + " AS a")
++		exec("CREATE TABLE ds.s_1 AS SELECT " + p.n + " AS a")
++		exec("CREATE FUNCTION ds.f(x INT64) AS (x + " + p.n + ")")
++		exec("CREATE TABLE FUNCTION ds.tf() AS SELECT " + p.n + " AS a")
++		exec("CREATE VIEW ds.v AS SELECT a * 10 AS a FROM ds.t")
++	}
++	one := func(q string, want int64) {
++		t.Helper()
++		var got int64
++		if err := conn.QueryRowContext(ctx, q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", q, err)
++			return
++		}
++		if got != want {
++			t.Errorf("%s = %d, want %d", q, got, want)
++		}
++	}
++	for _, p := range []struct {
++		path []string
++		n    int64
++	}{
++		{[]string{"proj-a"}, 1}, {[]string{"proj-b"}, 2},
++		{[]string{"proj-a", "ds"}, 1}, {[]string{"proj-b", "ds"}, 2},
++	} {
++		in(p.path...)
++		one("SELECT a FROM ds.t", p.n)
++		one("SELECT a FROM `ds.t`", p.n)
++		one("SELECT ds.f(0)", p.n)
++		one("SELECT a FROM ds.tf()", p.n)
++		one("SELECT a FROM ds.v", p.n*10)
++		one("SELECT SUM(a) FROM `ds.s_*`", p.n)
++		one("SELECT COUNT(*) FROM ds.INFORMATION_SCHEMA.TABLES WHERE table_name = 't'", 1)
++		one("SELECT a FROM `proj-a.ds.t`", 1)
++		one("SELECT a FROM `proj-b`.ds.t", 2)
++		one("SELECT `proj-a`.ds.f(0) * 10 + `proj-b`.ds.f(0)", 12)
++		if len(p.path) == 2 {
++			one("SELECT a FROM t", p.n)
++			one("SELECT f(0)", p.n)
++		}
++	}
++	// A view's and a function's body keep the names of their own project.
++	in("proj-a")
++	exec("CREATE VIEW ds.w AS SELECT ds.f(a) AS a FROM ds.t")
++	in("proj-b")
++	one("SELECT a FROM `proj-a`.ds.w", 2)
++	one("SELECT a FROM ds.v", 20)
++	// A project without the name does not find another project's.
++	in("proj-c")
++	for _, q := range []string{"SELECT a FROM ds.t", "SELECT ds.f(0)", "SELECT a FROM ds.tf()"} {
++		var got int64
++		if err := conn.QueryRowContext(ctx, q).Scan(&got); err == nil {
++			t.Errorf("%s in proj-c = %d, want not found", q, got)
++		}
++	}
++	// And makes its own.
++	exec("CREATE FUNCTION ds.f(x INT64) AS (x + 3)")
++	exec("CREATE TABLE ds.t AS SELECT 3 AS a")
++	one("SELECT ds.f(0) + a FROM ds.t", 6)
++	in("proj-a")
++	one("SELECT ds.f(0) + a FROM ds.t", 2)
++}

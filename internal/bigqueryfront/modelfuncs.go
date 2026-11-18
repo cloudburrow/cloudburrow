@@ -239,7 +239,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN and ML.RECONSTRUCTION_LOSS. Nothing was run.")
 			return true
 		}
-		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
+		project, dataset, id, ok := f.resolveModel(c.path, q)
 		if !ok {
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
 				Message: "Model name " + strings.Join(c.path, ".") + " missing dataset while no default dataset is set in the request."})

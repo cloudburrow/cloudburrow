@@ -17,6 +17,12 @@ WRITE_APPEND, write the other project's table and none in test, and a
 query of test's job with destination other.ds.q writes it. It fails
 without the patch.
 
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
 --- a/server/handler.go
 +++ b/server/handler.go
 @@ -454,7 +454,22 @@
