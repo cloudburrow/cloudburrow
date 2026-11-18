@@ -466,7 +466,8 @@ jobs:
     name: official SDK compatibility (${{ matrix.shard }})
     runs-on: ubuntu-latest
     # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
-    timeout-minutes: 90
+    # 120 since Landing 148: the run shard's compat suite may take 90m (#1821).
+    timeout-minutes: 120
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -701,7 +702,13 @@ jobs:
             # Memorystore moved to the memorystore shard (#1568): each is now
             # about 30 minutes. The job's timeout-minutes, 90, leaves the build,
             # the probes and the browser suite their half hour beside it.
-            go test -tags=compat -timeout 60m -v ./test/compat/... | tee compat.log
+            # The run shard gets 90m: since Landing 147 its CPU-scaling tests
+            # pass instead of failing fast (#1802: about 15 minutes between
+            # them), and at 60m main run 44357900271 timed out with its
+            # Terraform and Secure Source Manager tests still to run. #1821
+            # splits the shard so every shard is back near 30 minutes.
+            COMPAT_TIMEOUT=60m; [ "$SHARD" = run ] && COMPAT_TIMEOUT=90m
+            go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ./test/compat/... | tee compat.log
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
@@ -1047,13 +1054,13 @@ jobs:
           # there but skip at the gate. The Studio's local models test
           # (#1396) and EmbeddingGemma 2's image, WebP/BMP and audio EmbedContent tests
           # (#1454, #1651) and BigQuery ML's imported ONNX model test (#1711)
-          # need a -tags onnx build; BigQuery's AI functions, ML.ANNOTATE_IMAGE
+          # need a -tags onnx build; BigQuery's AI functions (AI.AGG too, #1777), ML.ANNOTATE_IMAGE
           # and its remote models over the local Vertex AI (Landing 146) need
           # the local generation or embeddings model (CLOUDBURROW_TEST_LOCALAI,
           # CLOUDBURROW_TEST_EMBEDDINGS), which CI does not download; and Cloud Build's
           # host-steps-off test (#1382) an instance without
           # --cloudbuild-host-steps, which the run shard sets; all run locally.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|EmbedContentEmbedsImagesThroughThePredictionClient|EmbedContentEmbedsAudioThroughThePredictionClient|EmbedContentEmbedsWebPAndBMPThroughThePredictionClient|EmbedContentEmbedsVideoAndPDFThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|EmbedContentEmbedsMP3ThroughThePredictionClient|EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient|EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient|EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient|BigQueryMLImportedONNXModel|EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient|EmbedContentEmbedsAVIFThroughThePredictionClient|BigQueryAIGenerate|BigQueryAIGenerateStructured|BigQueryAIManagedFunctions|BigQueryAIEmbed|BigQueryMLAnnotateImage|BigQueryMLRemoteGenerateText|BigQueryMLRemoteGenerateEmbedding|BigQueryMLRemoteGenerationOptions|BigQueryMLRemoteConnectionPermissions|BigQueryMLRemoteDefaultConnection)$'
+          never='^Test(BigQueryAIAgg|FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|EmbedContentEmbedsImagesThroughThePredictionClient|EmbedContentEmbedsAudioThroughThePredictionClient|EmbedContentEmbedsWebPAndBMPThroughThePredictionClient|EmbedContentEmbedsVideoAndPDFThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|EmbedContentEmbedsMP3ThroughThePredictionClient|EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient|EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient|EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient|BigQueryMLImportedONNXModel|EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient|EmbedContentEmbedsAVIFThroughThePredictionClient|BigQueryAIGenerate|BigQueryAIGenerateStructured|BigQueryAIManagedFunctions|BigQueryAIEmbed|BigQueryMLAnnotateImage|BigQueryMLRemoteGenerateText|BigQueryMLRemoteGenerateEmbedding|BigQueryMLRemoteGenerationOptions|BigQueryMLRemoteConnectionPermissions|BigQueryMLRemoteDefaultConnection)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1
