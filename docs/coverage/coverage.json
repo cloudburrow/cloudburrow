@@ -10344,6 +10344,7 @@
           "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/bigquerymlremoteoptions_test.go:28 TestBigQueryMLRemoteGenerationOptions",
           "test/compat/bigquerymlservice_test.go:186 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:320 TestBigQueryMLTranslate",
           "test/compat/bigquerymlservice_test.go:36 TestBigQueryMLAnnotateImage",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",

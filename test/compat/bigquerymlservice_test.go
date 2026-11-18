@@ -88,7 +88,7 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
 	}
 
-	for typ, fn := range map[string]string{"CLOUD_AI_TRANSLATE_V3": "ML.TRANSLATE", "CLOUD_AI_NATURAL_LANGUAGE_V1": "ML.UNDERSTAND_TEXT",
+	for typ, fn := range map[string]string{"CLOUD_AI_NATURAL_LANGUAGE_V1": "ML.UNDERSTAND_TEXT",
 		"CLOUD_AI_DOCUMENT_V1": "ML.PROCESS_DOCUMENT"} {
 		err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = '%s')", ds, conn, typ))
 		if err == nil || !strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), fn) {
@@ -295,5 +295,136 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		if err := run(fmt.Sprintf("SELECT * FROM ML.TRANSCRIBE(MODEL `%s.speech`, TABLE `%s.audio`%s)", ds, ds, cfg)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ML.TRANSCRIBE%s: %v, want %q", cfg, err, want)
 		}
+	}
+}
+
+// TestBigQueryMLTranslate (#1799): ML.TRANSLATE over a
+// CLOUD_AI_TRANSLATE_V3 remote model, through the official
+// cloud.google.com/go/bigquery and bigquery/connection/apiv1 clients and
+// the generated bigquery/v2. Each distinct text_content is sent to the
+// local Vertex AI endpoint's Translation v3 route (never Google):
+// DETECT_LANGUAGE answers ml_translate_result.languages[0] from MediaPipe's
+// Language Detector (fr, de, ja for the three sentences) with an empty
+// ml_translate_status, over a TABLE and over a query that aliases
+// text_content; a NULL text has no result. TRANSLATE_TEXT runs the
+// instance's local Gemma model: with one, the page's sample shape
+// (glossary_translations, translation_memory_translations, and
+// translations[0] with detected_language_code and translated_text, whose
+// words are recorded, not asserted); with none (an instance without
+// --local-ai-model), 501. An invalid target language is the row's
+// INVALID_ARGUMENT; a missing target, a bad mode, an unknown option, an
+// input without text_content and another function of the model are
+// refused before anything is sent.
+//
+// covers: bigquery.jobs.query
+func TestBigQueryMLTranslate(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvLocalAI)
+	c, project := bigqueryClient(t, h)
+	cc, _ := remoteConnectionClient(t, h)
+	ctx := h.Context()
+	id := strings.ReplaceAll(h.Project(), "-", "_") + "_translate"
+	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us", ConnectionId: id,
+		Connection: &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
+	if err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	t.Cleanup(func() { _ = cc.DeleteConnection(ctx, &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
+	grantRemoteModel(t, h, cc, project, cn)
+	conn := project + ".us." + id
+
+	ds := "compat_translate_" + strings.ReplaceAll(h.Project(), "-", "_")
+	if err := c.Dataset(ds).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
+		t.Fatalf("Dataset.Create: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Dataset(ds).DeleteWithContents(ctx) })
+	run := func(sql string) error { return mlRun(h, c, sql) }
+	if err := run(fmt.Sprintf("CREATE TABLE `%s.texts` AS SELECT 1 AS id, 'Bonjour tout le monde, comment allez-vous ?' AS text_content UNION ALL "+
+		"SELECT 2, 'Guten Morgen, wie geht es dir heute?' UNION ALL SELECT 3, 'こんにちは、今日はいい天気ですね。' UNION ALL SELECT 4, CAST(NULL AS STRING)", ds)); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE TABLE `%s.comments` AS SELECT 'Hola, ¿cómo estás?' AS comment", ds)); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE MODEL `%s.translate` REMOTE WITH CONNECTION `%s` OPTIONS(remote_service_type = 'cloud_ai_translate_v3')", ds, conn)); err != nil {
+		t.Fatalf("CREATE MODEL CLOUD_AI_TRANSLATE_V3: %v", err)
+	}
+	md, err := generatedBigQuery(t, h).Models.Get(c.Project(), ds, "translate").Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("models.get: %v", err)
+	}
+	if md.RemoteModelInfo == nil || md.RemoteModelInfo.RemoteServiceType != "CLOUD_AI_TRANSLATE_V3" || md.RemoteModelInfo.Endpoint != "" {
+		t.Errorf("remoteModelInfo: %+v", md.RemoteModelInfo)
+	}
+
+	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT id, JSON_VALUE(ml_translate_result, '$.languages[0].language_code') AS code, "+
+		"FLOAT64(ml_translate_result.languages[0].confidence) AS confidence, ml_translate_status AS status FROM ML.TRANSLATE(MODEL `%s.translate`, "+
+		"TABLE `%s.texts`, STRUCT('DETECT_LANGUAGE' AS translate_mode)) ORDER BY id", ds, ds))
+	if len(rows) != 4 {
+		t.Fatalf("DETECT_LANGUAGE rows: %v", rows)
+	}
+	for i, want := range []string{"fr", "de", "ja"} {
+		r := rows[i]
+		if r["code"] != want || r["status"] != "" {
+			t.Errorf("DETECT_LANGUAGE row %d: %v", i+1, r)
+		}
+		if p, _ := r["confidence"].(float64); p < 0.5 || p > 1 {
+			t.Errorf("DETECT_LANGUAGE confidence %d: %v", i+1, r)
+		}
+	}
+	if rows[3]["code"] != nil || rows[3]["status"] != nil {
+		t.Errorf("a NULL text: %v", rows[3])
+	}
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.TRANSLATE(MODEL `%s.translate`, (SELECT comment AS text_content FROM `%s.comments`), "+
+		"STRUCT('detect_language' AS translate_mode))", ds, ds))
+	if len(rows) != 1 || rows[0]["text_content"] != "Hola, ¿cómo estás?" || rows[0]["ml_translate_status"] != "" ||
+		!strings.Contains(fmt.Sprint(rows[0]["ml_translate_result"]), `"language_code":"es"`) {
+		t.Errorf("a query input: %v", rows)
+	}
+
+	q := fmt.Sprintf("SELECT * FROM ML.TRANSLATE(MODEL `%s.translate`, TABLE `%s.texts`, STRUCT('translate_text' AS translate_mode, 'en' AS target_language_code)) ORDER BY id", ds, ds)
+	if err := run(q); err != nil {
+		if !strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), "no local generation model") {
+			t.Errorf("TRANSLATE_TEXT without a local model: %v", err)
+		}
+		t.Logf("TRANSLATE_TEXT: this instance has no local generation model: %v", err)
+	} else {
+		rows = mlQuery(t, h, c, fmt.Sprintf("SELECT id, TO_JSON_STRING(ml_translate_result) AS result, ml_translate_status AS status, "+
+			"STRING(ml_translate_result.translations[0].detected_language_code) AS detected, STRING(ml_translate_result.translations[0].translated_text) AS text "+
+			"FROM ML.TRANSLATE(MODEL `%s.translate`, TABLE `%s.texts`, STRUCT('translate_text' AS translate_mode, 'en' AS target_language_code)) ORDER BY id", ds, ds))
+		if len(rows) != 4 {
+			t.Fatalf("TRANSLATE_TEXT rows: %v", rows)
+		}
+		for i, want := range []string{"fr", "de", "ja"} {
+			r := rows[i]
+			res := fmt.Sprint(r["result"])
+			if r["status"] != "" || r["detected"] != want || strings.TrimSpace(fmt.Sprint(r["text"])) == "" ||
+				!strings.Contains(res, `"glossary_translations":[]`) || !strings.Contains(res, `"translation_memory_translations":[]`) {
+				t.Errorf("TRANSLATE_TEXT row %d: %v", i+1, r)
+			}
+			t.Logf("translation (recorded, not asserted): %v", r["text"])
+		}
+	}
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT ml_translate_result AS result, ml_translate_status AS status FROM ML.TRANSLATE(MODEL `%s.translate`, "+
+		"(SELECT 'hello' AS text_content), STRUCT('TRANSLATE_TEXT' AS translate_mode, 'xx-nope' AS target_language_code))", ds))
+	if len(rows) != 1 || rows[0]["result"] != nil || !strings.Contains(fmt.Sprint(rows[0]["status"]), "INVALID_ARGUMENT") {
+		t.Errorf("an invalid target language: %v", rows)
+	}
+
+	for name, sql := range map[string]string{
+		"no target":       "TABLE `%[1]s.texts`, STRUCT('TRANSLATE_TEXT' AS translate_mode)",
+		"bad mode":        "TABLE `%[1]s.texts`, STRUCT('ROMANIZE' AS translate_mode)",
+		"no mode":         "TABLE `%[1]s.texts`, STRUCT('en' AS target_language_code)",
+		"unknown option":  "TABLE `%[1]s.texts`, STRUCT('DETECT_LANGUAGE' AS translate_mode, 1 AS glossary)",
+		"no text_content": "TABLE `%[1]s.comments`, STRUCT('DETECT_LANGUAGE' AS translate_mode)",
+	} {
+		err := run(fmt.Sprintf("SELECT * FROM ML.TRANSLATE(MODEL `%[1]s.translate`, "+sql+")", ds))
+		if err == nil || !strings.Contains(err.Error(), "400") && !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := run(fmt.Sprintf("SELECT * FROM ML.ANNOTATE_IMAGE(MODEL `%s.translate`, TABLE `%s.texts`, STRUCT(['TEXT_DETECTION'] AS vision_features))", ds, ds)); err == nil ||
+		!strings.Contains(err.Error(), "ML.TRANSLATE") {
+		t.Errorf("ML.ANNOTATE_IMAGE of the translation model: %v", err)
 	}
 }

@@ -85,6 +85,9 @@ func (s *Server) Handler() http.Handler {
 	// Speech-to-Text v2's recognize, for BigQuery's ML.TRANSCRIBE
 	// (speech.go, #1799).
 	mux.HandleFunc("POST /v2/projects/{project}/locations/{location}/recognizers/{recognizer}", s.recognize)
+	// Translation v3's translateText and detectLanguage, for BigQuery's
+	// ML.TRANSLATE (translate.go, #1799).
+	mux.HandleFunc("POST /v3/projects/{project}/locations/{location}", s.translation)
 	mux.HandleFunc("/", s.notFound)
 	// The playground page and any browser tab can reach this port (#676).
 	return hostguard.Wrap(mux)

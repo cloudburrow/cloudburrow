@@ -377,7 +377,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if rm.ServiceType != "" {
 		return f.serviceSubquery(r, q, md, c, fname) // modelservice.go, #1773
 	}
-	if t := map[string]string{"ANNOTATE_IMAGE": "CLOUD_AI_VISION_V1", "TRANSCRIBE": "CLOUD_AI_SPEECH_TO_TEXT_V2"}[c.fn]; t != "" {
+	if t := map[string]string{"ANNOTATE_IMAGE": "CLOUD_AI_VISION_V1", "TRANSCRIBE": "CLOUD_AI_SPEECH_TO_TEXT_V2", "TRANSLATE": "CLOUD_AI_TRANSLATE_V3"}[c.fn]; t != "" {
 		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s: it takes a remote model whose REMOTE_SERVICE_TYPE is %s", fname, rm.Endpoint, t)
 	}
 	switch {

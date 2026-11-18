@@ -35,9 +35,11 @@ import (
 //     table's columns with ml_annotate_image_result (JSON, the image's
 //     AnnotateImageResponse) and ml_annotate_image_status (STRING, empty
 //     on success, else the image's error).
-//   - CLOUD_AI_NATURAL_LANGUAGE_V1 (ML.UNDERSTAND_TEXT),
-//     CLOUD_AI_TRANSLATE_V3 (ML.TRANSLATE), CLOUD_AI_SPEECH_TO_TEXT_V2
-//     (ML.TRANSCRIBE) and CLOUD_AI_DOCUMENT_V1 (ML.PROCESS_DOCUMENT): 501
+//   - CLOUD_AI_SPEECH_TO_TEXT_V2 (ML.TRANSCRIBE, modeltranscribe.go) and
+//     CLOUD_AI_TRANSLATE_V3 (ML.TRANSLATE, modeltranslate.go) are served
+//     since #1799.
+//   - CLOUD_AI_NATURAL_LANGUAGE_V1 (ML.UNDERSTAND_TEXT) and
+//     CLOUD_AI_DOCUMENT_V1 (ML.PROCESS_DOCUMENT): 501
 //     at CREATE MODEL, each naming why (serviceTypeRefusals): no local
 //     model answers them as the service does.
 //
@@ -65,8 +67,6 @@ var serviceTypeFunctions = map[string]string{
 var serviceTypeRefusals = map[string]string{
 	"CLOUD_AI_NATURAL_LANGUAGE_V1": "a remote model over the Cloud Natural Language API (ML.UNDERSTAND_TEXT): CloudBurrow has no local model " +
 		"that analyses entities, sentiment, syntax or categories as the Natural Language API does, and never calls Google (#1773).",
-	"CLOUD_AI_TRANSLATE_V3": "a remote model over the Cloud Translation API (ML.TRANSLATE): CloudBurrow has no local translation model " +
-		"yet, and never calls Google (#1773).",
 	"CLOUD_AI_DOCUMENT_V1": "a remote model over the Document AI API (ML.PROCESS_DOCUMENT): CloudBurrow serves no Document AI API, " +
 		"so no processor can exist for DOCUMENT_PROCESSOR to name, and never calls Google (#1773).",
 }
@@ -134,11 +134,14 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 	if want := serviceTypeFunctions[rm.ServiceType]; "ML."+c.fn != want || c.ai {
 		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with REMOTE_SERVICE_TYPE %s: it takes %s", fname, rm.ServiceType, want)
 	}
-	if c.table == nil {
-		return "", 400, fname + " requires an object table: TABLE name"
-	}
 	if f.vertexai == "" {
 		return "", 501, "Not implemented here: " + fname + ": this instance does not serve its local Vertex AI endpoint to BigQuery (#1760). Nothing was run."
+	}
+	if c.fn == "TRANSLATE" {
+		return f.translateSubquery(r, q, md, c, fname) // modeltranslate.go, #1799
+	}
+	if c.table == nil {
+		return "", 400, fname + " requires an object table: TABLE name"
 	}
 	if c.fn == "TRANSCRIBE" {
 		return f.transcribeSubquery(r, q, md, c, fname) // modeltranscribe.go, #1799
