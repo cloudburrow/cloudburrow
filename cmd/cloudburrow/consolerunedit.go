@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -67,9 +68,17 @@ func (p runProvider) editForm(ctx context.Context, service string, svc *ksvcStat
 		if raw := svc.Metadata.Annotations[runadapter.ServiceLabelsAnnotation]; raw != "" {
 			_ = json.Unmarshal([]byte(raw), &labels)
 		}
+		// Service-level scaling is the service's too (#1800).
+		service := map[string]string{}
+		for _, f := range runServiceScalingFields(runadapter.ReadServiceScaling(svc.Metadata.Annotations)) {
+			service[f.Name] = f.Default
+		}
 		for i := range form.Fields {
 			if form.Fields[i].Name == "labels" {
 				form.Fields[i].Default = console.FormatMap(labels)
+			}
+			if v, ok := service[form.Fields[i].Name]; ok {
+				form.Fields[i].Default = v
 			}
 		}
 	}
@@ -199,6 +208,19 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		"concurrency":       positive(tmpl.Spec.ContainerConcurrency),
 		"timeout":           positive(tmpl.Spec.TimeoutSeconds),
 	}
+	// Service-level scaling lives on the service, not the template: editForm
+	// fills it in; here it starts as the deploy form's.
+	for _, f := range runServiceScalingFields(nil) {
+		defaults[f.Name] = f.Default
+	}
+	if sc := runadapter.ReadRevisionScaling(tmpl.Metadata.Annotations); sc != nil {
+		if sc.CpuUtilization != nil {
+			defaults["cpuUtilization"] = strconv.FormatFloat(float64(sc.GetCpuUtilization()), 'g', 3, 32)
+		}
+		if sc.ConcurrencyUtilization != nil {
+			defaults["concurrencyUtilization"] = strconv.FormatFloat(float64(sc.GetConcurrencyUtilization()), 'g', 3, 32)
+		}
+	}
 	for k, v := range runSettingsDefaults(pod.GetExecutionEnvironment(), pod.GetVpcAccess(), pod.GetEncryptionKey(), pod.GetSessionAffinity()) {
 		defaults[k] = v
 	}
@@ -287,6 +309,13 @@ func (p runProvider) Edit(ctx context.Context, project string, path []string, va
 	}
 	if ok {
 		svc.Labels = labels
+	}
+	scaling, ok, err := runFormServiceScaling(values)
+	if err != nil {
+		return err
+	}
+	if ok {
+		svc.Scaling = scaling
 	}
 	// No etag. The adapter's is the Knative resourceVersion, which Knative's
 	// own status writes move while a revision settles, so one read a moment

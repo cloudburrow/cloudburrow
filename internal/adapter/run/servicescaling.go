@@ -445,3 +445,13 @@ func v1ServiceScalingAnnotations(svc *runpb.Service) map[string]string {
 	}
 	return out
 }
+
+// ReadServiceScaling is a Knative Service's Cloud Run service-level
+// scaling, nil when it has none: the console's Edit form prefills from it.
+func ReadServiceScaling(ann map[string]string) *runpb.ServiceScaling { return readServiceScaling(ann) }
+
+// ReadRevisionScaling is a Knative template's (or revision's) own Cloud
+// Run scaling, nil when it has none.
+func ReadRevisionScaling(ann map[string]string) *runpb.RevisionScaling {
+	return readRevisionScaling(ann)
+}
