@@ -19,9 +19,10 @@ import (
 
 const actUndeleteDataset = "undeletedataset"
 
-// ListActions implements console.ListActor: Undelete dataset, on the one
-// project the emulator serves.
+// ListActions implements console.ListActor: Undelete dataset, in the
+// project chosen in the toolbar (#1764).
 func (p bigqueryProvider) ListActions(_ context.Context, project string) []console.Action {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if p.writable(project) != nil {
 		return nil
 	}

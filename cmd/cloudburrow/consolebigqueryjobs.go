@@ -731,6 +731,7 @@ func jobRefusal(err error) error {
 // with the job they ran, and Insert rows with Skip invalid rows with the rows
 // it skipped (#994); every other action with nothing.
 func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return nil, err
 	}
@@ -777,6 +778,7 @@ func (p bigqueryJobsProvider) service(ctx context.Context) (*bqv2.Service, error
 }
 
 func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	base := console.Listing{
 		Columns: []string{"Type", "Created", "Error"}, NameColumn: "Job ID", Noun: "jobs",
 		RowsOpenable: true, AlwaysStatus: true,
@@ -898,6 +900,7 @@ func errorText(e *bqv2.ErrorProto) string {
 
 // Detail opens one job.
 func (p bigqueryJobsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if prompt := p.bq.scope(project); prompt != "" {
 		return console.Detail{Prompt: prompt}, nil
 	}
@@ -1210,6 +1213,7 @@ func dmlProperties(q *bqv2.JobStatistics2, raw rawJob) []console.Property {
 // Delete implements console.Deleter for a job row: jobs.delete, which
 // deletes the job's record and nothing it wrote.
 func (p bigqueryJobsProvider) Delete(ctx context.Context, project, name string) error {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if err := p.bq.writable(project); err != nil {
 		return err
 	}
@@ -1225,6 +1229,7 @@ func (p bigqueryJobsProvider) Delete(ctx context.Context, project, name string) 
 // DetailActions offers Delete job on a job's page, and Cancel job on one
 // that is not done.
 func (p bigqueryJobsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if p.bq.writable(project) != nil || len(path) != 1 {
 		return nil
 	}
@@ -1242,6 +1247,7 @@ func (p bigqueryJobsProvider) DetailActions(ctx context.Context, project string,
 
 // ActAt implements console.PathActor.
 func (p bigqueryJobsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	if err := p.bq.writable(project); err != nil {
 		return err
 	}

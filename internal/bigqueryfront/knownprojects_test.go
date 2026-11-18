@@ -1,10 +1,15 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // TestKnownProjectsMarkTheEngine (#1764): a request of a project Resource
@@ -63,5 +68,58 @@ func TestKnownProjectsMarkTheEngine(t *testing.T) {
 	none.client(none.engine(engine)).ServeHTTP(httptest.NewRecorder(), req)
 	if got, _ := marked.Load().(string); got != "" {
 		t.Errorf("with no Resource Manager: the engine's header %q, want none", got)
+	}
+}
+
+// TestProjectsListIsResourceManagers (#1764): projects.list is every
+// ACTIVE project of Resource Manager, across its pages, by ID, with the
+// project's number; without a Resource Manager the engine answers.
+func TestProjectsListIsResourceManagers(t *testing.T) {
+	rm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/projects:search" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("pageToken") == "" {
+			_, _ = w.Write([]byte(`{"projects":[{"projectId":"zeta","state":"ACTIVE"},{"projectId":"gone","state":"DELETE_REQUESTED"}],"nextPageToken":"2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"projects":[{"projectId":"alpha","state":"ACTIVE","displayName":"Alpha"}]}`))
+	}))
+	defer rm.Close()
+	engine := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"projects":[{"id":"engine"}]}`))
+	})
+	k := &knownProjects{rm: rm.URL}
+	rec := httptest.NewRecorder()
+	k.client(engine).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/bigquery/v2/projects", nil))
+	var got struct {
+		Projects []struct {
+			ID               string `json:"id"`
+			NumericID        string `json:"numericId"`
+			FriendlyName     string `json:"friendlyName"`
+			ProjectReference struct {
+				ProjectID string `json:"projectId"`
+			} `json:"projectReference"`
+		} `json:"projects"`
+		TotalItems int `json:"totalItems"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if len(got.Projects) != 2 || got.Projects[0].ID != "alpha" || got.Projects[1].ID != "zeta" || got.TotalItems != 2 {
+		t.Fatalf("projects.list = %s, want alpha and zeta", rec.Body)
+	}
+	a := got.Projects[0]
+	if a.FriendlyName != "Alpha" || a.ProjectReference.ProjectID != "alpha" || a.NumericID != strconv.FormatInt(resource.ProjectNumber("alpha"), 10) {
+		t.Errorf("alpha = %+v", a)
+	}
+	if !k.known("zeta") {
+		t.Error("a listed project is not marked known")
+	}
+	rec = httptest.NewRecorder()
+	(&knownProjects{}).client(engine).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/bigquery/v2/projects", nil))
+	if !strings.Contains(rec.Body.String(), `"engine"`) {
+		t.Errorf("with no Resource Manager: %s, want the engine's answer", rec.Body)
 	}
 }

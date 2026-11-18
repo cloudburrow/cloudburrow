@@ -200,7 +200,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		opt(&o)
 	}
 	// Every project Resource Manager has ACTIVE (knownprojects.go, #1764).
-	known := &knownProjects{rm: o.resourceManager}
+	known := &knownProjects{rm: o.resourceManager} // numbers: below
 	next = known.engine(next)
 	// A client request's repeated reads of a dataset or table are the
 	// engine's first answer (readmemo.go, #1623).
@@ -234,6 +234,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	models := &bqModels{}                           // models.go, #1465
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
+	known.numbers = numbers
 	if o.logf != nil {
 		frontLogf.Store(&o.logf) // serviceclient.go, #1628
 	}

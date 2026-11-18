@@ -24,9 +24,10 @@ import (
 // (bigqueryPurgeHeader), so the front keeps nothing of them for
 // undelete and forgets what it kept of the project's deleted tables.
 //
-// The emulator serves one project, the instance's own (docs/bigquery.md):
-// another project has no datasets, and its reset has nothing to do. A full
-// reset resets every project CloudBurrow knows of.
+// BigQuery serves every ACTIVE project of Resource Manager (#1764), so a
+// purged project's datasets are deleted here as the instance's are; a
+// project BigQuery never served answers 404, and its reset has nothing to
+// do. A full reset resets every project CloudBurrow knows of.
 type bigqueryResetter struct {
 	tunnel   func() *netfwd.Forwarder
 	projects func() []string

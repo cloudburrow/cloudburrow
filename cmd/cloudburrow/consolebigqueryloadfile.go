@@ -57,6 +57,7 @@ func bigqueryLoadFileFields(withTable bool) []console.Field {
 
 // ActAtFile implements console.FileActor: Load from a file.
 func (p bigqueryProvider) ActAtFile(ctx context.Context, project string, path []string, action string, values map[string]string, file console.UploadedFile) (*console.Listing, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return nil, err
 	}

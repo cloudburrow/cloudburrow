@@ -19,9 +19,9 @@ import (
 // -jobs-by-organization). The project's folders and organization are the
 // instance's Resource Manager's (#1294), read with v1 projects.getAncestry
 // for each query, through the cloudburrow-host Service (the front is given
-// its address with --resourcemanager). The emulator serves one project,
-// the instance's, so the jobs of every project under the folder or the
-// organization are that project's: its JOBS rows. JOBS_BY_FOLDER adds
+// its address with --resourcemanager). The rows are the query's own
+// project's JOBS rows; the other projects' under the folder or the
+// organization, which BigQuery serves since #1764, are not added (#1767). JOBS_BY_FOLDER adds
 // folder_numbers, "Number IDs of folders that contain the project,
 // starting with the folder that immediately contains the project";
 // JOBS_BY_ORGANIZATION has JOBS' columns.

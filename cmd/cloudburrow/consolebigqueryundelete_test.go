@@ -33,8 +33,13 @@ func TestConsoleBigQueryUndeleteDataset(t *testing.T) {
 	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
 	ctx := context.Background()
 
-	if a := p.ListActions(ctx, "other"); a != nil {
+	// Another project's list offers it too (#1764), and with none chosen,
+	// nothing.
+	if a := p.ListActions(ctx, "other"); len(a) != 1 {
 		t.Errorf("another project's list offers %+v", a)
+	}
+	if a := p.ListActions(ctx, ""); a != nil {
+		t.Errorf("no project's list offers %+v", a)
 	}
 	a := p.ListActions(ctx, "p")
 	if len(a) != 1 || a[0].ID != actUndeleteDataset || len(a[0].Fields) != 1 || !a[0].Fields[0].Required {
@@ -53,10 +58,12 @@ func TestConsoleBigQueryUndeleteDataset(t *testing.T) {
 	if err := p.ActAt(ctx, "p", nil, actUndeleteDataset, map[string]string{"dataset": " "}); err == nil {
 		t.Error("an undelete with no dataset ID was sent")
 	}
+	// In another project, it is that project's (#1764): the fake has no
+	// such deleted dataset.
 	if err := p.ActAt(ctx, "other", nil, actUndeleteDataset, map[string]string{"dataset": "gone"}); err == nil {
-		t.Error("an undelete on a project the emulator does not serve was sent")
+		t.Error("an undelete in another project of a dataset it never deleted succeeded")
 	}
-	if len(calls) != 2 {
-		t.Errorf("the refused undeletes reached the API: %v", calls)
+	if len(calls) != 3 || !strings.HasSuffix(calls[2], "/projects/other/datasets/gone:undelete") {
+		t.Errorf("the undeletes sent %v; want the last in project other", calls)
 	}
 }

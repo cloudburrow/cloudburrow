@@ -1336,8 +1336,8 @@ var parityRows = []parityRow{
 	// generated client's methods make (docs/coverage/bigquery.md).
 	{Resource: "BigQuery datasets", Service: "bigquery",
 		Methods:  []string{"bigquery.datasets.insert", "bigquery.datasets.get", "bigquery.datasets.list", "bigquery.datasets.delete"},
-		Provider: "bigquery", Offers: "Datasets list with each one's table count, a dataset's page (tables, details), Create dataset (location, description, labels) and Delete dataset with its tables (#698, #854); the one project the emulator serves, and a prompt naming it for any other",
-		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestConsoleBigQueryDatasetTableAndRowWrites", "TestBigQueryWritesStayInTheServedProject"}},
+		Provider: "bigquery", Offers: "Datasets list with each one's table count, a dataset's page (tables, details), Create dataset (location, description, labels) and Delete dataset with its tables (#698, #854); in the project chosen in the toolbar, every ACTIVE project of Resource Manager, and a prompt naming Resource Manager for any other (#1764)",
+		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestConsoleBigQueryDatasetTableAndRowWrites", "TestBigQueryWritesGoToTheChosenProject", "TestBigQueryServesEveryResourceManagerProject"}},
 	{Resource: "BigQuery dataset edit", Service: "bigquery",
 		Methods:  []string{"bigquery.datasets.patch"},
 		Provider: "bigquery", Offers: "Edit dataset on a dataset's page: friendly name, description, labels, default table and partition expiration, default collation, time travel window and access, sending only what changed with the dataset's etag, so a change made elsewhere meanwhile is refused (#1205)",
