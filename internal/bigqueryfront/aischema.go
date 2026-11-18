@@ -28,7 +28,8 @@ import (
 // and, when it does not fit, gives the row a NULL value and a status
 // saying why (aiParseStatus), as BigQuery reports a row's failure.
 //
-// UNVERIFIED (2026-11-17, none of these is documented): the words of the
+// UNVERIFIED (re-read 2026-11-17: the two pages above, which document none
+// of these): the words of the
 // instruction (Google's response schema is not text the model sees); the
 // status of an answer that does not parse (with constrained decoding,
 // Google's never fails to); the error texts of a schema that does not
@@ -282,7 +283,7 @@ func jsonTypeName(t aiType) string {
 }
 
 // aiSchemaInstruction is what the front appends to a prompt with an
-// output schema (UNVERIFIED above).
+// output schema (UNVERIFIED, re-read 2026-11-17: see the top of this file).
 func aiSchemaInstruction(fields []aiField) string {
 	return "\n\nAnswer with only a JSON object, and nothing before or after it, with these keys:\n" + describeOutputSchema(fields)
 }

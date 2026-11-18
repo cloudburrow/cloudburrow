@@ -835,7 +835,8 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 }
 
 // aiInstruction is what the front appends to a prompt to ask for the
-// call's answer (UNVERIFIED: Google's own wording is not published; it
+// call's answer (UNVERIFIED, re-read 2026-11-17: the reference pages above
+// publish none of Google's wording; it
 // constrains Gemini with a response schema instead).
 func aiInstruction(c aiCall, a aiResolved) string {
 	examples := func(answer func(json.RawMessage) string) string {
@@ -871,7 +872,8 @@ func aiInstruction(c aiCall, a aiResolved) string {
 	return ""
 }
 
-// classifyPrompt is AI.CLASSIFY's prompt (UNVERIFIED, as aiInstruction).
+// classifyPrompt is AI.CLASSIFY's prompt (UNVERIFIED, re-read 2026-11-17:
+// bigqueryml-syntax-ai-classify publishes no prompt; as aiInstruction).
 func classifyPrompt(input string, a aiResolved) string {
 	var b strings.Builder
 	if a.multi {
