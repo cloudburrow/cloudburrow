@@ -61,7 +61,12 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 		}
 		opts.maxBad = n
 	}
-	read := storedValues(fields) || stamps || opts.unknown || opts.maxBad > 0 && len(fields) > 0 || // #1457: badJSONValue
+	if d := l.DestinationTable; d != nil {
+		if t, ok := f.tables.embeddingOf(streamKey(cmpOr(d.ProjectID, projectOf(f.base)), d.DatasetID, d.TableID)); ok {
+			opts.generated, opts.table = t.Embedding.Column, d.DatasetID+"."+d.TableID
+		}
+	}
+	read := opts.generated != "" || storedValues(fields) || stamps || opts.unknown || opts.maxBad > 0 && len(fields) > 0 || // #1457: badJSONValue
 		hasJSONColumn(fields) // #1457: jsonColumnValues
 	if !read && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
 		// #1079: a load from Cloud Storage is read here, as one.
@@ -183,6 +188,9 @@ type jsonReadOptions struct {
 	fields, known   []field // known: the fields a record may have
 	stamps, unknown bool
 	maxBad          int64
+	// generated is the destination's generated embedding column, which a
+	// record may not give (#1778, autoembed.go), or "".
+	generated, table string
 }
 
 // jsonState is what reading a load's records keeps from one file to the
@@ -240,6 +248,14 @@ func jsonRecord(w io.Writer, text []byte, o jsonReadOptions, st *jsonState, loc,
 		return &loadDataError{code: http.StatusBadRequest, reason: "invalid", msg: fmt.Sprintf(
 			"Error while reading data, error message: JSON parsing error in %s: %v. A NEWLINE_DELIMITED_JSON "+
 				"file holds one JSON object on each line. Nothing was loaded.", where, err)}
+	}
+	if o.generated != "" {
+		for k := range obj {
+			if strings.EqualFold(k, o.generated) {
+				return &loadDataError{code: http.StatusBadRequest, reason: "invalid", msg: "You can't write to the generated column " + o.generated + " of " + o.table +
+					": BigQuery generates its values; load without it (" + where + "). Nothing was loaded."}
+			}
+		}
 	}
 	if o.unknown {
 		name, isNull := unknownField(o.known, obj, "")

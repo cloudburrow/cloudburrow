@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,8 +97,12 @@ func TestJobIDPrefixHeader(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", base+"/queries", nil))
 	own := httptest.NewRequest("POST", base+"/queries", nil)
 	h.ServeHTTP(httptest.NewRecorder(), own.WithContext(asInternal(own.Context())))
-	if len(got) != 3 || got[0] != "" || got[1] != "" || got[2] != internalJobPrefix {
-		t.Errorf("prefixes sent: %q, want a client's dropped and the front's %q", got, internalJobPrefix)
+	// A background job of the front's that BigQuery lists (#1778: gc_).
+	h.ServeHTTP(httptest.NewRecorder(), own.WithContext(context.WithValue(asInternal(own.Context()), jobPrefixKey{}, "gc_")))
+	// The prefix is the front's alone: a client's request with it is not.
+	h.ServeHTTP(httptest.NewRecorder(), own.WithContext(context.WithValue(own.Context(), jobPrefixKey{}, "gc_")))
+	if len(got) != 5 || got[0] != "" || got[1] != "" || got[2] != internalJobPrefix || got[3] != "gc_" || got[4] != "" {
+		t.Errorf("prefixes sent: %q, want a client's dropped, the front's %q and its background job's gc_", got, internalJobPrefix)
 	}
 	if !isInternalJobID(jobIDFor(asInternal(own.Context()))) || isInternalJobID(jobIDFor(client.Context())) {
 		t.Error("jobIDFor: the front's job IDs are its own, a client's not")

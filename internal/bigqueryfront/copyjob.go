@@ -210,6 +210,10 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		invalid("Invalid value for createDisposition: " + c.CreateDisposition)
 		return
 	}
+	if msg := f.refuseGeneratedCopy(r, write, srcs, *c.DestinationTable); msg != "" { // #1778, autoembed.go
+		invalid(msg)
+		return
+	}
 	for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
 		if t.DatasetID == "" || t.TableID == "" {
 			invalid("Required parameter is missing: a table reference of the copy job has no datasetId or tableId.")
