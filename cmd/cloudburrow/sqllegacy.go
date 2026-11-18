@@ -1,7 +1,7 @@
 package main
 
-// MySQL 5.7 (#1524): its official image is linux/amd64 only, so an
-// instance of it is served where the cluster's node runs linux/amd64
+// MySQL 5.7 and 5.6 (#1524): their official images are linux/amd64
+// only, so an instance of either is served where the cluster's node runs linux/amd64
 // binaries, natively or through a binfmt_misc handler registered with
 // the F (fix binary) flag, whose interpreter then works inside every
 // container: the Rosetta or qemu-x86_64 handler Docker Desktop registers
@@ -39,7 +39,11 @@ func (p *sqlProvisioner) LegacyUnrunnable(version string) string {
 	if p.legacyWhy == "" {
 		return ""
 	}
-	return version + "'s official image (mysql:5.7, 5.7.44) is linux/amd64 only, and " + p.legacyWhy
+	image := "mysql:5.7, 5.7.44"
+	if version == "MYSQL_5_6" {
+		image = "mysql:5.6, 5.6.51"
+	}
+	return version + "'s official image (" + image + ") is linux/amd64 only, and " + p.legacyWhy
 }
 
 // amd64Unrunnable reads legacyProbe's output: "" when the node runs

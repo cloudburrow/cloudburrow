@@ -109,7 +109,7 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 			RootPassword: spec.RootPassword, HostAddr: p.hostAddr(spec.ServerName())}
 	}
 	user := "postgres"
-	if spec.MasterUp {
+	if spec.MasterUp && !spec.AwaitingPrimary {
 		// A replica of `up`'s server has its data, and its superuser.
 		user = components.CloudSQLUser
 	}
@@ -154,7 +154,9 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		}
 		b.Args = append(append([]string{}, b.Args...), pgPITRArgs()...)
 	}
-	if spec.MasterInstanceName != "" {
+	// A PostgreSQL replica upgraded on its own (#1524) runs an empty
+	// server of its new version until its primary's upgrade rebuilds it.
+	if spec.MasterInstanceName != "" && !spec.AwaitingPrimary {
 		src := components.SQLReplicaSource{
 			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.ServerName()))%1000000,
 			Epoch: spec.RebuildEpoch}

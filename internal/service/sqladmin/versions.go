@@ -134,17 +134,16 @@ func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) 
 	if _, ok := s.writes.prov.(Upgrader); !ok {
 		return unimplemented("changing databaseVersion", "this instance's provisioner cannot replace a server")
 	}
-	if c.spec.MasterInstanceName != "" {
-		if engineOf(cur) != "MYSQL" {
-			return unimplemented("upgrading a PostgreSQL read replica's major version on its own",
-				"a PostgreSQL replica is a physical standby streaming its primary's WAL, which PostgreSQL does not replicate across "+
-					"major versions; upgrade the primary with includeReplicasForMajorVersionUpgrade, which upgrades its replicas after it, as Cloud SQL does")
-		}
-		// MySQL replicates from a source to a replica of the next newer
-		// version (MySQL 8.4, "Replication Compatibility Between MySQL
-		// Versions"), so a replica is upgraded before its primary, as
-		// Cloud SQL documents (#1462).
+	if c.spec.MasterInstanceName != "" && c.spec.External != nil {
+		// Cloud SQL: "You can't perform an in-place major version upgrade
+		// on an external replica."
+		return Errorf(http.StatusBadRequest, "Invalid request: an in-place major version upgrade cannot be performed on an external replica (%s).", c.spec.Name)
 	}
+	// MySQL replicates from a source to a replica of the next newer
+	// version (MySQL 8.4, "Replication Compatibility Between MySQL
+	// Versions"), so a replica is upgraded before its primary, as Cloud SQL
+	// documents (#1462). A PostgreSQL replica is too (#1524), and then
+	// waits for its primary (awaitPrimary).
 	if rs := s.replicaNamesLocked(c.spec.Project, c.spec.Name); len(rs) > 0 && !includeReplicas {
 		// Cloud SQL: "If you don't include replicas in the upgrade, then you
 		// must upgrade the read replicas before you upgrade the primary
@@ -220,6 +219,7 @@ func (s *Server) upgradeReplica(name, version string) error {
 	spec.SettingsVersion++
 	spec.ReplicationPassword = newReplicationPassword()
 	spec.ReplicationStopped = false
+	spec.AwaitingPrimary = false
 	c.spec = spec
 	c.engine = s.writes.prov.Engine(spec)
 	_ = s.saveLocked()
@@ -298,4 +298,77 @@ func (s *Server) upgrade(name string, from, to Spec, opID string, includeReplica
 		_ = s.saveLocked()
 	}
 	s.emu.Unlock()
+}
+
+// awaitPrimary upgrades the PostgreSQL read replica name on its own
+// (#1524), and with include its replicas, each after its primary. Cloud
+// SQL: "you must upgrade the read replicas before you upgrade the primary
+// instance", and "The replicated databases of an upgraded replica are
+// available only after you upgrade the primary instance." PostgreSQL's
+// streaming replication does not cross major versions, so each replica's
+// server is replaced by an empty one of version, AwaitingPrimary, until
+// the primary's upgrade rebuilds it from the upgraded primary (upgrade,
+// upgradeReplicas). A replica that fails is FAILED.
+func (s *Server) awaitPrimary(project, name, version string, include bool) error {
+	names := []string{name}
+	if include {
+		s.emu.Lock()
+		names = append(names, s.replicaTreeLocked(project, name)...)
+		for _, n := range names[1:] {
+			s.writes.byName[n].state = "MAINTENANCE"
+		}
+		s.emu.Unlock()
+	}
+	var failed []string
+	for _, n := range names {
+		if err := s.awaitPrimaryOne(n, version); err != nil {
+			failed = append(failed, n+": "+err.Error())
+		}
+	}
+	if len(failed) > 0 {
+		return Errorf(http.StatusInternalServerError, "the upgrade of %s to %s failed: %s.", name, version, strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+func (s *Server) awaitPrimaryOne(name, version string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*startTimeout)
+	defer cancel()
+	s.emu.Lock()
+	c := s.writes.byName[name]
+	if c == nil {
+		s.emu.Unlock()
+		return fmt.Errorf("it was deleted")
+	}
+	spec := c.spec
+	spec.DatabaseVersion = version
+	spec.SettingsVersion++
+	spec.ReplicationStopped = false
+	spec.AwaitingPrimary = true
+	c.spec = spec
+	c.engine = s.writes.prov.Engine(spec)
+	_ = s.saveLocked()
+	s.emu.Unlock()
+	err := s.writes.prov.Remove(ctx, spec.ServerName())
+	if err == nil {
+		err = s.writes.prov.Start(ctx, spec)
+	}
+	if err != nil {
+		s.failReplica(c, err)
+		return err
+	}
+	s.emu.Lock()
+	if s.writes.byName[name] == c {
+		c.state, c.failure = "RUNNABLE", ""
+		_ = s.saveLocked()
+	}
+	s.emu.Unlock()
+	return nil
+}
+
+// awaitingWhy is why a replica verb is refused on a PostgreSQL replica
+// that waits for its primary's upgrade.
+func awaitingWhy(spec Spec) string {
+	return "the read replica " + spec.Name + " was upgraded to " + spec.DatabaseVersion + " on its own and does not replicate until its primary, " +
+		spec.MasterInstanceName + ", is upgraded to " + spec.DatabaseVersion + " too; its replicated databases are available only after that, as Cloud SQL documents"
 }

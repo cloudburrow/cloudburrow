@@ -57,6 +57,13 @@ type Spec struct {
 	ReplicationPassword string `json:"replicationPassword,omitempty"`
 	// ReplicationStopped is set by stopReplica.
 	ReplicationStopped bool `json:"replicationStopped,omitempty"`
+	// AwaitingPrimary is set on a PostgreSQL read replica upgraded on its
+	// own (#1524): its server is a new, empty one of the newer major
+	// version, which does not replicate until its primary is upgraded to
+	// that version too and the replica is rebuilt from it ("The replicated
+	// databases of an upgraded replica are available only after you
+	// upgrade the primary instance").
+	AwaitingPrimary bool `json:"awaitingPrimaryUpgrade,omitempty"`
 	// Region is the region the instance was created in, "" for Region
 	// (#1381): a cross-region replica's differs from its primary's. Every
 	// server runs in the one cluster; the region is what the instance
@@ -741,7 +748,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		if c.spec.MasterInstanceName != "" {
 			// A MySQL replica upgraded on its own (#1462) is rebuilt on the
 			// new version from its primary, which goes on being the older
-			// version's, as a replica created fresh would be.
+			// version's, as a replica created fresh would be. A PostgreSQL
+			// one (#1524) cannot stream an older primary's WAL: its server
+			// is replaced by an empty one of the new version, which waits
+			// for its primary's upgrade (awaitPrimary).
 			c.state = "MAINTENANCE"
 			err = s.saveLocked()
 			s.emu.Unlock()
@@ -751,6 +761,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 			op := s.pending(base, project, name, "MAJOR_VERSION_UPGRADE")
 			opID, version, include := op["name"].(string), b.DatabaseVersion, b.IncludeReplicas
 			go func() {
+				if engineOf(version) == "POSTGRES" {
+					s.finish(opID, s.awaitPrimary(project, name, version, include))
+					return
+				}
 				err := s.upgradeReplica(name, version)
 				if err == nil && include {
 					err = s.upgradeReplicas(project, name, version)
@@ -985,9 +999,9 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if spec.Regional() {
 		in["secondaryGceZone"] = spec.zone(1 - spec.PrimaryNode())
 	}
-	// A MySQL replica is upgraded on its own (#1462); a PostgreSQL one
-	// only with its primary.
-	if up := upgradable(spec.DatabaseVersion); len(up) > 0 && (spec.MasterInstanceName == "" || spec.MySQL()) {
+	// A replica is upgraded on its own: MySQL's (#1462), and PostgreSQL's
+	// (#1524), which then waits for its primary's upgrade.
+	if up := upgradable(spec.DatabaseVersion); len(up) > 0 {
 		in["upgradableDatabaseVersions"] = up
 	}
 	if spec.MySQL() {

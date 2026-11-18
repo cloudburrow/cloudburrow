@@ -301,7 +301,8 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 
 // TestCloudSQLRefusedMethods (#1462): what needs a maintenance schedule
 // or another engine is refused 501 through the official client, naming
-// what is missing. Server certificates and connect.resolve are served
+// what is missing; a rescheduleMaintenance request is checked first, a
+// malformed one 400 (#1524). Server certificates and connect.resolve are served
 // since #1614 (TestCloudSQLServerCertificates), and blue-green
 // deployments (TestCloudSQLBlueGreenDeployment).
 // covers: sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
@@ -328,10 +329,20 @@ func TestCloudSQLRefusedMethods(t *testing.T) {
 		}},
 		{"releaseSsrsLease", "SQL Server", func() error { _, err := svc.Instances.ReleaseSsrsLease(p, i).Do(); return err }},
 		{"rescheduleMaintenance", "maintenance", func() error {
-			_, err := svc.Projects.Instances.RescheduleMaintenance(p, i, &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{}).Do()
+			_, err := svc.Projects.Instances.RescheduleMaintenance(p, i, &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{
+				Reschedule: &sqladmin.Reschedule{RescheduleType: "SPECIFIC_TIME", ScheduleTime: time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)}}).Do()
 			return err
 		}},
 	} {
 		wantCode(t, c.what, c.call(), 501, c.why)
+	}
+	// Its request is checked first (#1524): reschedule and its
+	// rescheduleType are required, and SPECIFIC_TIME needs scheduleTime.
+	for what, body := range map[string]*sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{
+		"no reschedule":                      {},
+		"SPECIFIC_TIME with no scheduleTime": {Reschedule: &sqladmin.Reschedule{RescheduleType: "SPECIFIC_TIME"}},
+	} {
+		_, err := svc.Projects.Instances.RescheduleMaintenance(p, i, body).Do()
+		wantHTTP(t, "rescheduleMaintenance with "+what, err, 400)
 	}
 }

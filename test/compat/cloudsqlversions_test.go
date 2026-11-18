@@ -106,9 +106,9 @@ func eventually(t *testing.T, what string, f func() error) {
 // flags, and through the official connector, with pgx or the MySQL driver,
 // SELECT version() is that major version's server. PostgreSQL 9.6 to 12
 // are served (#1462), with read replicas, high availability and
-// point-in-time recovery (#1524); MYSQL_5_6 and SQL Server (whose images
-// are linux/amd64 only) and a version Cloud SQL no longer offers are 501.
-// MYSQL_5_7 is TestCloudSQLMySQL57.
+// point-in-time recovery (#1524); SQL Server (whose images are
+// linux/amd64 only) and versions Cloud SQL no longer offers are 501.
+// MYSQL_5_7 and MYSQL_5_6 are TestCloudSQLMySQL57 and TestCloudSQLMySQL56.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.flags.list, sql.databases.insert, sql.databases.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLDatabaseVersions(t *testing.T) {
 	h := New(t)
@@ -138,7 +138,7 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 	if os.Getenv(EnvMySQL) != "" {
 		versions = append(versions, version{"MYSQL_8_0", "MYSQL_8_0_46", "8.0.46", 1})
 	}
-	for _, bad := range []string{"MYSQL_5_6", "SQLSERVER_2022_STANDARD", "POSTGRES_8_4"} {
+	for _, bad := range []string{"MYSQL_5_5", "SQLSERVER_2022_STANDARD", "POSTGRES_8_4"} {
 		_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "bad-" + suffix, DatabaseVersion: bad,
 			Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 		wantHTTP(t, "insert "+bad, err, 501)

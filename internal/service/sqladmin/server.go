@@ -325,8 +325,8 @@ func verbWhy(verb string) string {
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
 		return "Microsoft Entra ID authentication: " + sqlServerWhy
 	case "rescheduleMaintenance":
-		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), " +
-			"so there is none to reschedule"
+		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set; " +
+			"an instance's server is its version's pinned image, replaced when CloudBurrow itself is upgraded), so there is none to reschedule"
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
 		"see docs/cloudsql.md for what is served"
@@ -587,6 +587,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.performDiskShrink(r, base, project, name)
 			return "sql.projects.instances.performDiskShrink", out, err
+		}
+	case "rescheduleMaintenance":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := rescheduleMaintenance(r)
+			return "sql.projects.instances.rescheduleMaintenance", out, err
 		}
 	case "resetReplicaSize":
 		if len(rest) == 3 && r.Method == http.MethodPost {
