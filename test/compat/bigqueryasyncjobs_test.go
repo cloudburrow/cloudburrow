@@ -48,12 +48,12 @@ const slowN = 380
 // was done, whatever timeoutMs said, and jobs.cancel of a job could only
 // come after its end.
 //
-// INFORMATION_SCHEMA.JOBS and jobs.list list a running job RUNNING (unit
-// tests, asyncjobs_test.go), but not here: the engine runs one statement
-// at a time, and a JOBS query or a jobs.list sent while slowQuery runs
-// waits for its end (measured: 10 to 21 s; gaps.md).
+// While the query runs, INFORMATION_SCHEMA.JOBS and jobs.list list it
+// RUNNING, at once: BigQuery runs jobs side by side (#1823). Measured
+// first: the engine ran one statement at a time, and a JOBS query or a
+// jobs.list sent while slowQuery ran waited for its end (10 to 21 s).
 //
-// covers: bigquery.jobs.query, bigquery.jobs.getQueryResults, bigquery.jobs.get, bigquery.jobs.insert, bigquery.jobs.cancel
+// covers: bigquery.jobs.query, bigquery.jobs.getQueryResults, bigquery.jobs.get, bigquery.jobs.insert, bigquery.jobs.cancel, bigquery.jobs.list
 func TestBigQueryAsyncJobs(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -84,6 +84,33 @@ func TestBigQueryAsyncJobs(t *testing.T) {
 	}
 	if job.Configuration == nil || job.Configuration.Query == nil || job.Configuration.Query.Query != slowQuery(slowN) {
 		t.Errorf("jobs.get of the running job: configuration %+v, want its query", job.Configuration)
+	}
+	// INFORMATION_SCHEMA.JOBS and jobs.list, while it runs (#1823): each
+	// answers before the query ends, and lists it RUNNING.
+	listStart := time.Now()
+	jit, err := c.Query("SELECT state FROM `region-us`.INFORMATION_SCHEMA.JOBS WHERE job_id = '" + id + "'").Read(ctx)
+	if err != nil {
+		t.Fatalf("INFORMATION_SCHEMA.JOBS while the job runs: %v", err)
+	}
+	var state []bigquery.Value
+	if err := jit.Next(&state); err != nil || fmt.Sprint(state) != "[RUNNING]" {
+		t.Errorf("INFORMATION_SCHEMA.JOBS of the running job: %v, %v; want [RUNNING]", state, err)
+	}
+	listed, err := svc.Jobs.List(project).StateFilter("running").Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("jobs.list while the job runs: %v", err)
+	}
+	found := false
+	for _, lj := range listed.Jobs {
+		if lj.JobReference != nil && lj.JobReference.JobId == id {
+			found = lj.State == "RUNNING"
+		}
+	}
+	if !found {
+		t.Errorf("jobs.list stateFilter running: %d jobs, want job %s RUNNING", len(listed.Jobs), id)
+	}
+	if job, err := svc.Jobs.Get(project, id).Location(loc).Context(ctx).Do(); err != nil || job.Status == nil || job.Status.State != "RUNNING" {
+		t.Errorf("the job had ended before INFORMATION_SCHEMA.JOBS and jobs.list answered (%v): %+v, %v; want it still RUNNING", time.Since(listStart), job, err)
 	}
 	res, err := svc.Jobs.GetQueryResults(project, id).Location(loc).TimeoutMs(100).Context(ctx).Do()
 	if err != nil {

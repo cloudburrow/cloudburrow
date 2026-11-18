@@ -1,0 +1,868 @@
+CloudBurrow patch 102 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1823).
+
+The bug: BigQuery runs jobs side by side. The emulator answered one
+request at a time (sequentialAccessMiddleware), so while a slow statement
+ran, every other request waited for its end: another client's query, a
+jobs.list and an INFORMATION_SCHEMA.JOBS query among them. A query sent
+during a 20 s query reached its 10 s timeoutMs, a jobs.list answered only
+when the slow query ended, and a running job could not be seen RUNNING.
+
+The patch:
+- opens the temporary database in WAL mode and without a shared cache, so
+  that a reader reads a snapshot of the last commit and neither waits for
+  the writer nor holds it up (a shared cache's readers and writers of one
+  table fail rather than wait);
+- lets a request that only reads run without the write lock: the GET
+  methods, and a jobs.query or query jobs.insert of one SELECT statement
+  in GoogleSQL (selectStatement reads the statement's tokens; DML, DDL,
+  scripts, legacy SQL, a compressed body and anything unclear take the
+  lock). Such a query's statement runs in a transaction that only reads;
+  its job, and a jobs.insert's destination table, are then written under
+  the write lock, in a transaction of their own;
+- keeps every other request under the write lock for its whole length, as
+  before, and begins its transactions IMMEDIATE, so that no read beside
+  it makes it begin from a snapshot it can no longer write over;
+- keeps a read request off the connections of other requests' open
+  transactions (the reads of a lazy dataset's tables used the newest
+  one's), and a read request's transactions out of that list: it reads on
+  a connection of its own.
+An in-memory database (MemoryStorage) and a --database file keep the one
+request lock.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/connection/manager.go
++++ b/internal/connection/manager.go
+@@ -108,7 +108,15 @@
+ }
+ 
+ func (c *Conn) Begin(ctx context.Context) (*Tx, error) {
+-	tx, err := c.Conn.BeginTx(ctx, nil)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): a transaction of
++	// a request that holds the write lock takes SQLite's at once (BEGIN
++	// IMMEDIATE), so that no read beside it makes it begin from a snapshot
++	// it can no longer write over; a read request's reads the last commit.
++	var opts *sql.TxOptions
++	if !metadata.ReadsUnlocked(ctx) {
++		opts = &sql.TxOptions{Isolation: sql.LevelSerializable}
++	}
++	tx, err := c.Conn.BeginTx(ctx, opts)
+ 	if err != nil {
+ 		// The pooled connection is owned by the Tx once BeginTx succeeds and
+ 		// is released by Commit/RollbackIfNotCommitted. When BeginTx fails no
+@@ -119,6 +127,6 @@
+ 	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1655): the metadata
+ 	// repository writes a job by its key through the connection.
+-	metadata.BindTx(tx, c.Conn)
++	metadata.BindTx(ctx, tx, c.Conn)
+ 	return &Tx{tx: tx, conn: c}, nil
+ }
+--- /dev/null
++++ b/internal/metadata/cloudburrow_concurrent_reads.go
+@@ -0,0 +1,52 @@
++package metadata
++
++import "context"
++
++// Reads beside a running statement (CloudBurrow patch,
++// cloudburrow/cloudburrow#1823; server/cloudburrow_concurrent_reads.go).
++// A request that only reads runs without the emulator's write lock, beside
++// the writer. Its transactions are not the writer's: the reads of a
++// dataset's tables that use the connection of the newest open transaction
++// (readChildRows) must neither take a reader's connection nor read on the
++// writer's, which holds what it has not committed. So a transaction begun
++// by a request without the write lock is not tracked (BindTx), and that
++// request's reads, a lazy dataset's among them, run on a connection of
++// their own.
++
++// ReadAccess is a read request's hold on the write lock: WritesLocked
++// reports whether it has taken it, to write.
++type ReadAccess interface {
++	WritesLocked() bool
++}
++
++type readAccessKey struct{}
++
++// WithReadAccess is ctx of a read request.
++func WithReadAccess(ctx context.Context, a ReadAccess) context.Context {
++	return context.WithValue(ctx, readAccessKey{}, a)
++}
++
++func readAccessOf(ctx context.Context) ReadAccess {
++	a, _ := ctx.Value(readAccessKey{}).(ReadAccess)
++	return a
++}
++
++// unlocked reports whether a is a read request's that has not taken the
++// write lock.
++func unlocked(a ReadAccess) bool {
++	return a != nil && !a.WritesLocked()
++}
++
++// ReadsUnlocked reports whether ctx is a read request's that has not taken
++// the write lock.
++func ReadsUnlocked(ctx context.Context) bool {
++	return unlocked(readAccessOf(ctx))
++}
++
++// lazyContext is the context of a lazy dataset's reads: its request's.
++func (d *Dataset) lazyContext() context.Context {
++	if d.access == nil {
++		return context.Background()
++	}
++	return WithReadAccess(context.Background(), d.access)
++}
+--- a/internal/metadata/cloudburrow_dataset_lazy.go
++++ b/internal/metadata/cloudburrow_dataset_lazy.go
+@@ -97,7 +97,10 @@
+ 			conn = v.(*sql.Conn)
+ 		}
+ 	}
+-	if conn == nil {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): a read request's
++	// reads run on a connection of their own
++	// (cloudburrow_concurrent_reads.go).
++	if conn == nil && !ReadsUnlocked(ctx) {
+ 		conn = newestTxConn()
+ 	}
+ 	if conn == nil {
+@@ -202,8 +205,9 @@
+ 
+ // newLazyDataset is a dataset of its metadata alone, whose tables, models
+ // and routines are read when they are asked for.
+-func newLazyDataset(repo *Repository, projectID, datasetID string, content *bigqueryv2.Dataset) *Dataset {
++func newLazyDataset(ctx context.Context, repo *Repository, projectID, datasetID string, content *bigqueryv2.Dataset) *Dataset {
+ 	return &Dataset{
++		access:     readAccessOf(ctx), // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 		ID:         datasetID,
+ 		ProjectID:  projectID,
+ 		tableMap:   map[string]*Table{},
+@@ -232,7 +236,7 @@
+ 		return
+ 	}
+ 	var tables []*Table
+-	if err := d.repo.readChildren(context.Background(), nil, "tables", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
++	if err := d.repo.readChildren(d.lazyContext(), nil, "tables", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
+ 		t := d.tableMap[id]
+ 		if t == nil {
+ 			t = NewTable(d.repo, d.ProjectID, d.ID, id, content)
+@@ -256,7 +260,7 @@
+ 		return
+ 	}
+ 	var models []*Model
+-	if err := d.repo.readChildren(context.Background(), nil, "models", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
++	if err := d.repo.readChildren(d.lazyContext(), nil, "models", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
+ 		m := d.modelMap[id]
+ 		if m == nil {
+ 			m = NewModel(d.repo, d.ProjectID, d.ID, id, content)
+@@ -280,7 +284,7 @@
+ 		return
+ 	}
+ 	var routines []*Routine
+-	if err := d.repo.readChildren(context.Background(), nil, "routines", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
++	if err := d.repo.readChildren(d.lazyContext(), nil, "routines", d.ProjectID, d.ID, "", func(id string, content map[string]interface{}) {
+ 		f := d.routineMap[id]
+ 		if f == nil {
+ 			f = NewRoutine(d.repo, d.ProjectID, d.ID, id, content)
+@@ -306,7 +310,7 @@
+ 		return t
+ 	}
+ 	var found *Table
+-	if err := d.repo.readChildren(context.Background(), tx, "tables", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
++	if err := d.repo.readChildren(d.lazyContext(), tx, "tables", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
+ 		found = NewTable(d.repo, d.ProjectID, d.ID, id, content)
+ 	}); err != nil {
+ 		lazyReadFailed(d, "tables", err)
+@@ -324,7 +328,7 @@
+ 		return m
+ 	}
+ 	var found *Model
+-	if err := d.repo.readChildren(context.Background(), tx, "models", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
++	if err := d.repo.readChildren(d.lazyContext(), tx, "models", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
+ 		found = NewModel(d.repo, d.ProjectID, d.ID, id, content)
+ 	}); err != nil {
+ 		lazyReadFailed(d, "models", err)
+@@ -342,7 +346,7 @@
+ 		return f
+ 	}
+ 	var found *Routine
+-	if err := d.repo.readChildren(context.Background(), tx, "routines", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
++	if err := d.repo.readChildren(d.lazyContext(), tx, "routines", d.ProjectID, d.ID, id, func(id string, content map[string]interface{}) {
+ 		found = NewRoutine(d.repo, d.ProjectID, d.ID, id, content)
+ 	}); err != nil {
+ 		lazyReadFailed(d, "routines", err)
+--- a/internal/metadata/cloudburrow_job_by_key.go
++++ b/internal/metadata/cloudburrow_job_by_key.go
+@@ -25,9 +25,14 @@
+ 
+ // BindTx records that tx runs on conn, until UnbindTx; a transaction not
+ // bound is written to with GoogleSQL, as before.
+-func BindTx(tx *sql.Tx, conn *sql.Conn) {
++func BindTx(ctx context.Context, tx *sql.Tx, conn *sql.Conn) {
+ 	txConns.Store(tx, conn)
+-	trackTx(tx, conn) // CloudBurrow patch (cloudburrow/cloudburrow#1661)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): not a read
++	// request's, which runs beside the writer
++	// (cloudburrow_concurrent_reads.go).
++	if !ReadsUnlocked(ctx) {
++		trackTx(tx, conn) // CloudBurrow patch (cloudburrow/cloudburrow#1661)
++	}
+ }
+ 
+ // UnbindTx forgets tx, once it is committed or rolled back.
+--- a/internal/metadata/cloudburrow_project_raw.go
++++ b/internal/metadata/cloudburrow_project_raw.go
+@@ -160,7 +160,7 @@
+ 	// they are asked for (cloudburrow_dataset_lazy.go).
+ 	datasets := make([]*Dataset, 0, len(order))
+ 	for _, datasetID := range order {
+-		datasets = append(datasets, newLazyDataset(r, projectID, datasetID, contentByID[datasetID]))
++		datasets = append(datasets, newLazyDataset(ctx, r, projectID, datasetID, contentByID[datasetID]))
+ 	}
+ 	return datasets, nil
+ }
+--- a/internal/metadata/dataset.go
++++ b/internal/metadata/dataset.go
+@@ -28,7 +28,10 @@
+ 	// and routines, which it reads when they are asked for; each loaded
+ 	// is whether it has read all of that kind. CloudBurrow patch
+ 	// (cloudburrow/cloudburrow#1661).
+-	lazy                                       bool
++	lazy bool
++	// access is the read request's that read the dataset, or nil.
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823).
++	access                                     ReadAccess
+ 	tablesLoaded, modelsLoaded, routinesLoaded bool
+ }
+ 
+--- a/internal/metadata/results_test.go
++++ b/internal/metadata/results_test.go
+@@ -53,7 +53,7 @@
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1655): as
+ 	// connection.Conn.Begin binds each transaction, so the jobs are
+ 	// written by their key.
+-	BindTx(tx, conn)
++	BindTx(context.Background(), tx, conn)
+ 	defer UnbindTx(tx)
+ 	if err := f(ctx, tx); err != nil {
+ 		tx.Rollback()
+--- /dev/null
++++ b/server/cloudburrow_concurrent_reads.go
+@@ -0,0 +1,340 @@
++package server
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"io"
++	"net/http"
++	"strings"
++	"sync"
++
++	"github.com/gorilla/mux"
++
++	"github.com/goccy/bigquery-emulator/internal/connection"
++	"github.com/goccy/bigquery-emulator/internal/metadata"
++)
++
++// Reads beside a running statement (CloudBurrow patch,
++// cloudburrow/cloudburrow#1823).
++//
++// BigQuery runs jobs side by side: a query, a jobs.list or an
++// INFORMATION_SCHEMA.JOBS query answers while another job runs. The
++// emulator answered one request at a time (sequentialAccessMiddleware), so
++// everything waited for a slow statement, and a job could not be seen
++// RUNNING. With a file database in WAL mode (cloudburrowFilePragmas) a
++// reader reads a snapshot of the last commit and neither waits for the
++// writer nor holds it up, so here:
++//
++//   - a request that writes holds the write lock for the whole request, as
++//     every request did: writes stay one at a time, each transaction sees
++//     every write committed before it and never meets another writer's
++//     commit in its middle;
++//   - a request that only reads (readRequest: the GET methods, and a
++//     jobs.query or query jobs.insert of one SELECT statement) holds no lock
++//     while it reads. A query's job record, and a jobs.insert's
++//     destination table, are written after its statement, in a transaction
++//     of their own under the write lock (lockWrites), as a write request's
++//     are: the statement only read, so what it read is what it answers.
++//
++// An in-memory database (MemoryStorage) is one connection's shared cache,
++// where a reader and a writer of a table do not wait for each other but
++// fail, so every request on it holds the write lock, as before.
++
++// cloudburrowFilePragmas are the PRAGMAs of a file database: those of
++// TempStorage (cloudburrow_auto_vacuum.go), then WAL mode, so that reads
++// run beside the writer.
++const cloudburrowFilePragmas = cloudburrowTempPragmas + "&_pragma=journal_mode(wal)"
++
++// engineAccess is the emulator's write lock.
++type engineAccess struct {
++	writes sync.Mutex
++	// concurrentReads is whether reads run without the lock (a file
++	// database in WAL mode).
++	concurrentReads bool
++}
++
++type readAccessKey struct{}
++
++// readAccess is the state of a read request: whether it took the write
++// lock (lockWrites).
++type readAccess struct {
++	access *engineAccess
++	mu     sync.Mutex
++	locked bool
++}
++
++// lockWrites takes the write lock for the rest of a read request, before
++// it writes; in a write request, which holds it already, it does nothing.
++// The caller begins its writing transaction after it.
++func lockWrites(ctx context.Context) {
++	ra, ok := ctx.Value(readAccessKey{}).(*readAccess)
++	if !ok {
++		return
++	}
++	ra.mu.Lock()
++	defer ra.mu.Unlock()
++	if !ra.locked {
++		ra.access.writes.Lock()
++		ra.locked = true
++	}
++}
++
++// readsConcurrently reports whether ctx's request runs without the write
++// lock, so that a statement it ran only read and its writes come after it,
++// in a transaction of their own (lockWrites).
++func readsConcurrently(ctx context.Context) bool {
++	_, ok := ctx.Value(readAccessKey{}).(*readAccess)
++	return ok
++}
++
++// writesAfterRead ends read, the transaction a read request's statement
++// ran in, takes the write lock, and begins the transaction its writes go
++// in.
++func writesAfterRead(ctx context.Context, s *Server, read *connection.Tx, projectID, datasetID string) (*connection.Tx, error) {
++	if err := read.Commit(); err != nil {
++		return nil, err
++	}
++	lockWrites(ctx)
++	conn, err := s.connMgr.Connection(ctx, projectID, datasetID)
++	if err != nil {
++		return nil, err
++	}
++	return conn.Begin(ctx)
++}
++
++// WritesLocked reports whether the request took the write lock
++// (metadata.ReadAccess).
++func (ra *readAccess) WritesLocked() bool {
++	ra.mu.Lock()
++	defer ra.mu.Unlock()
++	return ra.locked
++}
++
++func (ra *readAccess) release() {
++	ra.mu.Lock()
++	defer ra.mu.Unlock()
++	if ra.locked {
++		ra.access.writes.Unlock()
++		ra.locked = false
++	}
++}
++
++// engineAccessMiddleware replaces sequentialAccessMiddleware: a write
++// request holds the write lock, a read request does not (above).
++func engineAccessMiddleware(access *engineAccess) func(http.Handler) http.Handler {
++	return func(next http.Handler) http.Handler {
++		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			if !access.concurrentReads || !readRequest(r) {
++				access.writes.Lock()
++				defer access.writes.Unlock()
++				next.ServeHTTP(w, r)
++				return
++			}
++			ra := &readAccess{access: access}
++			defer ra.release()
++			ctx := metadata.WithReadAccess(context.WithValue(r.Context(), readAccessKey{}, ra), ra)
++			next.ServeHTTP(w, r.WithContext(ctx))
++		})
++	}
++}
++
++// maxReadBody is the largest request body readRequest reads to tell a
++// query; a larger one is a write request.
++const maxReadBody = 1 << 20
++
++// readRequest reports whether r only reads: a GET method of a resource,
++// or a jobs.query, or a query jobs.insert, of one SELECT statement in
++// GoogleSQL. Anything else, and a body it cannot read (compressed, or
++// larger than maxReadBody), writes.
++func readRequest(r *http.Request) bool {
++	route := mux.CurrentRoute(r)
++	if route == nil {
++		return false
++	}
++	switch route.GetHandler().(type) {
++	case *datasetsGetHandler, *datasetsListHandler,
++		*jobsGetHandler, *jobsGetQueryResultsHandler, *jobsListHandler,
++		*modelsGetHandler, *modelsListHandler,
++		*projectsGetServiceAccountHandler, *projectsListHandler,
++		*routinesGetHandler, *routinesListHandler,
++		*rowAccessPoliciesListHandler,
++		*tabledataListHandler, *tablesGetHandler, *tablesListHandler:
++		return r.Method == http.MethodGet
++	case *jobsQueryHandler, *jobsInsertHandler:
++	default:
++		return false
++	}
++	if r.Method != http.MethodPost || r.Header.Get("Content-Encoding") != "" || r.Body == nil {
++		return false
++	}
++	if r.ContentLength > maxReadBody {
++		return false
++	}
++	body, err := io.ReadAll(io.LimitReader(r.Body, maxReadBody+1))
++	r.Body.Close()
++	r.Body = io.NopCloser(bytes.NewReader(body))
++	if err != nil || len(body) > maxReadBody {
++		return false
++	}
++	if _, ok := route.GetHandler().(*jobsQueryHandler); ok {
++		var q struct {
++			Query        string `json:"query"`
++			UseLegacySQL *bool  `json:"useLegacySql"`
++		}
++		if json.Unmarshal(body, &q) != nil {
++			return false
++		}
++		return (q.UseLegacySQL == nil || !*q.UseLegacySQL) && selectStatement(q.Query)
++	}
++	var job struct {
++		Configuration *struct {
++			Query *struct {
++				Query        string `json:"query"`
++				UseLegacySQL *bool  `json:"useLegacySql"`
++			} `json:"query"`
++			Load    json.RawMessage `json:"load"`
++			Copy    json.RawMessage `json:"copy"`
++			Extract json.RawMessage `json:"extract"`
++		} `json:"configuration"`
++	}
++	if json.Unmarshal(body, &job) != nil || job.Configuration == nil || job.Configuration.Query == nil {
++		return false
++	}
++	c := job.Configuration
++	if len(c.Load) != 0 || len(c.Copy) != 0 || len(c.Extract) != 0 {
++		return false
++	}
++	return (c.Query.UseLegacySQL == nil || !*c.Query.UseLegacySQL) && selectStatement(c.Query.Query)
++}
++
++// selectStatement reports whether query is one query statement: SELECT,
++// WITH, or a parenthesized query, and nothing after it but a semicolon,
++// spaces and comments. It reads the tokens GoogleSQL's lexical structure
++// has (https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical):
++// comments (#, -- and /* */), quoted strings, bytes and identifiers, raw
++// or not, and triple-quoted ones; anything it does not understand is not
++// a query. A query statement writes nothing: DML, DDL and scripts begin
++// with other words.
++func selectStatement(query string) bool {
++	first := ""
++	ended := false
++	for i := 0; i < len(query); {
++		c := query[i]
++		switch {
++		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v':
++			i++
++			continue
++		case c == '#' || (c == '-' && strings.HasPrefix(query[i:], "--")):
++			j := strings.IndexByte(query[i:], '\n')
++			if j < 0 {
++				i = len(query)
++			} else {
++				i += j + 1
++			}
++			continue
++		case c == '/' && strings.HasPrefix(query[i:], "/*"):
++			j := strings.Index(query[i+2:], "*/")
++			if j < 0 {
++				return false
++			}
++			i += 2 + j + 2
++			continue
++		}
++		if ended {
++			return false // a second statement
++		}
++		switch {
++		case c == ';':
++			ended = true
++			i++
++		case c == '\'' || c == '"' || c == '`':
++			n, ok := quotedLength(query[i:], false)
++			if !ok {
++				return false
++			}
++			if first == "" {
++				return false
++			}
++			i += n
++		case isWordByte(c):
++			j := i
++			for j < len(query) && isWordByte(query[j]) {
++				j++
++			}
++			word := query[i:j]
++			if j < len(query) && (query[j] == '\'' || query[j] == '"') && len(word) <= 2 && strings.ContainsAny(strings.ToLower(word), "rb") && strings.Trim(strings.ToLower(word), "rb") == "" {
++				n, ok := quotedLength(query[j:], strings.ContainsAny(word, "rR"))
++				if !ok {
++					return false
++				}
++				if first == "" {
++					return false
++				}
++				i = j + n
++				continue
++			}
++			if first == "" {
++				first = strings.ToUpper(word)
++				if first != "SELECT" && first != "WITH" {
++					return false
++				}
++			}
++			i = j
++		case c == '(':
++			if first == "" {
++				first = "("
++			}
++			i++
++		default:
++			if first == "" {
++				return false
++			}
++			i++
++		}
++	}
++	if first == "(" {
++		return parenthesizedSelect(query)
++	}
++	return first == "SELECT" || first == "WITH"
++}
++
++// parenthesizedSelect reports whether a query that begins with "(" has
++// SELECT or WITH as its first word, as a parenthesized query does.
++func parenthesizedSelect(query string) bool {
++	q := strings.TrimLeft(query, " \t\n\r\f\v(")
++	for _, w := range []string{"SELECT", "WITH"} {
++		if len(q) > len(w) && strings.EqualFold(q[:len(w)], w) && !isWordByte(q[len(w)]) {
++			return true
++		}
++	}
++	return false
++}
++
++func isWordByte(c byte) bool {
++	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
++}
++
++// quotedLength is the length of the quoted string, bytes or identifier s
++// begins with (single, double or back quotes, triple-quoted or not), with
++// backslash escapes unless raw.
++func quotedLength(s string, raw bool) (int, bool) {
++	q := s[0]
++	delim := string(q)
++	if q != '`' && strings.HasPrefix(s, strings.Repeat(string(q), 3)) {
++		delim = strings.Repeat(string(q), 3)
++	}
++	for i := len(delim); i < len(s); i++ {
++		switch {
++		case s[i] == '\\' && q != '`' && !raw:
++			i++
++		case s[i] == '\\' && q == '`':
++			i++
++		case strings.HasPrefix(s[i:], delim):
++			return i + len(delim), true
++		case s[i] == '\n' && len(delim) == 1:
++			return 0, false
++		}
++	}
++	return 0, false
++}
+--- /dev/null
++++ b/server/cloudburrow_concurrent_reads_test.go
+@@ -0,0 +1,161 @@
++package server_test
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestReadsBesideARunningStatement is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1823): the emulator answered one request at a
++// time, so while a slow query ran, a jobs.list, another query and an
++// INFORMATION_SCHEMA read all waited for its end; BigQuery runs them side
++// by side. Now a read runs beside it, and writes, which stay one at a
++// time, are all kept: concurrent INSERTs and queries each answer, and
++// every row and every job is there after.
++func TestReadsBesideARunningStatement(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	project := types.NewProject("test", types.NewDataset("ds"))
++	if err := bqServer.Load(server.StructSource(project)); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	base := testServer.URL + "/bigquery/v2/projects/test"
++	do := func(method, path string, body any) (int, []byte, error) {
++		var r io.Reader
++		if body != nil {
++			b, _ := json.Marshal(body)
++			r = bytes.NewReader(b)
++		}
++		req, _ := http.NewRequestWithContext(ctx, method, base+path, r)
++		req.Header.Set("Content-Type", "application/json")
++		resp, err := http.DefaultClient.Do(req)
++		if err != nil {
++			return 0, nil, err
++		}
++		defer resp.Body.Close()
++		b, err := io.ReadAll(resp.Body)
++		return resp.StatusCode, b, err
++	}
++	query := func(sql string) (int, []byte, error) {
++		return do(http.MethodPost, "/queries", map[string]any{"query": sql, "useLegacySql": false})
++	}
++	if code, b, err := query("CREATE TABLE ds.t (n INT64)"); err != nil || code != http.StatusOK {
++		t.Fatalf("CREATE TABLE: %d %s %v", code, b, err)
++	}
++
++	// A query long enough to measure the others against: about a second
++	// or more, alone.
++	slow := "SELECT COUNT(*) FROM UNNEST(GENERATE_ARRAY(1, 300)) a, UNNEST(GENERATE_ARRAY(1, 300)) b, UNNEST(GENERATE_ARRAY(1, 300)) c"
++	start := time.Now()
++	if code, b, err := query(slow); err != nil || code != http.StatusOK {
++		t.Fatalf("slow query: %d %s %v", code, b, err)
++	}
++	alone := time.Since(start)
++	if alone < 500*time.Millisecond {
++		t.Skipf("the slow query took %v alone, too short to measure by", alone)
++	}
++
++	slowDone := make(chan time.Time, 1)
++	go func() {
++		_, _, _ = query(slow)
++		slowDone <- time.Now()
++	}()
++	time.Sleep(alone / 5)
++	reads := []struct {
++		name string
++		run  func() (int, []byte, error)
++	}{
++		{"jobs.list", func() (int, []byte, error) { return do(http.MethodGet, "/jobs", nil) }},
++		{"tables.list", func() (int, []byte, error) { return do(http.MethodGet, "/datasets/ds/tables", nil) }},
++		{"a query", func() (int, []byte, error) { return query("SELECT 1") }},
++		{"a query of a table", func() (int, []byte, error) { return query("SELECT COUNT(*) FROM ds.t") }},
++		{"jobs.insert of a query", func() (int, []byte, error) {
++			return do(http.MethodPost, "/jobs", map[string]any{"jobReference": map[string]any{"projectId": "test"}, "configuration": map[string]any{"query": map[string]any{"query": "SELECT 2", "useLegacySql": false}}})
++		}},
++	}
++	for _, read := range reads {
++		code, b, err := read.run()
++		if err != nil || code != http.StatusOK {
++			t.Fatalf("%s beside the slow query: %d %s %v", read.name, code, b, err)
++		}
++		select {
++		case <-slowDone:
++			t.Fatalf("%s answered only once the slow query (%v alone) had ended", read.name, alone)
++		default:
++		}
++	}
++	<-slowDone
++
++	// Writes and reads at once: each answers, and all are kept.
++	const writers, readers = 8, 8
++	var wg sync.WaitGroup
++	errs := make(chan error, writers+readers)
++	for i := 0; i < writers; i++ {
++		wg.Add(1)
++		go func(i int) {
++			defer wg.Done()
++			if code, b, err := query(fmt.Sprintf("INSERT INTO ds.t (n) VALUES (%d)", i)); err != nil || code != http.StatusOK {
++				errs <- fmt.Errorf("INSERT %d: %d %s %v", i, code, b, err)
++			}
++		}(i)
++	}
++	for i := 0; i < readers; i++ {
++		wg.Add(1)
++		go func(i int) {
++			defer wg.Done()
++			if code, b, err := query(fmt.Sprintf("SELECT %d, COUNT(*) FROM ds.t", i)); err != nil || code != http.StatusOK {
++				errs <- fmt.Errorf("SELECT %d: %d %s %v", i, code, b, err)
++			}
++		}(i)
++	}
++	wg.Wait()
++	close(errs)
++	for err := range errs {
++		t.Error(err)
++	}
++	code, b, err := query("SELECT COUNT(*) AS n, SUM(n) AS s FROM ds.t")
++	if err != nil || code != http.StatusOK {
++		t.Fatalf("count: %d %s %v", code, b, err)
++	}
++	var got struct {
++		Rows []struct {
++			F []struct {
++				V string `json:"v"`
++			} `json:"f"`
++		} `json:"rows"`
++	}
++	if err := json.Unmarshal(b, &got); err != nil || len(got.Rows) != 1 || got.Rows[0].F[0].V != fmt.Sprint(writers) || got.Rows[0].F[1].V != fmt.Sprint(writers*(writers-1)/2) {
++		t.Errorf("rows the concurrent INSERTs wrote: %s, want %d rows", b, writers)
++	}
++	code, b, err = do(http.MethodGet, "/jobs?maxResults=1000", nil)
++	if err != nil || code != http.StatusOK {
++		t.Fatalf("jobs.list: %d %s %v", code, b, err)
++	}
++	var list struct {
++		Jobs []json.RawMessage `json:"jobs"`
++	}
++	// CREATE, the slow query twice, the three reads that are queries, the
++	// writers and readers, and the count.
++	if want := 1 + 2 + 3 + writers + readers + 1; json.Unmarshal(b, &list) != nil || len(list.Jobs) != want {
++		t.Errorf("jobs.list: %d jobs, want %d", len(list.Jobs), want)
++	}
++}
+--- /dev/null
++++ b/server/cloudburrow_select_statement_test.go
+@@ -0,0 +1,33 @@
++package server
++
++import "testing"
++
++// TestSelectStatement is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1823): only one query statement runs without
++// the write lock; DML, DDL, scripts and anything unclear take it.
++func TestSelectStatement(t *testing.T) {
++	for q, want := range map[string]bool{
++		"SELECT 1":             true,
++		"  select * from t;  ": true,
++		"-- c\n# d\n/* e */ WITH a AS (SELECT 1) SELECT * FROM a": true,
++		"(SELECT 1) UNION ALL (SELECT 2)":                         true,
++		"SELECT ';' AS s, \"a;b\", `x;y` , '''x;\n'''":            true,
++		"SELECT 1 -- ; INSERT":                                    true,
++		"SELECT 1; SELECT 2":                                      false,
++		"SELECT 1; INSERT INTO t VALUES (1)":                      false,
++		"INSERT INTO t SELECT 1":                                  false,
++		"CREATE TABLE t AS SELECT 1":                              false,
++		"DECLARE x INT64; SELECT x":                               false,
++		"BEGIN SELECT 1; END":                                     false,
++		"CREATE TEMP FUNCTION f() AS (1); SELECT f()":             false,
++		"EXPORT DATA OPTIONS(uri='x') AS SELECT 1":                false,
++		"SELECT 'unterminated":                                    false,
++		"SELECT 1 /* unterminated":                                false,
++		"":                                                        false,
++		"(INSERT INTO t VALUES (1))":                              false,
++	} {
++		if got := selectStatement(q); got != want {
++			t.Errorf("selectStatement(%q) = %v, want %v", q, got, want)
++		}
++	}
++}
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1798,6 +1798,16 @@
+ 		job.Configuration.Query.Query,
+ 		job.Configuration.Query.QueryParameters,
+ 	)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): a SELECT ran
++	// without the write lock; its destination table and its job are
++	// written under it, in a transaction of their own
++	// (cloudburrow_concurrent_reads.go).
++	if readsConcurrently(ctx) {
++		if tx, err = writesAfterRead(ctx, r.server, tx, r.project.ID, ""); err != nil {
++			return nil, err
++		}
++		defer tx.RollbackIfNotCommitted()
++	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1584): a CREATE of a
+ 	// table in a dataset that does not exist fails the job, and leaves no
+ 	// table behind.
+@@ -2380,6 +2390,15 @@
+ 	if queryErr != nil {
+ 		return nil, queryErr
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): a SELECT ran
++	// without the write lock; its job is written under it, in a
++	// transaction of its own (cloudburrow_concurrent_reads.go).
++	if readsConcurrently(ctx) && !r.queryRequest.DryRun {
++		if tx, err = writesAfterRead(ctx, r.server, tx, r.project.ID, datasetID); err != nil {
++			return nil, err
++		}
++		defer tx.RollbackIfNotCommitted()
++	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1584): as jobs.insert.
+ 	if response != nil && response.ChangedCatalog.Changed() {
+ 		if err := dropTablesOfMissingDatasets(ctx, r.server, tx, response.ChangedCatalog); err != nil {
+--- a/server/server.go
++++ b/server/server.go
+@@ -33,6 +33,9 @@
+ 	httpServer     *http.Server
+ 	grpcServer     *grpc.Server
+ 	listenCallback func(httpAddr, grpcAddr string)
++	// access is the write lock (CloudBurrow patch,
++	// cloudburrow/cloudburrow#1823; cloudburrow_concurrent_reads.go).
++	access engineAccess
+ }
+ 
+ // SetListenCallback registers a function invoked once the HTTP and gRPC
+@@ -55,7 +58,11 @@
+ 		// (auto_vacuum=FULL, set before the first table is made); without
+ 		// it, it only ever grew. The busy timeout is the one the SQLite
+ 		// driver sets when no _pragma is given.
+-		storage = Storage(fmt.Sprintf("file:%s?cache=shared&%s", f.Name(), cloudburrowTempPragmas))
++		// CloudBurrow patch (cloudburrow/cloudburrow#1823): in WAL mode, and
++		// not a shared cache, so that reads run beside the writer
++		// (cloudburrow_concurrent_reads.go).
++		storage = Storage(fmt.Sprintf("file:%s?%s", f.Name(), cloudburrowFilePragmas))
++		server.access.concurrentReads = true
+ 		server.storage = storage
+ 		server.fileCleanup = func() error {
+ 			return os.Remove(f.Name())
+@@ -100,7 +107,9 @@
+ 	// follows the front's (cloudburrow_clock.go).
+ 	r.Handle(cloudburrowClockPath, cloudburrowClockHandler{}).Methods("POST")
+ 	r.PathPrefix("/").Handler(&defaultHandler{})
+-	r.Use(sequentialAccessMiddleware())
++	// CloudBurrow patch (cloudburrow/cloudburrow#1823): reads do not wait
++	// for a running statement (cloudburrow_concurrent_reads.go).
++	r.Use(engineAccessMiddleware(&server.access))
+ 	r.Use(recoveryMiddleware(server))
+ 	r.Use(loggerMiddleware(server))
+ 	r.Use(accessLogMiddleware())
