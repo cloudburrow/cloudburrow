@@ -29,7 +29,8 @@
 #                    each value a shell would split or expand)
 #   --list           print every variable this script can set, and exit
 #   --cli PATH       the cloudburrow binary; default bin/cloudburrow in this
-#                    checkout, else cloudburrow on PATH
+#                    checkout, else bin/cloudburrow-onnx (what `make
+#                    build-onnx` writes), else cloudburrow on PATH
 #   --gcloud PATH    CLOUDBURROW_TEST_GCLOUD; default gcloud on PATH
 #   --tofu PATH      CLOUDBURROW_TEST_TOFU; default tofu on PATH
 #   --env-json F     `cloudburrow env --format json` already written to F
@@ -91,7 +92,9 @@ command -v jq >/dev/null || { echo "compat-env: jq is required" >&2; exit 1; }
 
 if [ -z "$cli" ]; then
   here=$(cd "$(dirname "$0")/.." && pwd)
-  if [ -x "$here/bin/cloudburrow" ]; then cli="$here/bin/cloudburrow"; else cli=$(command -v cloudburrow || true); fi
+  if [ -x "$here/bin/cloudburrow" ]; then cli="$here/bin/cloudburrow"
+  elif [ -x "$here/bin/cloudburrow-onnx" ]; then cli="$here/bin/cloudburrow-onnx"
+  else cli=$(command -v cloudburrow || true); fi
 fi
 # CLOUDBURROW_TEST_CLI is run from the test's own directory, so absolute.
 case "$cli" in

@@ -568,3 +568,62 @@ func TestCompatEnvEmbeddingsOnlyWhenLoaded(t *testing.T) {
 		t.Errorf("the unset variable is not named on stderr: %s", stderr)
 	}
 }
+
+// Without --cli, CLOUDBURROW_TEST_CLI is the checkout's bin/cloudburrow, else
+// the bin/cloudburrow-onnx that `make build-onnx` writes (#1651: the
+// EmbedContent suites run against an onnx build, which has no
+// bin/cloudburrow), else cloudburrow on PATH.
+func TestCompatEnvDefaultCLI(t *testing.T) {
+	bash, script := compatEnvScript(t)
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq is not on PATH")
+	}
+	_, envFile, statusFile := compatEnvFixture(t, nil)
+	src, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for _, d := range []string{"scripts", "bin"} {
+		if err := os.Mkdir(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copied := filepath.Join(root, "scripts", "compat-env.sh")
+	if err := os.WriteFile(copied, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cli := func() string {
+		t.Helper()
+		cmd := exec.Command(bash, copied, "--plain", "--only", "CLI", "--env-json", envFile, "--status-json", statusFile)
+		cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin:"+filepath.Dir(mustLook(t, "jq")))
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("compat-env.sh: %v", err)
+		}
+		_, v, _ := strings.Cut(strings.TrimSpace(string(out)), "=")
+		return v
+	}
+	exe := func(name string) {
+		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exe("cloudburrow-onnx")
+	if got, want := cli(), filepath.Join(root, "bin", "cloudburrow-onnx"); got != want {
+		t.Errorf("only an onnx build: CLI %q, want %q", got, want)
+	}
+	exe("cloudburrow")
+	if got, want := cli(), filepath.Join(root, "bin", "cloudburrow"); got != want {
+		t.Errorf("both builds: CLI %q, want %q", got, want)
+	}
+}
+
+func mustLook(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Skipf("%s is not on PATH", name)
+	}
+	return p
+}
