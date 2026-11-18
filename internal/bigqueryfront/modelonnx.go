@@ -116,8 +116,8 @@ func onnxRunnerFailed(err error) (int, string) {
 }
 
 // parseONNXOptions reads an ONNX model's OPTIONS list into d.
-func parseONNXOptions(toks []token, d *modelDDL) (int, string) {
-	d.opts = mlOptions{ModelType: "ONNX"}
+func parseONNXOptions(toks []token, d *modelDDL, typ string) (int, string) {
+	d.opts = mlOptions{ModelType: typ}
 	for i := 0; i < len(toks); {
 		if toks[i].kind != tokWord || i+2 >= len(toks) || !toks[i+1].punct("=") {
 			return 400, "Syntax error in OPTIONS"
@@ -145,17 +145,17 @@ func parseONNXOptions(toks []token, d *modelDDL) (int, string) {
 			if !ok {
 				return 400, "Invalid value for option kms_key_name"
 			}
-			return 501, "Not implemented here: kms_key_name on an imported ONNX model: CloudBurrow keeps the model unencrypted; " +
+			return 501, "Not implemented here: kms_key_name on an imported " + typ + " model: CloudBurrow keeps the model unencrypted; " +
 				"leave the option out. Nothing was run."
 		default:
-			return 400, "Option " + name + " is not supported for model_type ONNX: an imported ONNX model takes model_type, model_path and kms_key_name"
+			return 400, "Option " + name + " is not supported for model_type " + typ + ": an imported " + typ + " model takes model_type, model_path and kms_key_name"
 		}
 	}
 	if d.onnxPath == "" {
-		return 400, "CREATE MODEL of model_type ONNX requires the model_path option"
+		return 400, "CREATE MODEL of model_type " + typ + " requires the model_path option"
 	}
 	if !strings.HasPrefix(d.onnxPath, "gs://") {
-		return 400, "Invalid model_path " + d.onnxPath + ": it must be a Cloud Storage URI, gs://bucket/path/to/model.onnx or gs://bucket/path/to/onnx_model/*"
+		return 400, "Invalid model_path " + d.onnxPath + ": it must be a Cloud Storage URI, gs://bucket/path/to/model_file or gs://bucket/path/to/model_folder/*"
 	}
 	return 0, ""
 }
@@ -224,87 +224,9 @@ func (f front) importONNX(ctx context.Context, path string) (*onnxImport, []byte
 	if f.onnx == nil {
 		return nil, nil, 501, onnxRefusal()
 	}
-	if f.storage == nil {
-		return nil, nil, 404, "Not found: URI " + path + ": CloudBurrow was given no Cloud Storage to read it from; is Cloud Storage enabled? Nothing was run."
-	}
-	rest := strings.TrimPrefix(path, "gs://")
-	bucket, name, _ := strings.Cut(rest, "/")
-	if bucket == "" || name == "" {
-		return nil, nil, 400, "Invalid model_path " + path + ": it must be gs://bucket/path/to/model.onnx or gs://bucket/path/to/onnx_model/*"
-	}
-	type object struct {
-		Name string      `json:"name"`
-		Size json.Number `json:"size"`
-	}
-	var obj object
-	switch strings.Count(name, "*") {
-	case 0:
-		if !strings.HasSuffix(strings.ToLower(name), ".onnx") {
-			return nil, nil, 400, "Invalid model_path " + path + ": an imported ONNX model must be a .onnx file"
-		}
-		st, err := f.storage.do(ctx, "/storage/v1/b/"+url.PathEscape(bucket)+"/o/"+url.PathEscape(name), &obj)
-		if err != nil {
-			return nil, nil, 404, f.storage.unreachable(path, err).Error()
-		}
-		if st != http.StatusOK {
-			return nil, nil, 404, fmt.Sprintf("Not found: URI %s (Cloud Storage answered HTTP %d). Nothing was run.", path, st)
-		}
-	case 1:
-		prefix, suffix, _ := strings.Cut(name, "*")
-		var found []object
-		token := ""
-		for {
-			q := url.Values{"prefix": {prefix}}
-			if token != "" {
-				q.Set("pageToken", token)
-			}
-			var list struct {
-				Items         []object `json:"items"`
-				NextPageToken string   `json:"nextPageToken"`
-			}
-			st, err := f.storage.do(ctx, "/storage/v1/b/"+url.PathEscape(bucket)+"/o?"+q.Encode(), &list)
-			if err != nil {
-				return nil, nil, 404, f.storage.unreachable(path, err).Error()
-			}
-			if st != http.StatusOK {
-				return nil, nil, 404, fmt.Sprintf("Not found: URI %s (Cloud Storage answered HTTP %d). Nothing was run.", path, st)
-			}
-			for _, it := range list.Items {
-				if strings.HasSuffix(it.Name, suffix) && strings.HasSuffix(strings.ToLower(it.Name), ".onnx") {
-					found = append(found, it)
-				}
-			}
-			if token = list.NextPageToken; token == "" {
-				break
-			}
-		}
-		switch len(found) {
-		case 0:
-			return nil, nil, 404, "Not found: URI " + path + ": it matches no .onnx file. Nothing was run."
-		case 1:
-			obj = found[0]
-		default:
-			return nil, nil, 400, fmt.Sprintf("Invalid model_path %s: it matches %d .onnx files (%s, %s, ...); an imported ONNX model is one .onnx file",
-				path, len(found), found[0].Name, found[1].Name)
-		}
-	default:
-		return nil, nil, 400, "Invalid model_path " + path + ": only one * wildcard is supported in a Cloud Storage URI"
-	}
-	o := gsObject{bucket, obj.Name}
-	if size, err := obj.Size.Int64(); err == nil && size > maxONNXModelBytes {
-		return nil, nil, 400, fmt.Sprintf("The ONNX model %s is %d bytes; the maximum model size is 450 MB", o.uri(), size)
-	}
-	rc, err := f.storage.open(ctx, o)
-	if err != nil {
-		return nil, nil, 404, strings.Replace(err.Error(), "Nothing was loaded.", "Nothing was run.", 1)
-	}
-	defer rc.Close()
-	data, err := io.ReadAll(io.LimitReader(rc, maxONNXModelBytes+1))
-	if err != nil {
-		return nil, nil, 500, "cloudburrow: could not read " + o.uri() + ": " + err.Error()
-	}
-	if len(data) > maxONNXModelBytes {
-		return nil, nil, 400, fmt.Sprintf("The ONNX model %s is larger than the maximum model size, 450 MB", o.uri())
+	o, data, code, msg := f.readImportedModel(ctx, path, "ONNX", []string{".onnx"}, maxONNXModelBytes, "450 MB")
+	if code != 0 {
+		return nil, nil, code, msg
 	}
 	sum := sha256.Sum256(data)
 	in, out, err := f.onnx.Load(ctx, hex.EncodeToString(sum[:]), data)
@@ -326,6 +248,106 @@ func (f front) importONNX(ctx context.Context, path string) (*onnxImport, []byte
 		}
 	}
 	return &onnxImport{URI: o.uri(), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data)), Inputs: in, Outputs: out}, data, 0, ""
+}
+
+// readImportedModel reads the object an imported model's MODEL_PATH names
+// from the instance's Cloud Storage: a file of one of exts, or the one
+// such file a folder's wildcard (gs://bucket/path/to/model_folder/*)
+// matches, of at most limit bytes (limitText as the page writes it).
+func (f front) readImportedModel(ctx context.Context, path, kind string, exts []string, limit int64, limitText string) (gsObject, []byte, int, string) {
+	if f.storage == nil {
+		return gsObject{}, nil, 404, "Not found: URI " + path + ": CloudBurrow was given no Cloud Storage to read it from; is Cloud Storage enabled? Nothing was run."
+	}
+	rest := strings.TrimPrefix(path, "gs://")
+	bucket, name, _ := strings.Cut(rest, "/")
+	if bucket == "" || name == "" {
+		return gsObject{}, nil, 400, "Invalid model_path " + path + ": it must be gs://bucket/path/to/model" + exts[0] + " or gs://bucket/path/to/model_folder/*"
+	}
+	type object struct {
+		Name string      `json:"name"`
+		Size json.Number `json:"size"`
+	}
+	var obj object
+	switch strings.Count(name, "*") {
+	case 0:
+		if !hasExt(name, exts) {
+			return gsObject{}, nil, 400, "Invalid model_path " + path + ": an imported " + kind + " model must be a " + strings.Join(exts, ", ") + " file"
+		}
+		st, err := f.storage.do(ctx, "/storage/v1/b/"+url.PathEscape(bucket)+"/o/"+url.PathEscape(name), &obj)
+		if err != nil {
+			return gsObject{}, nil, 404, f.storage.unreachable(path, err).Error()
+		}
+		if st != http.StatusOK {
+			return gsObject{}, nil, 404, fmt.Sprintf("Not found: URI %s (Cloud Storage answered HTTP %d). Nothing was run.", path, st)
+		}
+	case 1:
+		prefix, suffix, _ := strings.Cut(name, "*")
+		var found []object
+		token := ""
+		for {
+			q := url.Values{"prefix": {prefix}}
+			if token != "" {
+				q.Set("pageToken", token)
+			}
+			var list struct {
+				Items         []object `json:"items"`
+				NextPageToken string   `json:"nextPageToken"`
+			}
+			st, err := f.storage.do(ctx, "/storage/v1/b/"+url.PathEscape(bucket)+"/o?"+q.Encode(), &list)
+			if err != nil {
+				return gsObject{}, nil, 404, f.storage.unreachable(path, err).Error()
+			}
+			if st != http.StatusOK {
+				return gsObject{}, nil, 404, fmt.Sprintf("Not found: URI %s (Cloud Storage answered HTTP %d). Nothing was run.", path, st)
+			}
+			for _, it := range list.Items {
+				if strings.HasSuffix(it.Name, suffix) && hasExt(it.Name, exts) {
+					found = append(found, it)
+				}
+			}
+			if token = list.NextPageToken; token == "" {
+				break
+			}
+		}
+		switch len(found) {
+		case 0:
+			return gsObject{}, nil, 404, "Not found: URI " + path + ": it matches no " + strings.Join(exts, ", ") + " file. Nothing was run."
+		case 1:
+			obj = found[0]
+		default:
+			return gsObject{}, nil, 400, fmt.Sprintf("Invalid model_path %s: it matches %d %s files (%s, %s, ...); an imported %s model is one file",
+				path, len(found), strings.Join(exts, ", "), found[0].Name, found[1].Name, kind)
+		}
+	default:
+		return gsObject{}, nil, 400, "Invalid model_path " + path + ": only one * wildcard is supported in a Cloud Storage URI"
+	}
+	o := gsObject{bucket, obj.Name}
+	if size, err := obj.Size.Int64(); err == nil && size > limit {
+		return gsObject{}, nil, 400, fmt.Sprintf("The %s model %s is %d bytes; the maximum model size is %s", kind, o.uri(), size, limitText)
+	}
+	rc, err := f.storage.open(ctx, o)
+	if err != nil {
+		return gsObject{}, nil, 404, strings.Replace(err.Error(), "Nothing was loaded.", "Nothing was run.", 1)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	if err != nil {
+		return gsObject{}, nil, 500, "cloudburrow: could not read " + o.uri() + ": " + err.Error()
+	}
+	if int64(len(data)) > limit {
+		return gsObject{}, nil, 400, fmt.Sprintf("The %s model %s is larger than the maximum model size, %s", kind, o.uri(), limitText)
+	}
+	return o, data, 0, ""
+}
+
+// hasExt reports whether name ends in one of exts, ignoring case.
+func hasExt(name string, exts []string) bool {
+	for _, e := range exts {
+		if strings.HasSuffix(strings.ToLower(name), e) {
+			return true
+		}
+	}
+	return false
 }
 
 // onnxResource fills a model resource's columns and its import's
@@ -768,19 +790,33 @@ func (m *bqModels) blob(sum string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(dir, sum+".onnx"))
 }
 
+// blobSum is the SHA-256 of the imported model file md keeps (ONNX or,
+// in the same store, XGBoost: modelxgb.go), or "".
+func (md *bqModel) blobSum() string {
+	switch {
+	case md == nil:
+	case md.ONNX != nil:
+		return md.ONNX.SHA256
+	case md.XGB != nil:
+		return md.XGB.SHA256
+	}
+	return ""
+}
+
 // dropBlobLocked removes an ONNX file no model names any more.
 func (m *bqModels) dropBlobLocked(old *bqModel) {
-	if old == nil || old.ONNX == nil {
+	sum := old.blobSum()
+	if sum == "" {
 		return
 	}
 	for _, md := range m.models {
-		if md.ONNX != nil && md.ONNX.SHA256 == old.ONNX.SHA256 {
+		if md.blobSum() == sum {
 			return
 		}
 	}
-	delete(m.blobs, old.ONNX.SHA256)
+	delete(m.blobs, sum)
 	if dir := m.onnxDir(); dir != "" {
-		_ = os.Remove(filepath.Join(dir, old.ONNX.SHA256+".onnx"))
+		_ = os.Remove(filepath.Join(dir, sum+".onnx"))
 	}
 }
 

@@ -34,8 +34,9 @@ import (
 // and ARIMA_PLUS (modelarima.go) (#1504). Refused 501 with the reason: the
 // other types (their training is Google's, and either undocumented in the
 // detail a faithful result needs, as for DNNs, or Google's
-// infrastructure itself: AUTOML_*, imported TENSORFLOW/ONNX/XGBOOST models
-// read from Cloud Storage, and remote models over a Cloud resource
+// infrastructure itself: AUTOML_*, imported TENSORFLOW models read from
+// Cloud Storage (ONNX runs in the onnx build, modelonnx.go, and XGBOOST
+// on internal/xgbmodel, modelxgb.go, #1711), and remote models over a Cloud resource
 // connection, which CloudBurrow has none of); a TRANSFORM clause; and the
 // options CloudBurrow does not carry out.
 
@@ -67,6 +68,8 @@ type bqModel struct {
 	Inputs       []mlColumn `json:"inputs,omitempty"`
 	// ONNX is an imported ONNX model's (modelonnx.go, #1711).
 	ONNX *onnxImport `json:"onnx,omitempty"`
+	// XGB is an imported XGBoost model's (modelxgb.go, #1711).
+	XGB *xgbImport `json:"xgboost,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -276,7 +279,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -298,6 +301,10 @@ func (md bqModel) resource(full bool) map[string]any {
 	}
 	if md.ONNX != nil {
 		md.onnxResource(res) // modelonnx.go, #1711
+		return res
+	}
+	if md.XGB != nil {
+		md.xgbResource(res) // modelxgb.go, #1711
 		return res
 	}
 	var feats []map[string]any
@@ -698,8 +705,11 @@ type modelDDL struct {
 	opts                                 mlOptions
 	query                                string
 	transform                            []string
-	// onnxPath is an imported ONNX model's MODEL_PATH (modelonnx.go).
-	onnxPath string
+	// onnxPath is an imported ONNX or XGBoost model's MODEL_PATH
+	// (modelonnx.go, modelxgb.go), and importInputs and importOutputs an
+	// XGBoost model's INPUT and OUTPUT clauses.
+	onnxPath                    string
+	importInputs, importOutputs []importColumn
 }
 
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
@@ -709,11 +719,11 @@ var unsupportedModelTypes = map[string]string{
 	"AUTOML_CLASSIFIER": "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
 	"ARIMA_PLUS_XREG":   "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	// An imported model (#1562, measured): no CloudBurrow build has a
-	// TensorFlow or XGBoost runtime. An ONNX model runs on the ONNX
-	// Runtime of the opt-in `-tags onnx` build (modelonnx.go, #1711).
+	// TensorFlow runtime. An ONNX model runs on the ONNX Runtime of the
+	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
+	// internal/xgbmodel (modelxgb.go) (#1711).
 	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
 	"TENSORFLOW_LITE":       "an imported TensorFlow Lite model needs the TensorFlow Lite runtime, which CloudBurrow's BigQuery does not have",
-	"XGBOOST":               "an imported XGBoost model needs the XGBoost runtime, which CloudBurrow does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
@@ -781,7 +791,14 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 			}
 			d.transform = items
 			i = end + 1
-		case stmt[i].is("INPUT"), stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
+		case stmt[i].is("INPUT"):
+			// An imported XGBoost model's columns (modelxgb.go, #1711).
+			next, c, m := parseInputOutput(stmt, i, &d)
+			if c != 0 {
+				return d, true, c, m
+			}
+			i = next
+		case stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
 			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Google-hosted Vertex AI or Cloud AI endpoint through a " +
 				"Cloud resource connection of the BigQuery Connection API, which CloudBurrow does not serve. Nothing was run."
 		}
@@ -801,17 +818,15 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
-					if strings.EqualFold(typ, "ONNX") {
-						// An imported ONNX model (modelonnx.go, #1711):
-						// MODEL_PATH, and no TRANSFORM or query.
-						if c, m := parseONNXOptions(opts, &d); c != 0 {
+					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" {
+						// An imported ONNX or XGBoost model (modelonnx.go,
+						// modelxgb.go, #1711): MODEL_PATH, and no TRANSFORM
+						// or query.
+						if c, m := parseONNXOptions(opts, &d, up); c != 0 {
 							return d, true, c, m
 						}
-						switch {
-						case d.transform != nil:
-							return d, true, 400, "CREATE MODEL of model_type ONNX takes no TRANSFORM clause"
-						case end+1 < len(stmt):
-							return d, true, 400, "CREATE MODEL of model_type ONNX takes no query: the model is imported from model_path"
+						if c, m := importRefusal(&d, up, end+1 < len(stmt)); c != 0 {
+							return d, true, c, m
 						}
 						return d, true, 0, ""
 					}
@@ -828,6 +843,9 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if d.opts.ModelType == "" {
 		return d, true, 400, "CREATE MODEL requires the model_type option"
+	}
+	if d.importInputs != nil {
+		return d, true, 400, "CREATE MODEL of model_type " + d.opts.ModelType + " takes no INPUT or OUTPUT clause: it is for an imported XGBoost model"
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
 		return d, true, 501, refusedModelType(d.opts.ModelType, why)
@@ -1646,6 +1664,23 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "ONNX", Created: now, Modified: now,
 				Location: loc, Options: d.opts, ONNX: imp})
+		}
+	case d.opts.ModelType == "XGBOOST":
+		// An imported XGBoost model (modelxgb.go, #1711).
+		imp, data, c, m := f.importXGB(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's XGBoost file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "XGBOOST", Created: now, Modified: now,
+				Location: loc, Options: d.opts, XGB: imp})
 		}
 	default:
 		trainSQL := d.query
