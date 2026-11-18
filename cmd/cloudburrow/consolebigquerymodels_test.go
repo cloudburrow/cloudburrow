@@ -315,6 +315,9 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 "location":"US","etag":"e","remoteModelInfo":{"endpoint":"gemma-4-e2b-it-community","connection":"projects/1/locations/us/connections/ai"}}`,
 		"emb": `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"emb"},"creationTime":"1700000000000","lastModifiedTime":"1700000000000",
 "location":"US","etag":"e","remoteModelInfo":{"endpoint":"embeddinggemma-300m-onnx-community","connection":"projects/1/locations/us/connections/ai"}}`,
+		// #1773: a model over a Cloud AI service.
+		"vis": `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"vis"},"creationTime":"1700000000000","lastModifiedTime":"1700000000000",
+"location":"US","etag":"e","remoteModelInfo":{"remoteServiceType":"CLOUD_AI_VISION_V1","connection":"projects/1/locations/us/connections/ai"}}`,
 	}
 	var calls []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +331,8 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 	}))
 	defer api.Close()
 	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
-	for id, fn := range map[string]string{"gen": "ML.GENERATE_TEXT(MODEL `d.gen`", "emb": "ML.GENERATE_EMBEDDING(MODEL `d.emb`"} {
+	for id, fn := range map[string]string{"gen": "ML.GENERATE_TEXT(MODEL `d.gen`", "emb": "ML.GENERATE_EMBEDDING(MODEL `d.emb`",
+		"vis": "ML.ANNOTATE_IMAGE(MODEL `d.vis`, TABLE"} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
 		if err != nil || d.Unavailable != "" || len(d.Sections) != 1 {
 			t.Fatalf("%s: %v %+v", id, err, d)
@@ -341,7 +345,8 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 		}
 		all := strings.Join(props, "; ")
 		if !strings.Contains(all, "Type=Remote model") || !strings.Contains(all, "Connection=projects/1/locations/us/connections/ai") ||
-			!strings.Contains(all, "Endpoint="+map[string]string{"gen": "gemma-4-e2b-it-community", "emb": "embeddinggemma-300m-onnx-community"}[id]) ||
+			!strings.Contains(all, map[string]string{"gen": "Endpoint=gemma-4-e2b-it-community", "emb": "Endpoint=embeddinggemma-300m-onnx-community",
+				"vis": "Remote service type=CLOUD_AI_VISION_V1"}[id]) ||
 			!strings.Contains(all, fn) || !strings.Contains(all, "never Google's") {
 			t.Errorf("%s: %s", id, all)
 		}

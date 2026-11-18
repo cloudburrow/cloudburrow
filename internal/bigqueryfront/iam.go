@@ -477,14 +477,16 @@ func (p *iamPolicies) rewriteMember(from, to string) error {
 }
 
 // serveRewriteMember answers iampolicy.RewriteMemberPath: the tables' and
-// routines' policies the front keeps, and the access lists of the
-// datasets the engine keeps, next (datasetaccessrewrite.go).
-func (p *iamPolicies) serveRewriteMember(w http.ResponseWriter, r *http.Request, next http.Handler) bool {
+// routines' policies the front keeps, the access lists of the
+// datasets the engine keeps, next (datasetaccessrewrite.go), and the
+// connections' policies (connectionrewrite.go, #1795).
+func (p *iamPolicies) serveRewriteMember(w http.ResponseWriter, r *http.Request, next http.Handler, connections *bqConnections) bool {
 	if r.URL.Path != iampolicy.RewriteMemberPath {
 		return false
 	}
 	iampolicy.ServeRewriteMember(w, r, func(from, to string) error {
-		return errors.Join(p.rewriteMember(from, to), rewriteDatasetAccess(r.Context(), next, from, to))
+		return errors.Join(p.rewriteMember(from, to), rewriteDatasetAccess(r.Context(), next, from, to),
+			connections.rewriteMember(from, to)) // connectionrewrite.go, #1795
 	})
 	return true
 }

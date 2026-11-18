@@ -13,6 +13,7 @@ import (
 	artifactregistry "cloud.google.com/go/artifactregistry/apiv1"
 	"cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/bigquery/connection/apiv1/connectionpb"
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/iam"
 	admin "cloud.google.com/go/iam/admin/apiv1"
@@ -128,9 +129,11 @@ func deletedAccountRoundTrip(t *testing.T, h *Harness, adm *admin.IamClient, vic
 // and BigQuery in TestIAMDeletedServiceAccountInEmulatorFrontsPolicies,
 // and Cloud Run, Artifact Registry and Secure Source Manager in
 // TestIAMDeletedServiceAccountInRunShardPolicies, so each runs in the CI
-// shard that serves its services (#1761). Another member of the same
-// binding is kept. (Purge, 30 days after the delete, drops the member:
-// unit-tested, TestMemberRewriteHooks.)
+// shard that serves its services (#1761), and a BigQuery connection in
+// TestIAMDeletedServiceAccountInConnectionPolicies (#1795). Another member
+// of the same binding is kept. (Purge, 30 days after the delete, drops the
+// member: unit-tested, TestMemberRewriteHooks and
+// TestConnectionsRewriteMember.)
 func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager)
@@ -657,4 +660,40 @@ func TestIAMDeletedServiceAccountInRunShardPolicies(t *testing.T) {
 	}
 
 	deletedAccountRoundTrip(t, h, adm, victim, res)
+}
+
+// covers: google.iam.admin.v1.IAM/DeleteServiceAccount, google.iam.admin.v1.IAM/UndeleteServiceAccount, bigqueryconnection.projects.locations.connections.getIamPolicy
+//
+// TestIAMDeletedServiceAccountInConnectionPolicies (#1795): as
+// TestIAMDeletedServiceAccountInEveryServicesPolicies, for a BigQuery
+// Connection API connection's allow policy (the BigQuery front, another
+// process), read and written through the official
+// cloud.google.com/go/bigquery/connection/apiv1 client, in the shard that
+// serves BigQuery: deleted:serviceAccount:EMAIL?uid=ID after the delete,
+// serviceAccount:EMAIL again after undelete, the binding's other member
+// kept.
+func TestIAMDeletedServiceAccountInConnectionPolicies(t *testing.T) {
+	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)
+	cc, project := remoteConnectionClient(t, h)
+	adm, victim, suffix := deletedAccountFixture(t, h)
+	ctx := h.Context()
+	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us",
+		ConnectionId: "dse_" + strings.ReplaceAll(suffix, "-", "_"),
+		Connection:   &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
+	if err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cc.DeleteConnection(context.Background(), &connectionpb.DeleteConnectionRequest{Name: cn.GetName()})
+	})
+	deletedAccountRoundTrip(t, h, adm, victim, map[string]policyRW{"bigquery connection": {
+		get: func() (*iampb.Policy, error) {
+			return cc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: cn.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := cc.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: cn.GetName(), Policy: p})
+			return err
+		},
+	}})
 }

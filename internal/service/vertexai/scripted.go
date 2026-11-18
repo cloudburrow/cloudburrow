@@ -23,13 +23,30 @@ type ScriptedGenerator struct {
 	// Block, if non-nil, is waited on before the first chunk, so a test can
 	// hold generation open and cancel it.
 	Block <-chan struct{}
+	// Options makes it an OptionsGenerator, so the edge passes the sampler
+	// and the token limit down instead of refusing them; Seen, if set,
+	// receives each Request so a test can check what arrived.
+	Options bool
+	Seen    func(Request)
+	// Finish, if set, is the final chunk's finish reason instead of STOP.
+	Finish string
 }
 
 // Model implements Generator.
 func (g *ScriptedGenerator) Model() string { return g.ID }
 
+// HonoursOptions implements OptionsGenerator.
+func (g *ScriptedGenerator) HonoursOptions() bool { return g.Options }
+
 // Generate implements Generator.
 func (g *ScriptedGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk, func() error, error) {
+	if g.Seen != nil {
+		g.Seen(req)
+	}
+	finish := g.Finish
+	if finish == "" {
+		finish = FinishReasonStop
+	}
 	out := make(chan Chunk)
 	var genErr error
 
@@ -54,7 +71,7 @@ func (g *ScriptedGenerator) Generate(ctx context.Context, req Request) (<-chan C
 			return
 		}
 		select {
-		case out <- Chunk{Last: true, FinishReason: FinishReasonStop}:
+		case out <- Chunk{Last: true, FinishReason: finish}:
 		case <-ctx.Done():
 		}
 	}()

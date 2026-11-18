@@ -18,8 +18,11 @@ import (
 // (gemini-3.5-flash-lite, no alias) is the local endpoint's NOT_FOUND in
 // status with a NULL result, never substituted; without connection_id the
 // caller needs the Vertex AI User role (403 without it), and with one the
-// connection's permissions (#1765); output_schema and model_params are
-// 501. The model's words are recorded, not asserted.
+// connection's permissions (#1765); model_params' generationConfig is
+// applied (maxOutputTokens 6 caps the answer, #1797) and its other fields
+// are 501 (output_schema
+// is TestBigQueryAIGenerateStructured's, #1771). The model's words are
+// recorded, not asserted.
 //
 // covers: bigquery.jobs.query
 func TestBigQueryAIGenerate(t *testing.T) {
@@ -65,7 +68,20 @@ func TestBigQueryAIGenerate(t *testing.T) {
 	if len(rows) != 1 || rows[0]["result"] != nil || !strings.Contains(fmt.Sprint(rows[0]["status"]), "NOT_FOUND") {
 		t.Errorf("the default endpoint with no alias: %v", rows)
 	}
-	for arg, want := range map[string]string{"output_schema => 'a STRING'": "output_schema", `model_params => JSON '{"generationConfig":{"temperature":0}}'`: "model_params"} {
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT AI.GENERATE('Write a 300-word essay about the sea.', endpoint => '%s', "+
+		`model_params => JSON '{"generationConfig":{"maxOutputTokens":6,"temperature":0}}').result AS result`, localModel))
+	if len(rows) != 1 || rows[0]["result"] == nil || len(strings.Fields(fmt.Sprint(rows[0]["result"]))) > 8 {
+		t.Errorf("model_params maxOutputTokens 6: %v", rows)
+	}
+	t.Logf("model_params maxOutputTokens 6 (recorded): %v", rows)
+	// Out of range, the local endpoint's INVALID_ARGUMENT is the row's
+	// status, as a Vertex AI error is in BigQuery.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT AI.GENERATE('hi', endpoint => '%s', "+
+		`model_params => JSON '{"generationConfig":{"temperature":3}}').status AS status`, localModel))
+	if len(rows) != 1 || !strings.Contains(fmt.Sprint(rows[0]["status"]), "temperature") {
+		t.Errorf("model_params temperature 3: %v", rows)
+	}
+	for arg, want := range map[string]string{`model_params => JSON '{"safetySettings":[]}'`: "model_params.safetySettings"} {
 		if err := mlRun(h, c, fmt.Sprintf("SELECT AI.GENERATE('hi', endpoint => '%s', %s)", localModel, arg)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v", arg, err)
 		}

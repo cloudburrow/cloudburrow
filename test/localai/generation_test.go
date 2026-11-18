@@ -316,11 +316,11 @@ func TestRealUnsupportedOptionIsRefusedByTheRealEndpoint(t *testing.T) {
 	defer cancel()
 
 	_, err := cl.Models.GenerateContent(ctx, model, genai.Text("hi"),
-		&genai.GenerateContentConfig{Temperature: genai.Ptr[float32](0.2)})
+		&genai.GenerateContentConfig{PresencePenalty: genai.Ptr[float32](0.2)})
 	if err == nil {
-		t.Fatal("temperature was accepted; the caller would believe it was applied")
+		t.Fatal("presencePenalty was accepted; the caller would believe it was applied")
 	}
-	if !strings.Contains(err.Error(), "temperature") {
+	if !strings.Contains(err.Error(), "presencePenalty") {
 		t.Errorf("the error does not name the offending field: %v", err)
 	}
 }

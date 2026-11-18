@@ -100,9 +100,18 @@ type PlaygroundStatus struct {
 // is absent with a reason reads as a decision. The API is the authority and
 // TestPlaygroundRefusalsMatchTheAPI holds these in step with it.
 var refusedOptions = []string{
-	"temperature", "topP", "topK", "seed", "stopSequences", "maxOutputTokens",
-	"candidateCount", "responseMimeType", "tools", "safetySettings",
+	"candidateCount", "tools", "safetySettings",
 	"systemInstruction", "multi-turn", "countTokens",
+}
+
+// supportedOptions are the generationConfig fields the screen offers: the
+// runtime's cloudburrow_generate applies the sampler, the token limit and a
+// JSON response schema, and the API ends a stream at a stop sequence
+// (#1797, #1779). TestPlaygroundSupportedOptionsAreHonoured holds them in
+// step with the API.
+var supportedOptions = []string{
+	"temperature", "topP", "topK", "seed", "maxOutputTokens", "stopSequences",
+	"responseMimeType", "responseSchema",
 }
 
 // Status probes the endpoint and reports what the screen may offer.
@@ -120,7 +129,7 @@ func (p *Playground) Status(ctx context.Context) PlaygroundStatus {
 		Publisher:  p.Publisher,
 		Community:  p.Community,
 		Endpoint:   p.endpoint(),
-		Supported:  []string{},
+		Supported:  supportedOptions,
 		Refused:    refusedOptions,
 	}
 	if p.Community {
@@ -174,6 +183,9 @@ type playgroundRequest struct {
 	// relays :streamRawPredict (StreamRawPredict, #1285) when streaming and
 	// :rawPredict (RawPredict, #1284) otherwise.
 	Raw bool `json:"raw,omitempty"`
+	// GenerationConfig is relayed as the request's generationConfig, for
+	// the API to apply or refuse (supportedOptions).
+	GenerationConfig map[string]any `json:"generationConfig,omitempty"`
 }
 
 // maxRelayBytes bounds a relayed unary answer or refusal.
@@ -206,12 +218,16 @@ func (s *Server) handlePlaygroundGenerate(w http.ResponseWriter, r *http.Request
 
 	// The exact body the SDK sends, built here so the screen exercises the
 	// same request shape the compatibility tests do.
-	payload, err := json.Marshal(map[string]any{
+	req := map[string]any{
 		"contents": []map[string]any{{
 			"role":  "user",
 			"parts": []map[string]any{{"text": body.Prompt}},
 		}},
-	})
+	}
+	if len(body.GenerationConfig) > 0 {
+		req["generationConfig"] = body.GenerationConfig
+	}
+	payload, err := json.Marshal(req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

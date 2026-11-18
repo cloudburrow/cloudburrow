@@ -3821,9 +3821,10 @@
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdeletedprincipals1751_test.go:134 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:295 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:492 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:137 TestIAMDeletedServiceAccountInEveryServicesPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:298 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:495 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:675 TestIAMDeletedServiceAccountInConnectionPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts",
           "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ]
@@ -3999,9 +4000,10 @@
         "method": "google.iam.admin.v1.IAM/UndeleteServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdeletedprincipals1751_test.go:134 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:295 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:492 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:137 TestIAMDeletedServiceAccountInEveryServicesPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:298 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:495 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:675 TestIAMDeletedServiceAccountInConnectionPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ],
         "unverified": [
@@ -10038,6 +10040,7 @@
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
+          "test/compat/bigquerymlimage_test.go:41 TestBigQueryMLImageFunctions",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
           "test/compat/bigquerymlmore_test.go:125 TestBigQueryMLKMeans",
           "test/compat/bigquerymlmore_test.go:185 TestBigQueryMLPCA",
@@ -10161,7 +10164,10 @@
           "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryaigenerate_test.go:25 TestBigQueryAIGenerate",
+          "test/compat/bigqueryaifunctions_test.go:143 TestBigQueryAIManagedFunctions",
+          "test/compat/bigqueryaifunctions_test.go:229 TestBigQueryAIEmbed",
+          "test/compat/bigqueryaifunctions_test.go:47 TestBigQueryAIGenerateStructured",
+          "test/compat/bigqueryaigenerate_test.go:28 TestBigQueryAIGenerate",
           "test/compat/bigqueryalteratomic1612_test.go:108 TestBigQueryScriptDryRunStopsAtCallAndExecuteImmediate",
           "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
@@ -10277,6 +10283,7 @@
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
+          "test/compat/bigquerymlimage_test.go:41 TestBigQueryMLImageFunctions",
           "test/compat/bigquerymlmf_test.go:126 TestBigQueryMLImplicitMatrixFactorization",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
           "test/compat/bigquerymlmore_test.go:125 TestBigQueryMLKMeans",
@@ -10288,10 +10295,12 @@
           "test/compat/bigquerymlpreprocess_test.go:138 TestBigQueryMLQuantilePreprocess",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
-          "test/compat/bigquerymlremote_test.go:216 TestBigQueryMLRemoteGenerateEmbedding",
-          "test/compat/bigquerymlremote_test.go:93 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlremote_test.go:217 TestBigQueryMLRemoteGenerateEmbedding",
+          "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/bigquerymlremoteiam_test.go:238 TestBigQueryMLRemoteDefaultConnection",
+          "test/compat/bigquerymlremoteoptions_test.go:28 TestBigQueryMLRemoteGenerationOptions",
+          "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -10411,7 +10420,8 @@
           "test/compat/bigquerymlonnx_test.go:173 TestBigQueryMLONNXNeedsTheOnnxBuild",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
-          "test/compat/bigquerymlremote_test.go:93 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -10917,7 +10927,8 @@
         "method": "bigqueryconnection.projects.locations.connections.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
+          "test/compat/iamdeletedprincipals1751_test.go:675 TestIAMDeletedServiceAccountInConnectionPolicies"
         ]
       },
       {

@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // ContainerLabel marks runtime containers CloudBurrow started.
@@ -46,6 +48,10 @@ func NewDockerGenerator(image, modelDir, modelFile, modelID string) *ExecGenerat
 				"--name", id,
 				"--label", ContainerLabel,
 				"-v", modelDir + ":/models",
+				// cloudburrow_generate rather than the image's
+				// litert_lm_main: the same engine, with the sampler and
+				// the token limit set per request (#1797).
+				"--entrypoint", RunnerPath,
 				image,
 				"--backend=cpu",
 				"--model_path=/models/" + modelFile,
@@ -59,8 +65,13 @@ func NewDockerGenerator(image, modelDir, modelFile, modelID string) *ExecGenerat
 			_ = exec.CommandContext(ctx, "docker", "kill", id).Run()
 		},
 		ModelID: modelID,
+		Runner:  true,
 	}
 }
+
+// RunnerPath is cloudburrow_generate inside the runtime image
+// (deploy/litert-lm/runner).
+const RunnerPath = "/usr/local/bin/cloudburrow_generate"
 
 // ExecGenerator runs the LiteRT-LM runtime as a subprocess, one process per
 // request, and streams its standard output.
@@ -84,10 +95,64 @@ type ExecGenerator struct {
 	OnCancel func(id string)
 	// ModelID is what this generator reports as the model that ran.
 	ModelID string
+	// Runner marks the command as cloudburrow_generate: it takes the
+	// request's options as flags and writes only the model's text to
+	// standard output. Without it the command is litert_lm_main, whose
+	// output is parsed for its prompt echo, and options are refused.
+	Runner bool
 }
 
 // Model implements Generator.
 func (g *ExecGenerator) Model() string { return g.ModelID }
+
+// HonoursOptions implements OptionsGenerator.
+func (g *ExecGenerator) HonoursOptions() bool { return g.Runner }
+
+// runnerFlags are a request's options as cloudburrow_generate's flags, which
+// are LiteRT-LM's own shared flag names.
+func runnerFlags(req Request) []string {
+	var out []string
+	f32 := func(v float32) string { return strconv.FormatFloat(float64(v), 'g', -1, 32) }
+	if req.MaxOutputTokens != nil {
+		out = append(out, "--max_output_tokens="+strconv.Itoa(int(*req.MaxOutputTokens)))
+	}
+	if req.Temperature != nil {
+		out = append(out, "--sampler_temperature="+f32(*req.Temperature))
+	}
+	if req.TopP != nil {
+		out = append(out, "--sampler_top_p="+f32(*req.TopP))
+	}
+	if req.TopK != nil {
+		out = append(out, "--sampler_top_k="+strconv.Itoa(int(*req.TopK)))
+	}
+	if req.Seed != nil {
+		out = append(out, "--sampler_seed="+strconv.Itoa(int(*req.Seed)))
+	}
+	if req.JSONSchema != "" {
+		out = append(out, "--constraint_json_schema="+req.JSONSchema)
+	}
+	return out
+}
+
+// decodedMarker is cloudburrow_generate's last line on standard error.
+const decodedMarker = "cloudburrow_generate: decoded_tokens="
+
+// decodedTokens is the count cloudburrow_generate reported, or -1.
+func decodedTokens(stderr string) int {
+	i := strings.LastIndex(stderr, decodedMarker)
+	if i < 0 {
+		return -1
+	}
+	rest := stderr[i+len(decodedMarker):]
+	if j := strings.IndexAny(rest, "\r\n"); j >= 0 {
+		rest = rest[:j]
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(rest))
+	if err != nil {
+		return -1
+	}
+	return n
+}
 
 // promptMarker is echoed by the runtime before generation begins. Everything
 // after it on subsequent lines is model output; everything before is the
@@ -103,6 +168,9 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 	args := append([]string(nil), g.Args...)
 	if g.ArgsFor != nil {
 		args = g.ArgsFor(id)
+	}
+	if g.Runner {
+		args = append(args, runnerFlags(req)...)
 	}
 	args = append(args, "--input_prompt="+req.Prompt)
 
@@ -149,7 +217,11 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 	go func() {
 		defer close(finished)
 		defer close(out)
-		scanGeneration(ctx, stdout, out, req.Prompt)
+		if g.Runner {
+			streamRaw(ctx, stdout, out)
+		} else {
+			scanGeneration(ctx, stdout, out, req.Prompt)
+		}
 
 		// Drain anything left so the child never blocks writing.
 		_, _ = io.Copy(io.Discard, stdout)
@@ -162,13 +234,63 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 			}
 			return
 		}
+		finish := FinishReasonStop
+		// The limit was reached when the engine decoded as many tokens as
+		// it was allowed: Vertex's MAX_TOKENS.
+		if g.Runner && req.MaxOutputTokens != nil {
+			if n := decodedTokens(stderr.String()); n >= int(*req.MaxOutputTokens) {
+				finish = FinishReasonMaxTokens
+			}
+		}
 		select {
-		case out <- Chunk{Last: true, FinishReason: FinishReasonStop}:
+		case out <- Chunk{Last: true, FinishReason: finish}:
 		case <-ctx.Done():
 		}
 	}()
 
 	return out, func() error { return genErr }, nil
+}
+
+// streamRaw forwards cloudburrow_generate's standard output as it arrives.
+// Everything on it is the model's text, so nothing is parsed; a read may end
+// inside a multi-byte character, and that tail is held for the next read so
+// no chunk carries half a rune.
+func streamRaw(ctx context.Context, r io.Reader, out chan<- Chunk) {
+	buf := make([]byte, 4096)
+	var pending []byte
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			pending = append(pending, buf[:n]...)
+			cut := len(pending)
+			for i := 0; i < utf8.UTFMax && i < len(pending); i++ {
+				b := pending[len(pending)-1-i]
+				if utf8.RuneStart(b) {
+					if !utf8.FullRune(pending[len(pending)-1-i:]) {
+						cut = len(pending) - 1 - i
+					}
+					break
+				}
+			}
+			if cut > 0 {
+				select {
+				case out <- Chunk{Text: string(pending[:cut])}:
+				case <-ctx.Done():
+					return
+				}
+				pending = append([]byte(nil), pending[cut:]...)
+			}
+		}
+		if err != nil {
+			if len(pending) > 0 {
+				select {
+				case out <- Chunk{Text: string(pending)}:
+				case <-ctx.Done():
+				}
+			}
+			return
+		}
+	}
 }
 
 // scanGeneration forwards the model's output lines.

@@ -866,8 +866,9 @@
       "litertLM": {
         "$comment": "Built from source: no LiteRT-LM release publishes a Linux artifact, but Linux is a documented, supported build target.",
         "source": "https://github.com/google-ai-edge/LiteRT-LM",
-        "commit": "02e503079dda30b9c2c61289998a069a5099d4ea",
-        "commitDate": "2026-09-21",
+        "commit": "0082833dc28014489ceaa33eacaf5edbffbae518",
+        "commitDate": "2026-11-18",
+        "commitNote": "main, not a release: no release contains a789b7d0 (2026-11-05, 'Apply --max_output_tokens in litert_lm_main'); v0.19.1 was cut from release/v0.19.0, which left main before it (#1797). Move to the first release that contains it.",
         "license": "Apache-2.0",
         "redistribution": "published by each CloudBurrow release as localai.runtimeImage; `make litert-lm` builds the same Dockerfile locally",
         "updateFeed": "github-releases",
@@ -877,7 +878,8 @@
         "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
-        "binaries": "litert_lm_main (generation, verified) and embedding_litert_lm_main (embeddings, runs but has no compatible model)"
+        "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
+        "transitive": "Constrained decoding links upstream's own llguidance dependency (guidance-ai/llguidance, MIT), which LiteRT-LM's Bazel workspace fetches and builds; CloudBurrow adds no dependency of its own"
       },
       "litertLMBase": {
         "$comment": "Both stages of deploy/litert-lm/Dockerfile build FROM this digest (#687). TestDockerfilesPinTheInventory fails when they disagree.",

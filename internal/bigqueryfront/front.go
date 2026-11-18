@@ -331,7 +331,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
 			return
 		}
-		if iam.serveRewriteMember(w, r, next) { // iam.go and datasetaccessrewrite.go, #1751
+		if iam.serveRewriteMember(w, r, next, connections) { // iam.go, datasetaccessrewrite.go and connectionrewrite.go, #1751, #1795
 			return
 		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,

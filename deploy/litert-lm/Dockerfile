@@ -1,7 +1,12 @@
 # Build LiteRT-LM for Linux from Google's source.
 #
-# Two binaries: litert_lm_main for generation and embedding_litert_lm_main for
-# embeddings. They are separate targets upstream and neither implies the other.
+# Three binaries: litert_lm_main for generation, embedding_litert_lm_main for
+# embeddings, and cloudburrow_generate (runner/, #1797), litert_lm_main's
+# generation path with the sampler (temperature, top-k, top-p, seed) and the
+# token limit set per request through LiteRT-LM's own C++ API. litert_lm_main
+# builds its session with SessionConfig::CreateDefault() and has no flag for
+# the sampler, so the API is the only way to them. The runner is compiled here,
+# inside the image, so the CLI stays static.
 #
 # No LiteRT-LM release publishes a Linux artifact, but Linux is a documented,
 # supported build target — `bazel build //runtime/engine:litert_lm_main`, and
@@ -48,12 +53,22 @@ RUN case "${TARGETARCH}" in \
 
 # Pinned by commit, not by branch: a build that silently tracked main would
 # make the binary unreproducible.
-ARG LITERT_LM_REF=02e503079dda30b9c2c61289998a069a5099d4ea
+#
+# 0082833d is main on 2026-11-18. It is not a release: no release contains
+# a789b7d0 ("Apply --max_output_tokens in litert_lm_main", 2026-11-05), the
+# fix #1797 needs. v0.19.1 was cut from release/v0.19.0, which diverged from
+# main before it. Move to the first release that contains a789b7d0.
+ARG LITERT_LM_REF=0082833dc28014489ceaa33eacaf5edbffbae518
 RUN git lfs install --skip-repo \
     && git clone https://github.com/google-ai-edge/LiteRT-LM.git /src \
     && cd /src && git checkout "${LITERT_LM_REF}"
 
 WORKDIR /src
+# The runner builds as the package //cloudburrow inside upstream's workspace,
+# beside the litert_lm_main it is derived from, with that target's own
+# exported-symbols list (upstream does not export the file across packages).
+COPY runner/ /src/cloudburrow/
+RUN cp runtime/engine/litert_lm_main.exported_symbols cloudburrow/
 # The binary is not self-contained: it links libGemmaModelConstraintProvider.so,
 # which upstream ships prebuilt per platform rather than compiling, and finds it
 # through a RUNPATH into Bazel's output tree. Copying only the binary produces an
@@ -69,7 +84,9 @@ RUN case "${TARGETARCH}" in \
       *) echo "no upstream prebuilt libraries for ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
     && bazel build //runtime/engine:litert_lm_main //runtime/engine:embedding_litert_lm_main \
+      //cloudburrow:cloudburrow_generate \
     && cp bazel-bin/runtime/engine/litert_lm_main /usr/local/bin/litert_lm_main \
+    && cp bazel-bin/cloudburrow/cloudburrow_generate /usr/local/bin/cloudburrow_generate \
     && cp bazel-bin/runtime/engine/embedding_litert_lm_main /usr/local/bin/embedding_litert_lm_main \
     && mkdir -p /usr/local/lib/litert \
     && cp "prebuilt/${prebuilt}"/*.so /usr/local/lib/litert/ \
@@ -82,6 +99,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/litert_lm_main /usr/local/bin/litert_lm_main
 COPY --from=build /usr/local/bin/embedding_litert_lm_main /usr/local/bin/embedding_litert_lm_main
+COPY --from=build /usr/local/bin/cloudburrow_generate /usr/local/bin/cloudburrow_generate
 COPY --from=build /usr/local/lib/litert/ /usr/local/lib/litert/
 # ldconfig rather than LD_LIBRARY_PATH: the variable is inherited by every
 # child process and by anything the user runs in this image, and the loader

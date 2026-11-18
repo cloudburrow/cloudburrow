@@ -354,7 +354,6 @@ func TestUnsupportedOptionsAreRefused(t *testing.T) {
 		"topP":              `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"topP":0.9}}`,
 		"topK":              `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"topK":40}}`,
 		"seed":              `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"seed":7}}`,
-		"stopSequences":     `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"stopSequences":["x"]}}`,
 		"maxOutputTokens":   `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"maxOutputTokens":10}}`,
 		"responseMimeType":  `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json"}}`,
 		"tools":             `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[]}]}`,
