@@ -208,6 +208,13 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 				f("Davies-Bouldin index", cm.DaviesBouldinIndex)
 				f("Mean squared distance", cm.MeanSquaredDistance)
 			}
+			if rk := em.RankingMetrics; rk != nil {
+				// An IMPLICIT matrix factorization's (#1766).
+				f("Mean average precision", rk.MeanAveragePrecision)
+				f("Mean squared error", rk.MeanSquaredError)
+				f("Normalized discounted cumulative gain", rk.NormalizedDiscountedCumulativeGain)
+				f("Average rank", rk.AverageRank)
+			}
 			if dm := em.DimensionalityReductionMetrics; dm != nil {
 				f("Total explained variance ratio", dm.TotalExplainedVarianceRatio)
 			}

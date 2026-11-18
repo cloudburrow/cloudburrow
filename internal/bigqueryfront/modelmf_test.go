@@ -113,7 +113,41 @@ func TestTrainImplicitMatrixFactorization(t *testing.T) {
 	if n < 2 || tr.Iterations[0].Loss > tr.Iterations[n-1].Loss {
 		t.Errorf("the loss did not fall: %+v", tr.Iterations)
 	}
-	if len(tr.Eval) != 0 {
-		t.Errorf("metrics %v", tr.Eval)
+	for _, k := range rankingMetricNames {
+		if tr.Eval[k] == nil {
+			t.Errorf("metric %s missing: %v", k, tr.Eval)
+		}
+	}
+	if v := *tr.Eval["mean_average_precision"]; v < 0.7 {
+		t.Errorf("mean_average_precision %v; above chance", v)
+	}
+	if v := *tr.Eval["normalized_discounted_cumulative_gain"]; v <= 0.8 || v > 1+1e-9 {
+		t.Errorf("ndcg %v", v)
+	}
+	if v := *tr.Eval["average_rank"]; v < 0 || v > 0.34 {
+		t.Errorf("average_rank %v", v)
+	}
+}
+
+// TestRankingMetrics (#1766): hand-computed ranking metrics of a fixed
+// model: one user, three items scored 3, 2, 1; the relevant items are the
+// first (rating 1) and the third (rating 2).
+func TestRankingMetrics(t *testing.T) {
+	m := &mfTrained{Users: []string{"u"}, Items: []string{"a", "b", "c"}, UserF: [][]float64{{1}}, ItemF: [][]float64{{3}, {2}, {1}},
+		UserB: []float64{0}, ItemB: []float64{0, 0, 0}, Implicit: true}
+	got := m.rankingMetrics([]mfObs{{0, 0, 1}, {0, 2, 2}})
+	ap := (1.0/1 + 2.0/3) / 2
+	dcg := 1/math.Log2(2) + 2/math.Log2(4)
+	idcg := 2/math.Log2(2) + 1/math.Log2(3)
+	mse := ((3-1)*(3-1) + (1-1)*(1-1)) / 2.0
+	rank := (1*0 + 2*1.0) / 3
+	for k, want := range map[string]float64{"mean_average_precision": ap, "normalized_discounted_cumulative_gain": dcg / idcg,
+		"mean_squared_error": mse, "average_rank": rank} {
+		if got[k] == nil || math.Abs(*got[k]-want) > 1e-12 {
+			t.Errorf("%s = %v; want %v", k, got[k], want)
+		}
+	}
+	if len(m.rankingMetrics(nil)) != 0 {
+		t.Error("metrics of no rows")
 	}
 }

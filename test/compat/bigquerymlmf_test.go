@@ -117,8 +117,10 @@ func TestBigQueryMLMatrixFactorization(t *testing.T) {
 // predicted_rating_confidence; ML.RECOMMEND answers
 // predicted_rating_confidence for every user and item pair, each user's
 // own items above the others'; ML.WEIGHTS answers the factors;
-// wals_alpha on an EXPLICIT model is 400 and ML.EVALUATE of an IMPLICIT
-// one 501.
+// wals_alpha on an EXPLICIT model is 400; ML.EVALUATE answers the
+// ranking metrics (mean_average_precision, mean_squared_error,
+// normalized_discounted_cumulative_gain, average_rank) of the training
+// rows and of an input, and models.get names them under rankingMetrics.
 //
 // covers: bigquery.jobs.query, bigquery.models.get
 func TestBigQueryMLImplicitMatrixFactorization(t *testing.T) {
@@ -166,6 +168,33 @@ func TestBigQueryMLImplicitMatrixFactorization(t *testing.T) {
 	}
 	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.bad` OPTIONS(model_type='matrix_factorization', wals_alpha=2) AS SELECT user, item, rating FROM `%s.views`", name, name)).Read(ctx)
 	wantHTTPStatus(t, "wals_alpha of an EXPLICIT model", err, http.StatusBadRequest)
-	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.EVALUATE(MODEL `%s.imp`)", name)).Read(ctx)
-	wantHTTPStatus(t, "ML.EVALUATE of an IMPLICIT model", err, http.StatusNotImplemented)
+	for _, sql := range []string{
+		fmt.Sprintf("SELECT * FROM ML.EVALUATE(MODEL `%s.imp`)", name),
+		fmt.Sprintf("SELECT * FROM ML.EVALUATE(MODEL `%s.imp`, (SELECT user, item, rating FROM `%s.views` WHERE user IN ('a', 'b')))", name, name),
+	} {
+		ev := mlQuery(t, h, c, sql)
+		if len(ev) != 1 {
+			t.Fatalf("%s: %d rows", sql, len(ev))
+		}
+		for _, k := range []string{"mean_average_precision", "mean_squared_error", "normalized_discounted_cumulative_gain", "average_rank"} {
+			v, ok := ev[0][k].(float64)
+			if !ok || v < 0 || k != "mean_squared_error" && v > 1 {
+				t.Errorf("%s: %s = %v", sql, k, ev[0][k])
+			}
+		}
+		if v, _ := ev[0]["mean_average_precision"].(float64); v < 0.7 {
+			t.Errorf("%s: mean_average_precision %v; above chance", sql, v)
+		}
+		if _, ok := ev[0]["mean_absolute_error"]; ok {
+			t.Errorf("%s: a regression metric: %v", sql, ev[0])
+		}
+	}
+	raw, err := c.Dataset(name).Model("imp").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs := raw.RawTrainingRuns(); len(runs) != 1 || runs[0].EvaluationMetrics == nil || runs[0].EvaluationMetrics.RankingMetrics == nil ||
+		runs[0].EvaluationMetrics.RankingMetrics.MeanAveragePrecision < 0.7 {
+		t.Errorf("rankingMetrics: %+v", runs)
+	}
 }

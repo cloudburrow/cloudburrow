@@ -102,13 +102,14 @@ func TestBigQueryModelsSectionAndPage(t *testing.T) {
 // functions the front answers (#1481, #1504).
 func TestBigQueryModelPageResults(t *testing.T) {
 	models := map[string]string{
-		"km": `"modelType":"KMEANS","trainingRuns":[{"evaluationMetrics":{"clusteringMetrics":{"daviesBouldinIndex":0.1,"meanSquaredDistance":1.5}}}]`,
-		"lg": `"modelType":"LOGISTIC_REGRESSION","trainingRuns":[{"evaluationMetrics":{"multiClassClassificationMetrics":{"aggregateClassificationMetrics":{"accuracy":0.9}}}}]`,
-		"pc": `"modelType":"PCA","trainingRuns":[{"evaluationMetrics":{"dimensionalityReductionMetrics":{"totalExplainedVarianceRatio":0.75}}}]`,
-		"bt": `"modelType":"BOOSTED_TREE_REGRESSOR","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
-		"rf": `"modelType":"RANDOM_FOREST_CLASSIFIER","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
-		"ar": `"modelType":"ARIMA_PLUS","trainingRuns":[{"results":[{"index":0,"arimaResult":{"arimaModelInfo":[]}}]}]`,
-		"mf": `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"imp": `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"rankingMetrics":{"meanAveragePrecision":0.9,"averageRank":0.2}}}]`,
+		"km":  `"modelType":"KMEANS","trainingRuns":[{"evaluationMetrics":{"clusteringMetrics":{"daviesBouldinIndex":0.1,"meanSquaredDistance":1.5}}}]`,
+		"lg":  `"modelType":"LOGISTIC_REGRESSION","trainingRuns":[{"evaluationMetrics":{"multiClassClassificationMetrics":{"aggregateClassificationMetrics":{"accuracy":0.9}}}}]`,
+		"pc":  `"modelType":"PCA","trainingRuns":[{"evaluationMetrics":{"dimensionalityReductionMetrics":{"totalExplainedVarianceRatio":0.75}}}]`,
+		"bt":  `"modelType":"BOOSTED_TREE_REGRESSOR","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"rf":  `"modelType":"RANDOM_FOREST_CLASSIFIER","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"ar":  `"modelType":"ARIMA_PLUS","trainingRuns":[{"results":[{"index":0,"arimaResult":{"arimaModelInfo":[]}}]}]`,
+		"mf":  `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
 	}
 	rows := func(fields, rows string) string {
 		return `{"jobReference":{"projectId":"p","jobId":"j"},"jobComplete":true,"schema":{"fields":[` + fields + `]},"rows":[` + rows + `]}`
@@ -166,13 +167,14 @@ func TestBigQueryModelPageResults(t *testing.T) {
 	defer api.Close()
 	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
 	for id, wants := range map[string][]string{
-		"km": {"Centroids", "Value:11.5", "a=0.25", "Davies-Bouldin index"},
-		"lg": {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
-		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
-		"bt": {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
-		"rf": {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
-		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false"},
-		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
+		"imp": {"Mean average precision", "Average rank"},
+		"km":  {"Centroids", "Value:11.5", "a=0.25", "Davies-Bouldin index"},
+		"lg":  {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
+		"pc":  {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
+		"bt":  {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
+		"rf":  {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
+		"ar":  {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false"},
+		"mf":  {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
 		if err != nil || d.Unavailable != "" {
