@@ -17,7 +17,7 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,emulators,memorystore,sql,acceptance
+#                     storage,served,run,scale,emulators,memorystore,sql,acceptance
 #   --port-base N     the instances' port layout (default 41000)
 #   --out DIR         where the result and logs go (default ./verify-local)
 #   --no-build        use bin/cloudburrow as it is instead of `make build`

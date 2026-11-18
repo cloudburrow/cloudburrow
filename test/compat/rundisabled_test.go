@@ -50,6 +50,7 @@ func serviceAnswers(t *testing.T, base, host string, want func(int) bool) int {
 // its URL stops serving; MANUAL 1 serves again on the same revision.
 func TestRunServiceDisabledByManualZero(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -123,7 +124,8 @@ func TestRunServiceDisabledByManualZero(t *testing.T) {
 // clean; a count of 1 changes it in place.
 func TestTerraformRunServiceDisabled(t *testing.T) {
 	h := New(t)
-	c := runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
+	c := runClient(t, h)
 	m := newTFModule(t)
 	id := "tfsvcoff-" + strings.TrimPrefix(h.Project(), "cb-test-")
 	name := runParent(h) + "/services/" + id

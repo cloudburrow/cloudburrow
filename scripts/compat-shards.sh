@@ -7,7 +7,7 @@
 # job's matrix and COMPAT_SHARDS differ, or when the job sets these lists
 # itself. Bash 3.2 compatible: macOS runs it.
 #
-# The compatibility suite runs as five shards, each an instance with only
+# The compatibility suite runs as seven shards, each an instance with only
 # its services and only their CLOUDBURROW_TEST_* variables exported, so the
 # tests for the other shards skip by the gating a developer's partial
 # instance gets, not by a maintained list of names (#565). The membership
@@ -25,10 +25,20 @@
 #   served:    the remaining CloudBurrow-served APIs (kms, logging) and the
 #              KMS restart probe, with Resource Manager as
 #              LOGGING_RESOURCEMANAGER for the Logging folder tests;
-#   run:       Cloud Run with its Knative install and the prediction
-#              fixtures, whose startup-failure test is minutes on its own;
-#              secretmanager too, for the two tests that read a secret from
-#              a revision, so its tests run here and in storage;
+#   run:       Cloud Run with its Knative install; secretmanager too, for
+#              the two tests that read a secret from a revision, so its
+#              tests run here and in storage;
+#   scale:     the tests that take minutes each, split from run, which
+#              outgrew 60 minutes when its CPU-scaling tests began to pass
+#              (#1821, main run 44377266506: 3,766 s of tests): Cloud Run's
+#              autoscaling and manual-scaling tests (1,240 s), the
+#              prediction containers' (292 s, 244 of them the startup
+#              failure) and Secret Manager's 2,000 versions (286 s here,
+#              422 s in storage, which ran it too). They read Cloud Run and
+#              Secret Manager as SCALE_RUN and SCALE_SECRETS, which no other
+#              shard exports, and this shard exports neither RUN nor
+#              SECRETS, so each runs once: about 31 minutes here, and about
+#              32 left in run and 26 in storage;
 #   emulators: the upstream emulators but Memorystore, and their restart
 #              probes;
 #   memorystore: Memorystore for Redis, Redis Cluster and Valkey, with
@@ -42,11 +52,11 @@
 #              with Cloud Storage for the imports and exports, and the Cloud
 #              SQL restart probes: the slowest suites of what was the
 #              emulators shard, which passed 45m with them (#1472).
-# A seventh, acceptance, runs no compat test: storage, pubsub and run, for
+# An eighth, acceptance, runs no compat test: storage, pubsub and run, for
 # the acceptance workflow (test/e2e) and test/k8s (#596).
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run emulators memorystore sql acceptance"
+COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance"
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run
@@ -56,7 +66,9 @@ COMPAT_SHARDS="storage served run emulators memorystore sql acceptance"
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
 # (#868) and PostgreSQL (#995), only by the sql shard's (#1472). The tests
-# these name run there and the rest in storage.
+# these name run there and the rest in storage. The scale shard (#1821)
+# runs no browser test: the Cloud Run screens stay in run, whose instance
+# serves the services they read back.
 # The accessibility audit (#1604) follows the same split: its Cloud Storage,
 # Pub/Sub and Logs Explorer pages run in storage, and
 # TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
@@ -166,8 +178,8 @@ compat_shard() {
       # here. BigQuery for the revision that is refused by the validating
       # front at its injected CLOUDBURROW_BIGQUERY_ENDPOINT (#874, #902), as
       # RUN_BIGQUERY, with the one project its emulator serves.
-      # PREDICTION: the local AI endpoint, which Cloud Run starts, serving
-      # PredictionService for the custom prediction containers (#1193).
+      # PREDICTION, the local AI endpoint for the custom prediction
+      # containers (#1193), is the scale shard's (#1821).
       # RUN_SQLADMIN: the Cloud SQL volume tests (#1346), without the
       # Cloud SQL suite, which the sql shard runs; RUN_MYSQL and
       # MYSQL_PASSWORD for the MySQL one, which logs in as the cloudburrow
@@ -185,7 +197,19 @@ compat_shard() {
       # (#1568): the customer-managed and regional secrets, Terraform's data
       # sources, Cloud Storage volumes and Pub/Sub build triggers.
       FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,PREDICTION,APPENGINE_URL ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+    scale)
+      # The tests that take minutes each (#1821), split from run: Cloud
+      # Run's CPU, automatic and manual scaling and instance splits, through
+      # the SDK, gcloud and Terraform; the custom prediction containers, on
+      # Cloud Run, with PREDICTION, the local AI endpoint Cloud Run starts
+      # for PredictionService (#1193); and Secret Manager's 2,000 versions
+      # (#1596). Cloud Run as SCALE_RUN and Secret Manager as SCALE_SECRETS,
+      # which only these tests read, so neither suite runs a second time
+      # here; RUN_RESOURCEMANAGER and RUN_SERVICEUSAGE for gcloud's
+      # overrides, as in run.
+      SERVICES=run,secretmanager
+      TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
@@ -280,7 +304,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|run|emulators|memorystore|sql) TEST_VARS+=,GCLOUD ;;
+    storage|served|run|scale|emulators|memorystore|sql) TEST_VARS+=,GCLOUD ;;
   esac
 }
 

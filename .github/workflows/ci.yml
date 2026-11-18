@@ -450,7 +450,7 @@ jobs:
         run: |
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
 
-  # The compatibility suite runs as six shards and an acceptance shard,
+  # The compatibility suite runs as seven shards and an acceptance shard,
   # each an instance with only its services and only their CLOUDBURROW_TEST_*
   # variables exported (#565). What each shard starts and runs is in
   # scripts/compat-shards.sh, sourced here and by scripts/verify-local.sh,
@@ -466,15 +466,14 @@ jobs:
     name: official SDK compatibility (${{ matrix.shard }})
     runs-on: ubuntu-latest
     # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
-    # 120 since Landing 148: the run shard's compat suite may take 90m (#1821).
-    timeout-minutes: 120
+    timeout-minutes: 90
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, emulators, memorystore, sql, acceptance]
+        shard: [storage, served, run, scale, emulators, memorystore, sql, acceptance]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -499,7 +498,7 @@ jobs:
       # given credentials. 88 MB and a few seconds to unpack, so it is not
       # cached: restoring the unpacked 460 MB would take longer.
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -702,13 +701,12 @@ jobs:
             # Memorystore moved to the memorystore shard (#1568): each is now
             # about 30 minutes. The job's timeout-minutes, 90, leaves the build,
             # the probes and the browser suite their half hour beside it.
-            # The run shard gets 90m: since Landing 147 its CPU-scaling tests
-            # pass instead of failing fast (#1802: about 15 minutes between
-            # them), and at 60m main run 44357900271 timed out with its
-            # Terraform and Secure Source Manager tests still to run. #1821
-            # splits the shard so every shard is back near 30 minutes.
-            COMPAT_TIMEOUT=60m; [ "$SHARD" = run ] && COMPAT_TIMEOUT=90m
-            go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ./test/compat/... | tee compat.log
+            # The run shard outgrew 60m too once its CPU-scaling tests passed
+            # (#1802; main run 44357900271 timed out, and 44377266506 took
+            # 3,766 s under Landing 148's 90m stopgap): its tests that take
+            # minutes each moved to the scale shard (#1821), about 31 minutes,
+            # leaving run about 32.
+            go test -tags=compat -timeout 60m -v ./test/compat/... | tee compat.log
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
@@ -1025,7 +1023,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run emulators memorystore sql; do
+          for shard in storage served run scale emulators memorystore sql; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
