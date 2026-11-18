@@ -315,7 +315,14 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	}
 	var err error
 	if backends := c.Backends(); len(backends) > 0 {
+		// The cluster's DNS, beside the backends: up is ready only once
+		// their pods can look up a Service name (#1781).
+		dns := make(chan error, 1)
+		go func() { dns <- c.waitClusterDNS(ctx) }()
 		err = c.installer.InstallBackends(ctx, backends, c.timeout)
+		if derr := <-dns; err == nil {
+			err = derr
+		}
 	}
 	if err == nil && migrate {
 		if ierr := c.earlierStorage.Import(ctx); ierr != nil {
@@ -503,6 +510,37 @@ func (c *LifecycleComponent) waitKnativeWarm(ctx context.Context) error {
 		}
 	}
 	return c.installer.RestartKnative(ctx, c.timeout)
+}
+
+// waitClusterDNS waits until CoreDNS serves the cluster's names (#1781).
+//
+// A backend's pod reaches the instance's other services by Service name
+// (cloudburrow-host, for Resource Manager), and before CoreDNS is Ready
+// every such lookup fails. On a cluster this up did not restart, CoreDNS's
+// Deployment status is this boot's and is waited for. After a warm start
+// it predates the stop, and CoreDNS's pods wait out a retry backoff of
+// their own, so they are replaced once the Service network answers, and
+// the new ones are waited for; with Cloud Run, RestartKnative does that
+// with Knative's pods (#1610).
+func (c *LifecycleComponent) waitClusterDNS(ctx context.Context) error {
+	if c.restarted == nil || !c.restarted() {
+		return c.installer.WaitClusterDNS(ctx, c.timeout)
+	}
+	if c.NeedsKnative() {
+		return nil
+	}
+	if c.serviceNetwork != nil {
+		if err := c.serviceNetwork(ctx); err != nil {
+			if ctx.Err() != nil {
+				return err
+			}
+			// As waitKnativeWarm: a probe that cannot run is no reason
+			// to fail the start; CoreDNS comes back late, on its own.
+			fmt.Fprintf(c.out, "  the Service network was not confirmed (%v); the cluster's DNS restarts itself\n", err)
+			return nil
+		}
+	}
+	return c.installer.RestartClusterDNS(ctx, c.timeout)
 }
 
 // Installer exposes the underlying installer.

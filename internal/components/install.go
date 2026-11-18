@@ -284,6 +284,52 @@ var (
 	}
 )
 
+// clusterDNS is CoreDNS's Deployment, which every pod's lookup of a
+// Service name goes through: the bigquery front's of cloudburrow-host, for
+// Resource Manager (#1781).
+var clusterDNS = restartTarget{namespace: "kube-system", name: "coredns"}
+
+// RestartClusterDNS replaces CoreDNS's pods and waits until its Deployment
+// has as many Ready pods of the new template as it asks for (#1781): what
+// RestartKnative does for CoreDNS, for an instance without Cloud Run.
+//
+// After a warm start without it, nothing restarted CoreDNS: its pods,
+// started with the node before the Service network worked, waited out
+// their informers' retry backoff, unready, some 30 s after up was ready
+// (measured 2026-11-18, --services bigquery,storage, Docker Desktop
+// arm64). Until then the cluster's DNS Service had no endpoint, and a
+// pod's lookup of a Service name failed ("read udp ... 10.96.0.10:53:
+// connection refused", or no answer): the bigquery front could not ask
+// Resource Manager of a project, and answered a project created a moment
+// before 404 "project P is not found".
+func (i *Installer) RestartClusterDNS(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	want := map[restartTarget]int{}
+	names, err := i.restartTargets(ctx, clusterDNS, stamp, want)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return nil // a cluster without CoreDNS: nothing to wait for
+	}
+	i.logf("  restarted %s on the running network\n", strings.Join(names, ", "))
+	return i.waitRestarted(ctx, []restartTarget{clusterDNS}, want, stamp, deadline, timeout)
+}
+
+// WaitClusterDNS waits until CoreDNS's Deployment is Available, on a
+// cluster this up did not restart, whose Deployment status is this
+// boot's (#1781).
+func (i *Installer) WaitClusterDNS(ctx context.Context, timeout time.Duration) error {
+	i.logf("  waiting for the cluster's DNS...\n")
+	if _, err := i.kubectl(ctx, "", "-n", clusterDNS.namespace, "wait", "--for=condition=Available",
+		"deployment/"+clusterDNS.name, fmt.Sprintf("--timeout=%ds", int(timeout.Seconds()))); err != nil {
+		return fmt.Errorf("%w: the cluster's DNS (%s/%s) did not become ready: %w", ErrInstallFailed,
+			clusterDNS.namespace, clusterDNS.name, err)
+	}
+	return nil
+}
+
 // RestartedAtAnnotation marks the pod template of a Deployment
 // RestartKnative replaced, with the time it did (#1610).
 const RestartedAtAnnotation = "cloudburrow.dev/restarted-at"

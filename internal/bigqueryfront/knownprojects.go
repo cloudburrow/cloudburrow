@@ -31,7 +31,10 @@ import (
 // An ACTIVE answer is kept for activeProjectTTL, and the project asked
 // again after it: once the engine has the project, the header no longer
 // matters, but a project shut down since is not served (#1767). Any other
-// answer is asked again after unknownProjectTTL, and a Resource Manager that did not answer after
+// answer is kept for no time at all (#1781): a project created a moment
+// after BigQuery was asked of it is served on its next request, as
+// BigQuery serves one, and a project restored is served at once. A
+// Resource Manager that did not answer is asked again after
 // unreachableTTL. Each ask is an attempt bounded by projectAskTimeout and,
 // when it fails, one more bounded by twice that, so a Resource Manager
 // that is down slows no request for long; the
@@ -41,12 +44,18 @@ import (
 // KnownProjectHeader is bigquery-emulator patch 0091's header.
 const KnownProjectHeader = "X-Cloudburrow-Known-Project"
 
-// unknownProjectTTL is how long an answer other than ACTIVE is kept, and
+// activeProjectTTL is how long an ACTIVE answer is kept, and
 // unreachableTTL how long Resource Manager's silence is.
+//
+// Resource Manager went unanswered for some 30 s after a warm start
+// (#1781): not the service, which runs in the cloudburrow process, but
+// the cluster's DNS, whose CoreDNS pods were not Ready, so the front's
+// lookup of cloudburrow-host failed. up now waits for the cluster's DNS
+// (internal/components, waitClusterDNS) before it is ready, so a request
+// up serves never meets that silence.
 const (
-	activeProjectTTL  = 2 * time.Second
-	unknownProjectTTL = 2 * time.Second
-	unreachableTTL    = 10 * time.Second
+	activeProjectTTL = 2 * time.Second
+	unreachableTTL   = 10 * time.Second
 )
 
 // projectAskTimeout bounds one projects.get of Resource Manager.
@@ -62,8 +71,10 @@ type knownProjects struct {
 	mu      sync.Mutex
 	active  map[string]bool
 	// fresh is when each ACTIVE answer is asked again.
-	fresh   map[string]time.Time
-	unknown map[string]time.Time
+	fresh map[string]time.Time
+	// unreachable is when a project Resource Manager did not answer of
+	// is asked again.
+	unreachable map[string]time.Time
 	// shutDown is the projects Resource Manager last answered
 	// DELETE_REQUESTED of (#1767, refuseShutDown).
 	shutDown map[string]bool
@@ -91,7 +102,7 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 		k.mu.Unlock()
 		return true
 	}
-	if t, ok := k.unknown[project]; ok && time.Now().Before(t) {
+	if t, ok := k.unreachable[project]; ok && time.Now().Before(t) {
 		k.mu.Unlock()
 		return false
 	}
@@ -113,8 +124,8 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 	}
 	read := err == nil && status == http.StatusOK && json.Unmarshal(body, &p) == nil
 	active := read && p.State == "ACTIVE"
-	ttl := unknownProjectTTL
-	if err != nil || status/100 == 5 {
+	silent := err != nil || status/100 == 5
+	if silent {
 		k.mu.Lock()
 		was := k.active[project]
 		if was {
@@ -129,7 +140,6 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 			return true
 		}
 		logFront("bigquery front: Resource Manager projects.get of %s: %s; asked again in %s", project, describeAttempt(status, err), unreachableTTL)
-		ttl = unreachableTTL
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -150,15 +160,15 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 		}
 		k.active[project] = true
 		k.fresh[project] = time.Now().Add(activeProjectTTL)
-		delete(k.unknown, project)
+		delete(k.unreachable, project)
+	} else if silent {
+		if k.unreachable == nil {
+			k.unreachable = map[string]time.Time{}
+		}
+		k.unreachable[project] = time.Now().Add(unreachableTTL)
 	} else {
-		if status != 0 && status/100 != 5 {
-			delete(k.active, project)
-		}
-		if k.unknown == nil {
-			k.unknown = map[string]time.Time{}
-		}
-		k.unknown[project] = time.Now().Add(ttl)
+		delete(k.active, project)
+		delete(k.unreachable, project)
 	}
 	return active
 }

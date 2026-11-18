@@ -101,7 +101,7 @@ func TestBigQueryPerProjectIAMRest(t *testing.T) {
 		"CREATE TABLE data.t AS SELECT 1 AS x UNION ALL SELECT 2",
 		"CREATE TABLE data.t2 AS SELECT 5 AS x",
 		"CREATE TABLE cond.c AS SELECT 7 AS x",
-		"CREATE OR REPLACE FUNCTION data.f(x INT64) AS (x + 1)",
+		"CREATE FUNCTION data.f(x INT64) AS (x + 1)",
 	} {
 		if err := exec(ocl, sql); err != nil {
 			t.Fatalf("%s: %v", sql, err)
@@ -446,8 +446,8 @@ func TestBigQueryPerProjectIAMViewsAndRoutines(t *testing.T) {
 		"CREATE VIEW views.plain AS SELECT x FROM " + tb + "src.t`",
 		"CREATE VIEW views.authorized AS SELECT x FROM " + tb + "authsrc.t`",
 		"CREATE VIEW authviews.v AS SELECT x FROM " + tb + "authsrc.t`",
-		"CREATE OR REPLACE FUNCTION views.inc(x INT64) AS (x + 1)",
-		"CREATE OR REPLACE FUNCTION src.inc(x INT64) AS (x + 1)",
+		"CREATE FUNCTION views.inc(x INT64) AS (x + 1)",
+		"CREATE FUNCTION src.inc(x INT64) AS (x + 1)",
 	} {
 		if err := exec(ocl, sql); err != nil {
 			t.Fatalf("%s: %v", sql, err)

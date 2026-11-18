@@ -477,6 +477,15 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				f.insertDataset(w, r)
 				return
 			}
+			if r.Method == http.MethodDelete && r.Header.Get(PurgeHeader) != "" {
+				// A purge's deletes carry the linked writer's header too,
+				// so a linked dataset can go (cmd/cloudburrow's
+				// bigqueryResetter): each was sent straight to the engine,
+				// and the dataset's routines, models and row access
+				// policies outlived the purge (#1781).
+				f.deleteDatasetPurging(w, r, dataset)
+				return
+			}
 			next.ServeHTTP(w, r)
 		}) {
 			return

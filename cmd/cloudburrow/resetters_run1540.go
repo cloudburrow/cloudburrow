@@ -81,6 +81,29 @@ func (b *bigqueryResetter) ResetProject(ctx context.Context, project string) err
 	if err := c.Dataset(bigqueryDroppedDataset).DeleteWithContents(ctx); err != nil && !isHTTPStatus(err, http.StatusNotFound) {
 		errs = append(errs, fmt.Errorf("delete the front's deleted tables: %w", err))
 	}
+	// And its jobs, every user's (#1781): a project made again under a
+	// purged ID listed and read the purged project's.
+	jobs := c.Jobs(ctx)
+	jobs.AllUsers = true
+	var ids []*bigquery.Job
+	for {
+		j, err := jobs.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			if !isHTTPStatus(err, http.StatusNotFound) {
+				errs = append(errs, fmt.Errorf("list jobs: %w", err))
+			}
+			break
+		}
+		ids = append(ids, j)
+	}
+	for _, j := range ids {
+		if err := j.Delete(ctx); err != nil && !isHTTPStatus(err, http.StatusNotFound) {
+			errs = append(errs, fmt.Errorf("delete job %s: %w", j.ID(), err))
+		}
+	}
 	return errors.Join(errs...)
 }
 

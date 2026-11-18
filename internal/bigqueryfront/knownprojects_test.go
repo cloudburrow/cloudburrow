@@ -179,10 +179,30 @@ func TestShutDownProjectIsRefused(t *testing.T) {
 		t.Errorf("DELETE_REQUESTED: HTTP %d, want 403", c)
 	}
 	state.Store("ACTIVE")
-	k.mu.Lock()
-	k.unknown["p"] = time.Now().Add(-time.Second)
-	k.mu.Unlock()
 	if c := do(); c != http.StatusOK {
 		t.Errorf("restored: HTTP %d, want 200", c)
+	}
+}
+
+// TestAProjectCreatedSinceIsServed (#1781): an answer other than ACTIVE is
+// not kept, so a project BigQuery was asked of before Resource Manager had
+// it is served on the first request after it is created.
+func TestAProjectCreatedSinceIsServed(t *testing.T) {
+	var created atomic.Bool
+	rm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !created.Load() {
+			http.Error(w, `{"error":{"code":403}}`, http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(`{"projectId":"p","state":"ACTIVE"}`))
+	}))
+	defer rm.Close()
+	k := &knownProjects{rm: rm.URL}
+	if k.isActive(context.Background(), "p") {
+		t.Fatal("p is ACTIVE before it was created")
+	}
+	created.Store(true)
+	if !k.isActive(context.Background(), "p") {
+		t.Error("p is not served on the first request after it was created")
 	}
 }
