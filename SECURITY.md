@@ -7,7 +7,7 @@ not backported to earlier releases.
 
 | Version | Supported |
 |---|---|
-| Latest release (currently [v0.2.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.2.0)) | Yes |
+| Latest release (currently [v0.3.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.3.0)) | Yes |
 | `main` | Yes — fixed first, released next |
 | Any older release | No — upgrade to the latest |
 

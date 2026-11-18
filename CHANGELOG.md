@@ -11,6 +11,77 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-18
+
+A fix release for v0.2.0, with one new BigQuery function. The generated coverage is unchanged:
+**1,133 of 1,227 methods Verified** through official clients, across thirty API surfaces
+([docs/coverage](docs/coverage/README.md)). Only a row of
+[docs/compatibility.md](docs/compatibility.md) marked Verified is a support claim.
+
+### Fixed
+
+#### Cloud Run
+
+- **CPU scaling works on small hosts.** A container with a CPU limit now also requests 10m of CPU
+  (or its limit, when that is smaller), instead of reserving the whole limit. In v0.2.0 each 1-CPU
+  instance reserved a full core of the one kind node, so on a 4-CPU machine an automatically
+  scaled service or worker pool could not grow past its first instance. The limit itself is
+  unchanged (#1789, #1800, #1802).
+- `gcloud beta run services update` with `--scaling-cpu-target` and
+  `--scaling-concurrency-target` works: the `run.googleapis.com/launch-stage` annotation that
+  gcloud beta sends is now accepted as the service's launch stage, where v0.2.0 answered 501. A
+  value that is not a launch stage is `INVALID_ARGUMENT` (#1802).
+
+#### BigQuery and Datastore
+
+- **Two tunnels no longer share one kubectl port.** In v0.2.0, a port could be handed to the
+  BigQuery and Datastore tunnels at once, so BigQuery answered 404 and Datastore failed with "frame
+  too large". A tunnel is now never given a port already handed out, a kubectl that cannot listen
+  fails its launch, and a guarded tunnel whose port is taken moves to a new one.
+
+#### CLI
+
+- **`cloudburrow prefetch` no longer caches a truncated image** (#1805). Node images are exported
+  to a file on the node and copied out with `docker cp`, where v0.2.0 read `docker exec`'s output
+  stream, which sometimes ended early and failed `up --offline` with "unexpected EOF". A copy
+  shorter than its header says still fails and is never cached.
+
+#### Every gRPC server
+
+- **`Stop` waits for every call's handler** (#1804). This is v0.2.0's Resource Manager fix (#1803)
+  applied to every server that serves gRPC through HTTP: the shared gRPC port, Secret Manager,
+  Vertex AI, Cloud Storage, and the call fronts of Firestore, Datastore, Spanner and Pub/Sub. A
+  call's trace span and request record are no longer cut off at shutdown, and Pub/Sub's front
+  flushes its state only after the calls it cut off have finished.
+
+### Added
+
+#### BigQuery
+
+- **`AI.AGG`**, the aggregate generative AI function (#1777): one answer per `GROUP BY` group, as
+  a STRING or an `output_schema` STRUCT, with `DISTINCT`, `connection_id`, `endpoint` and
+  `max_error_ratio`. It runs on the instance's local Vertex AI endpoint, never Google, aggregating
+  in batches that fit the local model's 4,096-token context. `OVER`, ObjectRef input and
+  instructions that are not literals are 501.
+
+#### Upgrades and docs
+
+- **The upgrade test starts from v0.2.0** (#1807): the nightly test downloads v0.2.0's published
+  archive, checks it against the release's checksums, and upgrades it to this release, and can
+  still start from v0.1.0. State that v0.2.0 wrote, in the state directory and in a `state save`
+  archive, is read back in every CI run. [docs/install.md](docs/install.md#upgrading) names both
+  releases in the upgrade promise.
+- **Docs name the current release** (#1806): install links, examples, the action's `version:`
+  line and the CLI flag table point at the newest release, and a test fails when a page pins a
+  release older than this changelog's newest heading.
+- **"What survives a restart"** in docs/install.md (#1801) replaces "What is not persisted". A
+  service is marked Yes only when a stop/up restart probe in CI proves it, and a test keeps the
+  table and the probes in step.
+- **Signing and Gatekeeper** (#605): docs/install.md says v0.2.0's macOS binaries are signed and
+  notarized, and how to check one with `spctl -a -t open --context context:primary-signature`.
+  `spctl -a -t exec` rejects any bare CLI as "not an app", so release.yml's check after
+  notarization now uses the same command.
+
 ## [0.2.0] - 2026-11-18
 
 The second release. The generated coverage now tracks thirty API surfaces, up from nine in
@@ -605,6 +676,7 @@ operation in [docs/compatibility.md](docs/compatibility.md) and summarised in
   one `checksums.txt`, a Homebrew formula and an installer that refuses an archive it cannot
   verify (#71, #324).
 
-[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0
