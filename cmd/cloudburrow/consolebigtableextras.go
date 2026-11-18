@@ -300,7 +300,7 @@ func (p bigtableInstancesProvider) sqlViewsListing(ctx context.Context, c *bigta
 
 // viewRows runs the view, counting the rows it returns now.
 func (p bigtableInstancesProvider) viewRows(ctx context.Context, project, instance, view string) string {
-	c, err := bigtable.NewClient(ctx, project, instance, localOpts(p.endpoint)...)
+	c, err := newConsoleBigtableClient(ctx, p.endpoint, project, instance)
 	if err != nil {
 		return "unavailable: " + err.Error()
 	}
