@@ -31,7 +31,7 @@ import (
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true,
-	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true}
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true}
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -221,6 +221,11 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			return true
 		}
 	}
+	if fn := aiFunction(text); fn != "" {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": BigQuery's generative AI functions are not served yet (#1765); "+
+			"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING of a remote model run on the instance's local Vertex AI (#1760). Nothing was run.")
+		return true
+	}
 	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
@@ -236,7 +241,8 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
-				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN and ML.RECONSTRUCTION_LOSS. Nothing was run.")
+				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
+				"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -536,6 +542,12 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	}
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
+	}
+	if md.Remote != nil {
+		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
+	}
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" {
+		return "", 400, "Function ML." + c.fn + " is only supported for remote models"
 	}
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711

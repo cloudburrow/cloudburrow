@@ -37,8 +37,9 @@ import (
 // infrastructure itself: AUTOML_*, imported TENSORFLOW models read from
 // Cloud Storage (ONNX runs in the onnx build, modelonnx.go, and XGBOOST
 // on internal/xgbmodel, modelxgb.go, #1711; TENSORFLOW_LITE on
-// internal/tflitemodel, modeltflite.go, #1755), and remote models over a Cloud resource
-// connection, which CloudBurrow has none of); a TRANSFORM clause; and the
+// internal/tflitemodel, modeltflite.go, #1755; #1766), and remote models other than
+// LLM and embedding models on the local Vertex AI (modelremote.go, #1760; #1765); a
+// TRANSFORM clause; and the
 // options CloudBurrow does not carry out.
 
 // bqModel is a model the front keeps.
@@ -73,6 +74,8 @@ type bqModel struct {
 	XGB *xgbImport `json:"xgboost,omitempty"`
 	// TFLite is an imported TensorFlow Lite model's (modeltflite.go, #1755).
 	TFLite *tfliteImport `json:"tflite,omitempty"`
+	// Remote is a remote model's (modelremote.go, #1760).
+	Remote *remoteModel `json:"remote,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -312,6 +315,10 @@ func (md bqModel) resource(full bool) map[string]any {
 	}
 	if md.TFLite != nil {
 		md.tfliteResource(res) // modeltflite.go, #1755
+		return res
+	}
+	if md.Remote != nil {
+		md.remoteResource(res) // modelremote.go, #1760
 		return res
 	}
 	var feats []map[string]any
@@ -717,6 +724,9 @@ type modelDDL struct {
 	// XGBoost model's INPUT and OUTPUT clauses.
 	onnxPath                    string
 	importInputs, importOutputs []importColumn
+	// remote is a remote model's connection and endpoint (modelremote.go,
+	// #1760).
+	remote *remoteDDL
 }
 
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
@@ -804,9 +814,12 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 				return d, true, c, m
 			}
 			i = next
-		case stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
-			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): CloudBurrow serves the BigQuery Connection API (#1755), but its " +
-				"BigQuery does not yet route a remote model's calls through its connection to the instance's local Vertex AI endpoints (#1755 follow-up), and never to Google's. Nothing was run."
+		case stmt[i].is("REMOTE"):
+			// A remote model on the local Vertex AI (modelremote.go, #1760).
+			c, m := parseRemote(stmt, i, &d)
+			return d, true, c, m
+		case stmt[i].is("OUTPUT"):
+			return d, true, 400, "Syntax error: OUTPUT comes after INPUT"
 		}
 	}
 	d.opts = defaultMLOptions()
@@ -1654,6 +1667,18 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	case had && !d.replace:
 		fail(409, fmt.Sprintf("Already Exists: Model %s:%s.%s", project, dataset, id))
 		return true
+	case d.remote != nil:
+		// A remote model on the local Vertex AI (modelremote.go, #1760).
+		rm, c, m := f.createRemote(d, project, loc)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		if !dry {
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Created: now, Modified: now,
+				Location: loc, Remote: rm})
+		}
 	case d.opts.ModelType == "ONNX":
 		// An imported ONNX model (modelonnx.go, #1711).
 		imp, data, c, m := f.importONNX(r.Context(), d.onnxPath)

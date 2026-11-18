@@ -37,8 +37,8 @@ func TestConsoleBigQueryUndeleteDataset(t *testing.T) {
 		t.Errorf("another project's list offers %+v", a)
 	}
 	a := p.ListActions(ctx, "p")
-	if len(a) != 1 || a[0].ID != actUndeleteDataset || len(a[0].Fields) != 1 || !a[0].Fields[0].Required {
-		t.Fatalf("the BigQuery list offers %+v; want Undelete dataset with a required Dataset ID", a)
+	if len(a) != 4 || a[0].ID != actUndeleteDataset || len(a[0].Fields) != 1 || !a[0].Fields[0].Required {
+		t.Fatalf("the BigQuery list offers %+v; want Undelete dataset with a required Dataset ID, then the three connection actions (#1760)", a)
 	}
 	if err := p.ActAt(ctx, "p", nil, actUndeleteDataset, map[string]string{"dataset": " gone "}); err != nil {
 		t.Fatalf("Undelete dataset: %v", err)

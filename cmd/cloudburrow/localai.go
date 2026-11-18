@@ -72,6 +72,29 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 	return srv, nil
 }
 
+// localAIServed reports whether `up` serves the local Vertex AI endpoint:
+// with a model, with embeddings, or with Cloud Run's prediction endpoints
+// (buildLocalAI, withPredictionEndpoints).
+func localAIServed(cfg config.Config) bool {
+	return strings.TrimSpace(cfg.LocalAI.ModelPath) != "" || cfg.LocalAI.Embeddings || serviceEnabled(cfg, config.ServiceRun)
+}
+
+// pinLocalAIPort gives an OS-assigned (0) local AI port a fixed one before
+// anything starts, so the BigQuery front can be told where to reach it
+// through cloudburrow-host (#1760): the front's arguments are written
+// before the endpoint binds.
+func pinLocalAIPort(cfg *config.Config) error {
+	if cfg.Endpoints.LocalAI != 0 {
+		return nil
+	}
+	l, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddress, "0"))
+	if err != nil {
+		return fmt.Errorf("choose a port for the local AI endpoint: %w", err)
+	}
+	cfg.Endpoints.LocalAI = l.Addr().(*net.TCPAddr).Port
+	return l.Close()
+}
+
 // withPredictionEndpoints makes srv serve custom prediction endpoints when
 // Cloud Run is enabled, starting an endpoint with no model if srv is nil.
 // Generation and embeddings on it answer as they do with nothing configured.

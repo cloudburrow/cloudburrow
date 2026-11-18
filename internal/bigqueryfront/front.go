@@ -404,7 +404,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models,
-				onnx: o.onnx}
+				onnx: o.onnx, vertexai: o.vertexai, connections: connections, numbers: numbers}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -638,6 +638,14 @@ type front struct {
 	// onnx runs imported ONNX models (modelonnx.go, #1711): the runner
 	// of the onnx build's CLI, or nil, and every ONNX model is 501.
 	onnx onnxRunner
+	// vertexai is the instance's local Vertex AI endpoint (http://host:port),
+	// which remote models run on (modelremote.go, #1760), or "".
+	vertexai string
+	// connections and numbers are the Connection API's connections and
+	// the project numbers that key them (connections.go), which a remote
+	// model names.
+	connections *bqConnections
+	numbers     *projectNumbers
 }
 
 // Option is an option of Wrap.
@@ -675,6 +683,9 @@ type options struct {
 	resourceManager string
 	// onnx runs imported ONNX models, or nil (modelonnx.go, #1711).
 	onnx onnxRunner
+	// vertexai is the local Vertex AI endpoint remote models run on, or ""
+	// (modelremote.go, #1760).
+	vertexai string
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

@@ -292,3 +292,51 @@ func TestBigQueryTFLiteModelPage(t *testing.T) {
 		t.Errorf("page %+v", d)
 	}
 }
+
+// TestBigQueryRemoteModelPage (#1760): a remote model's page names its
+// endpoint and connection (models.get's remoteModelInfo), says it runs on
+// the local Vertex AI, and offers the function that runs it; it runs no
+// query.
+func TestBigQueryRemoteModelPage(t *testing.T) {
+	models := map[string]string{
+		"gen": `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"gen"},"creationTime":"1700000000000","lastModifiedTime":"1700000000000",
+"location":"US","etag":"e","remoteModelInfo":{"endpoint":"gemma-4-e2b-it-community","connection":"projects/1/locations/us/connections/ai"}}`,
+		"emb": `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"emb"},"creationTime":"1700000000000","lastModifiedTime":"1700000000000",
+"location":"US","etag":"e","remoteModelInfo":{"endpoint":"embeddinggemma-300m-onnx-community","connection":"projects/1/locations/us/connections/ai"}}`,
+	}
+	var calls []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if m, ok := models[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]; ok && strings.Contains(r.URL.Path, "/datasets/d/models/") {
+			fmt.Fprint(w, m)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	for id, fn := range map[string]string{"gen": "ML.GENERATE_TEXT(MODEL `d.gen`", "emb": "ML.GENERATE_EMBEDDING(MODEL `d.emb`"} {
+		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
+		if err != nil || d.Unavailable != "" || len(d.Sections) != 1 {
+			t.Fatalf("%s: %v %+v", id, err, d)
+		}
+		var props []string
+		for _, g := range d.Sections[0].Groups {
+			for _, pr := range g.Properties {
+				props = append(props, pr.Label+"="+pr.Value)
+			}
+		}
+		all := strings.Join(props, "; ")
+		if !strings.Contains(all, "Type=Remote model") || !strings.Contains(all, "Connection=projects/1/locations/us/connections/ai") ||
+			!strings.Contains(all, "Endpoint="+map[string]string{"gen": "gemma-4-e2b-it-community", "emb": "embeddinggemma-300m-onnx-community"}[id]) ||
+			!strings.Contains(all, fn) || !strings.Contains(all, "never Google's") {
+			t.Errorf("%s: %s", id, all)
+		}
+	}
+	for _, c := range calls {
+		if strings.HasSuffix(c, "/queries") {
+			t.Errorf("the page of a remote model ran a query: %v", calls)
+		}
+	}
+}
