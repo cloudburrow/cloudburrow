@@ -31,6 +31,10 @@ or `NewCertificateAuthorityRESTClient` with `http://` before the address.
 
 Every long-running method answers an operation that is already done. Not served, and answered 501: CA keys in Cloud KMS, CMEK pools, `gcs_bucket`, template `passthrough_extensions` and CEL identity constraints. [compatibility.md](compatibility.md#certificate-authority-service--googlecloudsecurityprivatecav1) has each claim and [coverage/privateca.md](coverage/privateca.md) each method.
 
+## gcloud and Terraform
+
+`cloudburrow gcloud-setup` writes the `privateca` override, so `gcloud privateca` pools, roots, subordinates, templates and certificates reach this instance (`TestGcloudPrivateCA`). `cloudburrow terraform` sets `privateca_custom_endpoint` for the `google_privateca_*` resources (`TestTerraformPrivateCA`).
+
 ## Console
 
 The console's Certificate Authority Service page (`/security/cas`, under Security and identity) lists a project's CA pools in every region and creates them; a pool's page lists its CAs and certificates and its trust anchors, and offers Create CA, Request certificate (from a CSR or from a subject and public key), Edit labels, Delete pool and the pool's Permissions tab. Create CA makes a subordinate too, signed and activated by an issuing CA of this instance, or awaiting a third-party issuer, its page then showing its CSR and offering Activate. A CA's page offers Enable, Disable, Delete (with or without the grace period) and Undelete, and lists its revocation lists; a certificate's page Revoke and Edit labels. The Certificate templates page creates, edits and deletes templates, which Request certificate takes.

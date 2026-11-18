@@ -664,3 +664,47 @@ func tmplPolicy(t *privatecapb.CertificateTemplate) *privatecapb.CaPool_Issuance
 	}
 	return &privatecapb.CaPool_IssuancePolicy{IdentityConstraints: t.GetIdentityConstraints()}
 }
+
+// caFilter is ListCertificateAuthorities' filter, in the subset gcloud
+// sends (`roots list` and `subordinates list` filter on type): terms
+// `type` or `state`, `:` or `=` an enum value, joined by AND. Any other
+// filter is 501, never ignored.
+func caFilter(filter string) (func(*privatecapb.CertificateAuthority) bool, error) {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return func(*privatecapb.CertificateAuthority) bool { return true }, nil
+	}
+	var tests []func(*privatecapb.CertificateAuthority) bool
+	for _, term := range strings.Split(filter, " AND ") {
+		term = strings.TrimSpace(term)
+		i := strings.IndexAny(term, ":=")
+		if i < 0 {
+			return nil, apierror.Unimplemented("list filter %q is not implemented in CloudBurrow yet: only type and state terms", filter)
+		}
+		field, value := strings.TrimSpace(term[:i]), strings.Trim(strings.TrimSpace(term[i+1:]), `"`)
+		switch field {
+		case "type":
+			v, ok := privatecapb.CertificateAuthority_Type_value[value]
+			if !ok {
+				return nil, apierror.InvalidArgument("filter: %q is not a CertificateAuthority type", value)
+			}
+			tests = append(tests, func(c *privatecapb.CertificateAuthority) bool { return int32(c.GetType()) == v })
+		case "state":
+			v, ok := privatecapb.CertificateAuthority_State_value[value]
+			if !ok {
+				return nil, apierror.InvalidArgument("filter: %q is not a CertificateAuthority state", value)
+			}
+			tests = append(tests, func(c *privatecapb.CertificateAuthority) bool { return int32(c.GetState()) == v })
+		default:
+			return nil, apierror.Unimplemented("list filter %q is not implemented in CloudBurrow yet: only type and state terms", filter)
+		}
+	}
+	return func(c *privatecapb.CertificateAuthority) bool {
+		for _, t := range tests {
+			if !t(c) {
+				return false
+			}
+		}
+		return true
+	}, nil
+}

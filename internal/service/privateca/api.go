@@ -431,7 +431,11 @@ func (a *API) GetCertificateAuthority(_ context.Context, req *privatecapb.GetCer
 }
 
 func (a *API) ListCertificateAuthorities(_ context.Context, req *privatecapb.ListCertificateAuthoritiesRequest) (*privatecapb.ListCertificateAuthoritiesResponse, error) {
-	if err := refuseFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
+	match, err := caFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseFilter("", req.GetOrderBy()); err != nil {
 		return nil, err
 	}
 	s := a.s
@@ -441,7 +445,13 @@ func (a *API) ListCertificateAuthorities(_ context.Context, req *privatecapb.Lis
 		return nil, apierror.InvalidArgument("parent %q must be a CaPool name", req.GetParent())
 	}
 	s.purge()
-	out, next, err := page("privateca-cas:"+req.GetParent(), sortedKeys(s.cas, req.GetParent()+"/certificateAuthorities/"), req.GetPageToken(), req.GetPageSize(),
+	var keys []string
+	for _, k := range sortedKeys(s.cas, req.GetParent()+"/certificateAuthorities/") {
+		if match(s.cas[k].CA) {
+			keys = append(keys, k)
+		}
+	}
+	out, next, err := page("privateca-cas:"+req.GetParent()+"?"+req.GetFilter(), keys, req.GetPageToken(), req.GetPageSize(),
 		func(k string) *privatecapb.CertificateAuthority { return clone(s.cas[k].CA) })
 	if err != nil {
 		return nil, err
