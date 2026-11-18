@@ -69,9 +69,11 @@ import (
 // requires the Agent Platform User role"). AI.EMBED's and AI.SIMILARITY's
 // model => 'embeddinggemma-300m' runs in BigQuery and takes neither.
 //
-// 501, naming why: model_params of the generating functions (the local
-// runtime takes no generation parameters, docs/generation.md) and of the
-// embedding functions other than outputDimensionality; embeddings
+// model_params of the generating functions sends its generationConfig as
+// the request's, which the local endpoint applies or refuses (#1797).
+//
+// 501, naming why: model_params fields other than generationConfig, and of
+// the embedding functions other than outputDimensionality; embeddings
 // (optimized mode's distilled model); ObjectRef prompt fields (object
 // tables); and a call whose prompts the front cannot read (outside a
 // SELECT block, or inside its FROM clause, such as a JOIN's ON).
@@ -366,7 +368,8 @@ type aiResolved struct {
 	taskType     string
 	title        string
 	dims         int
-	embedNoCheck bool // model => 'embeddinggemma-300m': runs in BigQuery
+	embedNoCheck bool           // model => 'embeddinggemma-300m': runs in BigQuery
+	genCfg       map[string]any // model_params' generationConfig (#1797)
 }
 
 // aiOutput is a call's value's type: its fields (name TYPE), and whether
@@ -560,8 +563,27 @@ func (f front) resolveAICall(r *http.Request, q queryOptions, project string, c 
 			a.schema = fields
 		case "model_params":
 			if !embedding {
-				return a, 501, "Not implemented here: the model_params argument of " + name + ": the local LiteRT-LM runtime takes no generation parameters " +
-					"(docs/generation.md), and CloudBurrow refuses an argument rather than ignoring it. Nothing was run."
+				// "must conform to the generateContent request body
+				// format", any field but contents: its generationConfig
+				// is sent as the request's, for the local endpoint to
+				// apply or refuse (#1797); the other fields are 501.
+				raw, ok := jsonArgument(v)
+				var mp map[string]json.RawMessage
+				if !ok || json.Unmarshal([]byte(raw), &mp) != nil {
+					return a, 400, "The model_params argument of " + name + " must be a JSON literal object"
+				}
+				for k, x := range mp {
+					if k != "generationConfig" && k != "generation_config" {
+						return a, 501, "Not implemented here: model_params." + k + " of " + name + ": the local runtime applies generationConfig alone, " +
+							"and CloudBurrow refuses a parameter rather than ignoring it. Nothing was run."
+					}
+					var gc map[string]any
+					if json.Unmarshal(x, &gc) != nil {
+						return a, 400, "model_params." + k + " of " + name + " must be a JSON object"
+					}
+					a.genCfg = gc
+				}
+				continue
 			}
 			raw, ok := jsonArgument(v)
 			var mp map[string]json.RawMessage
@@ -782,7 +804,7 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 	if c.fn == "CLASSIFY" {
 		full = classifyPrompt(prompt, a)
 	}
-	text, raw, status := f.aiGenerateText(r, project, a.rm, full, aiResponseSchema(c.fn, a.schema))
+	text, raw, status := f.aiGenerateText(r, project, a.rm, full, aiResponseSchema(c.fn, a.schema), a.genCfg)
 	fields, _ := c.output(a)
 	nulls := func() []string {
 		var out []string
@@ -950,12 +972,19 @@ func parseCategories(text string, a aiResolved) (string, string) {
 //
 // schema, when not nil, is the Vertex AI responseSchema the answer is
 // constrained to, as BigQuery sends Gemini one (aiResponseSchema, #1779).
-func (f front) aiGenerateText(r *http.Request, project string, rm *remoteModel, prompt string, schema map[string]any) (string, []byte, string) {
-	var cfg map[string]any
-	if schema != nil {
-		cfg = map[string]any{"responseMimeType": "application/json", "responseSchema": schema}
+//
+// cfg, when not nil, is the request's generationConfig (model_params'); the
+// schema's fields replace any of its own.
+func (f front) aiGenerateText(r *http.Request, project string, rm *remoteModel, prompt string, schema, cfg map[string]any) (string, []byte, string) {
+	gc := map[string]any{}
+	for k, v := range cfg {
+		gc[k] = v
 	}
-	body := generateBody(prompt, cfg)
+	if schema != nil {
+		gc["responseMimeType"] = "application/json"
+		gc["responseSchema"] = schema
+	}
+	body := generateBody(prompt, gc)
 	raw, status := f.vertexCall(r.Context(), project, rm, "generateContent", body)
 	if status != "" {
 		return "", raw, status

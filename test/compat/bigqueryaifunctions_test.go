@@ -125,9 +125,9 @@ func TestBigQueryAIGenerateStructured(t *testing.T) {
 		!strings.Contains(err.Error(), "output_schema") {
 		t.Errorf("AI.GENERATE_TABLE without output_schema: %v", err)
 	}
-	if err := mlRun(h, c, fmt.Sprintf("SELECT * FROM AI.GENERATE_TABLE(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT('a STRING' AS output_schema, 0.5 AS temperature))", ds)); err == nil ||
-		!strings.Contains(err.Error(), "temperature") || !strings.Contains(err.Error(), "501") {
-		t.Errorf("temperature: %v", err)
+	if err := mlRun(h, c, fmt.Sprintf("SELECT * FROM AI.GENERATE_TABLE(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT('a STRING' AS output_schema, 1.5 AS temperature))", ds)); err == nil ||
+		!strings.Contains(err.Error(), "temperature") || !strings.Contains(err.Error(), "400") {
+		t.Errorf("temperature out of range: %v", err)
 	}
 }
 

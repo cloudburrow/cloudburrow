@@ -128,6 +128,9 @@ func runnerFlags(req Request) []string {
 	if req.Seed != nil {
 		out = append(out, "--sampler_seed="+strconv.Itoa(int(*req.Seed)))
 	}
+	if req.JSONSchema != "" {
+		out = append(out, "--constraint_json_schema="+req.JSONSchema)
+	}
 	return out
 }
 

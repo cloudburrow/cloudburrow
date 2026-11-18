@@ -119,3 +119,29 @@ func TestRunnerFlags(t *testing.T) {
 		t.Errorf("decodedTokens = %d", n)
 	}
 }
+
+func TestResponseSchemaBecomesAJSONSchemaConstraint(t *testing.T) {
+	var mu sync.Mutex
+	var got Request
+	gen := &ScriptedGenerator{ID: testModel, Chunks: []string{`{"ok":true}`}, Options: true,
+		Seen: func(r Request) { mu.Lock(); got = r; mu.Unlock() }}
+	code, _, body := genPost(t, NewServer(gen), `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"OBJECT","properties":{"ok":{"type":"BOOLEAN","nullable":true}},"required":["ok"],"propertyOrdering":["ok"]}}}`)
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := `{"properties":{"ok":{"type":["boolean","null"]}},"required":["ok"],"type":"object"}`
+	if got.JSONSchema != want {
+		t.Errorf("JSONSchema %s, want %s", got.JSONSchema, want)
+	}
+	code, _, body = genPost(t, NewServer(gen), `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseSchema":{"type":"STRING"}}}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, "application/json") {
+		t.Errorf("schema without the JSON MIME type: %d %s", code, body)
+	}
+	code, _, body = genPost(t, NewServer(&ScriptedGenerator{ID: testModel, Chunks: []string{"x"}}), `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json"}}`)
+	if code != http.StatusBadRequest || !strings.Contains(body, "responseMimeType") {
+		t.Errorf("JSON without a runner: %d %s", code, body)
+	}
+}

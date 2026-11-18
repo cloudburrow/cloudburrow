@@ -84,7 +84,8 @@ func remoteModelSetup(t *testing.T, h *Harness, c *bigquery.Client, suffix strin
 // flatten_json_output ml_generate_text_llm_result, the input's columns
 // kept and a NULL prompt left unanswered; a gemini-* endpoint with no
 // alias is the local endpoint's NOT_FOUND in the row's status, never
-// substituted; temperature is refused 501. The model's words are
+// substituted; a temperature outside [0, 1] is refused 400 (the options
+// themselves are TestBigQueryMLRemoteGenerationOptions). The model's words are
 // recorded, not asserted.
 //
 // AI.GENERATE_TEXT (#1765) answers the same rows under its own columns.
@@ -191,9 +192,9 @@ func TestBigQueryMLRemoteGenerateText(t *testing.T) {
 	if err := run(fmt.Sprintf("SELECT * FROM AI.GENERATE_TEXT(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT(TRUE AS flatten_json_output))", ds)); err == nil {
 		t.Error("AI.GENERATE_TEXT took flatten_json_output")
 	}
-	if err := run(fmt.Sprintf("SELECT * FROM ML.GENERATE_TEXT(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT(0.2 AS temperature))", ds)); err == nil ||
+	if err := run(fmt.Sprintf("SELECT * FROM ML.GENERATE_TEXT(MODEL `%s.gen`, (SELECT 'x' AS prompt), STRUCT(1.5 AS temperature))", ds)); err == nil ||
 		!strings.Contains(err.Error(), "temperature") {
-		t.Errorf("temperature: %v", err)
+		t.Errorf("temperature out of range: %v", err)
 	}
 	if err := run(fmt.Sprintf("SELECT * FROM ML.GENERATE_EMBEDDING(MODEL `%s.gen`, (SELECT 'x' AS content))", ds)); err == nil {
 		t.Error("ML.GENERATE_EMBEDDING of a generative model ran")

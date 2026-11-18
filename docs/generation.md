@@ -40,10 +40,21 @@ does not exist. `{publisher}` must be `google`.
 ### Request
 
 ```json
-{"contents":[{"role":"user","parts":[{"text":"..."}]}]}
+{"contents":[{"role":"user","parts":[{"text":"..."}]}],
+ "generationConfig":{"temperature":0.7,"topP":0.95,"topK":40,"seed":7,
+                     "maxOutputTokens":256,"stopSequences":["END"],
+                     "responseMimeType":"application/json","responseSchema":{"type":"BOOLEAN"}}}
 ```
 
-That is the whole supported request. One turn, role `user`, text parts only.
+One turn, role `user`, text parts only. `generationConfig` is optional, and each of its
+fields here is **applied**, not accepted and dropped (#1797, #1779):
+
+| Field | How it is applied |
+|---|---|
+| `temperature`, `topP`, `topK`, `seed` | Set on the session's `SamplerParameters` by `cloudburrow_generate`, CloudBurrow's runner over LiteRT-LM's C++ API (`deploy/litert-lm/runner`, built inside the runtime image, so the CLI stays static). The fields the request leaves out keep the model's own defaults. `temperature` 0 is greedy decoding. Ranges as Vertex AI documents them: temperature 0.0-2.0, topP 0.0-1.0, topK a whole number of at least 1. |
+| `maxOutputTokens` | Passed to `Conversation::SendMessageAsync` as `OptionalArgs::max_output_tokens`, which LiteRT-LM honours since `a789b7d0` (the image pins `main` at `0082833d`: no release contains `a789b7d0` yet). The finish reason is `MAX_TOKENS` when the engine's own counters report that many decoded tokens. |
+| `stopSequences` | Applied on the stream, by this endpoint: at most 5, as Vertex AI allows; the answer ends before the first one, the sequence itself is not returned, the finish reason is `STOP`, and the runtime's container is stopped rather than left decoding. |
+| `responseMimeType` `application/json` (or `text/plain`), `responseSchema`, `responseJsonSchema` | A JSON response is an llguidance JSON-schema constraint (LiteRT-LM's own constrained decoding) applied to the conversation's message, so the model's chat template still frames the prompt: `responseSchema` (Vertex's OpenAPI subset, `nullable` folded into the type) is converted to JSON Schema, `responseJsonSchema` is used as given, and `application/json` with no schema allows any JSON. A schema needs `application/json`, as Vertex requires. |
 
 ### Response
 
@@ -53,12 +64,22 @@ That is the whole supported request. One turn, role `user`, text parts only.
  "modelVersion":"gemma-4-e2b-it-community"}
 ```
 
-`STOP` is the only finish reason that can occur. Streaming sends one such object per
-server-sent event, the last carrying the finish reason and no text.
+`STOP` or `MAX_TOKENS` (only when `maxOutputTokens` was reached). Streaming sends one such
+object per server-sent event, the last carrying the finish reason and no text.
 
 ---
 
 ## 2. What is refused, and why
+
+History (#1765, #1771, #1773, #1797): until the runtime image carried `cloudburrow_generate`,
+`temperature`, `topP`, `topK`, `seed`, `maxOutputTokens`, `stopSequences` and
+`responseMimeType`/`responseSchema` were refused here. `litert_lm_main` has no sampler flag
+(its session is `SessionConfig::CreateDefault()`); on the old `02e50307` pin it accepted
+`--max_output_tokens` and ignored it (309 decoded tokens at limits of 8, 40 and unset; 746 words
+at 8 and 64); and it accepts `--constraint_regex` and never reads it, while
+`litert_lm_advanced_main` constrains only on its Session path, which skips the chat template
+(#1779). The runner exists because of those three measurements. An `ExecGenerator` without the
+runner (the old image) still refuses them all.
 
 Every one of these returns an error naming the field. **None is silently ignored**, which
 is the single design decision this surface is built around: a request that is accepted and
@@ -66,11 +87,8 @@ not honoured tells the caller their setting applied when it did not.
 
 | Field | Why |
 |---|---|
-| `temperature`, `topP`, `topK`, `seed` | The runtime exposes no sampling control. `litert_lm_main --helpfull` lists no such flag (re-checked 2026-11-17, #1765). Re-checked 2026-11-18 (#1773) against LiteRT-LM's `main` (`0082833d`) and release `v0.19.1`: `runtime/engine/shared_flags.cc` still has no temperature, top-k, top-p or seed flag; the sampler's parameters exist only in the C++ API (`SessionConfig`, `runtime/proto/sampler_params.proto`), which `litert_lm_main` sets to `SessionConfig::CreateDefault()`. Honouring them needs a runner of CloudBurrow's own over that API (#1797). |
-| `maxOutputTokens` | **Accepted by the runtime and ignored by it.** The same prompt decoded 309 tokens at a limit of 8, at 40, and with no limit. Refused on that measurement, not on the flag's absence. Re-measured 2026-11-17 (#1765) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `--max_output_tokens=8` and `=64` wrote the same 746-word answer. Re-checked 2026-11-18 (#1773): upstream commit `a789b7d0` (2026-11-05, "Apply --max_output_tokens in litert_lm_main", after the pin) passes the flag to `Conversation::SendMessageAsync` as `OptionalArgs::max_output_tokens`, so a pin at or after it should honour the limit; it stays refused until the pin is moved and the limit measured again (#1797). |
-| `stopSequences` | No runtime control. |
 | `candidateCount` > 1 | `--num_output_candidates` exists but was never exercised; untested is not supported. |
-| `responseMimeType`, `responseSchema` | No constrained decoding is wired up. Measured 2026-11-17 (#1771) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `litert_lm_main --constraint_regex` is **accepted and ignored** (`(true|false)` and `-?[0-9]+` left the free-text answers unchanged; upstream's `litert_lm_main.cc` never reads the flag). `litert_lm_advanced_main` applies it on its Session path (`--use_session --async=false`), which skips the model's chat template: with the Gemma turn markers written by hand, `(true|false)` answered `true` and `-?[0-9]{1,18}` answered `10`. Wiring that path is #1779; until then BigQuery's structured AI functions parse the model's text (docs/compatibility.md). |
+| `responseMimeType` other than `application/json` and `text/plain` (`text/x.enum`) | Not wired up. |
 | `presencePenalty`, `frequencyPenalty`, `logprobs`, `responseLogprobs` | No runtime control. |
 | `thinkingConfig`, `speechConfig`, `audioTimestamp`, `routingConfig`, `responseModalities` | Out of scope. |
 | `tools`, `toolConfig` | Function calling is not implemented. |
@@ -126,7 +144,7 @@ runs the digest, not the tag. `-local-ai-image` overrides either default.
 local AI:  http://127.0.0.1:9095
   model:   gemma-4-e2b-it-community
   note:    a COMMUNITY conversion, not published by Google
-  generation options are refused rather than ignored; see docs/generation.md
+  sampling, maxOutputTokens, stopSequences and JSON schemas are applied; other options are refused; see docs/generation.md
 ```
 
 Point the official SDK at it. **Supply credentials explicitly** — see §6.
@@ -157,6 +175,28 @@ resp, _ := cl.Models.GenerateContent(ctx, "gemma-4-e2b-it-community", genai.Text
     model output (recorded, not asserted): "4"
 --- PASS: TestRealUnsupportedOptionIsRefusedByTheRealEndpoint (0.00s)
 ```
+
+The options, measured 2026-11-18 (#1797, #1779) on the `0082833d` image with
+`gemma-4-E2B-it.litertlm`, arm64 CPU, through the official Gen AI SDK:
+
+```
+--- PASS: TestRealMaxOutputTokensCapsTheAnswer (3.65s)
+    8 tokens (recorded): "## The Enduring Majesty of the Sea", MAX_TOKENS
+--- PASS: TestRealSeedIsRepeatable (5.73s)
+    five seeds, 5 distinct answers (recorded): ["Luminarose" "Aetheria" "Aqualume" "Aetherglow" "Emberglow"]
+--- PASS: TestRealTemperatureZeroIsDeterministic (1.92s)
+    temperature 0 (recorded): "Aetheria"
+--- PASS: TestRealStopSequenceEndsTheAnswer (1.00s)
+    stop at 5 (recorded): "1,2,3,4,"
+--- PASS: TestRealResponseSchemaConstrainsTheAnswer (4.67s)
+    object (recorded): {"city": "Paris", "millions": 21}
+```
+
+What is asserted: `maxOutputTokens` 8 gives at most 10 words and `MAX_TOKENS`, and 64 gives
+more; seed 7 at temperature 1 decodes the same answer twice, and five seeds do not all agree;
+temperature 0 agrees with itself across seeds; stop sequence `5` ends the count before it; a
+`BOOLEAN` schema answers `true` or `false`, an `OBJECT` schema JSON with both keys, an
+`INTEGER` schema an integer. What the model says beyond that is recorded, not asserted.
 
 Protocol behaviour is tested **separately and deterministically** in
 `internal/service/vertexai`, against scripted generators: routing, framing, finish

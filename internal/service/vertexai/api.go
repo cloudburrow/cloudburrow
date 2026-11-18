@@ -2,6 +2,7 @@ package vertexai
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
@@ -75,15 +76,17 @@ type GenerationConfig struct {
 	StopSequences    []string        `json:"stopSequences,omitempty"`
 	ResponseMIMEType string          `json:"responseMimeType,omitempty"`
 	ResponseSchema   json.RawMessage `json:"responseSchema,omitempty"`
-	PresencePenalty  *float32        `json:"presencePenalty,omitempty"`
-	FrequencyPenalty *float32        `json:"frequencyPenalty,omitempty"`
-	ResponseLogprobs *bool           `json:"responseLogprobs,omitempty"`
-	Logprobs         *int32          `json:"logprobs,omitempty"`
-	ThinkingConfig   json.RawMessage `json:"thinkingConfig,omitempty"`
-	SpeechConfig     json.RawMessage `json:"speechConfig,omitempty"`
-	AudioTimestamp   *bool           `json:"audioTimestamp,omitempty"`
-	RoutingConfig    json.RawMessage `json:"routingConfig,omitempty"`
-	ResponseModality []string        `json:"responseModalities,omitempty"`
+	// ResponseJSONSchema is v1beta1's JSON Schema form of responseSchema.
+	ResponseJSONSchema json.RawMessage `json:"responseJsonSchema,omitempty"`
+	PresencePenalty    *float32        `json:"presencePenalty,omitempty"`
+	FrequencyPenalty   *float32        `json:"frequencyPenalty,omitempty"`
+	ResponseLogprobs   *bool           `json:"responseLogprobs,omitempty"`
+	Logprobs           *int32          `json:"logprobs,omitempty"`
+	ThinkingConfig     json.RawMessage `json:"thinkingConfig,omitempty"`
+	SpeechConfig       json.RawMessage `json:"speechConfig,omitempty"`
+	AudioTimestamp     *bool           `json:"audioTimestamp,omitempty"`
+	RoutingConfig      json.RawMessage `json:"routingConfig,omitempty"`
+	ResponseModality   []string        `json:"responseModalities,omitempty"`
 }
 
 // unsupportedConfig lists every populated option the runtime cannot honour.
@@ -113,8 +116,11 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	add("topK", !options && g.TopK != nil)
 	add("seed", !options && g.Seed != nil)
 	add("candidateCount", g.CandidateCount != nil && *g.CandidateCount != 1)
-	add("responseMimeType", g.ResponseMIMEType != "")
-	add("responseSchema", len(g.ResponseSchema) > 0)
+	// A JSON response, with or without a schema, is constrained decoding
+	// (cloudburrow_generate's llguidance JSON-schema constraint, #1779).
+	add("responseMimeType", g.ResponseMIMEType != "" && !(options && (g.ResponseMIMEType == "application/json" || g.ResponseMIMEType == "text/plain")))
+	add("responseSchema", !options && len(g.ResponseSchema) > 0)
+	add("responseJsonSchema", !options && len(g.ResponseJSONSchema) > 0)
 	add("presencePenalty", g.PresencePenalty != nil)
 	add("frequencyPenalty", g.FrequencyPenalty != nil)
 	add("responseLogprobs", g.ResponseLogprobs != nil)
@@ -133,11 +139,15 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 const maxStopSequences = 5
 
 // rangeError checks the honoured options against Vertex AI's documented
-// ranges (GenerationConfig reference: temperature 0.0-2.0, topP 0.0-1.0,
-// topK at least 1, maxOutputTokens at least 1, at most 5 stopSequences).
+// ranges (the inference reference's generationConfig: temperature
+// 0.0-2.0, topP 0.0-1.0, "Maximum 5 items" of stopSequences; topK and
+// maxOutputTokens have no stated range, so only a positive whole topK and
+// a positive maxOutputTokens are required; "text/plain isn't supported
+// with responseSchema").
 //
-// UNVERIFIED: the error wording; Vertex's text for an out-of-range value is
-// not in its reference docs.
+// UNVERIFIED (re-read 2026-11-18:
+// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference,
+// which gives no error text): the error wording.
 func (g *GenerationConfig) rangeError() error {
 	if g == nil {
 		return nil
@@ -148,9 +158,9 @@ func (g *GenerationConfig) rangeError() error {
 	case g.TopP != nil && !(*g.TopP >= 0 && *g.TopP <= 1):
 		return apierror.InvalidArgument("Unable to submit request because it has a topP value of %g but the supported range is from 0 (inclusive) to 1.0001 (exclusive). Update the value and try again.", *g.TopP)
 	case g.TopK != nil && (*g.TopK < 1 || *g.TopK != float32(int32(*g.TopK))):
-		return apierror.InvalidArgument("Unable to submit request because it has a topK value of %g but the supported range is from 1 (inclusive) to 41 (exclusive). Update the value and try again.", *g.TopK)
+		return apierror.InvalidArgument("Unable to submit request because it has a topK value of %g; topK must be a whole number of at least 1. Update the value and try again.", *g.TopK)
 	case g.MaxOutputTokens != nil && *g.MaxOutputTokens < 1:
-		return apierror.InvalidArgument("Unable to submit request because it has a maxOutputTokens value of %d but the supported range is from 1 (inclusive) to 65537 (exclusive). Update the value and try again.", *g.MaxOutputTokens)
+		return apierror.InvalidArgument("Unable to submit request because it has a maxOutputTokens value of %d; maxOutputTokens must be at least 1. Update the value and try again.", *g.MaxOutputTokens)
 	case len(g.StopSequences) > maxStopSequences:
 		return apierror.InvalidArgument("Unable to submit request because it has %d stopSequences; the maximum is %d. Update the value and try again.", len(g.StopSequences), maxStopSequences)
 	}
@@ -159,7 +169,120 @@ func (g *GenerationConfig) rangeError() error {
 			return apierror.InvalidArgument("generationConfig.stopSequences[%d] is empty", i)
 		}
 	}
+	if (len(g.ResponseSchema) > 0 || len(g.ResponseJSONSchema) > 0) && g.ResponseMIMEType != "application/json" {
+		// Vertex AI: a response schema needs the JSON MIME type.
+		return apierror.InvalidArgument("Unable to submit request because responseSchema is set but responseMimeType is not application/json. Learn more: https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/control-generated-output")
+	}
+	if len(g.ResponseSchema) > 0 && len(g.ResponseJSONSchema) > 0 {
+		return apierror.InvalidArgument("generationConfig.responseSchema and generationConfig.responseJsonSchema cannot both be set")
+	}
+	if _, err := g.jsonSchema(); err != nil {
+		return apierror.InvalidArgument("generationConfig.responseSchema: %v", err)
+	}
 	return nil
+}
+
+// jsonSchema is the JSON Schema the response is constrained to: "" for a
+// text response, "{}" (any JSON) for application/json without a schema,
+// responseJsonSchema as given, or responseSchema (Vertex AI's OpenAPI
+// subset) converted to JSON Schema.
+func (g *GenerationConfig) jsonSchema() (string, error) {
+	if g == nil || g.ResponseMIMEType != "application/json" {
+		return "", nil
+	}
+	switch {
+	case len(g.ResponseJSONSchema) > 0:
+		var v any
+		if err := json.Unmarshal(g.ResponseJSONSchema, &v); err != nil {
+			return "", err
+		}
+		return string(g.ResponseJSONSchema), nil
+	case len(g.ResponseSchema) > 0:
+		var v map[string]any
+		if err := json.Unmarshal(g.ResponseSchema, &v); err != nil {
+			return "", err
+		}
+		out, err := openAPIToJSONSchema(v)
+		if err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(out)
+		return string(b), err
+	}
+	return "{}", nil
+}
+
+// openAPIToJSONSchema converts Vertex AI's Schema (an OpenAPI 3.0 subset:
+// upper-case types, nullable, propertyOrdering) to the JSON Schema the
+// runtime's llguidance constraint reads.
+func openAPIToJSONSchema(s map[string]any) (map[string]any, error) {
+	out := map[string]any{}
+	nullable, _ := s["nullable"].(bool)
+	for k, v := range s {
+		switch k {
+		case "type":
+			t, _ := v.(string)
+			jt, ok := map[string]string{"STRING": "string", "INTEGER": "integer", "NUMBER": "number",
+				"BOOLEAN": "boolean", "ARRAY": "array", "OBJECT": "object", "NULL": "null"}[strings.ToUpper(t)]
+			if !ok {
+				return nil, fmt.Errorf("unknown type %q", t)
+			}
+			if nullable {
+				out["type"] = []string{jt, "null"}
+			} else {
+				out["type"] = jt
+			}
+		case "properties":
+			props, _ := v.(map[string]any)
+			conv := map[string]any{}
+			for name, p := range props {
+				pm, ok := p.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("property %q is not a schema", name)
+				}
+				c, err := openAPIToJSONSchema(pm)
+				if err != nil {
+					return nil, err
+				}
+				conv[name] = c
+			}
+			out["properties"] = conv
+		case "items":
+			im, ok := v.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("items is not a schema")
+			}
+			c, err := openAPIToJSONSchema(im)
+			if err != nil {
+				return nil, err
+			}
+			out["items"] = c
+		case "anyOf":
+			list, _ := v.([]any)
+			var conv []any
+			for _, e := range list {
+				em, ok := e.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("anyOf holds a non-schema")
+				}
+				c, err := openAPIToJSONSchema(em)
+				if err != nil {
+					return nil, err
+				}
+				conv = append(conv, c)
+			}
+			out["anyOf"] = conv
+		case "enum", "required", "description", "minItems", "maxItems", "minimum", "maximum",
+			"minLength", "maxLength", "pattern", "title", "default", "example", "minProperties", "maxProperties":
+			out[k] = v
+		case "nullable", "propertyOrdering", "format":
+			// nullable is folded into type; ordering and format do not
+			// constrain the JSON.
+		default:
+			return nil, fmt.Errorf("unsupported schema field %q", k)
+		}
+	}
+	return out, nil
 }
 
 // generatorRequest is the request a generator is asked for.
@@ -174,6 +297,8 @@ func generatorRequest(req *GenerateContentRequest) Request {
 			k := int32(*g.TopK)
 			out.TopK = &k
 		}
+		out.JSONSchema, _ = g.jsonSchema() // validated by rangeError
+
 	}
 	return out
 }

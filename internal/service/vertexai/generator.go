@@ -44,6 +44,9 @@ type Request struct {
 	TopP            *float32
 	TopK            *int32
 	Seed            *int32
+	// JSONSchema, when set, constrains the output to JSON valid against it
+	// (responseMimeType application/json, #1779).
+	JSONSchema string
 }
 
 // OptionsGenerator is a Generator whose runtime applies Request's sampling

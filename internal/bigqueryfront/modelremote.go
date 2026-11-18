@@ -287,9 +287,9 @@ func vertexLocation(loc string) string {
 // cannot honour, and why.
 var refusedGenerateOptions = map[string]string{
 	"safety_settings":           "the local runtime has no safety filters to configure",
-	"generation_config":         "the local LiteRT-LM runtime takes no generation parameters",
+	"generation_config":         "CloudBurrow does not read the JSON form yet; the individual options (max_output_tokens, temperature, top_p, top_k, stop_sequences) are applied",
 	"ground_with_google_search": "grounding searches Google, which CloudBurrow never calls",
-	"model_params":              "the local LiteRT-LM runtime takes no generation parameters",
+	"model_params":              "CloudBurrow does not read the JSON form yet; the individual options (max_output_tokens, temperature, top_p, top_k, stop_sequences) are applied",
 }
 
 // generationOption reads one of ML.GENERATE_TEXT's and AI.GENERATE_TEXT's
@@ -298,7 +298,9 @@ var refusedGenerateOptions = map[string]string{
 // bigqueryml-syntax-ai-generate-text, re-read 2026-11-18). ok is false when
 // k is not a generation option.
 //
-// UNVERIFIED: the wording of the range errors, which the docs do not give.
+// UNVERIFIED (re-read 2026-11-18: the two pages above, which give the
+// ranges and no error text): the wording of the range errors and of top_k
+// refused for a Gemini endpoint.
 func generationOption(fname, endpoint, k, v string, cfg map[string]any) (code int, msg string, ok bool) {
 	num := func(lo, hi float64) (float64, bool) {
 		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
@@ -402,7 +404,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 	}
 	for k, v := range c.struc {
-		if c.fn == "GENERATE_TEXT" {
+		if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE" {
 			if code, msg, ok := generationOption(fname, rm.Endpoint, k, v, genCfg); ok {
 				if code != 0 {
 					return "", code, msg
@@ -506,7 +508,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		in := *row[0]
 		var parts []string
 		if c.fn == "GENERATE_TABLE" {
-			parts = f.generateTableRow(r, project, rm, schema, in)
+			parts = f.generateTableRow(r, project, rm, schema, in, genCfg)
 		} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
 			parts = f.embedRow(r.Context(), project, rm, in, true, taskType, dims)
 		} else if c.ai {
@@ -741,8 +743,8 @@ func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remote
 
 // generateTableRow is one prompt's AI.GENERATE_TABLE columns, as SQL
 // literals: the schema's fields, full_response and status (#1771).
-func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel, schema []aiField, prompt string) []string {
-	text, raw, status := f.aiGenerateText(r, project, rm, prompt+aiSchemaInstruction(schema), schemaObject(schema))
+func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel, schema []aiField, prompt string, cfg map[string]any) []string {
+	text, raw, status := f.aiGenerateText(r, project, rm, prompt+aiSchemaInstruction(schema), schemaObject(schema), cfg)
 	var vals []string
 	if status == "" {
 		vals, status = schemaLiterals(schema, text)
