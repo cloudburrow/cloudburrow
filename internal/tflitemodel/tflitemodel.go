@@ -122,7 +122,18 @@ type op struct {
 	name    string
 	in, out []int
 	opts    *flatbuffers.Table
+	// custom is a custom operator's kernel, and customOpts its
+	// custom_options (a FlexBuffer), when the caller supplied one (LoadWith).
+	custom     CustomOp
+	customOpts []byte
 }
+
+// CustomOp runs one custom operator: its custom_options, as the model
+// stores them, and its inputs; it gives its one output.
+type CustomOp func(opts []byte, in []*Tensor) (*Tensor, error)
+
+// opCustom is schema.fbs's CUSTOM.
+const opCustom = 32
 
 // Model is a loaded .tflite model.
 type Model struct {
@@ -288,15 +299,22 @@ func i32(t *flatbuffers.Table, slot int, d int32) int32 {
 
 // Load reads a .tflite model.
 func Load(data []byte) (m *Model, err error) {
+	return LoadWith(data, nil)
+}
+
+// LoadWith is Load for a model that uses custom operators, each run by the
+// kernel custom names (by its custom_code). A custom operator it does not
+// name is an *UnsupportedError, as Load's are.
+func LoadWith(data []byte, custom map[string]CustomOp) (m *Model, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			m, err = nil, fmt.Errorf("the file is not a valid TensorFlow Lite model: %v", r)
 		}
 	}()
-	return loadNoRecover(data)
+	return loadNoRecover(data, custom)
 }
 
-func loadNoRecover(data []byte) (m *Model, err error) {
+func loadNoRecover(data []byte, custom map[string]CustomOp) (m *Model, err error) {
 	if len(data) < 8 || string(data[4:8]) != "TFL3" {
 		return nil, errors.New("the file is not a TensorFlow Lite model (it lacks the TFL3 FlatBuffer identifier)")
 	}
@@ -324,7 +342,7 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 	}
 	m = &Model{}
 	for _, s := range subs {
-		g, err := loadGraph(s, codes, bufs)
+		g, err := loadGraph(s, codes, bufs, custom)
 		if err != nil {
 			return nil, err
 		}
@@ -392,7 +410,7 @@ func loadNoRecover(data []byte) (m *Model, err error) {
 }
 
 // loadGraph reads one subgraph.
-func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table) (*graph, error) {
+func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom map[string]CustomOp) (*graph, error) {
 	m := &graph{in: ints(sg, 6), out: ints(sg, 8)}
 	for _, t := range tables(sg, 4) {
 		d := tensorDef{name: str(t, 10), typ: Type(t.GetInt8Slot(6, 0)), shape: ints(t, 4)}
@@ -440,7 +458,15 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table) (*graph,
 		if dep := int32(c.GetInt8Slot(4, 0)); dep > code {
 			code = dep
 		}
-		if code == 32 { // CUSTOM
+		if code == opCustom {
+			if k := custom[str(c, 6)]; k != nil {
+				var opts []byte
+				if f := field(o, 14); f != 0 {
+					opts = o.ByteVector(o.Pos + f)
+				}
+				m.ops = append(m.ops, op{code: code, name: str(c, 6), in: ints(o, 6), out: ints(o, 8), custom: k, customOpts: opts})
+				continue
+			}
 			return nil, &UnsupportedError{"the model uses the custom operator " + str(c, 6) + ": only TensorFlow core operations are supported"}
 		}
 		name, ok := opNames[code]

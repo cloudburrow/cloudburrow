@@ -702,6 +702,22 @@
         "digest": "sha256:a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4",
         "notes": "Vertex AI EmbedContent's document_ocr on scanned PDF pages (#1733, internal/ocr): Tesseract (Google's LSTM OCR engine) and Leptonica 1.87.0 (BSD-2-Clause, https://github.com/DanBloomberg/leptonica, sha256:c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7), compiled by third_party/tesseract-wasm/build.sh with wasi-sdk 34 (https://github.com/WebAssembly/wasi-sdk, Apache-2.0 WITH LLVM-exception; the release's host-independent wasi-sysroot-34.0 and libclang_rt-34.0 archives, sha256:9d813544eeebe38b7b8f2244ed591de46b6db812c6dd1a257ff9f0d2a905a2be and sha256:eee3e634dcf71aa22b1333391623cf5c9965a637dc428a27b1a858c026c587f1, linked in: wasi-libc and musl MIT, libc++ Apache-2.0 WITH LLVM-exception), byte-identical on macOS and Linux arm64 and x86_64 to a WASI module run on wazero, so no cgo. With tessdata_fast 4.1.0 eng and osd (Apache-2.0, https://github.com/tesseract-ocr/tessdata_fast) embedded. Its script models (script/*.traineddata, commit 65727574dfcd264acbb0c3e07860e4e9e9b22185, Apache-2.0) are fetched on demand into <state-dir>/models, each pinned by SHA-256 in internal/localai/tessdata.go, for a page in a script other than Latin. The module's SHA-256 is in tesseract.wasm.sha256 and CI's tesseract-wasm job rebuilds it (third_party/tesseract-wasm/PROVENANCE.md)."
       },
+      "mediapipeLanguageDetector": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/language_detector/language_detector/float32/1/language_detector.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:7db4f23dfe1ad8966b050b419a865da451143fd43eb6b606a256aadeeb1e5417",
+        "notes": "BigQuery ML.TRANSLATE's DETECT_LANGUAGE and TRANSLATE_TEXT's detected_language_code (#1799, internal/langid): Google's MediaPipe Language Detector (Learn2Compress and Google Research, Apache-2.0 per its model card, https://storage.googleapis.com/mediapipe-assets/LanguageDetector%20Model%20Card.pdf; 110 languages, the label set of CLD3), as linked from https://ai.google.dev/edge/mediapipe/solutions/text/language_detector. Embedded (315294 bytes, third_party/mediapipe-langid), run in pure Go on internal/tflitemodel with Go ports of MediaPipe's NGramHash and KmeansEmbeddingLookup custom operators (mediapipe/tasks/cc/text/language_detector/custom_ops, Apache-2.0), so no cgo and no download at run time (third_party/mediapipe-langid/PROVENANCE.md)."
+      },
+      "whisperWasm": {
+        "version": "1.9.5",
+        "source": "https://github.com/ggml-org/whisper.cpp",
+        "license": "MIT",
+        "verification": "release-checksum",
+        "digest": "sha256:ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720",
+        "notes": "BigQuery ML.TRANSCRIBE over a CLOUD_AI_SPEECH_TO_TEXT_V2 remote model (#1799, internal/speech): whisper.cpp and its ggml (MIT), compiled by third_party/whisper-wasm/build.sh with wasi-sdk 34 (the same pinned archives as tesseractWasm; linked in: wasi-libc and musl MIT, libc++, libc++abi and libunwind Apache-2.0 WITH LLVM-exception) to a single-threaded WASI module run on wazero with its exception-handling feature, so no cgo. Google publishes no locally runnable speech model. The model, OpenAI's multilingual Whisper base in ggml q8_0 (MIT, https://huggingface.co/ggerganov/whisper.cpp revision 5359861c739e955e79d9a303bcbc70fb988958b1, ggml-base-q8_0.bin, sha256:c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9, 81768585 bytes), is fetched on first use into <state-dir>/models, pinned in internal/localai/whisper.go. The module's SHA-256 is in whisper.wasm.sha256 and CI's whisper-wasm job rebuilds it (third_party/whisper-wasm/PROVENANCE.md)."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",

@@ -86,3 +86,12 @@ predicates and edge-crossing helpers golang/geo lacks (src/s2/s2predicates.cc,
 src/s2/s2edge_crossings.cc, src/s2/s2edge_crosser.h). Each ported file keeps
 Google's copyright line; internal/s2ops/PROVENANCE.md records every file, its
 upstream path, and what was taken and what was changed.
+
+The binary embeds Google's MediaPipe Language Detector model
+(language_detector.tflite, float32 version 1), Copyright Google LLC, under the
+Apache License, Version 2.0, and internal/langid contains Go ports of
+MediaPipe's NGramHash and KmeansEmbeddingLookup TensorFlow Lite custom
+operators (https://github.com/google-ai-edge/mediapipe,
+mediapipe/tasks/cc/text/language_detector/custom_ops), Copyright 2023 The
+MediaPipe Authors, under the Apache License, Version 2.0;
+third_party/mediapipe-langid/PROVENANCE.md records the source and digest.

@@ -74,6 +74,9 @@ type Result struct {
 	// and Confidence its confidence (15 is reasonably confident).
 	Detected   int
 	Confidence float64
+	// Blocks is the page's layout, read by ReadLayout alone; its boxes are
+	// in img's coordinates from its bounds' origin.
+	Blocks []Block
 }
 
 var (
@@ -235,7 +238,7 @@ type engine struct {
 }
 
 var exports = []string{"cb_malloc", "cb_free", "cb_create", "cb_init", "cb_set_variable", "cb_set_psm",
-	"cb_set_image", "cb_get_text", "cb_free_text", "cb_osd", "cb_clear", "cb_delete"}
+	"cb_set_image", "cb_get_text", "cb_free_text", "cb_get_layout", "cb_osd", "cb_clear", "cb_delete"}
 
 func newEngine(ctx context.Context) (*engine, error) {
 	cfg := wazero.NewModuleConfig().WithName("").WithStartFunctions("_initialize").
@@ -491,7 +494,9 @@ func (e *engine) detect(ctx context.Context, g *image.Gray, ppi int) (deg int, c
 }
 
 // text reads g with the LSTM engine h.
-func (e *engine) text(ctx context.Context, h uint64, g *image.Gray, ppi int) (string, error) {
+// text reads g with engine h; with lay, also its layout (layoutOf's
+// arguments).
+func (e *engine) text(ctx context.Context, h uint64, g *image.Gray, ppi int, lay func(h uint64) error) (string, error) {
 	if err := e.setImage(ctx, h, g, ppi); err != nil {
 		return "", err
 	}
@@ -507,12 +512,21 @@ func (e *engine) text(ctx context.Context, h uint64, g *image.Gray, ppi int) (st
 		return "", errors.New("tesseract: recognition failed")
 	}
 	defer e.call(ctx, "cb_free_text", p)
+	if lay != nil {
+		if err := lay(h); err != nil {
+			return "", err
+		}
+	}
 	return e.readCString(uint32(p)), nil
 }
 
 // Read recognises the text of img, a page rendered at ppi pixels an inch
 // (300 is what Tesseract is trained for).
 func Read(ctx context.Context, img image.Image, ppi int) (Result, error) {
+	return read(ctx, img, ppi, false)
+}
+
+func read(ctx context.Context, img image.Image, ppi int, withLayout bool) (Result, error) {
 	if img.Bounds().Empty() {
 		return Result{}, nil
 	}
@@ -560,7 +574,15 @@ func Read(ctx context.Context, img image.Image, ppi int) (Result, error) {
 		h, model = sh, "script/"+name
 	}
 	res.Model = model
-	t, err := e.text(ctx, h, g, ppi)
+	var lay func(uint64) error
+	if withLayout {
+		w, h0 := img.Bounds().Dx(), img.Bounds().Dy()
+		lay = func(h uint64) (err error) {
+			res.Blocks, err = e.layout(ctx, h, res.Rotation, w, h0)
+			return err
+		}
+	}
+	t, err := e.text(ctx, h, g, ppi, lay)
 	if err != nil {
 		return Result{}, err
 	}

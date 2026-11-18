@@ -330,11 +330,25 @@ func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.Mo
 	}
 	// A model over a Cloud AI service names its service type, not an
 	// endpoint (#1773): a Vision model runs ML.ANNOTATE_IMAGE over an
-	// object table.
+	// object table, a Speech-to-Text model ML.TRANSCRIBE, and a Translation
+	// model ML.TRANSLATE and a Natural Language model ML.UNDERSTAND_TEXT
+	// over a text_content column (#1799).
 	target := console.Property{Label: "Endpoint", Value: ri.Endpoint}
 	if ri.RemoteServiceType != "" {
 		target = console.Property{Label: "Remote service type", Value: ri.RemoteServiceType}
 		fn = "ML.ANNOTATE_IMAGE(MODEL `" + datasetID + "." + modelID + "`, TABLE `" + datasetID + ".OBJECT_TABLE`, STRUCT(['TEXT_DETECTION'] AS vision_features))"
+		if ri.RemoteServiceType == "CLOUD_AI_SPEECH_TO_TEXT_V2" { // #1799
+			fn = "ML.TRANSCRIBE(MODEL `" + datasetID + "." + modelID + "`, TABLE `" + datasetID + ".OBJECT_TABLE`, " +
+				`recognition_config => (JSON '{"model": "chirp", "language_codes": ["en-US"], "auto_decoding_config": {}}'))`
+		}
+		if ri.RemoteServiceType == "CLOUD_AI_TRANSLATE_V3" { // #1799
+			fn = "ML.TRANSLATE(MODEL `" + datasetID + "." + modelID + "`, (SELECT comment AS text_content FROM `" + datasetID + ".TABLE`), " +
+				"STRUCT('TRANSLATE_TEXT' AS translate_mode, 'en' AS target_language_code))"
+		}
+		if ri.RemoteServiceType == "CLOUD_AI_NATURAL_LANGUAGE_V1" { // #1799
+			fn = "ML.UNDERSTAND_TEXT(MODEL `" + datasetID + "." + modelID + "`, (SELECT comment AS text_content FROM `" + datasetID + ".TABLE`), " +
+				"STRUCT('ANALYZE_SENTIMENT' AS nlu_option))"
+		}
 	}
 	props := []console.Property{
 		{Label: "Model ID", Value: p.project + "." + datasetID + "." + modelID},

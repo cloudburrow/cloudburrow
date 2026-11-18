@@ -26,22 +26,33 @@ import (
 //
 //   - TEXT_DETECTION and DOCUMENT_TEXT_DETECTION read the image with
 //     Tesseract (internal/ocr, the LSTM engine Google developed), at 300
-//     pixels an inch, and answer textAnnotations (one entry, the whole
-//     text) and fullTextAnnotation (text, and one page with the image's
-//     width and height). Tesseract's word and block boxes are not
-//     returned: no boundingPoly, no per-word textAnnotations and no
-//     blocks, paragraphs, words or symbols under the page (docs/gaps.md).
+//     pixels an inch, and answer textAnnotations (the whole text with its
+//     bounds, then one entry a word with its boundingPoly) and
+//     fullTextAnnotation (text, and one page with the image's width and
+//     height, its blocks, paragraphs, words and symbols with their
+//     boundingBox and confidence, from Tesseract's result iterator, #1799;
+//     each word's last symbol carries detectedBreak SPACE, EOL_SURE_SPACE
+//     at a line's end or LINE_BREAK at a paragraph's). UNVERIFIED (the
+//     AnnotateImageResponse reference, re-read 2026-11-18, defines the
+//     fields but not these choices): no locale or detectedLanguages
+//     (Tesseract names no language); box corners are Tesseract's pixel
+//     edges; Vision's TEXT_DETECTION and DOCUMENT_TEXT_DETECTION segment a
+//     page differently from each other, here both are Tesseract's.
+//   - IMAGE_PROPERTIES is computed from the pixels (imageprops.go, #1799):
+//     imagePropertiesAnnotation's dominant colors and a whole-image
+//     cropHintsAnnotation.
 //   - Every other feature (FACE_DETECTION, LANDMARK_DETECTION,
-//     LOGO_DETECTION, LABEL_DETECTION, IMAGE_PROPERTIES,
-//     OBJECT_LOCALIZATION, SAFE_SEARCH_DETECTION, CROP_HINTS, WEB_DETECTION,
+//     LOGO_DETECTION, LABEL_DETECTION, OBJECT_LOCALIZATION,
+//     SAFE_SEARCH_DETECTION, CROP_HINTS, WEB_DETECTION,
 //     PRODUCT_SEARCH) has no local model: that image's response is an
 //     UNIMPLEMENTED error naming it, and nothing is read.
 //   - image.content (base64) alone: image.source, a URL Vision would fetch,
 //     is refused. PNG, JPEG and GIF are decoded; other data is "Bad image
 //     data." as Vision answers it.
 
-// visionTextFeatures are the features answered.
-var visionTextFeatures = map[string]bool{"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true}
+// visionServedFeatures are the features answered, true for those read
+// with OCR.
+var visionServedFeatures = map[string]bool{"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true, "IMAGE_PROPERTIES": false}
 
 // visionStatus is a google.rpc.Status.
 type visionStatus struct {
@@ -82,14 +93,23 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var unserved []string
+		text, props := false, false
 		for _, f := range ir.Features {
-			if t := strings.ToUpper(f.Type); !visionTextFeatures[t] {
+			t := strings.ToUpper(f.Type)
+			ocr, ok := visionServedFeatures[t]
+			switch {
+			case !ok:
 				unserved = append(unserved, t)
+			case ocr:
+				text = true
+			default:
+				props = true
 			}
 		}
 		if len(unserved) > 0 {
 			fail(12, "Not implemented here: Vision feature "+strings.Join(unserved, ", ")+": CloudBurrow has no local model for it "+
-				"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR) and never calls Google. Nothing was read.")
+				"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels) "+
+				"and never calls Google. Nothing was read.")
 			continue
 		}
 		if len(ir.Image.Source) > 0 && string(ir.Image.Source) != "null" {
@@ -106,12 +126,21 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 			fail(3, "Bad image data.")
 			continue
 		}
-		res, err := ocr.Read(r.Context(), img, 300)
-		if err != nil {
-			fail(13, "Internal error: reading the image's text: "+err.Error())
-			continue
+		out := map[string]any{}
+		if text {
+			res, err := ocr.ReadLayout(r.Context(), img, 300)
+			if err != nil {
+				fail(13, "Internal error: reading the image's text: "+err.Error())
+				continue
+			}
+			out = visionTextResponse(res.Text, res.Blocks, img.Bounds())
 		}
-		responses = append(responses, visionTextResponse(res.Text, img.Bounds()))
+		if props {
+			for k, v := range imageProperties(img) {
+				out[k] = v
+			}
+		}
+		responses = append(responses, out)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"responses": responses})
@@ -119,18 +148,82 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 
 // visionTextResponse is an AnnotateImageResponse of text: empty, as
 // Vision's, when there is none.
-func visionTextResponse(text string, b image.Rectangle) map[string]any {
+func visionTextResponse(text string, blocks []ocr.Block, b image.Rectangle) map[string]any {
 	if strings.TrimSpace(text) == "" {
 		return map[string]any{}
 	}
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
-	return map[string]any{
-		"textAnnotations": []any{map[string]any{"description": text}},
-		"fullTextAnnotation": map[string]any{
-			"text":  text,
-			"pages": []any{map[string]any{"width": b.Dx(), "height": b.Dy()}},
-		},
+	all := map[string]any{"description": text}
+	annotations := []any{all}
+	var pageConf float64
+	var nwords int
+	var minP, maxP image.Point
+	first := true
+	grow := func(q ocr.Quad) {
+		for _, p := range q {
+			if first {
+				minP, maxP, first = p, p, false
+				continue
+			}
+			minP.X, minP.Y = min(minP.X, p.X), min(minP.Y, p.Y)
+			maxP.X, maxP.Y = max(maxP.X, p.X), max(maxP.Y, p.Y)
+		}
 	}
+	vblocks := make([]any, 0, len(blocks))
+	for _, bl := range blocks {
+		paras := make([]any, 0, len(bl.Paragraphs))
+		for _, p := range bl.Paragraphs {
+			words := make([]any, 0, len(p.Words))
+			for wi, w := range p.Words {
+				syms := make([]any, 0, len(w.Symbols))
+				var word strings.Builder
+				for si, sy := range w.Symbols {
+					word.WriteString(sy.Text)
+					vs := map[string]any{"boundingBox": visionPoly(sy.Box), "text": sy.Text, "confidence": float32(sy.Confidence)}
+					if si == len(w.Symbols)-1 {
+						brk := "SPACE"
+						switch {
+						case sy.LineEnd && wi == len(p.Words)-1:
+							brk = "LINE_BREAK"
+						case sy.LineEnd:
+							brk = "EOL_SURE_SPACE"
+						}
+						vs["property"] = map[string]any{"detectedBreak": map[string]any{"type": brk}}
+					}
+					syms = append(syms, vs)
+				}
+				if word.Len() == 0 {
+					continue
+				}
+				grow(w.Box)
+				pageConf += w.Confidence
+				nwords++
+				annotations = append(annotations, map[string]any{"description": word.String(), "boundingPoly": visionPoly(w.Box)})
+				words = append(words, map[string]any{"boundingBox": visionPoly(w.Box), "symbols": syms, "confidence": float32(w.Confidence)})
+			}
+			paras = append(paras, map[string]any{"boundingBox": visionPoly(p.Box), "words": words, "confidence": float32(p.Confidence)})
+		}
+		vblocks = append(vblocks, map[string]any{"boundingBox": visionPoly(bl.Box), "paragraphs": paras, "blockType": "TEXT",
+			"confidence": float32(bl.Confidence)})
+	}
+	page := map[string]any{"width": b.Dx(), "height": b.Dy(), "blocks": vblocks}
+	if nwords > 0 {
+		all["boundingPoly"] = visionPoly(ocr.Quad{minP, {maxP.X, minP.Y}, maxP, {minP.X, maxP.Y}})
+		page["confidence"] = float32(pageConf / float64(nwords))
+	}
+	return map[string]any{
+		"textAnnotations":    annotations,
+		"fullTextAnnotation": map[string]any{"text": text, "pages": []any{page}},
+	}
+}
+
+// visionPoly is a BoundingPoly of q's corners.
+func visionPoly(q ocr.Quad) map[string]any {
+	vs := make([]any, 0, 4)
+	for _, p := range q {
+		vs = append(vs, vertex(p.X, p.Y))
+	}
+	return map[string]any{"vertices": vs}
 }

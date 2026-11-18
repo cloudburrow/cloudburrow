@@ -47,8 +47,38 @@ func TestAnnotateImagesText(t *testing.T) {
 	if text, _ := full["text"].(string); !strings.Contains(text, "INVOICE No. 2026-0417") {
 		t.Errorf("text: %v", rs[0])
 	}
-	if ta, _ := rs[0]["textAnnotations"].([]any); len(ta) != 1 {
-		t.Errorf("textAnnotations: %v", rs[0]["textAnnotations"])
+	// The whole text with its bounds, then a word an entry (#1799).
+	ta, _ := rs[0]["textAnnotations"].([]any)
+	if len(ta) < 5 {
+		t.Fatalf("textAnnotations: %v", rs[0]["textAnnotations"])
+	}
+	if a := ta[0].(map[string]any); a["boundingPoly"] == nil || a["description"] != full["text"] {
+		t.Errorf("first textAnnotation: %v", a)
+	}
+	var words []string
+	for _, a := range ta[1:] {
+		a := a.(map[string]any)
+		words = append(words, a["description"].(string))
+		if vs, _ := a["boundingPoly"].(map[string]any)["vertices"].([]any); len(vs) != 4 {
+			t.Errorf("word %v: vertices %v", a["description"], vs)
+		}
+	}
+	if !strings.Contains(strings.Join(words, " "), "INVOICE No. 2026-0417") {
+		t.Errorf("words: %v", words)
+	}
+	pages, _ := full["pages"].([]any)
+	page, _ := pages[0].(map[string]any)
+	blocks, _ := page["blocks"].([]any)
+	if len(blocks) == 0 || page["confidence"] == nil {
+		t.Fatalf("page: %v", page)
+	}
+	bl := blocks[0].(map[string]any)
+	para := bl["paragraphs"].([]any)[0].(map[string]any)
+	word := para["words"].([]any)[0].(map[string]any)
+	syms := word["symbols"].([]any)
+	last := syms[len(syms)-1].(map[string]any)
+	if bl["blockType"] != "TEXT" || last["property"] == nil || syms[0].(map[string]any)["text"] == "" || word["boundingBox"] == nil {
+		t.Errorf("first block: %v", bl)
 	}
 	if e, _ := rs[1]["error"].(map[string]any); e["message"] != "Bad image data." || e["code"] != 3.0 {
 		t.Errorf("bad image: %v", rs[1])

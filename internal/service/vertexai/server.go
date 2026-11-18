@@ -82,6 +82,17 @@ func (s *Server) Handler() http.Handler {
 	// Cloud Vision's text features, for BigQuery's ML.ANNOTATE_IMAGE
 	// (vision.go, #1773).
 	mux.HandleFunc("POST /v1/images:annotate", s.annotateImages)
+	// Speech-to-Text v2's recognize, for BigQuery's ML.TRANSCRIBE
+	// (speech.go, #1799).
+	mux.HandleFunc("POST /v2/projects/{project}/locations/{location}/recognizers/{recognizer}", s.recognize)
+	// Translation v3's translateText and detectLanguage, for BigQuery's
+	// ML.TRANSLATE (translate.go, #1799).
+	mux.HandleFunc("POST /v3/projects/{project}/locations/{location}", s.translation)
+	// Natural Language v1's documents methods, for BigQuery's
+	// ML.UNDERSTAND_TEXT (language.go, #1799).
+	for _, v := range []string{"analyzeEntities", "analyzeEntitySentiment", "analyzeSentiment", "analyzeSyntax", "classifyText", "annotateText", "moderateText"} {
+		mux.HandleFunc("POST /v1/documents:"+v, s.language)
+	}
 	mux.HandleFunc("/", s.notFound)
 	// The playground page and any browser tab can reach this port (#676).
 	return hostguard.Wrap(mux)

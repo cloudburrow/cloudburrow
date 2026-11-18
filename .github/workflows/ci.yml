@@ -186,6 +186,18 @@ jobs:
       - name: Rebuild and compare
         run: WORK="$RUNNER_TEMP/tesseract-wasm" third_party/tesseract-wasm/build.sh --check
 
+  # Rebuilds third_party/whisper-wasm/whisper.wasm from its pinned
+  # whisper.cpp and wasi-sdk releases and fails unless the result matches the
+  # committed SHA-256 (#1799). Not in ci-green, so not a required check.
+  whisper-wasm:
+    name: rebuild whisper.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rebuild and compare
+        run: WORK="$RUNNER_TEMP/whisper-wasm" third_party/whisper-wasm/build.sh --check
+
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
