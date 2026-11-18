@@ -109,8 +109,12 @@ func (p bigqueryProvider) rowPolicies(ctx context.Context, svc *bqv2.Service, da
 	return all, err
 }
 
-// PolicyOn gives a table's page and a routine's a Permissions tab.
-func (bigqueryProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
+// PolicyOn gives a table's page, a routine's and a connection's (#1770) a
+// Permissions tab.
+func (p bigqueryProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
+	if isConnectionPath(path) {
+		return p.connectionPolicyTarget()
+	}
 	if len(path) != 2 && !isRoutinePath(path) {
 		return nil
 	}
@@ -137,6 +141,9 @@ func (p bigqueryProvider) iamResource(project string, path []string) (string, bo
 
 // GetPolicy is tables.getIamPolicy or routines.getIamPolicy.
 func (p bigqueryProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
+	if isConnectionPath(path) { // consolebigqueryconnectionpage.go, #1770
+		return p.connectionPolicy(ctx, project, path[2])
+	}
 	resource, routine, err := p.iamResource(project, path)
 	if err != nil {
 		return console.Policy{}, err
@@ -173,6 +180,9 @@ func (p bigqueryProvider) GetPolicy(ctx context.Context, project string, path []
 // SetPolicy is tables.setIamPolicy or routines.setIamPolicy with the etag
 // the page read, so a policy changed meanwhile is refused.
 func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+	if isConnectionPath(path) {
+		return p.setConnectionPolicy(ctx, project, path[2], pol)
+	}
 	resource, routine, err := p.iamResource(project, path)
 	if err != nil {
 		return err
@@ -207,6 +217,9 @@ func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []
 // TestPermissions is tables.testIamPermissions or routines.testIamPermissions
 // (#1242).
 func (p bigqueryProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	if isConnectionPath(path) {
+		return p.testConnectionPermissions(ctx, project, path[2], perms)
+	}
 	resource, routine, err := p.iamResource(project, path)
 	if err != nil {
 		return nil, err

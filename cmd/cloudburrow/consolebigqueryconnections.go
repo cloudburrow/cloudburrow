@@ -60,7 +60,8 @@ func (p bigqueryProvider) connectionsSummary(ctx context.Context, project string
 		if sa != "" {
 			v += ", service account " + sa
 		}
-		g.Properties = append(g.Properties, console.Property{Label: id, Value: v})
+		// Each opens the connection's page (#1770).
+		g.Properties = append(g.Properties, console.Property{Label: id, Value: v, Link: connectionHref(project, id)})
 	}
 	return g
 }

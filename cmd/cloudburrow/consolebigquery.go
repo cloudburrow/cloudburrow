@@ -169,6 +169,9 @@ func (p bigqueryProvider) Detail(ctx context.Context, project string, path []str
 	if prompt := p.scope(project); prompt != "" {
 		return console.Detail{Prompt: prompt}, nil
 	}
+	if isConnectionPath(path) { // consolebigqueryconnectionpage.go, #1770
+		return p.connectionDetail(ctx, project, path[1], path[2])
+	}
 	switch len(path) {
 	case 1:
 		return p.datasetDetail(ctx, path[0])

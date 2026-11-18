@@ -288,3 +288,18 @@ func TestPermissionsConditions(t *testing.T) {
 		}
 	}
 }
+
+// TestPermissionsEnforcedNote (#1770): a target whose policy the instance
+// checks carries its own note in place of PermissionsNote.
+func TestPermissionsEnforcedNote(t *testing.T) {
+	sets := 0
+	f := policyFake{fakeProvider: fakeProvider{id: "iam", title: "IAM fake"}, policy: &Policy{Etag: "e1"}, sets: &sets}
+	sec := permissionsSection(context.Background(), f, "p", []string{"r"}, &PolicyTarget{Enforced: "checked: x.use"})
+	if sec.Permissions == nil || sec.Permissions.Note != "checked: x.use" {
+		t.Errorf("section %+v", sec.Permissions)
+	}
+	sec = permissionsSection(context.Background(), f, "p", []string{"r"}, &PolicyTarget{})
+	if sec.Permissions.Note != PermissionsNote {
+		t.Errorf("the default note %q", sec.Permissions.Note)
+	}
+}

@@ -81,3 +81,85 @@ func TestBigQueryConnectionActions(t *testing.T) {
 		t.Errorf("calls:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+// TestBigQueryConnectionPage (#1770): a connection's page reads
+// connections.get, and its Permissions tab is the connection's own IAM
+// policy, read, written with the etag read, and tested, with a note that
+// says which permission the instance checks and for which caller.
+func TestBigQueryConnectionPage(t *testing.T) {
+	var got []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+" "+string(b))
+		switch r.URL.Path {
+		case "/v1/projects/p/locations/us/connections/ai":
+			fmt.Fprint(w, `{"name":"projects/1/locations/us/connections/ai","friendlyName":"AI","description":"for models",`+
+				`"creationTime":"1700000000000","lastModifiedTime":"1700000001000",`+
+				`"cloudResource":{"serviceAccountId":"bqcx-1-ab@gcp-sa-bigquery-condel.iam.gserviceaccount.com"}}`)
+		case "/v1/projects/p/locations/us/connections/ai:getIamPolicy":
+			fmt.Fprint(w, `{"version":1,"etag":"BwE=","bindings":[{"role":"roles/bigquery.connectionUser","members":["allUsers"]}]}`)
+		case "/v1/projects/p/locations/us/connections/ai:setIamPolicy":
+			if !strings.Contains(string(b), `"etag":"BwE="`) {
+				w.WriteHeader(409)
+				fmt.Fprint(w, `{"error":{"code":409,"message":"stale etag"}}`)
+				return
+			}
+			fmt.Fprint(w, `{}`)
+		case "/v1/projects/p/locations/us/connections/ai:testIamPermissions":
+			fmt.Fprint(w, `{"permissions":["bigquery.connections.use"]}`)
+		default:
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"error":{"code":404,"message":"Not found: Connection projects/1/locations/us/connections/missing"}}`)
+		}
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	path := []string{bigqueryConnectionsSegment, "us", "ai"}
+	d, err := p.Detail(ctx, "p", path)
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 1 {
+		t.Fatalf("detail %+v %v", d, err)
+	}
+	vals := map[string]string{}
+	for _, pr := range d.Sections[0].Groups[0].Properties {
+		vals[pr.Label] = pr.Value
+	}
+	for k, want := range map[string]string{"Friendly name": "AI", "Description": "for models", "Created": "2023-11-14T22:13:20Z",
+		"Last modified": "2023-11-14T22:13:21Z", "Service account ID": "bqcx-1-ab@gcp-sa-bigquery-condel.iam.gserviceaccount.com"} {
+		if vals[k] != want {
+			t.Errorf("%s = %q, want %q", k, vals[k], want)
+		}
+	}
+	if !strings.Contains(vals["Connection type"], "Cloud Resource") {
+		t.Errorf("type %q", vals["Connection type"])
+	}
+	if d, _ := p.Detail(ctx, "p", []string{bigqueryConnectionsSegment, "us", "missing"}); !strings.Contains(d.Unavailable, "Not found: Connection") {
+		t.Errorf("a missing connection's page %+v", d)
+	}
+	target := p.PolicyOn(ctx, path)
+	if target == nil || !strings.Contains(target.Enforced, "bigquery.connections.use") || !strings.Contains(target.Enforced, "cloudburrow-local@p.iam.gserviceaccount.com") {
+		t.Fatalf("policy target %+v", target)
+	}
+	pol, err := p.GetPolicy(ctx, "p", path)
+	if err != nil || pol.Etag != "BwE=" || len(pol.Bindings) != 1 || pol.Bindings[0].Members[0] != "allUsers" {
+		t.Fatalf("policy %+v %v", pol, err)
+	}
+	if err := p.SetPolicy(ctx, "p", path, pol); err != nil {
+		t.Errorf("set: %v", err)
+	}
+	pol.Etag = "old"
+	if err := p.SetPolicy(ctx, "p", path, pol); err == nil || !strings.Contains(err.Error(), "stale etag") {
+		t.Errorf("a stale etag: %v", err)
+	}
+	if perms, err := p.TestPermissions(ctx, "p", path, []string{"bigquery.connections.use"}); err != nil || len(perms) != 1 {
+		t.Errorf("test %v %v", perms, err)
+	}
+	// A dataset can be named "connections"; the page's segment has a dash
+	// no dataset ID can have.
+	if isConnectionPath([]string{"connections", "us", "ai"}) || p.PolicyOn(ctx, []string{"d", "x", "y"}) != nil {
+		t.Errorf("a dataset path taken for a connection's")
+	}
+	if g := p.connectionsSummary(ctx, "p"); len(got) == 0 || g.Properties == nil {
+		t.Errorf("summary %+v", g)
+	}
+}
