@@ -28,41 +28,38 @@ func TestEffectiveScale(t *testing.T) {
 	get := func(n string) *runpb.RevisionScaling { return own[n] }
 	shares := []revisionShare{{"a", 60}, {"b", 40}}
 	// Highest minimum wins, the lower maximum caps it.
-	got, err := effectiveScale(&runpb.ServiceScaling{MinInstanceCount: 10, MaxInstanceCount: 20}, shares, get)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got["a"] != (revisionScale{6, 12}) || got["b"] != (revisionScale{2, 2}) {
+	got := effectiveScale(&runpb.ServiceScaling{MinInstanceCount: 10, MaxInstanceCount: 20}, shares, get)
+	if got["a"] != (revisionScale{min: 6, max: 12}) || got["b"] != (revisionScale{min: 2, max: 2}) {
 		t.Fatalf("automatic = %v", got)
 	}
 	// MANUAL ignores revision-level settings.
-	got, err = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(5)},
+	got = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(5)},
 		append(shares, revisionShare{"t", 0}), get)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got["a"] != (revisionScale{3, 3}) || got["b"] != (revisionScale{2, 2}) || got["t"] != (revisionScale{0, 1}) {
+	if got["a"] != (revisionScale{min: 3, max: 3}) || got["b"] != (revisionScale{min: 2, max: 2}) || got["t"] != (revisionScale{min: 0, max: 1}) {
 		t.Fatalf("manual = %v", got)
 	}
 	// MANUAL 0 disables the service (#1800): no instance for a revision with
 	// traffic, at most one for a tag-only one.
-	got, err = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)},
+	got = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)},
 		append(shares, revisionShare{"t", 0}), get)
-	if err != nil || got["a"] != (revisionScale{0, 1}) || got["b"] != (revisionScale{0, 1}) || got["t"] != (revisionScale{0, 1}) {
-		t.Fatalf("manual 0 = %v, %v", got, err)
+	if got["a"] != (revisionScale{0, 1, true}) || got["b"] != (revisionScale{0, 1, true}) || got["t"] != (revisionScale{0, 1, false}) {
+		t.Fatalf("manual 0 = %v", got)
 	}
 	// So does MANUAL with no count, as Terraform sends manual_instance_count = 0.
-	if got, _ = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL}, shares, get); got["a"] != (revisionScale{0, 1}) {
+	if got = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL}, shares, get); got["a"] != (revisionScale{0, 1, true}) {
 		t.Fatalf("manual with no count = %v", got)
 	}
-	// A count that leaves one serving revision at zero is still refused.
-	if _, err := effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(1)},
-		shares, get); err == nil {
-		t.Fatal("manual 1 over two serving revisions accepted")
+	// A count that leaves one serving revision at zero (#1802): the first
+	// listed gets the instance, the other none, and its share of the
+	// traffic answers "Service unavailable".
+	got = effectiveScale(&runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(1)},
+		[]revisionShare{{"a", 50}, {"b", 50}}, get)
+	if got["a"] != (revisionScale{1, 1, false}) || got["b"] != (revisionScale{0, 1, true}) {
+		t.Fatalf("manual 1 over 50/50 = %v", got)
 	}
 	// No service scaling: each revision's own.
-	got, _ = effectiveScale(nil, shares, get)
-	if got["a"] != (revisionScale{5, 0}) || got["b"] != (revisionScale{0, 2}) {
+	got = effectiveScale(nil, shares, get)
+	if got["a"] != (revisionScale{min: 5}) || got["b"] != (revisionScale{max: 2}) {
 		t.Fatalf("none = %v", got)
 	}
 }
@@ -82,8 +79,10 @@ func TestCheckScalingLimits(t *testing.T) {
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: f(0.96)}}}, "between 0.1 and 0.95"},
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0), ConcurrencyUtilization: f(0)}}}, "cannot both be disabled"},
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{MinInstanceCount: 3, MaxInstanceCount: 2}}}, "must not exceed"},
-		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0.6)}}}, ""}, // the CPU driver (#1800)
-		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: f(0)}}}, "not supported locally"},
+		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0.6)}}}, ""},       // the CPU driver (#1800)
+		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: f(0)}}}, ""}, // CPU only (#1802)
+		{&runpb.Service{Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(1)},
+			Traffic: []*runpb.TrafficTarget{{Revision: "a", Percent: 50}, {Revision: "b", Percent: 50}}}, ""}, // one revision at zero (#1802)
 		{&runpb.Service{Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(0)}}, ""}, // disabled (#1800)
 		{&runpb.Service{Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{CpuUtilization: f(0), ConcurrencyUtilization: f(0.95)}},
 			Scaling: &runpb.ServiceScaling{ScalingMode: runpb.ServiceScaling_MANUAL, ManualInstanceCount: proto.Int32(2)}}, ""},
@@ -121,5 +120,47 @@ func TestServiceScalingRoundTrips(t *testing.T) {
 	}
 	if !proto.Equal(back.Scaling, svc.Scaling) {
 		t.Errorf("v1 round trip = %v", back.Scaling)
+	}
+}
+
+func TestConcurrencyUtilizationZeroScalesOnCPUOnly(t *testing.T) {
+	for _, tc := range []struct {
+		concurrency int32
+		target      string
+	}{{80, `"80"`}, {0, `"1000"`}} {
+		svc := &runpb.Service{Name: "projects/proj-1/locations/us-central1/services/s",
+			Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "nginx:1"}}, MaxInstanceRequestConcurrency: tc.concurrency,
+				Scaling: &runpb.RevisionScaling{ConcurrencyUtilization: proto.Float32(0), CpuUtilization: proto.Float32(0.5)}}}
+		m, err := ToKnative(svc, "ns", "i", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{annTarget + ": " + tc.target, annTargetUtilization + `: "100"`} {
+			if !strings.Contains(m, want) {
+				t.Errorf("concurrency %d: manifest lacks %s:\n%s", tc.concurrency, want, m)
+			}
+		}
+	}
+}
+
+func TestUnavailableIngressSplits(t *testing.T) {
+	var k ksvc
+	k.Metadata.Name, k.Metadata.Namespace, k.Metadata.UID = "s", "ns", "u-1"
+	shares := []revisionShare{{"a", 50}, {"b", 50}, {"t", 0}}
+	scales := map[string]revisionScale{"a": {1, 1, false}, "b": {0, 1, true}, "t": {0, 1, false}}
+	if off := offPercent(shares, scales); off != 50 {
+		t.Fatalf("offPercent = %d, want 50", off)
+	}
+	m := unavailableIngress(k, "s"+unavailableSuffix, "s.ns.example.com", shares, scales, 50)
+	for _, want := range []string{"serviceName: a\n", "Knative-Serving-Revision: a", "serviceName: " + unavailableName, "percent: 50", "uid: u-1", `"s.ns.example.com"`} {
+		if !strings.Contains(m, want) {
+			t.Errorf("ingress lacks %q:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "serviceName: b\n") || strings.Contains(m, "serviceName: t\n") {
+		t.Errorf("ingress routes to a revision with no instances or a tag-only one:\n%s", m)
+	}
+	if r := unavailableResponder("ns", "i", "envoy:1"); !strings.Contains(r, "status: 503") || !strings.Contains(r, unavailableBody) {
+		t.Errorf("responder:\n%s", r)
 	}
 }

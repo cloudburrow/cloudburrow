@@ -2079,7 +2079,9 @@ func runServiceScalingFields(cur *runpb.ServiceScaling) []console.Field {
 		{Name: "serviceMaxInstances", Label: "Service maximum instances", Type: "text", Default: maxN, Section: section,
 			Help: "Optional. Automatic scaling: the most instances across the service.", Pattern: `^[0-9]{0,4}$`},
 		{Name: "manualInstances", Label: "Number of instances", Type: "text", Default: manual, Section: section,
-			Help: "Manual scaling: this many instances run at all times. 0 disables the service.", Pattern: `^[0-9]{0,4}$`},
+			Help: "Manual scaling: this many instances run at all times. 0 disables the service: its URL answers " +
+				"\"Service unavailable\" while revisions reached only through a tag keep serving. With fewer instances " +
+				"than revisions serving traffic, the last-listed get none and their share answers the same.", Pattern: `^[0-9]{0,4}$`},
 	}
 }
 

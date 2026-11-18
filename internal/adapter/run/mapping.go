@@ -236,7 +236,7 @@ metadata:
 	// Scaling. Cloud Run's min/max instances and concurrency target map
 	// onto Knative's KPA annotations; service-level scaling is applied to
 	// each revision once it serves (servicescaling.go, #1790).
-	renderRevisionScaling(&b, tmpl.GetScaling())
+	renderRevisionScaling(&b, tmpl.GetScaling(), tmpl.GetMaxInstanceRequestConcurrency())
 	fmt.Fprintf(&b, "        cloudburrow.dev/managed: \"true\"\n")
 
 	b.WriteString("    spec:\n")

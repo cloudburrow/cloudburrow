@@ -59,6 +59,11 @@ const (
 	// annTargetUtilization is KPA's concurrency target as a percentage of
 	// containerConcurrency: Cloud Run's concurrencyUtilization.
 	annTargetUtilization = "autoscaling.knative.dev/target-utilization-percentage"
+	// annTarget is KPA's per-instance concurrency target.
+	annTarget = "autoscaling.knative.dev/target"
+	// maxRequestConcurrency is Cloud Run's largest
+	// maxInstanceRequestConcurrency.
+	maxRequestConcurrency = 1000
 )
 
 // checkServiceScaling enforces ServiceScaling's limits: counts are never
@@ -125,10 +130,27 @@ func serviceScalingSet(s *runpb.ServiceScaling) bool {
 
 // renderRevisionScaling writes a template's scaling annotations: KPA's
 // min-scale, max-scale and concurrency target, and the template's own
-// values for reading back.
-func renderRevisionScaling(b interface{ WriteString(string) (int, error) }, s *runpb.RevisionScaling) {
+// values for reading back. concurrency is the template's
+// maxInstanceRequestConcurrency.
+//
+// concurrencyUtilization 0.0 disables the concurrency scaling driver, "to
+// scale only by CPU" (https://docs.cloud.google.com/run/docs/configuring/scaling-controls,
+// read 2026-11-18). KPA cannot be switched off, so its target becomes the
+// concurrency limit itself, at 100%: it then asks only for the instances
+// the requests in flight cannot fit into otherwise, the capacity floor any
+// driver needs, and the CPU driver's floor (cpuscaling.go) does the
+// scaling. With no limit set, the target is Cloud Run's largest
+// concurrency, 1000.
+func renderRevisionScaling(b interface{ WriteString(string) (int, error) }, s *runpb.RevisionScaling, concurrency int32) {
 	if s == nil {
 		return
+	}
+	if c := s.ConcurrencyUtilization; c != nil && *c == 0 {
+		if concurrency <= 0 {
+			concurrency = maxRequestConcurrency
+		}
+		b.WriteString(fmt.Sprintf("        %s: %q\n", annTarget, fmt.Sprint(concurrency)))
+		b.WriteString(fmt.Sprintf("        %s: %q\n", annTargetUtilization, "100"))
 	}
 	if s.GetMinInstanceCount() > 0 {
 		b.WriteString(fmt.Sprintf("        %s: %q\n", annMinScale, fmt.Sprint(s.GetMinInstanceCount())))
@@ -208,46 +230,51 @@ func splitCount(n int32, shares []revisionShare) []int32 {
 }
 
 // revisionScale is a revision's effective min-scale and max-scale; max 0 is
-// Knative's "no limit".
-type revisionScale struct{ min, max int32 }
+// Knative's "no limit". off marks a revision that has traffic and no
+// instances: a disabled service's, or one a MANUAL split leaves at zero.
+// Knative's smallest max-scale is 1, so such a revision gets min 0 and max
+// 1, and the service's URL answers its share of the traffic "Service
+// unavailable" (serviceunavailable.go), which is what holds it at zero.
+type revisionScale struct {
+	min, max int32
+	off      bool
+}
 
 // effectiveScale is each traffic revision's scale under the service's
 // scaling, given each revision's own template scaling (own may be nil).
-// ok is false when a MANUAL split leaves a serving revision with no
-// instances, which Knative cannot express: its smallest maximum is one.
-func effectiveScale(svc *runpb.ServiceScaling, shares []revisionShare, own func(string) *runpb.RevisionScaling) (map[string]revisionScale, error) {
+func effectiveScale(svc *runpb.ServiceScaling, shares []revisionShare, own func(string) *runpb.RevisionScaling) map[string]revisionScale {
 	out := map[string]revisionScale{}
 	if disabledService(svc) {
 		// A disabled service (#1800): every revision with traffic runs no
 		// instance; one reached only through a tag is "not disabled" and
-		// runs at most one, as under any MANUAL count. Knative's smallest
-		// max-scale is 1, so a serving revision gets min 0 and max 1 and
-		// the route stops taking requests (applyDisabled), which is what
-		// holds it at zero.
+		// runs at most one, as under any MANUAL count.
 		for _, s := range shares {
 			if _, seen := out[s.revision]; !seen || s.percent > 0 {
-				out[s.revision] = revisionScale{0, 1}
+				out[s.revision] = revisionScale{0, 1, s.percent > 0}
 			}
 		}
-		return out, nil
+		return out
 	}
 	if svc.GetScalingMode() == runpb.ServiceScaling_MANUAL {
 		counts := splitCount(svc.GetManualInstanceCount(), shares)
 		for i, s := range shares {
 			if s.percent == 0 {
 				if _, seen := out[s.revision]; !seen {
-					out[s.revision] = revisionScale{0, 1} // tag-only: at most one
+					out[s.revision] = revisionScale{0, 1, false} // tag-only: at most one
 				}
 				continue
 			}
 			if counts[i] == 0 {
-				return nil, apierror.Unimplemented("scaling.manualInstanceCount %d leaves revision %s, which serves %d%% of traffic, with no instances; "+
-					"a revision with traffic and zero instances (a disabled service) is not supported locally",
-					svc.GetManualInstanceCount(), s.revision, s.percent)
+				// "If the number of revisions receiving traffic exceeds the
+				// manual instance count, some of the revisions will have no
+				// instances. Traffic sent to those revisions will get the
+				// same error as if the revisions were disabled" (#1802).
+				out[s.revision] = revisionScale{0, 1, true}
+				continue
 			}
-			out[s.revision] = revisionScale{counts[i], counts[i]}
+			out[s.revision] = revisionScale{counts[i], counts[i], false}
 		}
-		return out, nil
+		return out
 	}
 	mins := splitCount(svc.GetMinInstanceCount(), shares)
 	maxs := splitCount(svc.GetMaxInstanceCount(), shares)
@@ -276,7 +303,7 @@ func effectiveScale(svc *runpb.ServiceScaling, shares []revisionShare, own func(
 		}
 		out[s.revision] = sc
 	}
-	return out, nil
+	return out
 }
 
 // trafficShares is k's resolved traffic, one entry per revision in the
@@ -315,11 +342,9 @@ func (s *Server) applyServiceScaling(ctx context.Context, k ksvc) error {
 		r := byName[name]
 		return readRevisionScaling(r.Metadata.Annotations)
 	}
-	scales, err := effectiveScale(svc, trafficShares(k), own)
-	if err != nil {
-		return err
-	}
-	if err := s.applyDisabled(ctx, k, disabledService(svc)); err != nil {
+	shares := trafficShares(k)
+	scales := effectiveScale(svc, shares, own)
+	if err := s.applyUnavailable(ctx, k, shares, scales); err != nil {
 		return err
 	}
 	for _, r := range revs {
@@ -327,7 +352,7 @@ func (s *Server) applyServiceScaling(ctx context.Context, k ksvc) error {
 		if !ok {
 			// Not in the traffic: the revision's own values.
 			o := own(r.Metadata.Name)
-			sc = revisionScale{o.GetMinInstanceCount(), o.GetMaxInstanceCount()}
+			sc = revisionScale{min: o.GetMinInstanceCount(), max: o.GetMaxInstanceCount()}
 		}
 		// The CPU driver's recommendation is a floor under KPA's
 		// concurrency one, within the revision's maximum (cpuscaling.go).
@@ -365,37 +390,16 @@ func (s *Server) applyServiceScaling(ctx context.Context, k ksvc) error {
 	return nil
 }
 
-// checkScaling validates a service's scaling at both levels, and refuses
-// what the local cluster cannot do. A CPU threshold is the CPU driver's
-// (cpuscaling.go), beside KPA's concurrency one; cpuUtilization 0.0 turns
-// the CPU driver off. Disabling the concurrency threshold is Unimplemented:
-// KPA always scales on concurrency. A MANUAL split that leaves a serving
-// revision without instances is refused before anything is applied.
+// checkScaling validates a service's scaling at both levels. A CPU
+// threshold is the CPU driver's (cpuscaling.go), beside KPA's concurrency
+// one; cpuUtilization 0.0 turns the CPU driver off, and
+// concurrencyUtilization 0.0 sets KPA's target to the concurrency limit
+// itself (renderRevisionScaling), so only the CPU driver scales (#1802).
 func checkScaling(svc *runpb.Service) error {
 	if err := checkServiceScaling(svc.GetScaling()); err != nil {
 		return err
 	}
-	ts := svc.GetTemplate().GetScaling()
-	if err := checkRevisionScaling(ts); err != nil {
-		return err
-	}
-	if ts != nil && ts.ConcurrencyUtilization != nil && ts.GetConcurrencyUtilization() == 0 {
-		return apierror.Unimplemented("template.scaling.concurrencyUtilization 0.0: disabling the concurrency threshold is not supported locally; " +
-			"Knative's KPA scales on concurrency")
-	}
-	sc := svc.GetScaling()
-	if sc.GetScalingMode() != runpb.ServiceScaling_MANUAL {
-		return nil
-	}
-	var shares []revisionShare
-	for _, t := range svc.GetTraffic() {
-		shares = append(shares, revisionShare{revision: trafficRevision(t), percent: t.GetPercent()})
-	}
-	if len(shares) == 0 {
-		shares = []revisionShare{{revision: "LATEST", percent: 100}}
-	}
-	_, err := effectiveScale(sc, shares, func(string) *runpb.RevisionScaling { return nil })
-	return err
+	return checkRevisionScaling(svc.GetTemplate().GetScaling())
 }
 
 // Cloud Run v1 carries service-level scaling in the service's annotations
@@ -478,52 +482,10 @@ func ReadRevisionScaling(ann map[string]string) *runpb.RevisionScaling {
 	return readRevisionScaling(ann)
 }
 
-// Disabled services (#1800). Google (https://docs.cloud.google.com/run/docs/configuring/services/manual-scaling,
-// read 2026-11-18): "Specify a value of 0 to disable the service";
-// "requests that are currently being processed will be allowed to
-// complete. However, any further requests to the service URL will fail";
-// revisions reached only through a tag "are not disabled".
-//
-// Locally the Knative Service is made cluster-local
-// (networking.knative.dev/visibility), so the instance's gateway stops
-// routing its URL, its serving revisions get no instances and scale to zero
-// once their requests finish; setting a count again makes it public again.
-// The URL it had is kept in annDisabledURL, so the service reads back with
-// the same uri while disabled.
-const (
-	labelVisibility     = "networking.knative.dev/visibility"
-	visibilityClusterOn = "cluster-local"
-	annDisabledURL      = "cloudburrow.dev/disabled-url"
-)
-
 // disabledService reports whether s disables the service: MANUAL with a
 // manualInstanceCount of 0. An unset count is 0 too: hashicorp/google
 // (8.4.0) omits manual_instance_count = 0, Google's own Terraform example
 // of a disabled service, from the request.
 func disabledService(s *runpb.ServiceScaling) bool {
 	return s.GetScalingMode() == runpb.ServiceScaling_MANUAL && s.GetManualInstanceCount() == 0
-}
-
-// applyDisabled makes k's route cluster-local when disabled, and public
-// again when not; it changes nothing that is already so.
-func (s *Server) applyDisabled(ctx context.Context, k ksvc, disabled bool) error {
-	_, marked := k.Metadata.Annotations[annDisabledURL]
-	if disabled == marked {
-		return nil
-	}
-	var patch map[string]any
-	if disabled {
-		patch = map[string]any{"metadata": map[string]any{
-			"labels":      map[string]any{labelVisibility: visibilityClusterOn},
-			"annotations": map[string]any{annDisabledURL: k.Status.URL}}}
-	} else {
-		patch = map[string]any{"metadata": map[string]any{
-			"labels":      map[string]any{labelVisibility: nil},
-			"annotations": map[string]any{annDisabledURL: nil}}}
-	}
-	raw, _ := json.Marshal(patch)
-	if err := s.kn.Kube.Patch(ctx, "ksvc", k.Metadata.Name, string(raw)); err != nil {
-		return apierror.Internal(err, "disable service %s", k.Metadata.Name)
-	}
-	return nil
 }

@@ -2,7 +2,9 @@
 // (#1789, #1800).
 //
 // As a Cloud Run service it listens on $PORT: GET /burn?ms=N spins one
-// goroutine for N milliseconds and answers; anything else answers at once.
+// goroutine for N milliseconds and answers; GET /sleep?ms=N waits N
+// milliseconds without using CPU (a request that only holds concurrency,
+// #1802); anything else answers at once.
 // As a worker pool instance (no request ever arrives) it spins every CPU it
 // has until the Unix time in BURN_UNTIL, then idles, so every instance,
 // including those started while it burns, stops at the same moment.
@@ -44,6 +46,11 @@ func main() {
 		ms, _ := strconv.Atoi(r.URL.Query().Get("ms"))
 		spin(time.Now().Add(time.Duration(ms) * time.Millisecond))
 		fmt.Fprintf(w, "burned %d ms\n", ms)
+	})
+	http.HandleFunc("/sleep", func(w http.ResponseWriter, r *http.Request) {
+		ms, _ := strconv.Atoi(r.URL.Query().Get("ms"))
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		fmt.Fprintf(w, "slept %d ms\n", ms)
 	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "ok") })
 	if err := http.ListenAndServe(":"+port, nil); err != nil {

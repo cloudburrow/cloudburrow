@@ -1055,7 +1055,7 @@
         "license": "MPL-2.0",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl",
+        "usedBy": "The Terraform and OpenTofu tests in test/compat: every module requires exactly this version (googleProviderVersion in test/compat/realtools_test.go) and inits against test/compat/testdata/terraform/.terraform.lock.hcl, except TestTerraformRunServiceScalingControls, which requires 8.5.0 (the first release with google_cloud_run_v2_service template.scaling cpu_utilization and concurrency_utilization, #1802) and inits against test/compat/testdata/terraform-8.5.0/.terraform.lock.hcl",
         "updateFeed": "github-releases",
         "verification": "lock-file-hashes",
         "digest": null,
