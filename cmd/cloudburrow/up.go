@@ -508,6 +508,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err == nil && projects != nil {
 		projectRegistry = projects
 		wirePurge(adminAPI, projects)
+		// Service accounts (#1747): a key file names this instance's
+		// token endpoint, and IAM Credentials and the token endpoint
+		// resolve accounts and keys in the registry.
+		projects.SetServiceAccountTokenURI(tokenURI(cfg))
+		creds.SetServiceAccounts(serviceAccountDirectory{reg: projects})
 		wireProjectNumbers(ctx, projects, map[string]func() *netfwd.Forwarder{
 			"storage":  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
 			"bigquery": func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, // #1551

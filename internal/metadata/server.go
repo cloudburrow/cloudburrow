@@ -327,7 +327,16 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	// instance's key signed it (the ADC fixture's), and for no account
 	// otherwise: it is still served, but no check that needs an account
 	// (Memorystore's IAM auth, #1614) passes with it.
-	s.writeAccessToken(w, s.creds.assertionAccount(r.PostForm.Get("assertion")))
+	email, refuse := s.creds.assertionAccountChecked(r.PostForm.Get("assertion"))
+	if refuse {
+		// A service account key that is disabled or deleted, or whose
+		// account is (#1747): Google's token endpoint answers the same.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Invalid JWT Signature."}`))
+		return
+	}
+	s.writeAccessToken(w, email)
 }
 
 // certs serves the public key, so a client configured to fetch certificates

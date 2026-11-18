@@ -155,18 +155,70 @@ func (c *Credentials) MintAccessTokenFor(email string, ttl time.Duration) string
 // signed with this instance's key: its iss, the client_email of the ADC
 // fixture that signed it. "" for anything else.
 func (c *Credentials) assertionAccount(assertion string) string {
+	email, _ := c.assertionAccountChecked(assertion)
+	return email
+}
+
+// assertionAccountChecked is assertionAccount, and whether the assertion
+// must be refused: it names a service account key (#1747) that is
+// disabled, deleted, or of a disabled or deleted account, or that does not
+// verify, or its iss is not the key's account.
+func (c *Credentials) assertionAccountChecked(assertion string) (string, bool) {
 	parts := strings.Split(assertion, ".")
 	if len(parts) != 3 {
-		return ""
+		return "", false
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return ""
+		return "", false
 	}
 	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	if rsa.VerifyPKCS1v15(&c.PrivateKey.PublicKey, cryptoSHA256, sum[:], sig) != nil {
-		return ""
+		return c.serviceAccountAssertion(parts, sum[:], sig)
 	}
+	return c.assertionClaims(parts[1]), false
+}
+
+// serviceAccountAssertion checks an assertion signed with a service
+// account's key, which its header's kid names.
+func (c *Credentials) serviceAccountAssertion(parts []string, sum, sig []byte) (string, bool) {
+	d := c.directory()
+	if d == nil {
+		return "", false
+	}
+	hb, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", false
+	}
+	var header struct {
+		Kid string `json:"kid"`
+	}
+	if json.Unmarshal(hb, &header) != nil || header.Kid == "" {
+		return "", false
+	}
+	pub, email, known, usable := d.Key(header.Kid, time.Now())
+	if !known {
+		return "", false
+	}
+	if !usable || rsa.VerifyPKCS1v15(pub, cryptoSHA256, sum, sig) != nil {
+		return "", true
+	}
+	who := c.assertionClaims(parts[1])
+	if who == "" {
+		return "", true
+	}
+	if !strings.EqualFold(who, email) {
+		// A key may sign only as its own account; a subject naming
+		// another (domain-wide delegation) is not modelled.
+		return "", true
+	}
+	return email, false
+}
+
+// assertionClaims is the account a verified assertion's claims name, ""
+// when it has expired.
+func (c *Credentials) assertionClaims(segment string) string {
+	parts := []string{"", segment}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return ""
