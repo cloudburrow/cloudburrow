@@ -31,17 +31,21 @@ import (
 //     width and height). Tesseract's word and block boxes are not
 //     returned: no boundingPoly, no per-word textAnnotations and no
 //     blocks, paragraphs, words or symbols under the page (docs/gaps.md).
+//   - IMAGE_PROPERTIES is computed from the pixels (imageprops.go, #1799):
+//     imagePropertiesAnnotation's dominant colors and a whole-image
+//     cropHintsAnnotation.
 //   - Every other feature (FACE_DETECTION, LANDMARK_DETECTION,
-//     LOGO_DETECTION, LABEL_DETECTION, IMAGE_PROPERTIES,
-//     OBJECT_LOCALIZATION, SAFE_SEARCH_DETECTION, CROP_HINTS, WEB_DETECTION,
+//     LOGO_DETECTION, LABEL_DETECTION, OBJECT_LOCALIZATION,
+//     SAFE_SEARCH_DETECTION, CROP_HINTS, WEB_DETECTION,
 //     PRODUCT_SEARCH) has no local model: that image's response is an
 //     UNIMPLEMENTED error naming it, and nothing is read.
 //   - image.content (base64) alone: image.source, a URL Vision would fetch,
 //     is refused. PNG, JPEG and GIF are decoded; other data is "Bad image
 //     data." as Vision answers it.
 
-// visionTextFeatures are the features answered.
-var visionTextFeatures = map[string]bool{"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true}
+// visionServedFeatures are the features answered, true for those read
+// with OCR.
+var visionServedFeatures = map[string]bool{"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true, "IMAGE_PROPERTIES": false}
 
 // visionStatus is a google.rpc.Status.
 type visionStatus struct {
@@ -82,14 +86,23 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var unserved []string
+		text, props := false, false
 		for _, f := range ir.Features {
-			if t := strings.ToUpper(f.Type); !visionTextFeatures[t] {
+			t := strings.ToUpper(f.Type)
+			ocr, ok := visionServedFeatures[t]
+			switch {
+			case !ok:
 				unserved = append(unserved, t)
+			case ocr:
+				text = true
+			default:
+				props = true
 			}
 		}
 		if len(unserved) > 0 {
 			fail(12, "Not implemented here: Vision feature "+strings.Join(unserved, ", ")+": CloudBurrow has no local model for it "+
-				"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR) and never calls Google. Nothing was read.")
+				"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels) "+
+				"and never calls Google. Nothing was read.")
 			continue
 		}
 		if len(ir.Image.Source) > 0 && string(ir.Image.Source) != "null" {
@@ -106,12 +119,21 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 			fail(3, "Bad image data.")
 			continue
 		}
-		res, err := ocr.Read(r.Context(), img, 300)
-		if err != nil {
-			fail(13, "Internal error: reading the image's text: "+err.Error())
-			continue
+		out := map[string]any{}
+		if text {
+			res, err := ocr.Read(r.Context(), img, 300)
+			if err != nil {
+				fail(13, "Internal error: reading the image's text: "+err.Error())
+				continue
+			}
+			out = visionTextResponse(res.Text, img.Bounds())
 		}
-		responses = append(responses, visionTextResponse(res.Text, img.Bounds()))
+		if props {
+			for k, v := range imageProperties(img) {
+				out[k] = v
+			}
+		}
+		responses = append(responses, out)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"responses": responses})

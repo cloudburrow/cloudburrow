@@ -23,7 +23,8 @@ import (
 // never Google) into ml_annotate_image_result's fullTextAnnotation with
 // an empty ml_annotate_image_status, and an object that is not an image
 // is "Bad image data." in its row's status; the object table's columns
-// are kept. LABEL_DETECTION (no local model) is refused 501, as are the
+// are kept. IMAGE_PROPERTIES answers the page's dominant colors and a
+// crop hint (#1799). LABEL_DETECTION (no local model) is refused 501, as are the
 // service types with no local model at CREATE MODEL (Translation,
 // Natural Language, Speech-to-Text, Document AI), each naming its
 // function; ML.GENERATE_TEXT of the Vision model and ML.ANNOTATE_IMAGE
@@ -115,6 +116,27 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 	}
 	if text, _ := rows[1]["text"].(string); rows[1]["status"] != "" || !strings.Contains(text, "INVOICE No. 2026-0417") || rows[1]["content_type"] != "image/png" {
 		t.Errorf("scanned page row: %v", rows[1])
+	}
+
+	// IMAGE_PROPERTIES (#1799), computed from the pixels: the scanned
+	// page is mostly white paper, so its first dominant color is near
+	// white and covers most of it; and a whole-image crop hint.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT uri, ml_annotate_image_status AS status, "+
+		"ARRAY_LENGTH(JSON_QUERY_ARRAY(ml_annotate_image_result, '$.imagePropertiesAnnotation.dominantColors.colors')) AS n, "+
+		"LAX_INT64(ml_annotate_image_result.imagePropertiesAnnotation.dominantColors.colors[0].color.red) AS red, "+
+		"LAX_FLOAT64(ml_annotate_image_result.imagePropertiesAnnotation.dominantColors.colors[0].pixelFraction) AS fraction, "+
+		"LAX_FLOAT64(ml_annotate_image_result.cropHintsAnnotation.cropHints[0].importanceFraction) AS importance, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.fullTextAnnotation.text') AS text "+
+		"FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['IMAGE_PROPERTIES'] AS vision_features)) ORDER BY uri", ds, ds))
+	if len(rows) != 2 || rows[0]["status"] != "Bad image data." {
+		t.Fatalf("IMAGE_PROPERTIES rows: %v", rows)
+	}
+	r := rows[1]
+	red, _ := r["red"].(int64)
+	fraction, _ := r["fraction"].(float64)
+	n, _ := r["n"].(int64)
+	if r["status"] != "" || r["text"] != nil || r["importance"] != 1.0 || red < 200 || fraction < 0.5 || n < 1 || n > 10 {
+		t.Errorf("IMAGE_PROPERTIES of the scanned page: %v", r)
 	}
 
 	if err := run(fmt.Sprintf("SELECT * FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['label_detection'] AS vision_features))", ds, ds)); err == nil ||
