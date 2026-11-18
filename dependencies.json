@@ -702,6 +702,15 @@
         "digest": "sha256:a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4",
         "notes": "Vertex AI EmbedContent's document_ocr on scanned PDF pages (#1733, internal/ocr): Tesseract (Google's LSTM OCR engine) and Leptonica 1.87.0 (BSD-2-Clause, https://github.com/DanBloomberg/leptonica, sha256:c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7), compiled by third_party/tesseract-wasm/build.sh with wasi-sdk 34 (https://github.com/WebAssembly/wasi-sdk, Apache-2.0 WITH LLVM-exception; the release's host-independent wasi-sysroot-34.0 and libclang_rt-34.0 archives, sha256:9d813544eeebe38b7b8f2244ed591de46b6db812c6dd1a257ff9f0d2a905a2be and sha256:eee3e634dcf71aa22b1333391623cf5c9965a637dc428a27b1a858c026c587f1, linked in: wasi-libc and musl MIT, libc++ Apache-2.0 WITH LLVM-exception), byte-identical on macOS and Linux arm64 and x86_64 to a WASI module run on wazero, so no cgo. With tessdata_fast 4.1.0 eng and osd (Apache-2.0, https://github.com/tesseract-ocr/tessdata_fast) embedded. Its script models (script/*.traineddata, commit 65727574dfcd264acbb0c3e07860e4e9e9b22185, Apache-2.0) are fetched on demand into <state-dir>/models, each pinned by SHA-256 in internal/localai/tessdata.go, for a page in a script other than Latin. The module's SHA-256 is in tesseract.wasm.sha256 and CI's tesseract-wasm job rebuilds it (third_party/tesseract-wasm/PROVENANCE.md)."
       },
+      "mediapipeEfficientNetLite0": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:6c7ab0a6e5dcbf38a8c33b960996a55a3b4300b36a018c4545801de3a3c8bde0",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision LABEL_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelabel), approved by the maintainer 2026-11-18: Google's MediaPipe EfficientNet-Lite0 image classifier (18,582,189 bytes), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image is labelled, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imageclassifier.go. Its 1,000 ImageNet labels (labels_without_background.txt) are carried in the file."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",

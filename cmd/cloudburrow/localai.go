@@ -19,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
@@ -31,6 +32,7 @@ import (
 // build and the model a multi-gigabyte download; a developer using Cloud
 // Storage should not be made to acquire either.
 func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
+	attachLabelModel(cfg)
 	if strings.TrimSpace(cfg.LocalAI.ModelPath) == "" {
 		if !cfg.LocalAI.Embeddings {
 			return nil, nil
@@ -108,6 +110,7 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 		return srv
 	}
 	if srv == nil {
+		attachLabelModel(cfg)
 		srv = vertexai.NewServerOn(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI)), nil)
 	}
 	srv.SetEndpoints(endpointResolver{src: predictionSource{run: runProvider{
@@ -146,6 +149,22 @@ func attachScriptModels(cfg config.Config) {
 				f.Path, localai.TessdataFastRepo, localai.TessdataFastScripts.Pin.Revision[:12])
 		}
 		return cache.FetchPinnedFile(ctx, localai.TessdataFastScripts, f)
+	})
+}
+
+// attachLabelModel lets Vision's LABEL_DETECTION label an image (#1799):
+// MediaPipe's EfficientNet-Lite0 classifier is fetched from
+// storage.googleapis.com the first time one is labelled, into
+// <state-dir>/models, and checked against its pinned SHA-256.
+func attachLabelModel(cfg config.Config) {
+	cache := embeddingCache(cfg)
+	m := localai.EfficientNetLite0
+	f := m.Pin.Files[0]
+	imagelabel.SetSource(func(ctx context.Context) (string, error) {
+		if _, err := os.Stat(cache.PinnedPath(m, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "fetching MediaPipe %s (%s, Apache-2.0) for Vision LABEL_DETECTION...\n", f.Path, m.Repo)
+		}
+		return cache.FetchPinnedFile(ctx, m, f)
 	})
 }
 

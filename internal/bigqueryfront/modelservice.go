@@ -27,9 +27,11 @@ import (
 //     request, to the instance's local Vertex AI endpoint, whose Vision
 //     route reads text with Tesseract (internal/service/vertexai/vision.go);
 //     never to Google. TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are
-//     answered (text, with word and block boxes since #1799), and IMAGE_PROPERTIES
-//     (dominant colors and a crop hint, computed from the pixels, #1799);
-//     FACE_DETECTION, LANDMARK_DETECTION, LOGO_DETECTION, LABEL_DETECTION
+//     answered (text, with word and block boxes since #1799), IMAGE_PROPERTIES
+//     (dominant colors and a crop hint, computed from the pixels, #1799)
+//     and LABEL_DETECTION (ImageNet labels from Google's MediaPipe
+//     EfficientNet-Lite0 classifier, run locally, #1799);
+//     FACE_DETECTION, LANDMARK_DETECTION, LOGO_DETECTION
 //     and OBJECT_LOCALIZATION have no local model and are refused 501
 //     before anything is read. The output is the input
 //     table's columns with ml_annotate_image_result (JSON, the image's
@@ -94,7 +96,7 @@ func checkServiceType(v string) (int, string) {
 // those the local endpoint answers.
 var visionFeatures = map[string]bool{
 	"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true, "IMAGE_PROPERTIES": true,
-	"FACE_DETECTION": false, "LANDMARK_DETECTION": false, "LOGO_DETECTION": false, "LABEL_DETECTION": false,
+	"FACE_DETECTION": false, "LANDMARK_DETECTION": false, "LOGO_DETECTION": false, "LABEL_DETECTION": true,
 	"OBJECT_LOCALIZATION": false,
 }
 
@@ -159,7 +161,8 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 			}
 			if !served {
 				return "", 501, "Not implemented here: the " + u + " feature of " + fname + ": CloudBurrow has no local model for it " +
-					"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels) " +
+					"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels, " +
+					"LABEL_DETECTION with a local image classifier) " +
 					"and never calls Google. Nothing was run."
 			}
 			features = append(features, u)

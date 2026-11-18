@@ -26,7 +26,7 @@ import (
 // (#1799), and an object that is not an image
 // is "Bad image data." in its row's status; the object table's columns
 // are kept. IMAGE_PROPERTIES answers the page's dominant colors and a
-// crop hint (#1799). LABEL_DETECTION (no local model) is refused 501, as are the
+// crop hint (#1799). FACE_DETECTION (no local model) is refused 501, as are the
 // service types with no local model at CREATE MODEL (Translation,
 // Natural Language, Speech-to-Text, Document AI), each naming its
 // function; ML.GENERATE_TEXT of the Vision model and ML.ANNOTATE_IMAGE
@@ -36,57 +36,10 @@ import (
 func TestBigQueryMLAnnotateImage(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvLocalAI)
-	c, project := bigqueryClient(t, h)
-	cc, _ := remoteConnectionClient(t, h)
-	sc := storageClient(t, h)
-	ctx := h.Context()
-	page, err := os.ReadFile("../../internal/ocr/testdata/scan.png")
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := strings.ReplaceAll(h.Project(), "-", "_") + "_vision"
-	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us", ConnectionId: id,
-		Connection: &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
-	if err != nil {
-		t.Fatalf("CreateConnection: %v", err)
-	}
-	t.Cleanup(func() { _ = cc.DeleteConnection(ctx, &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
-	grantRemoteModel(t, h, cc, project, cn)
-	conn := project + ".us." + id
-
-	ds := "compat_vision_" + strings.ReplaceAll(h.Project(), "-", "_")
-	if err := c.Dataset(ds).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
-		t.Fatalf("Dataset.Create: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Dataset(ds).DeleteWithContents(ctx) })
-	bh := sc.Bucket(strings.ReplaceAll(h.Project(), "_", "-") + "-vision")
-	if err := bh.Create(ctx, h.Project(), nil); err != nil {
-		t.Fatalf("create bucket: %v", err)
-	}
-	t.Cleanup(func() { emptyAndDelete(ctx, bh) })
-	for name, data := range map[string][]byte{"img/scan.png": page, "img/broken.png": []byte("not an image")} {
-		w := bh.Object(name).NewWriter(ctx)
-		w.ContentType = "image/png"
-		if _, err := w.Write(data); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Close(); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-	pol, err := bh.IAM().Policy(ctx)
-	if err != nil {
-		t.Fatalf("bucket IAM Policy: %v", err)
-	}
-	pol.Add("serviceAccount:"+cn.GetCloudResource().GetServiceAccountId(), iam.RoleName("roles/storage.objectViewer"))
-	if err := bh.IAM().SetPolicy(ctx, pol); err != nil {
-		t.Fatalf("bucket IAM SetPolicy: %v", err)
-	}
+	c, ds, id := visionObjectTable(t, h)
 	run := func(sql string) error { return mlRun(h, c, sql) }
-	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.images` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/img/*'])",
-		ds, conn, bh.BucketName())); err != nil {
-		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
-	}
+	conn := c.Project() + ".us." + id
+	ctx := h.Context()
 
 	for typ, fn := range map[string]string{"CLOUD_AI_TRANSLATE_V3": "ML.TRANSLATE", "CLOUD_AI_NATURAL_LANGUAGE_V1": "ML.UNDERSTAND_TEXT",
 		"CLOUD_AI_SPEECH_TO_TEXT_V2": "ML.TRANSCRIBE", "CLOUD_AI_DOCUMENT_V1": "ML.PROCESS_DOCUMENT"} {
@@ -153,9 +106,9 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 		t.Errorf("IMAGE_PROPERTIES of the scanned page: %v", r)
 	}
 
-	if err := run(fmt.Sprintf("SELECT * FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['label_detection'] AS vision_features))", ds, ds)); err == nil ||
-		!strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), "LABEL_DETECTION") {
-		t.Errorf("LABEL_DETECTION: %v", err)
+	if err := run(fmt.Sprintf("SELECT * FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['face_detection'] AS vision_features))", ds, ds)); err == nil ||
+		!strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), "FACE_DETECTION") {
+		t.Errorf("FACE_DETECTION: %v", err)
 	}
 	if err := run(fmt.Sprintf("SELECT * FROM ML.GENERATE_TEXT(MODEL `%s.vision`, (SELECT 'hi' AS prompt))", ds)); err == nil ||
 		!strings.Contains(err.Error(), "ML.ANNOTATE_IMAGE") {
@@ -164,5 +117,112 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 	if err := run(fmt.Sprintf("SELECT * FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, (SELECT * FROM `%s.images`), STRUCT(['text_detection'] AS vision_features))", ds, ds)); err == nil ||
 		!strings.Contains(err.Error(), "object table") {
 		t.Errorf("over a query: %v", err)
+	}
+}
+
+// visionObjectTable makes a Cloud resource connection its service account
+// may use, a dataset, and an object table `images` over a bucket holding
+// the scanned page (img/scan.png) and an object that is not an image
+// (img/broken.png): the client, the dataset and the connection's ID.
+func visionObjectTable(t *testing.T, h *Harness) (*bigquery.Client, string, string) {
+	t.Helper()
+	c, project := bigqueryClient(t, h)
+	cc, _ := remoteConnectionClient(t, h)
+	sc := storageClient(t, h)
+	ctx := h.Context()
+	page, err := os.ReadFile("../../internal/ocr/testdata/scan.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.ReplaceAll(h.Project(), "-", "_") + "_vision"
+	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us", ConnectionId: id,
+		Connection: &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
+	if err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	t.Cleanup(func() { _ = cc.DeleteConnection(ctx, &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
+	grantRemoteModel(t, h, cc, project, cn)
+	conn := project + ".us." + id
+
+	ds := "compat_vision_" + strings.ReplaceAll(h.Project(), "-", "_")
+	if err := c.Dataset(ds).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
+		t.Fatalf("Dataset.Create: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Dataset(ds).DeleteWithContents(ctx) })
+	bh := sc.Bucket(strings.ReplaceAll(h.Project(), "_", "-") + "-vision")
+	if err := bh.Create(ctx, h.Project(), nil); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	t.Cleanup(func() { emptyAndDelete(ctx, bh) })
+	for name, data := range map[string][]byte{"img/scan.png": page, "img/broken.png": []byte("not an image")} {
+		w := bh.Object(name).NewWriter(ctx)
+		w.ContentType = "image/png"
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	pol, err := bh.IAM().Policy(ctx)
+	if err != nil {
+		t.Fatalf("bucket IAM Policy: %v", err)
+	}
+	pol.Add("serviceAccount:"+cn.GetCloudResource().GetServiceAccountId(), iam.RoleName("roles/storage.objectViewer"))
+	if err := bh.IAM().SetPolicy(ctx, pol); err != nil {
+		t.Fatalf("bucket IAM SetPolicy: %v", err)
+	}
+	run := func(sql string) error { return mlRun(h, c, sql) }
+	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.images` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/img/*'])",
+		ds, conn, bh.BucketName())); err != nil {
+		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
+	}
+	return c, ds, id
+}
+
+// EnvVisionLabels, when set, runs TestBigQueryMLAnnotateImageLabels: its
+// instance fetches MediaPipe's EfficientNet-Lite0 classifier (18.6 MB,
+// from storage.googleapis.com) the first time it labels an image.
+const EnvVisionLabels = "CLOUDBURROW_TEST_VISION_LABELS"
+
+// TestBigQueryMLAnnotateImageLabels (#1799): ML.ANNOTATE_IMAGE's
+// LABEL_DETECTION through the official cloud.google.com/go/bigquery,
+// storage and bigquery/connection/apiv1 clients, answered by MediaPipe's
+// EfficientNet-Lite0 run locally (never Vision): the scanned page's
+// labelAnnotations, ten by default, most probable first, each with a
+// description, a score in [0, 1] equal to its topicality and no mid (the
+// labels are ImageNet's, with no Knowledge Graph ID); its top label is
+// "web site", as the unit test measured; an object that is not an image is
+// "Bad image data.".
+//
+// covers: bigquery.jobs.query
+func TestBigQueryMLAnnotateImageLabels(t *testing.T) {
+	if os.Getenv(EnvVisionLabels) == "" {
+		t.Skip("set " + EnvVisionLabels + " to run LABEL_DETECTION: the instance fetches MediaPipe's EfficientNet-Lite0 (18.6 MB)")
+	}
+	h := New(t)
+	h.Endpoint(EnvLocalAI)
+	c, ds, id := visionObjectTable(t, h)
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.vision` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_VISION_V1')",
+		ds, c.Project()+".us."+id)); err != nil {
+		t.Fatalf("CREATE MODEL CLOUD_AI_VISION_V1: %v", err)
+	}
+	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT uri, ml_annotate_image_status AS status, "+
+		"ARRAY_LENGTH(JSON_QUERY_ARRAY(ml_annotate_image_result, '$.labelAnnotations')) AS n, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.labelAnnotations[0].description') AS top, "+
+		"LAX_FLOAT64(ml_annotate_image_result.labelAnnotations[0].score) AS score, "+
+		"LAX_FLOAT64(ml_annotate_image_result.labelAnnotations[0].topicality) AS topicality, "+
+		"LAX_FLOAT64(ml_annotate_image_result.labelAnnotations[1].score) AS second, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.labelAnnotations[0].mid') AS mid "+
+		"FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['LABEL_DETECTION'] AS vision_features)) ORDER BY uri", ds, ds))
+	if len(rows) != 2 || rows[0]["status"] != "Bad image data." {
+		t.Fatalf("LABEL_DETECTION rows: %v", rows)
+	}
+	r := rows[1]
+	score, _ := r["score"].(float64)
+	second, _ := r["second"].(float64)
+	if r["status"] != "" || r["n"] != int64(10) || r["top"] != "web site" || score <= 0 || score > 1 || r["topicality"] != r["score"] ||
+		second > score || r["mid"] != nil {
+		t.Errorf("LABEL_DETECTION of the scanned page: %v", r)
 	}
 }
