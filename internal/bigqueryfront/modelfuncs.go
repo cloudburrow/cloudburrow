@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"net/http"
@@ -243,7 +244,10 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	}
 	// The scalar AI functions, evaluated row by row here (aigenerate.go,
 	// #1765, #1771, #1772).
-	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
+	client := jobText{query: q.Query}
+	paramsChanged := false
+	var aq queryOptions
+	if text, aq, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
 		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 		if code == 501 || code == 500 {
 			writeError(w, code, reason, msg)
@@ -251,6 +255,13 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		}
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
 		return true
+	}
+	if aq.ParameterMode != q.ParameterMode || !bytes.Equal(aq.QueryParameters, q.QueryParameters) {
+		// AI.AGG named positional parameters or dropped an instruction's
+		// (#1810): the engine is sent those, the client's job shows its own.
+		client.params, client.paramMode, client.paramsSet = q.QueryParameters, q.ParameterMode, true
+		q.QueryParameters, q.ParameterMode = aq.QueryParameters, aq.ParameterMode
+		paramsChanged = true
 	}
 	if fn := aiFunction(text); fn != "" {
 		why := map[string]string{
@@ -312,11 +323,14 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	}
 	b.WriteString(text[last:])
 	sql := b.String()
-	if !setQueryText(r, insert, sql) {
+	set := setQueryText(r, insert, sql)
+	if paramsChanged {
+		set = setQueryParameters(r, insert, queryOptions{Query: sql, ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
+	}
+	if !set {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
-	client := jobText{query: q.Query}
 	q.Query = sql
 	rec := newRecorder()
 	f.runQuery(rec, r, q, insert)

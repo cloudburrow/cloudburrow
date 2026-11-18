@@ -20,9 +20,10 @@ import (
 // INPUT is a STRING or a STRUCT of STRING and ARRAY<STRING> fields
 // (concatenated, as AI.GENERATE's prompt; ObjectRef fields are 501, as
 // for the scalar functions: object tables, #1798); INSTRUCTION a STRING
-// literal (a query parameter, which the page allows, fails: see
-// aggInstruction). The front evaluates a call before the
-// engine runs the query, block by block, the deepest first:
+// literal or a query parameter, named (@name) or positional (?), "as
+// either a string or query parameter" (aggInstruction). The front
+// evaluates a call before the engine runs the query, block by block, the
+// deepest first:
 //
 //  1. It reads every group's rows with a probe of the call's block: the
 //     block's select list (so GROUP BY ordinals and aliases keep their
@@ -51,7 +52,8 @@ import (
 // the cap the front sends is aiAggOutputTokens.
 //
 // 501, naming why: an OVER clause; AI.AGG outside a SELECT block; ObjectRef
-// input (object tables, #1798); an instruction that is a query parameter.
+// input (object tables, #1798); an instruction that is neither a STRING
+// literal nor a query parameter.
 //
 // UNVERIFIED (re-read 2026-11-18: the page above documents none of these): the
 // words of the prompts (aggPrompt; Google publishes no prompt); the
@@ -242,26 +244,42 @@ func (l blockLayout) clauseEnd(from int, after ...string) int {
 }
 
 // rewriteAIAgg evaluates text's AI.AGG calls and writes their answers in.
-func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (string, int, string) {
+// It returns q with the parameters the rewritten text holds (#1810): the
+// engine refuses a parameter the query does not reference ("expected 0
+// arguments, got 1"), and an instruction's parameter is gone once its call
+// is answered. Positional parameters are named first (namePositional), as
+// the probes and the answers move the calls' ? around.
+func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (string, queryOptions, int, string) {
 	if !strings.Contains(strings.ToUpper(text), "AGG") {
-		return text, 0, ""
+		return text, q, 0, ""
 	}
 	project := projectOf(f.base)
+	rewritten := false
 	for {
 		toks, ok := lex(text)
 		if !ok {
-			return text, 0, ""
+			return text, q, 0, ""
 		}
 		depth := tokenDepths(toks)
 		calls, code, msg := findAIAggCalls(text, toks, depth)
 		if code != 0 {
-			return "", code, msg
+			return "", q, code, msg
 		}
 		if len(calls) == 0 {
-			return text, 0, ""
+			if rewritten {
+				q = usedParams(q, text)
+			}
+			return text, q, 0, ""
+		}
+		if !rewritten {
+			rewritten = true
+			if named, nq, ok := namePositional(q, text, toks); ok {
+				text, q = named, nq
+				continue
+			}
 		}
 		if f.vertexai == "" {
-			return "", 501, "Not implemented here: AI.AGG needs the instance's local Vertex AI endpoint, which this instance does not serve to BigQuery: " +
+			return "", q, 501, "Not implemented here: AI.AGG needs the instance's local Vertex AI endpoint, which this instance does not serve to BigQuery: " +
 				"start it with --local-ai-model (docs/generation.md). CloudBurrow never sends a call to Google. Nothing was run."
 		}
 		resolved := make([]aiResolved, len(calls))
@@ -270,7 +288,7 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 		for i, c := range calls {
 			a, code, msg := f.resolveAICall(r, q, project, aiCall{fn: "AGG", start: c.start, end: c.end, args: c.args, block: c.block})
 			if code != 0 {
-				return "", code, msg
+				return "", q, code, msg
 			}
 			resolved[i], types[i] = a, aggType(a)
 			if depth[c.block] > depth[calls[deepest].block] {
@@ -286,16 +304,16 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 			}
 			probe, code, msg := aggProbe(text, toks, depth, calls, types, i)
 			if code != 0 {
-				return "", code, msg
+				return "", q, code, msg
 			}
 			a := resolved[i]
 			instruction, code, msg := f.aggInstruction(r, q, c.args["instruction"])
 			if code != 0 {
-				return "", code, msg
+				return "", q, code, msg
 			}
 			_, rows, code, msg := f.queryAllRows(r, paramsOf(q, probe), probe)
 			if code != 0 {
-				return "", code, msg
+				return "", q, code, msg
 			}
 			var whens strings.Builder
 			failed, total := 0, 0
@@ -306,13 +324,13 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 				}
 				var keys []string
 				if *row[0] != "null" && json.Unmarshal([]byte(*row[0]), &keys) != nil {
-					return "", 500, "cloudburrow: unreadable AI.AGG group " + *row[0]
+					return "", q, 500, "cloudburrow: unreadable AI.AGG group " + *row[0]
 				}
 				var inputs []string
 				for _, k := range keys {
 					p, ok, code, msg := promptText(k)
 					if code != 0 {
-						return "", code, strings.ReplaceAll(msg, "AI.GENERATE", "AI.AGG")
+						return "", q, code, strings.ReplaceAll(msg, "AI.GENERATE", "AI.AGG")
 					}
 					if ok {
 						inputs = append(inputs, p)
@@ -332,7 +350,7 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 				}
 			}
 			if total > 0 && (failed == total || float64(failed)/float64(total) > a.maxErrRatio) {
-				return "", 400, "Query failed because AI functions exceeded their allowed error ratio: AI.AGG failed for " +
+				return "", q, 400, "Query failed because AI functions exceeded their allowed error ratio: AI.AGG failed for " +
 					strconv.Itoa(failed) + " of " + strconv.Itoa(total) + " rows; the first: " + firstStatus
 			}
 			if whens.Len() == 0 {
@@ -397,11 +415,11 @@ func aggProbe(text string, toks []token, depth []int, calls []aiAggCall, types [
 	return with + "SELECT DISTINCT _cbai_c, FARM_FINGERPRINT(_cbai_c) AS _cbai_fp FROM (SELECT " + list + ", " + c.contentExpr() + " AS _cbai_c" + src + ")", 0, ""
 }
 
-// aggInstruction is the instruction's value, a STRING literal; any other
-// expression is 501. A query parameter does not reach here yet: the query
-// fails first with the engine's "expected 0 arguments, got 1" on the read
-// of the groups (measured 2026-11-18 through the official Go client; not
-// yet traced, #1777 follow-up).
+// aggInstruction is the instruction's value: a STRING literal, or a query
+// parameter (@name; a positional ? is named by then, namePositional),
+// read from the request's own parameters, whose declared type it must
+// have (#1810): the engine types a parameter it reads alone by its value,
+// a NULL as INT64, so it is not asked. Any other expression is 501.
 func (f front) aggInstruction(r *http.Request, q queryOptions, expr string) (string, int, string) {
 	if s, ok := unquoteString(expr); ok {
 		return s, 0, ""
@@ -409,7 +427,103 @@ func (f front) aggInstruction(r *http.Request, q queryOptions, expr string) (str
 	if strings.EqualFold(strings.TrimSpace(expr), "NULL") || strings.HasPrefix(strings.ToUpper(strings.TrimSpace(expr)), "CAST(NULL") {
 		return "", 400, "The instruction argument of AI.AGG must not be NULL"
 	}
-	return "", 501, "Not implemented here: an AI.AGG instruction that is not a STRING literal (" + expr + "), such as a query parameter (#1777). Nothing was run."
+	name, ok := queryParameterName(expr)
+	if !ok {
+		return "", 501, "Not implemented here: an AI.AGG instruction that is neither a STRING literal nor a query parameter (" + expr + "). Nothing was run."
+	}
+	var ps []struct {
+		Name string `json:"name"`
+		Type struct {
+			Type string `json:"type"`
+		} `json:"parameterType"`
+		Value *struct {
+			Value *string `json:"value"`
+		} `json:"parameterValue"`
+	}
+	if len(q.QueryParameters) > 0 && json.Unmarshal(q.QueryParameters, &ps) != nil {
+		return "", 400, "Invalid query parameters"
+	}
+	for _, p := range ps {
+		if !strings.EqualFold(p.Name, name) {
+			continue
+		}
+		if !strings.EqualFold(p.Type.Type, "STRING") {
+			return "", 400, "The instruction argument of AI.AGG must be a STRING, not " + p.Type.Type
+		}
+		if p.Value == nil || p.Value.Value == nil {
+			return "", 400, "The instruction argument of AI.AGG must not be NULL"
+		}
+		return *p.Value.Value, 0, ""
+	}
+	return "", 400, "Query parameter '" + name + "' not found"
+}
+
+// queryParameterName is the name of the query parameter expr is, @name or
+// @`name` (not @@name, a system variable); ok is false for any other
+// expression.
+func queryParameterName(expr string) (string, bool) {
+	toks, ok := lex(expr)
+	if !ok || len(toks) != 2 || !toks[0].punct("@") || toks[1].kind != tokWord && toks[1].kind != tokQuoted || toks[1].pos != toks[0].end {
+		return "", false
+	}
+	return toks[1].text, true
+}
+
+// namePositional names q's positional parameters, in order, cbai_p1,
+// cbai_p2, … (the engine refuses a name that does not begin with a
+// letter), and writes text's ? as @cbai_p1, …; ok is false (nothing
+// to do) when q has no positional parameters. The client's job still shows
+// its own text and parameters (mlFunctions).
+func namePositional(q queryOptions, text string, toks []token) (string, queryOptions, bool) {
+	if len(q.QueryParameters) == 0 || q.ParameterMode != "" && !strings.EqualFold(q.ParameterMode, "POSITIONAL") {
+		return text, q, false
+	}
+	var ps []map[string]json.RawMessage
+	if json.Unmarshal(q.QueryParameters, &ps) != nil {
+		return text, q, false
+	}
+	for _, p := range ps {
+		// No parameterMode, as the Go client sends: positional when no
+		// parameter is named (bytesParameters).
+		var name string
+		if p == nil || q.ParameterMode == "" && json.Unmarshal(p["name"], &name) == nil && name != "" {
+			return text, q, false
+		}
+	}
+	for i, p := range ps {
+		p["name"], _ = json.Marshal("cbai_p" + strconv.Itoa(i+1))
+	}
+	var b strings.Builder
+	last, n := 0, 0
+	for _, t := range toks {
+		if t.punct("?") {
+			n++
+			b.WriteString(text[last:t.pos] + "@cbai_p" + strconv.Itoa(n))
+			last = t.end
+		}
+	}
+	b.WriteString(text[last:])
+	raw, err := json.Marshal(ps)
+	if err != nil {
+		return text, q, false
+	}
+	q.QueryParameters, q.ParameterMode = raw, "NAMED"
+	return b.String(), q, true
+}
+
+// usedParams is q with only the named parameters text references, as
+// the query the engine runs: an empty list rather than none, so the
+// request's own parameters are replaced (setQueryParameters).
+func usedParams(q queryOptions, text string) queryOptions {
+	if len(q.QueryParameters) == 0 {
+		return q
+	}
+	mode := q.ParameterMode
+	out := paramsOf(q, text)
+	if out.QueryParameters == nil {
+		out.QueryParameters, out.ParameterMode = json.RawMessage("[]"), mode
+	}
+	return out
 }
 
 // paramsOf is q with only the named query parameters sql uses: the engine
@@ -433,8 +547,9 @@ func paramsOf(q queryOptions, sql string) queryOptions {
 			return q
 		}
 		for k := 1; k < len(toks); k++ {
-			// @name, not @@name (a system variable)
-			if toks[k].is(named.Name) && toks[k-1].punct("@") && (k < 2 || !toks[k-2].punct("@")) {
+			// @name or @`name`, not @@name (a system variable)
+			if (toks[k].kind == tokWord || toks[k].kind == tokQuoted) && strings.EqualFold(toks[k].text, named.Name) &&
+				toks[k-1].punct("@") && (k < 2 || !toks[k-2].punct("@")) {
 				keep = append(keep, p)
 				break
 			}
