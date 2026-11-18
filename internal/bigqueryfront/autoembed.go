@@ -1038,7 +1038,7 @@ func (f front) generationBlocked(r *http.Request, e genEmbedding) string {
 	if code != 0 {
 		return "" // no Resource Manager to read the grants from: the calls' own checks apply
 	}
-	if sa := cn.serviceAccount(); sa == "" || !bindingsGrant(proj, "serviceAccount:"+sa, permVertexPredict) {
+	if sa := cn.serviceAccount(); sa == "" || !bindingsGrant(proj, f.members(r.Context(), "serviceAccount:"+sa), permVertexPredict) {
 		return sa + " does not have the permission to access resources used by AI.EMBED. " +
 			"Please follow https://docs.cloud.google.com/bigquery/docs/permissions-for-ai-functions to set up permissions."
 	}
