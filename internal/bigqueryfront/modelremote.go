@@ -708,8 +708,8 @@ func aiFunction(sql string) string {
 			if (toks[i+2].is("GENERATE_TEXT") || toks[i+2].is("GENERATE_TABLE") || toks[i+2].is("GENERATE_EMBEDDING")) && i+4 < len(toks) && toks[i+4].is("MODEL") {
 				continue // served with the ML functions of a model (#1765, #1771, #1772)
 			}
-			if _, ok := aiScalars[strings.ToUpper(toks[i+2].text)]; ok {
-				continue // evaluated row by row (aigenerate.go)
+			if _, ok := aiScalars[strings.ToUpper(toks[i+2].text)]; ok || toks[i+2].is("AGG") {
+				continue // evaluated row by row (aigenerate.go) or group by group (aiagg.go, #1777)
 			}
 			return "AI." + strings.ToUpper(toks[i+2].text)
 		}
