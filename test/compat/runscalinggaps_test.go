@@ -415,7 +415,10 @@ resource "google_cloud_run_v2_service" "s" {
 // official run/v2 client; --scaling-concurrency-target=disabled, "to scale
 // only by CPU", sets concurrencyUtilization 0.0; both disabled is refused,
 // as gcloud's own help says ("CPU and concurrency scaling cannot both be
-// disabled").
+// disabled"). Through gcloud beta, as Google's scaling-controls page gives
+// them: CI's gcloud 586.0.0 has the flags in the alpha and beta tracks
+// only (main run 44326182935: "unrecognized arguments"), and 593.0.0 has
+// them in beta as well as GA.
 func TestGcloudRunServiceScalingControls(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
@@ -436,11 +439,11 @@ func TestGcloudRunServiceScalingControls(t *testing.T) {
 			t.Errorf("%s, template.scaling = %v; want cpuUtilization %v, concurrencyUtilization %v", when, sc, cpu, concurrency)
 		}
 	}
-	g.must("run", "services", "update", id, region, project, "--scaling-cpu-target=0.7", "--scaling-concurrency-target=0.8", "--quiet")
+	g.must("beta", "run", "services", "update", id, region, project, "--scaling-cpu-target=0.7", "--scaling-concurrency-target=0.8", "--quiet")
 	targets("after both targets", 0.7, 0.8)
-	g.must("run", "services", "update", id, region, project, "--scaling-concurrency-target=disabled", "--quiet")
+	g.must("beta", "run", "services", "update", id, region, project, "--scaling-concurrency-target=disabled", "--quiet")
 	targets("after --scaling-concurrency-target=disabled", 0.7, 0)
-	if out, err := g.run(nil, "run", "services", "update", id, region, project, "--scaling-cpu-target=disabled", "--quiet"); err == nil {
+	if out, err := g.run(nil, "beta", "run", "services", "update", id, region, project, "--scaling-cpu-target=disabled", "--quiet"); err == nil {
 		t.Errorf("disabling both drivers succeeded:\n%s", out)
 	}
 }
