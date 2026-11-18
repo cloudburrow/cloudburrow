@@ -214,7 +214,7 @@ or from a clone:
 | `make vet` | `go vet` |
 | `make cross` | Build and vet every package for darwin and linux on amd64 and arm64 |
 | `make test` | Unit tests |
-| `make test-race` | Unit tests with the race detector |
+| `make test-race` | Unit tests with the race detector; `RACE_PKGS=./internal/x/` for one package (bare `go test -race` fails the Opus tests: #1808) |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`), against a running instance: `eval "$(scripts/compat-env.sh <its flags>)"` first; see [test/compat/README.md](test/compat/README.md) |
 | `make test-e2e` | The acceptance workflow end to end (build tag `e2e`) |
 | `make test-integration` | Tests that create a real cluster (build tag `integration`; needs Docker, kind, kubectl) |

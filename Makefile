@@ -215,16 +215,21 @@ vet:
 test:
 	go test -timeout $(TEST_TIMEOUT) ./...
 
-## test-race: Run unit tests with the race detector
-# -race turns on checkptr everywhere. github.com/kazzmir/opus-go is C
-# translated to Go, and computes struct sizes by pointer arithmetic on a
-# nil pointer (silk_Get_Decoder_Size), which never dereferences it but
-# which checkptr treats as fatal. Turn checkptr off for that one module
-# only; the race detector still covers it, and checkptr the rest.
+## test-race: Run unit tests with the race detector (RACE_PKGS=./internal/x/ for one package)
+# -race turns on checkptr in every package. github.com/kazzmir/opus-go is
+# libopus transpiled to Go: its libc shim hands out Go-heap memory as
+# uintptr, and the decoder converts it back with unsafe.Pointer, which
+# checkptr kills with a fatal error on the first opus.NewDecoder (#1808).
+# v1.7.0 is upstream's newest release and master (kazzmir/opus-go#79).
+# Turn checkptr off for that one module only: the race detector still
+# covers it, and checkptr everything else. Run a single package's race
+# tests through this target too (make test-race RACE_PKGS=./internal/embedding/);
+# a bare go test -race fails the Opus tests with an error naming this flag.
 RACE_GCFLAGS := github.com/kazzmir/opus-go/...=-d=checkptr=0
+RACE_PKGS ?= ./...
 .PHONY: test-race
 test-race:
-	go test -race -gcflags='$(RACE_GCFLAGS)' -timeout $(TEST_TIMEOUT) ./...
+	go test -race -gcflags='$(RACE_GCFLAGS)' -timeout $(TEST_TIMEOUT) $(RACE_PKGS)
 
 ## test-cover: Run unit tests and report coverage
 .PHONY: test-cover

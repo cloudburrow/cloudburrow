@@ -443,6 +443,9 @@ func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (p
 	if e == nil || e.Dops == nil {
 		return nil, 0, 0, errors.New("the Opus track has no dOps box")
 	}
+	if err := opusCheckptr(); err != nil {
+		return nil, 0, 0, err
+	}
 	dops := e.Dops
 	channels = int(dops.OutputChannelCount)
 	const opusRate = 48000
