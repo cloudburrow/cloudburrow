@@ -14,7 +14,7 @@ charts and operators work against it directly.
 
 ## Status
 
-**Released: [v0.2.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.2.0).** Install it
+**Released: [v0.3.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.3.0).** Install it
 with `brew install cloudburrow/tap/cloudburrow`, the install script, or from source
 ([docs/install.md](docs/install.md)). Every archive, and the one `checksums.txt`, carries a GitHub
 build attestation, and the installer refuses an archive it cannot verify. The
