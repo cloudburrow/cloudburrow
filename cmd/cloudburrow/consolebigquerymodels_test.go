@@ -110,6 +110,7 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"rf":  `"modelType":"RANDOM_FOREST_CLASSIFIER","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
 		"ar":  `"modelType":"ARIMA_PLUS","trainingRuns":[{"results":[{"index":0,"arimaResult":{"arimaModelInfo":[]}}]}]`,
 		"mf":  `"modelType":"MATRIX_FACTORIZATION","trainingRuns":[{"evaluationMetrics":{"regressionMetrics":{"meanSquaredError":0.5}}}]`,
+		"xr":  `"modelType":"ARIMA_PLUS_XREG","trainingRuns":[{"results":[{"index":0,"arimaResult":{"arimaModelInfo":[]}}]}]`,
 	}
 	rows := func(fields, rows string) string {
 		return `{"jobReference":{"projectId":"p","jobId":"j"},"jobComplete":true,"schema":{"fields":[` + fields + `]},"rows":[` + rows + `]}`
@@ -141,6 +142,9 @@ func TestBigQueryModelPageResults(t *testing.T) {
 			fmt.Fprint(w, rows(`{"name":"forecast_timestamp","type":"TIMESTAMP"},{"name":"forecast_value","type":"FLOAT"},{"name":"standard_error","type":"FLOAT"},`+
 				`{"name":"confidence_level","type":"FLOAT"},{"name":"prediction_interval_lower_bound","type":"FLOAT"},{"name":"prediction_interval_upper_bound","type":"FLOAT"}`,
 				`{"f":[{"v":"1704931200000000"},{"v":"19.5"},{"v":"0.75"},{"v":"0.95"},{"v":"18"},{"v":"21"}]}`))
+		case strings.Contains(q, "ML.ARIMA_COEFFICIENTS"):
+			fmt.Fprint(w, rows(`{"name":"processed_input","type":"STRING"},{"name":"weight","type":"FLOAT"},{"name":"f0_","type":"STRING"}`,
+				`{"f":[{"v":"temp"},{"v":"2.5"},{"v":""}]}`))
 		case strings.Contains(q, "ML.ARIMA_EVALUATE"):
 			fmt.Fprint(w, rows(`{"name":"f0_","type":"STRING"},{"name":"log_likelihood","type":"FLOAT"},{"name":"AIC","type":"FLOAT"},{"name":"variance","type":"FLOAT"},`+
 				`{"name":"f1_","type":"STRING"},{"name":"has_spikes_and_dips","type":"BOOLEAN"},{"name":"has_step_changes","type":"BOOLEAN"}`,

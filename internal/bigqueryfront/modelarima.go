@@ -56,8 +56,9 @@ import (
 // a forecast adds the seasonal components back; forecast_limit_lower_bound
 // and forecast_limit_upper_bound clamp the forecast and its interval
 // (UNVERIFIED). Refused 501: holiday_region (Google's holiday calendar),
-// hierarchical_time_series_cols, more than one time_series_id_col, and
-// ARIMA_PLUS_XREG.
+// hierarchical_time_series_cols and more than one time_series_id_col.
+// ARIMA_PLUS_XREG is this pipeline on a linear regression's residuals
+// (modelxreg.go, #1766).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
 
 // tsOptions are an ARIMA_PLUS model's options.
@@ -1283,6 +1284,12 @@ func (md bqModel) arimaResource() (opts map[string]any, info []map[string]any) {
 	}
 	if ts.IDCol != "" {
 		opts["timeSeriesIdColumn"] = ts.IDCol
+	}
+	if md.Options.ModelType == "ARIMA_PLUS_XREG" {
+		// Its regression's (modelxreg.go, #1766); it has no
+		// decomposition or forecast limits.
+		opts["l2Regularization"] = md.Options.L2
+		delete(opts, "decomposeTimeSeries")
 	}
 	if ts.AutoArima {
 		opts["autoArimaMaxOrder"], opts["autoArimaMinOrder"] = strconv.Itoa(ts.MaxOrder), strconv.Itoa(ts.MinOrder)

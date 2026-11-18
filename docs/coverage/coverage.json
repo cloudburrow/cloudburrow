@@ -9909,6 +9909,7 @@
           "test/compat/bigquerymlwnd_test.go:163 TestBigQueryMLHostedModelsRefused",
           "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
+          "test/compat/bigquerymlxreg_test.go:26 TestBigQueryMLArimaPlusXreg",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -10013,6 +10014,7 @@
           "test/compat/bigquerymlwnd_test.go:163 TestBigQueryMLHostedModelsRefused",
           "test/compat/bigquerymlwnd_test.go:38 TestBigQueryMLWideAndDeep",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
+          "test/compat/bigquerymlxreg_test.go:26 TestBigQueryMLArimaPlusXreg",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
         ]
       },

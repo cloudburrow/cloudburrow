@@ -251,6 +251,9 @@ type mlTrained struct {
 	Global []mlGlobal `json:"global,omitempty"`
 	// Arima is an ARIMA_PLUS model's series and fits (modelarima.go).
 	Arima *arimaTrained `json:"arima,omitempty"`
+	// Xreg is an ARIMA_PLUS_XREG model's regression on its features
+	// (modelxreg.go, #1766); its ARIMA is Arima.
+	Xreg *xregTrained `json:"xreg,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -308,6 +311,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 		return trainMF(opts, cols, rows)
 	case "ARIMA_PLUS":
 		return trainArima(opts, cols, rows)
+	case "ARIMA_PLUS_XREG":
+		return trainXreg(opts, cols, rows)
 	case "AUTOENCODER":
 		return trainAutoencoder(opts, cols, rows)
 	}
