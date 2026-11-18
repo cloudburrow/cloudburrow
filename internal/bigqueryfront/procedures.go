@@ -485,8 +485,12 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 	s.callers = s.framesOf(toks)
 	s.sql, s.scopes, s.inHandler, s.loc = proc.Body, []map[string]scriptVar{scope}, nil, loc
 	// A name of the body without a project is the procedure's project's
-	// (#1784): its statements are sent with that project as the default
-	// dataset's, which the engine reads such a name in
+	// (#1784): "the default project is the project which owns the
+	// procedure, not necessarily the project used to run the CREATE
+	// PROCEDURE statement", whichever project runs the CALL
+	// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#default_project_in_procedure_body,
+	// re-read 2026-11-18). Its statements are sent with that project as
+	// the default dataset's, which the engine reads such a name in
 	// (bigquery-emulator patch 0096).
 	defaultDataset := s.q.DefaultDataset
 	s.q.DefaultDataset = withDefaultProject(defaultDataset, project)
