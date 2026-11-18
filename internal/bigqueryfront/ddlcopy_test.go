@@ -638,7 +638,9 @@ func TestCopyJobs(t *testing.T) {
 	}
 	e = setup()
 	if code, got := do(t, Wrap(e), "POST", base+"/jobs", `{"jobReference":{"jobId":"x"},"configuration":{"copy":{"sourceTable":`+
-		`{"projectId":"other","datasetId":"ds","tableId":"s"},"destinationTable":{"projectId":"p","datasetId":"ds","tableId":"n"}}}}`); code != 501 {
-		t.Errorf("a table of another project: %d %v", code, got)
+		`{"projectId":"other","datasetId":"ds","tableId":"s"},"destinationTable":{"projectId":"p","datasetId":"ds","tableId":"n"}}}}`); code != 200 ||
+		!e.sent("GET /bigquery/v2/projects/other/datasets/ds/tables/s") {
+		// #1764: read in its own project; the fake has no such table.
+		t.Errorf("a table of another project: %d %v, %v", code, got, e.log)
 	}
 }

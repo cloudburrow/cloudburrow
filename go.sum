@@ -315,8 +315,8 @@ cloud.google.com/go/longrunning v0.6.7/go.mod h1:EAFV3IZAKmM56TyiE6VAP3VoTzhZzyS
 cloud.google.com/go/longrunning v0.8.0/go.mod h1:UmErU2Onzi+fKDg2gR7dusz11Pe26aknR4kHmJJqIfk=
 cloud.google.com/go/longrunning v0.9.0/go.mod h1:pkTz846W7bF4o2SzdWJ40Hu0Re+UoNT6Q5t+igIcb8E=
 cloud.google.com/go/longrunning v1.2.0/go.mod h1:5KMQALFGOCtFoi2xSOA1u3H7WKlhmckgiyFw7+LGQp0=
-cloud.google.com/go/longrunning v1.3.0 h1:lZ6c8SJJBmILp/Wnr3vGnBLa0q+cYfSHRCcUfVI2hpI=
-cloud.google.com/go/longrunning v1.3.0/go.mod h1:wpgLxCn+UA3/TZ1bj/fW39mfDpwVlMPu1xKJyoMt7V0=
+cloud.google.com/go/longrunning v1.5.0 h1:aGonu6LHQl38DyozLs2jxGieI4Ixk+7GTnmHVcHt8zA=
+cloud.google.com/go/longrunning v1.5.0/go.mod h1:vjM1U85ZQuTv8lJoUBSA44HLWvM6BBFeaSJYGFF1Q00=
 cloud.google.com/go/managedidentities v1.13.0/go.mod h1:lUYH5r6QEJTHqjgga0WFeiieqJ0iRwEuQSk20O41Vj0=
 cloud.google.com/go/maps v1.37.0/go.mod h1:oalKFBmf2eHmdr3OvfEiiBlOakNlVitYYEPcM3TTUB4=
 cloud.google.com/go/mediatranslation v0.13.0/go.mod h1:kjZrowuigFr+Bf1HM1TCtp1a3E3kfG1ovPK5VEuaNAQ=
@@ -378,8 +378,8 @@ cloud.google.com/go/resourcemanager v1.17.0/go.mod h1:IQT7djVg7KWNzEUt8QVeoHQ3Y8
 cloud.google.com/go/resourcesettings v1.8.3/go.mod h1:BzgfXFHIWOOmHe6ZV9+r3OWfpHJgnqXy8jqwx4zTMLw=
 cloud.google.com/go/retail v1.32.0/go.mod h1:t9w9mBarD59BnFHTST2LoiCP5608ZlEfniHLgA6OoH0=
 cloud.google.com/go/run v1.22.0/go.mod h1:Wo0aTNrqfftGmbxPPraeOxSUDUZ2c7IVNg2dk8Qm1Bs=
-cloud.google.com/go/run v1.23.0 h1:JvTkOn+8h+QicGzBPWjgSrwpTcs2b6zJkusfEnmvkGo=
-cloud.google.com/go/run v1.23.0/go.mod h1:ZCGrir3QdVgAJsVChr2nlQTfaknro8nwpEZwJDRHHhI=
+cloud.google.com/go/run v1.25.0 h1:ddLJB4WUchBI9OtHly+MdwoRmOJuwQdbQ8hBrjr8T/c=
+cloud.google.com/go/run v1.25.0/go.mod h1:qcFpJvl+EzRKP8XNtVzkD80FdlrihiWZ2CchMNONa8E=
 cloud.google.com/go/scheduler v1.16.0/go.mod h1:0hsZg0MZJADyke1lutI0FHAYJR8Dtm8oIivXkmpACkA=
 cloud.google.com/go/scheduler v1.17.0 h1:jFAEvWG9QDwDWYMgrXZBFi+f1EehetCmM0VE7OpPqJw=
 cloud.google.com/go/scheduler v1.17.0/go.mod h1:16h1vcu+XuadWlJjfKaUn3TWyzedOH+RGoylY2EQix8=

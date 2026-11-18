@@ -340,6 +340,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			addr:     func() string { return forwardedAddr(forwarders, "firestore") }}
 		fmIAM.start(ctx)
 	}
+	if serviceEnabled(cfg, config.ServiceBigQuery) {
+		// BigQuery's per-project IAM of a caller with a minted token
+		// (#1767, bigqueryfront/iamcheck.go).
+		bqIAM := &bigqueryIAM{creds: creds, client: &http.Client{Timeout: 5 * time.Second},
+			registry: func() *resourcemanager.Registry { return projectRegistry },
+			addr:     func() string { return forwardedAddr(forwarders, "bigquery") }}
+		bqIAM.start(ctx)
+	}
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server

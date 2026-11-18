@@ -8349,12 +8349,54 @@ async function renderPlayground(view) {
   const historyBody = el("tbody");
 
   const refused = el("details", { class: "card" },
-    el("summary", { text: `Generation options are refused, not ignored (${status.refused.length})` }),
+    el("summary", { text: `Options the endpoint refuses rather than ignores (${status.refused.length})` }),
     el("p", { text:
-      "This endpoint honours no generation options. The runtime applies none of them, and a " +
-      "request carrying one is rejected rather than answered as though it applied. These are " +
-      "refused:" }),
+      "The runtime applies none of these, and a request carrying one is rejected rather than " +
+      "answered as though it applied:" }),
     el("p", { class: "mono", text: status.refused.join(", ") }));
+
+  // Generation options (#1797, #1779): sent as generationConfig, only the
+  // fields given. An empty field is absent, not zero: temperature 0 must be
+  // typed to mean greedy decoding.
+  const supported = new Set(status.supported || []);
+  const optInput = (id, label, attrs) => {
+    const input = el("input", Object.assign({ id: "pg-opt-" + id, "aria-label": label }, attrs));
+    return { id, input, field: el("label", { for: "pg-opt-" + id }, label + " ", input) };
+  };
+  const numOpts = [
+    optInput("temperature", "Temperature", { type: "number", step: "0.05", min: "0", max: "2" }),
+    optInput("topP", "Top-p", { type: "number", step: "0.05", min: "0", max: "1" }),
+    optInput("topK", "Top-k", { type: "number", step: "1", min: "1" }),
+    optInput("seed", "Seed", { type: "number", step: "1" }),
+    optInput("maxOutputTokens", "Max output tokens", { type: "number", step: "1", min: "1" }),
+  ].filter((o) => supported.has(o.id));
+  const stops = optInput("stopSequences", "Stop sequences (comma-separated)", { type: "text" });
+  const schema = el("textarea", { id: "pg-opt-responseSchema", rows: "2", class: "mono",
+    placeholder: '{"type":"BOOLEAN"}', "aria-label": "Response schema" });
+  const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
+  const options = el("details", { class: "card", id: "pg-options" },
+    el("summary", { text: "Generation options" }),
+    el("div", { class: "card-actions" }, ...numOpts.map((o) => o.field),
+      ...(supported.has("stopSequences") ? [stops.field] : [])),
+    ...(supported.has("responseMimeType") ? [el("div", {},
+      el("label", { for: "pg-opt-json", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
+        jsonOut, " JSON response (application/json)"),
+      el("label", { for: "pg-opt-responseSchema" }, " Response schema "), schema)] : []));
+  const generationConfig = () => {
+    const cfg = {};
+    for (const o of numOpts) {
+      const v = o.input.value.trim();
+      if (v !== "") cfg[o.id] = Number(v);
+    }
+    const st = stops.input.value.split(",").map((x) => x.trim()).filter((x) => x);
+    if (st.length) cfg.stopSequences = st;
+    if (jsonOut.checked) {
+      cfg.responseMimeType = "application/json";
+      const sc = schema.value.trim();
+      if (sc) cfg.responseSchema = JSON.parse(sc);
+    }
+    return cfg;
+  };
 
   const renderHistory = () => {
     historyBody.replaceChildren();
@@ -8399,7 +8441,7 @@ async function renderPlayground(view) {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody }),
+        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody, generationConfig: generationConfig() }),
         signal: controller.signal,
       });
       if (!resp.ok) {
@@ -8478,6 +8520,7 @@ async function renderPlayground(view) {
     header,
     ...(models ? [models] : []),
     refused,
+    options,
     el("div", { class: "card" },
       prompt,
       el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),

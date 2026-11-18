@@ -20,11 +20,11 @@ require (
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
-	cloud.google.com/go/longrunning v1.3.0
+	cloud.google.com/go/longrunning v1.5.0
 	cloud.google.com/go/memorystore v1.7.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
-	cloud.google.com/go/run v1.23.0
+	cloud.google.com/go/run v1.25.0
 	cloud.google.com/go/scheduler v1.17.0
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/securesourcemanager v1.12.0

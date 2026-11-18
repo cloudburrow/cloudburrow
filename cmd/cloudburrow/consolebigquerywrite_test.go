@@ -213,8 +213,9 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 		len(sent) != 5 || sent[4]["query"] != "UPDATE t SET x = s.x FROM s WHERE t.id = s.id" {
 		t.Errorf("UPDATE … FROM = %v after %d requests, want it sent", err, len(sent))
 	}
-	if _, err := p.WriteReport(ctx, "other", []string{"ds"}, "CREATE SCHEMA x"); err == nil || !strings.Contains(err.Error(), `"served-project"`) {
-		t.Errorf("another project = %v, want the one-project refusal", err)
+	// Another project's statement is sent to it (#1764); the fake has none.
+	if _, err := p.WriteReport(ctx, "other", []string{"ds"}, "CREATE SCHEMA x"); err == nil || !strings.Contains(err.Error(), "/projects/other/queries") {
+		t.Errorf("another project = %v, want it sent to project other", err)
 	}
 
 	for _, path := range [][]string{{"ds"}, {"ds", "t"}} {

@@ -46,10 +46,15 @@ import (
 // and its service account roles/aiplatform.user on the project
 // (connectionauth.go, #1765).
 //
-// Options the local runtime cannot honour are refused 501 rather than
-// ignored, as the local endpoint refuses them (docs/generation.md):
-// temperature, top_p, top_k, max_output_tokens, stop_sequences,
-// safety_settings and generation_config; ground_with_google_search is
+// The generation options (#1797) are sent as the request's
+// generationConfig, with BigQuery's documented ranges and Gemini defaults
+// (generationOptions): max_output_tokens [1,8192] default 1024,
+// temperature [0.0,1.0] default 0, top_p [0.0,1.0] default 0.95,
+// stop_sequences; top_k [1,40] for a non-Gemini endpoint (BigQuery
+// documents none for Gemini). The local runtime applies them through
+// cloudburrow_generate. Options it cannot honour are still refused 501
+// rather than ignored (docs/generation.md): safety_settings,
+// generation_config and model_params; ground_with_google_search is
 // refused because it searches Google.
 //
 // UNVERIFIED (re-read 2026-11-17:
@@ -69,6 +74,10 @@ type remoteModel struct {
 	// takes, false for a generative one, which ML.GENERATE_TEXT takes.
 	Embedding bool   `json:"embedding,omitempty"`
 	Location  string `json:"location"`
+	// ServiceType is REMOTE_SERVICE_TYPE, for a remote model over a Cloud
+	// AI service (modelservice.go, #1773), with no endpoint; "" for an
+	// LLM or embedding model.
+	ServiceType string `json:"serviceType,omitempty"`
 }
 
 // remoteDDL is a CREATE MODEL … REMOTE WITH CONNECTION's parts.
@@ -76,6 +85,8 @@ type remoteDDL struct {
 	connection []string // project, location, id; nil for DEFAULT
 	isDefault  bool     // REMOTE WITH CONNECTION DEFAULT
 	endpoint   string
+	// serviceType is REMOTE_SERVICE_TYPE (modelservice.go, #1773).
+	serviceType string
 }
 
 // parseRemote reads REMOTE WITH CONNECTION {DEFAULT | name} OPTIONS(...)
@@ -125,7 +136,21 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 				return 400, "The ENDPOINT option of a remote model must be a string literal"
 			}
 			rd.endpoint = v
-		case "REMOTE_SERVICE_TYPE", "MAX_BATCHING_ROWS", "SPEECH_RECOGNIZER", "PROMPT_COL", "INPUT_LABEL_COLS",
+		case "REMOTE_SERVICE_TYPE":
+			v, ok := unquoteString(opts[k+2].text)
+			if opts[k+2].kind != tokString || !ok {
+				return 400, "The REMOTE_SERVICE_TYPE option of a remote model must be a string literal"
+			}
+			if code, msg := checkServiceType(v); code != 0 { // modelservice.go, #1773
+				return code, msg
+			}
+			rd.serviceType = strings.ToUpper(v)
+		case "DOCUMENT_PROCESSOR", "SPEECH_RECOGNIZER":
+			// Only CLOUD_AI_DOCUMENT_V1's and CLOUD_AI_SPEECH_TO_TEXT_V2's,
+			// which are refused (modelservice.go).
+			return 501, "Not implemented here: the " + name + " option of a remote model: " + serviceTypeRefusals[map[string]string{
+				"DOCUMENT_PROCESSOR": "CLOUD_AI_DOCUMENT_V1", "SPEECH_RECOGNIZER": "CLOUD_AI_SPEECH_TO_TEXT_V2"}[name]] + " Nothing was run."
+		case "MAX_BATCHING_ROWS", "PROMPT_COL", "INPUT_LABEL_COLS",
 			"MODEL_TYPE", "AI_SERVICE_TYPE":
 			return 501, "Not implemented here: the " + name + " option of a remote model: CloudBurrow's remote models are LLM " +
 				"and embedding models on the instance's local Vertex AI endpoint alone. Nothing was run."
@@ -137,8 +162,11 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 			k++
 		}
 	}
-	if rd.endpoint == "" {
-		return 400, "CREATE MODEL with a remote connection requires the ENDPOINT option"
+	if rd.endpoint != "" && rd.serviceType != "" {
+		return 400, "A remote model takes either the ENDPOINT or the REMOTE_SERVICE_TYPE option, not both"
+	}
+	if rd.endpoint == "" && rd.serviceType == "" {
+		return 400, "CREATE MODEL with a remote connection requires the ENDPOINT or REMOTE_SERVICE_TYPE option"
 	}
 	if end+1 < len(stmt) {
 		return 400, "Syntax error: a remote model takes no AS query: unexpected " + stmt[end+1].text
@@ -210,11 +238,15 @@ func (f front) createRemote(ctx context.Context, d modelDDL, project, loc string
 			cp, rd.connection[1], rd.connection[2])
 	}
 	model := endpointModel(rd.endpoint)
-	if model == "" {
+	if model == "" && rd.serviceType == "" {
 		return nil, 400, "Invalid ENDPOINT " + strconv.Quote(rd.endpoint)
 	}
 	if code, msg := f.checkConnectionUse(ctx, cp, project, cn); code != 0 { // connectionauth.go, #1765
 		return nil, code, msg
+	}
+	if rd.serviceType != "" {
+		return &remoteModel{Connection: fmt.Sprintf("projects/%d/locations/%s/connections/%s", number, cn.Location, cn.ID),
+			ServiceType: rd.serviceType, Location: cn.Location}, 0, ""
 	}
 	return &remoteModel{Connection: fmt.Sprintf("projects/%d/locations/%s/connections/%s", number, cn.Location, cn.ID),
 		Endpoint: rd.endpoint, Model: model, Embedding: isEmbeddingEndpoint(model), Location: cn.Location}, 0, ""
@@ -231,6 +263,11 @@ func sameLocation(a, b string) bool {
 // remoteResource fills a remote model's resource.
 func (md bqModel) remoteResource(res map[string]any) {
 	delete(res, "modelType")
+	if md.Remote.ServiceType != "" {
+		// remoteServiceType, with no endpoint (modelservice.go, #1773).
+		res["remoteModelInfo"] = map[string]any{"connection": md.Remote.Connection, "remoteServiceType": md.Remote.ServiceType}
+		return
+	}
 	res["remoteModelInfo"] = map[string]any{"connection": md.Remote.Connection, "endpoint": md.Remote.Endpoint}
 }
 
@@ -249,15 +286,80 @@ func vertexLocation(loc string) string {
 // refusedGenerateOptions are ML.GENERATE_TEXT's options the local runtime
 // cannot honour, and why.
 var refusedGenerateOptions = map[string]string{
-	"temperature":               "the local LiteRT-LM runtime takes no sampling parameters",
-	"top_p":                     "the local LiteRT-LM runtime takes no sampling parameters",
-	"top_k":                     "the local LiteRT-LM runtime takes no sampling parameters",
-	"max_output_tokens":         "the local LiteRT-LM runtime takes no output limit",
-	"stop_sequences":            "the local LiteRT-LM runtime takes no stop sequences",
 	"safety_settings":           "the local runtime has no safety filters to configure",
-	"generation_config":         "the local LiteRT-LM runtime takes no generation parameters",
+	"generation_config":         "CloudBurrow does not read the JSON form yet; the individual options (max_output_tokens, temperature, top_p, top_k, stop_sequences) are applied",
 	"ground_with_google_search": "grounding searches Google, which CloudBurrow never calls",
-	"model_params":              "the local LiteRT-LM runtime takes no generation parameters",
+	"model_params":              "CloudBurrow does not read the JSON form yet; the individual options (max_output_tokens, temperature, top_p, top_k, stop_sequences) are applied",
+}
+
+// generationOption reads one of ML.GENERATE_TEXT's and AI.GENERATE_TEXT's
+// generation options into cfg (a Vertex AI generationConfig), with
+// BigQuery's documented ranges (bigqueryml-syntax-generate-text,
+// bigqueryml-syntax-ai-generate-text, re-read 2026-11-18). ok is false when
+// k is not a generation option.
+//
+// UNVERIFIED (re-read 2026-11-18: the two pages above, which give the
+// ranges and no error text): the wording of the range errors and of top_k
+// refused for a Gemini endpoint.
+func generationOption(fname, endpoint, k, v string, cfg map[string]any) (code int, msg string, ok bool) {
+	num := func(lo, hi float64) (float64, bool) {
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return f, err == nil && f >= lo && f <= hi
+	}
+	switch k {
+	case "max_output_tokens":
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n < 1 || n > 8192 {
+			return 400, fmt.Sprintf("Invalid value of max_output_tokens for %s: %s. It must be in the range [1, 8192].", fname, v), true
+		}
+		cfg["maxOutputTokens"] = n
+	case "temperature":
+		f, ok := num(0, 1)
+		if !ok {
+			return 400, fmt.Sprintf("Invalid value of temperature for %s: %s. It must be in the range [0.0, 1.0].", fname, v), true
+		}
+		cfg["temperature"] = f
+	case "top_p":
+		f, ok := num(0, 1)
+		if !ok {
+			return 400, fmt.Sprintf("Invalid value of top_p for %s: %s. It must be in the range [0.0, 1.0].", fname, v), true
+		}
+		cfg["topP"] = f
+	case "top_k":
+		if strings.HasPrefix(strings.ToLower(endpoint), "gemini") {
+			return 400, fmt.Sprintf("top_k is not supported for %s with the Gemini model endpoint %s", fname, endpoint), true
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n < 1 || n > 40 {
+			return 400, fmt.Sprintf("Invalid value of top_k for %s: %s. It must be in the range [1, 40].", fname, v), true
+		}
+		cfg["topK"] = n
+	case "stop_sequences":
+		a, ok := parseStringArray(v)
+		if !ok {
+			return 400, "stop_sequences must be an ARRAY<STRING> literal", true
+		}
+		var stops []string
+		for _, s := range a {
+			if s != "" {
+				stops = append(stops, s)
+			}
+		}
+		if len(stops) > 0 {
+			cfg["stopSequences"] = stops
+		}
+	default:
+		return 0, "", false
+	}
+	return 0, "", true
+}
+
+// defaultGenerationConfig is BigQuery's Gemini defaults, which it sends
+// when an option is not given: a remote model's answer is capped at 1024
+// tokens and greedy (temperature 0, "deterministic") unless asked
+// otherwise.
+func defaultGenerationConfig() map[string]any {
+	return map[string]any{"maxOutputTokens": int64(1024), "temperature": 0.0, "topP": 0.95}
 }
 
 // remoteSubquery writes ML.GENERATE_TEXT or ML.GENERATE_EMBEDDING of a
@@ -268,13 +370,29 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if c.ai {
 		fname = "AI." + c.fn
 	}
+	if rm.ServiceType != "" {
+		return f.serviceSubquery(r, q, md, c, fname) // modelservice.go, #1773
+	}
+	if c.fn == "ANNOTATE_IMAGE" {
+		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s: it takes a remote model whose REMOTE_SERVICE_TYPE is CLOUD_AI_VISION_V1", fname, rm.Endpoint)
+	}
 	switch {
-	case c.fn == "GENERATE_TEXT" && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
+	case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
 		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s", fname, rm.Endpoint)
-	case c.fn != "GENERATE_TEXT" && c.fn != "GENERATE_EMBEDDING":
+	case c.fn != "GENERATE_TEXT" && c.fn != "GENERATE_EMBEDDING" && c.fn != "GENERATE_TABLE":
 		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s", fname, rm.Endpoint)
 	case c.input == "":
 		return "", 400, fname + " requires an input: a query in parentheses or TABLE name"
+	}
+	if c.table != nil {
+		// Multimodal input (#1798): an object table's objects sent to the
+		// model with the prompt (bigqueryml-syntax-generate-text, "TABLE
+		// object_table").
+		if ds, table, ok := tableOf(q, c.table); ok && (len(c.table) < 3 || c.table[0] == projectOf(f.base)) && f.isObjectTable(r, ds, table) {
+			return "", 501, "Not implemented here: " + fname + " over an object table (a multimodal prompt): the instance's local generative runtime " +
+				"(LiteRT-LM, `up --local-ai-model`) runs text models and reads text only; its generateContent refuses inlineData and fileData parts, " +
+				"so the objects cannot be sent to it (#1798). Nothing was run."
+		}
 	}
 	if f.vertexai == "" {
 		return "", 501, "Not implemented here: ML." + c.fn + ": this instance does not serve its local Vertex AI endpoint to BigQuery (#1760). Nothing was run."
@@ -282,21 +400,43 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	flatten := c.fn == "GENERATE_EMBEDDING"
 	var taskType string
 	dims := 0
+	genCfg := defaultGenerationConfig()
+	var schema []aiField
+	if c.fn == "GENERATE_TABLE" {
+		v, ok := c.struc["output_schema"]
+		s, isStr := unquoteString(v)
+		if !ok || !isStr {
+			return "", 400, "AI.GENERATE_TABLE requires the output_schema option, a STRING literal"
+		}
+		var msg string
+		if schema, msg = parseOutputSchema(s); msg != "" {
+			return "", 400, msg
+		}
+	}
 	for k, v := range c.struc {
+		if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE" {
+			if code, msg, ok := generationOption(fname, rm.Endpoint, k, v, genCfg); ok {
+				if code != 0 {
+					return "", code, msg
+				}
+				continue
+			}
+		}
 		switch {
+		case c.fn == "GENERATE_TABLE" && k == "output_schema":
 		case k == "flatten_json_output" && !c.ai:
 			b, ok := map[string]bool{"TRUE": true, "FALSE": false}[strings.ToUpper(v)]
 			if !ok {
 				return "", 400, "flatten_json_output must be a BOOL literal"
 			}
 			flatten = b
-		case c.fn == "GENERATE_TEXT" && k == "request_type":
+		case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && k == "request_type":
 			s, _ := unquoteString(v)
 			if s := strings.ToUpper(s); s != "DEDICATED" && s != "SHARED" && s != "UNSPECIFIED" {
 				return "", 400, "request_type must be 'DEDICATED', 'SHARED' or 'UNSPECIFIED'"
 			}
-		case c.fn == "GENERATE_TEXT" && refusedGenerateOptions[k] != "":
-			return "", 501, "Not implemented here: the " + k + " option of ML.GENERATE_TEXT: " + refusedGenerateOptions[k] +
+		case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && refusedGenerateOptions[k] != "":
+			return "", 501, "Not implemented here: the " + k + " option of " + fname + ": " + refusedGenerateOptions[k] +
 				", and CloudBurrow refuses an option rather than ignoring it (docs/generation.md). Nothing was run."
 		case c.fn == "GENERATE_EMBEDDING" && k == "task_type":
 			s, ok := unquoteString(v)
@@ -311,7 +451,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 			}
 			dims = n
 		default:
-			return "", 400, "Unknown option " + k + " for ML." + c.fn
+			return "", 400, "Unknown option " + k + " for " + fname
 		}
 	}
 	// The connection's permissions, before any row is sent (#1765).
@@ -349,7 +489,16 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	}
 	project := projectOf(f.base)
 	var outCols []string // name and type
-	if c.ai {
+	if c.fn == "GENERATE_TABLE" {
+		// The schema's columns, full_response and status (#1771).
+		for _, fd := range schema {
+			outCols = append(outCols, sqlIdent(fd.name)+" "+fd.typ.sql())
+		}
+		outCols = append(outCols, "full_response JSON", "status STRING")
+	} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
+		// AI.GENERATE_EMBEDDING's columns, a text embedding model's (#1772).
+		outCols = []string{"embedding ARRAY<FLOAT64>", "statistics JSON", "status STRING"}
+	} else if c.ai {
 		// AI.GENERATE_TEXT's columns, a Gemini model's (#1765).
 		outCols = []string{"result STRING", "rai_result JSON", "grounding_result JSON", "statistics JSON", "full_response JSON", "status STRING"}
 	} else if c.fn == "GENERATE_TEXT" && flatten {
@@ -368,10 +517,14 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 		in := *row[0]
 		var parts []string
-		if c.ai {
-			parts = f.aiGenerateTextRow(r.Context(), project, rm, in)
+		if c.fn == "GENERATE_TABLE" {
+			parts = f.generateTableRow(r, project, rm, schema, in, genCfg)
+		} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
+			parts = f.embedRow(r.Context(), project, rm, in, true, taskType, dims)
+		} else if c.ai {
+			parts = f.aiGenerateTextRow(r.Context(), project, rm, in, genCfg)
 		} else if c.fn == "GENERATE_TEXT" {
-			parts = f.generateRow(r.Context(), project, rm, in, flatten)
+			parts = f.generateRow(r.Context(), project, rm, in, flatten, genCfg)
 		} else {
 			parts = f.embedRow(r.Context(), project, rm, in, flatten, taskType, dims)
 		}
@@ -456,9 +609,19 @@ func (f front) vertexCall(ctx context.Context, project string, rm *remoteModel, 
 	return out, ""
 }
 
-// generateRow is one prompt's output columns, as SQL literals.
-func (f front) generateRow(ctx context.Context, project string, rm *remoteModel, prompt string, flatten bool) []string {
+// generateBody is a generateContent request for prompt with generationConfig
+// cfg (none when cfg is empty).
+func generateBody(prompt string, cfg map[string]any) map[string]any {
 	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+	if len(cfg) > 0 {
+		body["generationConfig"] = cfg
+	}
+	return body
+}
+
+// generateRow is one prompt's output columns, as SQL literals.
+func (f front) generateRow(ctx context.Context, project string, rm *remoteModel, prompt string, flatten bool, cfg map[string]any) []string {
+	body := generateBody(prompt, cfg)
 	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
 	if !flatten {
 		return []string{jsonLiteral(out), sqlString(status)}
@@ -542,8 +705,11 @@ func aiFunction(sql string) string {
 	for i := 0; i+3 < len(toks); i++ {
 		if toks[i].is("AI") && toks[i+1].punct(".") && toks[i+2].kind == tokWord && toks[i+3].punct("(") &&
 			(i == 0 || !toks[i-1].punct(".")) {
-			if toks[i+2].is("GENERATE_TEXT") && i+4 < len(toks) && toks[i+4].is("MODEL") {
-				continue // served as ML.GENERATE_TEXT's twin (#1765)
+			if (toks[i+2].is("GENERATE_TEXT") || toks[i+2].is("GENERATE_TABLE") || toks[i+2].is("GENERATE_EMBEDDING")) && i+4 < len(toks) && toks[i+4].is("MODEL") {
+				continue // served with the ML functions of a model (#1765, #1771, #1772)
+			}
+			if _, ok := aiScalars[strings.ToUpper(toks[i+2].text)]; ok {
+				continue // evaluated row by row (aigenerate.go)
 			}
 			return "AI." + strings.ToUpper(toks[i+2].text)
 		}
@@ -554,8 +720,8 @@ func aiFunction(sql string) string {
 // aiGenerateTextRow is one prompt's AI.GENERATE_TEXT columns, as SQL
 // literals: result, rai_result, grounding_result, statistics (the
 // response's usageMetadata), full_response and status (#1765).
-func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, prompt string) []string {
-	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, prompt string, cfg map[string]any) []string {
+	body := generateBody(prompt, cfg)
 	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
 	null := []string{"CAST(NULL AS STRING)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", jsonLiteral(out)}
 	if status != "" {
@@ -583,4 +749,21 @@ func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remote
 	}
 	return []string{sqlString(text.String()), jsonLiteral(cand.SafetyRatings), jsonLiteral(cand.GroundingMetadata), jsonLiteral(resp.UsageMetadata),
 		jsonLiteral(out), sqlString("")}
+}
+
+// generateTableRow is one prompt's AI.GENERATE_TABLE columns, as SQL
+// literals: the schema's fields, full_response and status (#1771).
+func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel, schema []aiField, prompt string, cfg map[string]any) []string {
+	text, raw, status := f.aiGenerateText(r, project, rm, prompt+aiSchemaInstruction(schema), schemaObject(schema), cfg)
+	var vals []string
+	if status == "" {
+		vals, status = schemaLiterals(schema, text)
+	}
+	if status != "" {
+		vals = nil
+		for _, fd := range schema {
+			vals = append(vals, "CAST(NULL AS "+fd.typ.sql()+")")
+		}
+	}
+	return append(vals, jsonLiteral(raw), sqlString(status))
 }

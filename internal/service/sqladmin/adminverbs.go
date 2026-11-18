@@ -198,7 +198,7 @@ func (s *Server) executeSQL(r *http.Request, project string, e Engine) (any, err
 	}
 	if body.AutoIamAuthn || body.PasswordSecretVersion == "" {
 		return nil, unimplemented("executeSql with IAM database authentication",
-			"IAM database authentication is not served (no identities, ADR-0004); give user and passwordSecretVersion, a Secret Manager secret version holding the user's password")
+			"IAM database authentication is not served (no Cloud SQL sign-in here checks a Google identity, ADR-0004); give user and passwordSecretVersion, a Secret Manager secret version holding the user's password")
 	}
 	if body.User == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: user is required with passwordSecretVersion.")

@@ -199,6 +199,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	// Every project Resource Manager has ACTIVE (knownprojects.go, #1764).
+	known := &knownProjects{rm: o.resourceManager} // numbers: below
+	next = known.engine(next)
 	// A client request's repeated reads of a dataset or table are the
 	// engine's first answer (readmemo.go, #1623).
 	next = memoReads(next)
@@ -234,6 +237,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	objects.public = o.storagePublic                                  // signedurls.go, #1786
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
+	known.numbers = numbers
 	if o.logf != nil {
 		frontLogf.Store(&o.logf) // serviceclient.go, #1628
 	}
@@ -327,7 +331,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
 			return
 		}
-		if iam.serveRewriteMember(w, r, next) { // iam.go and datasetaccessrewrite.go, #1751
+		if iam.serveRewriteMember(w, r, next, connections) { // iam.go, datasetaccessrewrite.go and connectionrewrite.go, #1751, #1795
 			return
 		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
@@ -486,6 +490,15 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				f.insertDataset(w, r)
 				return
 			}
+			if r.Method == http.MethodDelete && r.Header.Get(PurgeHeader) != "" {
+				// A purge's deletes carry the linked writer's header too,
+				// so a linked dataset can go (cmd/cloudburrow's
+				// bigqueryResetter): each was sent straight to the engine,
+				// and the dataset's routines, models and row access
+				// policies outlived the purge (#1781).
+				f.deleteDatasetPurging(w, r, dataset)
+				return
+			}
 			next.ServeHTTP(w, r)
 		}) {
 			return
@@ -556,7 +569,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	// Per-project IAM of a caller with a token the instance minted
+	// (iamcheck.go, #1767).
+	iamChecks := &iamState{policies: iam}
+	engine := next
+	return iamChecks.handler(engine, known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -580,7 +597,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed))
+	}), next, settings, failed))))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -1197,6 +1214,13 @@ func (f front) sendHeader(r *http.Request, method, path string, body []byte, hea
 }
 
 // projectOf returns the project in a base path.
+// inProject is f with its base in project rather than its own (#1764): the
+// engine reads another project's datasets and tables there.
+func (f front) inProject(project string) front {
+	f.base = f.base[:strings.LastIndex(f.base, "/")+1] + url.PathEscape(project)
+	return f
+}
+
 func projectOf(base string) string {
 	p := base[strings.LastIndex(base, "/")+1:]
 	if u, err := url.PathUnescape(p); err == nil {

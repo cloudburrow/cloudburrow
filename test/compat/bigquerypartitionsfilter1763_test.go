@@ -100,7 +100,11 @@ func TestBigQueryPartitionsFilter1763(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create api: %v", err)
 	}
-	exec("INSERT INTO " + p("api") + " (n, d) VALUES (1, CURRENT_DATE())")
+	// Today by the instance's BigQuery clock, which other tests advance
+	// (advanceBigQueryClock), not the machine's: the row lands in today's
+	// partition, within the table's 400-day partition expiration.
+	today := advanceBigQueryClock(t, h, 0).UTC().Format("20060102")
+	exec("INSERT INTO " + p("api") + " (n, d) VALUES (1, PARSE_DATE('%Y%m%d', '" + today + "'))")
 	for src, dst := range map[string]string{"t": "tcopy", "api": "apicopy"} {
 		cp := ds.Table(dst).CopierFrom(ds.Table(src))
 		j, err := cp.Run(ctx)
@@ -108,7 +112,6 @@ func TestBigQueryPartitionsFilter1763(t *testing.T) {
 			t.Fatalf("copy %s into %s: %v", src, dst, err)
 		}
 	}
-	today := time.Now().UTC().Format("20060102")
 	for table, want := range map[string][]string{"api": {today + ":1"}, "apicopy": {today + ":1"}, "tcopy": {"20261101:1", "20261102:2"}} {
 		if got := rows("SELECT partition_id || ':' || CAST(total_rows AS STRING) FROM " + p("INFORMATION_SCHEMA.PARTITIONS") +
 			" WHERE table_name = '" + table + "'"); !reflect.DeepEqual(got, want) {

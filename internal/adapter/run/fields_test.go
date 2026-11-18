@@ -34,7 +34,6 @@ func TestDroppedFieldsAreRefusedByName(t *testing.T) {
 	cases := map[string]func(*runpb.Service){
 		"ingress":                  func(s *runpb.Service) { s.Ingress = runpb.IngressTraffic_INGRESS_TRAFFIC_INTERNAL_ONLY },
 		"customAudiences":          func(s *runpb.Service) { s.CustomAudiences = []string{"x"} },
-		"scaling":                  func(s *runpb.Service) { s.Scaling = &runpb.ServiceScaling{MinInstanceCount: 2} },
 		"iapEnabled":               func(s *runpb.Service) { s.IapEnabled = true },
 		"template.revision":        func(s *runpb.Service) { s.Template.Revision = "hello-v2" },
 		"template.nodeSelector":    func(s *runpb.Service) { s.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "nvidia-l4"} },

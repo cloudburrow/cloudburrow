@@ -55,6 +55,12 @@ const (
 	// sets. Locally no CPU is throttled at startup, so the boost holds.
 	v1StartupCPUBoost = "run.googleapis.com/startup-cpu-boost"
 	v1MaxScale        = "autoscaling.knative.dev/maxScale"
+	// v2's template.scaling cpuUtilization and concurrencyUtilization, which
+	// gcloud's --scaling-cpu-target and --scaling-concurrency-target write
+	// ("disabled" as 0.0; googlecloudsdk/command_lib/run/flags.py, gcloud
+	// 593.0.0) and the scaling-controls page's YAML tab sets (#1802).
+	v1ScalingCPUTarget         = "run.googleapis.com/scaling-cpu-target"
+	v1ScalingConcurrencyTarget = "run.googleapis.com/scaling-concurrency-target"
 	// The source build `gcloud run deploy --source` deployed (#1347).
 	v1BuildImageURI       = "run.googleapis.com/build-image-uri"
 	v1BuildName           = "run.googleapis.com/build-name"
@@ -644,7 +650,7 @@ func v1Meta(svc *runpb.Service, k ksvc, collection string) *runv1.ObjectMeta {
 	id, _ := ServiceID(svc.GetName())
 	project := projectOf(svc.GetName())
 	m := &runv1.ObjectMeta{
-		Name: id, Namespace: project, Labels: v1Labels(svc), Annotations: svc.GetAnnotations(),
+		Name: id, Namespace: project, Labels: v1Labels(svc), Annotations: v1ServiceScalingAnnotations(svc),
 		Generation: svc.GetGeneration(), ResourceVersion: svc.GetEtag(), Uid: svc.GetUid(),
 		SelfLink: fmt.Sprintf("/apis/serving.knative.dev/v1/namespaces/%s/%s/%s", project, collection, id),
 	}
@@ -687,6 +693,12 @@ func toV1Template(svc *runpb.Service) *runv1.RevisionTemplate {
 		}
 		if sc.GetMaxInstanceCount() > 0 {
 			ann[v1MaxScale] = strconv.Itoa(int(sc.GetMaxInstanceCount()))
+		}
+		if sc.CpuUtilization != nil {
+			ann[v1ScalingCPUTarget] = strconv.FormatFloat(float64(sc.GetCpuUtilization()), 'f', -1, 32)
+		}
+		if sc.ConcurrencyUtilization != nil {
+			ann[v1ScalingConcurrencyTarget] = strconv.FormatFloat(float64(sc.GetConcurrencyUtilization()), 'f', -1, 32)
 		}
 	}
 	ann = toV1CloudSQL(ann, tmpl.GetVolumes())
@@ -856,6 +868,10 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				svc.Client = v
 			case v1ClientVersion:
 				svc.ClientVersion = v
+			case v1ServiceMinScale, v1ServiceMaxScale, v1ScalingMode, v1ManualInstanceCount:
+				if err := fromV1ServiceScaling(svc, k, v); err != nil {
+					return nil, err
+				}
 			case v1BuildImageURI, v1BuildName, v1BuildSourceLocation, v1BuildAutoUpdates, v1BuildID,
 				v1BuildFunctionTarget, v1BuildBaseImage:
 				// Which build produced the image, which `gcloud run deploy
@@ -896,6 +912,20 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				} else {
 					scaling.MaxInstanceCount = int32(n)
 				}
+			case v1ScalingCPUTarget, v1ScalingConcurrencyTarget:
+				f := 0.0
+				if v != "disabled" {
+					var err error
+					if f, err = strconv.ParseFloat(v, 32); err != nil {
+						return nil, apierror.InvalidArgument("spec.template.metadata.annotations[%s]: %q is not a utilization", k, v)
+					}
+				}
+				u := float32(f)
+				if k == v1ScalingCPUTarget {
+					scaling.CpuUtilization = &u
+				} else {
+					scaling.ConcurrencyUtilization = &u
+				}
 			case v1ClientName, v1ClientVersion:
 				// Which tool deployed the revision: informational.
 			case v1StartupCPUBoost:
@@ -907,7 +937,7 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				ann[k] = v
 			}
 		}
-		if scaling.MinInstanceCount > 0 || scaling.MaxInstanceCount > 0 {
+		if scaling.MinInstanceCount > 0 || scaling.MaxInstanceCount > 0 || scaling.CpuUtilization != nil || scaling.ConcurrencyUtilization != nil {
 			svc.Template.Scaling = &scaling
 		}
 		if len(ann) > 0 {

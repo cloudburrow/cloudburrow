@@ -19,9 +19,10 @@ import (
 // This screen is careful about one thing above all: it is not the Cloud SQL
 // Admin API. Google publishes no Cloud SQL emulator, so what runs here is the
 // database Cloud SQL runs underneath — a real PostgreSQL at a stable local
-// address. Instances, connection names, IAM database authentication, backups
-// and read replicas are all absent, and the screen says so rather than leaving
-// a developer to infer compatibility CloudBurrow does not have.
+// address — and this screen shows its databases. Instances, backups and read
+// replicas are the Admin API's, on the Cloud SQL instances screen
+// (consolecloudsqlinstances.go); IAM database authentication is not served.
+// The screen says so rather than leaving a developer to infer either.
 type cloudSQLProvider struct{ endpoint string }
 
 func (cloudSQLProvider) ID() string    { return "cloudsql" }
@@ -47,7 +48,7 @@ func (p cloudSQLProvider) connect(ctx context.Context, database string) (*pgx.Co
 
 const cloudSQLNote = "A real PostgreSQL: Google publishes no Cloud SQL emulator. " +
 	"The Cloud SQL Admin API serves it as the instance postgres, with its databases " +
-	"and users; creating instances, IAM database authentication, backups and replicas do not exist here."
+	"and users; instances, backups and replicas are on the Cloud SQL instances screen. IAM database authentication is not served."
 
 func (p cloudSQLProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	base := console.Listing{
@@ -339,9 +340,10 @@ func (p cloudSQLProvider) activitySection(ctx context.Context, database string) 
 
 // settingsSection is the server's configuration, as the server reports it.
 //
-// Cloud SQL calls these database flags. This is not the Cloud SQL Admin API, so
-// they cannot be set from here, and the section says so rather than leaving the
-// absence of an edit control unexplained.
+// Cloud SQL calls these database flags. The server `up` runs takes none, so
+// they cannot be set from here; an instance created through the Cloud SQL
+// Admin API takes them (settings.databaseFlags). The section says so rather
+// than leaving the absence of an edit control unexplained.
 func (p cloudSQLProvider) settingsSection(ctx context.Context, database string) console.Section {
 	return p.cloudSQLSection(ctx, database, catalogueSection{
 		id: "settings", label: "Server settings", noun: "settings", nameColumn: "Setting",
@@ -360,9 +362,9 @@ func (p cloudSQLProvider) settingsSection(ctx context.Context, database string) 
 		        'max_wal_size', 'wal_level', 'fsync', 'synchronous_commit')
 		      ORDER BY name`,
 		status: noStatus,
-		note: "Reported by the server, not set from here: this is a real " +
-			"PostgreSQL rather than the Cloud SQL Admin API, so there is no " +
-			"database-flags API to change them through.",
+		note: "Reported by the server, not set from here: the server `up` runs " +
+			"takes no database flags. An instance created through the Cloud SQL " +
+			"Admin API takes them (settings.databaseFlags).",
 	})
 }
 

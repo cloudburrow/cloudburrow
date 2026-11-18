@@ -1948,7 +1948,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 	// authorization and the execution environment are all absent for the same
 	// reason: the adapter refuses them, so offering the control would be
 	// offering support.
-	return "Deploy container", []console.Field{
+	return "Deploy container", append([]console.Field{
 		{
 			Name: "name", Label: "Service name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens; at most 49 characters.",
@@ -2032,7 +2032,117 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Pattern: `^[0-9]{1,5}$`,
 			Section: "Scaling",
 		},
+		{
+			Name: "cpuUtilization", Label: "CPU utilization target", Type: "text",
+			Help: "Optional. The revision's CPU scaling threshold: 0.1 to 0.90, " +
+				"or 0 to scale on concurrency alone. Cloud Run's default is 0.6.",
+			Pattern: runUtilizationPattern,
+			Section: "Scaling",
+		},
+		{
+			Name: "concurrencyUtilization", Label: "Concurrency utilization target", Type: "text",
+			Help: "Optional. The share of requests per instance at which more instances start: " +
+				"0.1 to 0.95, or 0 to scale on CPU alone. Cloud Run's default is 0.6.",
+			Pattern: runUtilizationPattern,
+			Section: "Scaling",
+		},
+	}, runServiceScalingFields(nil)...)
+}
+
+// runUtilizationPattern is a utilization target: blank, or a fraction.
+const runUtilizationPattern = `^(0(\.[0-9]+)?|1(\.0+)?|\.[0-9]+)?$`
+
+// runServiceScalingFields are the service-level scaling settings (#1800),
+// ServiceScaling as run/v2 defines it: Automatic scales between a minimum and
+// a maximum shared among the revisions that serve traffic; Manual runs a fixed
+// number of instances, 0 being a disabled service. cur prefills them.
+func runServiceScalingFields(cur *runpb.ServiceScaling) []console.Field {
+	mode, minN, maxN, manual := "AUTOMATIC", "", "", ""
+	if cur.GetScalingMode() == runpb.ServiceScaling_MANUAL {
+		mode = "MANUAL"
+		manual = fmt.Sprint(cur.GetManualInstanceCount())
 	}
+	if n := cur.GetMinInstanceCount(); n > 0 {
+		minN = fmt.Sprint(n)
+	}
+	if n := cur.GetMaxInstanceCount(); n > 0 {
+		maxN = fmt.Sprint(n)
+	}
+	const section = "Service scaling"
+	return []console.Field{
+		{Name: "serviceScalingMode", Label: "Service scaling", Type: "select", Options: []string{"AUTOMATIC", "MANUAL"},
+			Default: mode, Section: section,
+			Help: "Automatic scales between the service's minimum and maximum; Manual runs the number of instances below. " +
+				"Both are divided among the revisions serving traffic, by percent."},
+		{Name: "serviceMinInstances", Label: "Service minimum instances", Type: "text", Default: minN, Section: section,
+			Help: "Optional. Automatic scaling: the fewest instances across the service.", Pattern: `^[0-9]{0,4}$`},
+		{Name: "serviceMaxInstances", Label: "Service maximum instances", Type: "text", Default: maxN, Section: section,
+			Help: "Optional. Automatic scaling: the most instances across the service.", Pattern: `^[0-9]{0,4}$`},
+		{Name: "manualInstances", Label: "Number of instances", Type: "text", Default: manual, Section: section,
+			Help: "Manual scaling: this many instances run at all times. 0 disables the service: its URL answers " +
+				"\"Service unavailable\" while revisions reached only through a tag keep serving. With fewer instances " +
+				"than revisions serving traffic, the last-listed get none and their share answers the same.", Pattern: `^[0-9]{0,4}$`},
+	}
+}
+
+// runFormServiceScaling is the service-level scaling the form describes;
+// ok is false when the form has no service scaling fields (a request that
+// leaves the service's scaling as it is).
+func runFormServiceScaling(values map[string]string) (sc *runpb.ServiceScaling, ok bool, err error) {
+	mode, has := values["serviceScalingMode"]
+	if !has {
+		return nil, false, nil
+	}
+	sc = &runpb.ServiceScaling{}
+	switch strings.TrimSpace(mode) {
+	case "", "AUTOMATIC":
+		if strings.TrimSpace(values["manualInstances"]) != "" {
+			return nil, false, fmt.Errorf("the number of instances applies only to manual scaling")
+		}
+		minN, err := optionalInt(values["serviceMinInstances"], "service minimum instances")
+		if err != nil {
+			return nil, false, err
+		}
+		maxN, err := optionalInt(values["serviceMaxInstances"], "service maximum instances")
+		if err != nil {
+			return nil, false, err
+		}
+		sc.MinInstanceCount, sc.MaxInstanceCount = int32(minN), int32(maxN)
+		if strings.TrimSpace(mode) == "AUTOMATIC" && (minN > 0 || maxN > 0) {
+			sc.ScalingMode = runpb.ServiceScaling_AUTOMATIC
+		}
+	case "MANUAL":
+		if strings.TrimSpace(values["serviceMinInstances"]) != "" || strings.TrimSpace(values["serviceMaxInstances"]) != "" {
+			return nil, false, fmt.Errorf("the service minimum and maximum apply only to automatic scaling")
+		}
+		v := strings.TrimSpace(values["manualInstances"])
+		if v == "" {
+			return nil, false, fmt.Errorf("manual scaling needs a number of instances (0 disables the service)")
+		}
+		n, err := optionalInt(v, "number of instances")
+		if err != nil {
+			return nil, false, err
+		}
+		c := int32(n)
+		sc.ScalingMode, sc.ManualInstanceCount = runpb.ServiceScaling_MANUAL, &c
+	default:
+		return nil, false, fmt.Errorf("service scaling %q is neither AUTOMATIC nor MANUAL", mode)
+	}
+	return sc, true, nil
+}
+
+// runFormUtilization reads a utilization target field: nil when blank.
+func runFormUtilization(values map[string]string, key, what string) (*float32, error) {
+	v := strings.TrimSpace(values[key])
+	if v == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(v, 32)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %q is not a number", what, v)
+	}
+	c := float32(f)
+	return &c, nil
 }
 
 // CreateOnPage implements console.PageCreator.
@@ -2084,9 +2194,13 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	if err != nil {
 		return "", err
 	}
+	scaling, _, err := runFormServiceScaling(values)
+	if err != nil {
+		return "", err
+	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", project, p.location())
 	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{
-		Parent: parent, ServiceId: id, Service: &runpb.Service{Labels: labels, Template: tmpl},
+		Parent: parent, ServiceId: id, Service: &runpb.Service{Labels: labels, Template: tmpl, Scaling: scaling},
 	})
 	if err != nil {
 		return "", err
@@ -2182,6 +2296,20 @@ func runFormTemplate(values map[string]string) (*runpb.RevisionTemplate, error) 
 			MinInstanceCount: int32(minInstances),
 			MaxInstanceCount: int32(maxInstances),
 		}
+	}
+	cpuTarget, err := runFormUtilization(values, "cpuUtilization", "CPU utilization target")
+	if err != nil {
+		return nil, err
+	}
+	concTarget, err := runFormUtilization(values, "concurrencyUtilization", "concurrency utilization target")
+	if err != nil {
+		return nil, err
+	}
+	if cpuTarget != nil || concTarget != nil {
+		if tmpl.Scaling == nil {
+			tmpl.Scaling = &runpb.RevisionScaling{}
+		}
+		tmpl.Scaling.CpuUtilization, tmpl.Scaling.ConcurrencyUtilization = cpuTarget, concTarget
 	}
 	concurrency, err := optionalInt(values["concurrency"], "requests per instance")
 	if err != nil {

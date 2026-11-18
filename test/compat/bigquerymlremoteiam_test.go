@@ -163,6 +163,10 @@ func grantRemoteModel(t *testing.T, h *Harness, cc *connection.Client, project s
 // covers: bigquery.jobs.query, bigqueryconnection.projects.locations.connections.setIamPolicy, google.cloud.resourcemanager.v3.Projects/SetIamPolicy
 func TestBigQueryMLRemoteConnectionPermissions(t *testing.T) {
 	h := New(t)
+	// The front refuses a remote model 501 before reading its connection
+	// when it serves no local Vertex AI (the emulators shard), so the
+	// permission checks are reached only on an instance that serves one.
+	h.Endpoint(EnvLocalAI)
 	c, _ := bigqueryClient(t, h)
 	cc, project := remoteConnectionClient(t, h)
 	pc := remoteProjectsClient(t, h)

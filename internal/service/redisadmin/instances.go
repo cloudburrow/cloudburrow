@@ -466,8 +466,9 @@ func copyMap(m map[string]string) map[string]string {
 	return out
 }
 
-// DefaultRedisVersion is the one version a created instance runs: what
-// the Valkey image reports (INFO redis_version 7.2.4).
+// DefaultRedisVersion is the version a created instance runs when none is
+// asked: what the Valkey image reports (INFO redis_version 7.2.4). The
+// others are in Versions.
 const DefaultRedisVersion = "REDIS_7_2"
 
 // idRE is Google's rule for an instance ID: 1 to 40 lowercase letters,
@@ -483,8 +484,8 @@ func (c *instances) newOperation(target, verb string) string {
 	return op.Name
 }
 
-// CreateInstance runs a Valkey server for the instance and returns the
-// operation that completes once it serves.
+// CreateInstance runs a server for the instance, of its redis_version's
+// image, and returns the operation that completes once it serves.
 func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstanceRequest) (*longrunningpb.Operation, error) {
 	c := s.created
 	if c == nil {

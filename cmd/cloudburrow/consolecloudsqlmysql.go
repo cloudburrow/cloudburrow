@@ -57,7 +57,7 @@ const mysqlConsoleReader = "cloudburrow_console"
 
 const cloudSQLMySQLNote = "A real MySQL: Google publishes no Cloud SQL emulator. " +
 	"The Cloud SQL Admin API serves it as the instance mysql, with its databases " +
-	"and users; creating instances, IAM database authentication, backups and replicas do not exist here."
+	"and users; instances, backups and replicas are on the Cloud SQL instances screen. IAM database authentication is not served."
 
 // open returns a handle on one database as user, or on the server when
 // database is empty.
@@ -459,9 +459,9 @@ func (p cloudSQLMySQLProvider) settingsSection(ctx context.Context, database str
 		        'wait_timeout', 'max_allowed_packet', 'lower_case_table_names',
 		        'default_storage_engine', 'max_execution_time')
 		      ORDER BY VARIABLE_NAME`,
-		note: "Reported by the server, not set from here: this is a real MySQL " +
-			"rather than the Cloud SQL Admin API, so there is no database-flags " +
-			"API to change them through.",
+		note: "Reported by the server, not set from here: the server `up` runs " +
+			"takes no database flags. An instance created through the Cloud SQL " +
+			"Admin API takes them (settings.databaseFlags).",
 	})
 }
 
@@ -480,8 +480,8 @@ func (p cloudSQLMySQLProvider) usersSection(ctx context.Context, database string
 		      ORDER BY User, Host`,
 		note: "Read from mysql.user without its password column. " + mysqlConsoleReader +
 			" is the account this console's SQL editor reads as, and " + components.CloudSQLUser +
-			", the application's user, the one its Read-write mode writes as. Users cannot be " +
-			"created from here: this is not the Cloud SQL Admin API.",
+			", the application's user, the one its Read-write mode writes as. Users are not " +
+			"created from here: the Cloud SQL Admin API's users.insert creates them.",
 	})
 }
 

@@ -1615,9 +1615,11 @@ func checkModelOptions(o mlOptions) (int, string) {
 }
 
 // resolveModel is a model path's project, dataset and ID, with q's
-// default dataset for a bare ID.
-func (f front) resolveModel(path []string, defaultDataset string) (project, dataset, id string, ok bool) {
-	project = projectOf(f.base)
+// default dataset for a bare ID, and its project (else the job's) for a
+// path without a project (#1784).
+func (f front) resolveModel(path []string, q queryOptions) (project, dataset, id string, ok bool) {
+	defaultDataset := defaultDatasetOf(q)
+	project = defaultProjectOf(q, projectOf(f.base))
 	switch len(path) {
 	case 1:
 		if defaultDataset == "" {
@@ -1699,7 +1701,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return true
 	}
 	d := *found
-	project, dataset, id, ok := f.resolveModel(d.path, defaultDatasetOf(q))
+	project, dataset, id, ok := f.resolveModel(d.path, q)
 	if !ok {
 		fail(400, "Model name "+strings.Join(d.path, ".")+" missing dataset while no default dataset is set in the request.")
 		return true

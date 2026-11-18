@@ -50,6 +50,9 @@ type Server struct {
 	// volumeMu orders a collection of unused volume objects after the
 	// writes of workloads that mount them (volumegc.go).
 	volumeMu sync.RWMutex
+	// cpu is the CPU utilization driver's state (cpuscaling.go); nil until
+	// StartCPUScaling, when no revision has a CPU floor.
+	cpu *cpuScaler
 }
 
 // WithSecrets attaches a secret resolver, enabling secretKeyRef environment
@@ -237,6 +240,12 @@ func (s *Server) awaitReady(ctx context.Context, opName, kname, parent string, m
 			// the old revision still serving, not the new one being ready.
 			current := minGeneration == 0 || k.Status.LatestReadyRevisionName == k.Status.LatestCreatedRevisionName
 			if ready && current {
+				// Service-level scaling, split by the traffic Knative
+				// resolved (#1790).
+				if err := s.applyServiceScaling(ctx, k); err != nil {
+					_ = s.ops.Fail(opName, err)
+					return
+				}
 				_ = s.ops.Succeed(opName, FromKnative(k, parent))
 				return
 			}

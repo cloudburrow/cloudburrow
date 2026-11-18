@@ -419,7 +419,7 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 	if flow != nil {
 		return flow
 	}
-	project := s.project()
+	project := s.procProject(parts) // #1784
 	proc, ok := s.f.functions.proc(project, p)
 	if !ok {
 		return failWith(http.StatusNotFound, "notFound", "Not found: Procedure "+project+":"+p[0]+"."+p[1], stmt)
@@ -484,9 +484,20 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 	sql, scopes, handlers, oldLoc, callers := s.sql, s.scopes, s.inHandler, s.loc, s.callers
 	s.callers = s.framesOf(toks)
 	s.sql, s.scopes, s.inHandler, s.loc = proc.Body, []map[string]scriptVar{scope}, nil, loc
+	// A name of the body without a project is the procedure's project's
+	// (#1784): "the default project is the project which owns the
+	// procedure, not necessarily the project used to run the CREATE
+	// PROCEDURE statement", whichever project runs the CALL
+	// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#default_project_in_procedure_body,
+	// re-read 2026-11-18). Its statements are sent with that project as
+	// the default dataset's, which the engine reads such a name in
+	// (bigquery-emulator patch 0096).
+	defaultDataset := s.q.DefaultDataset
+	s.q.DefaultDataset = withDefaultProject(defaultDataset, project)
 	s.depth++
 	out := s.run(nodes)
 	s.depth--
+	s.q.DefaultDataset = defaultDataset
 	final := s.scopes[0]
 	if out != nil && out.failed && out.hasPos {
 		line, col := lineColumn(s.sql, out.pos)
@@ -511,4 +522,42 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 type stackFrame struct {
 	line, col int
 	loc       string
+}
+
+// procProject is the project of a procedure CALL names by parts (#1784):
+// the one it gives, or else the default dataset's, or else the job's, as
+// BigQuery reads a name without a project
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical#table_names).
+func (s *scriptRun) procProject(parts []string) string {
+	if len(parts) >= 3 {
+		return parts[len(parts)-3]
+	}
+	return defaultProjectOf(s.q, s.project())
+}
+
+// defaultProjectOf is the project of q's default dataset, or job when it
+// names none (#1784).
+func defaultProjectOf(q queryOptions, job string) string {
+	var def struct {
+		ProjectID string `json:"projectId"`
+	}
+	if json.Unmarshal(q.DefaultDataset, &def) != nil || def.ProjectID == "" {
+		return job
+	}
+	return def.ProjectID
+}
+
+// withDefaultProject is the default dataset raw with project as its
+// project, or one of project alone when raw names none (#1784).
+func withDefaultProject(raw json.RawMessage, project string) json.RawMessage {
+	def := map[string]any{}
+	if len(raw) > 0 && json.Unmarshal(raw, &def) != nil {
+		def = map[string]any{}
+	}
+	def["projectId"] = project
+	b, err := json.Marshal(def)
+	if err != nil {
+		return raw
+	}
+	return b
 }
