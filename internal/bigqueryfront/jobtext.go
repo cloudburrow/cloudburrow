@@ -33,8 +33,8 @@ type jobText struct {
 	// front sent another (#1067, writedisposition.go), or "".
 	writeDisposition string
 	// params and paramMode are the client's queryParameters and
-	// parameterMode, when paramsSet: the front sent others (#1078,
-	// bytesparams.go).
+	// parameterMode, when paramsSet: the front sent others (#1111,
+	// rangeparams.go).
 	params    json.RawMessage
 	paramMode string
 	paramsSet bool

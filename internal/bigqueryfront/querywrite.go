@@ -164,7 +164,7 @@ func (f front) queryWrite(w http.ResponseWriter, r *http.Request, job jobBody) b
 		old = meta.Schema.Fields
 	}
 	// The result's columns, before anything runs.
-	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
+	lq, _, _, _ := rangeParameters(c.queryOptions) // as runQuery sends them (#1111)
 	result, lstatus, _ := f.lone(r, lq, lq.Query)
 	defaults := defaultedFields(table)
 	add := write == "WRITE_TRUNCATE_DATA" && hasOption(c.SchemaUpdateOptions, "ALLOW_FIELD_ADDITION")

@@ -249,7 +249,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	if dryRun(r, true) {
 		return f.partitionDryRun(w, r, c.queryOptions, c.WriteDisposition, dest)
 	}
-	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
+	lq, _, _, _ := rangeParameters(c.queryOptions) // as runQuery sends them (#1111)
 	opts := c.SchemaUpdateOptions
 	if write == "" || write == "WRITE_EMPTY" {
 		opts = nil // schemaUpdateOptions are for WRITE_APPEND and WRITE_TRUNCATE (above)
@@ -955,7 +955,7 @@ func (f front) partitionDryRun(w http.ResponseWriter, r *http.Request, q queryOp
 		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
 			st, _ := resp["statistics"].(map[string]any)
 			qs, _ := st["query"].(map[string]any)
-			lq, _, _, _ := bytesParameters(q) // as runQuery sends them (#1078)
+			lq, _, _, _ := rangeParameters(q) // as runQuery sends them (#1111)
 			if fields, status, _ := f.lone(r, lq, lq.Query); qs != nil && qs["schema"] == nil && status == http.StatusOK {
 				qs["schema"] = map[string]any{"fields": fields}
 				if b, err := json.Marshal(resp); err == nil {

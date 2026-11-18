@@ -2,101 +2,51 @@ package bigqueryfront
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 )
 
-// BYTES query parameters (#1078).
+// RANGE query parameters (#1111).
 //
-// BigQuery takes a BYTES parameter's value as base64 ("BYTES ... base64
-// encoded", QueryParameterValue.value), and the parameter is BYTES in the
-// query. The emulator hands its engine the value as a Go string (its
-// source, internal/contentdata/repository.go, queryParameterValueToGoValue
-// and coerceScalarParameterValue, which keep a BYTES value's text), and
-// the engine types a string as STRING. Measured through the front with the
-// official Go client, on the pinned image: INSERT INTO ds.t (id, b) VALUES
-// (1, @p), with @p the BYTES ff 00 61, failed 400 "Value has type STRING
-// which cannot be inserted into column b, which has type BYTES", SELECT
-// TO_HEX(@p) failed "No matching signature for function TO_HEX ... STRING",
-// an ARRAY<BYTES> parameter read back as its base64 texts, and SELECT @p.x
-// of a STRUCT with a BYTES field failed "Cannot access field x on a value
-// with type STRING". FROM_BASE64 of the same text as a STRING parameter
-// read back ff0061, and inserted it as those bytes (measured).
+// The emulator reads a RANGE parameter as a NULL INTEGER (measured through
+// the front with the official Go client), and its engine reads a RANGE the
+// query builds as BigQuery does (measured: RANGE(CAST(@a AS DATE),
+// CAST(@b AS DATE)), RANGE(@t, CAST(NULL AS TIMESTAMP)), CAST(NULL AS
+// RANGE<DATE>) and RANGE<DATE> '[UNBOUNDED, UNBOUNDED)' read back typed
+// RANGE values, so did they in an ARRAY and a STRUCT). So a parameter whose
+// type has a RANGE in it, at the top level, in an ARRAY or in a STRUCT, is
+// sent as the expression that builds its value, each reference to it in
+// the query replaced by it: every scalar of its value (a leaf) is sent as a
+// parameter of its own type, @cloudburrow_s<position>_<n>, and the RANGEs,
+// STRUCTs and ARRAYs around them as typed constructors, in the value's
+// order: RANGE(start, end), an UNBOUNDED bound a typed NULL, both UNBOUNDED
+// as that literal, as RANGE(NULL, NULL) fails in the emulator ("at least
+// one of start or end must be non-NULL", measured); a NULL RANGE, STRUCT or
+// leaf a typed NULL; an ARRAY given no values the empty ARRAY of its type.
+// The bounds stay parameters rather than text in a RANGE literal, so a
+// value is never read as SQL. A query with positional parameters is sent
+// with named ones, @cloudburrow_p and the position, as a named parameter
+// can be referred to twice. The references are found by the lexer the
+// front reads queries with (lex), so text in a string literal or a comment
+// is not changed. jobs.insert's answer, jobs.get and jobs.list show the
+// client's text and parameters (jobTexts). A type the front does not know
+// in such a parameter is 501, naming it, before anything runs.
 //
-// So the front sends each BYTES parameter as a STRING of its base64 text,
-// and each reference to it in the query as FROM_BASE64 of it; an
-// ARRAY<BYTES> parameter as an ARRAY<STRING>, referred to as the array of
-// its elements' FROM_BASE64, in their order (NULL when the array is). A
-// query with positional parameters is sent with named ones, @cloudburrow_p
-// and the position, as a named parameter can be referred to twice. The
-// references are found by the lexer the front reads queries with (lex), so
-// text in a string literal or a comment is not changed. jobs.insert's
-// answer, jobs.get and jobs.list show the client's text and parameters
-// (jobTexts). A value that is not base64 is refused, 400 invalidQuery, as
-// BigQuery refuses it.
-//
-// STRUCT parameters (#1082). The emulator types a STRUCT parameter, and
-// an ARRAY of STRUCTs, as one STRING, the JSON text of its value, whatever
-// its fields (measured through the front with the official Go client:
-// SELECT @p of a STRUCT<X STRING, Y INT64> read back the STRING
-// {"X":"/wBh","Y":"2"}, and SELECT @p.X failed "Cannot access field X on
-// a value with type STRING"). Its engine types a STRUCT built in the query
-// as the STRUCT it is (measured: STRUCT<X BYTES, Y INT64>(FROM_BASE64(@a),
-// @b) read back a RECORD of the bytes ff 00 61 and 2, and was inserted
-// into a RECORD column so; ARRAY<STRUCT<...>>[...] and ARRAY<...>[] an
-// ARRAY of them, CAST(NULL AS STRUCT<...>) a NULL of the type; nested
-// STRUCTs and ARRAYs of STRUCTs so too). So the front sends a parameter
-// whose type holds a STRUCT as that expression, each reference to it
-// replaced by it: every scalar of its value (a leaf) is sent as a
-// parameter of its own, @cloudburrow_s<position>_<n>, and the STRUCTs and
-// ARRAYs around them as typed constructors, in the value's order, a NULL
-// STRUCT or leaf as a typed NULL, and an ARRAY given no values as the
-// empty ARRAY of its type (the Go client sends an empty slice so). A leaf
-// is sent as its own type where the emulator types a scalar parameter so
-// (measured: INT64, FLOAT64, BOOL, STRING, TIMESTAMP read back as sent);
-// BYTES as the STRING of its base64 in FROM_BASE64; NUMERIC, BIGNUMERIC,
-// DATE, DATETIME, TIME and INTERVAL, which the emulator types STRING (a
-// DATETIME TIMESTAMP, measured), as the STRING of its value in CAST(... AS
-// type), which read back each as sent (measured); GEOGRAPHY in
-// ST_GEOGFROMTEXT and JSON in PARSE_JSON (a CAST of a STRING to either is
-// refused, measured). A type the front does not know inside a STRUCT is
-// 501, naming it, before anything runs.
-//
-// RANGE parameters (#1111). The emulator reads a RANGE parameter as a
-// NULL INTEGER (measured through the front with the official Go client),
-// and its engine reads a RANGE the query builds as BigQuery does
-// (measured: RANGE(CAST(@a AS DATE), CAST(@b AS DATE)), RANGE(@t,
-// CAST(NULL AS TIMESTAMP)), CAST(NULL AS RANGE<DATE>) and RANGE<DATE>
-// '[UNBOUNDED, UNBOUNDED)' read back typed RANGE values, so did they in
-// an ARRAY and a STRUCT). So a RANGE parameter, at the top level, in an
-// ARRAY or in a STRUCT, is built as a STRUCT's is: RANGE(start, end),
-// each bound a leaf (an UNBOUNDED one a typed NULL); both UNBOUNDED as
-// that literal, as RANGE(NULL, NULL) fails in the emulator ("at least
-// one of start or end must be non-NULL", measured); a NULL RANGE a typed
-// NULL. The bounds stay parameters rather than text in a RANGE literal,
-// so a value is never read as SQL.
-//
-// Top-level scalars (#1108). The emulator types a top-level NUMERIC,
-// BIGNUMERIC, DATE, TIME, GEOGRAPHY, JSON and INTERVAL parameter STRING,
-// and a DATETIME one TIMESTAMP (measured through the front with the
-// official Go client: SELECT @p read back a STRING of the text, and a
-// TIMESTAMP), and refused a positional NUMERIC ("strconv.ParseInt:
-// parsing ... invalid syntax", measured). So such a parameter is sent as
-// a BYTES one is: as the STRING of its value, each reference to it in its
-// conversion (convSQL: CAST(... AS type), ST_GEOGFROMTEXT, PARSE_JSON),
-// an ARRAY of them as an ARRAY<STRING> read back element by element, and
-// positional parameters as named ones. The emulator reads a NULL element
-// of an ARRAY<STRING> parameter as '' (measured: a NULL DATE element
-// failed "failed to convert  to time.Time"), so an ARRAY with a NULL
-// element is built as a STRUCT's ARRAY is, each element a parameter of
-// its own and a NULL one a typed NULL.
+// Every other parameter goes to the engine as the client sent it. The
+// front used to send BYTES (#1078), NUMERIC, BIGNUMERIC, DATE, DATETIME,
+// TIME, INTERVAL, GEOGRAPHY and JSON parameters (#1108) as STRINGs in a
+// conversion, and STRUCTs (#1082) built from their leaves as RANGEs are,
+// because the emulator typed them STRING; its engine now binds each as a
+// value of its declared type, NULLs, ARRAYs' elements and STRUCTs' fields
+// too (bigquery-emulator patches 0098 and 0100, googlesqlite 0097 and
+// 0099; #1814, #1816), and refuses a BYTES value that is not base64, 400.
 
-// bytesParameters returns q with its BYTES parameters sent as above, and
-// whether it changed q; or, with code set, why it is refused.
-func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, msg string) {
+// rangeParameters returns q with its parameters whose type has a RANGE
+// sent as above, and whether it changed q; or, with code set, why it is
+// refused.
+func rangeParameters(q queryOptions) (out queryOptions, changed bool, code int, msg string) {
 	if len(q.QueryParameters) == 0 || q.UseLegacySQL != nil && *q.UseLegacySQL {
 		return q, false, 0, ""
 	}
@@ -106,19 +56,15 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	if dec.Decode(&params) != nil {
 		return q, false, 0, ""
 	}
-	type byteParam struct {
-		name  string
-		array bool
-		// typ is the GoogleSQL type of a scalar parameter, or of an
-		// ARRAY's elements, that is sent as a STRING (convType).
-		typ string
-		// expr is a STRUCT parameter's rebuilt value, which each
-		// reference is replaced by (#1082), or "".
+	type rebuiltParam struct {
+		name string
+		// expr is the parameter's rebuilt value, which each reference is
+		// replaced by.
 		expr string
 	}
 	var leaves []any
 	rebuilt := map[int]bool{}
-	var found []byteParam
+	var found []rebuiltParam
 	positional := strings.EqualFold(q.ParameterMode, "POSITIONAL")
 	if q.ParameterMode == "" {
 		positional = true
@@ -131,8 +77,7 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	for i, p := range params {
 		name, _ := p["name"].(string)
 		ptype, _ := p["parameterType"].(map[string]any)
-		kind := bytesKind(ptype)
-		if kind == "" {
+		if !hasRange(ptype) {
 			continue
 		}
 		label := name
@@ -140,53 +85,14 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			label = fmt.Sprintf("at position %d", i+1)
 		}
 		pval, _ := p["parameterValue"].(map[string]any)
-		if kind == "array" && nullElement(pval) {
-			// The emulator reads a NULL element of an ARRAY<STRING>
-			// parameter as '' (#1108), so an ARRAY with one is built as
-			// a STRUCT's is.
-			kind = "struct"
+		b := structBuilder{prefix: fmt.Sprintf("cloudburrow_s%d_", i+1)}
+		expr, code, msg := b.value(ptype, pval, label)
+		if code != 0 {
+			return q, false, code, msg
 		}
-		if kind == "struct" {
-			b := structBuilder{prefix: fmt.Sprintf("cloudburrow_s%d_", i+1)}
-			expr, code, msg := b.value(ptype, pval, label)
-			if code != 0 {
-				return q, false, code, msg
-			}
-			leaves = append(leaves, b.params...)
-			rebuilt[i] = true
-			found = append(found, byteParam{name: name, expr: expr})
-			if positional {
-				found[len(found)-1].name = fmt.Sprintf("cloudburrow_p%d", i+1)
-			}
-			continue
-		}
-		array := kind == "array"
-		scalar := ptype
-		if array {
-			scalar, _ = ptype["arrayType"].(map[string]any)
-		}
-		typ := convType(scalar)
-		if array {
-			ptype["arrayType"] = map[string]any{"type": "STRING"}
-			elems, _ := pval["arrayValues"].([]any)
-			for j, e := range elems {
-				em, _ := e.(map[string]any)
-				if typ != "BYTES" {
-					continue
-				}
-				if msg := normalBase64(em, fmt.Sprintf("%s[%d]", label, j)); msg != "" {
-					return q, false, http.StatusBadRequest, msg
-				}
-			}
-		} else {
-			ptype["type"] = "STRING"
-			if typ == "BYTES" {
-				if msg := normalBase64(pval, label); msg != "" {
-					return q, false, http.StatusBadRequest, msg
-				}
-			}
-		}
-		found = append(found, byteParam{name: name, array: array, typ: typ})
+		leaves = append(leaves, b.params...)
+		rebuilt[i] = true
+		found = append(found, rebuiltParam{name: name, expr: expr})
 		if positional {
 			found[len(found)-1].name = fmt.Sprintf("cloudburrow_p%d", i+1)
 		}
@@ -235,16 +141,8 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			if !strings.EqualFold(next.text, p.name) {
 				continue
 			}
-			ref := q.Query[t.pos:next.end]
 			b.WriteString(q.Query[last:t.pos])
-			if p.expr != "" {
-				b.WriteString("(" + p.expr + ")")
-			} else if p.array {
-				b.WriteString("IF(" + ref + " IS NULL, NULL, ARRAY(SELECT " + convSQL(p.typ, "_cloudburrow_e") + " FROM UNNEST(" + ref +
-					") AS _cloudburrow_e WITH OFFSET AS _cloudburrow_o ORDER BY _cloudburrow_o))")
-			} else {
-				b.WriteString(convSQL(p.typ, ref))
-			}
+			b.WriteString("(" + p.expr + ")")
 			last = next.end
 			i++
 			break
@@ -266,87 +164,42 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 	return q, true, 0, ""
 }
 
-// bytesKind returns "scalar" for the type of a parameter the front sends
-// as a STRING (convType: BYTES, and since #1108 NUMERIC, BIGNUMERIC,
-// DATE, DATETIME, TIME, INTERVAL, GEOGRAPHY and JSON), "array" for an
-// ARRAY of one, "struct" for a STRUCT or an ARRAY of STRUCTs (whatever
-// its fields, #1082), or "".
-func bytesKind(t map[string]any) string {
+// hasRange reports whether t, a QueryParameterType, is a RANGE or has one
+// in it, as an ARRAY's element type or a STRUCT's field, at any depth.
+func hasRange(t map[string]any) bool {
 	typ, _ := t["type"].(string)
 	switch strings.ToUpper(typ) {
+	case "RANGE":
+		return true
 	case "ARRAY":
 		elem, _ := t["arrayType"].(map[string]any)
-		switch bytesKind(elem) {
-		case "scalar":
-			return "array"
-		case "struct":
-			return "struct"
-		}
-	case "STRUCT", "RANGE":
-		return "struct"
-	}
-	if convType(t) != "" {
-		return "scalar"
-	}
-	return ""
-}
-
-// nullElement reports whether an ARRAY parameter's value v has a NULL
-// element.
-func nullElement(v map[string]any) bool {
-	elems, _ := v["arrayValues"].([]any)
-	for _, e := range elems {
-		em, _ := e.(map[string]any)
-		if val, ok := em["value"]; !ok || val == nil {
-			return true
+		return hasRange(elem)
+	case "STRUCT":
+		fields, _ := t["structTypes"].([]any)
+		for _, f := range fields {
+			fm, _ := f.(map[string]any)
+			ft, _ := fm["type"].(map[string]any)
+			if hasRange(ft) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// convType returns the GoogleSQL name of t, a scalar QueryParameterType,
-// when the front sends a parameter of it as a STRING in a conversion
-// (leafKinds), or "".
-func convType(t map[string]any) string {
-	typ, _ := t["type"].(string)
-	typ = strings.ToUpper(typ)
-	if n, ok := scalarTypeNames[typ]; ok {
-		typ = n
-	}
-	if leafKinds[typ] == "" {
-		return ""
-	}
-	return typ
-}
-
-// convSQL returns the expression that reads ref, a STRING, as a value of
-// typ, a type convType names (leafKinds).
-func convSQL(typ, ref string) string {
-	switch how := leafKinds[typ]; how {
-	case "bytes":
-		return "FROM_BASE64(" + ref + ")"
-	case "cast":
-		return "CAST(" + ref + " AS " + typ + ")"
-	default:
-		return how + "(" + ref + ")"
-	}
-}
-
-// structBuilder writes a STRUCT parameter's value as the expression the
-// front sends in its place (above), and collects the parameters of its
-// leaves, each named prefix and a number.
+// structBuilder writes a parameter's value as the expression the front
+// sends in its place (above), and collects the parameters of its leaves,
+// each named prefix and a number.
 type structBuilder struct {
 	prefix string
 	params []any
 }
 
-// leafKinds are how a leaf of each scalar type is sent (above): "" as a
-// parameter of its own type, "bytes" as FROM_BASE64 of a STRING, "cast"
-// as a CAST of a STRING, or the function that reads it from a STRING.
-var leafKinds = map[string]string{
-	"INT64": "", "FLOAT64": "", "BOOL": "", "STRING": "", "TIMESTAMP": "",
-	"BYTES": "bytes", "NUMERIC": "cast", "BIGNUMERIC": "cast", "DATE": "cast", "DATETIME": "cast", "TIME": "cast",
-	"INTERVAL": "cast", "GEOGRAPHY": "ST_GEOGFROMTEXT", "JSON": "PARSE_JSON",
+// leafTypes are the scalar types a leaf can be, each sent as a parameter
+// of its own type.
+var leafTypes = map[string]bool{
+	"INT64": true, "FLOAT64": true, "BOOL": true, "STRING": true, "TIMESTAMP": true, "BYTES": true, "NUMERIC": true,
+	"BIGNUMERIC": true, "DATE": true, "DATETIME": true, "TIME": true, "INTERVAL": true, "GEOGRAPHY": true, "JSON": true,
 }
 
 // scalarTypeNames are the GoogleSQL names of a QueryParameterType's legacy
@@ -398,7 +251,7 @@ func typeSQL(t map[string]any) (string, string) {
 		}
 		return "", "a RANGE whose element type is not DATE, DATETIME or TIMESTAMP"
 	}
-	if _, ok := leafKinds[typ]; !ok {
+	if !leafTypes[typ] {
 		if typ == "" {
 			return "", "a field with no type"
 		}
@@ -414,9 +267,8 @@ func (b *structBuilder) value(t, v map[string]any, label string) (string, int, s
 	typ, why := typeSQL(t)
 	if why != "" {
 		return "", http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", whose type has " +
-			why + ". The emulator behind CloudBurrow types a STRUCT query parameter as a STRING of its " +
-			"JSON and a RANGE one as a NULL INTEGER (measured, #1082, #1111); CloudBurrow sends such a parameter built " +
-			"from its values, but not with that type. Nothing was run."
+			why + ". The emulator behind CloudBurrow reads a RANGE query parameter as a NULL INTEGER (measured, #1111); " +
+			"CloudBurrow sends such a parameter built from its values, but not with that type. Nothing was run."
 	}
 	kind, _ := t["type"].(string)
 	switch strings.ToUpper(kind) {
@@ -480,25 +332,10 @@ func (b *structBuilder) value(t, v map[string]any, label string) (string, int, s
 	if !ok || val == nil {
 		return "CAST(NULL AS " + typ + ")", 0, ""
 	}
-	leaf := map[string]any{"value": val}
-	sendAs := typ
-	how := leafKinds[typ]
-	if how != "" {
-		sendAs = "STRING"
-	}
-	if how == "bytes" {
-		if msg := normalBase64(leaf, label); msg != "" {
-			return "", http.StatusBadRequest, msg
-		}
-	}
 	name := fmt.Sprintf("%s%d", b.prefix, len(b.params)+1)
-	b.params = append(b.params, map[string]any{"name": name, "parameterType": map[string]any{"type": sendAs},
-		"parameterValue": leaf})
-	ref := "@" + name
-	if how == "" {
-		return ref, 0, ""
-	}
-	return convSQL(typ, ref), 0, ""
+	b.params = append(b.params, map[string]any{"name": name, "parameterType": map[string]any{"type": typ},
+		"parameterValue": map[string]any{"value": val}})
+	return "@" + name, 0, ""
 }
 
 // boundValue returns a RANGE bound's value (a QueryParameterValue), or nil
@@ -510,28 +347,10 @@ func boundValue(v map[string]any) any {
 	return v["value"]
 }
 
-// normalBase64 sets v's value, a QueryParameterValue's base64 text, as
-// standard base64 (FROM_BASE64 reads it; a client may send it URL-safe),
-// or returns why it is not base64. A NULL value is left as it is.
-func normalBase64(v map[string]any, label string) string {
-	s, ok := v["value"].(string)
-	if !ok {
-		return ""
-	}
-	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
-		if b, err := enc.DecodeString(s); err == nil {
-			v["value"] = base64.StdEncoding.EncodeToString(b)
-			return ""
-		}
-	}
-	return fmt.Sprintf("Invalid query parameter %s: the value of a BYTES parameter must be base64 encoded, and %q is not.",
-		label, s)
-}
-
-// runBytesQuery runs q, whose BYTES parameters the front sends as client's
-// were not (bytesParameters), and answers with the client's text and
+// runRangeQuery runs q, whose RANGE parameters the front sends as client's
+// were not (rangeParameters), and answers with the client's text and
 // parameters in the job it names.
-func (f front) runBytesQuery(w http.ResponseWriter, r *http.Request, client, q queryOptions, insert bool) {
+func (f front) runRangeQuery(w http.ResponseWriter, r *http.Request, client, q queryOptions, insert bool) {
 	if !setQueryParameters(r, insert, q) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return

@@ -354,7 +354,7 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			"@@row_count. Nothing was run.")
 		return
 	}
-	if sent, changed, code, msg := bytesParameters(q); code != 0 { // #1078, bytesparams.go
+	if sent, changed, code, msg := rangeParameters(q); code != 0 { // #1111, rangeparams.go
 		reason := "notImplemented"
 		if code == http.StatusBadRequest {
 			reason = "invalidQuery"
@@ -362,7 +362,7 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		writeError(w, code, reason, msg)
 		return
 	} else if changed {
-		f.runBytesQuery(w, r, q, sent, insert)
+		f.runRangeQuery(w, r, q, sent, insert)
 		return
 	}
 	v := checkDDL(q.Query)
