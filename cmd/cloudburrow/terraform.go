@@ -352,12 +352,24 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// https://storage.googleapis.com/storage/v1/b, google_projects at
 	// https://cloudresourcemanager.googleapis.com/v1/projects and
 	// google_folders at https://cloudresourcemanager.googleapis.com/v3/folders,
-	// so no setting points them here.
+	// so no setting points them here. Three more do the same (#1578, read
+	// in 8.4.0's source and unchanged on the provider's main branch,
+	// 2026-11-18): google_cloud_run_locations lists at
+	// https://run.googleapis.com/v1/projects/{{project}}/locations,
+	// google_artifact_registry_locations at
+	// https://artifactregistry.googleapis.com/v1/projects/{{project}}/locations
+	// and google_iam_testable_permissions posts to
+	// https://iam.googleapis.com/v1/permissions:queryTestablePermissions.
+	// Before #1578 the wrapper let them through, to real Google, whenever the
+	// Run port or Resource Manager was served.
 	out = append(out,
 		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"},
 		unpointedPrefix{"google_storage_buckets", "the provider lists buckets at storage.googleapis.com, ignoring storage_custom_endpoint"},
 		unpointedPrefix{"google_projects", "the provider lists projects at cloudresourcemanager.googleapis.com, ignoring resource_manager_custom_endpoint"},
-		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"})
+		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"},
+		unpointedPrefix{"google_cloud_run_locations", "the provider lists Cloud Run locations at run.googleapis.com, ignoring cloud_run_custom_endpoint"},
+		unpointedPrefix{"google_artifact_registry_locations", "the provider lists Artifact Registry locations at artifactregistry.googleapis.com, ignoring artifact_registry_custom_endpoint"},
+		unpointedPrefix{"google_iam_testable_permissions", "the provider posts to iam.googleapis.com, ignoring iam_custom_endpoint"})
 	return out
 }
 

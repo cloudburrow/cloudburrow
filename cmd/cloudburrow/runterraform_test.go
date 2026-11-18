@@ -68,9 +68,10 @@ func TestRequestEventsNameTheProjectUnderAnyVersion(t *testing.T) {
 // served, Artifact Registry and Cloud Build are pointed at the Run port;
 // without it their resources are refused, as are Cloud Functions v2's
 // (#1377) and v1's (#1428); Cloud Build v2, which no instance serves, and
-// the google_storage_buckets, google_projects and google_folders data
-// sources, which ignore the custom endpoints, are refused whatever is
-// enabled.
+// the google_storage_buckets, google_projects, google_folders,
+// google_cloud_run_locations, google_artifact_registry_locations and
+// google_iam_testable_permissions data sources (#1578), which ignore the
+// custom endpoints, are refused whatever is enabled.
 func TestTerraformSetsArtifactRegistryAndCloudBuild(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceRun}
@@ -99,12 +100,18 @@ data "google_projects" "p" {}
 data "google_project" "p" {}
 data "google_folders" "f" {}
 data "google_folder" "f" {}
+data "google_cloud_run_locations" "l" {}
+data "google_artifact_registry_locations" "l" {}
+data "google_artifact_registry_repository" "r" {}
+data "google_iam_testable_permissions" "t" {}
+data "google_iam_role" "r" {}
 `
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got := unpointed(dir, unpointedResources(cfg))
-	want := []string{"google_cloudbuildv2_connection", "google_storage_buckets", "google_projects", "google_folders"}
+	want := []string{"google_cloudbuildv2_connection", "google_storage_buckets", "google_projects", "google_folders",
+		"google_cloud_run_locations", "google_artifact_registry_locations", "google_iam_testable_permissions"}
 	if len(got) != len(want) {
 		t.Errorf("with Cloud Run: unpointed = %q, want %q", got, want)
 	}
@@ -115,7 +122,7 @@ data "google_folder" "f" {}
 	}
 	noRun := config.Default()
 	noRun.Services = []config.Service{config.ServiceStorage}
-	if got := unpointed(dir, unpointedResources(noRun)); len(got) != 8 {
-		t.Errorf("without Cloud Run: unpointed = %q, want all eight", got)
+	if got := unpointed(dir, unpointedResources(noRun)); len(got) != 11 {
+		t.Errorf("without Cloud Run: unpointed = %q, want all eleven (the repository once, as a resource and a data source)", got)
 	}
 }
