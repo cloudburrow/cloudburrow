@@ -171,14 +171,25 @@ func (d *Decoder) configureCore(sfi, channels int) error {
 	}
 	// Channel configurations 1 to 6 (#1651): their channel count is the
 	// configuration (SCE; CPE; SCE CPE; SCE CPE SCE; SCE CPE CPE; SCE CPE
-	// CPE LFE); 7 is eight channels (AudioToolbox's 7.1); with a
-	// program_config_element, the count it lists.
+	// CPE LFE); 7 and 12 are eight channels (SCE CPE CPE CPE LFE:
+	// AudioToolbox's 7.1, and ffmpeg's), 11 seven (SCE CPE CPE SCE LFE,
+	// 6.1; ISO/IEC 14496-3:2019 Table 1.19); with a program_config_element,
+	// the count it lists.
 	d.channelConfig = channels
-	if channels == 7 && d.pce == nil {
-		channels = 8 // SCE CPE CPE CPE LFE
+	if d.pce == nil {
+		switch channels {
+		case 7, 12:
+			channels = 8
+		case 11:
+			channels = 7
+		default:
+			if channels < 1 || channels > 6 {
+				return unsupportedf("channel_configuration %d (1 to 7, 11, 12, or a program_config_element, only)", channels)
+			}
+		}
 	}
-	if channels < 1 || (channels > 8 && d.pce == nil) || channels > 48 {
-		return unsupportedf("channel_configuration %d (1 to 7, or a program_config_element, only)", channels)
+	if channels < 1 || channels > 48 {
+		return unsupportedf("a program_config_element of %d channels", channels)
 	}
 	d.sampleRate = rate
 	d.samplingFrequencyIndex = sfi

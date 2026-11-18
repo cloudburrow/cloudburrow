@@ -142,10 +142,12 @@ off), are the one known remaining source. `TestHEAACImplicitADTS` checks that `D
 fixtures; `TestDecodeAUMatchesDecodeLC` checks that plain AAC-LC through `DecodeAU` matches
 `Decode`; `TestPSRefusals` checks the refusals above.
 
-### Channel configurations 0 and 3 to 7, and multichannel SBR (#1651)
+### Channel configurations 0, 3 to 7, 11 and 12, and multichannel SBR (#1651)
 
 `configureCore` takes channel configurations 1 to 7 (mono to 7.1; configuration 7 is eight channels,
-SCE CPE CPE CPE LFE, as AudioToolbox writes 7.1) and configuration 0: `pce.go`, written for
+SCE CPE CPE CPE LFE, as AudioToolbox writes 7.1), 11 (SCE CPE CPE SCE LFE, 6.1, as AudioToolbox
+writes it) and 12 (SCE CPE CPE CPE LFE, 7.1, as ffmpeg 9 writes it; ISO/IEC 14496-3:2019 Table
+1.19), and configuration 0: `pce.go`, written for
 CloudBurrow from the `program_config_element()` syntax (ISO/IEC 14496-3 Table 4.2), parses the PCE
 of the AudioSpecificConfig (byte-aligned from the ASC's start), names each listed element's speakers
 (front: a centre, then up to two pairs; one side pair; behind, a pair and a centre; one LFE; anything
@@ -155,8 +157,9 @@ element it is (Table 4.3). `ChannelNames` gives the speakers (configuration 7's 
 side pair, as ffmpeg 9 lays it out). SBR now runs over every SCE and CPE of a multichannel stream
 (the LFE, which carries no SBR data, through the QMF banks alone), as it already ran per element.
 Checked against ffmpeg 9 after its downmix (`internal/embedding/decoders_test.go`): 5.1 AAC-LC within
-1.8e-7, ffmpeg's 7.1 (a PCE) 2.4e-7, AudioToolbox's 7.1 (configuration 7) 1.8e-7, AudioToolbox's 5.1
-HE-AAC 1.3e-5; `TestParseASCProgramConfig`.
+1.8e-7, ffmpeg's 7.1(wide) and 6.1 (PCEs) 2.4e-7 and 1.8e-7, ffmpeg's 7.1 (configuration 12),
+AudioToolbox's 7.1 (configuration 7) and 6.1 (configuration 11) 1.8e-7, AudioToolbox's 5.1 HE-AAC
+1.3e-5; `TestParseASCProgramConfig`.
 
 ## Checked
 

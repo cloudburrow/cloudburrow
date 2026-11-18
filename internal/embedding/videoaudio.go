@@ -253,8 +253,8 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 		return nil, 0, 0, nil, notDecodedf("its AAC audio object type %d is not decoded; AAC-LC and HE-AAC (v1, v2) are", asc.ObjectType)
 	case asc.FrameLengthFlag:
 		return nil, 0, 0, nil, notDecodedf("its AAC frames are 960 samples, which are not decoded")
-	case asc.ChannelConfiguration > 7:
-		return nil, 0, 0, nil, notDecodedf("its AAC channel configuration %d is not decoded; 1 to 7 (mono to 7.1) and 0 (a program_config_element) are", asc.ChannelConfiguration)
+	case asc.ChannelConfiguration > 7 && asc.ChannelConfiguration != 11 && asc.ChannelConfiguration != 12:
+		return nil, 0, 0, nil, notDecodedf("its AAC channel configuration %d is not decoded; 0 (a program_config_element), 1 to 7, 11 and 12 (mono to 7.1) are", asc.ChannelConfiguration)
 	}
 	d, err := aacdec.NewDecoderASC(dcd.DecSpecificInfo.DecConfig)
 	if err != nil {

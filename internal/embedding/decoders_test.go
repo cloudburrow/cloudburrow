@@ -198,7 +198,12 @@ func TestUndecodedTrackCodec(t *testing.T) {
 //	S8W="aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*660*t)|0.25*sin(2*PI*330*t)|0.2*sin(2*PI*60*t)|0.15*sin(2*PI*1500*t)|0.15*sin(2*PI*2500*t)|0.1*sin(2*PI*900*t)|0.1*sin(2*PI*1200*t):s=48000:d=1:channel_layout=7.1(wide)"
 //	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=1 -f lavfi -i "$S8W" -c:v libx264 -c:a aac_at -b:a 256k -shortest -map_metadata -1 va-aac71-cfg7.mp4 (channel configuration 7)
 //
-// (va-aac71-cfg7.ffmpeg-mono.f32 and va-heaac51.ffmpeg-mono.f32: `ffmpeg -i f -vn -ac 1 -f f32le`.)
+//	S7="aevalsrc=0.3*sin(2*PI*440*t)|0.3*sin(2*PI*660*t)|0.25*sin(2*PI*330*t)|0.2*sin(2*PI*60*t)|0.15*sin(2*PI*1500*t)|0.15*sin(2*PI*2500*t)|0.1*sin(2*PI*900*t):s=48000:d=0.5:channel_layout=6.1"
+//	ffmpeg -f lavfi -i color=c=blue:s=64x36:r=2:d=0.5 -f lavfi -i "$S7" -c:v libx264 -c:a aac_at -b:a 192k -shortest -map_metadata -1 va-aac61-cfg11.mp4 (configuration 11)
+//	(S8 with channel_layout=7.1 and S7 at s=16000) ffmpeg $V ... -c:a aac -aac_pns 0 ... va-aac71-cfg12.mp4 (configuration 12), va-aac61-pce.mp4 (a PCE)
+//
+// (va-aac71-cfg7, va-aac61-cfg11 and va-heaac51.ffmpeg-mono.f32: `ffmpeg -i f -vn -ac 1 -f f32le`;
+// va-aac71-cfg12 and va-aac61-pce.ffmpeg-16k.f32: `-ac 1 -ar 16000 -f f32le`.)
 func TestDecodeMultichannelAACTracks(t *testing.T) {
 	got, err := DecodeVideoAudio("video/mp4", readTestdata(t, "va-aac71.mp4"), VideoOptions{})
 	if err != nil {
@@ -209,15 +214,31 @@ func TestDecodeMultichannelAACTracks(t *testing.T) {
 	if d > 1e-6 {
 		t.Errorf("7.1 AAC: %.2e from ffmpeg's decode, want at most 1e-6", d)
 	}
-	// Channel configuration 7, as AudioToolbox writes 7.1: its second pair
-	// is a side pair (a front-wide one would be 0.12 off).
-	got, rate := soundTrackOf(t, "va-aac71-cfg7.mp4")
-	d = maxAbsDiff(t, "configuration 7", got, readF32(t, "va-aac71-cfg7.ffmpeg-mono.f32"))
-	t.Logf("configuration 7: max %.2e from ffmpeg", d)
-	if rate != 48000 || d > 1e-6 {
-		t.Errorf("configuration 7: %d Hz, %.2e from ffmpeg's decode, want 48000 Hz, at most 1e-6", rate, d)
+	// ffmpeg's 7.1 (channel configuration 12) and 6.1 (a PCE with a back
+	// centre).
+	for _, f := range []string{"va-aac71-cfg12", "va-aac61-pce"} {
+		got, err := DecodeVideoAudio("video/mp4", readTestdata(t, f+".mp4"), VideoOptions{})
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		d := maxAbsDiff(t, f, got, readF32(t, f+".ffmpeg-16k.f32"))
+		t.Logf("%s: max %.2e from ffmpeg", f, d)
+		if d > 1e-6 {
+			t.Errorf("%s: %.2e from ffmpeg's decode, want at most 1e-6", f, d)
+		}
 	}
-	got, rate = soundTrackOf(t, "va-heaac51.mp4")
+	// Channel configurations 7 and 11, as AudioToolbox writes 7.1 and 6.1:
+	// configuration 7's second pair is a side pair (a front-wide one would
+	// be 0.12 off).
+	for _, f := range []string{"va-aac71-cfg7", "va-aac61-cfg11"} {
+		got, rate := soundTrackOf(t, f+".mp4")
+		d := maxAbsDiff(t, f, got, readF32(t, f+".ffmpeg-mono.f32"))
+		t.Logf("%s: max %.2e from ffmpeg", f, d)
+		if rate != 48000 || d > 1e-6 {
+			t.Errorf("%s: %d Hz, %.2e from ffmpeg's decode, want 48000 Hz, at most 1e-6", f, rate, d)
+		}
+	}
+	got, rate := soundTrackOf(t, "va-heaac51.mp4")
 	if rate != 48000 {
 		t.Errorf("5.1 HE-AAC: %d Hz, want 48000", rate)
 	}

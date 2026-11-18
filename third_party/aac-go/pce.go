@@ -159,7 +159,8 @@ func (d *Decoder) programOrder(pcm [][]float64, elems []frameElement) ([][]float
 
 // ChannelNames are the decoded channels' speakers in output order, as
 // ffmpeg names them, for channel configuration 0 (a program_config_element)
-// and 3 to 7 (ISO/IEC 14496-3 Table 1.19), and nil for mono and stereo.
+// and 3 to 7, 11 and 12 (ISO/IEC 14496-3 Table 1.19), and nil for mono and
+// stereo.
 func (d *Decoder) ChannelNames() []string {
 	if d.pce != nil {
 		var names []string
@@ -168,21 +169,24 @@ func (d *Decoder) ChannelNames() []string {
 		}
 		return names
 	}
-	if d.channels > 2 && d.channels < len(configNames) {
-		return configNames[d.channels]
+	if d.channels > 2 && d.channelConfig < len(configNames) {
+		return configNames[d.channelConfig]
 	}
 	return nil
 }
 
-// configNames are the channels of configurations 3 to 7 in bitstream
-// order, by channel count: the centre's SCE, the front CPE, then the side
-// and back channels and the LFE. Configuration 7's second CPE is a side
-// pair as ffmpeg 9 lays it out (7.1: its mono downmix weighs it ½, as
-// checked against ffmpeg's decode of an AudioToolbox 7.1 stream).
-var configNames = [9][]string{
-	3: {"FC", "FL", "FR"},
-	4: {"FC", "FL", "FR", "BC"},
-	5: {"FC", "FL", "FR", "BL", "BR"},
-	6: {"FC", "FL", "FR", "BL", "BR", "LFE"},
-	8: {"FC", "FL", "FR", "SL", "SR", "BL", "BR", "LFE"}, // configuration 7
+// configNames are the channels of configurations 3 to 7, 11 and 12 in
+// bitstream order: the centre's SCE, the front CPE, then the side and back
+// channels and the LFE. The second pair of configurations 7 and 12 is a
+// side pair as ffmpeg 9 lays them out (7.1: its mono downmix weighs it ½,
+// as checked against ffmpeg's decode of an AudioToolbox configuration 7
+// stream, where a front-wide pair would be 0.12 off).
+var configNames = [13][]string{
+	3:  {"FC", "FL", "FR"},
+	4:  {"FC", "FL", "FR", "BC"},
+	5:  {"FC", "FL", "FR", "BL", "BR"},
+	6:  {"FC", "FL", "FR", "BL", "BR", "LFE"},
+	7:  {"FC", "FL", "FR", "SL", "SR", "BL", "BR", "LFE"},
+	11: {"FC", "FL", "FR", "SL", "SR", "BC", "LFE"},
+	12: {"FC", "FL", "FR", "SL", "SR", "BL", "BR", "LFE"},
 }
