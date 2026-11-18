@@ -491,3 +491,30 @@ func connReason(code int) string {
 	}
 	return "invalid"
 }
+
+// createCloudResource makes a CLOUD_RESOURCE connection, as the
+// DEFAULT keyword does (connectionauth.go, #1765), or returns the one
+// already there.
+func (c *bqConnections) createCloudResource(number int64, location, id string) (*bqConnection, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conns == nil {
+		c.conns = map[string]*bqConnection{}
+	}
+	project := strconv.FormatInt(number, 10)
+	location = strings.ToLower(location)
+	if cn, ok := c.conns[connKey(project, location, id)]; ok {
+		cp := *cn
+		return &cp, nil
+	}
+	fields := map[string]json.RawMessage{"cloudResource": json.RawMessage("{}")}
+	if code, msg := prepareConnection(fields, number); code != 0 {
+		return nil, errors.New(msg)
+	}
+	now := c.clock().UnixMilli()
+	cn := &bqConnection{Project: project, Location: location, ID: id, Fields: fields, Created: now, Modified: now}
+	c.conns[connKey(project, location, id)] = cn
+	c.saveLocked()
+	cp := *cn
+	return &cp, nil
+}

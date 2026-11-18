@@ -259,7 +259,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		}
 		sub, code, why := f.mlSubquery(r, q, md, c)
 		if code != 0 {
-			reason := map[int]string{400: "invalidQuery", 501: "notImplemented"}[code]
+			reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 			if code == 501 {
 				writeError(w, code, reason, why)
 				return true

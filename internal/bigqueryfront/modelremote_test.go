@@ -13,7 +13,7 @@ func TestParseRemoteModel(t *testing.T) {
 	for sql, want := range map[string]int{
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='gemini-2.0-flash')":              0,
 		"CREATE OR REPLACE MODEL ds.m REMOTE WITH CONNECTION `us.c` OPTIONS(endpoint = 'text-embedding-005')": 0,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION DEFAULT OPTIONS(ENDPOINT='gemini-2.0-flash')":               501,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION DEFAULT OPTIONS(ENDPOINT='gemini-2.0-flash')":               0,
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1')": 501,
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x', bogus=1)":                    400,
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x') AS SELECT 1":                 400,
@@ -26,7 +26,7 @@ func TestParseRemoteModel(t *testing.T) {
 		if !is || code != want {
 			t.Errorf("%s: %v %d %s; want %d", sql, is, code, msg, want)
 		}
-		if code == 0 && (d.remote == nil || d.remote.endpoint == "" || len(d.remote.connection) != 3) {
+		if code == 0 && (d.remote == nil || d.remote.endpoint == "" || len(d.remote.connection) != 3 && !d.remote.isDefault) {
 			t.Errorf("%s: %+v", sql, d.remote)
 		}
 	}

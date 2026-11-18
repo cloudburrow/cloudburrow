@@ -4186,6 +4186,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerymlremoteiam_test.go:206 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
           "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
@@ -4232,6 +4233,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerymlremoteiam_test.go:132 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/iamconditions1745_test.go:132 TestIAMConditionAttributes",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
@@ -10186,7 +10188,9 @@
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:189 TestBigQueryMLRemoteGenerateEmbedding",
-          "test/compat/bigquerymlremote_test.go:88 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlremote_test.go:91 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlremoteiam_test.go:132 TestBigQueryMLRemoteConnectionPermissions",
+          "test/compat/bigquerymlremoteiam_test.go:206 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
           "test/compat/bigquerymltransformcolumns_test.go:62 TestBigQueryMLPolynomialExpandOrder",
@@ -10294,7 +10298,7 @@
           "test/compat/bigquerymlonnx_test.go:173 TestBigQueryMLONNXNeedsTheOnnxBuild",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
-          "test/compat/bigquerymlremote_test.go:88 TestBigQueryMLRemoteGenerateText",
+          "test/compat/bigquerymlremote_test.go:91 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
           "test/compat/bigquerymltree_test.go:129 TestBigQueryMLBoostedTreeLabelEncoding",
@@ -10765,7 +10769,8 @@
         "method": "bigqueryconnection.projects.locations.connections.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI",
+          "test/compat/bigquerymlremoteiam_test.go:206 TestBigQueryMLRemoteDefaultConnection"
         ]
       },
       {
@@ -10793,7 +10798,8 @@
         "method": "bigqueryconnection.projects.locations.connections.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI",
+          "test/compat/bigquerymlremoteiam_test.go:132 TestBigQueryMLRemoteConnectionPermissions"
         ]
       },
       {

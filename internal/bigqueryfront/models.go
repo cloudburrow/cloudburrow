@@ -1626,7 +1626,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return false
 	}
 	fail := func(code int, msg string) {
-		reason := map[int]string{400: "invalidQuery", 404: "notFound", 409: "duplicate", 501: "notImplemented"}[code]
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 409: "duplicate", 501: "notImplemented"}[code]
 		if code == 501 {
 			writeError(w, code, reason, msg)
 			return
@@ -1673,7 +1673,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return true
 	case d.remote != nil:
 		// A remote model on the local Vertex AI (modelremote.go, #1760).
-		rm, c, m := f.createRemote(d, project, loc)
+		rm, c, m := f.createRemote(r.Context(), d, project, loc)
 		if c != 0 {
 			fail(c, m)
 			return true

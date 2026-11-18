@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -41,8 +42,9 @@ import (
 // in BigQuery.
 //
 // The connection must exist in the dataset's location (the Connection API
-// of connections.go). Its service account's Vertex AI User role is not
-// checked: CloudBurrow keeps no IAM grants for Vertex AI.
+// of connections.go), the caller must hold bigquery.connections.use on it
+// and its service account roles/aiplatform.user on the project
+// (connectionauth.go, #1765).
 //
 // Options the local runtime cannot honour are refused 501 rather than
 // ignored, as the local endpoint refuses them (docs/generation.md):
@@ -72,6 +74,7 @@ type remoteModel struct {
 // remoteDDL is a CREATE MODEL … REMOTE WITH CONNECTION's parts.
 type remoteDDL struct {
 	connection []string // project, location, id; nil for DEFAULT
+	isDefault  bool     // REMOTE WITH CONNECTION DEFAULT
 	endpoint   string
 }
 
@@ -84,22 +87,24 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 	i += 3
 	rd := &remoteDDL{}
 	if i < len(stmt) && stmt[i].is("DEFAULT") {
-		return 501, "Not implemented here: REMOTE WITH CONNECTION DEFAULT: CloudBurrow keeps no default connection for a project; " +
-			"name a connection (`project.location.connection_id`) made with the BigQuery Connection API. Nothing was run."
+		// The project's default connection (connectionauth.go, #1765).
+		rd.isDefault = true
+		i++
+	} else {
+		path, n := readModelPath(stmt[i:])
+		if n == 0 {
+			return 400, "Syntax error: expected a connection name after WITH CONNECTION"
+		}
+		switch len(path) {
+		case 3:
+			rd.connection = path
+		case 2:
+			rd.connection = []string{"", path[0], path[1]}
+		default:
+			return 400, "Invalid connection name " + strings.Join(path, ".") + ": expected `project.location.connection_id`"
+		}
+		i += n
 	}
-	path, n := readModelPath(stmt[i:])
-	if n == 0 {
-		return 400, "Syntax error: expected a connection name after WITH CONNECTION"
-	}
-	switch len(path) {
-	case 3:
-		rd.connection = path
-	case 2:
-		rd.connection = []string{"", path[0], path[1]}
-	default:
-		return 400, "Invalid connection name " + strings.Join(path, ".") + ": expected `project.location.connection_id`"
-	}
-	i += n
 	if i >= len(stmt) || !stmt[i].is("OPTIONS") || i+1 >= len(stmt) || !stmt[i+1].punct("(") {
 		return 400, "CREATE MODEL with a remote connection requires OPTIONS(ENDPOINT = ...)"
 	}
@@ -170,11 +175,15 @@ func isEmbeddingEndpoint(model string) bool {
 
 // createRemote checks a remote model's connection and endpoint: the
 // model to keep, or code and message.
-func (f front) createRemote(d modelDDL, project, loc string) (*remoteModel, int, string) {
+func (f front) createRemote(ctx context.Context, d modelDDL, project, loc string) (*remoteModel, int, string) {
 	rd := d.remote
 	if f.vertexai == "" {
 		return nil, 501, "Not implemented here: a remote model needs the instance's local Vertex AI endpoint, which this instance does not serve to BigQuery: " +
 			"start it with --local-ai-model (generation) or --local-ai-embeddings (embeddings) (docs/generation.md, #1760). CloudBurrow never sends a remote model's calls to Google. Nothing was run."
+	}
+	if rd.isDefault {
+		id := f.settings.effective(project, strings.ToLower(cmp.Or(loc, "us")), "default_cloud_resource_connection_id")
+		rd.connection = []string{project, strings.ToLower(cmp.Or(loc, "us")), cmp.Or(id, defaultConnectionID)}
 	}
 	cp := rd.connection[0]
 	if cp == "" {
@@ -182,6 +191,14 @@ func (f front) createRemote(d modelDDL, project, loc string) (*remoteModel, int,
 	}
 	number := connectionProject(cp, f.numbers)
 	cn, ok := f.connections.lookup(number, rd.connection[1], rd.connection[2])
+	if rd.isDefault {
+		var code int
+		var msg string
+		if cn, code, msg = f.ensureDefaultConnection(ctx, project, number, rd.connection[1], rd.connection[2], cn); code != 0 {
+			return nil, code, msg
+		}
+		ok = true
+	}
 	if !ok {
 		return nil, 404, fmt.Sprintf("Not found: Connection %s.%s.%s", cp, rd.connection[1], rd.connection[2])
 	}
@@ -195,6 +212,9 @@ func (f front) createRemote(d modelDDL, project, loc string) (*remoteModel, int,
 	model := endpointModel(rd.endpoint)
 	if model == "" {
 		return nil, 400, "Invalid ENDPOINT " + strconv.Quote(rd.endpoint)
+	}
+	if code, msg := f.checkConnectionUse(ctx, cp, project, cn); code != 0 { // connectionauth.go, #1765
+		return nil, code, msg
 	}
 	return &remoteModel{Connection: fmt.Sprintf("projects/%d/locations/%s/connections/%s", number, cn.Location, cn.ID),
 		Endpoint: rd.endpoint, Model: model, Embedding: isEmbeddingEndpoint(model), Location: cn.Location}, 0, ""
@@ -289,6 +309,14 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		default:
 			return "", 400, "Unknown option " + k + " for ML." + c.fn
 		}
+	}
+	// The connection's permissions, before any row is sent (#1765).
+	cn, ok := f.remoteConnection(rm)
+	if !ok {
+		return "", 404, "Not found: Connection " + rm.Connection
+	}
+	if code, msg := f.checkConnectionUse(r.Context(), md.Project, md.Project, cn); code != 0 {
+		return "", code, msg
 	}
 	col := "prompt"
 	if c.fn == "GENERATE_EMBEDDING" {

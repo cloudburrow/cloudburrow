@@ -44,6 +44,9 @@ func remoteModelSetup(t *testing.T, h *Harness, c *bigquery.Client, suffix strin
 		t.Fatalf("CreateConnection: %v", err)
 	}
 	t.Cleanup(func() { _ = cc.DeleteConnection(ctx, &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
+	// The caller's bigquery.connections.use and the connection's service
+	// account's Vertex AI User role (#1765).
+	grantRemoteModel(t, h, cc, project, cn)
 	if suffix == "gen" {
 		// A connection of another kind, and one in another location, are
 		// refused by CREATE MODEL (TestBigQueryMLRemoteGenerateText).
@@ -74,8 +77,8 @@ func remoteModelSetup(t *testing.T, h *Harness, c *bigquery.Client, suffix strin
 // CLOUD_RESOURCE connection whose ENDPOINT is the instance's local
 // generation model, through the official cloud.google.com/go/bigquery
 // client: CREATE MODEL … REMOTE WITH CONNECTION checks the connection
-// (a missing one 404, a Cloud SQL one and one in the EU 400, DEFAULT
-// 501), models.get answers remoteModelInfo (the
+// (a missing one 404, a Cloud SQL one and one in the EU 400; DEFAULT
+// is TestBigQueryMLRemoteDefaultConnection), models.get answers remoteModelInfo (the
 // generated bigquery/v2 client), ML.GENERATE_TEXT answers
 // ml_generate_text_result and ml_generate_text_status, and with
 // flatten_json_output ml_generate_text_llm_result, the input's columns
@@ -104,9 +107,6 @@ func TestBigQueryMLRemoteGenerateText(t *testing.T) {
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.nope` REMOTE WITH CONNECTION `%s` OPTIONS(ENDPOINT = '%s')", ds, eu, localModel)); err == nil ||
 		!strings.Contains(err.Error(), "differs from connection location") {
 		t.Errorf("a connection in the EU: %v", err)
-	}
-	if err := run(fmt.Sprintf("CREATE MODEL `%s.nope` REMOTE WITH CONNECTION DEFAULT OPTIONS(ENDPOINT = '%s')", ds, localModel)); err == nil {
-		t.Error("REMOTE WITH CONNECTION DEFAULT ran")
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.gen` REMOTE WITH CONNECTION `%s` OPTIONS(ENDPOINT = '%s')", ds, conn, localModel)); err != nil {
 		t.Fatalf("CREATE MODEL REMOTE: %v", err)
