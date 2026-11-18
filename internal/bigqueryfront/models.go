@@ -36,7 +36,8 @@ import (
 // detail a faithful result needs, as for DNNs, or Google's
 // infrastructure itself: AUTOML_*, imported TENSORFLOW models read from
 // Cloud Storage (ONNX runs in the onnx build, modelonnx.go, and XGBOOST
-// on internal/xgbmodel, modelxgb.go, #1711), and remote models over a Cloud resource
+// on internal/xgbmodel, modelxgb.go, #1711; TENSORFLOW_LITE on
+// internal/tflitemodel, modeltflite.go, #1755), and remote models over a Cloud resource
 // connection, which CloudBurrow has none of); a TRANSFORM clause; and the
 // options CloudBurrow does not carry out.
 
@@ -70,6 +71,8 @@ type bqModel struct {
 	ONNX *onnxImport `json:"onnx,omitempty"`
 	// XGB is an imported XGBoost model's (modelxgb.go, #1711).
 	XGB *xgbImport `json:"xgboost,omitempty"`
+	// TFLite is an imported TensorFlow Lite model's (modeltflite.go, #1755).
+	TFLite *tfliteImport `json:"tflite,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -279,7 +282,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX", "XGBOOST": "XGBOOST"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -305,6 +308,10 @@ func (md bqModel) resource(full bool) map[string]any {
 	}
 	if md.XGB != nil {
 		md.xgbResource(res) // modelxgb.go, #1711
+		return res
+	}
+	if md.TFLite != nil {
+		md.tfliteResource(res) // modeltflite.go, #1755
 		return res
 	}
 	var feats []map[string]any
@@ -723,7 +730,6 @@ var unsupportedModelTypes = map[string]string{
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
 	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
-	"TENSORFLOW_LITE":       "an imported TensorFlow Lite model needs the TensorFlow Lite runtime, which CloudBurrow's BigQuery does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
@@ -818,7 +824,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
-					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" {
+					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" {
 						// An imported ONNX or XGBoost model (modelonnx.go,
 						// modelxgb.go, #1711): MODEL_PATH, and no TRANSFORM
 						// or query.
@@ -1681,6 +1687,23 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "XGBOOST", Created: now, Modified: now,
 				Location: loc, Options: d.opts, XGB: imp})
+		}
+	case d.opts.ModelType == "TENSORFLOW_LITE":
+		// An imported TensorFlow Lite model (modeltflite.go, #1755).
+		imp, data, c, m := f.importTFLite(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's TensorFlow Lite file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW_LITE", Created: now, Modified: now,
+				Location: loc, Options: d.opts, TFLite: imp})
 		}
 	default:
 		trainSQL := d.query

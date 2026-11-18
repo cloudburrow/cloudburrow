@@ -145,8 +145,9 @@ func TestBigQueryMLWideAndDeep(t *testing.T) {
 // TestBigQueryMLHostedModelsRefused (#1562): what stays 501, each with the
 // reason measured on CloudBurrow, nothing run and no model left behind.
 // AutoML trains on Vertex AI's hosted service, whose model search Google
-// does not document; an imported TensorFlow or TensorFlow Lite model
-// needs that framework's runtime, which no CloudBurrow build has (an
+// does not document; an imported TensorFlow model needs TensorFlow's
+// runtime, which no CloudBurrow build has (a TensorFlow Lite one runs on
+// internal/tflitemodel since #1755, TestBigQueryMLImportedTFLiteModel; an
 // XGBoost one runs on internal/xgbmodel since #1711,
 // TestBigQueryMLImportedXGBoostModel; an ONNX one in the `-tags onnx`
 // build since #1711,
@@ -172,7 +173,6 @@ func TestBigQueryMLHostedModelsRefused(t *testing.T) {
 			"AutoML"},
 		"AUTOML_CLASSIFIER": {"CREATE MODEL `%s.no` OPTIONS(model_type='automl_classifier', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`", "AutoML"},
 		"TENSORFLOW":        {"CREATE MODEL `%s.no` OPTIONS(model_type='tensorflow', model_path='gs://bucket/saved_model/*')", "TensorFlow"},
-		"TENSORFLOW_LITE":   {"CREATE MODEL `%s.no` OPTIONS(model_type='tensorflow_lite', model_path='gs://bucket/model.tflite')", "TensorFlow Lite"},
 		"a remote model": {"CREATE MODEL `%s.no` REMOTE WITH CONNECTION `us.conn` OPTIONS(endpoint='gemini-2.0-flash')",
 			"connection"},
 		"holiday_region": {"CREATE MODEL `%s.no` OPTIONS(model_type='arima_plus', time_series_timestamp_col='d', time_series_data_col='v', " +

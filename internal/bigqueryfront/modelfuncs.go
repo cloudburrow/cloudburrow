@@ -543,6 +543,9 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if md.XGB != nil {
 		return f.xgbSubquery(r, q, md, c) // modelxgb.go, #1711
 	}
+	if md.TFLite != nil {
+		return f.tfliteSubquery(r, q, md, c) // modeltflite.go, #1755
+	}
 	if typ == "MATRIX_FACTORIZATION" {
 		return f.mfSubquery(r, q, md, c)
 	}

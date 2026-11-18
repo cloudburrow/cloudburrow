@@ -263,3 +263,32 @@ func TestBigQueryXGBoostModelPage(t *testing.T) {
 		t.Errorf("page %+v", d)
 	}
 }
+
+// TestBigQueryTFLiteModelPage (#1755): an imported TensorFlow Lite model's
+// page is an imported model's, its type TENSORFLOW_LITE, its signature's
+// inputs and outputs listed, ARRAY ones as ARRAY.
+func TestBigQueryTFLiteModelPage(t *testing.T) {
+	const model = `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"x"},"modelType":"TENSORFLOW_LITE",
+"creationTime":"1700000000000","lastModifiedTime":"1700000000000","location":"US","etag":"e",
+"featureColumns":[{"name":"a","type":{"typeKind":"FLOAT64"}},{"name":"b","type":{"typeKind":"ARRAY","arrayElementType":{"typeKind":"FLOAT64"}}}],
+"labelColumns":[{"name":"logits","type":{"typeKind":"ARRAY","arrayElementType":{"typeKind":"FLOAT64"}}},{"name":"score","type":{"typeKind":"FLOAT64"}}],
+"trainingRuns":[{"trainingOptions":{"modelUri":"gs://b/tfl/multi.tflite"},"startTime":"2023-11-14T22:13:20Z"}]}`
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/datasets/d/models/x") {
+			fmt.Fprint(w, model)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	d, err := p.Detail(context.Background(), "p", []string{"d", "models", "x"})
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 {
+		t.Fatalf("the model's page: %v %+v", err, d)
+	}
+	if d.Summary[1].Value != "TENSORFLOW_LITE" || d.Sections[0].Listing.Items[1].Name != "b" ||
+		d.Sections[1].Listing.Items[1].Name != "score" || d.Summary[3].Value != "2" {
+		t.Errorf("page %+v", d)
+	}
+}

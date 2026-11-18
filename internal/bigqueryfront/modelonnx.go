@@ -799,6 +799,8 @@ func (md *bqModel) blobSum() string {
 		return md.ONNX.SHA256
 	case md.XGB != nil:
 		return md.XGB.SHA256
+	case md.TFLite != nil:
+		return md.TFLite.SHA256
 	}
 	return ""
 }
