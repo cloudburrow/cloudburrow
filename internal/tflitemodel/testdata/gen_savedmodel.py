@@ -61,10 +61,34 @@ class Loop(tf.Module):
                 "pos": tf.where(x > 0.0, x, -x)}
 
 
+class Ops2(tf.Module):
+    """The operators #1775 adds: rounding and trigonometry, ELU,
+    LOG_SOFTMAX, max/min/product reductions, ARG_MAX/ARG_MIN, SLICE, TILE,
+    PAD, FLOOR_DIV/FLOOR_MOD (on INT32: TensorFlow Lite has no INT64
+    FloorDiv builtin), ADD_N, SPLIT and UNPACK."""
+
+    @tf.function(input_signature=[tf.TensorSpec([None, 6], tf.float32, name="v"), tf.TensorSpec([None, 4], tf.int64, name="n")])
+    def serve(self, v, n):
+        a, b = tf.split(v, 2, axis=1)
+        p, q, r = tf.unstack(tf.reshape(a, [-1, 3]), axis=1)
+        return {
+            "rounded": tf.concat([tf.floor(v), tf.math.ceil(v), tf.round(v)], axis=1),
+            "trig": tf.concat([tf.sin(v), tf.cos(v), tf.nn.elu(v)], axis=1),
+            "logsm": tf.nn.log_softmax(v),
+            "red": tf.stack([tf.reduce_max(v, axis=1), tf.reduce_min(v, axis=1), tf.reduce_prod(b, axis=1)], axis=1),
+            "args": tf.stack([tf.argmax(v, axis=1), tf.argmin(v, axis=1)], axis=1),
+            "cut": tf.tile(tf.pad(tf.slice(v, [0, 1], [-1, 3]), [[0, 0], [1, 2]], constant_values=0.5), [1, 2]),
+            "fl": tf.concat([tf.math.floordiv(tf.cast(n, tf.int32), 3), tf.math.floormod(tf.cast(n, tf.int32), 3)], axis=1),
+            "sum3": tf.add_n([p, q * 2.0, r * 3.0]),
+        }
+
+
 mlp = MLP()
 tf.saved_model.save(mlp, "/out/savedmodel/mlp", signatures={"serving_default": mlp.serve})
 loop = Loop()
 tf.saved_model.save(loop, "/out/savedmodel/loop", signatures={"serving_default": loop.serve})
+ops2 = Ops2()
+tf.saved_model.save(ops2, "/out/savedmodel/ops2", signatures={"serving_default": ops2.serve})
 flex = Flex()
 tf.saved_model.save(flex, "/out/savedmodel/flex", signatures={"serving_default": flex.serve})
 
@@ -83,5 +107,10 @@ loops = []
 for r in [{"x": [0.5, -0.25], "limit": [3.0]}, {"x": [1.0, 2.0], "limit": [2.0]}, {"x": [-0.125, 0.5], "limit": [40.0]}]:
     o = fn(x=tf.constant([r["x"]], tf.float32), limit=tf.constant(r["limit"], tf.float32))
     loops.append({"inputs": r, "outputs": {k: v.numpy().reshape(-1).tolist() for k, v in o.items()}})
+fn = tf.saved_model.load("/out/savedmodel/ops2").signatures["serving_default"]
+ops = []
+for r in [{"v": [0.5, -1.5, 2.25, -0.75, 3.5, 1.0], "n": [7, -7, 5, -2]}, {"v": [-2.5, 0.25, 1.75, 2.5, -3.0, 0.5], "n": [0, 9, -10, 4]}]:
+    o = fn(v=tf.constant([r["v"]], tf.float32), n=tf.constant([r["n"]], tf.int64))
+    ops.append({"inputs": r, "outputs": {k: v.numpy().reshape(-1).tolist() for k, v in o.items()}})
 with open("/out/tensorflow_predictions.json", "w") as f:
-    json.dump({"tensorflow": tf.__version__, "rows": out, "loop": loops}, f, indent=1)
+    json.dump({"tensorflow": tf.__version__, "rows": out, "loop": loops, "ops2": ops}, f, indent=1)

@@ -202,24 +202,19 @@ func TestStringsMatchLiteRT(t *testing.T) {
 	}
 }
 
-// TestControlFlow (#1775): loop.tflite, TensorFlow 2.20's TFLiteConverter
-// of testdata/savedmodel/loop (gen_savedmodel.py), runs its WHILE, IF,
-// LESS, GREATER and SELECT_V2 to TensorFlow's own serving_default output
-// for the SavedModel (tensorflow_predictions.json's "loop").
-func TestControlFlow(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("testdata", "loop.tflite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := Load(data)
-	if err != nil {
-		t.Fatal(err)
+// TestControlFlowAndOps2 (#1775): loop.tflite and ops2.tflite, TensorFlow
+// 2.20's TFLiteConverter of testdata/savedmodel/loop and ops2
+// (gen_savedmodel.py), run their WHILE, IF, LESS, GREATER and SELECT_V2,
+// and the operators ops2.go adds, to TensorFlow's own serving_default
+// output for the SavedModels (tensorflow_predictions.json).
+func TestControlFlowAndOps2(t *testing.T) {
+	type rows []struct {
+		Inputs  map[string][]float64 `json:"inputs"`
+		Outputs map[string][]float64 `json:"outputs"`
 	}
 	var ref struct {
-		Loop []struct {
-			Inputs  map[string][]float32 `json:"inputs"`
-			Outputs map[string][]float64 `json:"outputs"`
-		} `json:"loop"`
+		Loop rows `json:"loop"`
+		Ops2 rows `json:"ops2"`
 	}
 	b, err := os.ReadFile(filepath.Join("testdata", "tensorflow_predictions.json"))
 	if err != nil {
@@ -228,24 +223,50 @@ func TestControlFlow(t *testing.T) {
 	if err := json.Unmarshal(b, &ref); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range ref.Loop {
-		var ins []Tensor
-		for _, p := range m.Inputs {
-			vs := row.Inputs[p.Name]
-			shape := []int{1, len(vs)}
-			if len(p.Shape) == 1 {
-				shape = []int{len(vs)}
-			}
-			ins = append(ins, Tensor{Type: Float32, Shape: shape, F: vs})
-		}
-		outs, err := m.Run(ins)
+	for model, want := range map[string]rows{"loop": ref.Loop, "ops2": ref.Ops2} {
+		data, err := os.ReadFile(filepath.Join("testdata", model+".tflite"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for k, p := range m.Outputs {
-			for i, w := range row.Outputs[p.Name] {
-				if g := float64(outs[k].f(i)); math.Abs(g-w) > 1e-5*math.Max(1, math.Abs(w)) {
-					t.Errorf("%v %s[%d] = %v, TensorFlow %v", row.Inputs, p.Name, i, g, w)
+		m, err := Load(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range want {
+			var ins []Tensor
+			for _, p := range m.Inputs {
+				vs := row.Inputs[p.Name]
+				shape := []int{1, len(vs)}
+				if len(p.Shape) == 1 {
+					shape = []int{len(vs)}
+				}
+				in := Tensor{Type: p.Type, Shape: shape}
+				for _, v := range vs {
+					if p.Type.IsInt() {
+						in.I = append(in.I, int64(v))
+					} else {
+						in.F = append(in.F, float32(v))
+					}
+				}
+				ins = append(ins, in)
+			}
+			outs, err := m.Run(ins)
+			if err != nil {
+				t.Fatalf("%s: %v", model, err)
+			}
+			for k, p := range m.Outputs {
+				w := row.Outputs[p.Name]
+				if outs[k].Len() != len(w) {
+					t.Fatalf("%s %s: %d values, TensorFlow %d", model, p.Name, outs[k].Len(), len(w))
+				}
+				for i, wv := range w {
+					g := float64(outs[k].f(i))
+					if outs[k].I != nil {
+						g = float64(outs[k].I[i])
+					}
+					if math.Abs(g-wv) > 1e-5*math.Max(1, math.Abs(wv)) {
+						t.Errorf("%s %v %s[%d] = %v, TensorFlow %v", model, row.Inputs, p.Name, i, g, wv)
+					}
 				}
 			}
 		}
@@ -262,5 +283,40 @@ func TestWhileBounded(t *testing.T) {
 	_, err := m.while(0, 1, []*Tensor{{Type: Float32, Shape: []int{1}, F: []float32{1}}}, 0)
 	if err == nil {
 		t.Fatal("an endless WHILE returned")
+	}
+}
+
+// The ops2.go operators the converter folded away in ops2.tflite, checked
+// against LiteRT's reference kernels' definitions (#1775).
+func TestOps2Direct(t *testing.T) {
+	m := &Model{}
+	f := func(shape []int, v ...float32) *Tensor { return &Tensor{Type: Float32, Shape: shape, F: v} }
+	i := func(shape []int, v ...int64) *Tensor { return &Tensor{Type: Int32, Shape: shape, I: v} }
+	run := func(code int32, a ...*Tensor) *Tensor {
+		t.Helper()
+		r, err := m.eval(op{code: code, name: opNames[code]}, a)
+		if err != nil {
+			t.Fatalf("%s: %v", opNames[code], err)
+		}
+		return r
+	}
+	if r := run(opHardSwish, f([]int{4}, -4, -1, 1, 4)); !reflect.DeepEqual(r.F, []float32{0, -1.0 / 3, 2.0 / 3, 4}) {
+		t.Errorf("HARD_SWISH %v", r.F)
+	}
+	if r := run(opPad, f([]int{1, 2}, 1, 2), i([]int{2, 2}, 0, 1, 1, 0)); !reflect.DeepEqual(r.Shape, []int{2, 3}) || !reflect.DeepEqual(r.F, []float32{0, 1, 2, 0, 0, 0}) {
+		t.Errorf("PAD %v %v", r.Shape, r.F)
+	}
+	if r := run(opShape, f([]int{2, 3})); !reflect.DeepEqual(r.I, []int64{2, 3}) {
+		t.Errorf("SHAPE %v", r.I)
+	}
+	if r := run(opFill, i([]int{2}, 2, 2), f([]int{}, 1.5)); !reflect.DeepEqual(r.F, []float32{1.5, 1.5, 1.5, 1.5}) {
+		t.Errorf("FILL %v", r.F)
+	}
+	if r := run(opZerosLike, f([]int{3}, 1, 2, 3)); !reflect.DeepEqual(r.F, []float32{0, 0, 0}) {
+		t.Errorf("ZEROS_LIKE %v", r.F)
+	}
+	outs, err := m.evalMulti(op{code: opSplitV, name: "SPLIT_V"}, []*Tensor{f([]int{1, 5}, 1, 2, 3, 4, 5), i([]int{2}, 2, -1), i([]int{}, 1)}, 2)
+	if err != nil || !reflect.DeepEqual(outs[0].F, []float32{1, 2}) || !reflect.DeepEqual(outs[1].F, []float32{3, 4, 5}) {
+		t.Errorf("SPLIT_V %v %v", outs, err)
 	}
 }

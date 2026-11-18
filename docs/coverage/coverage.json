@@ -9899,7 +9899,7 @@
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:189 TestBigQueryMLRemoteGenerateEmbedding",
           "test/compat/bigquerymlremote_test.go:88 TestBigQueryMLRemoteGenerateText",
-          "test/compat/bigquerymltensorflow_test.go:38 TestBigQueryMLImportedTensorFlowModel",
+          "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
@@ -9983,7 +9983,7 @@
           "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
-          "test/compat/bigquerymltensorflow_test.go:38 TestBigQueryMLImportedTensorFlowModel",
+          "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel"
         ]
@@ -10009,7 +10009,7 @@
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:88 TestBigQueryMLRemoteGenerateText",
-          "test/compat/bigquerymltensorflow_test.go:38 TestBigQueryMLImportedTensorFlowModel",
+          "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",

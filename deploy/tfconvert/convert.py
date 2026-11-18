@@ -49,8 +49,8 @@ def convert():
         msg = str(e).strip()
         lines = [l.strip() for l in msg.splitlines() if l.strip()]
         # The converter names the ops it has no builtin for on its
-        # "Custom ops: ..." and "Flex ops: ..." lines.
-        named = [l for l in lines if l.startswith("Custom ops:") or l.startswith("Flex ops:")]
+        # "Custom ops: ...", "Flex ops: ..." and "TF Select ops: ..." lines.
+        named = [l for l in lines if l.startswith(("Custom ops:", "Flex ops:", "TF Select ops:"))]
         if named or "ERROR_NEEDS_FLEX_OPS" in msg or "ERROR_NEEDS_CUSTOM_OPS" in msg or "nor a flex op" in msg:
             fail("flex", "some ops are not TensorFlow Lite builtins (" + "; ".join(named or ["see the converter's log"]) + ")")
         errs = [l for l in lines if "error:" in l] or lines[:3]

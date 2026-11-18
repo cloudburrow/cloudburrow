@@ -103,12 +103,13 @@ func TestDockerConverter(t *testing.T) {
 	var ref struct {
 		Rows rows `json:"rows"`
 		Loop rows `json:"loop"`
+		Ops2 rows `json:"ops2"`
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "tensorflow_predictions.json"))
 	if err := json.Unmarshal(b, &ref); err != nil {
 		t.Fatal(err)
 	}
-	for model, want := range map[string]rows{"mlp": ref.Rows, "loop": ref.Loop} {
+	for model, want := range map[string]rows{"mlp": ref.Rows, "loop": ref.Loop, "ops2": ref.Ops2} {
 		data, err := conv(model)
 		if err != nil {
 			t.Fatalf("convert %s: %v", model, err)

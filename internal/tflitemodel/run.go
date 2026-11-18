@@ -120,8 +120,14 @@ func (m *Model) runGraph(g *graph, vals []*Tensor, depth int) error {
 				args[j] = vals[i]
 			}
 		}
-		if o.code == opWhile || o.code == opIf {
-			outs, err := m.control(o, args, depth)
+		if o.code == opWhile || o.code == opIf || multiOutput(o.code) {
+			var outs []*Tensor
+			var err error
+			if multiOutput(o.code) {
+				outs, err = m.evalMulti(o, args, len(o.out)) // ops2.go
+			} else {
+				outs, err = m.control(o, args, depth)
+			}
 			if err != nil {
 				return err
 			}
@@ -601,7 +607,7 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 	case opStridedSlice:
 		return stridedSlice(o, x, axes(arg(1)), axes(arg(2)), axes(arg(3)))
 	}
-	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
+	return m.eval2(o, a) // ops2.go, #1775
 }
 
 // broadcastShape is numpy's broadcast of two shapes.
