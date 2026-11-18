@@ -124,7 +124,8 @@ func TestSpannerIAMConditions(t *testing.T) {
 // reference documents for an allow policy's role binding compiles in a
 // project's policy (resource tags, request.path and .host,
 // request.auth.access_levels, destination.ip and .port, api.getAttribute
-// with hasOnly, the compute.* functions), and principal.type and
+// with hasOnly and with a map default (#1748), the compute.* functions),
+// and principal.type and
 // principal.subject, which the reference documents for Principal Access
 // Boundary policies only, are INVALID_ARGUMENT.
 // covers: google.cloud.resourcemanager.v3.Projects/SetIamPolicy
@@ -151,6 +152,10 @@ func TestIAMConditionAttributes(t *testing.T) {
 		`destination.ip == "10.0.0.5" && destination.port < 3001`,
 		`api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', []).hasOnly(['roles/pubsub.editor', 'roles/pubsub.publisher'])`,
 		`!compute.isForwardingRuleCreationOperation() || (compute.isForwardingRuleCreationOperation() && compute.matchLoadBalancingSchemes(['INTERNAL', 'INTERNAL_MANAGED', 'INTERNAL_SELF_MANAGED']))`,
+		// #1748: the map default, as Google's Memory Bank page writes it.
+		`api.getAttribute('aiplatform.googleapis.com/memoryScope', {}) == {'userId': 'userA'}`,
+		`'user_id' in api.getAttribute('aiplatform.googleapis.com/memoryScope', {}) && api.getAttribute('aiplatform.googleapis.com/memoryScope', {})['user_id'] == 'userA'`,
+		`api.getAttribute('aiplatform.googleapis.com/memoryScope', {})['userId'] in ['userA', 'userB']`,
 	} {
 		if err := set(e); err != nil {
 			t.Errorf("%s: SetIamPolicy = %v", e, err)

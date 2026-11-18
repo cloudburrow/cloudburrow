@@ -154,3 +154,60 @@ func TestEvalRemainingAttributes(t *testing.T) {
 		t.Error("an undefined API attribute did not return its default")
 	}
 }
+
+// TestMapDefault is api.getAttribute with a map default (#1748): every
+// expression Google's "Control access to Memory Bank with IAM Conditions"
+// gives for aiplatform.googleapis.com/memoryScope.
+func TestMapDefault(t *testing.T) {
+	const scope = `api.getAttribute('aiplatform.googleapis.com/memoryScope', {})`
+	userA := Attributes{API: map[string]any{"aiplatform.googleapis.com/memoryScope": map[string]string{"userId": "userA"}}}
+	other := Attributes{API: map[string]any{"aiplatform.googleapis.com/memoryScope": map[string]string{"user_id": "userA", "admin_override": "1"}}}
+	none := Attributes{}
+	for _, c := range []struct {
+		src               string
+		userA, other, nil bool
+	}{
+		{scope + ` == {'userId': 'userA'}`, true, false, false},
+		{scope + ` != {'userId': 'userA'}`, false, true, true},
+		{scope + `['userId'] == 'userA'`, true, false, false},
+		{`('admin_override' in ` + scope + `) || ('public_access_flag' in ` + scope + `)`, false, true, false},
+		{scope + `['userId'].startsWith('user')`, true, false, false},
+		{scope + `['userId'] in ['userA', 'userB']`, true, false, false},
+		{`'user_id' in ` + scope + ` && ` + scope + `['user_id'] == 'userA'`, false, true, false},
+		{scope + `['user_id'] == 'userA'`, false, true, false},
+		{scope + ` == {}`, false, false, true},
+		{`{'a': 1, 'b': 2}['b'] == 2`, true, true, true},
+		{`{'a': 1}['b'] == 2 || true`, true, true, true},
+		{`['x', 'y'][1] == 'y'`, true, true, true},
+		{`api.getAttribute('aiplatform.googleapis.com/sessionUserId', '') == ''`, true, true, true},
+	} {
+		e, err := Compile(c.src)
+		if err != nil {
+			t.Errorf("Compile(%s): %v", c.src, err)
+			continue
+		}
+		for _, w := range []struct {
+			a    Attributes
+			want bool
+		}{{userA, c.userA}, {other, c.other}, {none, c.nil}} {
+			if got := e.Eval(w.a); got != w.want {
+				t.Errorf("Eval(%s) on %v = %v, want %v", c.src, w.a.API, got, w.want)
+			}
+		}
+	}
+	for src, want := range map[string]string{
+		`api.getAttribute('aiplatform.googleapis.com/memoryScope', '') == ''`:        "the attribute is a map(string, string)",
+		`api.getAttribute('aiplatform.googleapis.com/memoryScope', {})[1] == 'a'`:    "no matching overload",
+		`api.getAttribute('aiplatform.googleapis.com/memoryScope', {})['a'] == 1`:    "no matching overload",
+		`api.getAttribute('aiplatform.googleapis.com/sessionUserId', {}) == {}`:      "the attribute is a string",
+		`api.getAttribute('aiplatform.googleapis.com/memoryScope', {}) == {'a' 'b'}`: "expected \":\"",
+		`{'a': 'b'}`:              "must be a boolean",
+		`{'a': 'b'} == {'a': 1}`:  "no matching overload",
+		`resource.name['a'] == 1`: "no matching overload",
+	} {
+		_, err := Compile(src)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Compile(%q) = %v, want an error containing %q", src, err, want)
+		}
+	}
+}

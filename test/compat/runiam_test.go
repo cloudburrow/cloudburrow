@@ -81,7 +81,8 @@ func checkRunIamPolicy(t *testing.T, ctx context.Context, name, missing string,
 // TestRunServiceIamPolicyIsStoredNotEnforced (#1216): through the official
 // ServicesClient. The service's own etag is unchanged by a policy change, so
 // a caller's next UpdateService is not ABORTED by it, and a service deleted
-// and created again under the same name starts with no policy.
+// and created again under the same name starts with no policy; it then
+// takes a conditional binding (#1748).
 func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
 	c := runClient(t, h)
@@ -128,6 +129,9 @@ func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 	if p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name}); err != nil || len(p.GetBindings()) != 0 {
 		t.Errorf("a recreated service's policy = %v, %v; want none", p, err)
 	}
+	// #1748: Cloud Run is among the services Google lists as allowing
+	// conditions, with the version 3 rules.
+	conditionalPolicy(t, ctx, "service", c, name, "roles/run.invoker", `request.time < timestamp("2099-01-01T00:00:00Z")`)
 }
 
 // covers: google.cloud.run.v2.Jobs/GetIamPolicy, google.cloud.run.v2.Jobs/SetIamPolicy, google.cloud.run.v2.Jobs/TestIamPermissions

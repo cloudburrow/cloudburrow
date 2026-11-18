@@ -26,8 +26,14 @@
 //     Cloud Run), request.auth.access_levels (a list of strings: IAP),
 //     destination.ip (a string) and destination.port (an integer: IAP TCP
 //     forwarding);
-//   - api.getAttribute(name, default), whose type is its default's, and a
-//     list's hasOnly(list);
+//   - api.getAttribute(name, default), whose type is its default's (for
+//     an attribute the page lists, the attribute's type, which the default
+//     must match), and a list's hasOnly(list);
+//   - maps (#1748), for aiplatform.googleapis.com/memoryScope, a
+//     map<string, string> whose default is {}: map literals, == and !=
+//     between maps, `key in map`, and map[key] (an absent key is an error,
+//     so that part grants nothing), as Google's "Control access to Memory
+//     Bank with IAM Conditions" writes them;
 //   - compute.isForwardingRuleCreationOperation() and
 //     compute.matchLoadBalancingSchemes(list);
 //   - string, integer and boolean literals, parentheses, and `in` against
@@ -86,7 +92,8 @@ type Attributes struct {
 	DestinationPort int64
 
 	// API are the request's API attributes (api.getAttribute): a list of
-	// strings is a []string; a key absent here returns the default.
+	// strings is a []string, a map of strings (memoryScope) a
+	// map[string]string; a key absent here returns the default.
 	API map[string]any
 
 	// ForwardingRule is set on a Compute Engine request: whether it
@@ -174,7 +181,45 @@ const (
 	tyTimestamp ty = "google.protobuf.Timestamp"
 	tyDuration  ty = "google.protobuf.Duration"
 	tyList      ty = "list"
+	// tyDyn is a value whose type is known only when evaluated: an
+	// element of a map literal's default ({}).
+	tyDyn ty = "dyn"
 )
+
+// mapOf is the type of a map with keys k and values v; isMap and
+// mapValue read it back.
+func mapOf(k, v ty) ty { return ty("map(" + string(k) + ", " + string(v) + ")") }
+
+func isMap(t ty) bool { return strings.HasPrefix(string(t), "map(") }
+
+func mapValue(t ty) ty {
+	s := strings.TrimSuffix(strings.TrimPrefix(string(t), "map("), ")")
+	if _, v, ok := strings.Cut(s, ", "); ok {
+		return ty(v)
+	}
+	return tyDyn
+}
+
+func mapKey(t ty) ty {
+	s := strings.TrimPrefix(string(t), "map(")
+	if k, _, ok := strings.Cut(s, ", "); ok {
+		return ty(k)
+	}
+	return tyDyn
+}
+
+// assignable is whether a value of type a can stand where b is expected:
+// equal types, or either is dyn, or two maps whose key and value types
+// are each assignable.
+func assignable(a, b ty) bool {
+	switch {
+	case a == b, a == tyDyn, b == tyDyn:
+		return true
+	case isMap(a) && isMap(b):
+		return assignable(mapKey(a), mapKey(b)) && assignable(mapValue(a), mapValue(b))
+	}
+	return false
+}
 
 // ---- lexer ----
 
@@ -260,7 +305,7 @@ func (p *parser) lex() error {
 			i = j
 		default:
 			op := ""
-			for _, o := range []string{"&&", "||", "==", "!=", "<=", ">=", "<", ">", "!", "(", ")", ".", ",", "[", "]", "+", "-"} {
+			for _, o := range []string{"&&", "||", "==", "!=", "<=", ">=", "<", ">", "!", "(", ")", ".", ",", "[", "]", "{", "}", ":", "+", "-"} {
 				if strings.HasPrefix(s[i:], o) {
 					op = o
 					break
@@ -402,7 +447,19 @@ func (p *parser) parsePostfix() (node, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.isOp(".") {
+	for p.isOp(".") || p.isOp("[") {
+		if p.isOp("[") {
+			t := p.next()
+			k, err := p.parseOr()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expect("]"); err != nil {
+				return nil, err
+			}
+			x = &index{x: x, key: k, pos: t.pos}
+			continue
+		}
 		p.i++
 		t := p.next()
 		if t.kind != tIdent {
@@ -491,6 +548,36 @@ func (p *parser) parsePrimary() (node, error) {
 					continue
 				}
 				return &list{elems: elems}, p.expect("]")
+			}
+		case "{":
+			m := &mapLit{pos: t.pos}
+			if p.isOp("}") {
+				p.i++
+				return m, nil
+			}
+			for {
+				k, err := p.parseOr()
+				if err != nil {
+					return nil, err
+				}
+				if err := p.expect(":"); err != nil {
+					return nil, err
+				}
+				v, err := p.parseOr()
+				if err != nil {
+					return nil, err
+				}
+				m.keys = append(m.keys, k)
+				m.vals = append(m.vals, v)
+				if p.isOp(",") {
+					p.i++
+					if p.isOp("}") { // a trailing comma, as CEL allows
+						p.i++
+						return m, nil
+					}
+					continue
+				}
+				return m, p.expect("}")
 			}
 		}
 	}

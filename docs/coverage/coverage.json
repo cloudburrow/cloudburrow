@@ -401,7 +401,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
-          "test/compat/iamconditions1745_test.go:189 TestConsoleIAMConditionsOnServicePolicies",
+          "test/compat/iamconditions1745_test.go:194 TestConsoleIAMConditionsOnServicePolicies",
           "test/compat/iamconditions1745_test.go:80 TestIAMConditionsOnServicePolicies",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
@@ -563,7 +563,7 @@
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:140 TestRunJobIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:144 TestRunJobIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -607,7 +607,7 @@
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:140 TestRunJobIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:144 TestRunJobIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -615,7 +615,7 @@
         "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:140 TestRunJobIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:144 TestRunJobIamPolicyIsStoredNotEnforced"
         ]
       },
       {
@@ -697,7 +697,7 @@
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:85 TestRunServiceIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -735,7 +735,7 @@
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:85 TestRunServiceIamPolicyIsStoredNotEnforced",
+          "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:325 TestTerraformRunIAM"
         ]
       },
@@ -743,7 +743,7 @@
         "method": "google.cloud.run.v2.Services/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:85 TestRunServiceIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced"
         ]
       },
       {
@@ -3971,7 +3971,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iamconditions1745_test.go:131 TestIAMConditionAttributes",
+          "test/compat/iamconditions1745_test.go:132 TestIAMConditionAttributes",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
@@ -5235,6 +5235,7 @@
           "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/iamconditions1748_test.go:162 TestMemorystoreIAMConditions",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
@@ -6752,7 +6753,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
-          "test/compat/iamconditions1745_test.go:189 TestConsoleIAMConditionsOnServicePolicies",
+          "test/compat/iamconditions1745_test.go:194 TestConsoleIAMConditionsOnServicePolicies",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:63 TestStorageBucketIAMStaleEtag",
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
@@ -8259,6 +8260,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/terraform_batch11_test.go:198 TestTerraformBigtableSchemaBundle",
           "test/compat/terraform_bigtable_rest_test.go:29 TestTerraformBigtableAppProfileAndIAM"
         ]
@@ -8367,6 +8369,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/terraform_bigtable_rest_test.go:29 TestTerraformBigtableAppProfileAndIAM"
         ]
       },
@@ -8549,6 +8552,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState",
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/storediam_test.go:220 TestBigtableTableIAM",
           "test/compat/storediam_test.go:244 TestTerraformBigtableTableIAM",
           "test/compat/storediam_test.go:294 TestGcloudBigtableTableIAM",
@@ -8641,6 +8645,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/SetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/storediam_test.go:220 TestBigtableTableIAM",
           "test/compat/storediam_test.go:244 TestTerraformBigtableTableIAM",
           "test/compat/storediam_test.go:294 TestGcloudBigtableTableIAM",
@@ -10355,6 +10360,7 @@
         "tests": [
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
+          "test/compat/iamconditions1748_test.go:77 TestBigQueryTableIAMConditions",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -10435,6 +10441,7 @@
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
+          "test/compat/iamconditions1748_test.go:77 TestBigQueryTableIAMConditions",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },

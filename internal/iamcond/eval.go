@@ -147,6 +147,118 @@ func (n *list) eval(a *Attributes) (any, error) {
 	return out, nil
 }
 
+// mapLit is a map literal: {} or {'userId': 'userA'}. Its type is
+// map(K, V) when its keys and values each have one type, with dyn for an
+// empty map or mixed types.
+type mapLit struct {
+	keys, vals []node
+	pos        int
+}
+
+func (n *mapLit) check() (ty, error) {
+	kt, vt := ty(""), ty("")
+	for i := range n.keys {
+		k, err := n.keys[i].check()
+		if err != nil {
+			return "", err
+		}
+		if k != tyString && k != tyInt && k != tyBool && k != tyDyn {
+			return "", fmt.Errorf("unsupported map key type %s (column %d)", k, n.pos+1)
+		}
+		v, err := n.vals[i].check()
+		if err != nil {
+			return "", err
+		}
+		kt, vt = unify(kt, k), unify(vt, v)
+	}
+	if kt == "" {
+		kt, vt = tyDyn, tyDyn
+	}
+	return mapOf(kt, vt), nil
+}
+
+// unify is the type of a literal's elements so far: their one type, or
+// dyn once two differ.
+func unify(acc, t ty) ty {
+	switch acc {
+	case "", t:
+		return t
+	}
+	return tyDyn
+}
+
+func (n *mapLit) eval(a *Attributes) (any, error) {
+	out := make(map[any]any, len(n.keys))
+	for i := range n.keys {
+		k, err := n.keys[i].eval(a)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := out[k]; dup {
+			return nil, fmt.Errorf("map literal has a repeated key %v", k)
+		}
+		v, err := n.vals[i].eval(a)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// index is m[key] on a map (an absent key is an error, as in CEL: the
+// part grants nothing) or l[i] on a list.
+type index struct {
+	x, key node
+	pos    int
+}
+
+func (n *index) check() (ty, error) {
+	xt, err := n.x.check()
+	if err != nil {
+		return "", err
+	}
+	kt, err := n.key.check()
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case isMap(xt) && assignable(kt, mapKey(xt)):
+		return mapValue(xt), nil
+	case xt == tyList && assignable(kt, tyInt):
+		return tyDyn, nil
+	case xt == tyDyn:
+		return tyDyn, nil
+	}
+	return "", fmt.Errorf("found no matching overload for '_[_]' applied to (%s, %s) (column %d)", xt, kt, n.pos+1)
+}
+
+func (n *index) eval(a *Attributes) (any, error) {
+	x, err := n.x.eval(a)
+	if err != nil {
+		return nil, err
+	}
+	k, err := n.key.eval(a)
+	if err != nil {
+		return nil, err
+	}
+	switch xv := x.(type) {
+	case map[any]any:
+		v, ok := xv[k]
+		if !ok {
+			return nil, fmt.Errorf("no such key: %v", k)
+		}
+		return v, nil
+	case []any:
+		i, ok := k.(int64)
+		if !ok || i < 0 || i >= int64(len(xv)) {
+			return nil, fmt.Errorf("index %v out of range", k)
+		}
+		return xv[i], nil
+	}
+	return nil, fmt.Errorf("no such overload: _[_] on %T", x)
+}
+
 type not struct{ x node }
 
 func (n *not) check() (ty, error) {
@@ -225,17 +337,20 @@ func (n *binary) check() (ty, error) {
 	bad := fmt.Errorf("found no matching overload for '_%s_' applied to (%s, %s) (column %d)", n.op, lt, rt, n.pos+1)
 	switch n.op {
 	case "==", "!=":
-		if lt != rt || lt == tyList {
+		if !assignable(lt, rt) || lt == tyList {
 			return "", bad
 		}
 		return tyBool, nil
 	case "<", "<=", ">", ">=":
+		if lt == tyDyn || rt == tyDyn {
+			return tyBool, nil
+		}
 		if lt != rt || (lt != tyInt && lt != tyString && lt != tyTimestamp && lt != tyDuration) {
 			return "", bad
 		}
 		return tyBool, nil
 	case "in":
-		if rt != tyList {
+		if rt != tyList && rt != tyDyn && !(isMap(rt) && assignable(lt, mapKey(rt))) {
 			return "", bad
 		}
 		return tyBool, nil
@@ -280,13 +395,23 @@ func (n *binary) eval(a *Attributes) (any, error) {
 	case "!=":
 		return !equal(l, r), nil
 	case "in":
-		for _, e := range r.([]any) {
-			if equal(l, e) {
-				return true, nil
+		switch rv := r.(type) {
+		case map[any]any:
+			_, ok := rv[l]
+			return ok, nil
+		case []any:
+			for _, e := range rv {
+				if equal(l, e) {
+					return true, nil
+				}
 			}
+			return false, nil
 		}
-		return false, nil
+		return nil, fmt.Errorf("no such overload: in on %T", r)
 	case "<", "<=", ">", ">=":
+		if !sameKind(l, r) {
+			return nil, fmt.Errorf("no such overload: %T %s %T", l, n.op, r)
+		}
 		c := compare(l, r)
 		switch n.op {
 		case "<":
@@ -328,12 +453,45 @@ func (n *binary) eval(a *Attributes) (any, error) {
 }
 
 func equal(l, r any) bool {
-	if lt, ok := l.(time.Time); ok {
+	switch lv := l.(type) {
+	case time.Time:
 		rt, ok := r.(time.Time)
-		return ok && lt.Equal(rt)
+		return ok && lv.Equal(rt)
+	case map[any]any:
+		rm, ok := r.(map[any]any)
+		if !ok || len(lv) != len(rm) {
+			return false
+		}
+		for k, v := range lv {
+			w, ok := rm[k]
+			if !ok || !equal(v, w) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		rl, ok := r.([]any)
+		if !ok || len(lv) != len(rl) {
+			return false
+		}
+		for i := range lv {
+			if !equal(lv[i], rl[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	if _, ok := r.(map[any]any); ok {
+		return false
+	}
+	if _, ok := r.([]any); ok {
+		return false
 	}
 	return l == r
 }
+
+// sameKind is whether two values a dyn comparison meets have one type.
+func sameKind(l, r any) bool { return fmt.Sprintf("%T", l) == fmt.Sprintf("%T", r) }
 
 func compare(l, r any) int {
 	switch lv := l.(type) {
@@ -424,8 +582,15 @@ func (n *call) checkNamespace(ns string, ats []ty, sig func() error) (ty, error)
 		if len(ats) != 2 || ats[0] != tyString {
 			return "", sig()
 		}
-		if l, ok := n.args[1].(*list); ok && len(l.elems) != 0 && n.argString(0) == "iam.googleapis.com/modifiedGrantsByRole" {
+		name := n.argString(0)
+		if l, ok := n.args[1].(*list); ok && len(l.elems) != 0 && name == "iam.googleapis.com/modifiedGrantsByRole" {
 			return "", fmt.Errorf("api.getAttribute('iam.googleapis.com/modifiedGrantsByRole', ...)'s default must be [] (column %d)", n.pos+1)
+		}
+		if t, ok := apiAttrTypes[name]; ok {
+			if !assignable(ats[1], t) {
+				return "", fmt.Errorf("api.getAttribute('%s', ...)'s default is a %s; the attribute is a %s (column %d)", name, ats[1], t, n.pos+1)
+			}
+			return t, nil
 		}
 		return ats[1], nil
 	case "compute.isForwardingRuleCreationOperation":
@@ -440,6 +605,18 @@ func (n *call) checkNamespace(ns string, ats []ty, sig func() error) (ty, error)
 		return tyBool, nil
 	}
 	return "", fmt.Errorf("undeclared reference to '%s' (column %d)", ns, n.pos+1)
+}
+
+// apiAttrTypes are the API attributes Google's attribute reference lists,
+// with their types: the page's api.getAttribute requires a default of
+// the attribute's type.
+var apiAttrTypes = map[string]ty{
+	"storage.googleapis.com/objectListPrefix": tyString,
+	"iam.googleapis.com/modifiedGrantsByRole": tyList,
+	"mcp.googleapis.com/tool.name":            tyString,
+	"mcp.googleapis.com/tool.isReadOnly":      tyBool,
+	"aiplatform.googleapis.com/memoryScope":   mapOf(tyString, tyString),
+	"aiplatform.googleapis.com/sessionUserId": tyString,
 }
 
 // argString is the i'th argument when it is a string literal.
@@ -496,12 +673,12 @@ func (n *call) check() (ty, error) {
 		}
 		return tyDuration, nil
 	case n.recv != nil && (n.fn == "startsWith" || n.fn == "endsWith"):
-		if rt != tyString || !one(tyString) {
+		if !assignable(rt, tyString) || !one(tyString) {
 			return "", sig()
 		}
 		return tyBool, nil
 	case n.recv != nil && n.fn == "extract":
-		if rt != tyString || !one(tyString) {
+		if !assignable(rt, tyString) || !one(tyString) {
 			return "", sig()
 		}
 		if lit, ok := n.args[0].(*lit); ok {
@@ -511,7 +688,7 @@ func (n *call) check() (ty, error) {
 		}
 		return tyString, nil
 	case n.recv != nil && n.fn == "hasOnly":
-		if rt != tyList || !one(tyList) {
+		if !assignable(rt, tyList) || !one(tyList) {
 			return "", sig()
 		}
 		return tyBool, nil
@@ -690,8 +867,15 @@ func (n *call) evalNamespace(ns string, a *Attributes) (any, error) {
 		if !ok {
 			return args[1], nil
 		}
-		if l, ok := v.([]string); ok {
-			return strList(l), nil
+		switch x := v.(type) {
+		case []string:
+			return strList(x), nil
+		case map[string]string:
+			m := make(map[any]any, len(x))
+			for k, s := range x {
+				m[k] = s
+			}
+			return m, nil
 		}
 		return v, nil
 	case "compute.isForwardingRuleCreationOperation":
