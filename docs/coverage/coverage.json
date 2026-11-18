@@ -10461,56 +10461,56 @@
         "method": "bigqueryconnection.projects.locations.connections.create",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       },
       {
         "method": "bigqueryconnection.projects.locations.connections.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryconnection_test.go:32 TestBigQueryConnectionAPI"
+          "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI"
         ]
       }
     ]

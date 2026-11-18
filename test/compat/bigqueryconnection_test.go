@@ -16,6 +16,10 @@ import (
 	"github.com/googleapis/gax-go/v2/apierror"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -46,15 +50,55 @@ func TestBigQueryConnectionAPI(t *testing.T) {
 		t.Fatalf("connection.NewRESTClient: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	parent := "projects/" + project + "/locations/us"
-	id := strings.ReplaceAll(h.Project(), "-", "_")
-	code := func(err error) int {
+	connectionAPIRun(t, h, c, project, strings.ReplaceAll(h.Project(), "-", "_"), func(err error) int {
 		var ae *apierror.APIError
 		if errors.As(err, &ae) {
 			return ae.HTTPCode()
 		}
 		return 0
+	})
+}
+
+// TestBigQueryConnectionAPIGRPC (#1766): the same calls as
+// TestBigQueryConnectionAPI through the official client's gRPC transport
+// (connection.NewClient), served on the BigQuery front's gRPC port (the
+// Storage Read API's), with the canonical codes: ALREADY_EXISTS for a
+// second create, INVALID_ARGUMENT for an update without a mask, NOT_FOUND
+// after delete.
+func TestBigQueryConnectionAPIGRPC(t *testing.T) {
+	h := New(t)
+	endpoint := h.Endpoint(EnvBigQueryStorage)
+	project := strings.TrimSpace(os.Getenv(EnvBigQueryProject))
+	if project == "" {
+		t.Skipf("%s is not set", EnvBigQueryProject)
 	}
+	ctx := h.Context()
+	c, err := connection.NewClient(ctx, option.WithEndpoint(endpoint), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatalf("connection.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	connectionAPIRun(t, h, c, project, strings.ReplaceAll(h.Project(), "-", "_")+"_g", func(err error) int {
+		switch status.Code(err) {
+		case codes.OK:
+			return 0
+		case codes.InvalidArgument:
+			return http.StatusBadRequest
+		case codes.NotFound:
+			return http.StatusNotFound
+		case codes.AlreadyExists:
+			return http.StatusConflict
+		}
+		return -1
+	})
+}
+
+// connectionAPIRun runs the Connection API's calls through c; code is an
+// error's HTTP code (a gRPC one mapped to it).
+func connectionAPIRun(t *testing.T, h *Harness, c *connection.Client, project, id string, code func(error) int) {
+	ctx := h.Context()
+	parent := "projects/" + project + "/locations/us"
 
 	cr, err := c.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: parent, ConnectionId: id + "_ai",
 		Connection: &connectionpb.Connection{FriendlyName: "ai", Description: "remote models",
