@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 	"github.com/cloudburrow/cloudburrow/internal/storageimage"
 	"github.com/cloudburrow/cloudburrow/internal/terminal"
+	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
 )
 
 // offlinePlan is what `up` with this configuration downloads (#604): the
@@ -93,9 +94,13 @@ func daemonArch(ctx context.Context, r prefetch.Runner) string {
 // runPrefetch implements `cloudburrow prefetch`: it stores in the state
 // directory everything `up` with the same flags would download.
 func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	args, tensorflow := takeFlag(args, "tensorflow-converter")
 	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
 	if err != nil {
 		return err
+	}
+	if tensorflow && !tfConverterEnabled(cfg) {
+		return errors.New("--tensorflow-converter: the TensorFlow converter serves BigQuery ML, which this configuration does not enable")
 	}
 	r := prefetch.ExecRunner{}
 	plan := offlinePlan(ctx, cfg, r)
@@ -126,7 +131,41 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	printStored(stdout, stored)
+	if tensorflow {
+		// Asked for only: the converter image is 2.3 GB, which `up`
+		// otherwise builds on the first CREATE MODEL … TENSORFLOW
+		// (#1775). Built into the host's Docker, where the converter runs
+		// it, not into the cache.
+		engine := tfConverterEngine(stdout)
+		bctx, cancel := context.WithTimeout(ctx, tfconvert.BuildTimeout)
+		defer cancel()
+		if err := engine.Build(bctx); err != nil {
+			return fmt.Errorf("the TensorFlow converter image: %w", err)
+		}
+		fmt.Fprintf(stdout, "TensorFlow converter image %s is in Docker; BigQuery ML's TENSORFLOW imports need no network.\n", engine.Image)
+	}
 	return nil
+}
+
+// takeFlag removes a boolean flag (-name, --name, -name=true or
+// --name=false) from args, which config.Load would refuse, and reports
+// whether it was set.
+func takeFlag(args []string, name string) ([]string, bool) {
+	var out []string
+	set := false
+	for i, a := range args {
+		if a == "--" {
+			out = append(out, args[i:]...)
+			break
+		}
+		f := strings.TrimLeft(a, "-")
+		if !strings.HasPrefix(a, "-") || (f != name && !strings.HasPrefix(f, name+"=")) {
+			out = append(out, a)
+			continue
+		}
+		set = f == name || f == name+"=true"
+	}
+	return out, set
 }
 
 // throwawayNode starts a kind cluster of its own, under a name no instance

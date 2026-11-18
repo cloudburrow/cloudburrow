@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -1796,6 +1797,14 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	case d.opts.ModelType == "TENSORFLOW":
 		// An imported TensorFlow SavedModel, converted to TensorFlow Lite
 		// on the CLI's converter (modeltensorflow.go, #1775).
+		//
+		// On BigQuery CREATE MODEL is a job, which runs to its end
+		// whatever its client does. The first import here can take as
+		// long as the converter image's build (a minute or more), so the
+		// import, and the job record written after it, no longer end with
+		// the request: a client that gives up still gets the model, and
+		// the job its jobs.insert named, when it looks again.
+		r = r.WithContext(context.WithoutCancel(r.Context()))
 		imp, data, c, m := f.importTensorFlow(r, d)
 		if c != 0 {
 			fail(c, m)

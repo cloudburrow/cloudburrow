@@ -563,6 +563,13 @@ all of it in the state directory, and `up --offline` then needs none of those ho
 
 Without `--offline`, `up` still prefers what is cached and downloads only what is not.
 
+BigQuery ML's imported TensorFlow models (`CREATE MODEL ... OPTIONS (MODEL_TYPE='TENSORFLOW')`)
+are converted by an image of Google's TensorFlow (2.3 GB). The first such `CREATE MODEL` builds it
+into the host's Docker, which needs the network, so the first import can take as long as the
+build (a minute or more). `prefetch` builds it only when asked, with `--tensorflow-converter`, on
+the machine that will run the instance: the image stays in that machine's Docker and is not copied
+with the cache.
+
 What `prefetch` stores in `<state dir>/cache`, and how:
 
 - **Images `up` gives Docker** — the kind node image, the builtin Cloud Storage server's image,

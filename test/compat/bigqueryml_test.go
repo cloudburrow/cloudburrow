@@ -3,12 +3,14 @@
 package compat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/googleapi"
@@ -72,6 +74,31 @@ func mlRun(h *Harness, c *bigquery.Client, sql string) error {
 		return err
 	}
 	st, err := job.Wait(h.Context())
+	if err != nil {
+		return err
+	}
+	return st.Err()
+}
+
+// tensorflowImportDeadline is how long a test waits for the first CREATE
+// MODEL ... MODEL_TYPE='TENSORFLOW' of an instance, which builds the
+// converter image (deploy/tfconvert: the python base and pip's TensorFlow,
+// 2.3 GB) before it converts. A cold build took 57 s on a workstation with
+// the base cached, and longer on a 4-CPU CI runner, past the harness's
+// 60 s (main run 44357900271). BigQuery's CREATE MODEL is a job, which may
+// take minutes; ten covers a cold build on such a runner with room to spare.
+// A conversion once the image is there takes about 1.5 s.
+const tensorflowImportDeadline = 10 * time.Minute
+
+// mlRunWithin is mlRun with its own deadline for the query and the wait.
+func mlRunWithin(h *Harness, c *bigquery.Client, sql string, d time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	job, err := c.Query(sql).Run(ctx)
+	if err != nil {
+		return err
+	}
+	st, err := job.Wait(ctx)
 	if err != nil {
 		return err
 	}

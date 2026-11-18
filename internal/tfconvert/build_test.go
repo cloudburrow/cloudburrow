@@ -52,20 +52,20 @@ func TestDockerBuildOutlivesTheRequestThatStartedIt(t *testing.T) {
 	}
 }
 
-// Warm starts the build without waiting for it.
-func TestDockerWarmDoesNotWait(t *testing.T) {
+// Build (prefetch's) waits for the image a build makes.
+func TestDockerBuildWaits(t *testing.T) {
 	dir := t.TempDir()
+	built := filepath.Join(dir, "built")
 	bin := filepath.Join(dir, "docker")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncase \"$1\" in image) exit 1 ;; build) cat >/dev/null; sleep 1 ;; esac\n"), 0o755); err != nil {
+	script := "#!/bin/sh\ncase \"$1\" in image) [ -f '" + built + "' ] ;; build) cat >/dev/null; sleep 1; : > '" + built + "' ;; esac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	d := &Docker{Image: "cb/tf:test", Docker: bin, Context: func() (io.Reader, error) { return bytes.NewReader(nil), nil }}
-	began := time.Now()
-	d.Warm()
-	if time.Since(began) > 500*time.Millisecond {
-		t.Fatalf("Warm waited %s", time.Since(began))
-	}
-	if err := d.ensure(context.Background()); err != nil {
+	if err := d.Build(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(built); err != nil {
+		t.Fatalf("Build returned before the image was built: %v", err)
 	}
 }

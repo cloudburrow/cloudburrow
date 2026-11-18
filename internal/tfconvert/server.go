@@ -159,10 +159,10 @@ func (d *Docker) logf(format string, args ...any) {
 	}
 }
 
-// Warm starts building the image in the background when it is missing,
-// so the first CREATE MODEL does not wait for it (`up` calls it as the
-// converter starts).
-func (d *Docker) Warm() { d.start() }
+// Build builds the image when it is missing and waits for it, as long as
+// ctx allows (`cloudburrow prefetch --tensorflow-converter`, for an
+// instance that will run offline).
+func (d *Docker) Build(ctx context.Context) error { return d.ensure(ctx) }
 
 // start returns the build under way, starting one when the image is
 // neither built nor being built, or nil once the image is there.
@@ -188,13 +188,15 @@ func (d *Docker) start() *imageBuild {
 
 // ensure waits, at most as long as ctx allows, for the image.
 //
-// The build itself runs under its own BuildTimeout, never ctx: a cold
-// build takes a minute or more (57 s on a warm-cached workstation, longer on
-// a 4-CPU CI runner), and killing it with the request that started it
-// meant a client with a shorter deadline restarted it from scratch on
-// every attempt and never got a model (main run 44357900271: both
-// TENSORFLOW tests' CREATE MODEL hit the harness's 60 s deadline). A
-// caller that gives up leaves the build running for the next one.
+// The image is built on the first CREATE MODEL … TENSORFLOW, never by
+// `up`: it is 2.3 GB, which an instance that imports no TensorFlow model
+// should not pay. The build itself runs under its own BuildTimeout, never
+// ctx: a cold build takes a minute or more (57 s on a workstation with the
+// base cached, longer on a 4-CPU CI runner), and killing it with the
+// request that started it meant a client with a shorter deadline restarted
+// it from scratch on every attempt and never got a model (main run
+// 44357900271: both TENSORFLOW tests' CREATE MODEL hit the harness's 60 s
+// deadline). A caller that gives up leaves the build running for the next.
 func (d *Docker) ensure(ctx context.Context) error {
 	b := d.start()
 	if b == nil {

@@ -45,8 +45,10 @@ A fix release for v0.2.0, with one new BigQuery function. The generated coverage
 - **`CREATE MODEL ... OPTIONS (MODEL_TYPE='TENSORFLOW')` no longer times out on first use.** The
   TensorFlow converter's image was built by the first `CREATE MODEL` and killed with it when the
   client's deadline passed, so a client that waits less than a cold build (a minute or more) never
-  imported a model. `up` now builds the image once in the background, and a build is never
-  cancelled by the request waiting for it (#1775).
+  imported a model. The build now runs once, under its own 30-minute limit, and is never cancelled
+  by a request waiting for it; nor is the `CREATE MODEL` job, which still finishes when its client
+  gives up. `cloudburrow prefetch --tensorflow-converter` builds the 2.3 GB image ahead of time,
+  for instances that will run offline (#1775).
 
 #### CLI
 
