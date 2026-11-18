@@ -47,6 +47,10 @@ import (
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.insert, bigquery.tables.get, bigquery.tables.list
 func TestBigQueryObjectTables(t *testing.T) {
 	h := New(t)
+	// Cloud Storage under the emulators shard's own name for it, as
+	// TestBigQueryMLImportedXGBoostModel (#1761), so the Cloud Storage suite
+	// stays in the storage shard and this test runs in emulators.
+	shardEndpoint(h, "CLOUDBURROW_TEST_BQML_STORAGE", EnvStorage)
 	c, project := bigqueryClient(t, h)
 	cc, _ := remoteConnectionClient(t, h)
 	sc := storageClient(t, h)
