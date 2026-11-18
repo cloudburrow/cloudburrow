@@ -100,13 +100,20 @@ type PolicyTarget struct {
 	// Conditions is whether the service stores IAM Conditions, so Grant
 	// access offers one and a row's condition can be edited (#1742).
 	Conditions bool `json:"conditions,omitempty"`
+	// Enforced, when set, replaces PermissionsNote for a resource whose
+	// policy the instance does check, in part (#1770: a BigQuery
+	// connection's bigquery.connections.use, ADR-0006 as amended by
+	// #1765). It must say which permission is checked and which identity
+	// the caller is taken to be; PermissionsNote would read as "nothing is
+	// enforced" there, which is wrong.
+	Enforced string `json:"-"`
 }
 
 // PermissionsView is a KindPermissions section's content.
 type PermissionsView struct {
 	Policy
 	PolicyTarget
-	// Note is PermissionsNote, always.
+	// Note is PermissionsNote, or the target's Enforced note.
 	Note string `json:"note"`
 	// Resource is the full resource name of the policy, such as
 	// //cloudresourcemanager.googleapis.com/folders/123, which the condition
@@ -146,6 +153,9 @@ type PolicyEditor interface {
 func permissionsSection(ctx context.Context, pe PolicyEditor, project string, path []string, target *PolicyTarget) Section {
 	sec := Section{ID: "permissions", Label: "Permissions", Kind: KindPermissions}
 	view := &PermissionsView{PolicyTarget: *target, Note: PermissionsNote}
+	if target.Enforced != "" {
+		view.Note = target.Enforced
+	}
 	if view.PrincipalHelp == "" {
 		view.PrincipalHelp = DefaultPrincipalHelp
 	}
