@@ -142,3 +142,34 @@ func (s viewIAMServer) TestIamPermissions(_ context.Context, req *iampb.TestIamP
 
 // ViewIAM is the views' IAMPolicy service, for the console.
 func (a *Admin) ViewIAM() iampb.IAMPolicyServer { return viewIAMServer{a: a} }
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every log view's policy: a deleted service account's
+// bindings (#1751), which the resource manager registry's OnMemberRewrite
+// hook passes here.
+func (a *Admin) RewriteIAMMember(from, to string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	keys, err := a.db.List("logging/viewiam/")
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		raw, err := a.db.Get(k)
+		if err != nil {
+			continue
+		}
+		var p iampolicy.Stored
+		if json.Unmarshal(raw, &p) != nil || !p.RewriteMember(from, to) {
+			continue
+		}
+		b, err := json.Marshal(&p)
+		if err != nil {
+			return err
+		}
+		if err := a.db.Put(k, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}

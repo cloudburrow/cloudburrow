@@ -56,3 +56,16 @@ func TestRewriteMemberInRecord(t *testing.T) {
 		t.Error("a record without a policy changed")
 	}
 }
+
+// TestRewriteMemberKeepsCondition: a conditional binding keeps its
+// condition when a deleted account's member is renamed in it.
+func TestRewriteMemberKeepsCondition(t *testing.T) {
+	c := &Condition{Title: "t", Expression: "true"}
+	s := &Stored{Bindings: []Binding{{Role: "roles/viewer", Members: []string{"serviceAccount:a@p.iam.gserviceaccount.com"}, Condition: c}}}
+	if !s.RewriteMember("serviceAccount:a@p.iam.gserviceaccount.com", "deleted:serviceAccount:a@p.iam.gserviceaccount.com?uid=1") {
+		t.Fatal("not rewritten")
+	}
+	if s.Bindings[0].Condition != c {
+		t.Errorf("condition lost: %+v", s.Bindings[0])
+	}
+}

@@ -138,3 +138,19 @@ func (t *tableIAM) drop(resource string) {
 		}
 	}
 }
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every instance's, table's, authorized view's and backup's
+// policy: a deleted service account's bindings (#1751), which the host
+// sends to iampolicy.RewriteMemberPath.
+func (f *Front) RewriteIAMMember(from, to string) error {
+	f.instances.mu.Lock()
+	for _, in := range f.instances.byNm {
+		in.policy.RewriteMember(from, to)
+	}
+	f.instances.mu.Unlock()
+	f.tableIAM.mu.Lock()
+	iampolicy.RewriteMemberIn(f.tableIAM.policies, from, to)
+	f.tableIAM.mu.Unlock()
+	return f.save()
+}

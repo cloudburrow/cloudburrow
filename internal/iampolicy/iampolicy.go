@@ -316,7 +316,9 @@ func (s *Stored) RewriteMember(from, to string) bool {
 			}
 		}
 		if len(members) > 0 {
-			kept = append(kept, Binding{Role: bd.Role, Members: members})
+			nb := bd // keeps the role and the condition (#1742)
+			nb.Members = members
+			kept = append(kept, nb)
 		}
 	}
 	if !changed {

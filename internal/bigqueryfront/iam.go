@@ -456,3 +456,31 @@ func rowPolicyIAM(pol rowPolicy) *iampb.Policy {
 	}
 	return out
 }
+
+// rewriteMember replaces the member from with to (dropping it when to is
+// empty) in every table's and routine's policy: a deleted service
+// account's bindings (#1751), which the host sends to
+// iampolicy.RewriteMemberPath.
+func (p *iamPolicies) rewriteMember(from, to string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	changed := false
+	for _, s := range p.policies {
+		if s.Policy.RewriteMember(from, to) {
+			changed = true
+		}
+	}
+	if changed {
+		p.saveLocked()
+	}
+	return nil
+}
+
+// serveRewriteMember answers iampolicy.RewriteMemberPath.
+func (p *iamPolicies) serveRewriteMember(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != iampolicy.RewriteMemberPath {
+		return false
+	}
+	iampolicy.ServeRewriteMember(w, r, p.rewriteMember)
+	return true
+}

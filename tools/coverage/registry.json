@@ -492,7 +492,7 @@
   "google.iam.admin.v1.IAM/GetRole": "implemented",
   "google.iam.admin.v1.IAM/GetServiceAccount": "implemented",
   "google.iam.admin.v1.IAM/GetServiceAccountKey": "implemented",
-  "google.iam.admin.v1.IAM/LintPolicy": "unimplemented",
+  "google.iam.admin.v1.IAM/LintPolicy": "implemented",
   "google.iam.admin.v1.IAM/ListRoles": "implemented",
   "google.iam.admin.v1.IAM/ListServiceAccountKeys": "implemented",
   "google.iam.admin.v1.IAM/ListServiceAccounts": "implemented",

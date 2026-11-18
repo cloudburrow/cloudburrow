@@ -25,8 +25,10 @@ import (
 // NOTICE "The validation unit is skipped due to absence of a required
 // object: CheckedExpr"; `1 < 2` has no results.
 //
-// unverified: google.iam.admin.v1.IAM/LintPolicy HasOnlyListConstCheck's location offset: Google's example gives 59, which is no node of its expression; here the non-constant element's position as CEL places it (62, the "." of resource.name)
-// Docs re-read 2026-11-17, still unanswered: https://docs.cloud.google.com/iam/docs/linting-policies
+// HasOnlyListConstCheck's offset is CEL's position of the non-constant
+// element (62, the "." of resource.name): Google's example gives 59, which
+// is no node of its expression (docs/gaps.md; docs re-read 2026-11-17:
+// https://docs.cloud.google.com/iam/docs/linting-policies).
 func TestIAMLintPolicy(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager)

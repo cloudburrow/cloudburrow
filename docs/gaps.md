@@ -29,14 +29,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 4 | 2 | 0 | 2 | 0 |
-| IAM custom roles | 8 | 2 | 1 | 5 | 0 |
+| IAM custom roles | 9 | 1 | 1 | 7 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **61** | **6** | **19** | **30** | **6** |
+| **Total** | **62** | **5** | **19** | **32** | **6** |
 
 ## Cloud Storage
 
@@ -176,13 +176,13 @@ console's predefined roles, a deleted role's bindings removed when its deletion 
 codes Google's samples catch for reusing a deleted role's ID, deleting a deleted role and undeleting
 a live one (`FAILED_PRECONDITION`) (#1746). Service accounts, their keys and IAM policies, IAM
 Credentials' checks and signBlob, key-file sign-in, gcloud iam service-accounts and Terraform's
-service account resources (#1747). Impersonation through any predefined role and through folder and organization grants, a deleted account's bindings as `deleted:serviceAccount:...?uid=` and their restoration on undelete, the account's public certificate URLs, PKCS#12 key files and RSA 1024 keys (#1750). The IAM API's deprecated `SignBlob` and `SignJwt`, `QueryAuditableServices`, and a deleted account's bindings in Secret Manager's, Cloud KMS's and Cloud Tasks' policies (#1751).
+service account resources (#1747). Impersonation through any predefined role and through folder and organization grants, a deleted account's bindings as `deleted:serviceAccount:...?uid=` and their restoration on undelete, the account's public certificate URLs, PKCS#12 key files and RSA 1024 keys (#1750). The IAM API's deprecated `SignBlob` and `SignJwt` with the caller's permission check, `QueryAuditableServices`, `LintPolicy`'s eleven validation units, and a deleted account's bindings in Secret Manager's, Cloud KMS's, Cloud Tasks', Cloud Storage's, Pub/Sub's, Bigtable's, Spanner's, BigQuery tables', Logging views', Cloud Run's and Artifact Registry's policies (#1751).
 
 | Gap | Why open | Size |
 |---|---|---|
-| The IAM API's `LintPolicy`: 501; Google's linting page lists eleven validation units (`ConditionCompileCheck`, `ConditionComplexityCheck`, `DateTimeCheck`, ...) over a CEL condition (#1751) | not built yet | M |
-| A deleted service account's bindings are rewritten to `deleted:serviceAccount:...?uid=` in Secret Manager's, Cloud KMS's and Cloud Tasks' policies, but not yet in Cloud Storage's and Pub/Sub's (served from another process), BigQuery's, Bigtable's, Spanner's, Cloud Run's, Artifact Registry's, Secure Source Manager's or Logging views' (#1751) | not built yet | M |
-| The IAM API's deprecated `SignBlob` and `SignJwt` (#1751) do not read the caller's `iam.serviceAccounts.signBlob` / `signJwt` grant, as no IAM admin method here knows its caller; `QueryAuditableServices` answers Google's documented audit-log service list whatever the project enables, which Google does not say it filters | not built yet / not documented by Google | S |
+| `LintPolicy` (#1751): Google's page shows one example per unit, so these are CloudBurrow's: HasOnlyListConstCheck's offset (CEL's position of the non-constant element, 62 for the page's example, where the page gives 59, which is no node of that expression); a compile error other than the page's (the ANTLR message for a missing `)` or a trailing token, and for a type-check error the checker's own text after `ERROR: Parse expression:`); DateTimeCheck's message for a malformed timestamp and for an always-true comparison; EffectiveTimeRangeCheck's message for comparisons joined by `||` that cover a function's whole range (`results in full ranges`), and that it needs two comparisons of one function; RestrictedAttributesCheck warns of `request.auth.access_levels` alone, the one attribute the page names; results of one severity are in the page's unit order. The caller's permissions on the resource are not read | not documented by Google | S |
+| A deleted service account's bindings (#1751): a BigQuery dataset's access entries are not rewritten (they live in the BigQuery engine, not the front); managed folders, Pub/Sub snapshots and schemas, Bigtable tables, views and backups, Spanner databases and backups, BigQuery routines, Cloud Run services and worker pools and Secure Source Manager instances and repositories are rewritten by the same code as the resources `TestIAMDeletedServiceAccountInEveryServicesPolicies` checks, but no compat test reads them | not built yet | S |
+| `QueryAuditableServices` (#1751) answers Google's documented audit-log service list whatever the project enables, which Google does not say it filters | not documented by Google | S |
 | A service account's certificate URLs (#1750): Google's body for an unknown account (404 `NOT_FOUND` here), and whether disabled keys or a disabled account's keys are listed (not here); the codes for an unknown private key type or key algorithm (`INVALID_ARGUMENT` here) | not documented by Google | S |
 | Service accounts (#1747): the per-project account quota (100 here; Google's "varies depending on the project"), the code for a disabled account in IAM Credentials (`FAILED_PRECONDITION` here), whether self-impersonation is checked before the permission, the messages for an invalid account ID, display name or description, and the code for deleting a system-managed key | not documented by Google | S |
 | `QueryGrantableRoles` and `QueryTestablePermissions` for resources other than a project, folder or the organization (a bucket, a topic, a service account): 501; Google's docs say on which lowest-level resources only 254 of the 2,423 predefined roles can be granted, and map no permission to a resource type (#1746) | not documented by Google | M |

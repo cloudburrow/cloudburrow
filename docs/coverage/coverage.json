@@ -3753,8 +3753,7 @@
     "Key": "iam",
     "Title": "IAM (custom roles, service accounts)",
     "counts": {
-      "Unimplemented": 1,
-      "Verified": 30
+      "Verified": 31
     },
     "rows": [
       {
@@ -3805,6 +3804,7 @@
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccount",
         "status": "Verified",
         "tests": [
+          "test/compat/iamdeletedprincipals1751_test.go:61 TestIAMDeletedServiceAccountInEveryServicesPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ]
       },
@@ -3874,8 +3874,10 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/LintPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served yet: policy lint is not built (#1751)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamlint1751_test.go:32 TestIAMLintPolicy"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/ListRoles",
@@ -3917,7 +3919,7 @@
         "method": "google.iam.admin.v1.IAM/QueryAuditableServices",
         "status": "Verified",
         "tests": [
-          "test/compat/iamapi1751_test.go:164 TestIAMQueryAuditableServices"
+          "test/compat/iamapi1751_test.go:231 TestIAMQueryAuditableServices"
         ]
       },
       {
@@ -3945,14 +3947,14 @@
         "method": "google.iam.admin.v1.IAM/SignBlob",
         "status": "Verified",
         "tests": [
-          "test/compat/iamapi1751_test.go:74 TestIAMLegacySignBlobAndSignJwt"
+          "test/compat/iamapi1751_test.go:87 TestIAMLegacySignBlobAndSignJwt"
         ]
       },
       {
         "method": "google.iam.admin.v1.IAM/SignJwt",
         "status": "Verified",
         "tests": [
-          "test/compat/iamapi1751_test.go:74 TestIAMLegacySignBlobAndSignJwt"
+          "test/compat/iamapi1751_test.go:87 TestIAMLegacySignBlobAndSignJwt"
         ]
       },
       {
@@ -3974,6 +3976,7 @@
         "method": "google.iam.admin.v1.IAM/UndeleteServiceAccount",
         "status": "Verified",
         "tests": [
+          "test/compat/iamdeletedprincipals1751_test.go:61 TestIAMDeletedServiceAccountInEveryServicesPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ],
         "unverified": [

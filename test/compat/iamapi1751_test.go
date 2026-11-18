@@ -174,9 +174,6 @@ func TestIAMLegacySignBlobAndSignJwt(t *testing.T) {
 	if _, err := adm.SignBlob(ctx, &adminpb.SignBlobRequest{Name: sa.GetName(), BytesToSign: blob}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("SignBlob on a disabled account = %v, want FAILED_PRECONDITION", err)
 	}
-	if err := adm.DeleteServiceAccount(ctx, &adminpb.DeleteServiceAccountRequest{Name: sa.GetName()}); err != nil {
-		t.Fatal(err)
-	}
 	// Over REST, with the caller's token.
 	rest, err := iamv1.NewService(ctx, option.WithEndpoint("http://"+strings.TrimPrefix(h.Endpoint(EnvResourceManager), "http://")+"/"),
 		option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: ts}}))
