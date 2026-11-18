@@ -31,13 +31,13 @@ func TestNormalizedLiteralsHash(t *testing.T) {
 
 // TestPhysicalBytes (#1458): the estimates of the physical byte columns.
 func TestPhysicalBytes(t *testing.T) {
-	if got, want := physicalBytes("27", "27", "0", "26"), []string{"27", "53", "53", "0", "26", "0"}; !reflect.DeepEqual(got, want) {
+	if got, want := physicalBytes(storageSizes{"27", "27", "0", "NULL", "26", "0"}), []string{"27", "53", "53", "0", "26", "0"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("new table: %v, want %v", got, want)
 	}
-	if got, want := physicalBytes("27", "NULL", "NULL", "NULL"), []string{"27", "NULL", "NULL", "NULL", "NULL", "0"}; !reflect.DeepEqual(got, want) {
+	if got, want := physicalBytes(storageSizes{"27", "NULL", "NULL", "NULL", "NULL", "13"}), []string{"27", "NULL", "NULL", "NULL", "NULL", "13"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("old table without a change table: %v, want %v", got, want)
 	}
-	if got, want := physicalBytes("NULL", "NULL", "NULL", "NULL"), []string{"NULL", "NULL", "NULL", "NULL", "NULL", "NULL"}; !reflect.DeepEqual(got, want) {
+	if got, want := physicalBytes(storageSizes{"NULL", "NULL", "NULL", "NULL", "NULL", "5"}), []string{"NULL", "NULL", "NULL", "NULL", "NULL", "NULL"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("unknown: %v, want %v", got, want)
 	}
 }

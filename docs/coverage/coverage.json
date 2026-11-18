@@ -9974,6 +9974,7 @@
           "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
+          "test/compat/bigquerypartitionlastwrites_test.go:32 TestBigQueryPartitionLastWritesKept",
           "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
@@ -10004,6 +10005,7 @@
           "test/compat/bigquerystoragebytes_test.go:29 TestBigQueryPartitionsBytesAndWriteTimes",
           "test/compat/bigquerystoragephysical_test.go:30 TestBigQueryTableStoragePhysicalAndJobColumns",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
+          "test/compat/bigquerystreamtimemore_test.go:22 TestBigQueryStreamTimeOfMadeTables",
           "test/compat/bigquerystructfloat_test.go:53 TestBigQueryStructFloatFieldsKeepTheirType",
           "test/compat/bigquerytempscriptsinturn_test.go:40 TestBigQueryTempScriptsInTurn",
           "test/compat/bigquerytempscriptstatements_test.go:109 TestBigQueryStatementsLaterInAScript",
@@ -10197,6 +10199,7 @@
           "test/compat/bigqueryoneclock_test.go:22 TestBigQueryWriteTimesByTheInstanceClock",
           "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
+          "test/compat/bigquerypartitionlastwrites_test.go:32 TestBigQueryPartitionLastWritesKept",
           "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
@@ -10230,6 +10233,7 @@
           "test/compat/bigquerystoragewriteinterval_test.go:183 TestBigQueryStorageWriteIntervals",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
           "test/compat/bigquerystreamtime_test.go:19 TestBigQueryStreamTimeOfEveryTable",
+          "test/compat/bigquerystreamtimemore_test.go:22 TestBigQueryStreamTimeOfMadeTables",
           "test/compat/bigquerystructfloat_test.go:53 TestBigQueryStructFloatFieldsKeepTheirType",
           "test/compat/bigquerytempscriptsinturn_test.go:40 TestBigQueryTempScriptsInTurn",
           "test/compat/bigquerytempscriptstatements_test.go:109 TestBigQueryStatementsLaterInAScript",
@@ -10481,6 +10485,7 @@
           "test/compat/bigquerystoragebytes_test.go:29 TestBigQueryPartitionsBytesAndWriteTimes",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
           "test/compat/bigquerystreamtime_test.go:19 TestBigQueryStreamTimeOfEveryTable",
+          "test/compat/bigquerystreamtimemore_test.go:22 TestBigQueryStreamTimeOfMadeTables",
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns"
         ]
       },
@@ -10520,6 +10525,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerypartitionlastwrites_test.go:32 TestBigQueryPartitionLastWritesKept",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",

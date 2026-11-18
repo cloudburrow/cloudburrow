@@ -1,0 +1,512 @@
+CloudBurrow patch 90 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1458). Applies after patch 0089; needs patches
+0036, 0044, 0050, 0062 and 0074.
+
+A table's change table (patch 0036) keeps seven days of changes: each
+write's trigger deletes the older ones, and CloudBurrow's front lets go of
+what is older than a dataset's time travel window. So once a partition's
+last write was let go of, the front could not say when the partition was
+last written: INFORMATION_SCHEMA.PARTITIONS' last_modified_time ("the
+most recent time that data was written to the partition") went NULL, and
+TABLE_STORAGE could not tell active bytes from long-term ones (a partition
+"not modified for 90 consecutive days",
+https://cloud.google.com/bigquery/pricing#storage). Every change record a
+change table lets go of (its START row aside) is now moved, with its
+values (a pending record's, patch 0074, from its row in the table), to the
+table's kept table, named the table's last path element with
+"$kept$changes", by a BEFORE DELETE trigger on the change table, so every
+way a record goes keeps it; it is in the database, so it survives a
+restart. A kept table is a change table to every reader (no wildcard or
+INFORMATION_SCHEMA lists it, and it has none of its own); DROP TABLE drops
+it with the change table, and a new history (CREATE OR REPLACE TABLE)
+starts an empty one. The engine does not know a table's partitioning; the
+front reads a partition's last write from the change table and the kept
+table together, and compacts the kept table to the latest record of each
+partition. A change table made before this patch gets its kept table and
+trigger at the catalog's first sync; what it let go of before then is
+gone. change_history_kept_test.go fails without the patch and passes with
+it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/change_history_kept_test.go
+@@ -0,0 +1,117 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"path/filepath"
++	"testing"
++	"time"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestChangeHistoryKeptRecords is CloudBurrow's regression test of its
++// patch 0090 (cloudburrow/cloudburrow#1458): a change record the change
++// table lets go of (a write's trigger after seven days, or a DELETE of the
++// change table, as CloudBurrow's front lets go of what is older than a
++// dataset's time travel window) is moved to the table's kept table with
++// its values, a pending one's from its row in the table, the START row
++// aside; the kept table survives a reopening, is made for a change table
++// saved without one, goes with DROP TABLE and starts empty on CREATE OR
++// REPLACE TABLE.
++func TestChangeHistoryKeptRecords(t *testing.T) {
++	ctx := context.Background()
++	defer googlesqlite.SetClockOffset(googlesqlite.ClockOffset())
++	path := filepath.Join(t.TempDir(), "kept.db")
++	// The engine keeps a catalog by data source name: each open names
++	// the file another way, as a restarted engine starts a new catalog.
++	opened := 0
++	open := func() *sql.DB {
++		t.Helper()
++		opened++
++		db, err := sql.Open("googlesqlite", fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)", path, 5000+opened))
++		if err != nil {
++			t.Fatal(err)
++		}
++		db.SetMaxOpenConns(1)
++		return db
++	}
++	db := open()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	kept := func() string {
++		t.Helper()
++		var got sql.NullString
++		if err := db.QueryRowContext(ctx, "SELECT STRING_AGG(FORMAT('%s:%d:%s', _CHANGE_TYPE, id, IF(d IS NULL, 'null', CAST(d AS STRING))), ',' ORDER BY id, _CHANGE_TYPE) FROM `p.d.t$kept$changes`").Scan(&got); err != nil {
++			t.Fatal(err)
++		}
++		return got.String
++	}
++	exec("CREATE TABLE `p.d.t` (id INT64, d DATE)")
++	exec("INSERT INTO `p.d.t` (id, d) VALUES (1, DATE '2025-01-01'), (2, DATE '2025-01-02')")
++	exec("DELETE `p.d.t` WHERE id = 2")
++	if got := kept(); got != "" {
++		t.Errorf("kept records before seven days: %q, want none", got)
++	}
++	googlesqlite.SetClockOffset(googlesqlite.ClockOffset() + 8*24*time.Hour)
++	exec("INSERT INTO `p.d.t` (id, d) VALUES (3, DATE '2025-01-03')")
++	// Row 1's INSERT (pending, its values the row's), row 2's INSERT
++	// (settled by its DELETE) and DELETE; not the START row.
++	if got := kept(); got != "INSERT:1:2025-01-01,DELETE:2:2025-01-02,INSERT:2:2025-01-02" {
++		t.Errorf("kept records after seven days: %q", got)
++	}
++	var n int
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_TYPE != 'START'").Scan(&n); err != nil || n != 1 {
++		t.Errorf("records left in the change table: %d (%v), want 1", n, err)
++	}
++	// A DELETE of the change table (the front's window) keeps them too.
++	exec("DELETE FROM `p.d.t$changes` WHERE TRUE")
++	if got := kept(); got != "INSERT:1:2025-01-01,DELETE:2:2025-01-02,INSERT:2:2025-01-02,INSERT:3:2025-01-03" {
++		t.Errorf("kept records after the change table's delete: %q", got)
++	}
++	db.Close()
++
++	// A reopening keeps them; a change table saved without a kept table
++	// (made before the patch) gets one.
++	db = open()
++	exec("CREATE TABLE `p.d.u` (id INT64)")
++	db.Close()
++	raw, err := sql.Open("googlesqlite_sqlite3", "file:"+path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, q := range []string{
++		"DROP TRIGGER `p_d_u$changes$keep`",
++		"DROP TABLE `p_d_u$kept$changes`",
++		"DELETE FROM googlesqlite_catalog WHERE name = 'p_d_u$kept$changes'",
++	} {
++		if _, err := raw.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	raw.Close()
++	db = open()
++	defer db.Close()
++	if got := kept(); got != "INSERT:1:2025-01-01,DELETE:2:2025-01-02,INSERT:2:2025-01-02,INSERT:3:2025-01-03" {
++		t.Errorf("kept records after a reopening: %q", got)
++	}
++	exec("INSERT INTO `p.d.u` (id) VALUES (7)")
++	exec("DELETE FROM `p.d.u$changes` WHERE TRUE")
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.u$kept$changes` WHERE id = 7").Scan(&n); err != nil || n != 1 {
++		t.Errorf("kept records of an older change table: %d (%v), want 1", n, err)
++	}
++
++	exec("CREATE OR REPLACE TABLE `p.d.t` (id INT64, d DATE)")
++	if got := kept(); got != "" {
++		t.Errorf("kept records after CREATE OR REPLACE TABLE: %q, want none", got)
++	}
++	exec("DROP TABLE `p.d.t`")
++	if _, err := db.QueryContext(ctx, "SELECT * FROM `p.d.t$kept$changes`"); err == nil {
++		t.Error("the kept table of a dropped table is still there")
++	}
++}
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -94,11 +94,15 @@ type Catalog struct {
+ 	// _PARTITION_STREAMED have it (CloudBurrow patch,
+ 	// cloudburrow/cloudburrow#1458, streamed_at_migrate.go).
+ 	streamedAtMigrated bool
+-	mu                 sync.Mutex
+-	tables             []*TableSpec
+-	functions          []*FunctionSpec
+-	tvfs               []*TVFSpec
+-	catalog            *googlesql.SimpleCatalog
++	// keptMigrated: the change tables made before the engine kept the
++	// records they let go of have kept tables (CloudBurrow patch,
++	// cloudburrow/cloudburrow#1458, change_history_kept.go).
++	keptMigrated bool
++	mu           sync.Mutex
++	tables       []*TableSpec
++	functions    []*FunctionSpec
++	tvfs         []*TVFSpec
++	catalog      *googlesql.SimpleCatalog
+ 	// descriptorPool is the protobuf DescriptorPool attached to the
+ 	// SimpleCatalog at construction time. Consumers register FileDescriptorProto
+ 	// payloads through Catalog.RegisterProto (Conn.RegisterProto on the
+@@ -2339,6 +2343,15 @@ func (c *Catalog) createCatalogTablesIfNotExists(ctx context.Context, conn *Conn
+ 		}
+ 		c.streamedAtMigrated = true
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): the kept table of
++	// a change table made before the engine kept what it lets go of
++	// (change_history_kept.go).
++	if !c.keptMigrated {
++		if err := migrateKeptTables(ctx, conn); err != nil {
++			return fmt.Errorf("failed to migrate the kept changes of tables: %w", err)
++		}
++		c.keptMigrated = true
++	}
+ 	return nil
+ }
+ 
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -150,12 +150,25 @@ func createChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, spec *
+ 		// failed script): it keeps its history.
+ 		var one int
+ 		if err := conn.QueryRowContext(ctx, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", change).Scan(&one); err == nil {
+-			return catalog.AddNewTableSpec(ctx, conn, cs)
++			if err := catalog.AddNewTableSpec(ctx, conn, cs); err != nil {
++				return err
++			}
++			// CloudBurrow patch (cloudburrow/cloudburrow#1458): and its
++			// kept records (change_history_kept.go).
++			return addKeptTable(ctx, conn, catalog, cs, false)
+ 		}
+ 	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1466): CREATE OR REPLACE
+ 	// TABLE keeps the history of the table it replaces
+ 	// (change_history_replace.go).
++	//
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): the trigger that
++	// keeps the records the replaced change table lets go of reads the
++	// replaced table's columns, which are gone; a new history starts a new
++	// kept table (change_history_kept.go).
++	if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TRIGGER IF EXISTS `%s$keep`", change)); err != nil {
++		return fmt.Errorf("change history of %s: %w", base, err)
++	}
+ 	replaced, err := keepReplacedHistory(ctx, conn, catalog, spec, change)
+ 	if err != nil {
+ 		return err
+@@ -263,7 +276,12 @@ func createChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, spec *
+ 			return err
+ 		}
+ 	}
+-	return catalog.AddNewTableSpec(ctx, conn, cs)
++	if err := catalog.AddNewTableSpec(ctx, conn, cs); err != nil {
++		return err
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): a new history keeps
++	// no records of an old one (change_history_kept.go).
++	return addKeptTable(ctx, conn, catalog, cs, true)
+ }
+ 
+ // dropChangeTable drops the change table of the table named name, if it
+@@ -273,18 +291,24 @@ func createChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, spec *
+ // table's name when the catalog holds it, for the caller to delete with
+ // the table's own spec in one rebuild of the catalog (DeleteTableSpecs),
+ // rather than deleting it itself, which rebuilt the catalog once more.
+-func dropChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, name string) (string, error) {
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1458): and the change table's
++// kept table (change_history_kept.go), its name returned with the change
++// table's.
++func dropChangeTable(ctx context.Context, conn *Conn, catalog *Catalog, name string) ([]string, error) {
+ 	if isChangeTableName(name) {
+-		return "", nil
+-	}
+-	change := name + changeTableSuffix
+-	if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", change)); err != nil {
+-		return "", err
++		return nil, nil
+ 	}
+-	if _, exists := catalog.tableMap[change]; exists {
+-		return change, nil
++	var names []string
++	for _, change := range []string{name + changeTableSuffix, name + keptTableSuffix} {
++		if _, err := conn.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", change)); err != nil {
++			return nil, err
++		}
++		if _, exists := catalog.tableMap[change]; exists {
++			names = append(names, change)
++		}
+ 	}
+-	return "", nil
++	return names, nil
+ }
+ 
+ // registerChangeTimeFunctions registers on conn the functions the change
+--- /dev/null
++++ b/internal/change_history_kept.go
+@@ -0,0 +1,219 @@
++package internal
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"fmt"
++	"strings"
++	"time"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// Kept change records (CloudBurrow patch, cloudburrow/cloudburrow#1458).
++//
++// A table's change table (patch 0036) keeps seven days of changes: each
++// write's trigger deletes the older ones, and CloudBurrow's front lets go
++// of what is older than a dataset's time travel window. But BigQuery's
++// INFORMATION_SCHEMA.PARTITIONS.last_modified_time is "the most recent
++// time that data was written to the partition", and TABLE_STORAGE's
++// active and long-term bytes hang on whether a partition went 90 days
++// unmodified (https://cloud.google.com/bigquery/docs/information-schema-partitions,
++// https://cloud.google.com/bigquery/pricing#storage), so a reader needs a
++// partition's last write however long ago it was. Every change record a
++// change table lets go of (a START row aside) is now moved, with its
++// values (a pending record's from its row in the table, patch 0074), to
++// the table's kept table: the change table's columns, named the table's
++// last path element with keptTableSuffix, a change table to every reader
++// (no wildcard or INFORMATION_SCHEMA lists it, it has no change table of
++// its own). A BEFORE DELETE trigger on the change table moves them, so
++// every way a record goes (the triggers' seven days, the front's window)
++// keeps it; the kept table is in the database, so it survives a restart.
++// The engine does not know a table's partitioning: CloudBurrow's front,
++// which does, reads a partition's last write from the change table and the
++// kept table together, and compacts the kept table to the latest record of
++// each partition. DROP TABLE drops it with the change table, and a table
++// made again (CREATE OR REPLACE TABLE) starts an empty one. A change table
++// made before this patch gets its kept table, and the trigger, at the
++// catalog's first sync (migrateKeptTables); what it let go of before then
++// is gone.
++
++// keptTableSuffix ends the last path element of a kept table; it ends with
++// changeTableSuffix, so a kept table is a change table to isChangeTableName.
++const keptTableSuffix = "$kept" + changeTableSuffix
++
++// keptTableName is the SQLite name of the kept table of the change table
++// named change.
++func keptTableName(change string) string {
++	return strings.TrimSuffix(change, changeTableSuffix) + keptTableSuffix
++}
++
++func isKeptTableName(name string) bool { return strings.HasSuffix(name, keptTableSuffix) }
++
++// keptTableSpec is the catalog spec of the kept table of the change table
++// of spec cs.
++func keptTableSpec(cs *TableSpec) *TableSpec {
++	ks := *cs
++	ks.NamePath = append([]string{}, cs.NamePath...)
++	last := len(ks.NamePath) - 1
++	ks.NamePath[last] = strings.TrimSuffix(ks.NamePath[last], changeTableSuffix) + keptTableSuffix
++	ks.Columns = append([]*ColumnSpec{}, cs.Columns...)
++	return &ks
++}
++
++// sqliteColumns returns the SQLite columns of table, in order, with their
++// declared types.
++func sqliteColumns(ctx context.Context, conn *Conn, table string) ([]string, map[string]string, error) {
++	rows, err := conn.QueryContext(ctx, "SELECT name, type FROM pragma_table_info(@t)", sql.Named("t", table))
++	if err != nil {
++		return nil, nil, err
++	}
++	defer rows.Close()
++	var order []string
++	types := map[string]string{}
++	for rows.Next() {
++		var name, typ string
++		if err := rows.Scan(&name, &typ); err != nil {
++			return nil, nil, err
++		}
++		order = append(order, name)
++		types[name] = typ
++	}
++	return order, types, rows.Err()
++}
++
++// makeKeptTable makes, in SQLite, the kept table of the change table named
++// change (when it has none) and the trigger that moves each record the
++// change table lets go of into it. fresh drops a kept table already there
++// first.
++func makeKeptTable(ctx context.Context, conn *Conn, change string, fresh bool) error {
++	kept := keptTableName(change)
++	base := strings.TrimSuffix(change, changeTableSuffix)
++	order, types, err := sqliteColumns(ctx, conn, change)
++	if err != nil || len(order) == 0 {
++		return err
++	}
++	_, inBase, err := sqliteColumns(ctx, conn, base)
++	if err != nil {
++		return err
++	}
++	_, pending := types[changePendingColumn]
++	var defs, cols, vals []string
++	for _, c := range order {
++		if c == changePendingColumn {
++			continue
++		}
++		q := "`" + c + "`"
++		defs = append(defs, strings.TrimSpace(q+" "+types[c]))
++		cols = append(cols, q)
++		v := "OLD." + q
++		if _, ok := inBase[c]; ok && pending && !isChangeColumn(c) && !strings.HasPrefix(c, "googlesqlite_") {
++			// A pending record's values are its row's in the table.
++			v = fmt.Sprintf("CASE WHEN OLD.`%s` IS NULL THEN OLD.%s ELSE (SELECT %s FROM `%s` WHERE rowid = OLD.`%s`) END",
++				changePendingColumn, q, q, base, changeRowidColumn)
++		}
++		vals = append(vals, v)
++	}
++	when := "OLD.`_CHANGE_TYPE` IS NOT " + encodedLiteral(value.StringValue(changeStartType))
++	if pending {
++		// A pending record whose row is gone (the trigger of a DELETE that
++		// let it go fires after the row went) is left out: the DELETE's
++		// own record is the later write of the row's partition.
++		when += fmt.Sprintf(" AND (OLD.`%s` IS NULL OR EXISTS (SELECT 1 FROM `%s` WHERE rowid = OLD.`%s`))",
++			changePendingColumn, base, changeRowidColumn)
++	}
++	var stmts []string
++	if fresh {
++		stmts = append(stmts, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", kept))
++	}
++	stmts = append(stmts,
++		fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s` (%s)", kept, strings.Join(defs, ",")),
++		fmt.Sprintf("DROP TRIGGER IF EXISTS `%s$keep`", change),
++		fmt.Sprintf("CREATE TRIGGER `%s$keep` BEFORE DELETE ON `%s` FOR EACH ROW WHEN %s BEGIN INSERT INTO `%s` (%s) VALUES (%s); END",
++			change, change, when, kept, strings.Join(cols, ","), strings.Join(vals, ",")),
++	)
++	for _, s := range stmts {
++		if _, err := conn.ExecContext(ctx, s); err != nil {
++			return fmt.Errorf("kept changes of %s: %w", base, err)
++		}
++	}
++	return nil
++}
++
++// addKeptTable makes the kept table of the change table of spec cs, just
++// made (fresh: a new history) or found in SQLite, and puts it in the
++// catalog.
++func addKeptTable(ctx context.Context, conn *Conn, catalog *Catalog, cs *TableSpec, fresh bool) error {
++	change := cs.TableName()
++	if err := makeKeptTable(ctx, conn, change, fresh); err != nil {
++		return err
++	}
++	ks := keptTableSpec(cs)
++	if _, exists := catalog.tableMap[ks.TableName()]; exists {
++		if !fresh {
++			return nil
++		}
++		if err := catalog.DeleteTableSpec(ctx, conn, ks.TableName()); err != nil {
++			return err
++		}
++	}
++	return catalog.AddNewTableSpec(ctx, conn, ks)
++}
++
++// migrateKeptTables gives every change table of the catalog made before
++// this patch its kept table (in SQLite and in the catalog) and trigger.
++func migrateKeptTables(ctx context.Context, conn *Conn) error {
++	rows, err := conn.QueryContext(ctx, "SELECT name, spec FROM googlesqlite_catalog WHERE kind = @kind AND name LIKE @suffix",
++		sql.Named("kind", string(TableSpecKind)), sql.Named("suffix", "%"+changeTableSuffix))
++	if err != nil {
++		return err
++	}
++	specs := map[string]*TableSpec{}
++	var changes []string
++	for rows.Next() {
++		var name, encoded string
++		if err := rows.Scan(&name, &encoded); err != nil {
++			rows.Close()
++			return err
++		}
++		var spec TableSpec
++		if err := json.Unmarshal([]byte(encoded), &spec); err != nil || !isChangeTableName(name) {
++			continue
++		}
++		specs[name] = &spec
++		if !isKeptTableName(name) {
++			changes = append(changes, name)
++		}
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return err
++	}
++	rows.Close()
++	for _, change := range changes {
++		kept := keptTableName(change)
++		if _, ok := specs[kept]; ok {
++			continue
++		}
++		if order, _, err := sqliteColumns(ctx, conn, change); err != nil || len(order) == 0 {
++			if err != nil {
++				return err
++			}
++			continue // no SQLite table of the name
++		}
++		if err := makeKeptTable(ctx, conn, change, false); err != nil {
++			return err
++		}
++		encoded, err := json.Marshal(keptTableSpec(specs[change]))
++		if err != nil {
++			return err
++		}
++		now := time.Now()
++		if _, err := conn.ExecContext(ctx, upsertCatalogQuery, sql.Named("name", kept), sql.Named("kind", string(TableSpecKind)),
++			sql.Named("spec", string(encoded)), sql.Named("updatedAt", now), sql.Named("createdAt", now)); err != nil {
++			return fmt.Errorf("kept changes of %s: %w", change, err)
++		}
++	}
++	return nil
++}
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -369,14 +369,11 @@ func (a *DropStmtAction) exec(ctx context.Context, conn *Conn) error {
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1418): the change
+ 		// table goes with the table; and (#1525) both specs in one
+ 		// rebuild of the catalog.
+-		change, err := dropChangeTable(ctx, conn, a.catalog, a.name)
++		changes, err := dropChangeTable(ctx, conn, a.catalog, a.name)
+ 		if err != nil {
+ 			return fmt.Errorf("failed to drop the change history of %s: %w", a.name, err)
+ 		}
+-		names := []string{a.name}
+-		if change != "" {
+-			names = append(names, change)
+-		}
++		names := append([]string{a.name}, changes...)
+ 		if err := a.catalog.DeleteTableSpecs(ctx, conn, names...); err != nil {
+ 			return fmt.Errorf("failed to delete table spec: %w", err)
+ 		}

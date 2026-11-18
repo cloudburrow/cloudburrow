@@ -1,0 +1,249 @@
+CloudBurrow patch 89 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1458). Applies after patch 0088; needs patches
+0030, 0036 and 0065.
+
+Patches 0030, 0056 and 0088 give a table made by tables.insert or a
+CREATE TABLE statement the pseudo-column _PARTITION_STREAMED, the time
+CloudBurrow's front streamed a row, which DML reads to refuse a row
+streamed "within the last 30 minutes"
+(https://cloud.google.com/bigquery/docs/data-manipulation-language). A
+table made before those patches and kept in an instance's state had
+none, so the front streamed to it without the time, and DML held its
+streamed rows only while in the streaming buffer. The catalog's first
+sync now gives every such table the column (SQLite ALTER TABLE ADD
+COLUMN, and the catalog's spec, its updatedAt left as it is), NULL on the
+rows it has, whose stream times were never recorded, so the rows streamed
+to it from then on are held as BigQuery holds them. A temporary table, a
+view, a change table and CloudBurrow's own tables get none, as before.
+streamed_at_migrate_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -90,6 +90,10 @@
+ 	// changeFlagMigrated: the change tables have patch 0065's update flag
+ 	// (CloudBurrow patch, cloudburrow/cloudburrow#1548).
+ 	changeFlagMigrated bool
++	// streamedAtMigrated: the tables made before the engine gave them
++	// _PARTITION_STREAMED have it (CloudBurrow patch,
++	// cloudburrow/cloudburrow#1458, streamed_at_migrate.go).
++	streamedAtMigrated bool
+ 	mu                 sync.Mutex
+ 	tables             []*TableSpec
+ 	functions          []*FunctionSpec
+@@ -2325,6 +2329,15 @@
+ 			return fmt.Errorf("failed to migrate change tables: %w", err)
+ 		}
+ 		c.changeFlagMigrated = true
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): the stream-time
++	// pseudo-column of a table made before the engine gave it one
++	// (streamed_at_migrate.go).
++	if !c.streamedAtMigrated {
++		if err := migrateStreamedAtColumn(ctx, conn); err != nil {
++			return fmt.Errorf("failed to migrate the stream time of tables: %w", err)
++		}
++		c.streamedAtMigrated = true
+ 	}
+ 	return nil
+ }
+--- /dev/null
++++ b/internal/streamed_at_migrate.go
+@@ -0,0 +1,105 @@
++package internal
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"fmt"
++	"strings"
++
++	"github.com/goccy/go-googlesql"
++)
++
++// The stream time of a table made before the engine had it (CloudBurrow
++// patch, cloudburrow/cloudburrow#1458).
++//
++// Patch 0030 gave a table made by tables.insert or by CREATE TABLE with a
++// column list the pseudo-column _PARTITION_STREAMED, the time CloudBurrow's
++// front streamed a row, which DML reads to refuse a row streamed "within
++// the last 30 minutes" (https://cloud.google.com/bigquery/docs/data-manipulation-language);
++// patch 0056 gave it to CREATE TABLE ... AS SELECT and patch 0088 to
++// CREATE TABLE IF NOT EXISTS. A table made before those patches, saved in
++// an instance's state, had none, so the rows streamed to it were held from
++// DML only while in the streaming buffer. The catalog's first sync now
++// gives every such table the column, NULL on the rows it has (their stream
++// times were never recorded), so the rows streamed to it from then on are
++// held as BigQuery holds them. A temporary table (tabledata.insertAll
++// cannot stream to one), a view, a change table and CloudBurrow's own
++// tables (a query's results) get none, as before.
++
++// migrateStreamedAtColumn adds _PARTITION_STREAMED to every table of the
++// catalog made without it (above), in SQLite and in the catalog; the
++// catalog's updatedAt is left as it is, so a table's last change is not
++// moved.
++func migrateStreamedAtColumn(ctx context.Context, conn *Conn) error {
++	rows, err := conn.QueryContext(ctx,
++		"SELECT name, spec FROM googlesqlite_catalog WHERE kind = @kind AND instr(spec, @col) = 0",
++		sql.Named("kind", string(TableSpecKind)), sql.Named("col", `"`+streamedAtColumn+`"`))
++	if err != nil {
++		return err
++	}
++	type old struct {
++		name string
++		spec *TableSpec
++	}
++	var olds []old
++	for rows.Next() {
++		var name, encoded string
++		if err := rows.Scan(&name, &encoded); err != nil {
++			rows.Close()
++			return err
++		}
++		var spec TableSpec
++		if err := json.Unmarshal([]byte(encoded), &spec); err != nil || !streamedAtMigratable(name, &spec) {
++			continue
++		}
++		olds = append(olds, old{name, &spec})
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return err
++	}
++	rows.Close()
++	for _, o := range olds {
++		var have, has int
++		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*), COUNT(CASE WHEN name = @c COLLATE NOCASE THEN 1 END) FROM pragma_table_info(@t)",
++			sql.Named("t", o.name), sql.Named("c", streamedAtColumn)).Scan(&have, &has); err != nil {
++			return err
++		}
++		if have == 0 {
++			continue // no SQLite table of the name
++		}
++		col := &ColumnSpec{Name: streamedAtColumn, Type: &Type{Kind: int(googlesql.TypeKindTypeTimestamp)}}
++		if has == 0 {
++			if _, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN %s", o.name, col.SQLiteSchema())); err != nil {
++				return fmt.Errorf("table %s: %w", o.name, err)
++			}
++		}
++		o.spec.Columns = append(o.spec.Columns, col)
++		encoded, err := json.Marshal(o.spec)
++		if err != nil {
++			return err
++		}
++		if _, err := conn.ExecContext(ctx, "UPDATE googlesqlite_catalog SET spec = @spec WHERE name = @name",
++			sql.Named("spec", string(encoded)), sql.Named("name", o.name)); err != nil {
++			return err
++		}
++	}
++	return nil
++}
++
++// streamedAtMigratable reports whether the table name of spec is one the
++// migration gives the column (above).
++func streamedAtMigratable(name string, spec *TableSpec) bool {
++	if spec.IsTemp || spec.IsView || len(spec.NamePath) < 3 || isChangeTableName(name) ||
++		strings.HasPrefix(spec.NamePath[len(spec.NamePath)-1], "googlesqlite_") ||
++		strings.HasPrefix(spec.NamePath[len(spec.NamePath)-2], "_cloudburrow") {
++		return false
++	}
++	for _, c := range spec.Columns {
++		if strings.EqualFold(c.Name, streamedAtColumn) {
++			return false
++		}
++	}
++	return true
++}
+--- /dev/null
++++ b/streamed_at_migrate_test.go
+@@ -0,0 +1,84 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestStreamedAtColumnOfAnOlderTable is CloudBurrow's regression test of
++// its patch 0089 (cloudburrow/cloudburrow#1458): a table saved without the
++// pseudo-column _PARTITION_STREAMED (made before patches 0030, 0056 and
++// 0088) gets it when the database is next opened, NULL on the rows it
++// has, left out of SELECT *, and an INSERT may give it; its history goes
++// on.
++func TestStreamedAtColumnOfAnOlderTable(t *testing.T) {
++	ctx := context.Background()
++	open := func(dsn string) *sql.DB {
++		t.Helper()
++		db, err := sql.Open("googlesqlite", dsn)
++		if err != nil {
++			t.Fatal(err)
++		}
++		db.SetMaxOpenConns(1)
++		return db
++	}
++	exec := func(db *sql.DB, q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	path := filepath.Join(t.TempDir(), "old.db")
++	db := open("file:" + path)
++	exec(db, "CREATE TABLE `p.d.old` (id INT64, s STRING)")
++	exec(db, "INSERT INTO `p.d.old` (id, s) VALUES (1, 'a')")
++	db.Close()
++	// The table as a state saved before the patches had it: no column in
++	// SQLite (its tables are named by their paths joined with _) or in
++	// the catalog's spec, whose last column it is.
++	raw, err := sql.Open("googlesqlite_sqlite3", "file:"+path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, q := range []string{
++		"ALTER TABLE `p_d_old` DROP COLUMN `_PARTITION_STREAMED`",
++		`UPDATE googlesqlite_catalog SET spec = json_remove(spec, '$.columns[#-1]') WHERE name = 'p_d_old' AND json_extract(spec, '$.columns[#-1].name') = '_PARTITION_STREAMED'`,
++	} {
++		if _, err := raw.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	var n int
++	if err := raw.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('p_d_old') WHERE name = '_PARTITION_STREAMED'").Scan(&n); err != nil || n != 0 {
++		t.Fatalf("the aged table still has the column (%d, %v)", n, err)
++	}
++	raw.Close()
++
++	db = open("file:" + path + "?_pragma=busy_timeout(5000)")
++	defer db.Close()
++	exec(db, "INSERT INTO `p.d.old` (id, s, _PARTITION_STREAMED) VALUES (2, 'b', TIMESTAMP '2026-01-01 00:00:00+00')")
++	rows, err := db.QueryContext(ctx, "SELECT * FROM `p.d.old`")
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ := rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "id,s" {
++		t.Errorf("SELECT * columns = %v, want [id s]", cols)
++	}
++	var got string
++	if err := db.QueryRowContext(ctx, "SELECT STRING_AGG(FORMAT('%d:%s', id, IF(_PARTITION_STREAMED IS NULL, 'null', CAST(_PARTITION_STREAMED AS STRING))), ',' ORDER BY id) FROM `p.d.old`").Scan(&got); err != nil {
++		t.Fatal(err)
++	}
++	if got != "1:null,2:2026-01-01 00:00:00+00" {
++		t.Errorf("_PARTITION_STREAMED by id = %s, want 1:null,2:2026-01-01 00:00:00+00", got)
++	}
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.old$changes` WHERE _CHANGE_TYPE = 'INSERT'").Scan(&n); err != nil || n != 2 {
++		t.Errorf("INSERTs in the history after the migration: %d (%v), want 2", n, err)
++	}
++}
