@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	_ "image/gif"  // Vision reads GIF
 	_ "image/jpeg" // and JPEG
@@ -13,7 +14,10 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
+	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
+	"github.com/cloudburrow/cloudburrow/internal/tflitemodel"
 )
 
 // The text features of Cloud Vision's images:annotate (#1773), for
@@ -41,8 +45,14 @@ import (
 //   - IMAGE_PROPERTIES is computed from the pixels (imageprops.go, #1799):
 //     imagePropertiesAnnotation's dominant colors and a whole-image
 //     cropHintsAnnotation.
-//   - Every other feature (FACE_DETECTION, LANDMARK_DETECTION,
-//     LOGO_DETECTION, LABEL_DETECTION, OBJECT_LOCALIZATION,
+//   - LABEL_DETECTION is answered by Google's MediaPipe EfficientNet-Lite0
+//     classifier run locally (labels.go, #1799): labelAnnotations of
+//     ImageNet classes, at most the feature's maxResults (10 by default).
+//   - OBJECT_LOCALIZATION and FACE_DETECTION are answered by Google's
+//     MediaPipe EfficientDet-Lite0 and BlazeFace detectors run locally
+//     (detections.go, #1799): localizedObjectAnnotations of COCO's 80
+//     categories, and faceAnnotations with six landmarks.
+//   - Every other feature (LANDMARK_DETECTION, LOGO_DETECTION,
 //     SAFE_SEARCH_DETECTION, CROP_HINTS, WEB_DETECTION,
 //     PRODUCT_SEARCH) has no local model: that image's response is an
 //     UNIMPLEMENTED error naming it, and nothing is read.
@@ -50,9 +60,20 @@ import (
 //     is refused. PNG, JPEG and GIF are decoded; other data is "Bad image
 //     data." as Vision answers it.
 
-// visionServedFeatures are the features answered, true for those read
-// with OCR.
-var visionServedFeatures = map[string]bool{"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true, "IMAGE_PROPERTIES": false}
+// visionServedFeatures are the features answered, and how.
+var visionServedFeatures = map[string]visionKind{"TEXT_DETECTION": visionText, "DOCUMENT_TEXT_DETECTION": visionText,
+	"IMAGE_PROPERTIES": visionProps, "LABEL_DETECTION": visionLabel, "OBJECT_LOCALIZATION": visionObject, "FACE_DETECTION": visionFace}
+
+// visionKind is how a feature is answered.
+type visionKind int
+
+const (
+	visionText   visionKind = iota + 1 // local Tesseract OCR
+	visionProps                        // from the pixels
+	visionLabel                        // the local image classifier
+	visionObject                       // the local object detector
+	visionFace                         // the local face detector
+)
 
 // visionStatus is a google.rpc.Status.
 type visionStatus struct {
@@ -93,22 +114,29 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var unserved []string
-		text, props := false, false
+		text, props, labels, maxLabels := false, false, false, 0
+		objects, maxObjects, faces, maxFaces := false, 0, false, 0
 		for _, f := range ir.Features {
 			t := strings.ToUpper(f.Type)
-			ocr, ok := visionServedFeatures[t]
-			switch {
-			case !ok:
-				unserved = append(unserved, t)
-			case ocr:
+			switch visionServedFeatures[t] {
+			case visionText:
 				text = true
-			default:
+			case visionProps:
 				props = true
+			case visionLabel:
+				labels, maxLabels = true, max(maxLabels, f.MaxResults)
+			case visionObject:
+				objects, maxObjects = true, max(maxObjects, f.MaxResults)
+			case visionFace:
+				faces, maxFaces = true, max(maxFaces, f.MaxResults)
+			default:
+				unserved = append(unserved, t)
 			}
 		}
 		if len(unserved) > 0 {
 			fail(12, "Not implemented here: Vision feature "+strings.Join(unserved, ", ")+": CloudBurrow has no local model for it "+
-				"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels) "+
+				"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels, "+
+				"LABEL_DETECTION with a local image classifier, OBJECT_LOCALIZATION and FACE_DETECTION with local detectors) "+
 				"and never calls Google. Nothing was read.")
 			continue
 		}
@@ -140,10 +168,53 @@ func (s *Server) annotateImages(w http.ResponseWriter, r *http.Request) {
 				out[k] = v
 			}
 		}
+		if labels {
+			la, err := visionLabels(r.Context(), img, maxLabels)
+			if err != nil {
+				fail(labelErrorCode(err), "Labelling the image: "+err.Error())
+				continue
+			}
+			out["labelAnnotations"] = la
+		}
+		if objects {
+			oa, err := visionObjects(r.Context(), img, maxObjects)
+			if err != nil {
+				fail(labelErrorCode(err), "Localizing the image's objects: "+err.Error())
+				continue
+			}
+			if len(oa) > 0 { // proto3 JSON omits an empty list
+				out["localizedObjectAnnotations"] = oa
+			}
+		}
+		if faces {
+			fa, err := visionFaces(r.Context(), img, maxFaces)
+			if err != nil {
+				fail(labelErrorCode(err), "Detecting the image's faces: "+err.Error())
+				continue
+			}
+			if len(fa) > 0 {
+				out["faceAnnotations"] = fa
+			}
+		}
 		responses = append(responses, out)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"responses": responses})
+}
+
+// labelErrorCode is the google.rpc.Code of a failure to label an image or
+// detect its objects or faces: UNIMPLEMENTED when this process has no such
+// model or the model holds an
+// operator the local runtime does not run, UNAVAILABLE when it could not be
+// fetched, INTERNAL otherwise.
+func labelErrorCode(err error) int {
+	switch {
+	case errors.Is(err, imagelabel.ErrNoModel), errors.Is(err, imagedetect.ErrNoModel), tflitemodel.IsUnsupported(err):
+		return 12
+	case errors.Is(err, imagelabel.ErrFetch), errors.Is(err, imagedetect.ErrFetch):
+		return 14
+	}
+	return 13
 }
 
 // visionTextResponse is an AnnotateImageResponse of text: empty, as

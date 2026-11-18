@@ -718,6 +718,33 @@
         "digest": "sha256:ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720",
         "notes": "BigQuery ML.TRANSCRIBE over a CLOUD_AI_SPEECH_TO_TEXT_V2 remote model (#1799, internal/speech): whisper.cpp and its ggml (MIT), compiled by third_party/whisper-wasm/build.sh with wasi-sdk 34 (the same pinned archives as tesseractWasm; linked in: wasi-libc and musl MIT, libc++, libc++abi and libunwind Apache-2.0 WITH LLVM-exception) to a single-threaded WASI module run on wazero with its exception-handling feature, so no cgo. Google publishes no locally runnable speech model. The model, OpenAI's multilingual Whisper base in ggml q8_0 (MIT, https://huggingface.co/ggerganov/whisper.cpp revision 5359861c739e955e79d9a303bcbc70fb988958b1, ggml-base-q8_0.bin, sha256:c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9, 81768585 bytes), is fetched on first use into <state-dir>/models, pinned in internal/localai/whisper.go. The module's SHA-256 is in whisper.wasm.sha256 and CI's whisper-wasm job rebuilds it (third_party/whisper-wasm/PROVENANCE.md)."
       },
+      "mediapipeEfficientNetLite0": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:6c7ab0a6e5dcbf38a8c33b960996a55a3b4300b36a018c4545801de3a3c8bde0",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision LABEL_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelabel), approved by the maintainer 2026-11-18: Google's MediaPipe EfficientNet-Lite0 image classifier (18,582,189 bytes), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image is labelled, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imageclassifier.go. Its 1,000 ImageNet labels (labels_without_background.txt) are carried in the file."
+      },
+      "mediapipeEfficientDetLite0": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:40338edf5ec70d43e318b0a716a84d4564cd1802759a7a07170c7e43796dbf58",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision OBJECT_LOCALIZATION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagedetect), approved by the maintainer 2026-11-18: Google's MediaPipe EfficientDet-Lite0 object detector (13,836,895 bytes), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image needs it, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imagedetector.go. Its COCO labels (labels.txt, 90 class IDs of which 80 are named) and its 19,206 fixed anchors (DETECTOR_METADATA) are carried in the file."
+      },
+      "mediapipeBlazeFaceShortRange": {
+        "version": "float16/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision FACE_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagedetect), approved by the maintainer 2026-11-18: Google's MediaPipe BlazeFace short-range face detector (229,746 bytes; MediaPipe publishes it in float16 only), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image needs it, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imagedetector.go."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",
