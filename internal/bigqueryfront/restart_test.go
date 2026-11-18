@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -102,23 +103,50 @@ func TestEmulatorWatch(t *testing.T) {
 
 // TestEmulatorWatchNotBeforeFirstUp: an emulator that is not up yet when
 // the front starts has not restarted.
+//
+// The watch's dial is refused, as a port nobody listens on is, until the
+// process is up, and the test steps on the watch's own dials rather than
+// on time: it starts the process after the watch has been refused twice,
+// and stops the watch once it has connected twice (the first connection,
+// when the emulator came up, and the one after its idle). A port freed by
+// closing a listener is no stand-in for "not up yet": on a shared CI host
+// another process can bind it, or a dial to it can connect to itself,
+// before the test listens there, and the watch then sees an emulator come
+// and go (fired 2 times, main CI run 44296179658).
 func TestEmulatorWatchNotBeforeFirstUp(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	_ = l.Close()
-	w := newEmulatorWatch(addr, t.Logf)
+	w := newEmulatorWatch("unused:0", t.Logf)
 	w.idle, w.poll = 20*time.Millisecond, 5*time.Millisecond
+	var proc atomic.Pointer[fakeProcess]
+	refused, connected := make(chan struct{}, 1), make(chan struct{}, 1)
+	w.dial = func() (net.Conn, error) {
+		p := proc.Load()
+		if p == nil {
+			select {
+			case refused <- struct{}{}:
+			default:
+			}
+			return nil, errors.New("connection refused")
+		}
+		c, err := net.DialTimeout("tcp", p.l.Addr().String(), time.Second)
+		if err == nil {
+			select {
+			case connected <- struct{}{}:
+			default:
+			}
+		}
+		return c, err
+	}
 	var fired atomic.Int32
 	w.onRestart(func() { fired.Add(1) })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { w.run(ctx); close(done) }()
-	time.Sleep(50 * time.Millisecond)
-	p := startProcess(t, addr)
-	time.Sleep(100 * time.Millisecond)
+	<-refused
+	<-refused
+	p := startProcess(t, "127.0.0.1:0")
+	proc.Store(p)
+	<-connected
+	<-connected
 	cancel()
 	<-done
 	p.stop()
