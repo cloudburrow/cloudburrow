@@ -110,10 +110,7 @@ func checkWorkerPool(wp *runpb.WorkerPool) error {
 			return err
 		}
 	}
-	if c := wp.GetScaling().GetManualInstanceCount(); c < 0 {
-		return apierror.InvalidArgument("scaling.manualInstanceCount must not be negative")
-	}
-	return nil
+	return checkPoolScaling(wp.GetScaling())
 }
 
 // revisionSuffix is three random characters, as Cloud Run ends a revision
@@ -143,7 +140,7 @@ func workerPoolSpec(wp *runpb.WorkerPool, generation int64, revision string) *ru
 	if wp.GetScaling() != nil {
 		scaling = proto.Clone(wp.GetScaling()).(*runpb.WorkerPoolScaling)
 	}
-	if scaling.ManualInstanceCount == nil {
+	if scaling.ManualInstanceCount == nil && !scalingOf(scaling).automatic() {
 		n := int32(defaultWorkerPoolInstances)
 		scaling.ManualInstanceCount = &n
 	}

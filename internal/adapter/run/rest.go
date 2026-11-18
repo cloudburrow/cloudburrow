@@ -38,6 +38,7 @@ func Transcoder() *rest.Transcoder {
 	return &rest.Transcoder{
 		Packages: []string{"google.cloud.run.v2"},
 		Mixins:   mixins,
+		Overlay:  runOverlay,
 	}
 }
 
