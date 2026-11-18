@@ -53,6 +53,13 @@ func (f *fakeDirectory) Key(kid string, _ time.Time) (*rsa.PublicKey, string, bo
 	return &f.userKey.PublicKey, targetEmail, true, f.keyOK
 }
 
+func (f *fakeDirectory) PublicCerts(account string) ([]PublicCert, bool) {
+	if a, ok := f.Account(account); !ok || a.Email != targetEmail {
+		return nil, false
+	}
+	return []PublicCert{{ID: "system-key", CertPEM: "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n", Key: &f.key.PublicKey}}, true
+}
+
 func callIAM(t *testing.T, base, account, verb, bearer string, body map[string]any) (int, map[string]any) {
 	t.Helper()
 	b, _ := json.Marshal(body)

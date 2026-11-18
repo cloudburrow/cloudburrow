@@ -187,6 +187,10 @@ func (s *Server) Handler() http.Handler {
 	// token URI that never leaves the machine.
 	mux.HandleFunc("/token", s.token)
 	mux.HandleFunc("/certs", s.certs)
+	// A service account's public certificates (#1750); see serviceaccountcerts.go.
+	for _, p := range []string{saX509Prefix, saJWKPrefix, robotX509Prefix} {
+		mux.HandleFunc(p, s.serviceAccountCerts)
+	}
 	// IAM Credentials (#303), for impersonation; see iamcredentials.go.
 	mux.HandleFunc(iamPrefix, s.iamCredentials)
 
@@ -226,7 +230,9 @@ func (s *Server) requireFlavor(next http.Handler) http.Handler {
 		// clients do not send the header to it.
 		// So is IAM Credentials: it is a Google API, called by its own
 		// clients, which have never heard of the metadata header.
-		if r.URL.Path == "/token" || r.URL.Path == "/certs" || strings.HasPrefix(r.URL.Path, iamPrefix) {
+		// And a service account's public certificates (#1750), which any
+		// verifier fetches as www.googleapis.com serves them.
+		if r.URL.Path == "/token" || r.URL.Path == "/certs" || strings.HasPrefix(r.URL.Path, iamPrefix) || isCertPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -19,24 +19,18 @@ type serviceAccountDirectory struct {
 
 var _ metadata.ServiceAccountDirectory = serviceAccountDirectory{}
 
-// tokenCreatorRoles are the predefined roles that grant IAM Credentials'
-// permissions, with what each grants, from Google's IAM roles reference
-// (docs.cloud.google.com/iam/docs/roles-permissions/iam, read 2026-11-17).
-// Owner and Editor grant none of them.
-var tokenCreatorRoles = map[string][]string{
-	"roles/iam.serviceAccountTokenCreator": {"iam.serviceAccounts.get", "iam.serviceAccounts.getAccessToken",
-		"iam.serviceAccounts.getOpenIdToken", "iam.serviceAccounts.implicitDelegation", "iam.serviceAccounts.list",
-		"iam.serviceAccounts.signBlob", "iam.serviceAccounts.signJwt"},
-	"roles/iam.serviceAccountOpenIdTokenCreator": {"iam.serviceAccounts.getOpenIdToken"},
-	"roles/iam.workloadIdentityUser":             {"iam.serviceAccounts.get", "iam.serviceAccounts.getAccessToken", "iam.serviceAccounts.getOpenIdToken", "iam.serviceAccounts.list"},
-}
-
 func (d serviceAccountDirectory) Account(name string) (metadata.DirectoryAccount, bool) {
 	a, ok := d.reg.ServiceAccountByName(name)
 	return metadata.DirectoryAccount{Email: a.Email, UniqueID: a.UniqueID, Disabled: a.Disabled}, ok
 }
 
-// Granted checks the account's own policy and its project's.
+// Granted checks the account's own policy, its project's, and those of
+// the project's folders and organization, which Google's resource
+// hierarchy makes every account in the project inherit (#1750). A role is
+// a custom role's permissions or a predefined role's from Google's catalog
+// (internal/iamroles, #1746), so any role holding the permission counts.
+// A deleted account's bindings read deleted:serviceAccount:...?uid= and
+// match no caller.
 func (d serviceAccountDirectory) Granted(member, account, permission string) bool {
 	a, ok := d.reg.ServiceAccountByName(account)
 	if !ok {
@@ -44,7 +38,22 @@ func (d serviceAccountDirectory) Granted(member, account, permission string) boo
 	}
 	_, domain, _ := strings.Cut(a.Email, "@")
 	project := strings.TrimSuffix(domain, ".iam.gserviceaccount.com")
-	for _, res := range []string{"projects/" + project + "/serviceAccounts/" + a.Email, "projects/" + project} {
+	resources := []string{"projects/" + project + "/serviceAccounts/" + a.Email}
+	if anc, err := d.reg.Ancestry(project); err == nil {
+		for _, s := range anc {
+			switch s.Type {
+			case "project":
+				resources = append(resources, "projects/"+s.ID)
+			case "folder":
+				resources = append(resources, "folders/"+s.ID)
+			case "organization":
+				resources = append(resources, resourcemanager.OrganizationName)
+			}
+		}
+	} else {
+		resources = append(resources, "projects/"+project)
+	}
+	for _, res := range resources {
 		pol, err := d.reg.IAMPolicy(res)
 		if err != nil || pol == nil {
 			continue
@@ -56,19 +65,23 @@ func (d serviceAccountDirectory) Granted(member, account, permission string) boo
 					held = true
 				}
 			}
-			if !held {
-				continue
-			}
-			perms, custom := d.reg.RolePermissions(b.Role)
-			if !custom {
-				perms = tokenCreatorRoles[b.Role]
-			}
-			if iamroles.Grants(perms, permission) {
+			if held && iamroles.Grants(d.rolePermissions(b.Role), permission) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// rolePermissions are a custom or predefined role's permissions.
+func (d serviceAccountDirectory) rolePermissions(role string) []string {
+	if perms, custom := d.reg.RolePermissions(role); custom {
+		return perms
+	}
+	if r := iamroles.Predefined(role); r != nil {
+		return r.Permissions
+	}
+	return nil
 }
 
 func (d serviceAccountDirectory) Signer(account string) (*rsa.PrivateKey, string, error) {
@@ -77,4 +90,13 @@ func (d serviceAccountDirectory) Signer(account string) (*rsa.PrivateKey, string
 
 func (d serviceAccountDirectory) Key(keyID string, now time.Time) (*rsa.PublicKey, string, bool, bool) {
 	return d.reg.ServiceAccountKeyState(keyID, now)
+}
+
+func (d serviceAccountDirectory) PublicCerts(account string) ([]metadata.PublicCert, bool) {
+	certs, ok := d.reg.ServiceAccountPublicCerts(account)
+	out := make([]metadata.PublicCert, 0, len(certs))
+	for _, c := range certs {
+		out = append(out, metadata.PublicCert{ID: c.ID, CertPEM: c.CertPEM, Key: c.Key})
+	}
+	return out, ok
 }

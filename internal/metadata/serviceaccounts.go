@@ -51,6 +51,9 @@ type ServiceAccountDirectory interface {
 	// Key is the public key a key ID names: known is false when no account
 	// has it, usable false when it or its account is disabled or deleted.
 	Key(keyID string, now time.Time) (pub *rsa.PublicKey, email string, known, usable bool)
+	// PublicCerts are a live account's enabled, valid keys, by email or
+	// unique ID; ok is false when it is not a live account.
+	PublicCerts(account string) (certs []PublicCert, ok bool)
 }
 
 // DirectoryAccount is one live account.

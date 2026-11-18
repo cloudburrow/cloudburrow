@@ -29,14 +29,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 1 | 0 | 0 | 1 | 0 |
-| IAM custom roles | 6 | 1 | 1 | 4 | 0 |
+| IAM custom roles | 8 | 2 | 1 | 5 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 7 | 1 | 5 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **56** | **3** | **19** | **28** | **6** |
+| **Total** | **58** | **4** | **19** | **29** | **6** |
 
 ## Cloud Storage
 
@@ -169,11 +169,13 @@ console's predefined roles, a deleted role's bindings removed when its deletion 
 codes Google's samples catch for reusing a deleted role's ID, deleting a deleted role and undeleting
 a live one (`FAILED_PRECONDITION`) (#1746). Service accounts, their keys and IAM policies, IAM
 Credentials' checks and signBlob, key-file sign-in, gcloud iam service-accounts and Terraform's
-service account resources (#1747).
+service account resources (#1747). Impersonation through any predefined role and through folder and organization grants, a deleted account's bindings as `deleted:serviceAccount:...?uid=` and their restoration on undelete, the account's public certificate URLs, PKCS#12 key files and RSA 1024 keys (#1750).
 
 | Gap | Why open | Size |
 |---|---|---|
-| The IAM API's deprecated `SignBlob` and `SignJwt`, `QueryAuditableServices`, `LintPolicy`: 501; impersonation checks know only the predefined roles that grant IAM Credentials' permissions (Token Creator, OpenID Token Creator, Workload Identity User), not folder or organization grants; bindings naming a deleted account are not rewritten to `deleted:serviceAccount:...?uid=`; the account's public certificate URLs are not served; PKCS#12 keys and RSA 1024 are 501 (#1750) | not built yet | L |
+| The IAM API's deprecated `SignBlob` and `SignJwt`, `QueryAuditableServices`, `LintPolicy`: 501 (#1751) | not built yet | M |
+| A deleted service account's bindings in other services' own policies (a bucket's, a topic's) are not rewritten to `deleted:serviceAccount:...?uid=` (#1751) | not built yet | S |
+| A service account's certificate URLs (#1750): Google's body for an unknown account (404 `NOT_FOUND` here), and whether disabled keys or a disabled account's keys are listed (not here); the codes for an unknown private key type or key algorithm (`INVALID_ARGUMENT` here) | not documented by Google | S |
 | Service accounts (#1747): the per-project account quota (100 here; Google's "varies depending on the project"), the code for a disabled account in IAM Credentials (`FAILED_PRECONDITION` here), whether self-impersonation is checked before the permission, the messages for an invalid account ID, display name or description, and the code for deleting a system-managed key | not documented by Google | S |
 | `QueryGrantableRoles` and `QueryTestablePermissions` for resources other than a project, folder or the organization (a bucket, a topic, a service account): 501; Google's docs say on which lowest-level resources only 254 of the 2,423 predefined roles can be granted, and map no permission to a resource type (#1746) | not documented by Google | M |
 | The basic roles' (`roles/owner`, `editor`, `viewer`, `admin`, `writer`, `reader`) included permissions, and their API descriptions: Google's docs point to the console for them, so they are served without permissions; a predefined role whose page gives a long description is served its first paragraph; `GetRole` of an unknown predefined role is `NOT_FOUND`, and `UpdateRole`, `DeleteRole` or `UndeleteRole` of a predefined one `UNIMPLEMENTED` (#1746) | not documented by Google | S |

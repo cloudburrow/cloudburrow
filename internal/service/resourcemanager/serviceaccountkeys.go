@@ -23,8 +23,9 @@ package resourcemanager
 //
 // The private key of a system-managed key is kept, as Google keeps it; it
 // is CloudBurrow's own test material and never leaves the store but as a
-// signature. A PKCS#12 file (TYPE_PKCS12_FILE) and RSA 1024 keys are
-// UNIMPLEMENTED.
+// signature. A created key may instead be a PKCS#12 file
+// (TYPE_PKCS12_FILE, password "notasecret", pkcs12.go) and an RSA 1024 key
+// (KEY_ALG_RSA_1024), the REST reference's other values (#1750).
 
 import (
 	"crypto/rand"
@@ -35,6 +36,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net/url"
 	"strings"
 	"time"
 
@@ -90,6 +92,9 @@ func (k *saKey) proto(a *serviceAccount, public adminpb.ServiceAccountPublicKeyT
 		KeyType:         adminpb.ListServiceAccountKeysRequest_USER_MANAGED,
 		Disabled:        k.Disabled,
 	}
+	if pub := k.publicKey(); pub != nil && pub.N.BitLen() <= 1024 {
+		out.KeyAlgorithm = adminpb.ServiceAccountKeyAlgorithm_KEY_ALG_RSA_1024
+	}
 	if k.Uploaded {
 		out.KeyOrigin = adminpb.ServiceAccountKeyOrigin_USER_PROVIDED
 	}
@@ -129,7 +134,12 @@ func newKeyID() string {
 
 // newKey generates an RSA 2048 key and its self-signed certificate.
 func newKey(a *serviceAccount, now time.Time, until time.Time) (*rsa.PrivateKey, *saKey, error) {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	return newKeyBits(a, now, until, 2048)
+}
+
+// newKeyBits generates an RSA key of bits and its self-signed certificate.
+func newKeyBits(a *serviceAccount, now time.Time, until time.Time, bits int) (*rsa.PrivateKey, *saKey, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		return nil, nil, apierror.Internal(err, "generate key")
 	}
@@ -210,15 +220,21 @@ type keyCredentialsFile struct {
 // CreateServiceAccountKey makes a user-managed key and returns its private
 // half, once.
 func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyRequest) (*adminpb.ServiceAccountKey, error) {
-	switch req.GetPrivateKeyType() {
-	case adminpb.ServiceAccountPrivateKeyType_TYPE_UNSPECIFIED, adminpb.ServiceAccountPrivateKeyType_TYPE_GOOGLE_CREDENTIALS_FILE:
+	keyType := req.GetPrivateKeyType()
+	switch keyType {
+	case adminpb.ServiceAccountPrivateKeyType_TYPE_UNSPECIFIED:
+		keyType = adminpb.ServiceAccountPrivateKeyType_TYPE_GOOGLE_CREDENTIALS_FILE
+	case adminpb.ServiceAccountPrivateKeyType_TYPE_GOOGLE_CREDENTIALS_FILE, adminpb.ServiceAccountPrivateKeyType_TYPE_PKCS12_FILE:
 	default:
-		return nil, apierror.Unimplemented("private_key_type %s: only TYPE_GOOGLE_CREDENTIALS_FILE (JSON) keys are served", req.GetPrivateKeyType())
+		return nil, apierror.InvalidArgument("Invalid private key type %s.", keyType)
 	}
+	bits := 2048
 	switch req.GetKeyAlgorithm() {
 	case adminpb.ServiceAccountKeyAlgorithm_KEY_ALG_UNSPECIFIED, adminpb.ServiceAccountKeyAlgorithm_KEY_ALG_RSA_2048:
+	case adminpb.ServiceAccountKeyAlgorithm_KEY_ALG_RSA_1024:
+		bits = 1024
 	default:
-		return nil, apierror.Unimplemented("key_algorithm %s: only KEY_ALG_RSA_2048 keys are served", req.GetKeyAlgorithm())
+		return nil, apierror.InvalidArgument("Invalid key algorithm %s.", req.GetKeyAlgorithm())
 	}
 	r.mu.Lock()
 	defer r.unlock()
@@ -229,7 +245,7 @@ func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyR
 	if a.userKeys() >= maxUserKeys {
 		return nil, apierror.FailedPrecondition("Precondition check failed.")
 	}
-	priv, k, err := newKey(a, r.now(), userKeyExpiry)
+	priv, k, err := newKeyBits(a, r.now(), userKeyExpiry, bits)
 	if err != nil {
 		return nil, err
 	}
@@ -237,24 +253,39 @@ func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyR
 	if err != nil {
 		return nil, apierror.Internal(err, "encode key")
 	}
-	base := strings.TrimSuffix(r.saTokenURI, "/token")
-	file, err := json.MarshalIndent(keyCredentialsFile{
-		Type: "service_account", ProjectID: a.Project, PrivateKeyID: k.ID,
-		PrivateKey:  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
-		ClientEmail: a.email(), ClientID: a.UniqueID, AuthURI: r.saTokenURI, TokenURI: r.saTokenURI,
-		AuthProviderCertURL: base + "/certs", ClientCertURL: base + "/certs", UniverseDomain: "googleapis.com",
-	}, "", "  ")
-	if err != nil {
-		return nil, apierror.Internal(err, "encode key file")
+	var file []byte
+	if keyType == adminpb.ServiceAccountPrivateKeyType_TYPE_PKCS12_FILE {
+		cert, _ := pem.Decode([]byte(k.CertPEM))
+		if file, err = encodePKCS12(der, cert.Bytes); err != nil {
+			return nil, apierror.Internal(err, "encode the PKCS#12 key file")
+		}
+	} else if file, err = r.keyFileLocked(a, k, der); err != nil {
+		return nil, err
 	}
 	a.Keys = append(a.Keys, *k)
 	if err := r.putSALocked(a); err != nil {
 		return nil, err
 	}
 	out := k.proto(a, adminpb.ServiceAccountPublicKeyType_TYPE_NONE)
-	out.PrivateKeyType = adminpb.ServiceAccountPrivateKeyType_TYPE_GOOGLE_CREDENTIALS_FILE
+	out.PrivateKeyType = keyType
 	out.PrivateKeyData = file
 	return out, nil
+}
+
+// keyFileLocked is a JSON key file of a key whose PKCS#8 private half is
+// der. The caller holds r.mu.
+func (r *Registry) keyFileLocked(a *serviceAccount, k *saKey, der []byte) ([]byte, error) {
+	base := strings.TrimSuffix(r.saTokenURI, "/token")
+	file, err := json.MarshalIndent(keyCredentialsFile{
+		Type: "service_account", ProjectID: a.Project, PrivateKeyID: k.ID,
+		PrivateKey:  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		ClientEmail: a.email(), ClientID: a.UniqueID, AuthURI: r.saTokenURI, TokenURI: r.saTokenURI,
+		AuthProviderCertURL: base + "/certs", ClientCertURL: base + "/robot/v1/metadata/x509/" + strings.ReplaceAll(url.PathEscape(a.email()), "@", "%40"), UniverseDomain: "googleapis.com",
+	}, "", "  ")
+	if err != nil {
+		return nil, apierror.Internal(err, "encode key file")
+	}
+	return file, nil
 }
 
 // UploadServiceAccountKey adds a user-managed key from an X.509
@@ -414,4 +445,50 @@ func (r *Registry) ServiceAccountKeyState(keyID string, now time.Time) (pub *rsa
 		}
 	}
 	return nil, "", false, false
+}
+
+// ServiceAccountCert is one public key of an account as its public
+// certificate URLs serve it (#1750).
+type ServiceAccountCert struct {
+	ID      string
+	CertPEM string
+	Key     *rsa.PublicKey
+}
+
+// ServiceAccountPublicCerts are the certificates of a live account's
+// enabled, valid keys, its system-managed key first (rotated when it has
+// expired, so it is the key signBlob and signJwt sign with), by email or
+// unique ID: what https://www.googleapis.com/service_accounts/v1/metadata/
+// {x509,jwk,raw}/EMAIL serve on Google. ok is false for an account that
+// is not live.
+func (r *Registry) ServiceAccountPublicCerts(account string) (certs []ServiceAccountCert, ok bool) {
+	r.mu.Lock()
+	defer r.unlock()
+	a, err := r.findSALocked("projects/-/serviceAccounts/"+account, false)
+	if err != nil {
+		return nil, false
+	}
+	now := r.now()
+	if a.systemKey(now) == nil {
+		if err := a.rotateSystemKey(now); err == nil {
+			_ = r.putSALocked(a)
+		}
+	}
+	var sys, user []ServiceAccountCert
+	for _, k := range a.Keys {
+		if k.Disabled || k.Deleted || now.Before(k.ValidAfter) || !now.Before(k.ValidBefore) {
+			continue
+		}
+		pub := k.publicKey()
+		if pub == nil {
+			continue
+		}
+		c := ServiceAccountCert{ID: k.ID, CertPEM: k.CertPEM, Key: pub}
+		if k.System {
+			sys = append(sys, c)
+		} else {
+			user = append(user, c)
+		}
+	}
+	return append(sys, user...), true
 }

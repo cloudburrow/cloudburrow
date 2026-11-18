@@ -296,8 +296,8 @@ func TestServiceAccountKeysThroughTheOfficialClient(t *testing.T) {
 		t.Errorf("an 11th key = %v, want FAILED_PRECONDITION", err)
 	}
 	if _, err := c.CreateServiceAccountKey(ctx, &adminpb.CreateServiceAccountKeyRequest{Name: sa.GetName(),
-		PrivateKeyType: adminpb.ServiceAccountPrivateKeyType_TYPE_PKCS12_FILE}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("a PKCS#12 key = %v, want UNIMPLEMENTED", err)
+		PrivateKeyType: adminpb.ServiceAccountPrivateKeyType(99)}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an unknown private key type = %v, want INVALID_ARGUMENT", err)
 	}
 	// The system-managed key signs, and cannot be deleted.
 	signer, kid, err := reg.ServiceAccountSigner(sa.GetEmail())

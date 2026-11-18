@@ -122,6 +122,8 @@ func (r *Registry) loadSALocked(project, uniqueID string) (*serviceAccount, erro
 	}
 	if a.Deleted && !r.now().Before(a.DeleteTime.Add(saUndeletePeriod)) {
 		_ = r.st.Delete(saStoreKey(project, uniqueID))
+		// Its bindings go with it (Google purges them within 60 days).
+		_ = r.rewriteMemberLocked(deletedMember(&a), "")
 		return nil, nil
 	}
 	return &a, nil
@@ -379,7 +381,10 @@ func (r *Registry) DeleteServiceAccount(name string) error {
 		return err
 	}
 	a.Deleted, a.DeleteTime = true, r.now().UTC()
-	return r.putSALocked(a)
+	if err := r.putSALocked(a); err != nil {
+		return err
+	}
+	return r.rewriteMemberLocked("serviceAccount:"+a.email(), deletedMember(a))
 }
 
 // UndeleteServiceAccount restores an account deleted less than 30 days
@@ -399,6 +404,9 @@ func (r *Registry) UndeleteServiceAccount(name string) (*adminpb.UndeleteService
 		a.Deleted, a.DeleteTime = false, time.Time{}
 		a.Etag = newSAEtag()
 		if err := r.putSALocked(a); err != nil {
+			return nil, err
+		}
+		if err := r.rewriteMemberLocked(deletedMember(a), "serviceAccount:"+a.email()); err != nil {
 			return nil, err
 		}
 	}

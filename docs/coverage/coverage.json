@@ -3870,7 +3870,7 @@
       {
         "method": "google.iam.admin.v1.IAM/LintPolicy",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served yet: policy lint is not built (#1746 serves predefined roles and QueryGrantableRoles)"
+        "note": "returns UNIMPLEMENTED (in-process check): not served yet: policy lint is not built (#1751)"
       },
       {
         "method": "google.iam.admin.v1.IAM/ListRoles",
@@ -3911,7 +3911,7 @@
       {
         "method": "google.iam.admin.v1.IAM/QueryAuditableServices",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served yet: auditable services are not built (#1746 serves predefined roles and QueryGrantableRoles)"
+        "note": "returns UNIMPLEMENTED (in-process check): not served yet: auditable services are not built (#1751)"
       },
       {
         "method": "google.iam.admin.v1.IAM/QueryGrantableRoles",
@@ -3937,12 +3937,12 @@
       {
         "method": "google.iam.admin.v1.IAM/SignBlob",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1747)"
+        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1751)"
       },
       {
         "method": "google.iam.admin.v1.IAM/SignJwt",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1747)"
+        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1751)"
       },
       {
         "method": "google.iam.admin.v1.IAM/TestIamPermissions",
