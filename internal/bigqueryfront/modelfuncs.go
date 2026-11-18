@@ -42,7 +42,8 @@ type mlCall struct {
 	// thresholds are ML.ROC_CURVE's GENERATE_ARRAY argument.
 	thresholds []float64
 	pos, end   int
-	// ai is AI.GENERATE_TEXT, ML.GENERATE_TEXT's AI.* twin (#1765).
+	// ai is AI.GENERATE_TEXT, ML.GENERATE_TEXT's AI.* twin (#1765), or
+	// AI.GENERATE_TABLE or AI.GENERATE_EMBEDDING (#1771, #1772).
 	ai bool
 }
 
@@ -58,7 +59,8 @@ func findMLCalls(sql string) ([]mlCall, string) {
 	}
 	var calls []mlCall
 	for i := 0; i+4 < len(toks); i++ {
-		ai := toks[i].is("AI") && toks[i+2].is("GENERATE_TEXT") && (i == 0 || !toks[i-1].punct("."))
+		ai := toks[i].is("AI") && (toks[i+2].is("GENERATE_TEXT") || toks[i+2].is("GENERATE_TABLE") || toks[i+2].is("GENERATE_EMBEDDING")) &&
+			(i == 0 || !toks[i-1].punct("."))
 		if !toks[i].is("ML") && !ai || !toks[i+1].punct(".") || toks[i+2].kind != tokWord || !toks[i+3].punct("(") || !toks[i+4].is("MODEL") {
 			continue
 		}
@@ -224,7 +226,8 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			return true
 		}
 	}
-	// AI.GENERATE, evaluated row by row here (aigenerate.go, #1765).
+	// The scalar AI functions, evaluated row by row here (aigenerate.go,
+	// #1765, #1771, #1772).
 	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
 		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 		if code == 501 || code == 500 {
@@ -235,8 +238,17 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		return true
 	}
 	if fn := aiFunction(text); fn != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": of BigQuery's generative AI functions only AI.GENERATE and AI.GENERATE_TEXT are served (#1765; the rest are #1771 and #1772); "+
-			"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING of a remote model run on the instance's local Vertex AI (#1760). Nothing was run.")
+		why := map[string]string{
+			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +
+				"and a count made any other way would not be the model's",
+			"AI.AGG":    "the aggregate generative function is not served yet (#1777)",
+			"AI.SEARCH": "it searches tables with autonomous embedding generation, which CloudBurrow does not serve yet (#1778)",
+		}[fn]
+		if why == "" {
+			why = "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
+				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE and AI.CLASSIFY run on the instance's local Vertex AI (#1765, #1771, #1772)"
+		}
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": "+why+". Nothing was run.")
 		return true
 	}
 	calls, msg := findMLCalls(text)
@@ -250,7 +262,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	var b strings.Builder
 	last := 0
 	for _, c := range calls {
-		if !mlFunctionsServed[c.fn] {
+		if !mlFunctionsServed[c.fn] && !(c.ai && c.fn == "GENERATE_TABLE") {
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
@@ -559,8 +571,15 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if md.Remote != nil {
 		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
 	}
-	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" {
-		return "", 400, "Function ML." + c.fn + " is only supported for remote models"
+	if c.ai && c.fn == "GENERATE_EMBEDDING" {
+		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
+	}
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" {
+		fname := "ML." + c.fn
+		if c.ai {
+			fname = "AI." + c.fn
+		}
+		return "", 400, "Function " + fname + " is only supported for remote models"
 	}
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711

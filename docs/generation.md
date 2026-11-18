@@ -70,7 +70,7 @@ not honoured tells the caller their setting applied when it did not.
 | `maxOutputTokens` | **Accepted by the runtime and ignored by it.** The same prompt decoded 309 tokens at a limit of 8, at 40, and with no limit. Refused on that measurement, not on the flag's absence. Re-measured 2026-11-17 (#1765) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `--max_output_tokens=8` and `=64` wrote the same 746-word answer. |
 | `stopSequences` | No runtime control. |
 | `candidateCount` > 1 | `--num_output_candidates` exists but was never exercised; untested is not supported. |
-| `responseMimeType`, `responseSchema` | No constrained decoding is wired up. |
+| `responseMimeType`, `responseSchema` | No constrained decoding is wired up. Measured 2026-11-17 (#1771) on the pinned `02e50307` build with `gemma-4-E2B-it.litertlm`: `litert_lm_main --constraint_regex` is **accepted and ignored** (`(true|false)` and `-?[0-9]+` left the free-text answers unchanged; upstream's `litert_lm_main.cc` never reads the flag). `litert_lm_advanced_main` applies it on its Session path (`--use_session --async=false`), which skips the model's chat template: with the Gemma turn markers written by hand, `(true|false)` answered `true` and `-?[0-9]{1,18}` answered `10`. Wiring that path is #1779; until then BigQuery's structured AI functions parse the model's text (docs/compatibility.md). |
 | `presencePenalty`, `frequencyPenalty`, `logprobs`, `responseLogprobs` | No runtime control. |
 | `thinkingConfig`, `speechConfig`, `audioTimestamp`, `routingConfig`, `responseModalities` | Out of scope. |
 | `tools`, `toolConfig` | Function calling is not implemented. |

@@ -129,9 +129,13 @@ func TestRemoteOptionsRefusedBeforeAnyCall(t *testing.T) {
 
 func TestAIFunctionsAreNamed(t *testing.T) {
 	for sql, want := range map[string]string{
-		"SELECT AI.GENERATE('hi', connection_id => 'us.c', endpoint => 'gemini-2.5-flash').result": "AI.GENERATE",
-		"SELECT * FROM AI.GENERATE_TABLE(MODEL m, (SELECT 'x' AS prompt))":                         "AI.GENERATE_TABLE",
-		"select ai.embed(content) from t":                                                          "AI.EMBED",
+		// The served ones are not named: the row-by-row scalars and the
+		// functions of a MODEL (#1771, #1772).
+		"SELECT AI.GENERATE('hi', connection_id => 'us.c', endpoint => 'gemini-2.5-flash').result": "",
+		"SELECT * FROM AI.GENERATE_TABLE(MODEL m, (SELECT 'x' AS prompt))":                         "",
+		"select ai.embed(content) from t":                                                          "",
+		"SELECT AI.AGG(s, 'summarize') FROM t":                                                     "AI.AGG",
+		"SELECT AI.COUNT_TOKENS('hi')":                                                             "AI.COUNT_TOKENS",
 		"SELECT ai.x FROM t AS ai":                                                                 "",
 		"SELECT p.ai.f(1)":                                                                         "",
 		"SELECT 'AI.GENERATE(' AS s":                                                               "",

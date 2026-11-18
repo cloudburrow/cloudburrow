@@ -269,9 +269,9 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		fname = "AI." + c.fn
 	}
 	switch {
-	case c.fn == "GENERATE_TEXT" && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
+	case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
 		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s", fname, rm.Endpoint)
-	case c.fn != "GENERATE_TEXT" && c.fn != "GENERATE_EMBEDDING":
+	case c.fn != "GENERATE_TEXT" && c.fn != "GENERATE_EMBEDDING" && c.fn != "GENERATE_TABLE":
 		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s", fname, rm.Endpoint)
 	case c.input == "":
 		return "", 400, fname + " requires an input: a query in parentheses or TABLE name"
@@ -282,21 +282,34 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	flatten := c.fn == "GENERATE_EMBEDDING"
 	var taskType string
 	dims := 0
+	var schema []aiField
+	if c.fn == "GENERATE_TABLE" {
+		v, ok := c.struc["output_schema"]
+		s, isStr := unquoteString(v)
+		if !ok || !isStr {
+			return "", 400, "AI.GENERATE_TABLE requires the output_schema option, a STRING literal"
+		}
+		var msg string
+		if schema, msg = parseOutputSchema(s); msg != "" {
+			return "", 400, msg
+		}
+	}
 	for k, v := range c.struc {
 		switch {
+		case c.fn == "GENERATE_TABLE" && k == "output_schema":
 		case k == "flatten_json_output" && !c.ai:
 			b, ok := map[string]bool{"TRUE": true, "FALSE": false}[strings.ToUpper(v)]
 			if !ok {
 				return "", 400, "flatten_json_output must be a BOOL literal"
 			}
 			flatten = b
-		case c.fn == "GENERATE_TEXT" && k == "request_type":
+		case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && k == "request_type":
 			s, _ := unquoteString(v)
 			if s := strings.ToUpper(s); s != "DEDICATED" && s != "SHARED" && s != "UNSPECIFIED" {
 				return "", 400, "request_type must be 'DEDICATED', 'SHARED' or 'UNSPECIFIED'"
 			}
-		case c.fn == "GENERATE_TEXT" && refusedGenerateOptions[k] != "":
-			return "", 501, "Not implemented here: the " + k + " option of ML.GENERATE_TEXT: " + refusedGenerateOptions[k] +
+		case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && refusedGenerateOptions[k] != "":
+			return "", 501, "Not implemented here: the " + k + " option of " + fname + ": " + refusedGenerateOptions[k] +
 				", and CloudBurrow refuses an option rather than ignoring it (docs/generation.md). Nothing was run."
 		case c.fn == "GENERATE_EMBEDDING" && k == "task_type":
 			s, ok := unquoteString(v)
@@ -311,7 +324,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 			}
 			dims = n
 		default:
-			return "", 400, "Unknown option " + k + " for ML." + c.fn
+			return "", 400, "Unknown option " + k + " for " + fname
 		}
 	}
 	// The connection's permissions, before any row is sent (#1765).
@@ -349,7 +362,16 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	}
 	project := projectOf(f.base)
 	var outCols []string // name and type
-	if c.ai {
+	if c.fn == "GENERATE_TABLE" {
+		// The schema's columns, full_response and status (#1771).
+		for _, fd := range schema {
+			outCols = append(outCols, sqlIdent(fd.name)+" "+fd.typ.sql())
+		}
+		outCols = append(outCols, "full_response JSON", "status STRING")
+	} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
+		// AI.GENERATE_EMBEDDING's columns, a text embedding model's (#1772).
+		outCols = []string{"embedding ARRAY<FLOAT64>", "statistics JSON", "status STRING"}
+	} else if c.ai {
 		// AI.GENERATE_TEXT's columns, a Gemini model's (#1765).
 		outCols = []string{"result STRING", "rai_result JSON", "grounding_result JSON", "statistics JSON", "full_response JSON", "status STRING"}
 	} else if c.fn == "GENERATE_TEXT" && flatten {
@@ -368,7 +390,11 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 		in := *row[0]
 		var parts []string
-		if c.ai {
+		if c.fn == "GENERATE_TABLE" {
+			parts = f.generateTableRow(r, project, rm, schema, in)
+		} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
+			parts = f.embedRow(r.Context(), project, rm, in, true, taskType, dims)
+		} else if c.ai {
 			parts = f.aiGenerateTextRow(r.Context(), project, rm, in)
 		} else if c.fn == "GENERATE_TEXT" {
 			parts = f.generateRow(r.Context(), project, rm, in, flatten)
@@ -542,8 +568,11 @@ func aiFunction(sql string) string {
 	for i := 0; i+3 < len(toks); i++ {
 		if toks[i].is("AI") && toks[i+1].punct(".") && toks[i+2].kind == tokWord && toks[i+3].punct("(") &&
 			(i == 0 || !toks[i-1].punct(".")) {
-			if toks[i+2].is("GENERATE_TEXT") && i+4 < len(toks) && toks[i+4].is("MODEL") {
-				continue // served as ML.GENERATE_TEXT's twin (#1765)
+			if (toks[i+2].is("GENERATE_TEXT") || toks[i+2].is("GENERATE_TABLE") || toks[i+2].is("GENERATE_EMBEDDING")) && i+4 < len(toks) && toks[i+4].is("MODEL") {
+				continue // served with the ML functions of a model (#1765, #1771, #1772)
+			}
+			if _, ok := aiScalars[strings.ToUpper(toks[i+2].text)]; ok {
+				continue // evaluated row by row (aigenerate.go)
 			}
 			return "AI." + strings.ToUpper(toks[i+2].text)
 		}
@@ -583,4 +612,21 @@ func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remote
 	}
 	return []string{sqlString(text.String()), jsonLiteral(cand.SafetyRatings), jsonLiteral(cand.GroundingMetadata), jsonLiteral(resp.UsageMetadata),
 		jsonLiteral(out), sqlString("")}
+}
+
+// generateTableRow is one prompt's AI.GENERATE_TABLE columns, as SQL
+// literals: the schema's fields, full_response and status (#1771).
+func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel, schema []aiField, prompt string) []string {
+	text, raw, status := f.aiGenerateText(r, project, rm, prompt+aiSchemaInstruction(schema))
+	var vals []string
+	if status == "" {
+		vals, status = schemaLiterals(schema, text)
+	}
+	if status != "" {
+		vals = nil
+		for _, fd := range schema {
+			vals = append(vals, "CAST(NULL AS "+fd.typ.sql()+")")
+		}
+	}
+	return append(vals, jsonLiteral(raw), sqlString(status))
 }
