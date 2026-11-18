@@ -142,6 +142,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/frontready/` | The readiness path a front serves for the backend beside it (#1114): the BigQuery and Pub/Sub emulators listen on their pod's loopback alone, so no other pod reaches them past their fronts, and Kubernetes, which probes at the pod's IP, asks their readiness of the front, which dials them on loopback. |
 | `internal/frontstate/` | The state directory the Spanner, Bigtable and Firestore fronts keep their records and data copies in (#1514), on a size-limited emptyDir of their pod: one records file replaced whole by a rename, and a file per backup, snapshot or deleted table, written once; and the reset path `cloudburrow reset` clears it through. |
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
+| `internal/grpchttp/` | Builds gRPC servers that are served through `ServeHTTP` (h2c) with `WaitForHandlers`, and stops them so `Stop` waits for every call's handler, its stats `End` included, before returning (#1804). `grpchttptest` holds the shared regression-test helpers. |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
