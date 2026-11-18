@@ -67,7 +67,6 @@ func TestDecodePDFRefuses(t *testing.T) {
 		want string
 	}{
 		{"seven pages", read("seven-pages.pdf"), false, "7 pages; at most 6"},
-		{"scan with document_ocr", read("no-text.pdf"), true, "no OCR engine"},
 		{"not a PDF", []byte("hello"), false, "not a PDF"},
 		{"truncated", read("turtle.pdf")[:200], false, "not a valid PDF"},
 		{"empty", nil, false, "empty"},
@@ -77,7 +76,66 @@ func TestDecodePDFRefuses(t *testing.T) {
 			t.Errorf("%s: %v, want an error naming %q", c.name, err, c.want)
 		}
 	}
-	if pages, err := DecodePDF("application/pdf", read("no-text.pdf"), false); err != nil || len(pages) != 1 {
-		t.Errorf("a page with no text, without document_ocr: %d pages, %v", len(pages), err)
+	for _, ocr := range []bool{false, true} {
+		if pages, err := DecodePDF("application/pdf", read("no-text.pdf"), ocr); err != nil || len(pages) != 1 || pages[0].Text != "" {
+			t.Errorf("a page of shapes, document_ocr %v: %d pages, %v", ocr, len(pages), err)
+		}
 	}
+}
+
+// testdata/scan.pdf is a scanned page: one 300 DPI greyscale JPEG of a
+// printed invoice (testdata/scan.txt is its text), with no text layer.
+func TestDecodePDFOCR(t *testing.T) {
+	data, err := os.ReadFile("testdata/scan.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/scan.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := DecodePDF("application/pdf", data, false)
+	if err != nil || len(pages) != 1 || pages[0].Text != "" {
+		t.Fatalf("without document_ocr: %d pages, %v", len(pages), err)
+	}
+	pages, err = DecodePDF("application/pdf", data, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("%d pages, want 1", len(pages))
+	}
+	c := charErrorRate(pages[0].Text, string(want))
+	t.Logf("CER %.3f", c)
+	if c > 0.05 {
+		t.Errorf("CER %.3f over 0.05; text:\n%s", c, pages[0].Text)
+	}
+	// The image is still the page rendered at 150 DPI (A4).
+	if b := pages[0].Image.Bounds(); b.Dx() != 1240 || b.Dy() != 1754 {
+		t.Errorf("page image %v, want 1240x1754", b)
+	}
+}
+
+// charErrorRate is the edit distance between got and want, with runs of
+// white space as one space, over want's length.
+func charErrorRate(got, want string) float64 {
+	a := []rune(strings.Join(strings.Fields(got), " "))
+	b := []rune(strings.Join(strings.Fields(want), " "))
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			c := prev[j-1]
+			if a[i-1] != b[j-1] {
+				c++
+			}
+			cur[j] = min(c, prev[j]+1, cur[j-1]+1)
+		}
+		prev, cur = cur, prev
+	}
+	return float64(prev[len(b)]) / float64(len(b))
 }

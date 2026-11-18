@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/draw"
@@ -13,6 +14,8 @@ import (
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"
+
+	"github.com/cloudburrow/cloudburrow/internal/ocr"
 )
 
 // PDF for EmbeddingGemma 2 (#1723), as Google documents it for
@@ -24,10 +27,11 @@ import (
 // rendered page is an image like any other: the vision encoder's processor
 // resizes it to its soft-token budget.
 //
-// document_ocr reads the text PDFium finds on each page, which is the text a
-// born-digital PDF holds. CloudBurrow runs no OCR engine, so a document whose
-// pages hold no text (a scan) is refused with document_ocr rather than
-// embedded without the text Google would have read.
+// document_ocr reads each page's text: the text layer PDFium finds when the
+// page has one (a born-digital PDF), and otherwise (a scan) the text
+// Tesseract OCR reads from the page rendered again at 300 DPI
+// (internal/ocr, #1733). The text follows the page's image as text tokens,
+// counted against the request's token limit like any other text.
 
 // PDFMIMEType is the PDF type.
 const PDFMIMEType = "application/pdf"
@@ -47,6 +51,17 @@ const (
 	pdfDPI       = 150
 	pdfMaxPixels = 4 << 20
 )
+
+// ocrDPI is the resolution a page without a text layer is rendered at for
+// OCR, the resolution Tesseract's models are trained for; ocrMaxPixels caps
+// it (an A4 page at 300 DPI is 8.7 million pixels).
+const (
+	ocrDPI       = 300
+	ocrMaxPixels = 16 << 20
+)
+
+// ocrTimeout bounds the OCR of one PDF.
+const ocrTimeout = 5 * time.Minute
 
 // PDFPage is one rendered page and, when asked for, its text.
 type PDFPage struct {
@@ -109,34 +124,18 @@ func DecodePDF(mimeType string, data []byte, text bool) (pages []PDFPage, err er
 	if n > MaxPDFPages {
 		return nil, fmt.Errorf("the PDF has %d pages; at most %d pages are embedded", n, MaxPDFPages)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), ocrTimeout)
+	defer cancel()
 	for i := 0; i < n; i++ {
 		page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}}
 		size, err := inst.FPDF_GetPageSizeByIndex(&requests.FPDF_GetPageSizeByIndex{Document: doc.Document, Index: i})
 		if err != nil {
 			return nil, fmt.Errorf("page %d: %v", i+1, err)
 		}
-		w := size.Width / 72 * pdfDPI
-		h := size.Height / 72 * pdfDPI
-		if w <= 0 || h <= 0 {
-			return nil, fmt.Errorf("page %d has no area", i+1)
-		}
-		if px := w * h; px > pdfMaxPixels {
-			f := math.Sqrt(pdfMaxPixels / px)
-			w, h = w*f, h*f
-		}
-		r, err := inst.RenderPageInPixels(&requests.RenderPageInPixels{Page: page,
-			Width: max(1, int(math.Round(w))), Height: max(1, int(math.Round(h)))})
+		img, err := renderPage(inst, page, size.Width, size.Height, pdfDPI, pdfMaxPixels)
 		if err != nil {
-			return nil, fmt.Errorf("rendering page %d: %v", i+1, err)
+			return nil, fmt.Errorf("page %d: %v", i+1, err)
 		}
-		src := r.Result.RenderedImage
-		if src == nil {
-			src = r.Result.Image
-		}
-		// Copy the pixels: in WebAssembly they live only until Cleanup.
-		img := image.NewNRGBA(src.Bounds())
-		draw.Draw(img, img.Bounds(), src, src.Bounds().Min, draw.Src)
-		r.Cleanup()
 		p := PDFPage{Image: img}
 		if text {
 			t, err := inst.GetPageText(&requests.GetPageText{Page: page})
@@ -144,20 +143,48 @@ func DecodePDF(mimeType string, data []byte, text bool) (pages []PDFPage, err er
 				return nil, fmt.Errorf("reading page %d's text: %v", i+1, err)
 			}
 			p.Text = strings.TrimSpace(t.Text)
+			if p.Text == "" {
+				// No text layer: a scanned page, read with OCR.
+				hi, err := renderPage(inst, page, size.Width, size.Height, ocrDPI, ocrMaxPixels)
+				if err != nil {
+					return nil, fmt.Errorf("page %d: %v", i+1, err)
+				}
+				r, err := ocr.Read(ctx, hi, ocrDPI)
+				if err != nil {
+					return nil, fmt.Errorf("document_ocr: reading page %d: %v", i+1, err)
+				}
+				p.Text = r.Text
+			}
 		}
 		pages = append(pages, p)
 	}
-	if text {
-		empty := true
-		for _, p := range pages {
-			if p.Text != "" {
-				empty = false
-			}
-		}
-		if empty {
-			return nil, fmt.Errorf("document_ocr: the PDF's pages hold no text, and CloudBurrow runs no OCR engine " +
-				"to read a scanned page; send it without document_ocr to embed the pages as images")
-		}
-	}
 	return pages, nil
+}
+
+// renderPage renders a page of w by h points at dpi, smaller when that would
+// exceed maxPixels, and copies the pixels out of WebAssembly memory.
+func renderPage(inst pdfium.Pdfium, page requests.Page, wPt, hPt float64, dpi, maxPixels float64) (image.Image, error) {
+	w := wPt / 72 * dpi
+	h := hPt / 72 * dpi
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("the page has no area")
+	}
+	if px := w * h; px > maxPixels {
+		f := math.Sqrt(maxPixels / px)
+		w, h = w*f, h*f
+	}
+	r, err := inst.RenderPageInPixels(&requests.RenderPageInPixels{Page: page,
+		Width: max(1, int(math.Round(w))), Height: max(1, int(math.Round(h)))})
+	if err != nil {
+		return nil, fmt.Errorf("rendering: %v", err)
+	}
+	src := r.Result.RenderedImage
+	if src == nil {
+		src = r.Result.Image
+	}
+	// Copy the pixels: in WebAssembly they live only until Cleanup.
+	img := image.NewNRGBA(src.Bounds())
+	draw.Draw(img, img.Bounds(), src, src.Bounds().Min, draw.Src)
+	r.Cleanup()
+	return img, nil
 }
