@@ -66,7 +66,8 @@ import (
 // 501, and nothing is copied: a CLONE, SNAPSHOT or RESTORE of several
 // sources, a CLONE into a table that exists (BigQuery's documentation
 // implies a clone may overwrite one, "If the table clone overwrites an
-// existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration,
+// existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration with a
+// partition decorator (the key is given to a whole table: copykey.go, #1762),
 // destinationExpirationTime into a table that exists (whether it changes
 // that table's expiration is not documented), and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
@@ -112,6 +113,9 @@ type copyTable struct {
 	// layout is the table's partitioning and clustering, as tables.get
 	// gives them (#1759, copylayout.go).
 	layout map[string]json.RawMessage
+	// key is the table's encryptionConfiguration.kmsKeyName, or "" (#1762,
+	// copykey.go).
+	key string
 }
 
 // partitionExtra returns the Table fields that make a new table
@@ -151,9 +155,6 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		notImplemented(fmt.Sprintf("with operationType %s of several source tables. BigQuery's documentation "+
 			"gives it one table.", op))
 		return
-	case len(c.DestinationEncryptionConfiguration) > 0 && string(c.DestinationEncryptionConfiguration) != "null":
-		notImplemented("with destinationEncryptionConfiguration. The emulator behind CloudBurrow has no customer-managed keys.")
-		return
 	case len(srcs) == 0 || c.DestinationTable == nil:
 		invalid("Required parameter is missing: a copy job needs sourceTable or sourceTables, and destinationTable.")
 		return
@@ -187,6 +188,21 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		if why := f.protectedRead(r, project, src.DatasetID, src.TableID, "a copy job"); why != "" {
 			writeError(w, http.StatusNotImplemented, "notImplemented", why)
 			return
+		}
+	}
+	// destinationEncryptionConfiguration (#1762, copykey.go).
+	key, keyWhy := copyKeyName(c.DestinationEncryptionConfiguration)
+	if keyWhy != "" {
+		invalid(keyWhy)
+		return
+	}
+	if key != "" {
+		for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
+			if _, _, ok := decorated(t.TableID); ok {
+				notImplemented("of or into a partition (" + t.TableID + ") with destinationEncryptionConfiguration. " +
+					"CloudBurrow gives the key to a whole destination table.")
+				return
+			}
 		}
 	}
 	expiration, hasExpiration, expOK := copyExpiration(c.DestinationExpirationTime)
@@ -356,6 +372,22 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		fail("duplicate", "Already Exists: Table "+tableName(project, dest.ref))
 		return
 	}
+	if key != "" { // #1762, copykey.go
+		if why := keyRegionMismatch(key, in.datasetLocation(r, dest.ref.DatasetID)); why != "" {
+			fail("invalid", why)
+			return
+		}
+		if appending && dest.key != key {
+			fail("invalid", keyMismatchMessage)
+			return
+		}
+	}
+	withKey := func(extra map[string]any) map[string]any {
+		if key != "" {
+			extra["encryptionConfiguration"] = map[string]any{"kmsKeyName": key}
+		}
+		return extra
+	}
 
 	rows, msg := f.countRows(r, sources)
 	if msg != "" {
@@ -405,7 +437,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 				made[k] = v
 			}
 		}
-		if err = in.makeCopyTable(r, dest.ref, sources[0].schema, made); err == "" {
+		if err = in.makeCopyTable(r, dest.ref, sources[0].schema, withKey(made)); err == "" {
 			if err = f.insertSelect(r, dest.ref, sources); err != "" {
 				in.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
 			}
@@ -419,9 +451,10 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 				// The destination keeps its own partitioning and clustering,
 				// which match the source's or, of a partitioned source into
 				// a table that is not, "remains unpartitioned" (#1759,
-				// copylayout.go).
-				if err = in.makeCopyTable(r, dest.ref, sources[0].schema, in.newTableLayout(r, dest.layout, false,
-					dest.ref.DatasetID)); err == "" {
+				// copylayout.go). It is encrypted by the key given, or
+				// by default encryption (#1762, copykey.go).
+				if err = in.makeCopyTable(r, dest.ref, sources[0].schema, withKey(in.newTableLayout(r, dest.layout, false,
+					dest.ref.DatasetID))); err == "" {
 					err = f.insertSelect(r, dest.ref, []copyTable{{ref: scratch, fields: sources[0].fields,
 						partitionTime: sources[0].partitionTime}})
 				}
@@ -481,6 +514,7 @@ func (f front) copyTableMeta(r *http.Request, ref tableRef) copyTable {
 	t.exists, t.kind, t.schema, t.fields = true, meta.Type, meta.Schema, s.Fields
 	t.snapshot = snapshotDefinitionOf(got)
 	t.layout = layoutOf(got)
+	t.key = tableKeyOf(got)
 	return t
 }
 
