@@ -574,13 +574,14 @@ func TestBuilderVoronoiSiteExclusionBugs(t *testing.T) {
 	}{
 		{64.83, "29.40:173.03, -18.02:-5.83", []string{"25.84:131.46", "-29.23:-166.58"}, "25.84:131.46, -18.02:-5.83", ""},
 		// Upstream expects ...374 except on Windows, whose C library
-		// rounds to ...373.
+		// rounds to ...373; amd64, without arm64's fused multiply-add,
+		// gives ...192 in the latitude. Both are within a few ulps.
 		{67.75, "47.06:-175.17, -47.59:10.57", []string{"36.36:47.63", "-28.34:-72.46"},
 			"47.06:-175.17, -34.4968065428191:69.7125289482374", "47.06:-175.17, -34.4968065428191:69.7125289482373"},
 	} {
 		got := buildPolylines(t, BuilderOptions{SnapFunction: s2.NewIdentitySnapper(s1.Angle(c.radius) * s1.Degree), Idempotent: true},
 			polylineLayerOptions(), []string{c.line}, c.forced)
-		if got[0] != c.want && got[0] != c.wantAlt {
+		if got[0] != c.want && got[0] != c.wantAlt && !sameLatLngs(got[0], c.want, 1e-12) {
 			t.Errorf("radius %v: got %q, want %q", c.radius, got[0], c.want)
 		}
 	}
@@ -602,4 +603,28 @@ func TestBuilderMaxSnapRadiusCanSnapAtLevel0(t *testing.T) {
 	if r := s2.CellIDSnapperForLevel(0).SnapRadius(); r > MaxSnapRadius {
 		t.Errorf("level 0 snap radius %v exceeds %v", r, MaxSnapRadius)
 	}
+}
+
+// sameLatLngs reports whether two "lat:lng, lat:lng" strings name the same
+// points to within tol degrees: the last printed digit of a snapped vertex
+// depends on the platform's floating-point rounding.
+func sameLatLngs(a, b string, tol float64) bool {
+	pa, pb := strings.Split(a, ", "), strings.Split(b, ", ")
+	if len(pa) != len(pb) {
+		return false
+	}
+	for i := range pa {
+		ca, cb := strings.Split(pa[i], ":"), strings.Split(pb[i], ":")
+		if len(ca) != 2 || len(cb) != 2 {
+			return false
+		}
+		for j := range ca {
+			x, err1 := strconv.ParseFloat(ca[j], 64)
+			y, err2 := strconv.ParseFloat(cb[j], 64)
+			if err1 != nil || err2 != nil || math.Abs(x-y) > tol {
+				return false
+			}
+		}
+	}
+	return true
 }
