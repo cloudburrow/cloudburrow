@@ -120,7 +120,8 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	be := memorystoreBackend(s.tunnel)
 	s.api = redisadmin.NewServer(memorystoreInstance(s.cfg, time.Now(), be.Addr), be)
 	s.api.RecordEvents(s.events)
-	// CreateInstance (#1302): a Valkey server per instance, kept across a
+	// CreateInstance (#1302): a server per instance, of its redis_version's
+	// image (memorystoreImages, #1386), kept across a
 	// restart in persistent mode, as the instance `up` runs keeps its data.
 	var db store.Store = store.NewMemory()
 	if s.cfg.Mode == config.ModePersistent {

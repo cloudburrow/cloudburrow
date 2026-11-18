@@ -8,8 +8,9 @@
 // (INFO and CONFIG GET maxmemory), and its state is READY only while the
 // server answers. It cannot be updated or deleted.
 //
-// Every other instance is one CreateInstance made: a real Valkey server of
-// its own, which a Provisioner runs (a Deployment and Service per instance,
+// Every other instance is one CreateInstance made: a real server of its
+// own, of its redis_version's image (Redis 6.2, Redis 7.0 or Valkey 8.1;
+// versions.go), which a Provisioner runs (a Deployment and Service per instance,
 // reached through a tunnel), started with the instance's maxmemory, AUTH
 // and redis_configs. Its size and configs are changed on the running
 // server with CONFIG SET, and DeleteInstance removes the server and its

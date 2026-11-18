@@ -32,7 +32,7 @@ Cloud KMS in `(served)`, and Memorystore, Cloud SQL for MySQL and Datastore in `
 | **Cloud Tasks** | CloudBurrow itself | Queues, tasks, pause/resume, HTTP dispatch with retry |
 | **Cloud Run** | Knative Serving | Create, get, list, delete services; deploys real containers; env from Secret Manager |
 | **Secret Manager** | CloudBurrow itself | Secrets and versions, enable/disable/destroy, access, over gRPC and JSON. **Not a secret store** — nothing is authenticated |
-| **Resource Manager** | CloudBurrow itself (#298, #301) | Always served, not chosen with `--services`. v3 Projects create, get, search, update labels and delete over gRPC and REST, and v1 `projects.list/get/create/delete`, from the same project registry the console lists; `gcloud projects list` and Terraform's `google_project` work. No folders, organizations or IAM; a delete takes effect at once |
+| **Resource Manager** | CloudBurrow itself (#298, #301) | Always served, not chosen with `--services`. v3 Projects create, get, search, update labels and delete over gRPC and REST, and v1 `projects.list/get/create/delete`, from the same project registry the console lists; `gcloud projects list` and Terraform's `google_project` work. Folders, the local organization, tags and liens are served too, and IAM policies are stored, not enforced (#1294, #1368); a deleted project stays `DELETE_REQUESTED` for 30 days and can be undeleted |
 
 Opt-in, with `--services`:
 
@@ -42,10 +42,10 @@ Opt-in, with `--services`:
 | **Datastore** | Google's own emulator | Entities and kinds through the official SDK |
 | **Bigtable** | Google's own emulator | Tables, column families and rows through the official SDK |
 | **Spanner** | Google's own emulator | Instances, databases, DDL and queries through the official SDK |
-| **Cloud Scheduler** | CloudBurrow itself (#302) | Jobs with cron schedules in IANA time zones: create, get, list, pause, resume, run and delete, to HTTP and Pub/Sub targets (`UpdateJob` is unit-tested only), with retries. Survives a restart in persistent mode. No App Engine targets. OIDC and OAuth tokens are minted locally, signed with the instance's own key (#1243). HTTP targets are called from the host |
-| **Cloud Logging** | CloudBurrow itself (#304) | `WriteLogEntries`, `ListLogEntries` with a documented filter subset, `ListLogs`, `DeleteLog`; entries appear in the console's Logs Explorer. In memory in every mode, bounded at 20,000 entries. No sinks, exclusions, buckets, log-based metrics or tailing |
-| **Cloud KMS** | CloudBurrow itself (#309) | Key rings, symmetric keys and versions, over gRPC; Encrypt and Decrypt also over JSON. **Not a security boundary** — key material is stored unencrypted |
-| **Cloud SQL** | PostgreSQL in the cluster; MySQL 8.4 as `cloudsql-mysql` (#297) | **A local SQL database, not the Cloud SQL Admin API.** Google publishes no Cloud SQL emulator, so this is a real PostgreSQL reached with an ordinary driver. No instances, connection names, IAM database authentication, backups or replicas, and no `sqladmin` endpoint — see [#121](https://github.com/cloudburrow/cloudburrow/issues/121) |
+| **Cloud Scheduler** | CloudBurrow itself (#302) | Jobs with cron schedules in IANA time zones: create, get, list, pause, resume, run and delete, to HTTP and Pub/Sub targets and update, with retries. Survives a restart in persistent mode. App Engine targets are delivered to a local stand-in with `--appengine-url` (#1447). OIDC and OAuth tokens are minted locally, signed with the instance's own key (#1243). HTTP targets are called from the host |
+| **Cloud Logging** | CloudBurrow itself (#304) | `WriteLogEntries`, `ListLogEntries` with a documented filter subset, `ListLogs`, `DeleteLog`; entries appear in the console's Logs Explorer. Also sinks (delivered to their destinations), exclusions, buckets and views, log-based metrics and `TailLogEntries`. In memory in every mode, bounded at 20,000 entries |
+| **Cloud KMS** | CloudBurrow itself (#309) | Key rings, symmetric, asymmetric and MAC keys and versions, import jobs, Autokey and EKM connections, over gRPC and JSON. **Not a security boundary** — key material is stored unencrypted |
+| **Cloud SQL** | PostgreSQL in the cluster; MySQL 8.4 as `cloudsql-mysql` (#297) | Google publishes no Cloud SQL emulator, so each instance is a real PostgreSQL or MySQL server, reached with an ordinary driver, the Cloud SQL connectors or the Auth Proxy. The **Cloud SQL Admin API** is served over them on its own port (`CLOUDBURROW_SQLADMIN_ENDPOINT`, #1301, #1330): 74 of its 80 methods are Verified ([coverage](coverage/sqladmin.md)), among them instances, databases, users, backups, read replicas, high availability, clones, imports and exports. IAM database authentication is 501 — see [cloudsql.md](cloudsql.md) |
 
 ## Languages and tools
 
@@ -60,12 +60,12 @@ shard` job, so the gcloud and gsutil tests below, which skip where the tool is a
 | `gcloud storage` | **Verified** | `test/compat/gcloudstorage_test.go`, `test/compat/gcloudsetup_test.go` |
 | `gcloud kms` | **Verified** | `test/compat/gcloudkms_test.go`, `gcloudkms_iam_test.go`, `gcloudkms_crypto_test.go` |
 | `gcloud secrets` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudSecrets`) |
-| `gcloud tasks` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudTasks`): queues and tasks over JSON (#591); `gcloud tasks run` answers 501 |
+| `gcloud tasks` | **Verified** | `test/compat/gcloudsecrets_test.go` (`TestGcloudTasks`): queues and tasks over JSON (#591); `RunTask` is verified over gRPC and JSON, `gcloud tasks run` itself is not tested |
 | `gcloud scheduler` | **Verified** | `test/compat/gcloudschedulerlogging_test.go` (`TestGcloudScheduler`): jobs through `gcloud-setup`, with `--location` (#591) |
 | `gcloud logging` | **Verified** | `test/compat/gcloudschedulerlogging_test.go` (`TestGcloudLogging`): write, read, list logs and delete a log (#591) |
 | `gcloud projects list` | **Verified** | `test/compat/resourcemanagerv1_test.go` (`TestGcloudProjectsList`) |
-| `gcloud pubsub` | **Partial** | `topics list` only, in `test/compat/gcloudsetup_test.go` |
-| Other `gcloud` command families (`run`, `scheduler`, `logging`, ...) | Untested | No test |
+| `gcloud pubsub` | **Verified** | `test/compat/gcloudpubsub_test.go` (`TestGcloudPubSub`): topics create, list, publish and delete; subscriptions create, update, describe, pull and delete |
+| `gcloud run` | **Verified** | `TestGcloudRunServicesList`, `TestGcloudRunDeployImage`, `TestGcloudRunJobs` |
 | **gsutil** | **Verified** | `test/compat/gcloudstorage_test.go` (`TestGsutilJSONAndHMACXML`) |
 | **Terraform** (`hashicorp/google` 8.4.0, Terraform 1.16.6) | **Verified** for the resources compatibility.md lists | `test/compat/terraform_test.go`, `terraformstorage_test.go`, `terraform_kms_test.go`, `terraform_run_test.go`, and `resourcemanagerv1_test.go` (`TestTerraformGoogleProject`) |
 | **OpenTofu** 1.12.6 (`cloudburrow terraform --binary tofu`) | **Verified** for the modules its tests apply | `test/compat/terraform_test.go` (`TestTofuAppliesAndDestroysThroughTheWrapper`) and `terraform_scheduler_test.go` (`TestTofuSchedulerAndSubscription`), in the `storage` shard |
@@ -73,7 +73,8 @@ shard` job, so the gcloud and gsutil tests below, which skip where the tool is a
 | **Node.js** (official Cloud client libraries) | **Verified** for the rows compatibility.md lists | `test/compat-node/storage.test.mjs`, `pubsub.test.mjs`, `tasks.test.mjs`, `secrets.test.mjs`, `firestore.test.mjs` and `examples.test.mjs`, run by `make compat-node` in compat CI's `storage` and `emulators` shards, green since the #759 train (#589) |
 | Java, .NET, Ruby, PHP | Untested | No test; no Java suite is planned (#718) |
 | Firebase SDKs, Spring Cloud GCP | Untested | No test |
-| Pulumi, `bq` | Untested | No test |
+| `bq` | **Verified** | `mk`, `insert`, `query` and `rm`, as compatibility.md's BigQuery section lists |
+| Pulumi | Untested | No test |
 
 ## Shipped platforms
 
@@ -101,37 +102,49 @@ linux/arm64 a Tier 2 platform. The cluster and SDK subset runs on linux/arm64 ni
 Worth reading before you hit these. Every remaining gap, grouped by service with why it is open
 and a rough size, is in [gaps.md](gaps.md).
 
-- **No IAM enforcement, anywhere.** No policy evaluation, no service-account identity. Google's
-  Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
-  [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*, never enforcement: Secret
-  Manager (#365), Cloud Tasks (#366) and Cloud KMS key rings and keys (#428) have it, and so do
-  Cloud Storage buckets (#504) and Cloud Run services and jobs (#1216); a project's policy
-  does not. **Do not use CloudBurrow to test whether your
+- **IAM policies are stored, not enforced, apart from three named checks.**
+  [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*: Secret Manager (#365),
+  Cloud Tasks (#366), Cloud KMS key rings and keys (#428), Cloud Storage buckets and ACLs (#504,
+  #1233), Cloud Run services and jobs (#1216), BigQuery tables, routines and row access policies
+  (#1231), Pub/Sub (#1367, served by CloudBurrow's front over Google's emulator), Resource
+  Manager's projects, folders and organization (#1368), Artifact Registry (#1304), Spanner,
+  Bigtable and tags (#1486) and Secure Source Manager (#1527) store policies, and no call of
+  theirs reads one. The exceptions check a token this instance minted (by SHA-256, against its
+  own log of minted tokens) and the roles, custom roles and conditions of the project's stored
+  policy: Memorystore for Redis Cluster's and Valkey's IAM auth (#1614), Firestore with MongoDB
+  compatibility's token and SCRAM sign-ins and each command's permissions (#1738), and IAM
+  Credentials' `generateAccessToken`, `generateIdToken`, `signBlob` and `signJwt`, and the IAM
+  API's `SignBlob` and `SignJwt`, on a service account the IAM API created (#1747, #1751). The
+  instance's own account is not such an account and is not checked
+  ([credentials.md](credentials.md)). These checks prove that this instance applies its own
+  rule, not that a policy is right on Google. **Do not use CloudBurrow to test whether your
   permissions are correct.**
 - **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits
   unencrypted in Kubernetes Secrets. IAM policies on key rings and keys are stored, never
   enforced ([ADR-0006](adr/0006-iam-policy-surface.md), #428): a binding neither grants nor
   denies Encrypt or Decrypt. They are served over gRPC and JSON, and
   Terraform's `google_kms_key_ring_iam_member`, `google_kms_crypto_key_iam_member` and
-  `google_kms_crypto_key_iam_binding` apply and destroy (#430). There is no HSM, EKM or Autokey. Symmetric
-  encryption only.
+  `google_kms_crypto_key_iam_binding` apply and destroy (#430). HSM and EKM keys are served with no
+  real HSM or external key manager behind them: this instance acts as both.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
-- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method —
-  object IAM, `managedFolders.update`, folders, caches and `bulkRestore` — and the official Go
-  client retries a 501 until its deadline. The gRPC `google.storage.v2` API is served on the same
+- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method — object
+  IAM (`objects.getIamPolicy`, `setIamPolicy`, `testIamPermissions`) — and the official Go client
+  retries a 501 until its deadline. The gRPC `google.storage.v2` API is served on the same
   port (#1321); what it cannot serve answers `UNIMPLEMENTED`.
   ACLs are stored and returned, never enforced (#1233).
-- **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
-  access, volumes, encryption keys, binary authorization, execution environment, session
-  affinity and traffic splitting all return `Unimplemented` naming the field. You will see an
-  error rather than silently wrong behaviour. (Secret-backed env used to be listed here in
-  error: it is mapped and verified.)
+- **Cloud Run configuration we cannot map is refused, not ignored**, with the field named — for
+  example `encryptionKeyRevocationAction`, and VPC access or an encryption key on a worker pool or
+  an instance. You will see an error rather than silently wrong behaviour. Volumes and the service
+  account are mapped (#1346); VPC access, encryption keys, binary authorization, the execution
+  environment and session affinity are stored and returned with no effect, as compatibility.md
+  says row by row.
 - **Knative is not Cloud Run.** Min-instances is verified; max-instances, concurrency, the
   request timeout and resource limits reach the manifest but are not tested under load.
   `UpdateService` redeploys as a new revision (#300); the Revisions API serves Get, List and
-  Delete (#299). Traffic splitting is not mapped. Jobs and Executions run as Kubernetes batch Jobs
-  (#582), with the same container mapping, over gRPC only.
+  Delete (#299). Traffic splitting and tags are mapped to Knative's traffic block (#1224). Jobs and
+  Executions run as Kubernetes batch Jobs (#582), with the same container mapping, over gRPC and
+  JSON, so `gcloud run jobs` and Terraform reach them.
 - **Cloud Tasks' `max_burst_size` is CloudBurrow's own pick.** Rate limits are enforced (#716):
   `max_dispatches_per_second` through a per-queue token bucket, `max_concurrent_dispatches`
   per queue (#579). Google does not document how it picks the burst; CloudBurrow uses one
@@ -164,8 +177,9 @@ and a rough size, is in [gaps.md](gaps.md).
 Some things are implemented and tested but **not** marked `Verified`, because no official SDK
 has driven them:
 
-- `DeleteTopic` (Pub/Sub) — called during test cleanup, never asserted
-- Resumable upload **interruption and resume** — the happy path is verified, recovery is not
+- Nothing at present: `DeleteTopic` (`TestPubSubDeleteTopic`) and a resumable upload's
+  resume after an interrupted chunk (`test_resumable_upload_resumes_after_interruption`, #516),
+  once listed here, are now Verified.
 
 The distinction is the point: called is not the same as verified.
 

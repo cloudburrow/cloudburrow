@@ -63,11 +63,13 @@ has failed its own test.
 
 Out of contract, not merely unscheduled:
 
-- **Full IAM enforcement.** No policy evaluation. Google's Pub/Sub emulator returns
-  `Unimplemented` for IAM methods and we do not paper over it.
+- **Full IAM enforcement.** Stored policies are not enforced
+  ([ADR-0006](adr/0006-iam-policy-surface.md)), except by the checks it lists: Memorystore's
+  IAM auth, Firestore with MongoDB compatibility's sign-ins, IAM Credentials on service
+  accounts the IAM API created, and BigQuery's per-project IAM of a minted token's caller, each
+  against this instance's own minted tokens and the project's stored policy (`internal/iamcond`,
+  `internal/iamroles`), and BigQuery remote models' connection permissions.
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
-- **Source builds.** Prebuilt images only. (Cloud Run Jobs were listed here; since #582 they
-  run as Kubernetes batch Jobs, docs/compatibility.md.)
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
   because Google publishes none, built by CloudBurrow with patches to its SQL engine (#1061), and
@@ -173,7 +175,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
-| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server and a Valkey server per created instance, which `cmd/cloudburrow` provisions in the cluster (#1302). |
+| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server and a server per created instance (Redis 6.2 or 7.0, or Valkey, by its `redis_version`, #1386), which `cmd/cloudburrow` provisions in the cluster (#1302); the Memorystore for Valkey and Redis Cluster APIs too (#1519). |
 | `internal/redistlsfront/` | The TLS endpoint of a Memorystore for Redis server before Redis 6.0 with in-transit encryption (#1768): `cloudburrow-storage redis-tls-front`, a second container in the server's pod, serving TLS 1.2 or later on port 6378 with the instance CA's server certificate while the server listens on the pod's loopback alone; a Standard tier replica replicates through a loopback relay the front forwards over TLS to its primary. |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
