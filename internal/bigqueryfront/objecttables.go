@@ -102,10 +102,17 @@ type objectTables struct {
 	path    string
 	logf    func(string, ...any)
 	storage *storageReader
+	// agents are the connections' service agents' keys, public the
+	// address clients reach Cloud Storage at, and signNow the signing
+	// clock (nil: the system's), for SIGNED_URL (signedurls.go, #1786).
+	agents  agentKeys
+	public  string
+	signNow func() time.Time
 }
 
 func (o *objectTables) keep(dir string, logf func(string, ...any)) {
 	o.path, o.logf = filepath.Join(dir, objectTablesFile), logf
+	o.agents.keep(dir, logf)
 	b, err := os.ReadFile(o.path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) && logf != nil {
 		logf("bigquery front: object tables: %v", err)
@@ -1024,7 +1031,8 @@ func (f front) serveObjectTableStatements(w http.ResponseWriter, r *http.Request
 		}
 		return done(ds, table, "CALL", "")
 	}
-	if code, msg := f.checkObjectTransform(r, q); code != 0 { // EXTERNAL_OBJECT_TRANSFORM
+	calls, code, msg := f.checkObjectTransform(r, q) // EXTERNAL_OBJECT_TRANSFORM
+	if code != 0 {
 		return failed(code, msg)
 	}
 	if p := writeTarget(q.Query); p != nil {
@@ -1033,6 +1041,18 @@ func (f front) serveObjectTableStatements(w http.ResponseWriter, r *http.Request
 				return failed(400, readOnlyObjectTable(project, ds, table))
 			}
 		}
+	}
+	if len(calls) > 0 {
+		text, code, msg := f.rewriteObjectTransforms(r, q, calls)
+		if code != 0 {
+			return failed(code, msg)
+		}
+		if !setQueryText(r, insert, text) {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+			return true
+		}
+		f.forward(w, r, jobText{query: q.Query})
+		return true
 	}
 	if code, msg := f.objectTablesRead(r, q); code != 0 {
 		return failed(code, msg)
@@ -1301,42 +1321,39 @@ func (f front) refuseObjectTableJob(w http.ResponseWriter, r *http.Request, dest
 // inputs. Subqueries or any other types of tables aren't supported",
 // transform_types "is an array of STRING literals", and "the only
 // supported transform_types_array value is SIGNED_URL" (400 otherwise).
-// A valid call is 501: SIGNED_URL's "read-only signed URLs for the
-// objects", valid 6 hours, need a key the instance's Cloud Storage
-// verifies and the address clients reach it at, which the BigQuery front
-// has neither of (#1786). 0 when q has none. The texts are not measured.
-func (f front) checkObjectTransform(r *http.Request, q queryOptions) (int, string) {
+// A valid call is rewritten to a subquery with signed_url
+// (signedurls.go, #1786): calls are the calls, in order. 0 when q has
+// none. The texts are not measured.
+func (f front) checkObjectTransform(r *http.Request, q queryOptions) (calls []objectTransform, code int, msg string) {
 	if !strings.Contains(strings.ToUpper(q.Query), "EXTERNAL_OBJECT_TRANSFORM") {
-		return 0, ""
+		return nil, 0, ""
 	}
 	t, lexed := lex(q.Query)
 	if !lexed {
-		return 0, ""
+		return nil, 0, ""
 	}
 	const notObject = "EXTERNAL_OBJECT_TRANSFORM only supports object tables as inputs: subqueries or any other types of tables aren't supported."
-	found := false
 	for i := 0; i < len(t); i++ {
 		if !t[i].is("EXTERNAL_OBJECT_TRANSFORM") || i+1 >= len(t) || !t[i+1].punct("(") {
 			continue
 		}
-		found = true
 		j := i + 2
 		if j >= len(t) || !t[j].is("TABLE") {
-			return 400, notObject
+			return nil, 400, notObject
 		}
 		p, next := path(t, j+1)
 		ds, table, ok := tableOf(q, p)
 		if !ok || len(p) == 3 && p[0] != projectOf(f.base) {
-			return 400, notObject
+			return nil, 400, notObject
 		}
 		if _, live := f.objectTable(r, ds, table); !live {
 			if st, got := f.get(r, tablePath(ds, table)); st != http.StatusOK {
-				return 404, errorMessage(got, st)
+				return nil, 404, errorMessage(got, st)
 			}
-			return 400, notObject
+			return nil, 400, notObject
 		}
 		if next >= len(t) || !t[next].punct(",") || next+1 >= len(t) || !t[next+1].punct("[") {
-			return 400, "EXTERNAL_OBJECT_TRANSFORM's second argument, transform_types_array, is an array of STRING literals."
+			return nil, 400, "EXTERNAL_OBJECT_TRANSFORM's second argument, transform_types_array, is an array of STRING literals."
 		}
 		k := next + 2
 		n := 0
@@ -1346,20 +1363,21 @@ func (f front) checkObjectTransform(r *http.Request, q queryOptions) (int, strin
 			}
 			v, ok := stringLiteral(t[k])
 			if !ok {
-				return 400, "EXTERNAL_OBJECT_TRANSFORM's second argument, transform_types_array, is an array of STRING literals."
+				return nil, 400, "EXTERNAL_OBJECT_TRANSFORM's second argument, transform_types_array, is an array of STRING literals."
 			}
 			if !strings.EqualFold(v, "SIGNED_URL") {
-				return 400, fmt.Sprintf("Invalid transform type %q for EXTERNAL_OBJECT_TRANSFORM: the only supported transform type is SIGNED_URL.", v)
+				return nil, 400, fmt.Sprintf("Invalid transform type %q for EXTERNAL_OBJECT_TRANSFORM: the only supported transform type is SIGNED_URL.", v)
 			}
 			n++
 		}
 		if n == 0 {
-			return 400, "EXTERNAL_OBJECT_TRANSFORM needs a transform type: the only supported transform type is SIGNED_URL."
+			return nil, 400, "EXTERNAL_OBJECT_TRANSFORM needs a transform type: the only supported transform type is SIGNED_URL."
 		}
+		if k+1 >= len(t) || !t[k+1].punct(")") {
+			return nil, 400, "EXTERNAL_OBJECT_TRANSFORM takes two arguments: TABLE object_table_name and transform_types_array."
+		}
+		calls = append(calls, objectTransform{pos: t[i].pos, end: t[k+1].end, dataset: ds, table: table})
+		i = k + 1
 	}
-	if !found {
-		return 0, ""
-	}
-	return 501, "Not implemented here: EXTERNAL_OBJECT_TRANSFORM(TABLE ..., ['SIGNED_URL']). Signing a Cloud Storage URL needs a key the " +
-		"instance's Cloud Storage verifies, and the address clients reach it at, which CloudBurrow's BigQuery does not have yet (#1786). Nothing was run."
+	return calls, 0, ""
 }

@@ -231,6 +231,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	models := &bqModels{}                           // models.go, #1465
 	connections := &bqConnections{}                 // connections.go, #1755
 	objects := &objectTables{storage: storage}      // objecttables.go, #1783
+	objects.public = o.storagePublic                // signedurls.go, #1786
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.logf != nil {
@@ -318,6 +319,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if numbers.serve(w, r) { // projectnumbers.go, #1551
+			return
+		}
+		if objects.agents.serveCerts(w, r) { // signedurls.go, #1786: the service agents' certificates
 			return
 		}
 		if connections.serve(w, r, numbers) { // connections.go, #1755: the BigQuery Connection API
@@ -677,6 +681,9 @@ type Option func(*options)
 
 type options struct {
 	storage string
+	// storagePublic is the address clients reach that Cloud Storage at
+	// (http://host:port), which signed URLs name (signedurls.go, #1786).
+	storagePublic string
 	// restarts watches the emulator restart (restart.go, #1016).
 	restarts *emulatorWatch
 	// configs are the configurations of the jobs the emulator ran
@@ -717,6 +724,13 @@ type options struct {
 // look an extract job's bucket up in (#939).
 func WithStorage(endpoint string) Option {
 	return func(o *options) { o.storage = endpoint }
+}
+
+// WithStoragePublic gives the front the address clients reach the
+// instance's Cloud Storage at (http://host:port), which the signed URLs
+// of EXTERNAL_OBJECT_TRANSFORM name (#1786).
+func WithStoragePublic(endpoint string) Option {
+	return func(o *options) { o.storagePublic = endpoint }
 }
 
 // readBody reads r's body and puts it back, so it can still be forwarded.

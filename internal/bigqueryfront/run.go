@@ -41,6 +41,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"when it starts: the Storage Write API's streams and the rows they hold (#1115), and the functions it knows of; "+
 		"empty: kept in memory only")
 	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from and an extract job's bucket is looked up in")
+	storagePublic := fs.String("storage-public", "", "the address clients reach that Cloud Storage at (http://host:port), which "+
+		"EXTERNAL_OBJECT_TRANSFORM's signed URLs name (#1786); empty: SIGNED_URL is 501")
 	resourceManager := fs.String("resourcemanager", "", "the instance's Resource Manager (http://host:port), which INFORMATION_SCHEMA.JOBS_BY_FOLDER "+
 		"and JOBS_BY_ORGANIZATION read a project's ancestry from (#1392); empty: those views are 501")
 	onnx := fs.String("onnx", "", "the ONNX runner of the onnx build's CLI (http://host:port), which runs BigQuery ML's imported "+
@@ -79,7 +81,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("listen on %s: %w", *readListen, err)
 		}
 	}
-	handler := Wrap(results, WithStorage(*storage), func(o *options) {
+	handler := Wrap(results, WithStorage(*storage), WithStoragePublic(*storagePublic), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
 		o.policies, o.resourceManager = policies, *resourceManager
 		o.vertexai = *vertexai

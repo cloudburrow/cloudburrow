@@ -40,6 +40,9 @@ type LifecycleComponent struct {
 	// signingKeys are the public keys the storage server verifies RSA
 	// signed URLs against, by service account email (#577).
 	signingKeys map[string][]byte
+	// storagePublic is the address clients reach Cloud Storage at
+	// (http://host:port), for BigQuery's signed URLs (#1786).
+	storagePublic string
 	// corsOrigins are the origins, beyond loopback, whose browser requests
 	// the storage server answers (#677).
 	corsOrigins []string
@@ -141,12 +144,13 @@ func NewLifecycleComponent(kubeconfig string, cfg config.Config, out io.Writer) 
 			Instance:   cfg.Name,
 			Out:        out,
 		},
-		services:    cfg.EnabledServices(),
-		corsOrigins: cfg.Storage.CORSAllowOrigins,
-		project:     cfg.DefaultProject(),
-		mode:        cfg.Mode,
-		timeout:     time.Duration(cfg.ReadyTimeout),
-		out:         out,
+		services:      cfg.EnabledServices(),
+		corsOrigins:   cfg.Storage.CORSAllowOrigins,
+		storagePublic: "http://" + net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Storage)),
+		project:       cfg.DefaultProject(),
+		mode:          cfg.Mode,
+		timeout:       time.Duration(cfg.ReadyTimeout),
+		out:           out,
 
 		emulatorHeapMiB: cfg.EmulatorHeapMiB,
 		bigQueryHeapMiB: cfg.BigQueryHeapMiB,
@@ -216,6 +220,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// the same Cloud Storage (#944), and looks an extract's
 					// bucket up there (#939): the emulator creates a missing one.
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+					// EXTERNAL_OBJECT_TRANSFORM's signed URLs name the
+					// address clients reach Cloud Storage at (#1786).
+					if c.storagePublic != "" && c.enabled(config.ServiceStorage) {
+						b.Front.Args = append(b.Front.Args, "--storage-public", c.storagePublic)
+					}
 					// INFORMATION_SCHEMA.JOBS_BY_FOLDER and
 					// JOBS_BY_ORGANIZATION read the project's ancestry
 					// (#1392).
@@ -237,6 +246,14 @@ func (c *LifecycleComponent) Backends() []Backend {
 		case config.ServiceStorage:
 			// One Deployment serves the host and the cluster (#514).
 			b := BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys, c.corsOrigins)
+			// The BigQuery front holds its connections' service agents'
+			// keys and serves their certificates, which signed URLs
+			// signed as them verify against (#1786).
+			if c.enabled(config.ServiceBigQuery) {
+				b.Args = append(b.Args, "--service-account-certs",
+					BigQueryServiceAgentDomain+"=http://"+InClusterBigQueryHost(c.installer.Namespace))
+				b.EgressTo = append(b.EgressTo, "bigquery")
+			}
 			// Storage Intelligence inheritance walks the projects and
 			// folders of Resource Manager, through cloudburrow-host (#1532).
 			if c.resourceManager != "" {

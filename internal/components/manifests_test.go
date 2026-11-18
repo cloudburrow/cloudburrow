@@ -482,3 +482,37 @@ func TestMemorystoreNodePodAndLoopback6(t *testing.T) {
 		t.Errorf("a server bound as before has args %q", b.Args)
 	}
 }
+
+// With BigQuery and Cloud Storage, BigQuery's front is told the address
+// clients reach Cloud Storage at, and the storage server reads the
+// connections' service agents' certificates from the front, which its
+// egress policy allows (#1786).
+func TestBigQuerySignedURLWiring(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceBigQuery, config.ServiceStorage}
+	cfg.BindAddress, cfg.Endpoints.Storage = "127.0.0.1", 30210
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("img")
+	seen := 0
+	for _, b := range c.Backends() {
+		switch b.Name {
+		case "bigquery":
+			seen++
+			if args := strings.Join(b.Front.Args, " "); !strings.Contains(args, "--storage-public http://127.0.0.1:30210") {
+				t.Errorf("front args %q do not name the client-facing Cloud Storage", args)
+			}
+		case "storage":
+			seen++
+			want := "--service-account-certs gcp-sa-bigquery-condel.iam.gserviceaccount.com=http://bigquery." + cfg.Cluster.Namespace + ".svc.cluster.local:9050"
+			if args := strings.Join(b.Args, " "); !strings.Contains(args, want) {
+				t.Errorf("storage args %q lack %q", args, want)
+			}
+			if m := b.Manifest("cloudburrow", "i"); !strings.Contains(m, "app: bigquery\n") || !strings.Contains(m, "-egress") {
+				t.Errorf("the storage egress policy does not allow the BigQuery front:\n%s", m)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("saw %d of the two backends", seen)
+	}
+}

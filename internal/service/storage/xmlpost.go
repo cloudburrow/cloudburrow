@@ -2,8 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"crypto"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -377,16 +375,16 @@ func (s *Server) verifyPolicySignature(fields map[string]string) error {
 	}
 	if sig := fields["signature"]; sig != "" {
 		id := fields["googleaccessid"]
-		key, ok := s.signingKeys[id]
-		if !ok {
-			return denied("No signing certificate is registered for %s; register one (storage-server --signing-cert) to verify its signatures.", id)
+		keys, err := s.rsaKeys(id)
+		if err != nil {
+			return err
 		}
 		raw, err := base64.StdEncoding.DecodeString(sig)
 		if err != nil {
 			return mismatch()
 		}
 		sum := sha256.Sum256([]byte(policy))
-		if rsa.VerifyPKCS1v15(key, crypto.SHA256, sum[:], raw) != nil {
+		if !verifyAny(keys, sum[:], raw) {
 			return mismatch()
 		}
 	}

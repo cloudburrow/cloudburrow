@@ -4,13 +4,18 @@ package compat
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/bigquery/connection/apiv1/connectionpb"
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
 
@@ -33,8 +38,11 @@ import (
 // hive partitioning (WITH PARTITION COLUMNS, hivePartitioningOptions)
 // refused; load and copy jobs into an object table, and a copy of one,
 // refused; EXTERNAL_OBJECT_TRANSFORM of anything but an object table, or
-// with a transform other than SIGNED_URL, refused (SIGNED_URL is 501,
-// #1786).
+// with a transform other than SIGNED_URL, refused; and SIGNED_URL
+// (#1786): the table's columns plus signed_url, a V4 URL signed as the
+// connection's service account for 6 hours at the instance's Cloud
+// Storage address, which plain HTTP reads the object's bytes through,
+// and which Cloud Storage refuses (403) once tampered with or expired.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.insert, bigquery.tables.get, bigquery.tables.list
 func TestBigQueryObjectTables(t *testing.T) {
@@ -254,8 +262,7 @@ func TestBigQueryObjectTables(t *testing.T) {
 		t.Errorf("tables.insert with hivePartitioningOptions: %v", err)
 	}
 
-	// EXTERNAL_OBJECT_TRANSFORM takes an object table and SIGNED_URL only;
-	// SIGNED_URL itself is 501 (#1786).
+	// EXTERNAL_OBJECT_TRANSFORM takes an object table and SIGNED_URL only.
 	for name, sql := range map[string]string{
 		"a table":       fmt.Sprintf("SELECT * FROM EXTERNAL_OBJECT_TRANSFORM(TABLE `%s.plain0`, ['SIGNED_URL'])", ds),
 		"a subquery":    fmt.Sprintf("SELECT * FROM EXTERNAL_OBJECT_TRANSFORM((SELECT * FROM `%s.live`), ['SIGNED_URL'])", ds),
@@ -265,10 +272,7 @@ func TestBigQueryObjectTables(t *testing.T) {
 			t.Errorf("EXTERNAL_OBJECT_TRANSFORM of %s: %v", name, err)
 		}
 	}
-	if _, err := c.Query(fmt.Sprintf("SELECT uri FROM EXTERNAL_OBJECT_TRANSFORM(TABLE `%s.live`, ['SIGNED_URL'])", ds)).Read(ctx); err == nil ||
-		!strings.Contains(err.Error(), "501") {
-		t.Errorf("EXTERNAL_OBJECT_TRANSFORM SIGNED_URL: %v", err)
-	}
+	checkSignedURLs(t, h, c, bh, ds, sa)
 
 	// Load and copy jobs: an object table is read-only, and an external
 	// table cannot be copied.
@@ -292,5 +296,100 @@ func TestBigQueryObjectTables(t *testing.T) {
 	}
 	if err := mlRun(h, c, strings.Replace(create, "CREATE EXTERNAL", "CREATE OR REPLACE EXTERNAL", 1)); err != nil {
 		t.Errorf("CREATE OR REPLACE: %v", err)
+	}
+}
+
+// checkSignedURLs runs EXTERNAL_OBJECT_TRANSFORM(TABLE ds.live,
+// ['SIGNED_URL']) and fetches each URL with plain HTTP (#1786).
+func checkSignedURLs(t *testing.T, h *Harness, c *bigquery.Client, bh *storage.BucketHandle, ds, sa string) {
+	t.Helper()
+	ctx := h.Context()
+	gcs, err := url.Parse(h.Endpoint(EnvStorage))
+	if err != nil || gcs.Host == "" {
+		t.Fatalf("the instance's Cloud Storage endpoint: %v", err)
+	}
+	it, err := c.Query(fmt.Sprintf("SELECT * FROM EXTERNAL_OBJECT_TRANSFORM(TABLE `%s.live`, ['SIGNED_URL']) ORDER BY uri", ds)).Read(ctx)
+	if err != nil {
+		t.Fatalf("EXTERNAL_OBJECT_TRANSFORM SIGNED_URL: %v", err)
+	}
+	var got []map[string]bigquery.Value
+	for {
+		row := map[string]bigquery.Value{}
+		err := it.Next(&row)
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("SIGNED_URL rows: %v", err)
+		}
+		got = append(got, row)
+	}
+	var names []string
+	for _, f := range it.Schema {
+		names = append(names, f.Name)
+	}
+	if want := "uri generation content_type size md5_hash updated metadata ref signed_url"; strings.Join(names, " ") != want {
+		t.Errorf("columns = %v, want %s", names, want)
+	}
+	if len(got) < 2 {
+		t.Fatalf("rows = %d, want the table's objects", len(got))
+	}
+	// Each object's bytes, read with the storage client.
+	content := func(uri string) string {
+		t.Helper()
+		name, ok := strings.CutPrefix(uri, "gs://"+bh.BucketName()+"/")
+		if !ok {
+			t.Fatalf("uri %s", uri)
+		}
+		r, err := bh.Object(name).NewReader(ctx)
+		if err != nil {
+			t.Fatalf("read %s: %v", uri, err)
+		}
+		defer r.Close()
+		b, _ := io.ReadAll(r)
+		return string(b)
+	}
+	fetch := func(u string) (int, string) {
+		t.Helper()
+		pu, err := url.Parse(u)
+		if err != nil || pu.Host != gcs.Host {
+			t.Fatalf("signed URL %q is not on the instance's Cloud Storage (%s)", u, gcs.Host)
+		}
+		resp, err := http.Get(u)
+		if err != nil {
+			t.Fatalf("GET signed URL: %v", err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	for _, row := range got {
+		u, _ := row["signed_url"].(string)
+		if u == "" {
+			t.Fatalf("row %v has no signed_url", row)
+		}
+		data := content(fmt.Sprint(row["uri"]))
+		pu, _ := url.Parse(u)
+		q := pu.Query()
+		if q.Get("X-Goog-Algorithm") != "GOOG4-RSA-SHA256" || q.Get("X-Goog-Expires") != "21600" ||
+			!strings.HasPrefix(q.Get("X-Goog-Credential"), sa+"/") || q.Get("X-Goog-SignedHeaders") != "host" {
+			t.Errorf("signed URL parameters = %v", q)
+		}
+		if code, body := fetch(u); code != 200 || body != data {
+			t.Errorf("GET %s = %d %q, want %q", row["uri"], code, body, data)
+		}
+		// Tampered: another object under the same signature.
+		if code, body := fetch(strings.Replace(u, "/img/", "/other/", 1)); code != 403 || !strings.Contains(body, "SignatureDoesNotMatch") {
+			t.Errorf("tampered GET = %d %s", code, body)
+		}
+		// Expired: signed more than 6 hours ago.
+		q.Set("X-Goog-Date", time.Now().UTC().Add(-6*time.Hour-time.Minute).Format("20060102T150405Z"))
+		cred := strings.Split(q.Get("X-Goog-Credential"), "/")
+		cred[1] = q.Get("X-Goog-Date")[:8]
+		q.Set("X-Goog-Credential", strings.Join(cred, "/"))
+		pu.RawQuery = q.Encode()
+		if code, body := fetch(pu.String()); code != 403 || !strings.Contains(body, "expired") {
+			t.Errorf("expired GET = %d %s", code, body)
+		}
 	}
 }

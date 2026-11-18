@@ -47,6 +47,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.Var(&certs, "signing-cert", "email=path.pem: a public certificate or key to verify that service account's signed URLs against (repeatable)")
 	var inline signingKeyFlag
 	fs.Var(&inline, "signing-key", "email=base64: the same, the PEM given inline as standard base64, for a server with no file to read (repeatable; what `up` passes, #577)")
+	var certSources certSourceFlag
+	fs.Var(&certSources, "service-account-certs", "domain=http://host:port: where the public certificates of the service accounts of an email domain "+
+		"(such as gcp-sa-bigquery-condel.iam.gserviceaccount.com) are read, at /service_accounts/v1/metadata/x509/EMAIL, to verify their signed URLs "+
+		"(repeatable; what `up` passes for BigQuery's connections, #1786)")
 	var origins originsFlag
 	fs.Var(&origins, "cors-allow-origin", "scheme://host[:port]: a web origin, beyond loopback ones, whose browser requests are answered; any other Origin is refused with 403 (repeatable or comma-separated, #677)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
@@ -68,7 +72,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			names = append(names, h)
 		}
 	}
-	opts := storage.Options{Hosts: names, CORSAllowOrigins: origins, RelayChannels: *relayChannels}
+	opts := storage.Options{Hosts: names, CORSAllowOrigins: origins, RelayChannels: *relayChannels, CertSources: certSources}
 	if *resourceManager != "" {
 		opts.Hierarchy = storage.ResourceManagerHierarchy{Base: *resourceManager}
 	}
@@ -234,6 +238,24 @@ func (f *originsFlag) Set(v string) error {
 		}
 		*f = append(*f, o)
 	}
+	return nil
+}
+
+// certSourceFlag collects --service-account-certs domain=http://host:port
+// (#1786).
+type certSourceFlag map[string]string
+
+func (f *certSourceFlag) String() string { return fmt.Sprint(map[string]string(*f)) }
+
+func (f *certSourceFlag) Set(v string) error {
+	domain, base, ok := strings.Cut(v, "=")
+	if !ok || domain == "" || strings.Contains(domain, "@") || !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		return fmt.Errorf("want domain=http://host:port, not %q", v)
+	}
+	if *f == nil {
+		*f = certSourceFlag{}
+	}
+	(*f)[domain] = base
 	return nil
 }
 
