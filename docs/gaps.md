@@ -32,11 +32,11 @@ tracks it; a closed issue is named only where it says what was built.
 | IAM custom roles | 10 | 2 | 1 | 7 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 19 | 0 | 6 | 13 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 1 | 3 | 1 |
+| Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **60** | **4** | **18** | **32** | **6** |
+| **Total** | **59** | **3** | **18** | **32** | **6** |
 
 ## Cloud Storage
 
@@ -263,12 +263,11 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 
 ## Spanner, Bigtable, Firestore, Datastore
 
-Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405); Spanner `AddSplitPoints` and `FetchCacheUpdate`, Bigtable change streams (with garbage collection and `DropRowRange` records) and the session data plane, and Firestore pipelines' stages and functions (#1523, #1613); Firestore with MongoDB compatibility's wire protocol, SCRAM authentication with the Admin API's user credentials, CRUD, queries, cursors, aggregation and indexes (#1703), and its transactions, `explain`, positional operators, `$text`, `$lookup` pipelines, TLS, IAM checks and the Standard edition guard on the `Write` stream (#1738); Bigtable SQL's `UNPACK`, window functions, `STRUCT` constructors and the documented functions the ticket named (#1704); Bigtable SQL's geography `ST_` and `S2_` functions (#1720).
+Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405); Spanner `AddSplitPoints` and `FetchCacheUpdate`, Bigtable change streams (with garbage collection and `DropRowRange` records) and the session data plane, and Firestore pipelines' stages and functions (#1523, #1613); Firestore with MongoDB compatibility's wire protocol, SCRAM authentication with the Admin API's user credentials, CRUD, queries, cursors, aggregation and indexes (#1703), and its transactions, `explain`, positional operators, `$text`, `$lookup` pipelines, TLS, IAM checks and the Standard edition guard on the `Write` stream (#1738), the SCRAM user's binding with its IAM condition naming the database (#1742) and custom roles (#1743); Firestore's Standard edition guard on the browser's WebChannel `Write` stream (#1744); Bigtable SQL's `UNPACK`, window functions, `STRUCT` constructors and the documented functions the ticket named (#1704); Bigtable SQL's geography `ST_` and `S2_` functions (#1720).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
-| Firestore with MongoDB compatibility is served since #1703, with transactions, `explain`, the positional operators and `arrayFilters`, `$text`, `$lookup` pipelines, collection-less aggregations, TLS and the IAM role checks since #1738 ([compatibility.md](compatibility.md#firestore-with-mongodb-compatibility-1703)); the binding Google documents for a SCRAM user, with its IAM condition naming the database, since #1742; custom roles since #1743; left: a Standard edition database's `Write` stream over the browser's WebChannel transport (the Firebase Web SDK in a browser) is not checked for Enterprise-only values, as its gRPC stream and the unary writes are | not built yet | M |
 | Firestore: `ExecutePipeline` runs on Enterprise edition databases since #1500, its stages and functions since #1523 and #1613 ([compatibility.md](compatibility.md)); left: full-text search (`document_matches`, `score`) is `UNIMPLEMENTED`, Google's reference defining neither its tokenization nor its score, and the explain stats' text is CloudBurrow's own (#1577) | not documented by Google | M |
 | Spanner: 1 RPC refused, naming why: `InternalUpdateGraphOperation`, which Google documents as "an internal API called by Spanner Graph jobs. You should never need to call this API directly", every field "Internal field, do not use directly", so there is no behaviour to serve ([spanner.md](coverage/spanner.md)). `AddSplitPoints` is a stored no-op of the call front since #1523 (the emulator never splits), and `FetchCacheUpdate` answers an empty location-aware routing cache since #1523 (one server, nothing to route). Backups and restores, backup schedules, instance configurations (Google's and custom), `MoveInstance`, partition updates, database roles, the operation listings and IAM on backups and roles are served by the call front since #1498 (#1577) | not documented by Google | S |
 | Bigtable: `OpenMaterializedView`'s sessions open but their `ReadRow` is refused `UNIMPLEMENTED`, as `ReadRows` of a materialized view is: Google documents reading a continuous materialized view with `ReadRows`, but neither the column family its aggregate columns are stored in nor how its row key is encoded without a `_key` column (docs re-read 2026-11-17: <https://docs.cloud.google.com/bigtable/docs/continuous-materialized-view-queries>), so its rows are read with SQL and the client falls back to the classic path ([bigtable.md](coverage/bigtable.md)). Change streams (since #1523) have one partition, which the API allows, and a collected cell's `GARBAGE_COLLECTION` record names the cell's millisecond as its time range, UNVERIFIED (docs re-read 2026-11-17: <https://docs.cloud.google.com/bigtable/docs/change-streams-overview> names none) (#1577) | not documented by Google | M |
