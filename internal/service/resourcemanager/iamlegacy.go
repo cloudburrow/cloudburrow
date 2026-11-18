@@ -33,6 +33,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -127,8 +128,8 @@ func (r *Registry) SignJwt(name, payload string) (*adminpb.SignJwtResponse, erro
 }
 
 // auditableServices are the services Google's audit logging page lists
-// (docs.cloud.google.com/logging/docs/audit/services, read 2026-11-17),
-// sorted.
+// (docs.cloud.google.com/logging/docs/audit/services, read 2026-11-17);
+// init sorts them.
 var auditableServices = []string{
 	"accessapproval.googleapis.com", "accesscontextmanager.googleapis.com", "advisorynotifications.googleapis.com",
 	"agentidentity.googleapis.com", "aiplatform.googleapis.com", "alloydb.googleapis.com", "analyticshub.googleapis.com",
@@ -198,6 +199,8 @@ var auditableServices = []string{
 	"workloadidentity.googleapis.com", "workloadmanager.googleapis.com", "workspacekeyaccess.googleapis.com",
 	"workstations.googleapis.com",
 }
+
+func init() { slices.Sort(auditableServices) }
 
 // QueryAuditableServices lists the auditable services of a project, a
 // folder or the organization, which must exist.

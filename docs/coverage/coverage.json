@@ -3748,8 +3748,8 @@
     "Key": "iam",
     "Title": "IAM (custom roles, service accounts)",
     "counts": {
-      "Unimplemented": 4,
-      "Verified": 27
+      "Unimplemented": 1,
+      "Verified": 30
     },
     "rows": [
       {
@@ -3910,8 +3910,10 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/QueryAuditableServices",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served yet: auditable services are not built (#1751)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamapi1751_test.go:164 TestIAMQueryAuditableServices"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/QueryGrantableRoles",
@@ -3936,13 +3938,17 @@
       },
       {
         "method": "google.iam.admin.v1.IAM/SignBlob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1751)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamapi1751_test.go:74 TestIAMLegacySignBlobAndSignJwt"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/SignJwt",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): deprecated by Google for the IAM Credentials API, whose signBlob and signJwt the metadata server serves (#1751)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamapi1751_test.go:74 TestIAMLegacySignBlobAndSignJwt"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/TestIamPermissions",
