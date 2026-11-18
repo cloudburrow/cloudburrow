@@ -11,325 +11,530 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ## [Unreleased]
 
+The second release. The generated coverage now tracks thirty API surfaces, up from nine in
+v0.1.0, and counts **1,133 of 1,222 methods Verified** through official clients, up from 97 of
+191 ([docs/coverage](docs/coverage/README.md)). New since v0.1.0: Cloud Run's v1 (Knative) API,
+jobs and worker pools; Cloud Build, Artifact Registry, Secure Source Manager and Developer Connect;
+Cloud Functions v1 and v2; the Cloud SQL Admin API and Backup and DR; the Memorystore for Redis,
+Redis Cluster and Valkey admin APIs; IAM custom roles, predefined roles and service accounts;
+Service Usage; Firestore's Admin API and Firestore with MongoDB compatibility; Bigtable's instance
+admin API and SQL; the BigQuery Storage and Connection APIs, and BigQuery ML; and Resource Manager
+folders, organizations, tags and liens. CloudBurrow now builds its own Cloud Storage server and
+its own BigQuery emulator, and BigQuery serves every Resource Manager project. Local AI embeds
+text, images, audio, video and PDFs with EmbeddingGemma 2, OCR included, and serves Vertex AI's
+`PredictionService` over gRPC. IAM gains roles, service accounts and Conditions; policies are
+stored and still not enforced, with three named exceptions under **Changed**. The console has a
+Cloud Shell-style terminal and a screen for every service. Releases are smoke-tested before they
+become latest, and macOS signing and notarization are ready once the maintainer adds the Apple
+secrets. Only a row of [docs/compatibility.md](docs/compatibility.md) marked Verified is a support
+claim; [docs/gaps.md](docs/gaps.md) lists what is still open.
+
 ### Added
 
-- **BigQuery table functions, and nested RECORDs, work** (#1061, #1047, #900): CloudBurrow now
-  builds its BigQuery emulator, goccy/bigquery-emulator v0.8.1, from source with patches to the SQL
-  engine it links, instead of pulling upstream's image. `make build` and each release compile it
-  from Go modules pinned and checked by checksum (`third_party/bigquery-emulator`, with the
-  patches, their provenance and licences), the CLI embeds the Linux builds, and `up` builds the
-  image locally. `CREATE [OR REPLACE] TABLE FUNCTION`, `routines.insert` of a table-valued
-  function, their calls, `DROP TABLE FUNCTION` and `DROP SCHEMA … CASCADE` of a dataset with one
-  now work where they were 501, and so do streaming and loading a RECORD inside a REPEATED RECORD
-  (upstream's open goccy/googlesqlite#76). A FLOAT64 NaN is kept, written or computed (#1066), and
-  BYTES of any value, not only UTF-8 text, are written by loads and streamed rows (#1075), where
-  both were 501; an infinity inside an ARRAY or STRUCT a statement computes is written (#1077), and
-  `-a` of a column no longer fails "no such function". The engine's memory past 2 GiB no longer
-  panics (#989), and DDL no longer grows it by the whole builtin function set per dataset at each
-  DROP (upstream's open goccy/googlesqlite#80, #1057): the compat suite leaves the emulator at
-  1.4 GiB rather than 2.5 GiB.
-  A CLI is about 86 MB larger; a CLI built without the emulator (`go build` alone) refuses `up`
-  with BigQuery, and `doctor` has an `embedded bigquery` row.
-- **Pub/Sub subscriptions expire** (#873): a front before Google's emulator, in the Pub/Sub pod,
-  deletes a subscription idle for its `expirationPolicy.ttl` (31 days when none is given, as in
-  Google), counts every call naming it as activity and an open streaming pull as keeping it
-  active, and refuses a ttl under a day or under the message retention. Exactly-once delivery,
-  which the emulator implements, is now verified with the official client. The console's
-  **Create subscription** offers both. A Pub/Sub instance now needs a CLI with the embedded Linux
-  binaries (`make build` or a release), because the front runs from the storage image. The front
-  serves the emulator's REST API on the same port too, with the same rules, so gcloud and
-  Terraform, which use REST, reach Pub/Sub as before.
-- **Pub/Sub in `cloudburrow state save` and `load`** (#880): schemas with every revision, topics,
-  subscriptions with every setting and their expiration clocks, and snapshots, in every project a
-  call has named; messages are not kept. Push subscriptions now expire too: the front relays the
-  emulator's pushes and counts a successful one as activity. Exactly-once delivery with a push
-  endpoint is refused, as Google refuses it, on the API and in a seed file, which now accepts
-  `enableExactlyOnceDelivery` on a pull subscription; **Edit subscription** turns it on and off.
-  All of it holds for REST clients (gcloud, Terraform) too (#908): a push endpoint sent over REST
-  is relayed and read back as sent, exactly-once with push or export is refused on REST, and a
-  project named only in REST paths is saved.
-- **Pub/Sub expiration can be changed** (#891): the emulator refuses an `UpdateSubscription` of
-  `expiration_policy`, so CloudBurrow's front applies it, checks it by Google's rules, returns it
-  on every read and enforces it, over gRPC and REST alike (gcloud's `subscriptions update
-  --expiration-period`, #908); `state save` keeps it. **Edit subscription** now edits the
-  expiration period.
-- **Pub/Sub schemas in a seed file** (#890): `pubsub.schemas` declares Avro schemas and a topic's
-  `schemaSettings` binds it to one, which the emulator enforces on publish.
-- **A terminal in the console's top bar, like Cloud Shell** (#781): **Activate terminal** opens
-  a drawer with a shell in a pod in the instance's cluster (never on this machine), from the
-  pinned Cloud SDK image with kubectl, with the instance's pod environment and gcloud
-  configuration and no credential. It follows the toolbar's project, keeps its session across
-  a closed drawer or a reload, and says why when there is no shell. The WebSocket is refused to
-  any other origin, host or remote peer. What differs from Cloud Shell is in
-  [docs/compatibility.md](docs/compatibility.md#console).
-- **A release is latest only once its smoke test has passed** (#680): the release workflow
-  publishes it as a prerelease, smoke-installs it on Linux and macOS, and only then marks it
-  latest and pushes the formula to the Homebrew tap, so the install script, the action's
-  `version: latest` and `brew upgrade` never get a release that failed it.
-  [docs/install.md](docs/install.md#a-release-failed-its-smoke-test) says how to withdraw one.
-- **A release is built only from a commit CI has passed** (#596): the release workflow's first
-  job requires a successful `ci-green` check for the tagged SHA, waiting up to 45 minutes while
-  CI for it is still running, and fails with the SHA named before anything is built, pushed or
-  published when there is none. [docs/install.md](docs/install.md#install-a-release) describes
-  it.
-- **The macOS binaries can be signed and notarized** (#605): the release workflow signs both
-  darwin binaries with a Developer ID certificate (hardened runtime, secure timestamp) and
-  notarizes them before the checksums, formula and attestations are computed. It is active
-  only once the maintainer adds the Apple secrets; until then releases stay unsigned, and the
-  release notes say which. [docs/install.md](docs/install.md#gatekeeper) explains how to
-  verify, and what to do with an unsigned binary.
-- **`cloudburrow prefetch` and `up --offline`** (#604): prefetch stores in the state directory
-  the kind node image, the storage image this CLI builds, every enabled backend's image by its
-  pinned digest, Knative's YAMLs checked against their pinned sha256, and the images those YAMLs
-  name. `up` prefers the cached copies; `up --offline` uses nothing else and, when something is
-  missing, refuses before creating a cluster and names it. `doctor` reports whether each
-  registry and GitHub is reachable, and whether the cache is complete. See "Offline and
-  air-gapped use" in docs/install.md for the procedure, every artifact's measured size, and what
-  is and is not tested. The Bigtable emulator no longer falls back to installing itself when
-  its container starts.
-- **The local-AI runtime image is published with each release** (#602):
-  `ghcr.io/cloudburrow/litert-lm:<tag>`, linux/amd64 and linux/arm64, attested, its digest in
-  the release notes. A release CLI defaults `--local-ai-image` to that digest, so local
-  generation no longer needs a checkout and `make litert-lm`.
-- **CloudBurrow's own Cloud Storage server**, built to the API rather than reused (ADR-0005
-  amendment, #486), and now the only Cloud Storage backend (#519). It serves buckets and
-  objects over JSON, uploads including resumable and XML multipart, ranged reads, every
-  precondition, `objects.list` with prefixes, offsets, globs and pages, compose, copy, rewrite
-  and move, the batch endpoint, object versioning, soft delete and restore, retention policies,
-  locks and holds, lifecycle rules, CORS, HMAC keys, notifications to Pub/Sub, the XML API
-  subset, and signed URLs verified and failing closed (#489–#509). Bucket IAM policies are
-  stored and never enforced (#504). It runs as a locally built image in one in-cluster
-  Deployment (#514), with reset and seed (#510), state snapshots (#511), persistence by
-  `--mode` (#512), events, metrics and faults (#513), and the console, status and request log
-  (#518).
-- Cloud Storage verified through the official Python client (#516), `gcloud storage` and
-  `gsutil` (#517) and Terraform (#515), and compared against Google's `storage-testbench` by a
-  differential oracle (#497).
-- Cloud KMS through `cloudburrow terraform` (#425) and `gcloud kms` (#426, #427), and IAM
-  policies stored on key rings and keys, never enforced, over gRPC and REST (#428–#431).
-- Cloud KMS automatic rotation (#816): `rotation_period` and `next_rotation_time` on
-  `CreateCryptoKey` and `UpdateCryptoKey`, validated as resources.proto says (a period of 24
-  hours to 876,000 hours, and a next rotation time with it); at the next rotation time the key
-  gets a new primary version and the time moves on by the period. The console's **Edit key**
-  offers both.
-- A Cloud KMS oracle comparing the resource RPCs and the version lifecycle against a pinned
-  `fakekms`, run nightly (#419, #420).
-- A release smoke test: after publishing, the release workflow installs the tag with the
-  installer (checksum and attestation verified) on Linux and macOS, and installs, tests and
-  strictly audits the Homebrew formula (#603).
-- This changelog, and [SECURITY.md](SECURITY.md) with how to report a vulnerability (#603).
-- RSA signed URLs verify on an `up` instance: the ADC fixture's key is registered with the
-  storage server, and `storage.signingCerts` adds others (#577).
+#### Cloud Storage
+
+- **CloudBurrow's own Cloud Storage server**, built to the API, is now the only Cloud Storage
+  backend (#485, #519). It serves buckets and objects over JSON, every upload type including
+  resumable and XML multipart, ranged reads, every precondition, listing with prefixes, offsets,
+  globs and pages, compose, copy, rewrite and move, the batch endpoint, versioning, soft delete and
+  restore, retention policies, locks and holds, lifecycle rules, CORS, HMAC keys, notifications to
+  Pub/Sub, the XML API, and signed URLs that fail closed (#489–#509, #1258). It runs as a locally
+  built image in one Deployment, with reset, seed, state snapshots, persistence by `--mode`, events,
+  metrics and faults, and console pages (#510–#514, #518).
+- The gRPC API, `google.storage.v2`, on the same port, sharing one store with JSON (#1321, #1345,
+  #1443), including appendable objects and customer-supplied encryption keys.
+- Hierarchical namespace folders, managed folders and their updates, bucket long-running
+  operations, relocation, Anywhere Cache and rapid caches, `objects.bulkRestore`, object contexts,
+  and Storage Intelligence configurations (#828, #1203, #1279, #1280, #1444, #1505, #1519, #1532,
+  #1700).
+- Bucket and object ACLs, and bucket and managed-folder IAM policies, are stored and returned, never
+  enforced (#504, #847, #1233).
+- `softDeletePolicy.hardDeletePause`, held to Google's rules (#1702, #1715).
+- Signed URLs verify against the instance's ADC key, `storage.signingCerts` and the certificates of
+  IAM service accounts (#577, #1787).
+- Verified through the official Python and Node.js clients, `gcloud storage`, `gsutil` and
+  Terraform, and compared against Google's `storage-testbench` by a nightly oracle (#497,
+  #515–#517, #589).
+
+#### Pub/Sub
+
+- **Subscription expiration** (#873, #891): a front in the Pub/Sub pod deletes a subscription idle
+  for its `expirationPolicy.ttl` (31 days by default), counts calls and open streaming pulls as
+  activity, applies expiration updates that Google's emulator refuses, and works over gRPC and
+  REST alike (#908). Exactly-once delivery is verified, and is refused with a push endpoint, as on
+  Google (#880).
+- Pub/Sub in `state save` and `state load`: schemas with their revisions, topics, subscriptions
+  with every setting, and snapshots, but not messages (#880). Seed files take schemas, a topic's
+  `schemaSettings`, and a subscription's expiration, retention and exactly-once settings (#890,
+  #899).
+- Topic and subscription label updates checked against Google's rules, `DetachSubscription`,
+  `UpdateSnapshot` and Protocol Buffer schema validation (#949, #962, #1406, #1446).
+- IAM policies on topics, subscriptions, snapshots and schemas, stored and not enforced (#1367).
+- The front recreates every topic, subscription, schema and snapshot after the emulator restarts,
+  so no client sees an empty emulator. Messages that were not yet acknowledged are still lost
+  (#1608).
+- Pub/Sub calls are recorded in `/metrics`, the request log and traces, as the in-process
+  services' calls are (#1266).
+
+#### Cloud Tasks
+
+- `UpdateQueue` over gRPC and REST, `RunTask`, `BatchCreateTasks`, `BatchDeleteTasks`, and CMEK
+  configuration, stored only (#692, #1215).
+- Rate limits are enforced: `max_dispatches_per_second` and `max_concurrent_dispatches`, with
+  queues dispatched concurrently and `dispatch_deadline` honoured per attempt (#579, #716).
+  `max_burst_size` is CloudBurrow's own choice, because Google does not document it.
+- `oidcToken` and `oauthToken` on HTTP tasks, minted locally and signed with the instance's key
+  (#1243).
+- Queue-level `http_target`, `stackdriver_logging_config`, `ListQueues` filters, and App Engine
+  targets delivered to the server named by `--appengine-url` (#1222, #1255, #1256, #1282, #1447,
+  #1506).
+
+#### Cloud Run
+
+- **Jobs, executions and tasks** run as Kubernetes batch Jobs (#582, #1223), and **worker pools and
+  instances**, including automatic scaling over REST (#1299, #1300, #1348, #1387, #1788).
+- Traffic splits, tags and pinned revisions, mapped to Knative (#1224).
+- The service account, Secret Manager and in-memory volumes, Cloud SQL volumes through the Auth
+  Proxy, NFS volumes, Cloud Storage FUSE volumes from the instance's own storage, the `h2c` port
+  name and `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` (#1297, #1346, #1388, #1448, #1474,
+  #1475, #1476).
+- IAM policies on services, jobs and worker pools, stored and not enforced (#1216).
+- The v1 (Knative-shaped) Admin API that `gcloud run` uses, including jobs, executions, domain
+  mappings, instances and worker pools (#1293, #1349, #1379, #1420, #1533, #1546).
+- `gcloud run deploy --source` and `Builds.SubmitBuild`, and a REST surface for Cloud Run v2 that
+  gcloud and Terraform reach (#591, #1268, #1347).
+- Container logs in Cloud Logging, with `logUri`, and operations with `ListOperations` filters
+  and `WaitOperation` (#1229, #1263, #1298, #1333).
+- Two projects can each have a service, job or worker pool with the same ID (#1399, #1400).
+
+#### Cloud Build, Artifact Registry, Secure Source Manager and Developer Connect
+
+- **Cloud Build**: builds with docker build, push and pack steps; steps of any image when
+  `--cloudbuild-host-steps` is set; `secretEnv`, `script`, `allowFailure` and `allowExitCodes`;
+  `RetryBuild`, approvals and dynamic substitutions; manual, webhook and Pub/Sub triggers; private
+  worker pools, stored; logs written to the default logs bucket (#1382, #1407, #1422, #1430,
+  #1449).
+- **Artifact Registry**: a Docker registry that clients push to and pull from, with no
+  authentication; Maven, npm, Python, Apt and Yum repositories; packages, versions, tags, files,
+  rules, remote repositories over another repository, project configuration and Locations; and
+  repository IAM, stored and not enforced (#1383, #1439, #1531, #1539, #1546, #1578).
+- **Secure Source Manager** instances and repositories, git over HTTP, and push triggers into Cloud
+  Build (#1521, #1527); **Developer Connect** connections and git repository links (#1546).
+
+#### Cloud Functions
+
+- The Cloud Functions v2 API (2nd gen, HTTP functions) and the v1 API (1st gen), with `gcloud
+  functions` and Terraform (#1377, #1428).
+- v2 `eventTrigger` for Pub/Sub and Cloud Storage events, delivered locally (#1414); secrets, KMS
+  keys, worker pools and binary authorization on functions (#1464).
+- Functions in Node.js, Python, Java, Ruby, PHP and .NET, built with Google's buildpacks (#1303,
+  #1319).
+
+#### BigQuery
+
+- **CloudBurrow builds its own BigQuery emulator** (#1061): goccy/bigquery-emulator v0.8.1, built
+  from pinned sources with patches to its SQL engine (`third_party/bigquery-emulator`) and embedded
+  in the CLI. A validating front in the emulator's pod holds IDs, schemas, rows and statements to
+  BigQuery's rules, and answers 501 for what the emulator cannot run (#861, #901, #902).
+- **Every Resource Manager project is a BigQuery project** (#1764, #1767, #1781): datasets, tables
+  and jobs per project, queries, DML, loads, copies, clones and snapshots across projects, and
+  `projects.list` from Resource Manager. A name without a project is resolved in the job's project
+  (#1784).
+- DDL: `ALTER TABLE` (add, rename and drop columns, `SET DATA TYPE`, defaults, keys, options),
+  views with column lists, materialized views, `CREATE TABLE … LIKE`, `COPY` and `CLONE`, snapshot
+  tables, partitioning and clustering, column defaults, `und:ci` collation, and table, column and
+  schema `OPTIONS` (#1227, #1239, #1272, #1322, #1334, #1340, #1390, #1415, #1438, #1456, #1508).
+- Scripting: `IF`, `LOOP`, `WHILE`, `REPEAT`, `FOR`, `CASE`, `BEGIN … EXCEPTION`, `RAISE`,
+  `ASSERT`, `EXECUTE IMMEDIATE`, stored procedures, multi-statement transactions, and child jobs
+  (#1037, #1201, #1217, #1253, #1353, #1459).
+- `INFORMATION_SCHEMA`: dataset views and region-qualified views, including `JOBS`,
+  `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1274, #1275, #1286, #1328, #1329, #1351, #1355,
+  #1392).
+- Time travel with `FOR SYSTEM_TIME AS OF`, dataset and table undelete, and change history through
+  `APPENDS` and `CHANGES` (#1276, #1418, #1460).
+- Loads: Avro, ORC and nested or repeated Parquet; CSV and JSON options, bad-record reporting and
+  load statistics; autodetect, `columnNameCharacterMap`, hive partitioning, manifest file sets and
+  GeoJSON; and loads from the instance's Cloud Storage (#919, #944, #952, #960, #966, #988, #1004,
+  #1324, #1326, #1339, #1457, #1547, #1713).
+- Extract jobs to the instance's Cloud Storage as CSV or newline-delimited JSON, with GZIP (#939,
+  #957), and copy jobs that keep partitioning and clustering (#987, #1759).
+- The Storage Read API (Arrow and Avro) and the Storage Write API (proto and Arrow rows, every
+  stream type, missing values, RANGE and INTERVAL columns) (#1095, #1098, #1102, #1327, #1391,
+  #1424).
+- Routines (`routines.*`), table functions, models (`models.*`), `datasets.patch`, `update` and
+  `undelete`, `projects.getServiceAccount` and row access policies (#1047, #1177, #1205, #1218,
+  #1238).
+- Table and routine IAM policies, stored, with Terraform's `google_bigquery_table_iam_*`
+  (#1231, #1236). The per-project checks for minted tokens are under **Changed**.
+- `privacy_policy` (aggregation threshold, join restriction and differential privacy), BigQuery
+  tables for Apache Iceberg, and object tables over Cloud Storage with signed URLs (#1426, #1427,
+  #1455, #1482, #1783, #1786).
+- **BigQuery ML**: `CREATE MODEL` with linear and logistic regression, k-means, PCA, matrix
+  factorization, boosted trees, random forests, DNNs, autoencoders, and ARIMA_PLUS with custom
+  holidays, trained locally; imported ONNX, TensorFlow Lite and TensorFlow SavedModel models; and
+  remote models over the local Vertex AI endpoint (`ML.GENERATE_TEXT`, `ML.GENERATE_EMBEDDING`)
+  (#1465, #1481, #1518, #1548, #1562, #1600, #1711, #1760, #1765, #1775, #1776). compatibility.md
+  lists the model types and functions served.
+- The BigQuery Connection API over REST and gRPC, with connection IAM (#1755, #1770).
+- Query parameters of every top-level type, `STRUCT` and `RANGE` parameters, DML row counts and
+  statement types, and the `bq` CLI's `mk`, `insert`, `query` and `rm` (#696, #1008, #1082, #1108,
+  #1111).
+
+#### Firestore and Datastore
+
+- The Firestore Admin API: databases, indexes, field overrides, backup schedules, backups, restore
+  and clone, exports and imports, and user credentials (#1331, #1500).
+- **Firestore with MongoDB compatibility** (#1703, #1738): CloudBurrow's own MongoDB wire-protocol
+  server on `--port-firestore-mongodb`, authenticated with the Admin API's user credentials or
+  with an access token the instance minted. It serves CRUD, aggregation, indexes, transactions,
+  `explain` and text search over the database's Firestore documents.
+- Firestore pipelines, `PartitionQuery`, and Datastore `RunAggregationQuery` and `explain_options`
+  (#1405, #1500, #1613).
+- Firestore keeps its documents across a pod restart and an emulator crash in persistent mode
+  (#1615).
+- Every Firestore and Datastore method coverage had marked Unknown is now verified through the
+  official SDK (#1197).
+
+#### Bigtable and Spanner
+
+- Bigtable's instance admin API over gRPC and REST: instances, clusters, app profiles, logical
+  views, memory layers, and IAM, stored (#1331, #1440, #1499).
+- Bigtable authorized views, snapshots, backups, schema bundles, `UndeleteTable` and change streams
+  (#1499, #1511, #1523).
+- **Bigtable SQL** through `ExecuteQuery`, including the documented functions and geography
+  functions (#1499, #1511, #1704, #1720, #1728, #1735).
+- Spanner: the 55 methods coverage had marked Unknown, backups and backup schedules, instance
+  configurations and partitions, database roles, and IAM, stored (#1199, #1486, #1498).
+- Terraform `google_bigtable_*`, `google_spanner_*` and `google_firestore_*` resources (#1331,
+  #1440, #1461).
+
+#### Cloud SQL and Backup and DR
+
+- **The Cloud SQL Admin API** (`sqladmin` v1 and v1beta4) on `--port-sqladmin`, over real
+  PostgreSQL and MySQL servers (#1301): instances, databases and users; backups; read replicas,
+  cascading and cross-region; high availability and failover; point-in-time recovery; import and
+  export; SSL and server certificates; and the connector path that the Cloud SQL connectors and
+  Auth Proxy use (#1330, #1380, #1408, #1425).
+- PostgreSQL 9.6 to 18 and MySQL 8.0 and 8.4, major version upgrades, clones to
+  binary log coordinates, parallel imports and exports, external primaries and their syncs, DR
+  replicas and switchover, blue-green deployments, CMEK and disk shrink (#1381, #1421, #1501,
+  #1524, #1535, #1538, #1570, #1614, #1769).
+- **The Backup and DR Service API** for Cloud SQL (`--services backupdr`): backup vaults, plans,
+  associations, data sources and restores, with gcloud and Terraform (#1433, #1462, #1536).
+- Terraform's `google_sql_*` resources (#1301, #1304, #1330).
+
+#### Memorystore
+
+- **The Memorystore for Redis admin API** (`google.cloud.redis.v1`, gRPC and REST) over real Valkey
+  servers, one Deployment per instance (#1302): create, update, delete, export and import, RDB
+  persistence, the Standard HA tier with read replicas and failover, upgrades, maintenance, CMEK
+  and in-transit encryption (#1384, #1385, #1386, #1412, #1413, #1463, #1768).
+- **Memorystore for Redis Cluster and Memorystore for Valkey**: clusters and instances, token and
+  IAM auth, ACL policies, backups, migration, cross-instance replication, Valkey 7.2 and 9.0, and
+  CMEK (#1519, #1549, #1557, #1563, #1578, #1614).
+- `gcloud redis`, `gcloud memorystore`, Terraform and console screens for all three.
+
+#### Secret Manager
+
+- User-managed replica locations, `expire_time` and `ttl`, rotation schedules, `topics`
+  notifications to Pub/Sub, `version_destroy_ttl`, and list filters (#857, #1225, #1228, #1259,
+  #1278).
+- Regional secrets and customer-managed encryption keys, including CMEK-protected versions mounted
+  into Cloud Run (#1453, #1489, #1519).
+
+#### Cloud KMS
+
+- Asymmetric signing and decryption, MAC, raw symmetric and key encapsulation (ML-KEM) keys,
+  `GenerateRandomBytes`, key deletion and retired resources, and import jobs (#1212).
+  `EC_SIGN_SECP256K1_SHA256` signing (#1719).
+- Automatic rotation (`rotation_period`, `next_rotation_time`), editable in the console (#816).
+- EXTERNAL and EXTERNAL_VPC keys, EKM connections, Autokey, single-tenant HSM management, key
+  access justifications and trusted key wrapping, without any real HSM or external key manager
+  (#1452, #1469, #1506, #1521). `Locations` is served too (#1291).
+- `gcloud kms` and `cloudburrow terraform` for key rings, keys, versions and IAM policies, which are
+  stored and not enforced (#425–#431).
+
+#### Cloud Scheduler
+
+- `UpdateJob`, a REST surface, `Locations`, OIDC and OAuth tokens minted locally, App Engine
+  targets, and Terraform's `google_cloud_scheduler_job` (#591, #795, #1237, #1243, #1304, #1447).
+- State save, seeding, faults, tracing, the request log and metrics, as the other services have
+  (#600).
+
+#### Cloud Logging
+
+- Log-based metrics, sinks, exclusions, log buckets and views, links, settings and CMEK settings
+  (#1226, #1264, #1292, #1311).
+- Sinks deliver to Cloud Storage, Pub/Sub, BigQuery and another project, and intercepting sinks
+  (#1404, #1451, #1521).
+- Folder, organization and billing-account parents, Log Analytics linked datasets that BigQuery
+  can query, `CopyLogEntries`, `TailLogEntries`, saved queries, log scopes and log view IAM
+  (#1215, #1394, #1395, #1403, #1410, #1423, #1435, #1519).
+- `gcloud logging` and Terraform's `google_logging_*` resources (#1246, #1332, #1403).
+
+#### Resource Manager, IAM and Service Usage
+
+- **Folders and the local organization**, `MoveProject`, tag keys, values, bindings and holds, and
+  liens, over v1, v2 and v3, with Terraform (#1294, #1295, #1350).
+- Project, folder and organization IAM policies, stored and not enforced, with IAM Conditions
+  stored and validated as Google documents them (#1368, #1742, #1745), and org policies on
+  projects, folders and the organization (#1296, #1534).
+- `UndeleteProject`, v1 `projects.update`, and `POST /admin/purge` (#1216, #1265, #1537).
+- **IAM**: custom roles, Google's 2,423 predefined roles, `queryGrantableRoles` and
+  `queryTestablePermissions`; service accounts and their keys; `LintPolicy`,
+  `QueryAuditableServices` and the deprecated `SignBlob` and `SignJwt`; and the certificate URLs
+  of service accounts, with gcloud, Terraform and console pages (#1743, #1746, #1747, #1750,
+  #1751).
+- IAM Credentials: `generateIdToken`, `signJwt` and `signBlob`, beside `generateAccessToken`
+  (#1747).
+- **Service Usage** (`serviceusage.googleapis.com`) on `--port-serviceusage`, for `gcloud services`
+  and Terraform's `google_project_service`. Disabling an API is recorded and not enforced (#1352,
+  #1530).
+
+#### Vertex AI and local AI
+
+- **Embeddings**: a community ONNX conversion of EmbeddingGemma for text (#41), and one of
+  EmbeddingGemma 2 for text, images, audio, video and PDFs, including `document_ocr` on scanned
+  pages with Tesseract OCR (#1454, #1651, #1721–#1724, #1729, #1731–#1734, #1736, #1739). Both are
+  labelled as community conversions, not Google artifacts.
+- **`PredictionService` over gRPC**, for `cloud.google.com/go/aiplatform`: `Predict`, `RawPredict`,
+  `GenerateContent`, `StreamGenerateContent`, `EmbedContent`, `Explain` with Sampled Shapley, and
+  the streaming and direct predict methods, raw ones relayed to a container's `grpcPorts` (#1193,
+  #1244, #1257, #1284, #1285, #1454, #1475, #1477).
+- The local-AI runtime image is published with each release, `ghcr.io/cloudburrow/litert-lm:<tag>`,
+  and a release CLI uses it by digest, so local generation no longer needs a checkout (#602).
+- Console: model download, load and unload, an embedding view, and custom prediction requests from
+  the playground (#869, #1305, #1306, #1396).
+
+#### Console
+
+- **A terminal in the top bar, like Cloud Shell** (#781, #834): a shell in a pod in the instance's
+  cluster, never on this machine, from the pinned Cloud SDK image, with the instance's gcloud
+  configuration and no credential. It has tabs, keeps its sessions across a reload, shows progress
+  during the first image pull, and refuses any other origin (#824, #826).
+- A screen for every service, and every feature reachable from it, checked by three parity audits
+  (#782, #1552, #1591): edits, create options and IAM Permissions tabs across services (#784–#802,
+  #852–#854, #1242); BigQuery, Firestore, Datastore, Bigtable, Spanner, Cloud SQL and Memorystore
+  screens (#698, #868, #993–#999, #1207, #1343, #1358); fault injection, state save and load,
+  reset, seed, and a Connect and About panel (#800–#802).
+- Tested in headless Chrome in CI, at several viewport sizes and against a WCAG 2.1 AA audit (#594,
+  #700, #1604).
+
+#### CLI, tools and SDKs
+
+- `--port-base` runs instances side by side, and `--cloudsql-connector` moves the Cloud SQL
+  connector listener (#584, #1364).
+- `cloudburrow seed` and `events`, `env --format kubernetes`, and endpoints injected into Cloud Run
+  revisions; the metadata server and CLI-hosted APIs resolve from pods (#575, #576, #586, #707).
+- `cloudburrow prefetch` and `up --offline` for air-gapped use (#604); see "Offline and air-gapped
+  use" in [docs/install.md](docs/install.md#offline-and-air-gapped-use).
+- Clusters are stamped with the CLI, node-image and Knative versions, and `up` reconciles them
+  (#601). State written by v0.1.0, in the state directory and in a `state save` archive, loads in
+  this release, Cloud Storage included; a nightly test upgrades a real v0.1.0 instance (#1605,
+  #1606, #1714).
+- `gcloud-setup` writes the overrides for every API the instance serves, and `cloudburrow
+  terraform` sets the matching custom endpoints. Terraform is verified for the resources
+  compatibility.md lists, and OpenTofu for the modules its tests apply (#682, #719, #1304, #1578).
+- `--emulator-heap-mib` and `--bigquery-heap-mib` bound the emulators' memory (#1603, #1618).
+- The Python suite covers the opt-in emulators, Cloud KMS, BigQuery and impersonation, and a new
+  Node.js suite covers Storage, Pub/Sub, Cloud Tasks, Secret Manager and Firestore (#589, #592).
+
+#### Releases
+
+- A release is built only from a commit whose `ci-green` check passed, is published as a
+  prerelease, and is marked latest and pushed to the Homebrew tap only after it smoke-installs on
+  each platform's native runner (#596, #603, #680, #689).
+  [docs/install.md](docs/install.md#a-release-failed-its-smoke-test) says how to withdraw a
+  release.
+- The macOS binaries are signed with a Developer ID certificate and notarized once the maintainer
+  adds the Apple secrets. Until then, releases are unsigned and the release notes say so (#605).
+  [docs/install.md](docs/install.md#gatekeeper) explains how to check a binary.
+- Release notes come from this changelog, and [SECURITY.md](SECURITY.md) says how to report a
+  vulnerability (#603).
 
 ### Changed
 
-- CI builds the embedded BigQuery emulator once per workflow run, and restores it from a cache
-  when nothing it is built from has changed, instead of in every check and compat job; each
-  release builds it from source once for its four CLIs (#1087). `make bigquery-binaries
-  BQENGINE_FLAGS=-prebuilt` checks binaries built elsewhere against the sources checked out.
-- `--mode ephemeral` now also applies to Cloud KMS (#481) and Secret Manager (#483) state.
-- `up` creates the managed namespace whenever the cluster is up, not only with a backend
-  (#571).
-- A Cloud Run revision that fails at startup is reported after 240s rather than Knative's 600s
-  (#568).
-- Secret Manager refuses the create fields it would drop (ttl, rotation, topics and others),
-  refuses list filters, compares request etags, and verifies and returns payload CRC32C (#580).
-- Cloud Tasks refuses OIDC and OAuth tokens, logging config and list filters it would drop,
-  keeps `dispatch_deadline` and honours `max_retry_duration` (#578).
-- The embedded storage servers are no longer committed; `make build` and releases build them
-  (#585).
-- Release notes are taken from this changelog instead of fixed text (#603).
-- The rendered Homebrew formula no longer sets a `version` that repeats the one in its URLs
-  (#603).
-- A fault rule on Cloud Tasks' `ListQueues`, Secret Manager's `ListSecrets` or Cloud
-  Scheduler's `ListJobs` now also fails that service's console list, with the message an SDK
-  receives, and a console open on the screen draws from the rule's count (#594).
-- The console is tested in headless Chrome in CI (`test/browser`, chromedp): shell landmarks,
-  the theme switch, creating a bucket through the form, the error card under an injected fault,
-  keyboard row activation, and no request off loopback (#594). docs/console-verification.md
-  describes the run in place of the manual transcript.
+#### BigQuery
+
+- **BigQuery serves every ACTIVE Resource Manager project, and only those** (#1764). v0.1.0 served
+  one project. A project that Resource Manager does not have is now 404 "project … is not found",
+  a project in `DELETE_REQUESTED` is 403, and `projects.list` lists Resource Manager's projects.
+  Create a project in Resource Manager, or seed one, before using it in BigQuery.
+- **A name without a project now resolves in the job's project** (#1784): `dataset.table`, views,
+  functions, procedures and models, and the default dataset's `projectId`. Before, the first
+  project to create an object of that name won.
+- **A request with an access token the instance minted is checked against that account's roles**
+  (#1767, #1774): `bigquery.jobs.create` on the job's project, and data, dataset, table, routine,
+  model and job permissions, with inherited roles, IAM Conditions and authorized views. Refusals are
+  403 `accessDenied`. Requests with no bearer token, or with the ADC fixture's token, are served
+  as before.
+- **Remote models need their connection's permissions** (#1765): `CREATE MODEL … REMOTE WITH
+  CONNECTION` and every query of a remote model need `bigquery.connections.use` on the connection
+  (403 otherwise), and need the connection's service account to hold `roles/aiplatform.user` on the
+  model's project (400 otherwise). `WITH CONNECTION DEFAULT` uses the project's default
+  connection, and creates it when the caller holds `bigquery.connections.create`. Remote models
+  are new in this release (#1760); this changes how they answered before #1765.
+- A `TIMESTAMP` literal with no time zone, and casts between dates, datetimes and timestamps, now
+  use UTC as BigQuery does, not the emulator's America/Los_Angeles (#1188, #1189).
+- `tables.get` and every job report times in milliseconds, not seconds (#971, #1310). A retried
+  `jobs.insert` of an existing job ID is 409 duplicate, not 400 (#1622). An unknown table or
+  dataset in a query is 404 `notFound`, not `jobInternalError` (#1582), and a failed query gives
+  the same error through `jobs.query` and `jobs.insert` (#1581).
+- Query results go to a hidden `_cloudburrow_query_results` dataset and expire after 24 hours or
+  past 200 results, as BigQuery's anonymous datasets do. `jobs.getQueryResults` of an expired
+  result is 404 (#1017, #1059, #1086).
+- The emulator listens only on loopback in its pod, so pods reach it through the front's checks
+  (#1114). Enabling BigQuery needs a CLI with the embedded emulator and storage server; a CLI built
+  with a plain `go build` refuses `up` with BigQuery, and `doctor` reports it (#902, #1061). The CLI
+  is about 86 MB larger.
+
+#### IAM, projects and credentials
+
+- **IAM policies are still not enforced, with three exceptions**, each recorded in
+  [ADR-0006](docs/adr/0006-iam-policy-surface.md): BigQuery's checks of minted tokens and remote
+  models (above), Memorystore for Redis Cluster and Valkey IAM auth, and Firestore with MongoDB
+  compatibility's token sign-in. A Redis cluster or Valkey instance with IAM auth, and a token
+  sign-in to Firestore, accept only an access token this instance minted, for a principal holding
+  the documented role (#1614, #1738).
+- **One project number everywhere** (#1211, #1544): the metadata server's `numeric-project-id`,
+  zone and machine type now carry the project's own number rather than `000000000000`, and
+  Resource Manager v3 names a project `projects/{number}`, as Google does. A project recreated
+  under a purged ID gets a new number.
+- **Deleting a project keeps it in `DELETE_REQUESTED` for 30 days**, as on Google, instead of
+  removing it at once. Its ID cannot be reused until it is purged, and the purge drops the
+  project's state in every service (#1216, #1537, #1540–#1543, #1550).
+- Cloud Tasks and Cloud Scheduler accept `oidcToken` and `oauthToken` and send a locally minted
+  token, where v0.1.0 refused them (#1243).
+
+#### Cloud Run
+
+- Service accounts and Secret Manager, in-memory, Cloud SQL, NFS and Cloud Storage volumes are now
+  mapped (#1297, #1346, #1448, #1474). VPC access, encryption keys, binary authorization,
+  `executionEnvironment` and `sessionAffinity`, which v0.1.0 refused, are stored and returned but
+  have no effect (#1346).
+- A revision that fails at startup is reported after 240 s rather than Knative's 600 s (#568).
+
+#### Other services
+
+- Secret Manager refuses the create fields it would otherwise drop, compares request etags, and
+  verifies and returns payload CRC32C (#580). Each version is now a Kubernetes Secret of its own,
+  so `AddSecretVersion` no longer fails past about 900 versions (#1596).
+- Cloud Tasks keeps `dispatch_deadline`, honours `max_retry_duration`, and refuses the fields it
+  would drop (#578).
+- A Pub/Sub instance needs a CLI with the embedded Linux binaries (`make build` or a release),
+  because its front runs from the storage image (#873).
+- Google's Java emulators (Pub/Sub, Firestore and Datastore) run with a 1 GiB heap by default, and
+  the BigQuery emulator with a 512 MiB `GOMEMLIMIT`. A Pub/Sub emulator whose heap fills exits and
+  restarts (#1603, #1618).
+- `--mode ephemeral` also applies to Cloud KMS and Secret Manager state (#481, #483).
+- REST error bodies carry Google's `status` field and `details` (#1470).
+
+#### CLI
+
+- `cloudburrow reset` resets a running instance through its admin API (#586).
+- `up` creates the managed namespace whenever the cluster is up (#571), waits until Cloud SQL
+  accepts a login and the cluster's DNS answers before it reports ready, and starts independent
+  phases at the same time. A warm start takes about 29 s on macOS/arm64 (#1262, #1588, #1610,
+  #1781).
+- `stop`, `env` and `status` find an instance by its PID and start time, not by process name
+  (#820). `env` and `status` report only the services and ports the named instance runs (#630,
+  #652, #863).
+- A CLI built without the embedded Cloud Storage server is refused before `up` creates a cluster,
+  and `doctor` reports what is embedded (#686). `doctor` names the container engine and warns on
+  unsupported ones (#712).
+- CI builds the embedded BigQuery emulator once per workflow run, or restores it from a cache
+  (#1087). `make bigquery-binaries BQENGINE_FLAGS=-prebuilt` checks binaries built elsewhere.
 
 ### Fixed
 
-- **BigQuery requests no longer slow down with every job** (#1086): the emulator read every job it
-  had run, with its whole result, at every request, so after 40 queries of 50,000 rows a `SELECT
-  1` took 0.27 s rather than 0.006 s, and after 2,000 small ones 1.43 s. CloudBurrow's build reads
-  a job only when a request names it, and keeps a query's result rows as BigQuery keeps a query's
-  result, up to 24 hours, and while they come to 256 MiB; `jobs.getQueryResults` of a job whose
-  result was dropped is 404 `notFound`.
-- **A Pub/Sub reset deletes schemas** (#889): `/admin/reset` for Pub/Sub deleted a project's
-  subscriptions, snapshots and topics and left its schemas, so a test that reset between cases
-  met `ALREADY_EXISTS` creating the same schema again.
-- **BigQuery refuses what BigQuery refuses** (#861): invalid dataset and table IDs, field names
-  and duplicate columns are 400, a duplicate dataset is 409, not the emulator's 500 that the Go
-  client retried until its deadline; `tabledata.insertAll` checks every row against the schema
-  and honours `skipInvalidRows` and `ignoreUnknownValues`, with per-row `insertErrors`, so a bad
-  value no longer leaves a table that cannot be read. The checks run in front of the emulator
-  on the host tunnel; see [docs/compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
-- **BigQuery's checks reach every pod, and cover ALTER TABLE, CREATE TABLE ... AS SELECT,
-  script blocks and autodetected loads** (#901, #902): the validating front runs in the
-  emulator's pod, from the storage image, so `bigquery.<namespace>.svc.cluster.local:9050` is
-  checked with or without Cloud Run; enabling BigQuery now needs a CLI with the embedded storage
-  server, as Cloud Storage does. ALTER TABLE and IF, LOOP, WHILE, REPEAT, FOR and CASE blocks,
-  which the emulator reported done without doing, are 501; their names, a CREATE TABLE ... AS
-  SELECT's columns and the columns a CSV load detects are held to BigQuery's rules.
-- **BigQuery views, CREATE OR REPLACE, scripts and loads** (#916, #917, #918, #919): a view's
-  ID and the columns its query gives are held to BigQuery's rules; CREATE OR REPLACE TABLE and
-  VIEW replace an existing one, which the emulator refused; a CREATE TABLE ... AS SELECT that
-  names a script variable is checked after its script; a failing script with an EXCEPTION
-  handler, RAISE, materialized views and a view's column list are 501. Loads with no
-  `sourceFormat` are CSV, as in BigQuery, instead of the emulator's 400 or 500; resumable
-  uploads (the Go client's above 16 MiB) work; `gs://` loads read the instance's Cloud Storage
-  instead of dialling Google's; a CSV whose first row BigQuery would not take as a header is
-  501; and jobs.list reports the jobs the front failed.
-- **BigQuery CSV loads, IF NOT EXISTS, failed jobs, LIKE/COPY/CLONE** (#931, #932, #934,
-  #937): a CSV load with a schema, or into an existing table, loads every row, where the
-  emulator silently dropped the first as a header whatever `skipLeadingRows` said (a `gs://`
-  one is 501 unless `skipLeadingRows` is 1); CREATE TABLE and VIEW ... IF NOT EXISTS of one
-  that exists does nothing, as in BigQuery, instead of failing; a job the emulator failed reads
-  back failed through jobs.get and jobs.list instead of succeeded; CREATE TABLE ... LIKE, COPY
-  and CLONE and snapshot tables are 501 instead of the emulator's 400.
-- **BigQuery CREATE SCHEMA and CSV load options** (#951, #952): CREATE SCHEMA of a new dataset
-  makes it, with its description, friendly_name, labels and location, alone and in a script,
-  where the emulator reported it done and made none; other options and scripts that could see
-  the dataset early are 501. A CSV load honours `allowQuotedNewlines`, ISO-8859-1 `encoding`,
-  `maxBadRecords`, `ignoreUnknownValues`, `nullMarkers`, `preserveAsciiControlCharacters` and
-  `sourceColumnMatch` NAME, and holds REQUIRED columns to having a value, all of which the
-  emulator ignored; other encodings, `timeZone` and the date and time formats are 501.
-- **BigQuery CSV loads report their bad records** (#960): a load that leaves out bad records
-  under `maxBadRecords` counts them in `statistics.load.badRecords` and lists them in
-  `status.errors`, with `outputRows`, `inputFiles` and `inputFileBytes`, on jobs.insert,
-  jobs.get and jobs.list, where the emulator's job had no statistics and no errors.
-- **BigQuery script variables, failed scripts, TEMP tables, job text and extracts** (#933,
-  #935, #936, #938, #939): a script's variables end with the script, where the emulator kept
-  them and put their values into every later query; a script that fails after a statement that
-  changes data is 501, as the emulator rolls it all back where BigQuery keeps the earlier
-  statements; CREATE OR REPLACE and DROP of a TEMP table the script made are 501 instead of the
-  emulator's 400; a CREATE TEMP TABLE ... AS SELECT that names a variable or another TEMP table
-  has its columns checked; a job the front rewrote shows the client's query in jobs.get; and a
-  CSV extract to Cloud Storage writes BigQuery's file to the instance's own Cloud Storage (a
-  wildcard URI's first file named as BigQuery names it, a missing bucket 404 instead of created,
-  a view and a nested schema refused), with JSON, Avro, Parquet, compression, other delimiters
-  and several URIs 501.
-- **BigQuery script follow-ups** (#955, #956, #957, #958): a failed script no longer leaves the
-  emulator's SQL catalog or its list of tables out of step with its tables (a dropped table
-  unreadable, a made one listed or not, a TEMP table's columns left for the next of its name);
-  a failed query job keeps what its statements before the failing one did, as BigQuery does,
-  and fails with the emulator's error instead of 501; a script variable no longer replaces an
-  alias, a column list's name or a STRUCT field of its name, and a statement where BigQuery may
-  read a column or alias of that name instead is 501; NEWLINE_DELIMITED_JSON (STRING and INT64
-  columns), GZIP, other one-character delimiters and an empty table's header row are extracted
-  as BigQuery documents them, by the front, to the instance's own Cloud Storage; and jobs.list
-  with projection=full gives each job's configuration.
-- **BigQuery loads the front does not read report their counts** (#966): a NEWLINE_DELIMITED_JSON
-  or Parquet load, a CSV load passed on as it is, and a load from Cloud Storage the emulator
-  reads itself report `statistics.load.outputRows` (the table's rows before and after the
-  load), `inputFiles` and `inputFileBytes` (the upload's, or the objects' sizes), and status
-  DONE, on jobs.insert, jobs.get and jobs.list, where they had no statistics. `outputBytes` is
-  documented as not covered (#965): BigQuery gives no rule for it.
-- **BigQuery job references, times and jobs.list, Parquet loads, empty strings in CSV extracts,
-  functions after a failed script** (#970, #971, #972, #973, #975, #976): a jobs.insert with no
-  jobReference is given one, where the emulator answered 500 and the client retried; every job's
-  creationTime, startTime and endTime are milliseconds since the epoch (the emulator gave seconds,
-  and an upload none); jobs.list is newest first and honours maxResults, pageToken, stateFilter,
-  minCreationTime, maxCreationTime and parentJobId, and leaves out the front's own check queries;
-  a Parquet load with no schema into a table that exists loads with the table's schema, and one
-  into a new table is 501 at once instead of a retried 500; a CSV extract of an empty STRING,
-  which BigQuery's documentation does not give the form of, is 501 instead of written as a NULL;
-  a function a failed jobs.query script made is taken out of the catalog again, and DROP
-  FUNCTION or CREATE TABLE FUNCTION in such a script, DROP TABLE FUNCTION and DROP SCHEMA are
-  501 instead of left half done or the emulator's 400.
-- **BigQuery Parquet loads are checked against the table** (#988): the front reads a Parquet
-  file's schema from its footer (an upload's data, or each object in the instance's Cloud
-  Storage) and holds it to BigQuery's rules before the emulator loads anything, where the
-  emulator dropped a file column the table lacked, loaded NULL for a column the file named in
-  another case, and loaded an INT64 column into a STRING one as text. A file column the table
-  lacks, a change of type or of mode, or a REQUIRED column the file lacks is 400; what the
-  emulator would not load as BigQuery does (TIME, TIMESTAMP(MILLIS), INT96, BYTES, DECIMAL,
-  nested columns, schema changes, and the rest docs/compatibility.md lists) is 501. A load into
-  a new table now takes the file's schema instead of being 501.
-- **A BigQuery emulator whose SQL engine has failed is restarted** (#989): after enough query
-  jobs and DROP TABLEs the pinned engine's memory passes 2 GiB and every request panics until
-  the process is restarted. The front answers that panic, and every request after it, 501 naming
-  the limitation, and fails the emulator container's new liveness probe so that Kubernetes
-  restarts it at once; the restart loses the emulator's data, as the crash did.
-  `scripts/bigquery-engine-soak.sh` reproduces it on an instance of your own.
-- **BigQuery query results go to one hidden dataset** (#1017): the pinned emulator made a
-  dataset of its own for each query job's result, and its SQL engine a catalog of every builtin
-  function for each, which was most of the engine's growth per query. The front now names the
-  destination itself, a table named after the job in `_cloudburrow_query_results`, which
-  `datasets.list` leaves out unless hidden datasets are asked for, as BigQuery leaves out its
-  anonymous datasets; `jobs.getQueryResults` and reading the destination table are unchanged.
-  Measured with the soak script, 60 query jobs took the emulator from 62 MiB to 4301 MiB before
-  and from 66 MiB to 701 MiB after, and 400 held it at about 800 MiB. The compat suite still grows
-  the engine, through DDL (docs/compatibility.md).
-- **The BigQuery front forgets the emulator's jobs when the emulator restarts** (#1016): it
-  watches the emulator's process, and when the emulator's container restarts alone (a crash, or
-  the liveness probe of #989) it drops the failures, texts, configurations, times and its own
-  jobs it kept, so `jobs.get` and `jobs.list` answer as the emptied emulator does.
-- **BigQuery query results expire** (#1059): the front deletes a query job's result table in
-  `_cloudburrow_query_results` once it is 24 hours old, as BigQuery's are, or, oldest first, past
-  200 of them, in batches while the instance is idle, since each deletion is a `DROP TABLE` that
-  costs more the more tables the emulator's engine has; `jobs.getQueryResults` of such a job is
-  then 404 `notFound`. `POST /cloudburrow/bigquery-expire-query-results` on the BigQuery endpoint
-  does it at once.
-- **The BigQuery front's scratch tables no longer rebuild the engine's catalogs while you wait**
-  (#1057): the tables and function it makes for a copy with WRITE_TRUNCATE, a FLOAT load, `MERGE`
-  from a subquery and `CREATE OR REPLACE` go to the hidden dataset and are deleted while the
-  instance is idle. Measured with `scripts/bigquery-engine-soak.sh`, which now has a phase per
-  kind of operation: 20 `MERGE`s from a subquery took the emulator to 428 MiB rather than
-  2,262 MiB. The rest of the growth is every `DROP` rebuilding a catalog of every builtin for each
-  dataset (docs/compatibility.md).
-- A CLI built without the embedded Cloud Storage server (a plain `go build` or `go install`)
-  is refused before `up` creates a cluster, naming the fix, rather than after kind has spent
-  minutes creating one (#686). `cloudburrow doctor` and `diagnose` report it in an
-  `embedded storage` row: which Linux builds are embedded and whether one is the node's. An
-  empty or placeholder file counts as missing.
-- Port forwarding replaces a dead tunnel on evidence rather than on one client's failure
-  (#526), retries a launch that does not carry (#572), and notices a pod that restarted its
-  containers (#566).
-- **The setup-cloudburrow action works with the CLI it installs** (#679): it reads `cloudburrow
-  version --short` and passes `--trust` and `--port-base` only to a CLI that has them, so
-  `version: v0.1.0` (and `latest` while that is v0.1.0) no longer fails with "flag provided but
-  not defined". The `port-base` input with v0.1.0 fails before `up`, naming the version it needs.
-  Installing any release through the action also failed before this ("The \"path\" argument must
-  be of type string"): it looked for its own files in `GITHUB_ACTION_PATH`, which the runner sets
-  only for composite actions. It now finds them from its own location, which also makes
-  `version: source` build the action's checkout rather than the job's workspace.
-  The action self-test also runs against the newest published release, and the release
-  workflow runs it against each tag it publishes. [docs/ci.md](docs/ci.md#which-cli-versions-an-action-ref-supports)
-  has the table.
-- **Both Linux release archives are linked the same way** (#714): every release CLI is built
-  with `CGO_ENABLED=0`, and the release fails unless `go version -m` on each binary says so.
-  The linux/amd64 binary was linked against the build runner's glibc; it is now static, like
-  linux/arm64. Cloud Tasks and Cloud Scheduler HTTP targets under `.localhost` are dialled on
-  `127.0.0.1` without a DNS lookup, so they no longer depend on the host's resolver.
-  [docs/install.md](docs/install.md#how-the-cli-is-linked) records the linkage and the measured
-  resolver behaviour.
-- **Container engines are stated, and an engine whose kind gateway is not on this machine fails
-  early** (#712): [docs/install.md](docs/install.md#container-engines) marks each engine
-  supported, unverified or unsupported, with the evidence for each supported row. `doctor` names
-  the engine from `docker info` and warns on rootless and non-Desktop VM engines, and no longer
-  measures the host's `/` as the daemon root when a Linux client talks to Docker Desktop's VM.
-  With Cloud Run, `up` checks that the kind gateway can be bound before relaying on it, and
-  otherwise fails naming the engine and the workaround instead of with a bare listen error.
+#### BigQuery
+
+- Requests no longer slow down with every job: the emulator read every job it had run, with its
+  results, on every request (#1086, #1103, #1133, #1661).
+- The SQL engine no longer panics past 2 GiB of memory, and no longer grows by a whole builtin
+  catalog at each DDL statement. An engine that does fail is restarted at once, and the front
+  forgets the jobs it lost (#989, #1016, #1017, #1057, #1091).
+- Table functions, nested RECORDs, NaN and ±Infinity values, non-UTF-8 BYTES, `-0`, INTERVAL signs
+  and comparisons, NULL arguments, GEOGRAPHY text and `TO_JSON_STRING` now give BigQuery's answers
+  (#900, #1047, #1066, #1075–#1077, #1109, #1116, #1119–#1121, #1126–#1128).
+- CSV loads no longer drop the first row as a header, failed jobs no longer read back as
+  succeeded, `IF NOT EXISTS` of an existing table does nothing, and a failed script keeps the
+  statements before the failing one, as BigQuery does (#931, #932, #934, #935, #955).
+- A table ID used in two datasets reads the right table in `tabledata.list`, queries and the
+  Storage Read API (#1015, #1032, #1046).
+- A `jobs.insert` with no `jobReference` no longer answers 500, and `jobs.list` honours its
+  paging and filters (#972, #973).
+- Storage Read API reads of REPEATED columns no longer crash the emulator, and Avro reads work in
+  a project whose ID has a hyphen (#1095, #1098).
+
+#### Pub/Sub
+
+- `/admin/reset` deletes schemas too (#889).
+- Updated expiration policies survive a restart of the front, REST answers over 4 MiB pass
+  through, and `GetSubscription` no longer counts as activity (#898, #926, #1039).
+- The emulator's memory no longer rises for the length of a long run (#1603, #1619).
+
+#### Cloud Run and Cloud Tasks
+
+- A task deleted during its dispatch attempt is no longer recreated by the attempt (#656).
+- Console actions on Cloud Run no longer dial a fixed port when the Run port is OS-assigned
+  (#646).
+
+#### Other services
+
+- Bigtable answers `UNIMPLEMENTED` for the 15 RPCs that crashed its emulator pod (#1206), and its
+  pod no longer reaches `dl.google.com` on every start (#611).
+- Cloud KMS and Secret Manager no longer hold their lock across one Kubernetes read per record, so
+  requests no longer time out on a large instance (#1232).
+- Cloud SQL in ephemeral mode keeps a created instance's data across a server restart (#1740).
+- `up` over a cluster made before the builtin Cloud Storage server removes the old server instead
+  of crash-looping (#780).
+- The console loads back an archive that its own **Save state** wrote, over the upload limit
+  (#1250), and long monospace text no longer pushes a 320 px page sideways (#1637).
+
+#### CLI, networking and releases
+
+- Port forwarding replaces a dead tunnel on evidence rather than on one client's failure, retries a
+  launch that does not take, and notices a pod that restarted its containers (#526, #566, #572).
+- **The setup-cloudburrow action works with the CLI it installs** (#679): it passes only the flags
+  that CLI has, finds its own files outside composite actions, and is self-tested against the
+  newest release. [docs/ci.md](docs/ci.md#which-cli-versions-an-action-ref-supports) has the table.
+- **Both Linux release archives are statically linked** (#714): every release CLI is built with
+  `CGO_ENABLED=0`, and the release checks it. HTTP targets under `.localhost` are dialled on
+  `127.0.0.1` without a DNS lookup.
+- With Cloud Run, `up` checks that the kind gateway can be bound, and otherwise names the engine
+  and the workaround (#712). See [docs/install.md](docs/install.md#container-engines).
 
 ### Security
 
-- Every `/admin` route now requires a per-instance token (#553).
-- Every HTTP listener refuses a request whose `Host` is not an IP address, `localhost` (or a
-  name under `.localhost`), `host.docker.internal`, `cloudburrow-host.<namespace>.svc.cluster.local`
-  or, on the builtin storage server, its Service and virtual-hosted bucket names, answering 421
-  with the rejected host named (#676). This is the DNS-rebinding defence: a page on a domain
-  that resolves to 127.0.0.1 could otherwise drive the console and the service APIs as a
-  same-origin peer. Cleartext HTTP/2, and so gRPC, is not checked, because a browser never sends it.
-- The builtin Cloud Storage server refuses a browser request from an origin that is neither
-  loopback (`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`, any port) nor named with the new
-  `up --cors-allow-origin` (`CLOUDBURROW_CORS_ALLOW_ORIGIN`, config `storage.corsAllowOrigins`),
-  answering 403 with no CORS headers, preflights included (#677). Its JSON API had allowed every
-  origin, as Google's does, so any web page could read and change local buckets. A request with no
-  `Origin`, as the SDKs and `curl` send, is unaffected. `Access-Control-Allow-Credentials` is no
-  longer sent: no recorded observation of Google shows it.
+- Every `/admin` route needs the instance's admin token, because a cluster workload on Docker
+  Desktop can reach the host's loopback ports (#553).
+- Every HTTP listener refuses a `Host` that is not an IP address, `localhost`, a `.localhost`
+  name or one of the instance's own names, answering 421. This is the DNS-rebinding defence, and
+  it covers the tunnels to the HTTP emulators and the fronts in their pods (#676, #725, #1587).
+- **Every listener now checks `Origin`** (#1586): a browser request from an origin that is not
+  loopback, the listener's own, or one named with `--cors-allow-origin` is 403 with no CORS
+  headers. A cross-site form post could otherwise create resources. The Pub/Sub and Firestore
+  emulators' permissive CORS is blocked at the tunnel. Cloud Storage's JSON API, which allowed any
+  origin as Google's does, follows the same rule (#677). A request with no `Origin`, as the SDKs and
+  `curl` send, is unaffected.
+- A discovered `cloudburrow.json` can no longer set `allowRemote` or a non-loopback
+  `bindAddress`, and a directory's config file and hooks run only once that directory is trusted
+  (#598).
+- `up` tightens an existing instance directory to mode 0700, and log redaction now covers quoted
+  JSON tokens, bare bearer tokens and PEM key bodies (#1586). [docs/security.md](docs/security.md)
+  describes the model and each check.
+- The terminal's WebSocket is refused to any other origin, host or remote peer (#781).
+- Releases build with Go 1.27.4, and dependencies with known reachable vulnerabilities were updated
+  (#264, #1175, #1178).
+
+### Removed
+
+- The community Cloud Storage emulator v0.1.0 ran, replaced by CloudBurrow's own server (#519).
+- Google's product icons in the console, replaced by CloudBurrow's own marks (#684).
+- About 59 MB of committed build output; `make build` and releases build the embedded servers
+  (#585).
+- Java from the support matrix's planned languages: no Java suite is planned (#718).
 
 ## [0.1.0] - 2026-09-25
 
@@ -375,3 +580,10 @@ operation in [docs/compatibility.md](docs/compatibility.md) and summarised in
 
 [Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0
+
+<!-- When v0.2.0 is tagged: rename "## [Unreleased]" above to "## [0.2.0] - YYYY-MM-DD", put a new
+empty "## [Unreleased]" above it (test/install's TestTheChangelogHasAnUnreleasedSectionAndV010
+requires one), and replace the [Unreleased] link above with these two lines:
+[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.1.0...v0.2.0
+-->
