@@ -119,7 +119,7 @@ func (s *Server) ExportInstance(ctx context.Context, req *redispb.ExportInstance
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+	return s.launch(op, func() {
 		ctx, cancel := c.cancellable(op)
 		defer cancel()
 		data, err := c.snapshot(ctx, sh, server, addr, auth)
@@ -127,8 +127,7 @@ func (s *Server) ExportInstance(ctx context.Context, req *redispb.ExportInstance
 			err = c.objs.Write(ctx, bucket, object, data)
 		}
 		c.done(r.Name, op, redispb.Instance_READY, err)
-	}()
-	return s.operation(op)
+	})
 }
 
 // snapshot is the server's data as an RDB file: BGSAVE, then the file.
@@ -167,12 +166,11 @@ func (s *Server) ImportInstance(ctx context.Context, req *redispb.ImportInstance
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+	return s.launch(op, func() {
 		ctx, cancel := c.cancellable(op)
 		defer cancel()
 		c.done(r.Name, op, redispb.Instance_READY, c.load(ctx, sh, server, bin, addr, auth, data))
-	}()
-	return s.operation(op)
+	})
 }
 
 // load replaces the data of the server at addr with the RDB file data.

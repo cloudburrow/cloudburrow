@@ -69,7 +69,7 @@ func (s *ClusterServer) AddTokenAuthUser(ctx context.Context, req *clusterpb.Add
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *ClusterServer) DeleteTokenAuthUser(ctx context.Context, req *clusterpb.DeleteTokenAuthUserRequest) (*longrunningpb.Operation, error) {
@@ -86,7 +86,7 @@ func (s *ClusterServer) DeleteTokenAuthUser(ctx context.Context, req *clusterpb.
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *ClusterServer) GetTokenAuthUser(ctx context.Context, req *clusterpb.GetTokenAuthUserRequest) (*clusterpb.TokenAuthUser, error) {
@@ -143,7 +143,7 @@ func (s *ClusterServer) AddAuthToken(ctx context.Context, req *clusterpb.AddAuth
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *ClusterServer) DeleteAuthToken(ctx context.Context, req *clusterpb.DeleteAuthTokenRequest) (*longrunningpb.Operation, error) {
@@ -160,7 +160,7 @@ func (s *ClusterServer) DeleteAuthToken(ctx context.Context, req *clusterpb.Dele
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *ClusterServer) GetAuthToken(ctx context.Context, req *clusterpb.GetAuthTokenRequest) (*clusterpb.AuthToken, error) {
@@ -215,7 +215,7 @@ func (s *ClusterServer) BackupCluster(ctx context.Context, req *clusterpb.Backup
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *ClusterServer) ListBackupCollections(ctx context.Context, req *clusterpb.ListBackupCollectionsRequest) (*clusterpb.ListBackupCollectionsResponse, error) {
@@ -336,7 +336,7 @@ func (s *ClusterServer) ExportBackup(ctx context.Context, req *clusterpb.ExportB
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 // --- Memorystore for Valkey ---
@@ -355,7 +355,7 @@ func (s *MemorystoreServer) AddTokenAuthUser(ctx context.Context, req *memorysto
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *MemorystoreServer) DeleteTokenAuthUser(ctx context.Context, req *memorystorepb.DeleteTokenAuthUserRequest) (*longrunningpb.Operation, error) {
@@ -372,7 +372,7 @@ func (s *MemorystoreServer) DeleteTokenAuthUser(ctx context.Context, req *memory
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *MemorystoreServer) GetTokenAuthUser(ctx context.Context, req *memorystorepb.GetTokenAuthUserRequest) (*memorystorepb.TokenAuthUser, error) {
@@ -429,7 +429,7 @@ func (s *MemorystoreServer) AddAuthToken(ctx context.Context, req *memorystorepb
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *MemorystoreServer) DeleteAuthToken(ctx context.Context, req *memorystorepb.DeleteAuthTokenRequest) (*longrunningpb.Operation, error) {
@@ -446,7 +446,7 @@ func (s *MemorystoreServer) DeleteAuthToken(ctx context.Context, req *memorystor
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *MemorystoreServer) GetAuthToken(ctx context.Context, req *memorystorepb.GetAuthTokenRequest) (*memorystorepb.AuthToken, error) {
@@ -501,7 +501,7 @@ func (s *MemorystoreServer) BackupInstance(ctx context.Context, req *memorystore
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }
 
 func (s *MemorystoreServer) ListBackupCollections(ctx context.Context, req *memorystorepb.ListBackupCollectionsRequest) (*memorystorepb.ListBackupCollectionsResponse, error) {
@@ -633,5 +633,5 @@ func (s *MemorystoreServer) ExportBackup(ctx context.Context, req *memorystorepb
 	if err != nil {
 		return nil, err
 	}
-	return s.api.operation(op)
+	return op, nil
 }

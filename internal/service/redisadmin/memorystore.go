@@ -714,8 +714,7 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	op := c.newOperation(name, "create")
 	c.busy[name] = op
 	c.mu.Unlock()
-	go c.create(name, op)
-	return s.api.operation(op)
+	return s.api.launch(op, func() { c.create(name, op) })
 }
 
 // UpdateInstance changes shard_count, replica_count, node_type,
@@ -910,8 +909,7 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	if upgradeTo != "" {
 		r.state, r.message = clusterpb.Cluster_UPDATING, "upgrading the engine to "+upgradeTo
 		c.busy[r.Name] = op
-		go c.upgrade(r.Name, op, upgradeTo)
-		return s.api.operation(op)
+		return s.api.launch(op, func() { c.upgrade(r.Name, op, upgradeTo) })
 	}
 	if !reshape {
 		c.finish(op, renderValkey(r), nil)
@@ -926,8 +924,7 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		r.pendingReplicas = replicas
 	}
 	c.busy[r.Name] = op
-	go c.reshape(r.Name, op, shards, replicas)
-	return s.api.operation(op)
+	return s.api.launch(op, func() { c.reshape(r.Name, op, shards, replicas) })
 }
 
 // valkeyConfigDefaults are the values an engine config goes back to when
@@ -968,7 +965,7 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 	c.busy[r.Name] = op
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	name := r.Name
-	go func() {
+	return s.api.launch(op, func() {
 		c.removeNodes(nodes)
 		c.mu.Lock()
 		delete(c.busy, name)
@@ -981,6 +978,5 @@ func (s *MemorystoreServer) DeleteInstance(ctx context.Context, req *memorystore
 		}
 		c.mu.Unlock()
 		c.finish(op, &emptypb.Empty{}, err)
-	}()
-	return s.api.operation(op)
+	})
 }

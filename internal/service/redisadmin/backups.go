@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -280,33 +281,33 @@ const defaultBackupTTL = 100 * 365 * 24 * time.Hour
 
 // startBackup begins a backup of r (mu held) and returns the operation,
 // completed with resp once every shard's file is kept.
-func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, automated bool, resp func() proto.Message) (string, error) {
+func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, automated bool, resp func() proto.Message) (*longrunningpb.Operation, error) {
 	kind := "cluster"
 	if c.valkey {
 		kind = "instance"
 	}
 	if _, ok := c.rt.(Shell); !ok {
-		return "", apierror.Unimplemented("backups are not supported by this instance's servers")
+		return nil, apierror.Unimplemented("backups are not supported by this instance's servers")
 	}
 	if _, pending := c.busy[r.Name]; pending || r.state.String() != "ACTIVE" {
-		return "", apierror.FailedPrecondition("%s %s is %s or has an operation in progress: it is backed up only when ACTIVE", kind, r.Name, r.state)
+		return nil, apierror.FailedPrecondition("%s %s is %s or has an operation in progress: it is backed up only when ACTIVE", kind, r.Name, r.state)
 	}
 	if id == "" {
 		id = c.now().UTC().Format("20060102150405")
 	}
 	if !backupIDRE.MatchString(id) {
-		return "", apierror.InvalidArgument("backup_id %q must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter or digit", id)
+		return nil, apierror.InvalidArgument("backup_id %q must be 1 to 63 lowercase letters, digits or hyphens, starting with a letter or digit", id)
 	}
 	if ttl == 0 {
 		ttl = defaultBackupTTL
 	}
 	if ttl < 24*time.Hour || ttl > defaultBackupTTL {
-		return "", apierror.InvalidArgument("ttl must be between 1 day and 100 years")
+		return nil, apierror.InvalidArgument("ttl must be between 1 day and 100 years")
 	}
 	c.addCollection(r)
 	name := collectionName(r) + "/backups/" + id
 	if c.backups[name] != nil {
-		return "", apierror.AlreadyExists("Resource '%s' already exists", name)
+		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
 	}
 	now := c.now()
 	b := &backupRecord{Name: name, Owner: r.Name, OwnerUID: r.UID, UID: newUID(), Created: now, Expire: now.Add(ttl), Automated: automated,
@@ -328,6 +329,10 @@ func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, a
 		}
 	}
 	sort.Slice(primaries, func(i, j int) bool { return primaries[i].Shard < primaries[j].Shard })
+	started, err := c.api.operation(op)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(c.bg, importOpTimeout)
 		defer cancel()
@@ -375,7 +380,7 @@ func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, a
 		}
 		c.finish(op, out, err)
 	}()
-	return op, nil
+	return started, nil
 }
 
 // snapshotNode is a node's data as an RDB file: BGSAVE, then the file,
@@ -482,14 +487,14 @@ func (c *clusters) readGCS(ctx context.Context, uris []string, field string) ([]
 }
 
 // exportBackup writes b's files to bucket, under the backup's ID.
-func (c *clusters) exportBackup(ctx context.Context, name, bucket string) (string, error) {
+func (c *clusters) exportBackup(ctx context.Context, name, bucket string) (*longrunningpb.Operation, error) {
 	if bucket == "" {
-		return "", apierror.InvalidArgument("gcs_bucket is required")
+		return nil, apierror.InvalidArgument("gcs_bucket is required")
 	}
 	bucket = strings.TrimPrefix(bucket, "gs://")
 	objs := c.api.created.objs
 	if objs == nil {
-		return "", apierror.FailedPrecondition("exporting writes this instance's Cloud Storage, which is not enabled: start it with --services memorystore,storage")
+		return nil, apierror.FailedPrecondition("exporting writes this instance's Cloud Storage, which is not enabled: start it with --services memorystore,storage")
 	}
 	c.mu.Lock()
 	b, err := c.findBackup(name)
@@ -498,7 +503,7 @@ func (c *clusters) exportBackup(ctx context.Context, name, bucket string) (strin
 	}
 	if err != nil {
 		c.mu.Unlock()
-		return "", err
+		return nil, err
 	}
 	snap := *b
 	m := backupRE.FindStringSubmatch(name)
@@ -506,6 +511,10 @@ func (c *clusters) exportBackup(ctx context.Context, name, bucket string) (strin
 	op := ops.Create("projects/"+m[2]+"/locations/"+m[3], name)
 	c.setMetadata(op.Name, name, "export")
 	c.mu.Unlock()
+	started, err := c.api.operation(op.Name)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(c.bg, importOpTimeout)
 		defer cancel()
@@ -527,7 +536,7 @@ func (c *clusters) exportBackup(ctx context.Context, name, bucket string) (strin
 		}
 		c.finish(op.Name, c.backupOut(&snap), err)
 	}()
-	return op.Name, nil
+	return started, nil
 }
 
 // deleteBackup removes a backup and its files.

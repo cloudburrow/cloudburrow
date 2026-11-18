@@ -600,7 +600,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		linked = append(linked, snaps[x])
 	}
 	trust := trustOf(append([]*clusterRecord{primary}, members...))
-	go func() {
+	return s.api.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
 		// Over TLS, the members that will replicate the new primary trust
@@ -640,8 +640,7 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 		out := renderValkey(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
-	}()
-	return s.api.operation(op)
+	})
 }
 
 // sourceAddr is where the nodes reach a migration's source at ip:port: a
@@ -736,7 +735,7 @@ func (s *MemorystoreServer) StartMigration(ctx context.Context, req *memorystore
 	c.busy[r.Name] = op
 	snap := *r
 	snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
-	go func() {
+	return s.api.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
 		err := c.linkTo(ctx, &snap, host, port, "")
@@ -753,8 +752,7 @@ func (s *MemorystoreServer) StartMigration(ctx context.Context, req *memorystore
 		out := renderValkey(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
-	}()
-	return s.api.operation(op)
+	})
 }
 
 // FinishMigration stops replicating the source once the instance has
@@ -778,7 +776,7 @@ func (s *MemorystoreServer) FinishMigration(ctx context.Context, req *memorystor
 	snap := *r
 	snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
 	force := req.GetForce()
-	go func() {
+	return s.api.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
 		var err error
@@ -797,8 +795,7 @@ func (s *MemorystoreServer) FinishMigration(ctx context.Context, req *memorystor
 		out := renderValkey(r)
 		c.mu.Unlock()
 		c.finish(op, out, err)
-	}()
-	return s.api.operation(op)
+	})
 }
 
 // caughtUp waits until r's primary's replication offset reaches the

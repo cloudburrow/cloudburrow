@@ -500,12 +500,11 @@ func (s *Server) FailoverInstance(ctx context.Context, req *redispb.FailoverInst
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+	return s.launch(op, func() {
 		ctx, cancel := context.WithTimeout(c.bg, haWait)
 		defer cancel()
 		c.done(from.Name, op, redispb.Instance_READY, c.failover(ctx, rs, &from, addrs, mode))
-	}()
-	return s.operation(op)
+	})
 }
 
 // failover promotes the replica of from that has the most of the

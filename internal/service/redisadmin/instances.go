@@ -574,8 +574,7 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	op := c.newOperation(name, "create")
 	c.busy[name] = op
 	c.mu.Unlock()
-	go c.run(name, op, r.spec())
-	return s.operation(op)
+	return s.launch(op, func() { c.run(name, op, r.spec()) })
 }
 
 // checkCreate refuses what CreateInstance cannot run faithfully, and what
@@ -775,12 +774,11 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 		// they are.
 		r.state = redispb.Instance_UPDATING
 		c.busy[r.Name] = op
-		go func() {
+		return s.launch(op, func() {
 			ctx, cancel := context.WithTimeout(c.bg, haWait)
 			defer cancel()
 			c.done(r.Name, op, redispb.Instance_READY, c.scale(ctx, r.Name))
-		}()
-		return s.operation(op)
+		})
 	}
 	c.finish(op, c.render(r))
 	return s.operation(op)
@@ -807,7 +805,7 @@ func (s *Server) DeleteInstance(ctx context.Context, req *redispb.DeleteInstance
 	c.busy[r.Name] = op
 	c.mu.Unlock()
 	gone := *r
-	go func() {
+	return s.launch(op, func() {
 		err := c.removeServers(c.bg, gone)
 		c.mu.Lock()
 		delete(c.busy, r.Name)
@@ -829,6 +827,5 @@ func (s *Server) DeleteInstance(ctx context.Context, req *redispb.DeleteInstance
 			return
 		}
 		c.finish(op, &emptypb.Empty{})
-	}()
-	return s.operation(op)
+	})
 }

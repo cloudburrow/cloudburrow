@@ -97,7 +97,7 @@ func (s *Server) UpgradeInstance(ctx context.Context, req *redispb.UpgradeInstan
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+	return s.launch(op, func() {
 		ctx, cancel := c.cancellable(op)
 		defer cancel()
 		err := c.upgrade(ctx, sh, &from, v)
@@ -107,8 +107,7 @@ func (s *Server) UpgradeInstance(ctx context.Context, req *redispb.UpgradeInstan
 			err = fmt.Errorf("upgrade to %s: %w", v, err)
 		}
 		c.done(from.Name, op, redispb.Instance_READY, err)
-	}()
-	return s.operation(op)
+	})
 }
 
 func (c *instances) upgrade(ctx context.Context, sh Shell, from *record, v string) error {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -126,28 +127,32 @@ func (c *clusters) syncUsers(ctx context.Context, r *clusterRecord, users map[st
 
 // changeUsers runs change on r (mu held), keeps r, and returns the
 // operation that completes, with resp, once every node has r's users.
-func (c *clusters) changeUsers(r *clusterRecord, verb string, needToken bool, change func() error, resp func() proto.Message) (string, error) {
+func (c *clusters) changeUsers(r *clusterRecord, verb string, needToken bool, change func() error, resp func() proto.Message) (*longrunningpb.Operation, error) {
 	kind := "cluster"
 	if c.valkey {
 		kind = "instance"
 	}
 	if needToken && !r.tokenAuth() {
-		return "", apierror.FailedPrecondition("%s %s does not use token auth: its authorization mode is not TOKEN_AUTH", kind, r.Name)
+		return nil, apierror.FailedPrecondition("%s %s does not use token auth: its authorization mode is not TOKEN_AUTH", kind, r.Name)
 	}
 	if _, pending := c.busy[r.Name]; pending || r.state.String() != "ACTIVE" {
-		return "", apierror.FailedPrecondition("%s %s is %s or has an operation in progress: it is changed only when ACTIVE", kind, r.Name, r.state)
+		return nil, apierror.FailedPrecondition("%s %s is %s or has an operation in progress: it is changed only when ACTIVE", kind, r.Name, r.state)
 	}
 	if err := change(); err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := c.save(r); err != nil {
-		return "", apierror.Internal(err, "keep %s %s", kind, r.Name)
+		return nil, apierror.Internal(err, "keep %s %s", kind, r.Name)
 	}
 	op := c.newOperation(r.Name, verb)
 	c.busy[r.Name] = op
 	snap := *r
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	users := c.aclUsers(r)
+	started, err := c.api.operation(op)
+	if err != nil {
+		return nil, err
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
@@ -161,7 +166,7 @@ func (c *clusters) changeUsers(r *clusterRecord, verb string, needToken bool, ch
 		}
 		c.finish(op, out, err)
 	}()
-	return op, nil
+	return started, nil
 }
 
 // tokenUserState is what a token auth user's or token's state is: ACTIVE,
@@ -181,9 +186,9 @@ func authTokenName(owner, user, id string) string {
 }
 
 // addTokenUser adds user to r. Call with mu held.
-func (c *clusters) addTokenUser(r *clusterRecord, user string, resp func() proto.Message) (string, error) {
+func (c *clusters) addTokenUser(r *clusterRecord, user string, resp func() proto.Message) (*longrunningpb.Operation, error) {
 	if err := checkACLUser("token_auth_user", user); err != nil {
-		return "", err
+		return nil, err
 	}
 	return c.changeUsers(r, "addTokenAuthUser", true, func() error {
 		if _, ok := r.TokenUsers[user]; ok {
@@ -204,13 +209,13 @@ func (c *clusters) addTokenUser(r *clusterRecord, user string, resp func() proto
 
 // deleteTokenUser removes user from r; one with tokens only with force, as
 // Google's does. Call with mu held.
-func (c *clusters) deleteTokenUser(r *clusterRecord, user string, force bool, resp func() proto.Message) (string, error) {
+func (c *clusters) deleteTokenUser(r *clusterRecord, user string, force bool, resp func() proto.Message) (*longrunningpb.Operation, error) {
 	tu, ok := r.TokenUsers[user]
 	if !ok {
-		return "", apierror.NotFound("Resource '%s' was not found", tokenUserName(r.Name, user))
+		return nil, apierror.NotFound("Resource '%s' was not found", tokenUserName(r.Name, user))
 	}
 	if len(tu.Tokens) > 0 && !force {
-		return "", apierror.FailedPrecondition("token auth user %s has auth tokens: delete them first, or set force", tokenUserName(r.Name, user))
+		return nil, apierror.FailedPrecondition("token auth user %s has auth tokens: delete them first, or set force", tokenUserName(r.Name, user))
 	}
 	return c.changeUsers(r, "deleteTokenAuthUser", false, func() error {
 		users := map[string]*tokenUser{}
@@ -225,19 +230,19 @@ func (c *clusters) deleteTokenUser(r *clusterRecord, user string, force bool, re
 }
 
 // addAuthToken generates a token for user. Call with mu held.
-func (c *clusters) addAuthToken(r *clusterRecord, user, id string, resp func() proto.Message) (string, error) {
+func (c *clusters) addAuthToken(r *clusterRecord, user, id string, resp func() proto.Message) (*longrunningpb.Operation, error) {
 	tu, ok := r.TokenUsers[user]
 	if !ok {
-		return "", apierror.NotFound("Resource '%s' was not found", tokenUserName(r.Name, user))
+		return nil, apierror.NotFound("Resource '%s' was not found", tokenUserName(r.Name, user))
 	}
 	if id == "" {
 		id = newUID()[:16]
 	} else if !clusterIDRE.MatchString(id) && !regexp.MustCompile(`^[a-z0-9-]{1,63}$`).MatchString(id) {
-		return "", apierror.InvalidArgument("auth token ID %q must be lowercase letters, digits and hyphens", id)
+		return nil, apierror.InvalidArgument("auth token ID %q must be lowercase letters, digits and hyphens", id)
 	}
 	for _, t := range tu.Tokens {
 		if t.ID == id {
-			return "", apierror.AlreadyExists("Resource '%s' already exists", authTokenName(r.Name, user, id))
+			return nil, apierror.AlreadyExists("Resource '%s' already exists", authTokenName(r.Name, user, id))
 		}
 	}
 	return c.changeUsers(r, "addAuthToken", true, func() error {
@@ -254,7 +259,7 @@ func (c *clusters) addAuthToken(r *clusterRecord, user, id string, resp func() p
 }
 
 // deleteAuthToken removes a token. Call with mu held.
-func (c *clusters) deleteAuthToken(r *clusterRecord, user, id string, resp func() proto.Message) (string, error) {
+func (c *clusters) deleteAuthToken(r *clusterRecord, user, id string, resp func() proto.Message) (*longrunningpb.Operation, error) {
 	tu, ok := r.TokenUsers[user]
 	found := false
 	if ok {
@@ -263,7 +268,7 @@ func (c *clusters) deleteAuthToken(r *clusterRecord, user, id string, resp func(
 		}
 	}
 	if !found {
-		return "", apierror.NotFound("Resource '%s' was not found", authTokenName(r.Name, user, id))
+		return nil, apierror.NotFound("Resource '%s' was not found", authTokenName(r.Name, user, id))
 	}
 	return c.changeUsers(r, "deleteAuthToken", false, func() error {
 		next := &tokenUser{Created: tu.Created}
