@@ -93,6 +93,16 @@ func permissionDenied(resource string) error {
 		Message: fmt.Sprintf("Error(2028): Permission denied for resource %s (or it may not exist).", resource)}
 }
 
+// customerParent reads a customer parent, customers/{id}, or its
+// customerId/{id} spelling, which gcloud identity groups sends
+// (googlecloudsdk command_lib/identity/groups/hooks.py GetCustomerId).
+func customerParent(p string) string {
+	if id, ok := strings.CutPrefix(p, "customerId/"); ok {
+		return "customers/" + id
+	}
+	return p
+}
+
 func normEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
 // validEmail is a minimal check of a group or member key: local@domain.
@@ -191,6 +201,7 @@ func (r *Registry) CreateGroup(in GroupInput) (*Group, error) {
 	if in.Dynamic {
 		return nil, apierror.Unimplemented("Not implemented here: dynamic groups (dynamicGroupMetadata, the %s label) are not evaluated; Google Groups are served.", labelDynamic)
 	}
+	in.Parent = customerParent(in.Parent)
 	if in.Parent == "" {
 		return nil, apierror.InvalidArgument("Request contains an invalid argument: parent is required.")
 	}
@@ -254,6 +265,7 @@ func (r *Registry) GetGroup(name string) (*Group, error) {
 
 // ListGroups are the customer's groups, by email.
 func (r *Registry) ListGroups(parent string) ([]*Group, error) {
+	parent = customerParent(parent)
 	if parent == "" {
 		return nil, apierror.InvalidArgument("Request contains an invalid argument: parent is required.")
 	}

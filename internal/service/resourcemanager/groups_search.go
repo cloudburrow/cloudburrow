@@ -97,7 +97,7 @@ func parseGroupSearch(q string) (groupSearch, error) {
 			v := celValue(m, 2)
 			switch m[1] {
 			case "parent":
-				out.parent = v
+				out.parent = customerParent(v)
 			case "domain_name":
 				out.domain = strings.ToLower(v)
 			case "group_key":

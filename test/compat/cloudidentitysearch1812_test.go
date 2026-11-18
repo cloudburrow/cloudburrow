@@ -267,3 +267,49 @@ func TestIAMCredentialsGroupMember1812(t *testing.T) {
 		t.Errorf("GenerateAccessToken after the nesting was removed = %v, want PERMISSION_DENIED", err)
 	}
 }
+
+// TestGcloudIdentityGroups (#1812): gcloud identity groups create
+// (--customer, which gcloud sends as customerId/{id}), describe, search
+// (gcloud's listing of a customer's groups, through groups.search) and
+// delete, and memberships add, list and delete, through gcloud-setup's
+// cloudidentity override alone, egress blocked.
+func TestGcloudIdentityGroups(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvResourceManager)
+	g := newGcloudSession(t, h)
+	customer := strings.TrimPrefix(localCustomer, "customers/")
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1e9)
+	email := "gc-" + suffix + "@" + localDomain
+	member := "gc-member-" + suffix + "@example-project.iam.gserviceaccount.com"
+	g.must("identity", "groups", "create", email, "--customer", customer, "--display-name", "gcloud group",
+		"--description", "made by gcloud", "--labels", forumLabel)
+	if out := g.must("identity", "groups", "describe", email, "--format=value(groupKey.id,displayName,description)"); !strings.Contains(out, email) ||
+		!strings.Contains(out, "gcloud group") || !strings.Contains(out, "made by gcloud") {
+		t.Errorf("gcloud identity groups describe = %q", out)
+	}
+	// search prints groups.search's response, whose groups are a field.
+	listed := func() string {
+		return g.must("identity", "groups", "search", "--customer", customer, "--labels", forumLabel, "--format=value(groups[].groupKey.id)")
+	}
+	if out := listed(); !strings.Contains(out, email) {
+		t.Errorf("gcloud identity groups search = %q; want %s", out, email)
+	}
+	g.must("identity", "groups", "memberships", "add", "--group-email", email, "--member-email", member)
+	members := func() string {
+		return g.must("identity", "groups", "memberships", "list", "--group-email", email, "--format=value(preferredMemberKey.id,roles[].name)")
+	}
+	if out := members(); !strings.Contains(out, member) || !strings.Contains(out, "MEMBER") {
+		t.Errorf("gcloud identity groups memberships list = %q; want %s as MEMBER", out, member)
+	}
+	g.must("identity", "groups", "memberships", "delete", "--group-email", email, "--member-email", member, "--quiet")
+	if out := members(); strings.Contains(out, member) {
+		t.Errorf("memberships list after delete = %q", out)
+	}
+	g.must("identity", "groups", "delete", email, "--quiet")
+	if out := listed(); strings.Contains(out, email) {
+		t.Errorf("groups search after delete = %q", out)
+	}
+	if out, err := g.run(nil, "identity", "groups", "describe", email); err == nil {
+		t.Errorf("describe of a deleted group succeeded: %s", out)
+	}
+}
