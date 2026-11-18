@@ -147,8 +147,13 @@ func TestBigQueryModelPageResults(t *testing.T) {
 				`{"f":[{"v":"temp"},{"v":"2.5"},{"v":""}]}`))
 		case strings.Contains(q, "ML.ARIMA_EVALUATE"):
 			fmt.Fprint(w, rows(`{"name":"f0_","type":"STRING"},{"name":"log_likelihood","type":"FLOAT"},{"name":"AIC","type":"FLOAT"},{"name":"variance","type":"FLOAT"},`+
-				`{"name":"f1_","type":"STRING"},{"name":"has_spikes_and_dips","type":"BOOLEAN"},{"name":"has_step_changes","type":"BOOLEAN"}`,
-				`{"f":[{"v":"ARIMA(0, 1, 0) with drift"},{"v":"-9.5"},{"v":"23"},{"v":"0.6"},{"v":"WEEKLY"},{"v":"true"},{"v":"false"}]}`))
+				`{"name":"f1_","type":"STRING"},{"name":"has_spikes_and_dips","type":"BOOLEAN"},{"name":"has_step_changes","type":"BOOLEAN"},`+
+				`{"name":"has_holiday_effect","type":"BOOLEAN"}`,
+				`{"f":[{"v":"ARIMA(0, 1, 0) with drift"},{"v":"-9.5"},{"v":"23"},{"v":"0.6"},{"v":"WEEKLY"},{"v":"true"},{"v":"false"},{"v":"true"}]}`))
+		case strings.Contains(q, "ML.HOLIDAY_INFO"):
+			fmt.Fprint(w, rows(`{"name":"holiday_name","type":"STRING"},{"name":"region","type":"STRING"},{"name":"f0_","type":"STRING"},`+
+				`{"name":"preholiday_days","type":"INTEGER"},{"name":"postholiday_days","type":"INTEGER"}`,
+				`{"f":[{"v":"Fest"},{"v":"XX"},{"v":"2024-02-10"},{"v":"1"},{"v":"2"}]}`))
 		case strings.Contains(q, "ML.RECOMMEND"):
 			fmt.Fprint(w, rows(`{"name":"predicted_rating","type":"FLOAT"},{"name":"user","type":"INTEGER"},{"name":"item","type":"STRING"}`,
 				`{"f":[{"v":"4.5"},{"v":"7"},{"v":"film"}]}`))
@@ -177,8 +182,9 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"pc":  {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
 		"bt":  {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
 		"rf":  {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
-		"ar":  {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false"},
-		"mf":  {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
+		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false",
+			"Holiday effect:true", "Custom holidays", "Name:Fest", "Region:XX", "Primary date:2024-02-10", "Days before:1", "Days after:2"},
+		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
 		if err != nil || d.Unavailable != "" {

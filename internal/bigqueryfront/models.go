@@ -381,7 +381,7 @@ func (md bqModel) resource(full bool) map[string]any {
 		var single []map[string]any
 		for _, m := range info {
 			sm := map[string]any{"nonSeasonalOrder": m["nonSeasonalOrder"], "arimaFittingMetrics": m["arimaFittingMetrics"], "hasDrift": m["hasDrift"],
-				"seasonalPeriods": m["seasonalPeriods"], "hasHolidayEffect": false}
+				"seasonalPeriods": m["seasonalPeriods"], "hasHolidayEffect": m["hasHolidayEffect"]}
 			if id, ok := m["timeSeriesId"]; ok {
 				sm["timeSeriesId"] = id
 			}
@@ -718,7 +718,10 @@ type modelDDL struct {
 	path                                 []string
 	opts                                 mlOptions
 	query                                string
-	transform                            []string
+	// holidayQuery is a time series model's custom_holiday query
+	// (modelholiday.go, #1776).
+	holidayQuery string
+	transform    []string
 	// onnxPath is an imported ONNX or XGBoost model's MODEL_PATH
 	// (modelonnx.go, modelxgb.go), and importInputs and importOutputs an
 	// XGBoost model's INPUT and OUTPUT clauses.
@@ -896,8 +899,59 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	if i >= len(stmt) {
 		return d, true, 400, "Syntax error: expected a query after AS"
 	}
+	if i+2 < len(stmt) && stmt[i].punct("(") && stmt[i+1].is("TRAINING_DATA") && stmt[i+2].is("AS") {
+		c, m := parseHolidayAs(stmt, i, sql, &d)
+		return d, true, c, m
+	}
 	d.query = strings.TrimSpace(sql[stmt[i].pos:stmt[len(stmt)-1].end])
 	return d, true, 0, ""
+}
+
+// parseHolidayAs reads the AS clause of a time series model with custom
+// holidays, from the ( at open: (training_data AS (query_statement),
+// custom_holiday AS (holiday_statement)) (modelholiday.go, #1776).
+func parseHolidayAs(stmt []token, open int, sql string, d *modelDDL) (int, string) {
+	end := matchParen(stmt, open)
+	if end < 0 {
+		return 400, "Syntax error: unclosed ( after AS"
+	}
+	if end != len(stmt)-1 {
+		return 400, "Syntax error: unexpected " + stmt[end+1].text
+	}
+	part := func(i int, name string) (string, int, int, string) {
+		if i+2 >= end || !stmt[i].is(name) || !stmt[i+1].is("AS") || !stmt[i+2].punct("(") {
+			return "", 0, 400, "Syntax error: expected " + strings.ToLower(name) + " AS (query)"
+		}
+		close := matchParen(stmt, i+2)
+		if close < 0 || close > end || close == i+3 {
+			return "", 0, 400, "Syntax error: expected a query in " + strings.ToLower(name) + " AS (...)"
+		}
+		return strings.TrimSpace(sql[stmt[i+3].pos:stmt[close-1].end]), close + 1, 0, ""
+	}
+	train, next, c, m := part(open+1, "TRAINING_DATA")
+	if c != 0 {
+		return c, m
+	}
+	if next >= end || !stmt[next].punct(",") {
+		return 400, "Syntax error: expected , custom_holiday AS (holiday_statement) after training_data AS (query_statement)"
+	}
+	hol, next, c, m := part(next+1, "CUSTOM_HOLIDAY")
+	if c != 0 {
+		return c, m
+	}
+	if next != end {
+		return 400, "Syntax error: unexpected " + stmt[next].text
+	}
+	switch {
+	case d.opts.ModelType != "ARIMA_PLUS" && d.opts.ModelType != "ARIMA_PLUS_XREG":
+		return 400, "The AS (training_data AS (...), custom_holiday AS (...)) clause is only for time series models (ARIMA_PLUS and ARIMA_PLUS_XREG), not " + d.opts.ModelType
+	case d.opts.TS.Frequency != "DAILY" && d.opts.TS.Frequency != "AUTO_FREQUENCY":
+		return 400, "Custom holiday modeling only works for models that have a data_frequency value of either DAILY or AUTO_FREQUENCY, not " + d.opts.TS.Frequency
+	case len(d.transform) > 0:
+		return 400, "The TRANSFORM clause of the CREATE MODEL statement cannot be used with custom holiday modeling"
+	}
+	d.query, d.holidayQuery = train, hol
+	return 0, ""
 }
 
 // readModelPath reads a [project.]dataset.model name, plain or quoted,
@@ -1773,6 +1827,20 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if c != 0 {
 			fail(c, m)
 			return true
+		}
+		if d.holidayQuery != "" {
+			// The custom holidays (modelholiday.go, #1776).
+			hc, hr, c, m := f.queryAllRows(r, q, d.holidayQuery)
+			if c != 0 {
+				fail(c, m)
+				return true
+			}
+			hs, fe := parseCustomHolidays(hc, hr)
+			if fe != nil {
+				fail(fe.code, fe.msg)
+				return true
+			}
+			d.opts.TS.Holidays = hs
 		}
 		trained, fe := trainModel(d.opts, cols, rows, f.engineFingerprints(r, q))
 		if fe != nil {

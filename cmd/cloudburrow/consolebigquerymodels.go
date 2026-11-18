@@ -546,22 +546,38 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 			out = append(out, console.Section{ID: "forecast", Label: "Forecast", Listing: l})
 		}
 		_, ev := read("SELECT FORMAT('ARIMA(%d, %d, %d)%s', non_seasonal_p, non_seasonal_d, non_seasonal_q, IF(has_drift, ' with drift', '')), " +
-			"log_likelihood, AIC, variance, ARRAY_TO_STRING(seasonal_periods, ', '), has_spikes_and_dips, has_step_changes " +
+			"log_likelihood, AIC, variance, ARRAY_TO_STRING(seasonal_periods, ', '), has_spikes_and_dips, has_step_changes, has_holiday_effect " +
 			"FROM ML.ARIMA_EVALUATE(" + model + ") WHERE error_message IS NULL")
 		if len(ev) > 0 {
 			// The pipeline's stages too: the seasonal periods found, and
-			// whether spikes and dips or step changes were (#1518).
-			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance", "Seasonal periods", "Spikes and dips", "Step changes"},
+			// whether spikes and dips, step changes (#1518) or a custom
+			// holiday's effect (#1776) were.
+			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance", "Seasonal periods", "Spikes and dips", "Step changes", "Holiday effect"},
 				NameColumn: "Model", Noun: "candidate models"}
 			for _, r := range ev {
 				f := map[string]string{"Log likelihood": num(r[1]), "AIC": num(r[2]), "Variance": num(r[3])}
 				if len(r) >= 7 {
 					f["Seasonal periods"], f["Spikes and dips"], f["Step changes"] = fmt.Sprint(r[4]), fmt.Sprint(r[5]), fmt.Sprint(r[6])
 				}
+				if len(r) >= 8 {
+					f["Holiday effect"] = fmt.Sprint(r[7])
+				}
 				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: f})
 			}
 			l.Total = len(l.Items)
 			out = append(out, console.Section{ID: "candidates", Label: "Candidate models", Listing: l})
+		}
+		// The custom holidays it was trained with (ML.HOLIDAY_INFO, #1776).
+		_, hol := read("SELECT holiday_name, region, CAST(primary_date AS STRING), preholiday_days, postholiday_days FROM ML.HOLIDAY_INFO(" + model +
+			") ORDER BY holiday_name, primary_date LIMIT 500")
+		if len(hol) > 0 {
+			l := console.Listing{Columns: []string{"Region", "Primary date", "Days before", "Days after"}, NameColumn: "Holiday", Noun: "holidays"}
+			for _, r := range hol {
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Region": fmt.Sprint(r[1]),
+					"Primary date": fmt.Sprint(r[2]), "Days before": fmt.Sprint(r[3]), "Days after": fmt.Sprint(r[4])}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "holidays", Label: "Custom holidays", Listing: l})
 		}
 		return out
 	case "MATRIX_FACTORIZATION":

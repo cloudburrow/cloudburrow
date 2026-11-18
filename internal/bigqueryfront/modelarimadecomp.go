@@ -46,7 +46,13 @@ import (
 //     the median of the 7-point window about it, over 1.4826 MAD of those
 //     differences) is above 5; the point is replaced by the linear
 //     interpolation of its nearest clean neighbours, as BigQuery
-//     documents, and spikes_and_dips is the difference.
+//     documents, and spikes_and_dips is the difference; a day of a
+//     custom holiday's window is never one (#1776);
+//   - custom holidays (modelholiday.go, #1776): after spikes and dips and
+//     step changes, before the final decomposition, as the documented
+//     pipeline lists them (the seasonal periods are found with their
+//     windows interpolated over), fitted three times, the second and third on
+//     the series robustly deseasonalized without the last fit's effects.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
 
 // arimaSeason is one seasonal period: its name and its length in points.
@@ -82,11 +88,14 @@ type arimaDecomp struct {
 	Seasonal [][]float64
 	Spikes   []float64 // nil when clean_spikes_and_dips is FALSE
 	Steps    []float64 // nil when adjust_step_changes is FALSE
+	// Holiday is the combined custom holiday effect (nil with none,
+	// #1776); the holidays' effects are set in place.
+	Holiday []float64
 }
 
 // decomposeSeries runs the stages on y, a series on its data frequency's
-// grid, as opts say.
-func decomposeSeries(y []float64, freq string, ts tsOptions) arimaDecomp {
+// grid, as opts say, with hs its custom holidays (whose effects it sets).
+func decomposeSeries(y []float64, freq string, ts tsOptions, hs []arimaHoliday) arimaDecomp {
 	n := len(y)
 	var d arimaDecomp
 	var cands []arimaSeason
@@ -109,12 +118,18 @@ func decomposeSeries(y []float64, freq string, ts tsOptions) arimaDecomp {
 	// The first pass: which periods, and the series without them (robustly).
 	var periods []arimaSeason
 	if auto {
+		// The periods are found with the custom holidays' windows
+		// interpolated over, as their effects would weaken them (#1776).
+		yd := y
+		if len(hs) > 0 {
+			yd = interpolateOver(y, inHolidayWindow(hs, n))
+		}
 		for _, c := range cands {
 			try := append(append([]arimaSeason(nil), periods...), c)
 			// The strength is of the plain (not robust) fit, whose
 			// remainder an outlier does not dominate.
-			trend, seas := mstl(y, try, false)
-			if seasonalStrength(y, trend, seas, len(try)-1) >= arimaStrength {
+			trend, seas := mstl(yd, try, false)
+			if seasonalStrength(yd, trend, seas, len(try)-1) >= arimaStrength {
 				periods = try
 			}
 		}
@@ -138,15 +153,72 @@ func decomposeSeries(y []float64, freq string, ts tsOptions) arimaDecomp {
 		}
 	}
 	if ts.CleanSpikes {
-		d.Spikes = spikesAndDips(des)
+		var skip []bool
+		if len(hs) > 0 {
+			skip = inHolidayWindow(hs, n)
+		}
+		d.Spikes = spikesAndDips(des, skip...)
 		for k := range adj {
+			des[k] -= d.Spikes[k]
 			adj[k] -= d.Spikes[k]
+		}
+	}
+	if len(hs) > 0 {
+		// A holiday on the same weekday (or day of the year) each time
+		// is partly taken as seasonal by the first pass: the holidays are
+		// fitted again on the series deseasonalized without them.
+		d.Holiday = fitHolidays(des, hs)
+		for pass := 0; pass < 2; pass++ {
+			clean := make([]float64, n)
+			for k := range adj {
+				clean[k] = adj[k] - d.Holiday[k]
+			}
+			_, seas = mstl(clean, periods, true)
+			for k := range des {
+				des[k] = adj[k]
+				for _, s := range seas {
+					des[k] -= s[k]
+				}
+			}
+			d.Holiday = fitHolidays(des, hs)
+		}
+		for k := range adj {
+			adj[k] -= d.Holiday[k]
 		}
 	}
 	// The final pass, on the cleaned and adjusted series.
 	d.Seasons = periods
 	_, d.Seasonal = mstl(adj, periods, false)
 	return d
+}
+
+// interpolateOver is x with the points skip marks replaced by the linear
+// interpolation of their nearest unmarked neighbours.
+func interpolateOver(x []float64, skip []bool) []float64 {
+	out := append([]float64(nil), x...)
+	n := len(x)
+	for k := 0; k < n; k++ {
+		if !skip[k] {
+			continue
+		}
+		l, r := k-1, k+1
+		for r < n && skip[r] {
+			r++
+		}
+		for j := k; j < r; j++ {
+			switch {
+			case l < 0 && r >= n:
+			case l < 0:
+				out[j] = x[r]
+			case r >= n:
+				out[j] = x[l]
+			default:
+				out[j] = x[l] + (x[r]-x[l])*float64(j-l)/float64(r-l)
+			}
+		}
+		k = r
+	}
+	return out
 }
 
 // splitSeasonalities are the names in a stored seasonalities option.
@@ -326,7 +398,8 @@ func stepChanges(x []float64) []float64 {
 
 // spikesAndDips is x's spikes-and-dips component: at each spike or dip
 // its difference from the linear interpolation of its clean neighbours.
-func spikesAndDips(x []float64) []float64 {
+// A point skip marks is never one.
+func spikesAndDips(x []float64, skip ...bool) []float64 {
 	n, w := len(x), arimaSpikeWindow
 	out := make([]float64, n)
 	if n < w {
@@ -347,7 +420,7 @@ func spikesAndDips(x []float64) []float64 {
 	spike := make([]bool, n)
 	found := false
 	for k := range r {
-		if math.Abs(r[k]-mr)/scale > arimaSpikeZ {
+		if math.Abs(r[k]-mr)/scale > arimaSpikeZ && (skip == nil || !skip[k]) {
 			spike[k], found = true, true
 		}
 	}
