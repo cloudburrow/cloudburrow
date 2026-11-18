@@ -54,6 +54,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 )
 
 // enterpriseOnly maps the key of each one-key map Google's clients write a
@@ -226,11 +228,21 @@ type EditionGuard struct {
 }
 
 // EditionGuard is the guard over a's databases.
-func (a *Admin) EditionGuard() *EditionGuard {
-	g := &EditionGuard{a: a, grpc: grpc.NewServer()}
+func (a *Admin) EditionGuard() *EditionGuard { return a.editionGuard() }
+
+// editionGuard is EditionGuard with extra gRPC server options (tests). The
+// server is served through ServeHTTP: grpchttp's, so Stop waits for every
+// call's handler (#1804).
+func (a *Admin) editionGuard(opts ...grpc.ServerOption) *EditionGuard {
+	g := &EditionGuard{a: a, grpc: grpchttp.NewServer(opts...)}
 	firestorepb.RegisterFirestoreServer(g.grpc, editionRefusals{g: g})
 	return g
 }
+
+// Stop stops the gRPC server, once the HTTP server the guard is served by
+// has shut down, waiting for every call's handler to return, until ctx
+// ends (#1804).
+func (g *EditionGuard) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, g.grpc) }
 
 // standard reports whether the database is a Standard edition one the
 // Admin API knows. One it does not know is the emulator's to answer.

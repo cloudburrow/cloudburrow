@@ -14,6 +14,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 )
 
 const firestorePartition = "/google.firestore.v1.Firestore/PartitionQuery"
@@ -31,12 +33,22 @@ type Firestore struct {
 
 // NewFirestore returns the front for the Firestore emulator at emulator
 // (host:port).
-func NewFirestore(emulator string) *Firestore {
+func NewFirestore(emulator string) *Firestore { return newFirestoreWith(emulator) }
+
+// newFirestoreWith is NewFirestore with extra gRPC server options (tests). The
+// server is served through ServeHTTP: grpchttp's, so Stop waits for every
+// call's handler (#1804).
+func newFirestoreWith(emulator string, opts ...grpc.ServerOption) *Firestore {
 	f := &Firestore{up: upstream{addr: emulator}}
-	f.grpc = grpc.NewServer()
+	f.grpc = grpchttp.NewServer(opts...)
 	pb.RegisterFirestoreServer(f.grpc, f)
 	return f
 }
+
+// Stop stops the gRPC server, once the HTTP server the front is served by
+// has shut down, waiting for every call's handler to return, until ctx
+// ends (#1804).
+func (f *Firestore) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, f.grpc) }
 
 // Claims reports whether r is a PartitionQuery call, over gRPC or REST.
 func (f *Firestore) Claims(r *http.Request) bool {

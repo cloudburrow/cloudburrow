@@ -1,6 +1,7 @@
 package spannerfront
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 )
 
 // The admin methods neither the emulator nor the front serves are refused
@@ -40,12 +43,22 @@ var restReasons = map[string]string{}
 type Refusals struct{ grpc *grpc.Server }
 
 // NewRefusals returns the refusals.
-func NewRefusals() *Refusals {
-	return &Refusals{grpc: grpc.NewServer(grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
+func NewRefusals() *Refusals { return newRefusals() }
+
+// newRefusals is NewRefusals with extra gRPC server options (tests). The
+// server is served through ServeHTTP: grpchttp's, so Stop waits for every
+// call's handler (#1804).
+func newRefusals(opts ...grpc.ServerOption) *Refusals {
+	return &Refusals{grpc: grpchttp.NewServer(append([]grpc.ServerOption{grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
 		m, _ := grpc.MethodFromServerStream(stream)
 		return refusal(m[strings.LastIndex(m, "/")+1:], refusedMethods[m])
-	}))}
+	})}, opts...)...)}
 }
+
+// Stop stops the gRPC server, once the HTTP server the refusals are served
+// by has shut down, waiting for every call's handler to return, until ctx
+// ends (#1804).
+func (f *Refusals) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, f.grpc) }
 
 func refusal(method, why string) error {
 	return status.Errorf(codes.Unimplemented, "%s is not served here: %s", method, why)

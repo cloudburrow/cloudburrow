@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -78,7 +79,9 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 		}
 		unary = append(unary, s.interpose...)
 		unary = append(unary, errorInterceptor)
-		s.srv = grpc.NewServer(append([]grpc.ServerOption{
+		// grpchttp: Stop waits for every call's handler goroutine, where
+		// a call's trace span ends (#1804), on either transport.
+		s.srv = grpchttp.NewServer(append([]grpc.ServerOption{
 			grpc.MaxRecvMsgSize(MaxMessageBytes),
 			grpc.MaxSendMsgSize(MaxMessageBytes),
 			grpc.ChainUnaryInterceptor(unary...),
@@ -217,7 +220,9 @@ func (s *Server) Stop(ctx context.Context) error {
 		if err := httpSrv.Shutdown(ctx); err != nil {
 			_ = httpSrv.Close()
 		}
-		srv.Stop()
+		// ServeHTTP can return before a call's handler goroutine has
+		// ended its span; Stop waits for it, until ctx ends (#1804).
+		_ = grpchttp.Stop(ctx, srv)
 		<-done
 		return nil
 	}
@@ -229,7 +234,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	select {
 	case <-stopped:
 	case <-ctx.Done():
-		srv.Stop()
+		_ = grpchttp.Stop(ctx, srv)
 	}
 	<-done
 	return nil

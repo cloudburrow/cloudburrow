@@ -15,6 +15,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -23,7 +24,10 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
@@ -65,8 +69,8 @@ type Server struct {
 	// hierarchy reads a project's and a folder's parent (#1532), or nil.
 	hierarchy Hierarchy
 	// grpc serves google.storage.v2.Storage (#1321) on the same port, as
-	// h2c.
-	grpc http.Handler
+	// h2c, through ServeHTTP; Stop stops it.
+	grpc *grpc.Server
 }
 
 // Options configure a Server.
@@ -110,6 +114,10 @@ type Options struct {
 	// (#1532); nil means none: what inherits inherits the local
 	// organization's configuration.
 	Hierarchy Hierarchy
+
+	// grpcOptions are extra options for the gRPC server (tests: a stats
+	// handler).
+	grpcOptions []grpc.ServerOption
 }
 
 // NewServer returns the server.
@@ -214,7 +222,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.notifications.delete"] = s.notificationsDelete
 	s.handlers["storage.objects.viewFullContext"] = s.objectsViewFullContext
 	s.registerACL()
-	s.grpc = newGRPCServer(s)
+	s.grpc = newGRPCServer(s, o.grpcOptions...)
 	for id := range s.handlers {
 		if methodStatus[id] != built {
 			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)
@@ -233,6 +241,12 @@ const (
 	downloadPrefix  = "/download/storage/v1/"
 	batchPath       = "/batch/storage/v1"
 )
+
+// Stop stops the gRPC API, once the HTTP server s is served by has shut
+// down: a gRPC call's handler can outlive ServeHTTP, and Stop waits for
+// every one to return, until ctx ends (#1804), so none is still at the
+// stores when they are closed.
+func (s *Server) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, s.grpc) }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isGRPC(r) {

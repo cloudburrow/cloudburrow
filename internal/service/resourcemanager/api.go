@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -559,7 +560,7 @@ type Server struct {
 	// hijacks the connection, so http.Server.Shutdown does not wait for
 	// them; Stop does, so a call finishes before the server is gone. Its
 	// handler goroutine, which ends its trace span (#1159), can outlive
-	// that count; Stop waits for it through grpc.WaitForHandlers.
+	// that count; Stop waits for it through grpchttp.Options.
 	inflight sync.WaitGroup
 	stopping bool // set by Stop under mu; no call is counted after it
 }
@@ -599,11 +600,11 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) Start(ctx context.Context) error {
-	// WaitForHandlers: gRPC served through ServeHTTP runs each call's
-	// handler on a goroutine of its own, and ServeHTTP (so inflight) can
-	// return once the answer is written, before that goroutine has ended
-	// the call's trace span; Stop then waits for those goroutines too.
-	opts := append([]grpc.ServerOption{grpc.WaitForHandlers(true)}, s.options...)
+	// gRPC served through ServeHTTP runs each call's handler on a
+	// goroutine of its own, and ServeHTTP (so inflight) can return once the
+	// answer is written, before that goroutine has ended the call's trace
+	// span; grpchttp's options make Stop wait for those goroutines too.
+	opts := grpchttp.Options(s.options...)
 	if s.calls != nil {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(grpcx.UnaryObserver(s.calls)),
@@ -705,15 +706,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 	}
 	if g != nil {
-		// g.Stop waits for every call's handler goroutine (WaitForHandlers
-		// in Start), and with it for its trace span to end, unless ctx
-		// ends first.
-		stopped := make(chan struct{})
-		go func() { g.Stop(); close(stopped) }()
-		select {
-		case <-stopped:
-		case <-ctx.Done():
-		}
+		// Every call's handler goroutine, and with it its trace span,
+		// ends first (grpchttp.Options in Start), unless ctx ends.
+		_ = grpchttp.Stop(ctx, g)
 	}
 	if done != nil {
 		select {
