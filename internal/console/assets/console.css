@@ -1663,3 +1663,8 @@ tr.is-inspected { background: var(--nav-selected); }
 /* The Logs Explorer's log view pickers (#1410), shown in the view scope. */
 .log-view-controls { display: contents; }
 .log-view-controls[hidden], #log-view-note[hidden] { display: none; }
+
+/* Run Linter in the IAM condition editor (#1756). */
+.lint-results { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
+.lint-result { display: flex; gap: 6px; align-items: baseline; font-size: var(--text-caption-size); }
+.lint-severity { font-weight: 600; }

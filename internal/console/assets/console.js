@@ -191,6 +191,10 @@ const ROUTES = [
   // keys and Permissions tab, Create, Edit, Disable, Enable, Delete,
   // Undelete, Create key and Upload key.
   { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", section: "IAM & Admin" },
+  // IAM & Admin > Audit Logs (#1756): the services that can write Data
+  // Access audit logs (queryAuditableServices) and the project policy's
+  // log types for each.
+  { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", section: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
@@ -3005,7 +3009,7 @@ async function renderDetail(view, route, resourcePath) {
                 view.conditions && (row.conditional || !row.condition)
                   ? el("button", { class: "secondary", text: row.conditional ? "Edit condition" : "Add condition",
                       "aria-label": `${row.conditional ? "Edit" : "Add"} the condition of ${row.member}'s ${row.role}`,
-                      onclick: () => openConditionForm(row, name, change, reload) })
+                      onclick: () => openConditionForm(row, name, change, reload, view.resource || "") })
                   : null,
                 el("button", { class: "secondary danger", text: "Remove principal",
                   "aria-label": `Remove ${row.member} from ${row.role}`,
@@ -3419,10 +3423,50 @@ function conditionFrom(values) {
 // openConditionForm is Edit condition (#1742): one principal's role moved to
 // the binding with the condition the form names (none when it is empty), in
 // one SetIamPolicy with the etag the page read.
-function openConditionForm(row, name, change, onDone) {
+function openConditionForm(row, name, change, onDone, resource = "") {
   const fields = buildCreateForm({ label: "Edit condition", fields: conditionFields(row.conditional) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
+  // Run Linter (#1756), as Google's condition editor runs it: the IAM API's
+  // iamPolicies.lintPolicy of the expression, an error or warning icon for
+  // each result with its details on hover, run again while the expression
+  // is edited once it has run; Save is refused while an error stands. The
+  // policy's full resource name (the Permissions view's resource) goes as
+  // LintPolicy's full_resource_name.
+  const lintList = el("ul", { class: "lint-results", id: "lint-results", "aria-live": "polite" });
+  let linted = false, lintErrors = 0, lintTimer = null, lintSeq = 0;
+  const lint = async () => {
+    const values = fields.values();
+    const expression = (values.conditionExpression || "").trim();
+    const seq = ++lintSeq;
+    if (!expression) {
+      lintErrors = 0;
+      setChildren(lintList);
+      return;
+    }
+    try {
+      const res = await send("/api/iam/lint", "POST",
+        { resource, title: (values.conditionTitle || "").trim(), expression });
+      if (seq !== lintSeq) return;
+      const results = res.results || [];
+      lintErrors = results.filter((r) => r.severity === "ERROR").length;
+      setChildren(lintList, ...(results.length ? results.map((r) => {
+        const kind = r.severity === "ERROR" ? "error" : "warning";
+        const unit = (r.unit || "").replace(/^LintValidationUnits\//, "");
+        return el("li", { class: `lint-result lint-${kind}`, title: `${unit}: ${r.message}` },
+          el("span", { class: "lint-icon", "aria-hidden": "true", text: kind === "error" ? "\u26D4" : "\u26A0" }),
+          el("span", { class: "lint-severity", text: r.severity }),
+          el("span", { class: "lint-where", text: ` at character ${r.position} (${unit}): ` }),
+          el("span", { class: "lint-message", text: r.message }));
+      }) : [el("li", { class: "lint-result lint-ok", text: "No issues found." })]));
+      announce(results.length ? `${results.length} linter results, ${lintErrors} errors` : "The linter found no issues");
+    } catch (err) {
+      if (seq !== lintSeq) return;
+      setChildren(lintList, el("li", { class: "lint-result lint-error", text: err.message }));
+    }
+  };
+  const runLinter = el("button", { type: "button", class: "secondary", id: "run-linter", text: "Run Linter",
+    onclick: async () => { linted = true; await lint(); } });
   const { dialog, close } = openModal({ labelledBy: "condition-title", canClose: () => !submitting });
   const primary = el("button", { type: "submit", class: "primary", text: "Save" });
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
@@ -3430,6 +3474,12 @@ function openConditionForm(row, name, change, onDone) {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    if (linted) await lint();
+    if (lintErrors > 0) {
+      error.textContent = "The linter found errors in the expression: fix them before saving.";
+      error.hidden = false;
+      return;
+    }
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Edit the condition of ${row.member}'s ${row.role} on ${name}`);
@@ -3453,7 +3503,17 @@ function openConditionForm(row, name, change, onDone) {
     el("h2", { id: "condition-title", text: `Condition of ${row.member}'s ${row.role}` }),
     error,
     ...fields.nodes,
+    el("div", { class: "action-bar" }, runLinter),
+    lintList,
     el("div", { class: "modal-actions" }, cancel, primary)));
+  const expression = dialog.querySelector("#f-conditionExpression");
+  if (expression) {
+    expression.addEventListener("input", () => {
+      if (!linted) return;
+      clearTimeout(lintTimer);
+      lintTimer = setTimeout(lint, 300);
+    });
+  }
   fields.focusFirst();
 }
 

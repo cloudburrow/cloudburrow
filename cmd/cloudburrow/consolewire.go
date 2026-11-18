@@ -100,6 +100,9 @@ func buildConsole(d consoleDeps) *console.Server {
 
 	addr := net.JoinHostPort(d.cfg.BindAddress, strconv.Itoa(d.cfg.Endpoints.Console))
 	srv := console.New(addr, consoleStatus(d), providers...)
+	if d.projects != nil {
+		srv.SetPolicyLinter(iamLinter{registry: d.projects}) // #1756, consoleiamaudit.go
+	}
 	srv.SetPlayground(playgroundFor(d))
 	srv.SetPrediction(predictionFor(d))
 	if d.localModels == nil {
@@ -140,7 +143,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
 			projectIAMProvider{registry: d.projects}, iamRolesProvider{registry: d.projects},
-			iamServiceAccountsProvider{registry: d.projects})
+			iamServiceAccountsProvider{registry: d.projects}, iamAuditProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted

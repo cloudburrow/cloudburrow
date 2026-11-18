@@ -3804,9 +3804,9 @@
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdeletedprincipals1751_test.go:124 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:280 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:367 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:134 TestIAMDeletedServiceAccountInEveryServicesPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:295 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:492 TestIAMDeletedServiceAccountInRunShardPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ]
       },
@@ -3978,9 +3978,9 @@
         "method": "google.iam.admin.v1.IAM/UndeleteServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdeletedprincipals1751_test.go:124 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:280 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
-          "test/compat/iamdeletedprincipals1751_test.go:367 TestIAMDeletedServiceAccountInRunShardPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:134 TestIAMDeletedServiceAccountInEveryServicesPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:295 TestIAMDeletedServiceAccountInEmulatorFrontsPolicies",
+          "test/compat/iamdeletedprincipals1751_test.go:492 TestIAMDeletedServiceAccountInRunShardPolicies",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ],
         "unverified": [

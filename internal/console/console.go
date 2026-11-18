@@ -978,6 +978,9 @@ type Server struct {
 	// logNames lists a parent's log names, for the Logs Explorer's Log name
 	// picker (#1554).
 	logNames LogNameLister
+	// linter is the IAM API's LintPolicy, for the condition editor's Run
+	// Linter (#1756, iamlint.go); nil offers none.
+	linter PolicyLinter
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
@@ -1061,6 +1064,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/resources/{service}", s.handleEdit)
 	mux.HandleFunc("POST /api/reveal/{service}", s.handleReveal)
 	mux.HandleFunc("POST /api/permissions/{service}", s.handlePermissions)
+	mux.HandleFunc("POST /api/iam/lint", s.handleLintCondition)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,10 +23,13 @@ import (
 	"cloud.google.com/go/run/apiv2/runpb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
+	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	bqv2 "google.golang.org/api/bigquery/v2"
 	logging "google.golang.org/api/logging/v2"
 	storagev1 "google.golang.org/api/storage/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // policyRW reads and writes one resource's allow policy through its
@@ -63,8 +67,9 @@ func deletedAccountFixture(t *testing.T, h *Harness) (*admin.IamClient, *adminpb
 // every resource of res, through each service's official client, and
 // checks that each binding reads deleted:serviceAccount:EMAIL?uid=ID after
 // the delete and serviceAccount:EMAIL again after undelete, the other
-// member kept.
-func deletedAccountRoundTrip(t *testing.T, h *Harness, adm *admin.IamClient, victim *adminpb.ServiceAccount, res map[string]policyRW) {
+// member kept. Each of also runs after each of those checks, with the
+// phase's name and whether the account is deleted then.
+func deletedAccountRoundTrip(t *testing.T, h *Harness, adm *admin.IamClient, victim *adminpb.ServiceAccount, res map[string]policyRW, also ...func(when string, isDeleted bool)) {
 	t.Helper()
 	ctx := h.Context()
 	live := "serviceAccount:" + victim.GetEmail()
@@ -84,6 +89,11 @@ func deletedAccountRoundTrip(t *testing.T, h *Harness, adm *admin.IamClient, vic
 	}
 	check := func(when, want string) {
 		t.Helper()
+		defer func() {
+			for _, f := range also {
+				f(when, want == deleted)
+			}
+		}()
 		for name, rw := range res {
 			p, err := rw.get()
 			if err != nil {
@@ -274,9 +284,14 @@ func TestIAMDeletedServiceAccountInEveryServicesPolicies(t *testing.T) {
 //
 // TestIAMDeletedServiceAccountInEmulatorFrontsPolicies (#1751): as
 // TestIAMDeletedServiceAccountInEveryServicesPolicies, for a Bigtable
-// instance and table, a Spanner instance and database and a BigQuery
-// table (their fronts, other processes, which the host reaches through
-// their tunnels), in the emulators shard.
+// instance, table, authorized view and backup, a Spanner instance,
+// database and backup, and a BigQuery table and routine (their fronts,
+// other processes, which the host reaches through their tunnels), in the
+// emulators shard. A BigQuery dataset's access list names the account as
+// userByEmail, iamMember deleted:serviceAccount:EMAIL?uid=ID once it is
+// deleted (the shape is UNVERIFIED, re-read 2026-11-17:
+// internal/bigqueryfront/datasetaccessrewrite.go) and userByEmail again
+// after undelete; another entry stays.
 func TestIAMDeletedServiceAccountInEmulatorFrontsPolicies(t *testing.T) {
 	h := New(t)
 	shardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)
@@ -342,6 +357,29 @@ func TestIAMDeletedServiceAccountInEmulatorFrontsPolicies(t *testing.T) {
 		},
 	}
 
+	// A Spanner backup of that database.
+	bop, err := dba.CreateBackup(ctx, &databasepb.CreateBackupRequest{Parent: spName, BackupId: "dse-bk",
+		Backup: &databasepb.Backup{Database: dbName, ExpireTime: timestamppb.New(time.Now().Add(48 * time.Hour))}})
+	if err != nil {
+		t.Fatalf("Spanner CreateBackup: %v", err)
+	}
+	spBackup, err := bop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("Spanner CreateBackup.Wait: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = dba.DeleteBackup(context.Background(), &databasepb.DeleteBackupRequest{Name: spBackup.GetName()})
+	})
+	res["spanner backup"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return dba.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: spBackup.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := dba.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: spBackup.GetName(), Policy: p})
+			return err
+		},
+	}
+
 	// BigQuery.
 	bq, bqProject := bigqueryClient(t, h)
 	ds := bq.DatasetInProject(bqProject, "dse_"+suffix)
@@ -355,15 +393,102 @@ func TestIAMDeletedServiceAccountInEmulatorFrontsPolicies(t *testing.T) {
 	}
 	res["bigquery table"] = handleRW(ctx, tbl.IAM())
 
-	deletedAccountRoundTrip(t, h, adm, victim, res)
+	// A Bigtable authorized view and backup of the table.
+	sv := &bigtable.SubsetViewConf{}
+	sv.AddRowPrefix([]byte("eu#"))
+	if err := btAdmin.CreateAuthorizedView(ctx, &bigtable.AuthorizedViewConf{TableID: "dse-" + suffix, AuthorizedViewID: "v", AuthorizedView: sv}); err != nil {
+		t.Fatalf("CreateAuthorizedView: %v", err)
+	}
+	res["bigtable authorized view"] = handleRW(ctx, btAdmin.AuthorizedViewIAM("dse-"+suffix, "v"))
+	btBackup := "dse-bk-" + suffix
+	if err := btAdmin.CreateBackup(ctx, "dse-"+suffix, "c1", btBackup, time.Now().Add(24*time.Hour)); err != nil {
+		t.Fatalf("Bigtable CreateBackup: %v", err)
+	}
+	t.Cleanup(func() { _ = btAdmin.DeleteBackup(context.Background(), "c1", btBackup) })
+	res["bigtable backup"] = handleRW(ctx, btAdmin.BackupIAM("c1", btBackup))
+
+	// A BigQuery routine, through the generated REST client (the Go client
+	// has no routine IAM call).
+	if _, err := bq.Query("CREATE FUNCTION `" + bqProject + ".dse_" + suffix + ".plus_one`(x INT64) AS (x + 1)").Read(ctx); err != nil {
+		t.Fatalf("CREATE FUNCTION: %v", err)
+	}
+	bqs := bigqueryService(t, h)
+	routine := "projects/" + bqProject + "/datasets/dse_" + suffix + "/routines/plus_one"
+	res["bigquery routine"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			p, err := bqs.Routines.GetIamPolicy(routine, &bqv2.GetIamPolicyRequest{}).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			out := &iampb.Policy{Version: int32(p.Version), Etag: []byte(p.Etag)}
+			for _, b := range p.Bindings {
+				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
+			}
+			return out, nil
+		},
+		set: func(p *iampb.Policy) error {
+			in := &bqv2.Policy{Etag: string(p.GetEtag())}
+			for _, b := range p.GetBindings() {
+				in.Bindings = append(in.Bindings, &bqv2.Binding{Role: b.GetRole(), Members: b.GetMembers()})
+			}
+			_, err := bqs.Routines.SetIamPolicy(routine, &bqv2.SetIamPolicyRequest{Policy: in}).Context(ctx).Do()
+			return err
+		},
+	}
+
+	// The dataset's own access list: the account as userByEmail (the
+	// datasets reference's field for serviceAccount:EMAIL), beside another
+	// entry that stays.
+	md, err := ds.Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.Update(ctx, bigquery.DatasetMetadataToUpdate{Access: append(md.Access,
+		&bigquery.AccessEntry{Role: bigquery.ReaderRole, EntityType: bigquery.UserEmailEntity, Entity: victim.GetEmail()},
+		&bigquery.AccessEntry{Role: bigquery.ReaderRole, EntityType: bigquery.UserEmailEntity, Entity: "keep@example.com"})}, md.ETag); err != nil {
+		t.Fatalf("dataset Update: %v", err)
+	}
+	checkAccess := func(when string, wantType bigquery.EntityType, want string) {
+		t.Helper()
+		md, err := ds.Metadata(ctx)
+		if err != nil {
+			t.Fatalf("%s: dataset Metadata: %v", when, err)
+		}
+		var found, kept, stale bool
+		for _, a := range md.Access {
+			switch {
+			case a.EntityType == wantType && a.Entity == want && a.Role == bigquery.ReaderRole:
+				found = true
+			case a.EntityType == bigquery.UserEmailEntity && a.Entity == "keep@example.com":
+				kept = true
+			case strings.Contains(a.Entity, victim.GetEmail()):
+				stale = true
+			}
+		}
+		if !found || !kept || stale {
+			var got []string
+			for _, a := range md.Access {
+				got = append(got, fmt.Sprintf("%s %d %s", a.Role, a.EntityType, a.Entity))
+			}
+			t.Errorf("%s: dataset access %q, want READER %d %s and keep@example.com", when, got, wantType, want)
+		}
+	}
+
+	deletedAccountRoundTrip(t, h, adm, victim, res, func(when string, isDeleted bool) {
+		if isDeleted {
+			checkAccess(when, bigquery.IAMMemberEntity, "deleted:serviceAccount:"+victim.GetEmail()+"?uid="+victim.GetUniqueId())
+		} else {
+			checkAccess(when, bigquery.UserEmailEntity, victim.GetEmail())
+		}
+	})
 }
 
 // covers: google.iam.admin.v1.IAM/DeleteServiceAccount, google.iam.admin.v1.IAM/UndeleteServiceAccount
 //
 // TestIAMDeletedServiceAccountInRunShardPolicies (#1751): as
 // TestIAMDeletedServiceAccountInEveryServicesPolicies, for a Cloud Run
-// job, an Artifact Registry repository and a Secure Source Manager
-// instance and repository, in the run shard.
+// job, service and worker pool, an Artifact Registry repository and a
+// Secure Source Manager instance and repository, in the run shard.
 func TestIAMDeletedServiceAccountInRunShardPolicies(t *testing.T) {
 	h := New(t)
 	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER", EnvResourceManager)
@@ -469,6 +594,64 @@ func TestIAMDeletedServiceAccountInRunShardPolicies(t *testing.T) {
 		},
 		set: func(p *iampb.Policy) error {
 			_, err := ssm.SetIamPolicyRepo(ctx, &iampb.SetIamPolicyRequest{Resource: srepo.GetName(), Policy: p})
+			return err
+		},
+	}
+
+	// A Cloud Run service and worker pool.
+	services, err := run.NewServicesClient(ctx, runClientOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = services.Close() })
+	sop, err := services.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: "dse-" + suffix,
+		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "ghcr.io/knative/helloworld-go:latest"}}}}})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	svc, err := sop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("CreateService.Wait: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = services.DeleteService(context.Background(), &runpb.DeleteServiceRequest{Name: svc.GetName()})
+	})
+	res["run service"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return services.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: svc.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := services.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: svc.GetName(), Policy: p})
+			return err
+		},
+	}
+	pools, err := run.NewWorkerPoolsClient(ctx, runClientOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pools.Close() })
+	one := int32(1)
+	pop, err := pools.CreateWorkerPool(ctx, &runpb.CreateWorkerPoolRequest{Parent: runParent(h), WorkerPoolId: "dse-" + suffix,
+		WorkerPool: &runpb.WorkerPool{Template: &runpb.WorkerPoolRevisionTemplate{Containers: sleeper("dse")},
+			Scaling: &runpb.WorkerPoolScaling{ManualInstanceCount: &one}}})
+	if err != nil {
+		t.Fatalf("CreateWorkerPool: %v", err)
+	}
+	pool, err := pop.Wait(ctx)
+	if err != nil {
+		t.Fatalf("CreateWorkerPool.Wait: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := pools.DeleteWorkerPool(context.Background(), &runpb.DeleteWorkerPoolRequest{Name: pool.GetName()}); err == nil {
+			_, _ = op.Wait(context.Background())
+		}
+	})
+	res["run worker pool"] = policyRW{
+		get: func() (*iampb.Policy, error) {
+			return pools.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: pool.GetName()})
+		},
+		set: func(p *iampb.Policy) error {
+			_, err := pools.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: pool.GetName(), Policy: p})
 			return err
 		},
 	}
