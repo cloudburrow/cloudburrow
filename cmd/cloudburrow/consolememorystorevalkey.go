@@ -138,6 +138,7 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 			Help: "TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the instance's page adds and shows."},
 		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
 			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
+		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
 		{Name: "engineVersion", Label: "Engine version", Type: "select", Default: redisadmin.DefaultValkeyVersion, Options: valkeyEngineVersions},
 		{Name: "persistence", Label: "Persistence", Type: "select", Default: "DISABLED", Options: []string{"DISABLED", "RDB", "AOF"},
 			Help: "RDB snapshots or the append-only file keep the data across a restart of CloudBurrow; without, it is lost."},
@@ -183,6 +184,9 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 	}
 	if values["tokenAuth"] == "true" {
 		in.AuthorizationMode = memorystorepb.Instance_TOKEN_AUTH
+	}
+	if pol := strings.TrimSpace(values["aclPolicy"]); pol != "" {
+		in.AclPolicy = proto.String(pol)
 	}
 	if b := strings.TrimSpace(values["restoreBackup"]); b != "" {
 		in.ImportSources = &memorystorepb.Instance_ManagedBackupSource_{ManagedBackupSource: &memorystorepb.Instance_ManagedBackupSource{Backup: b}}
@@ -279,6 +283,7 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		console.Property{Label: "Engine version", Value: i.GetEngineVersion()},
 		console.Property{Label: "Persistence", Value: i.GetPersistenceConfig().GetMode().String()},
 		console.Property{Label: "Authorization", Value: i.GetAuthorizationMode().String()},
+		console.Property{Label: "ACL policy", Value: orDash(i.GetAclPolicy())},
 		// IAM auth checks the token (#1614): who may connect is the
 		// project's IAM policy, granted on the IAM page.
 		console.Property{Label: "IAM connect role", Value: valkeyIAMRole(i)},

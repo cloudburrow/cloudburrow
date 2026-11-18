@@ -715,6 +715,14 @@ var parityRows = []parityRow{
 		Excluded: "the ACL policies tab shows each policy's current revision; earlier revisions are history the API keeps, not settings"},
 
 	// Memorystore for Valkey (#1519)
+	{Resource: "Memorystore for Valkey ACL policies", Service: "memorystore",
+		Methods: []string{"Memorystore/CreateAclPolicy", "Memorystore/GetAclPolicy", "Memorystore/ListAclPolicies", "Memorystore/UpdateAclPolicy",
+			"Memorystore/DeleteAclPolicy"},
+		Provider: "memorystore-valkey", Offers: "Create instance's ACL policy; an instance's ACL policies tab (the location's policies: rules, the instances attached, revision) and its ACL policy; Create ACL policy (ID, username=rule per line), Update ACL policy (a new revision set on every attached instance's nodes), Delete ACL policy, and Set ACL policy to attach or detach (#1578)",
+		Tests: []string{"TestConsoleMemorystoreTokenAuthBackups"}},
+	{Resource: "Memorystore for Valkey ACL policy revisions", Service: "memorystore",
+		Methods:  []string{"Memorystore/GetAclPolicyRevision", "Memorystore/ListAclPolicyRevisions"},
+		Excluded: "the ACL policies tab shows each policy's current revision; earlier revisions are history the API keeps, not settings"},
 	{Resource: "Memorystore for Valkey token auth and backups", Service: "memorystore",
 		Methods: []string{"Memorystore/AddTokenAuthUser", "Memorystore/ListTokenAuthUsers", "Memorystore/DeleteTokenAuthUser",
 			"Memorystore/AddAuthToken", "Memorystore/ListAuthTokens", "Memorystore/DeleteAuthToken",

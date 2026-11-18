@@ -20,8 +20,9 @@ import (
 // and Memorystore for Valkey pages (#1549): a cluster's or instance's page
 // lists its token auth users and their tokens, and its backups, and
 // offers Add token auth user, Add auth token, Delete auth token, Delete
-// token auth user, Back up now, Export backup and Delete backup; a Redis
-// cluster's page also sets its ACL policy. Create takes Token
+// token auth user, Back up now, Export backup and Delete backup, and
+// lists its location's ACL policies, which it creates, updates, deletes
+// and attaches (a Valkey instance's since #1578). Create takes Token
 // authentication and a backup to restore from.
 
 // tokenSection is the Token auth tab: one row per token (or per user
@@ -68,7 +69,11 @@ func memorystoreAuthActions(tokenAuth bool, cluster bool) []console.Action {
 		console.Action{ID: "export-backup", Label: "Export backup", Fields: []console.Field{backupID,
 			{Name: "bucket", Label: "Bucket", Type: "text", Required: true, Help: "A bucket of this instance's Cloud Storage: the files go under the backup ID."}}},
 		console.Action{ID: "delete-backup", Label: "Delete backup", Destructive: true, Confirm: "The backup's files are deleted.", Fields: []console.Field{backupID}})
-	if cluster {
+	{
+		noun := "instance"
+		if cluster {
+			noun = "cluster"
+		}
 		rules := console.Field{Name: "rules", Label: "Rules", Type: "map", Required: true,
 			Help: "One username=rule per line, the rule a Valkey ACL rule such as on >secret ~app:* +@read."}
 		policyID := console.Field{Name: "policyId", Label: "ACL policy ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`}
@@ -76,9 +81,9 @@ func memorystoreAuthActions(tokenAuth bool, cluster bool) []console.Action {
 			console.Action{ID: "acl-policy", Label: "Set ACL policy", Fields: []console.Field{{Name: "policy", Label: "ACL policy", Type: "text",
 				Help: "projects/{project}/locations/{location}/aclPolicies/{policy}; empty detaches it."}}},
 			console.Action{ID: "create-acl-policy", Label: "Create ACL policy", Fields: []console.Field{policyID, rules}},
-			console.Action{ID: "update-acl-policy", Label: "Update ACL policy", Confirm: "The rules are set on every node of every cluster the policy is attached to.",
+			console.Action{ID: "update-acl-policy", Label: "Update ACL policy", Confirm: "The rules are set on every node of every " + noun + " the policy is attached to.",
 				Fields: []console.Field{policyID, rules}},
-			console.Action{ID: "delete-acl-policy", Label: "Delete ACL policy", Destructive: true, Confirm: "The policy is deleted; one attached to a cluster is refused.",
+			console.Action{ID: "delete-acl-policy", Label: "Delete ACL policy", Destructive: true, Confirm: "The policy is deleted; one attached to a " + noun + " is refused.",
 				Fields: []console.Field{policyID}})
 	}
 	return out
@@ -262,7 +267,27 @@ func (p valkeyProvider) authSections(ctx context.Context, api *redisadmin.Memory
 			}
 		}
 	}
-	return append(out, backupSection(rows))
+	out = append(out, backupSection(rows))
+	// The location's ACL policies (#1578), which the page's actions create,
+	// update, delete and attach.
+	loc := i.GetName()[:strings.Index(i.GetName(), "/instances/")]
+	pl := console.Listing{Columns: []string{"Rules", "Attached to", "Revision"}, NameColumn: "ACL policy", Noun: "ACL policies",
+		Note: "Each rule is a Valkey ACL user on every node of each instance the policy is attached to."}
+	if resp, err := api.ListAclPolicies(ctx, &memorystorepb.ListAclPoliciesRequest{Parent: loc, PageSize: 1000}); err == nil {
+		for _, pol := range resp.GetAclPolicies() {
+			var rules, at []string
+			for _, r := range pol.GetRules() {
+				rules = append(rules, r.GetUsername()+": "+r.GetRule())
+			}
+			for _, a := range pol.GetInstanceAclPolicyAttachments() {
+				at = append(at, memorystoreID(a.GetInstance()))
+			}
+			pl.Items = append(pl.Items, console.Resource{Name: pol.GetName()[strings.LastIndex(pol.GetName(), "/")+1:], Status: pol.GetState().String(),
+				Fields: map[string]string{"Rules": strings.Join(rules, "; "), "Attached to": orDash(strings.Join(at, ", ")), "Revision": pol.GetEtag()}})
+		}
+	}
+	pl.Total = len(pl.Items)
+	return append(out, console.Section{ID: "acl-policies", Label: "ACL policies", Listing: pl})
 }
 
 // DetailActions implements console.PathActor.
@@ -326,6 +351,33 @@ func (p valkeyProvider) ActAt(ctx context.Context, project string, path []string
 			Destination: &memorystorepb.ExportBackupRequest_GcsBucket{GcsBucket: strings.TrimSpace(values["bucket"])}})
 	case "delete-backup":
 		op, err = api.DeleteBackup(ctx, &memorystorepb.DeleteBackupRequest{Name: backup})
+	case "create-acl-policy", "update-acl-policy", "delete-acl-policy":
+		loc := name[:strings.Index(name, "/instances/")]
+		pname := loc + "/aclPolicies/" + strings.TrimSpace(values["policyId"])
+		var crules []*clusterpb.AclRule
+		if action != "delete-acl-policy" {
+			if crules, err = aclRules(values["rules"]); err != nil {
+				return err
+			}
+		}
+		var rules []*memorystorepb.AclRule
+		for _, r := range crules {
+			rules = append(rules, &memorystorepb.AclRule{Username: r.GetUsername(), Rule: r.GetRule()})
+		}
+		switch action {
+		case "create-acl-policy":
+			_, err = api.CreateAclPolicy(ctx, &memorystorepb.CreateAclPolicyRequest{Parent: loc, AclPolicyId: strings.TrimSpace(values["policyId"]),
+				AclPolicy: &memorystorepb.AclPolicy{Rules: rules}})
+			return err
+		case "update-acl-policy":
+			op, err = api.UpdateAclPolicy(ctx, &memorystorepb.UpdateAclPolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rules"}},
+				AclPolicy: &memorystorepb.AclPolicy{Name: pname, Rules: rules}})
+		default:
+			op, err = api.DeleteAclPolicy(ctx, &memorystorepb.DeleteAclPolicyRequest{Name: pname})
+		}
+	case "acl-policy":
+		op, err = api.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
+			Instance: &memorystorepb.Instance{Name: name, AclPolicy: proto.String(strings.TrimSpace(values["policy"]))}})
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}

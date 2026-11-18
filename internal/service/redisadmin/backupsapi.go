@@ -351,7 +351,7 @@ func (s *MemorystoreServer) AddTokenAuthUser(ctx context.Context, req *memorysto
 		return nil, err
 	}
 	defer c.mu.Unlock()
-	op, err := c.addTokenUser(r, req.GetTokenAuthUser(), func() proto.Message { return renderValkey(r) })
+	op, err := c.addTokenUser(r, req.GetTokenAuthUser(), func() proto.Message { return c.renderValkey(r) })
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +497,7 @@ func (s *MemorystoreServer) BackupInstance(ctx context.Context, req *memorystore
 	}
 	defer c.mu.Unlock()
 	c.loadBackups()
-	op, err := c.startBackup(r, req.GetBackupId(), req.GetTtl().AsDuration(), false, func() proto.Message { return renderValkey(r) })
+	op, err := c.startBackup(r, req.GetBackupId(), req.GetTtl().AsDuration(), false, func() proto.Message { return c.renderValkey(r) })
 	if err != nil {
 		return nil, err
 	}

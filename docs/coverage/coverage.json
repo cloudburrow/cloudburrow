@@ -779,7 +779,7 @@
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/terraform_run_more_test.go:217 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -788,7 +788,7 @@
         "tests": [
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/terraform_run_more_test.go:217 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -808,7 +808,7 @@
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/terraform_run_more_test.go:217 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -842,7 +842,7 @@
         "tests": [
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/terraform_run_more_test.go:217 TestTerraformRunWorkerPool"
         ]
       }
     ]
@@ -1952,7 +1952,7 @@
           "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
-          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
+          "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -1965,7 +1965,7 @@
           "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
-          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
+          "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -1981,7 +1981,7 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
-          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
+          "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -1992,7 +1992,7 @@
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
-          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
+          "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -2093,7 +2093,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
-          "test/compat/terraform_batch8_test.go:214 TestTerraformCloudFunctionsFunctionIAM"
+          "test/compat/terraform_batch8_test.go:216 TestTerraformCloudFunctionsFunctionIAM"
         ]
       },
       {
@@ -2109,7 +2109,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
-          "test/compat/terraform_batch8_test.go:214 TestTerraformCloudFunctionsFunctionIAM"
+          "test/compat/terraform_batch8_test.go:216 TestTerraformCloudFunctionsFunctionIAM"
         ]
       },
       {
@@ -3667,6 +3667,7 @@
         "method": "google.cloud.location.Locations/GetLocation",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -3676,6 +3677,7 @@
         "method": "google.cloud.location.Locations/ListLocations",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -3691,7 +3693,7 @@
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11",
-          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
+          "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
         "unverified": [
@@ -3721,7 +3723,7 @@
           "test/compat/iamconditions1745_test.go:81 TestIAMConditionsOnServicePolicies",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
-          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
+          "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
         "unverified": [
@@ -4045,7 +4047,7 @@
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
-          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
+          "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -4056,7 +4058,7 @@
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
-          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
+          "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -4066,7 +4068,7 @@
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/terraform_batch10_test.go:460 TestTerraformResourceManagerDataSources",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
-          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
+          "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -4075,7 +4077,7 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
-          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
+          "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -4099,7 +4101,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
+          "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -4108,7 +4110,7 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
-          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
+          "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -4197,7 +4199,7 @@
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
           "test/compat/storediam_test.go:562 TestTerraformProjectIAMAuditConfig",
-          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
+          "test/compat/terraform_batch9_test.go:356 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
@@ -4241,7 +4243,7 @@
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
-          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
+          "test/compat/terraform_batch9_test.go:356 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
@@ -4646,7 +4648,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
-          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
+          "test/compat/terraform_batch9_test.go:281 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -4656,7 +4658,7 @@
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
-          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
+          "test/compat/terraform_batch9_test.go:281 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -4665,7 +4667,7 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
-          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
+          "test/compat/terraform_batch9_test.go:281 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -4706,7 +4708,7 @@
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
           "test/compat/storediam_test.go:562 TestTerraformProjectIAMAuditConfig",
-          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
+          "test/compat/terraform_batch9_test.go:356 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
@@ -4714,7 +4716,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
-          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
+          "test/compat/terraform_batch9_test.go:281 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -4748,7 +4750,7 @@
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus",
           "test/compat/storediam_test.go:562 TestTerraformProjectIAMAuditConfig",
-          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
+          "test/compat/terraform_batch9_test.go:356 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
@@ -4757,7 +4759,7 @@
         "tests": [
           "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
-          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
+          "test/compat/terraform_batch9_test.go:281 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -4794,6 +4796,7 @@
         "method": "google.cloud.location.Locations/GetLocation",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -4803,6 +4806,7 @@
         "method": "google.cloud.location.Locations/ListLocations",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -5467,7 +5471,7 @@
     "Title": "Memorystore for Redis",
     "counts": {
       "Unimplemented": 4,
-      "Verified": 62
+      "Verified": 69
     },
     "rows": [
       {
@@ -5493,6 +5497,13 @@
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/CreateAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -5524,6 +5535,13 @@
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/DeleteAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -5573,6 +5591,20 @@
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:383 TestMemorystoreValkeyMigration"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/GetAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/GetAclPolicyRevision",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -5637,6 +5669,20 @@
         ]
       },
       {
+        "method": "google.cloud.memorystore.v1.Memorystore/ListAclPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/ListAclPolicyRevisions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
+        ]
+      },
+      {
         "method": "google.cloud.memorystore.v1.Memorystore/ListAuthTokens",
         "status": "Verified",
         "tests": [
@@ -5686,6 +5732,13 @@
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:383 TestMemorystoreValkeyMigration",
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/UpdateAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -11877,7 +11930,7 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -11887,7 +11940,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -11897,7 +11950,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -11912,7 +11965,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -11937,7 +11990,7 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -12064,7 +12117,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -12082,7 +12135,7 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -12098,7 +12151,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -12236,7 +12289,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
-          "test/compat/terraform_batch8_test.go:277 TestTerraformBackupDRVaultAndPlanUpdates"
+          "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {

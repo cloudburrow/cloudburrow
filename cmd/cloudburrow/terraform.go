@@ -191,6 +191,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// services are Resource Manager v3, which the provider reaches through
 	// its own tags_ endpoint, in TestTerraformTagsAndLien.
 	{resourceManagerEndpoint, "tags_custom_endpoint", "GOOGLE_TAGS_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// google_tags_location_tag_binding (#1578): regional tag bindings, which
+	// the provider sends to {{location}}-cloudresourcemanager.googleapis.com
+	// by default; the one v3 server binds any location's resource, in
+	// TestTerraformTagsLocationTagBinding.
+	{resourceManagerEndpoint, "tags_location_custom_endpoint", "GOOGLE_TAGS_LOCATION_CUSTOM_ENDPOINT", "/v3/", true, ""},
 }
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a

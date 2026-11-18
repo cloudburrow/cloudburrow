@@ -230,7 +230,7 @@ func (s *MemorystoreServer) find(name string) (*clusters, *clusterRecord, error)
 }
 
 // renderValkey is r as Google shapes an instance. Call with mu held.
-func renderValkey(r *clusterRecord) *memorystorepb.Instance {
+func renderValkeyBase(r *clusterRecord) *memorystorepb.Instance {
 	v := r.Valkey
 	m := nodesOwnerRE.FindStringSubmatch(r.Name)
 	mode := memorystorepb.Instance_CLUSTER
@@ -424,7 +424,7 @@ func (s *MemorystoreServer) ListInstances(ctx context.Context, req *memorystorep
 	for n, r := range c.byName {
 		k := instanceRE.FindStringSubmatch(n)
 		if k[1] == m[1] && (m[2] == "-" || k[2] == m[2]) {
-			byName[n] = renderValkey(r)
+			byName[n] = c.renderValkey(r)
 		}
 	}
 	c.mu.Unlock()
@@ -451,7 +451,7 @@ func (s *MemorystoreServer) GetInstance(ctx context.Context, req *memorystorepb.
 		return nil, err
 	}
 	defer c.mu.Unlock()
-	return renderValkey(r), nil
+	return c.renderValkey(r), nil
 }
 
 // GetCertificateAuthority returns an instance's CA, as managed_server_ca;
@@ -668,6 +668,10 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		r.AdminPassword = newUID() + newUID()
 	}
 	r.AutoBackup = protoJSON(ab)
+	// The ACL policy whose users every node gets (#1578, memorystoreacl.go).
+	if r.AclPolicy, err = c.attachPolicy(ctx, in.GetAclPolicy(), req.GetParent()); err != nil {
+		return nil, err
+	}
 	if key := in.GetKmsKey(); key != "" {
 		if err := c.newClusterKey(ctx, r, key, m[2]); err != nil {
 			return nil, err
@@ -767,6 +771,8 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 			set["automated_backup_config"] = true
 		case "cross_instance_replication_config", "crossInstanceReplicationConfig":
 			set["cross_instance_replication_config"] = true
+		case "acl_policy", "aclPolicy":
+			set["acl_policy"] = true
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode", "mode",
 			"psc_auto_connections", "pscAutoConnections":
 			return nil, apierror.InvalidArgument("update_mask path %q is an immutable field of Instance", p)
@@ -797,6 +803,14 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	next := *r
 	vf := *r.Valkey
 	next.Valkey = &vf
+	syncACL := false
+	if set["acl_policy"] && in.GetAclPolicy() != r.AclPolicy {
+		m := instanceRE.FindStringSubmatch(r.Name)
+		if next.AclPolicy, err = c.attachPolicy(ctx, in.GetAclPolicy(), "projects/"+m[1]+"/locations/"+m[2]); err != nil {
+			return nil, err
+		}
+		syncACL = true
+	}
 	if set["shard_count"] {
 		next.ShardCount = in.GetShardCount()
 	}
@@ -896,6 +910,9 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	vf.Updated = c.now()
 	reshape := next.ShardCount != r.ShardCount || next.ReplicaCount != r.ReplicaCount
+	if syncACL && (reshape || upgradeTo != "") {
+		return nil, apierror.Unimplemented("acl_policy and the instance's shape or engine_version cannot be changed in one update")
+	}
 	shards, replicas := next.ShardCount, next.ReplicaCount
 	next.ShardCount, next.ReplicaCount = r.ShardCount, r.ReplicaCount // until the nodes are
 	if err := c.save(&next); err != nil {
@@ -911,8 +928,29 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		c.busy[r.Name] = op
 		return s.api.launch(op, func() { c.upgrade(r.Name, op, upgradeTo) })
 	}
+	if syncACL {
+		// The policy's users on every node, and the users of the policy
+		// it replaced removed (aclpolicy.go), then done.
+		c.busy[r.Name] = op
+		snap, users := *r, c.aclUsers(r)
+		nodes := append([]*clusterNode(nil), r.Nodes...)
+		go func() {
+			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
+			defer cancel()
+			err := c.syncUsers(ctx, &snap, users, nodes)
+			c.mu.Lock()
+			delete(c.busy, snap.Name)
+			out := c.renderValkey(r)
+			c.mu.Unlock()
+			if err != nil {
+				err = fmt.Errorf("the nodes' ACL users did not change: %w", err)
+			}
+			c.finish(op, out, err)
+		}()
+		return s.api.operation(op)
+	}
 	if !reshape {
-		c.finish(op, renderValkey(r), nil)
+		c.finish(op, c.renderValkey(r), nil)
 		return s.api.operation(op)
 	}
 	r.state, r.message = clusterpb.Cluster_UPDATING, "changing the instance's shape"
