@@ -55,6 +55,7 @@ const channelIdle = 30 * time.Minute
 // channelSession is what the guard keeps of a WebChannel session.
 type channelSession struct {
 	lastID  int64         // the last array id sent down
+	taken   int64         // the last array id a refusal was given
 	refusal error         // a refusal not yet sent down
 	wake    chan struct{} // closed when refusal is set; anew once it is sent
 	seen    time.Time
@@ -94,7 +95,7 @@ func (c *channels) session(sid string) *channelSession {
 				delete(c.sessions, k)
 			}
 		}
-		s = &channelSession{lastID: -1, wake: make(chan struct{})}
+		s = &channelSession{lastID: -1, taken: -1, wake: make(chan struct{})}
 		c.sessions[sid] = s
 	}
 	s.seen = now
@@ -127,8 +128,11 @@ func (c *channels) saw(s *channelSession, id int64) {
 	}
 }
 
-// takeRefusal is s's refusal and the array id to send it with, and marks
-// it sent; nil if there is none.
+// takeRefusal is s's refusal and the array id to send it with; nil if
+// there is none. The refusal is no longer pending, but its id counts as
+// sent (saw) only once it has gone down: a forward answer names the last
+// array id the backchannel has sent, and one it names but never sends
+// reads to the client as a dead backchannel (#1831).
 func (c *channels) takeRefusal(s *channelSession) (error, int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -137,8 +141,8 @@ func (c *channels) takeRefusal(s *channelSession) (error, int64) {
 		return nil, 0
 	}
 	s.refusal, s.wake = nil, make(chan struct{})
-	s.lastID++
-	return err, s.lastID
+	s.taken = max(s.taken, s.lastID) + 1
+	return err, s.taken
 }
 
 // serveWriteChannel answers a request claimsWriteChannel claimed.
@@ -227,12 +231,13 @@ func (g *EditionGuard) serveForward(w http.ResponseWriter, r *http.Request, sid 
 		c.refuse(sid, refusal)
 		return
 	}
-	c.refuse(sid, refusal)
 	// The forward channel's own answer: [backchannel present, the last
-	// array id sent, bytes outstanding].
+	// array id sent, bytes outstanding], as the backchannel stands when
+	// the request arrives, before its refusal is queued (#1831).
 	c.mu.Lock()
 	last := s.lastID
 	c.mu.Unlock()
+	c.refuse(sid, refusal)
 	channelHeaders(w, r)
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, channelChunk(fmt.Sprintf("[1,%d,0]", last)))
@@ -417,6 +422,7 @@ func (b *backchannelWriter) sendRefusal() {
 	if f, ok := b.w.(http.Flusher); ok {
 		f.Flush()
 	}
+	b.c.saw(b.s, id)
 }
 
 // handshakeWriter passes a handshake's answer on, reading the session id
