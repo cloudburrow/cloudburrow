@@ -3782,7 +3782,8 @@
         "method": "google.iam.admin.v1.IAM/CreateServiceAccountKey",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
+          "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ],
         "unverified": [
           {
@@ -3805,14 +3806,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamdeletedprincipals1751_test.go:66 TestIAMDeletedServiceAccountInEveryServicesPolicies",
-          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts",
+          "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ]
       },
       {
         "method": "google.iam.admin.v1.IAM/DeleteServiceAccountKey",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
+          "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ]
       },
       {
@@ -3826,7 +3829,8 @@
         "method": "google.iam.admin.v1.IAM/DisableServiceAccountKey",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
+          "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ]
       },
       {
@@ -3840,7 +3844,8 @@
         "method": "google.iam.admin.v1.IAM/EnableServiceAccountKey",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
+          "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ]
       },
       {
@@ -7454,6 +7459,7 @@
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storagemultipart_test.go:90 TestStorageXMLMultipartCompleteRefusals",
+          "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",

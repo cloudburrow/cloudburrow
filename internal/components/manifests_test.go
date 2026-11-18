@@ -516,3 +516,32 @@ func TestBigQuerySignedURLWiring(t *testing.T) {
 		t.Fatalf("saw %d of the two backends", seen)
 	}
 }
+
+// With Cloud Storage, whether or not Cloud Run or BigQuery is served, the
+// storage server reads IAM service accounts' certificates from the
+// metadata server through cloudburrow-host, whose port its egress policy
+// allows (#1787).
+func TestIAMSignedURLWiring(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceStorage}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("img")
+	c.SetServiceAccountCerts("cloudburrow-host.ns.svc.cluster.local:30411")
+	seen := false
+	for _, b := range c.Backends() {
+		if b.Name != "storage" {
+			continue
+		}
+		seen = true
+		want := "--service-account-certs *.iam.gserviceaccount.com=http://cloudburrow-host.ns.svc.cluster.local:30411"
+		if args := strings.Join(b.Args, " "); !strings.Contains(args, want) {
+			t.Errorf("storage args %q lack %q", args, want)
+		}
+		if m := b.Manifest("cloudburrow", "i"); !strings.Contains(m, "port: 30411\n") {
+			t.Errorf("the storage egress policy does not allow the metadata server's port:\n%s", m)
+		}
+	}
+	if !seen {
+		t.Fatal("no storage backend")
+	}
+}

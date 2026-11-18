@@ -24,6 +24,13 @@ import (
 // (gcp-sa-bigquery-condel.iam.gserviceaccount.com), on every request, so
 // a key that is gone verifies nothing. A source that does not answer, or
 // an account it does not know, verifies nothing: the URL is refused.
+//
+// A domain written "*.example.com" stands for every domain under it
+// (#1787): `up` points *.iam.gserviceaccount.com, the domain of every
+// project's IAM service accounts (NAME@PROJECT.iam.gserviceaccount.com),
+// at the metadata server, which serves their certificates as
+// www.googleapis.com does (#1750). The most specific domain wins, so the
+// BigQuery front still answers for its own service agents.
 
 // certSourceTimeout bounds one read of a certificate source.
 const certSourceTimeout = 10 * time.Second
@@ -35,8 +42,8 @@ func (s *Server) rsaKeys(accessID string) ([]*rsa.PublicKey, error) {
 		return []*rsa.PublicKey{k}, nil
 	}
 	_, domain, _ := strings.Cut(accessID, "@")
-	base, ok := s.certSources[strings.ToLower(domain)]
-	if !ok || domain == "" {
+	base, ok := s.certSource(domain)
+	if !ok {
 		return nil, denied("No signing certificate is registered for %s; register one (storage-server --signing-cert) to verify its signatures.", accessID)
 	}
 	keys, err := fetchCerts(s.certClient, base, accessID)
@@ -47,6 +54,29 @@ func (s *Server) rsaKeys(accessID string) ([]*rsa.PublicKey, error) {
 		return nil, denied("%s has no signing certificate.", accessID)
 	}
 	return keys, nil
+}
+
+// certSource is where the certificates of an email domain's accounts are
+// read: the source of the domain itself, or else of the nearest "*." one
+// above it.
+func (s *Server) certSource(domain string) (string, bool) {
+	domain = strings.TrimSuffix(strings.ToLower(domain), ".")
+	if domain == "" {
+		return "", false
+	}
+	if base, ok := s.certSources[domain]; ok {
+		return base, true
+	}
+	for d := domain; ; {
+		_, parent, ok := strings.Cut(d, ".")
+		if !ok || parent == "" {
+			return "", false
+		}
+		if base, ok := s.certSources["*."+parent]; ok {
+			return base, true
+		}
+		d = parent
+	}
 }
 
 func fetchCerts(c *http.Client, base, email string) ([]*rsa.PublicKey, error) {

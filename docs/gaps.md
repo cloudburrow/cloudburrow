@@ -334,10 +334,6 @@ Not gaps to close; each stays until its decision is amended.
   but for Memorystore's IAM auth, which checks a client's token and the project's connect role (amended by #1614).
 - **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
   service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
-- **Signed URLs signed with an IAM service account's own keys** (`signBlob`, a key file): the
-  instance's Cloud Storage verifies RSA signatures against registered keys and the BigQuery
-  connections' service agents' certificates (#1786), not yet against the IAM service accounts'
-  certificates the metadata server serves.
 - **Cloud SQL IAM database authentication** (`generateEphemeralCert` with an access token,
   `cloudsql.iam_authentication`, users of an IAM type): 501, as CloudBurrow has no identities
   ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).

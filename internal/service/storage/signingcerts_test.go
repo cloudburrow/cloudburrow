@@ -66,3 +66,30 @@ func TestSignedURLCertSource(t *testing.T) {
 		t.Errorf("with the source down = %d %s", resp.StatusCode, body)
 	}
 }
+
+// A "*." domain stands for every domain under it, and the most specific
+// source wins (#1787): IAM's accounts of any project are read from one
+// source, BigQuery's service agents still from theirs.
+func TestCertSourceWildcard(t *testing.T) {
+	s := &Server{certSources: map[string]string{
+		"*.iam.gserviceaccount.com":                      "http://metadata",
+		"gcp-sa-bigquery-condel.iam.gserviceaccount.com": "http://bigquery",
+		"example.com": "http://exact",
+	}}
+	for domain, want := range map[string]string{
+		"my-project.iam.gserviceaccount.com":             "http://metadata",
+		"MY-PROJECT.IAM.gserviceaccount.com":             "http://metadata",
+		"gcp-sa-bigquery-condel.iam.gserviceaccount.com": "http://bigquery",
+		"iam.gserviceaccount.com":                        "",
+		"evil-iam.gserviceaccount.com":                   "",
+		"gserviceaccount.com":                            "",
+		"example.com":                                    "http://exact",
+		"sub.example.com":                                "",
+		"":                                               "",
+	} {
+		got, ok := s.certSource(domain)
+		if got != want || ok != (want != "") {
+			t.Errorf("certSource(%q) = %q, %v; want %q", domain, got, ok, want)
+		}
+	}
+}

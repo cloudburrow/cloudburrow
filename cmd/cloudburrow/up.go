@@ -172,6 +172,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 	}
+	if serviceEnabled(cfg, config.ServiceStorage) && cfg.Endpoints.Metadata > 0 {
+		// Cloud Storage verifies a URL an IAM service account signed
+		// (signBlob, or a user-managed key file) against the account's
+		// certificates, which the metadata server serves, through
+		// cloudburrow-host (#1787).
+		comps.SetServiceAccountCerts(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.Metadata))
+	}
 	if onnxRunnerEnabled(cfg) && cfg.Endpoints.ONNX > 0 {
 		// The onnx build's ONNX runner, through cloudburrow-host, runs
 		// BigQuery ML's imported ONNX models for the front (#1711).
@@ -771,7 +779,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// alone is published: the BigQuery front reads a project's ancestry
 	// from it (#1392), and the storage server a project's and a folder's
 	// parents (#1532). So is the onnx build's ONNX runner, which the
-	// BigQuery front runs imported ONNX models on (#1711).
+	// BigQuery front runs imported ONNX models on (#1711), and, with Cloud
+	// Storage, the metadata server, whose service account certificates
+	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
@@ -781,6 +791,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "localai": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "localai": true}
+			// The storage server reads IAM service accounts' certificates
+			// from the metadata server (#1787).
+			if serviceEnabled(cfg, config.ServiceStorage) {
+				published["metadata"] = true
+			}
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}

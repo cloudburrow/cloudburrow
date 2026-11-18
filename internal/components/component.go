@@ -54,6 +54,10 @@ type LifecycleComponent struct {
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
+	// serviceAccountCerts is the in-cluster address (host:port) of the
+	// metadata server, which serves IAM service accounts' certificates
+	// (#1750), for the storage server's signed URLs (#1787), or "".
+	serviceAccountCerts string
 	// vertexAI is the local Vertex AI endpoint's in-cluster address
 	// (host:port), given to the BigQuery front for remote models (#1760).
 	vertexAI string
@@ -106,6 +110,11 @@ func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager
 // SetONNXRunner records the in-cluster address of the onnx build's ONNX
 // runner, for BigQuery's front (#1711).
 func (c *LifecycleComponent) SetONNXRunner(addr string) { c.onnxRunner = addr }
+
+// SetServiceAccountCerts records the in-cluster address of the metadata
+// server, where the storage server reads the certificates of IAM service
+// accounts to verify the URLs they sign (#1787).
+func (c *LifecycleComponent) SetServiceAccountCerts(addr string) { c.serviceAccountCerts = addr }
 
 // SetVertexAI records the in-cluster address of the instance's local
 // Vertex AI endpoint, which BigQuery ML's remote models run on (#1760).
@@ -253,6 +262,19 @@ func (c *LifecycleComponent) Backends() []Backend {
 				b.Args = append(b.Args, "--service-account-certs",
 					BigQueryServiceAgentDomain+"=http://"+InClusterBigQueryHost(c.installer.Namespace))
 				b.EgressTo = append(b.EgressTo, "bigquery")
+			}
+			// IAM's service accounts sign URLs with their own keys: the
+			// system-managed one signBlob uses and their user-managed ones,
+			// whose certificates the metadata server serves at
+			// /service_accounts/v1/metadata/x509/EMAIL, through
+			// cloudburrow-host (#1787).
+			if c.serviceAccountCerts != "" {
+				b.Args = append(b.Args, "--service-account-certs", IAMServiceAccountDomains+"=http://"+c.serviceAccountCerts)
+				if _, p, err := net.SplitHostPort(c.serviceAccountCerts); err == nil {
+					if port, err := strconv.Atoi(p); err == nil {
+						b.EgressPorts = append(b.EgressPorts, port)
+					}
+				}
 			}
 			// Storage Intelligence inheritance walks the projects and
 			// folders of Resource Manager, through cloudburrow-host (#1532).

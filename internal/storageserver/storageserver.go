@@ -49,8 +49,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.Var(&inline, "signing-key", "email=base64: the same, the PEM given inline as standard base64, for a server with no file to read (repeatable; what `up` passes, #577)")
 	var certSources certSourceFlag
 	fs.Var(&certSources, "service-account-certs", "domain=http://host:port: where the public certificates of the service accounts of an email domain "+
-		"(such as gcp-sa-bigquery-condel.iam.gserviceaccount.com) are read, at /service_accounts/v1/metadata/x509/EMAIL, to verify their signed URLs "+
-		"(repeatable; what `up` passes for BigQuery's connections, #1786)")
+		"(such as gcp-sa-bigquery-condel.iam.gserviceaccount.com, or *.iam.gserviceaccount.com for every domain under it) are read, at /service_accounts/v1/metadata/x509/EMAIL, to verify their signed URLs "+
+		"(repeatable; what `up` passes for BigQuery's connections, #1786, and IAM's service accounts, #1787)")
 	var origins originsFlag
 	fs.Var(&origins, "cors-allow-origin", "scheme://host[:port]: a web origin, beyond loopback ones, whose browser requests are answered; any other Origin is refused with 403 (repeatable or comma-separated, #677)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
@@ -249,7 +249,7 @@ func (f *certSourceFlag) String() string { return fmt.Sprint(map[string]string(*
 
 func (f *certSourceFlag) Set(v string) error {
 	domain, base, ok := strings.Cut(v, "=")
-	if !ok || domain == "" || strings.Contains(domain, "@") || !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+	if !ok || domain == "" || domain == "*." || strings.Contains(domain, "@") || strings.Contains(strings.TrimPrefix(domain, "*."), "*") || !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
 		return fmt.Errorf("want domain=http://host:port, not %q", v)
 	}
 	if *f == nil {
