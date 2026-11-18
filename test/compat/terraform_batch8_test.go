@@ -202,10 +202,12 @@ resource "google_secret_manager_secret" "s" {
 	}
 }
 
-// TestTerraformCloudFunctionsFunctionIAM (#1304, #1428):
+// TestTerraformCloudFunctionsFunctionIAM (#1304, #1428, #1578):
 // google_cloudfunctions_function_iam_member, _binding and _policy on a 1st
 // gen function, through TestTerraformBigQueryIAM's phases, each read back
-// with the official v1 client's GetIamPolicy and planned clean. The
+// with the official v1 client's GetIamPolicy and planned clean, with the
+// data source google_cloudfunctions_function_iam_policy compared with that
+// read in the member-and-binding and the policy phases. The
 // function is made by the official v1 client from a source that is not a
 // zip, so it is OFFLINE (its build fails) and the test runs where no
 // function can be built; a function's IAM policy does not depend on its
@@ -247,7 +249,7 @@ func TestTerraformCloudFunctionsFunctionIAM(t *testing.T) {
 		t.Fatalf("GetFunction = %v, %v; want it OFFLINE", f, err)
 	}
 	targets := []tfIAMTarget{{
-		kind: "google_cloudfunctions_function", label: "f",
+		kind: "google_cloudfunctions_function", label: "f", policyData: true,
 		ref: map[string]string{"project": fmt.Sprintf("%q", h.Project()), "region": `"us-central1"`, "cloud_function": fmt.Sprintf("%q", id)},
 		read: func() map[string][]string {
 			t.Helper()

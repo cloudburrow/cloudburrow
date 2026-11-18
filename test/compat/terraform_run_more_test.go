@@ -208,7 +208,11 @@ resource "google_cloud_run_v2_job" "j" {
 // the run v2 discovery documents of google.golang.org/api v0.298.0
 // (revision 20260904) and v0.301.0 (20260917). Google publishes no
 // scaling_mode for a worker pool, so the refusal is the published surface,
-// not a gap: accepting the field would invent its meaning.
+// not a gap: accepting the field would invent its meaning. Re-read on
+// 2026-11-18 (#1578): the run v2 discovery document publishes scalingMode,
+// min/maxInstanceCount and cpuScaling from revision 20261108 (v0.314.0),
+// the proto (googleapis master, cloud.google.com/go/run v1.25.0) still does
+// not, and no Google doc says what AUTOMATIC does; serving them is #1788.
 // covers: google.cloud.run.v2.WorkerPools/CreateWorkerPool, google.cloud.run.v2.WorkerPools/GetWorkerPool, google.cloud.run.v2.WorkerPools/UpdateWorkerPool, google.cloud.run.v2.WorkerPools/DeleteWorkerPool
 func TestTerraformRunWorkerPool(t *testing.T) {
 	h := New(t)
