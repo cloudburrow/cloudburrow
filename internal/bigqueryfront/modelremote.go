@@ -46,10 +46,15 @@ import (
 // and its service account roles/aiplatform.user on the project
 // (connectionauth.go, #1765).
 //
-// Options the local runtime cannot honour are refused 501 rather than
-// ignored, as the local endpoint refuses them (docs/generation.md):
-// temperature, top_p, top_k, max_output_tokens, stop_sequences,
-// safety_settings and generation_config; ground_with_google_search is
+// The generation options (#1797) are sent as the request's
+// generationConfig, with BigQuery's documented ranges and Gemini defaults
+// (generationOptions): max_output_tokens [1,8192] default 1024,
+// temperature [0.0,1.0] default 0, top_p [0.0,1.0] default 0.95,
+// stop_sequences; top_k [1,40] for a non-Gemini endpoint (BigQuery
+// documents none for Gemini). The local runtime applies them through
+// cloudburrow_generate. Options it cannot honour are still refused 501
+// rather than ignored (docs/generation.md): safety_settings,
+// generation_config and model_params; ground_with_google_search is
 // refused because it searches Google.
 //
 // UNVERIFIED (re-read 2026-11-17:
@@ -281,15 +286,78 @@ func vertexLocation(loc string) string {
 // refusedGenerateOptions are ML.GENERATE_TEXT's options the local runtime
 // cannot honour, and why.
 var refusedGenerateOptions = map[string]string{
-	"temperature":               "the local LiteRT-LM runtime takes no sampling parameters",
-	"top_p":                     "the local LiteRT-LM runtime takes no sampling parameters",
-	"top_k":                     "the local LiteRT-LM runtime takes no sampling parameters",
-	"max_output_tokens":         "the local LiteRT-LM runtime takes no output limit",
-	"stop_sequences":            "the local LiteRT-LM runtime takes no stop sequences",
 	"safety_settings":           "the local runtime has no safety filters to configure",
 	"generation_config":         "the local LiteRT-LM runtime takes no generation parameters",
 	"ground_with_google_search": "grounding searches Google, which CloudBurrow never calls",
 	"model_params":              "the local LiteRT-LM runtime takes no generation parameters",
+}
+
+// generationOption reads one of ML.GENERATE_TEXT's and AI.GENERATE_TEXT's
+// generation options into cfg (a Vertex AI generationConfig), with
+// BigQuery's documented ranges (bigqueryml-syntax-generate-text,
+// bigqueryml-syntax-ai-generate-text, re-read 2026-11-18). ok is false when
+// k is not a generation option.
+//
+// UNVERIFIED: the wording of the range errors, which the docs do not give.
+func generationOption(fname, endpoint, k, v string, cfg map[string]any) (code int, msg string, ok bool) {
+	num := func(lo, hi float64) (float64, bool) {
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return f, err == nil && f >= lo && f <= hi
+	}
+	switch k {
+	case "max_output_tokens":
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n < 1 || n > 8192 {
+			return 400, fmt.Sprintf("Invalid value of max_output_tokens for %s: %s. It must be in the range [1, 8192].", fname, v), true
+		}
+		cfg["maxOutputTokens"] = n
+	case "temperature":
+		f, ok := num(0, 1)
+		if !ok {
+			return 400, fmt.Sprintf("Invalid value of temperature for %s: %s. It must be in the range [0.0, 1.0].", fname, v), true
+		}
+		cfg["temperature"] = f
+	case "top_p":
+		f, ok := num(0, 1)
+		if !ok {
+			return 400, fmt.Sprintf("Invalid value of top_p for %s: %s. It must be in the range [0.0, 1.0].", fname, v), true
+		}
+		cfg["topP"] = f
+	case "top_k":
+		if strings.HasPrefix(strings.ToLower(endpoint), "gemini") {
+			return 400, fmt.Sprintf("top_k is not supported for %s with the Gemini model endpoint %s", fname, endpoint), true
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n < 1 || n > 40 {
+			return 400, fmt.Sprintf("Invalid value of top_k for %s: %s. It must be in the range [1, 40].", fname, v), true
+		}
+		cfg["topK"] = n
+	case "stop_sequences":
+		a, ok := parseStringArray(v)
+		if !ok {
+			return 400, "stop_sequences must be an ARRAY<STRING> literal", true
+		}
+		var stops []string
+		for _, s := range a {
+			if s != "" {
+				stops = append(stops, s)
+			}
+		}
+		if len(stops) > 0 {
+			cfg["stopSequences"] = stops
+		}
+	default:
+		return 0, "", false
+	}
+	return 0, "", true
+}
+
+// defaultGenerationConfig is BigQuery's Gemini defaults, which it sends
+// when an option is not given: a remote model's answer is capped at 1024
+// tokens and greedy (temperature 0, "deterministic") unless asked
+// otherwise.
+func defaultGenerationConfig() map[string]any {
+	return map[string]any{"maxOutputTokens": int64(1024), "temperature": 0.0, "topP": 0.95}
 }
 
 // remoteSubquery writes ML.GENERATE_TEXT or ML.GENERATE_EMBEDDING of a
@@ -320,7 +388,16 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	flatten := c.fn == "GENERATE_EMBEDDING"
 	var taskType string
 	dims := 0
+	genCfg := defaultGenerationConfig()
 	for k, v := range c.struc {
+		if c.fn == "GENERATE_TEXT" {
+			if code, msg, ok := generationOption(fname, rm.Endpoint, k, v, genCfg); ok {
+				if code != 0 {
+					return "", code, msg
+				}
+				continue
+			}
+		}
 		switch {
 		case k == "flatten_json_output" && !c.ai:
 			b, ok := map[string]bool{"TRUE": true, "FALSE": false}[strings.ToUpper(v)]
@@ -407,9 +484,9 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		in := *row[0]
 		var parts []string
 		if c.ai {
-			parts = f.aiGenerateTextRow(r.Context(), project, rm, in)
+			parts = f.aiGenerateTextRow(r.Context(), project, rm, in, genCfg)
 		} else if c.fn == "GENERATE_TEXT" {
-			parts = f.generateRow(r.Context(), project, rm, in, flatten)
+			parts = f.generateRow(r.Context(), project, rm, in, flatten, genCfg)
 		} else {
 			parts = f.embedRow(r.Context(), project, rm, in, flatten, taskType, dims)
 		}
@@ -494,9 +571,19 @@ func (f front) vertexCall(ctx context.Context, project string, rm *remoteModel, 
 	return out, ""
 }
 
-// generateRow is one prompt's output columns, as SQL literals.
-func (f front) generateRow(ctx context.Context, project string, rm *remoteModel, prompt string, flatten bool) []string {
+// generateBody is a generateContent request for prompt with generationConfig
+// cfg (none when cfg is empty).
+func generateBody(prompt string, cfg map[string]any) map[string]any {
 	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+	if len(cfg) > 0 {
+		body["generationConfig"] = cfg
+	}
+	return body
+}
+
+// generateRow is one prompt's output columns, as SQL literals.
+func (f front) generateRow(ctx context.Context, project string, rm *remoteModel, prompt string, flatten bool, cfg map[string]any) []string {
+	body := generateBody(prompt, cfg)
 	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
 	if !flatten {
 		return []string{jsonLiteral(out), sqlString(status)}
@@ -592,8 +679,8 @@ func aiFunction(sql string) string {
 // aiGenerateTextRow is one prompt's AI.GENERATE_TEXT columns, as SQL
 // literals: result, rai_result, grounding_result, statistics (the
 // response's usageMetadata), full_response and status (#1765).
-func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, prompt string) []string {
-	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, prompt string, cfg map[string]any) []string {
+	body := generateBody(prompt, cfg)
 	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
 	null := []string{"CAST(NULL AS STRING)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", jsonLiteral(out)}
 	if status != "" {

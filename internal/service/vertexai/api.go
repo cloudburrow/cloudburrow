@@ -90,7 +90,14 @@ type GenerationConfig struct {
 //
 // It returns all of them rather than the first, because a caller fixing one at
 // a time learns their configuration is unsupported one round trip per field.
-func (g *GenerationConfig) unsupportedConfig() []string {
+//
+// options reports whether the generator applies the sampler and the token
+// limit (cloudburrow_generate, #1797). Without it those are refused too: the
+// image's litert_lm_main takes no sampler flag, and before LiteRT-LM a789b7d0
+// it accepted --max_output_tokens and ignored it (309 tokens decoded at a
+// limit of 8, measured). stopSequences are applied by this package (stop.go),
+// so they need only a generator that streams, which every one does.
+func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	if g == nil {
 		return nil
 	}
@@ -100,18 +107,12 @@ func (g *GenerationConfig) unsupportedConfig() []string {
 			out = append(out, name)
 		}
 	}
-	// maxOutputTokens is refused on measured evidence, not on absence: the
-	// runtime accepts --max_output_tokens and ignores it. The same prompt
-	// decoded 309 tokens at a limit of 8, at 40, and with no limit at all.
-	// A flag that is accepted and does nothing is the worst case for a
-	// caller, because the request looks honoured.
-	add("maxOutputTokens", g.MaxOutputTokens != nil)
+	add("maxOutputTokens", !options && g.MaxOutputTokens != nil)
+	add("temperature", !options && g.Temperature != nil)
+	add("topP", !options && g.TopP != nil)
+	add("topK", !options && g.TopK != nil)
+	add("seed", !options && g.Seed != nil)
 	add("candidateCount", g.CandidateCount != nil && *g.CandidateCount != 1)
-	add("temperature", g.Temperature != nil)
-	add("topP", g.TopP != nil)
-	add("topK", g.TopK != nil)
-	add("seed", g.Seed != nil)
-	add("stopSequences", len(g.StopSequences) > 0)
 	add("responseMimeType", g.ResponseMIMEType != "")
 	add("responseSchema", len(g.ResponseSchema) > 0)
 	add("presencePenalty", g.PresencePenalty != nil)
@@ -124,6 +125,56 @@ func (g *GenerationConfig) unsupportedConfig() []string {
 	add("routingConfig", len(g.RoutingConfig) > 0)
 	add("responseModalities", len(g.ResponseModality) > 0)
 	sort.Strings(out)
+	return out
+}
+
+// maxStopSequences is Vertex AI's limit on generationConfig.stopSequences
+// ("A maximum of 5 items in the list", GenerationConfig reference).
+const maxStopSequences = 5
+
+// rangeError checks the honoured options against Vertex AI's documented
+// ranges (GenerationConfig reference: temperature 0.0-2.0, topP 0.0-1.0,
+// topK at least 1, maxOutputTokens at least 1, at most 5 stopSequences).
+//
+// UNVERIFIED: the error wording; Vertex's text for an out-of-range value is
+// not in its reference docs.
+func (g *GenerationConfig) rangeError() error {
+	if g == nil {
+		return nil
+	}
+	switch {
+	case g.Temperature != nil && !(*g.Temperature >= 0 && *g.Temperature <= 2):
+		return apierror.InvalidArgument("Unable to submit request because it has a temperature value of %g but the supported range is from 0 (inclusive) to 2.0001 (exclusive). Update the value and try again.", *g.Temperature)
+	case g.TopP != nil && !(*g.TopP >= 0 && *g.TopP <= 1):
+		return apierror.InvalidArgument("Unable to submit request because it has a topP value of %g but the supported range is from 0 (inclusive) to 1.0001 (exclusive). Update the value and try again.", *g.TopP)
+	case g.TopK != nil && (*g.TopK < 1 || *g.TopK != float32(int32(*g.TopK))):
+		return apierror.InvalidArgument("Unable to submit request because it has a topK value of %g but the supported range is from 1 (inclusive) to 41 (exclusive). Update the value and try again.", *g.TopK)
+	case g.MaxOutputTokens != nil && *g.MaxOutputTokens < 1:
+		return apierror.InvalidArgument("Unable to submit request because it has a maxOutputTokens value of %d but the supported range is from 1 (inclusive) to 65537 (exclusive). Update the value and try again.", *g.MaxOutputTokens)
+	case len(g.StopSequences) > maxStopSequences:
+		return apierror.InvalidArgument("Unable to submit request because it has %d stopSequences; the maximum is %d. Update the value and try again.", len(g.StopSequences), maxStopSequences)
+	}
+	for i, s := range g.StopSequences {
+		if s == "" {
+			return apierror.InvalidArgument("generationConfig.stopSequences[%d] is empty", i)
+		}
+	}
+	return nil
+}
+
+// generatorRequest is the request a generator is asked for.
+func generatorRequest(req *GenerateContentRequest) Request {
+	out := Request{Prompt: promptOf(req)}
+	if g := req.GenerationConfig; g != nil {
+		out.MaxOutputTokens = g.MaxOutputTokens
+		out.Temperature = g.Temperature
+		out.TopP = g.TopP
+		out.Seed = g.Seed
+		if g.TopK != nil {
+			k := int32(*g.TopK)
+			out.TopK = &k
+		}
+	}
 	return out
 }
 
@@ -141,11 +192,13 @@ type GenerateContentRequest struct {
 	Labels            json.RawMessage `json:"labels,omitempty"`
 }
 
-// FinishReason values, spelled as Vertex spells them.
-// Only STOP is ever emitted. MAX_TOKENS is absent deliberately: nothing in
-// this path can stop generation early, so a constant for it would suggest a
-// reason that cannot occur.
-const FinishReasonStop = "STOP"
+// FinishReason values, spelled as Vertex spells them. MAX_TOKENS is emitted
+// when cloudburrow_generate reports it decoded maxOutputTokens tokens; STOP
+// otherwise, including at a stop sequence, as Vertex reports one.
+const (
+	FinishReasonStop      = "STOP"
+	FinishReasonMaxTokens = "MAX_TOKENS"
+)
 
 // Candidate is one generated result.
 type Candidate struct {
@@ -174,7 +227,7 @@ const maxRequestBytes = 1 << 20
 // one here: an option this runtime does not implement must not be silently
 // dropped, and DisallowUnknownFields is what catches the ones not enumerated
 // above — including any Vertex adds after this was written.
-func decodeRequest(r io.Reader) (*GenerateContentRequest, error) {
+func decodeRequest(r io.Reader, options bool) (*GenerateContentRequest, error) {
 	dec := json.NewDecoder(io.LimitReader(r, maxRequestBytes))
 	dec.DisallowUnknownFields()
 
@@ -186,14 +239,14 @@ func decodeRequest(r io.Reader) (*GenerateContentRequest, error) {
 		}
 		return nil, apierror.InvalidArgument("malformed request body: %v", err)
 	}
-	if err := validate(&req); err != nil {
+	if err := validate(&req, options); err != nil {
 		return nil, err
 	}
 	return &req, nil
 }
 
 // validate enforces the documented subset.
-func validate(req *GenerateContentRequest) error {
+func validate(req *GenerateContentRequest, options bool) error {
 	switch {
 	case len(req.Tools) > 0:
 		return unsupportedField("tools")
@@ -207,12 +260,15 @@ func validate(req *GenerateContentRequest) error {
 		return unsupportedField("cachedContent")
 	}
 
-	if names := req.GenerationConfig.unsupportedConfig(); len(names) > 0 {
+	if names := req.GenerationConfig.unsupportedConfig(options); len(names) > 0 {
 		return apierror.InvalidArgument(
 			"generationConfig.%s cannot be honoured: the LiteRT-LM runtime applies no such control, "+
 				"and accepting it would report a setting that was never applied. "+
-				"This endpoint supports no generation options at all — see docs/generation.md",
+				"See docs/generation.md for the options this endpoint applies",
 			strings.Join(names, ", generationConfig."))
+	}
+	if err := req.GenerationConfig.rangeError(); err != nil {
+		return err
 	}
 
 	if len(req.Contents) == 0 {

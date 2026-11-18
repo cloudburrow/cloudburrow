@@ -216,15 +216,23 @@ func (s *Server) startGeneration(ctx context.Context, requested string, body io.
 	if err != nil {
 		return "", nil, nil, err
 	}
-	req, err := decodeRequest(body)
+	req, err := decodeRequest(body, honoursOptions(s.gen))
 	if err != nil {
 		return "", nil, nil, err
 	}
-	chunks, errFn, err := s.gen.Generate(ctx, Request{Prompt: promptOf(req)})
+	// The generation runs under its own context so a stop sequence can end
+	// it without ending the request.
+	gctx, cancel := context.WithCancel(ctx)
+	chunks, errFn, err := s.gen.Generate(gctx, generatorRequest(req))
 	if err != nil {
+		cancel()
 		return "", nil, nil, apierror.Internal(err, "starting the local runtime failed")
 	}
-	return model, chunks, errFn, nil
+	var stops []string
+	if req.GenerationConfig != nil {
+		stops = req.GenerationConfig.StopSequences
+	}
+	return model, applyStops(ctx, cancel, chunks, stops), errFn, nil
 }
 
 // generateUnary serves one generateContent, for the JSON route and the gRPC
