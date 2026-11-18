@@ -934,7 +934,7 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		c.busy[r.Name] = op
 		snap, users := *r, c.aclUsers(r)
 		nodes := append([]*clusterNode(nil), r.Nodes...)
-		go func() {
+		return s.api.launch(op, func() {
 			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 			defer cancel()
 			err := c.syncUsers(ctx, &snap, users, nodes)
@@ -946,8 +946,7 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 				err = fmt.Errorf("the nodes' ACL users did not change: %w", err)
 			}
 			c.finish(op, out, err)
-		}()
-		return s.api.operation(op)
+		})
 	}
 	if !reshape {
 		c.finish(op, c.renderValkey(r), nil)
