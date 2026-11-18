@@ -119,7 +119,8 @@ func TestWAVLayoutsAndRefusals(t *testing.T) {
 		data []byte
 		want string
 	}{
-		{"3-bit IMA ADPCM", wavBytes(0x11, 1, 16000, 3, 0, 16), "3-bit IMA ADPCM"},
+		{"5-bit IMA ADPCM", wavBytes(0x11, 1, 16000, 5, 0, 16), "5-bit IMA ADPCM"},
+		{"6-channel Microsoft ADPCM", wavBytes(2, 6, 16000, 4, 0, 16), "Microsoft ADPCM of 6 channels"},
 		{"MP3 in WAV", wavBytes(0x55, 1, 16000, 16, 0, 16), "WAVE format 85"},
 		{"a 4 kHz rate", wavBytes(1, 1, 4000, 16, 0, 16), "4000 Hz"},
 		{"nine channels, no mask", wavBytes(1, 9, 16000, 16, 0, 16), "9 channels"},

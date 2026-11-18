@@ -38,8 +38,14 @@ func maxAbsDiff(t *testing.T, name string, got, want []float32) float64 {
 //	S2="aevalsrc=0.3*sin(2*PI*440*t)+0.1*sin(2*PI*3000*t)|0.25*sin(2*PI*660*t):s=16000:d=0.53"
 //	ffmpeg -f lavfi -i "$S1" -c:a adpcm_ima_wav -map_metadata -1 -fflags +bitexact -flags +bitexact wav-ima.wav
 //	("$S2": wav-ima-st.wav; -c:a adpcm_ms: wav-ms.wav, wav-ms-st.wav)
+//
+// 3-bit IMA ADPCM (#1651), which ffmpeg does not encode, was written by a
+// small encoder made for the fixtures (scratch, not kept): a 1-second
+// signal of S1's kind, mono in 260-byte blocks (four bytes of padding
+// after 21 groups) and stereo in 512-byte blocks, wav-ima3.wav and
+// wav-ima3-st.wav; ffmpeg's decode (`-f f32le`) is the reference.
 func TestDecodeADPCMWAV(t *testing.T) {
-	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st"} {
+	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st"} {
 		w, err := decodeWAV(readTestdata(t, name+".wav"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
