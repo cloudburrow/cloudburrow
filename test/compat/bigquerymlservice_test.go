@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -26,9 +27,9 @@ import (
 // (#1799), and an object that is not an image
 // is "Bad image data." in its row's status; the object table's columns
 // are kept. IMAGE_PROPERTIES answers the page's dominant colors and a
-// crop hint (#1799). LABEL_DETECTION (no local model) is refused 501, as are the
-// service types with no local model at CREATE MODEL (Translation,
-// Natural Language, Document AI), each naming its
+// crop hint (#1799). LABEL_DETECTION (no local model) is refused 501, as is the
+// service type with no local model at CREATE MODEL (Document AI),
+// naming its
 // function; ML.GENERATE_TEXT of the Vision model and ML.ANNOTATE_IMAGE
 // over a query are 400.
 //
@@ -88,8 +89,7 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
 	}
 
-	for typ, fn := range map[string]string{"CLOUD_AI_NATURAL_LANGUAGE_V1": "ML.UNDERSTAND_TEXT",
-		"CLOUD_AI_DOCUMENT_V1": "ML.PROCESS_DOCUMENT"} {
+	for typ, fn := range map[string]string{"CLOUD_AI_DOCUMENT_V1": "ML.PROCESS_DOCUMENT"} {
 		err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = '%s')", ds, conn, typ))
 		if err == nil || !strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), fn) {
 			t.Errorf("%s: %v", typ, err)
@@ -477,5 +477,216 @@ func TestBigQueryMLTranslate(t *testing.T) {
 	if err := run(fmt.Sprintf("SELECT * FROM ML.ANNOTATE_IMAGE(MODEL `%s.translate`, TABLE `%s.texts`, STRUCT(['TEXT_DETECTION'] AS vision_features))", ds, ds)); err == nil ||
 		!strings.Contains(err.Error(), "ML.TRANSLATE") {
 		t.Errorf("ML.ANNOTATE_IMAGE of the translation model: %v", err)
+	}
+}
+
+// TestBigQueryMLUnderstandText (#1799): ML.UNDERSTAND_TEXT over a
+// CLOUD_AI_NATURAL_LANGUAGE_V1 remote model, through the official
+// cloud.google.com/go/bigquery and bigquery/connection/apiv1 clients and
+// the generated bigquery/v2. Each distinct text_content is sent to the
+// local Vertex AI endpoint's Natural Language v1 route (never Google),
+// which asks the instance's local Gemma model under a JSON schema, greedily.
+// With a local model: ANALYZE_SENTIMENT answers document_sentiment,
+// language and sentences (begin_offset -1, as the tutorial shows it) with
+// the review's polarity; ANALYZE_ENTITIES names entities whose mentions are
+// in the text, with salience summing to 1; ANALYZE_ENTITY_SENTIMENT adds
+// each entity's sentiment; CLASSIFY_TEXT answers the BigQuery page's
+// example sentence with a Version 1 content category under
+// /Arts & Entertainment, and a text under twenty tokens is the row's
+// INVALID_ARGUMENT; flatten_json_output TRUE answers the page's columns;
+// encoding_type UTF8 answers byte offsets; a second run answers the same
+// JSON; a NULL text has no result. Without one (an instance without
+// --local-ai-model), 501. ANALYZE_SYNTAX is 501 either way, and an
+// undocumented option (MODERATE_TEXT), encoding_type with CLASSIFY_TEXT, an
+// input without text_content and another function of the model are
+// refused before anything is sent.
+//
+// covers: bigquery.jobs.query, bigquery.models.get
+func TestBigQueryMLUnderstandText(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvLocalAI)
+	c, project := bigqueryClient(t, h)
+	cc, _ := remoteConnectionClient(t, h)
+	ctx := h.Context()
+	id := strings.ReplaceAll(h.Project(), "-", "_") + "_nl"
+	cn, err := cc.CreateConnection(ctx, &connectionpb.CreateConnectionRequest{Parent: "projects/" + project + "/locations/us", ConnectionId: id,
+		Connection: &connectionpb.Connection{Properties: &connectionpb.Connection_CloudResource{CloudResource: &connectionpb.CloudResourceProperties{}}}})
+	if err != nil {
+		t.Fatalf("CreateConnection: %v", err)
+	}
+	t.Cleanup(func() { _ = cc.DeleteConnection(ctx, &connectionpb.DeleteConnectionRequest{Name: cn.Name}) })
+	grantRemoteModel(t, h, cc, project, cn)
+	conn := project + ".us." + id
+
+	ds := "compat_nl_" + strings.ReplaceAll(h.Project(), "-", "_")
+	if err := c.Dataset(ds).Create(ctx, &bigquery.DatasetMetadata{Location: "US"}); err != nil {
+		t.Fatalf("Dataset.Create: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Dataset(ds).DeleteWithContents(ctx) })
+	run := func(sql string) error { return mlRun(h, c, sql) }
+	const tv = "That actor on TV makes movies in Hollywood and also stars in a variety of popular new TV shows."
+	if err := run(fmt.Sprintf("CREATE TABLE `%s.reviews` AS SELECT 1 AS id, 'This movie is amazing. The acting was wonderful and I loved every minute.' AS text_content UNION ALL "+
+		"SELECT 2, 'The film was a boring, terrible waste of time. I hated it.' UNION ALL SELECT 3, '%s' UNION ALL SELECT 4, CAST(NULL AS STRING)", ds, tv)); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE TABLE `%s.comments` AS SELECT 'Sundar Pichai is the CEO of Google, which is based in Mountain View, California.' AS comment", ds)); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE OR REPLACE MODEL `%s.nl` REMOTE WITH CONNECTION `%s` OPTIONS(remote_service_type = 'cloud_ai_natural_language_v1')", ds, conn)); err != nil {
+		t.Fatalf("CREATE MODEL CLOUD_AI_NATURAL_LANGUAGE_V1: %v", err)
+	}
+	md, err := generatedBigQuery(t, h).Models.Get(c.Project(), ds, "nl").Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("models.get: %v", err)
+	}
+	if md.RemoteModelInfo == nil || md.RemoteModelInfo.RemoteServiceType != "CLOUD_AI_NATURAL_LANGUAGE_V1" || md.RemoteModelInfo.Endpoint != "" {
+		t.Errorf("remoteModelInfo: %+v", md.RemoteModelInfo)
+	}
+	understand := func(option, input, extra string) []map[string]bigquery.Value {
+		return mlQuery(t, h, c, fmt.Sprintf("SELECT * EXCEPT (ml_understand_text_result), TO_JSON_STRING(ml_understand_text_result) AS result "+
+			"FROM ML.UNDERSTAND_TEXT(MODEL `%s.nl`, %s, STRUCT('%s' AS nlu_option%s))", ds, input, option, extra))
+	}
+
+	q := fmt.Sprintf("SELECT * FROM ML.UNDERSTAND_TEXT(MODEL `%s.nl`, TABLE `%s.reviews`, STRUCT('ANALYZE_SENTIMENT' AS nlu_option))", ds, ds)
+	if err := run(q); err != nil {
+		if !strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), "no local generation model") {
+			t.Errorf("ANALYZE_SENTIMENT without a local model: %v", err)
+		}
+		t.Logf("ANALYZE_SENTIMENT: this instance has no local generation model: %v", err)
+	} else {
+		byID := func(rows []map[string]bigquery.Value) map[int64]map[string]any {
+			out := map[int64]map[string]any{}
+			for _, r := range rows {
+				var m map[string]any
+				if s, ok := r["result"].(string); ok {
+					_ = json.Unmarshal([]byte(s), &m)
+				}
+				if r["ml_understand_text_status"] != nil && r["ml_understand_text_status"] != "" {
+					m = map[string]any{"status": r["ml_understand_text_status"]}
+				}
+				out[r["id"].(int64)] = m
+			}
+			return out
+		}
+		sentiment := understand("analyze_sentiment", "TABLE `"+ds+".reviews`", "")
+		s := byID(sentiment)
+		if len(sentiment) != 4 || s[4] != nil {
+			t.Fatalf("ANALYZE_SENTIMENT rows: %v", sentiment)
+		}
+		for id, sign := range map[int64]float64{1: 1, 2: -1} {
+			r := s[id]
+			b, _ := json.Marshal(r)
+			t.Logf("ANALYZE_SENTIMENT row %d: %s", id, b)
+			doc, _ := r["document_sentiment"].(map[string]any)
+			score, _ := doc["score"].(float64)
+			sents, _ := r["sentences"].([]any)
+			if r["language"] != "en" || score*sign < 0.3 || len(sents) != 2 {
+				t.Errorf("ANALYZE_SENTIMENT row %d: %s", id, b)
+				continue
+			}
+			if txt := sents[0].(map[string]any)["text"].(map[string]any); txt["begin_offset"] != -1.0 || txt["content"] == "" {
+				t.Errorf("ANALYZE_SENTIMENT row %d sentence: %v", id, txt)
+			}
+		}
+		// Greedy decoding: a second run answers the same JSON.
+		again := byID(understand("ANALYZE_SENTIMENT", "TABLE `"+ds+".reviews`", ""))
+		for id := range s {
+			a, _ := json.Marshal(s[id])
+			b, _ := json.Marshal(again[id])
+			if string(a) != string(b) {
+				t.Errorf("ANALYZE_SENTIMENT is not deterministic, row %d: %s then %s", id, a, b)
+			}
+		}
+
+		input := "(SELECT 1 AS id, comment AS text_content FROM `" + ds + ".comments`)"
+		const text = "Sundar Pichai is the CEO of Google, which is based in Mountain View, California."
+		for _, option := range []string{"ANALYZE_ENTITIES", "ANALYZE_ENTITY_SENTIMENT"} {
+			rows := understand(option, input, ", 'UTF8' AS encoding_type")
+			if len(rows) != 1 || rows[0]["ml_understand_text_status"] != "" {
+				t.Fatalf("%s: %v", option, rows)
+			}
+			t.Logf("%s: %v", option, rows[0]["result"])
+			var res struct {
+				Entities []struct {
+					Name      string          `json:"name"`
+					Type      string          `json:"type"`
+					Salience  float64         `json:"salience"`
+					Sentiment json.RawMessage `json:"sentiment"`
+					Mentions  []struct {
+						Text struct {
+							Content     string `json:"content"`
+							BeginOffset int    `json:"begin_offset"`
+						} `json:"text"`
+						Type string `json:"type"`
+					} `json:"mentions"`
+				} `json:"entities"`
+				Language string `json:"language"`
+			}
+			if err := json.Unmarshal([]byte(rows[0]["result"].(string)), &res); err != nil || res.Language != "en" || len(res.Entities) < 2 {
+				t.Fatalf("%s: %v %v", option, err, rows[0]["result"])
+			}
+			var sum float64
+			names := map[string]string{}
+			for _, e := range res.Entities {
+				sum += e.Salience
+				names[e.Name] = e.Type
+				if option == "ANALYZE_ENTITY_SENTIMENT" && len(e.Sentiment) == 0 {
+					t.Errorf("%s: %s has no sentiment", option, e.Name)
+				}
+				for _, m := range e.Mentions {
+					if o := m.Text.BeginOffset; o < 0 || o+len(m.Text.Content) > len(text) || text[o:o+len(m.Text.Content)] != m.Text.Content {
+						t.Errorf("%s: mention %q at %d is not in the text", option, m.Text.Content, o)
+					}
+				}
+			}
+			if sum < 0.99 || sum > 1.01 || names["Google"] != "ORGANIZATION" || names["Sundar Pichai"] != "PERSON" {
+				t.Errorf("%s: %v (salience %g)", option, names, sum)
+			}
+		}
+
+		cls := understand("CLASSIFY_TEXT", "TABLE `"+ds+".reviews`", "")
+		k := byID(cls)
+		b, _ := json.Marshal(k[3])
+		t.Logf("CLASSIFY_TEXT of the page's example: %s", b)
+		cats, _ := k[3]["categories"].([]any)
+		if len(cats) == 0 || !strings.HasPrefix(fmt.Sprint(cats[0].(map[string]any)["name"]), "/Arts & Entertainment") {
+			t.Errorf("CLASSIFY_TEXT row 3: %s", b)
+		}
+		if st := fmt.Sprint(k[1]["status"]); !strings.Contains(st, "too few tokens") {
+			t.Errorf("CLASSIFY_TEXT of 14 tokens: %v", k[1])
+		}
+		flat := mlQuery(t, h, c, fmt.Sprintf("SELECT id, TO_JSON_STRING(categories) AS categories, ml_understand_text_status AS status FROM ML.UNDERSTAND_TEXT(MODEL `%s.nl`, "+
+			"TABLE `%s.reviews`, STRUCT('classify_text' AS nlu_option, TRUE AS flatten_json_output)) WHERE id = 3", ds, ds))
+		if len(flat) != 1 || flat[0]["status"] != "" || !strings.Contains(fmt.Sprint(flat[0]["categories"]), "/Arts & Entertainment") {
+			t.Errorf("CLASSIFY_TEXT flattened: %v", flat)
+		}
+		flat = mlQuery(t, h, c, fmt.Sprintf("SELECT language, TO_JSON_STRING(sentiment) AS sentiment, TO_JSON_STRING(sentences) AS sentences FROM ML.UNDERSTAND_TEXT(MODEL `%s.nl`, "+
+			"TABLE `%s.reviews`, STRUCT('ANALYZE_SENTIMENT' AS nlu_option, TRUE AS flatten_json_output)) WHERE id = 1", ds, ds))
+		if len(flat) != 1 || flat[0]["language"] != "en" || !strings.Contains(fmt.Sprint(flat[0]["sentiment"]), `"score"`) ||
+			!strings.Contains(fmt.Sprint(flat[0]["sentences"]), `"begin_offset"`) {
+			t.Errorf("ANALYZE_SENTIMENT flattened: %v", flat)
+		}
+	}
+
+	if err := run(fmt.Sprintf("SELECT * FROM ML.UNDERSTAND_TEXT(MODEL `%[1]s.nl`, (SELECT comment AS text_content FROM `%[1]s.comments`), STRUCT('ANALYZE_SYNTAX' AS nlu_option))", ds)); err == nil ||
+		!strings.Contains(err.Error(), "Not implemented here") {
+		t.Errorf("ANALYZE_SYNTAX: %v", err)
+	}
+	for name, sql := range map[string]string{
+		"no option":       "TABLE `%[1]s.reviews`, STRUCT(TRUE AS flatten_json_output)",
+		"moderate text":   "TABLE `%[1]s.reviews`, STRUCT('MODERATE_TEXT' AS nlu_option)",
+		"classify utf8":   "TABLE `%[1]s.reviews`, STRUCT('CLASSIFY_TEXT' AS nlu_option, 'UTF8' AS encoding_type)",
+		"bad encoding":    "TABLE `%[1]s.reviews`, STRUCT('ANALYZE_SENTIMENT' AS nlu_option, 'UTF7' AS encoding_type)",
+		"unknown option":  "TABLE `%[1]s.reviews`, STRUCT('ANALYZE_SENTIMENT' AS nlu_option, 1 AS model)",
+		"no text_content": "TABLE `%[1]s.comments`, STRUCT('ANALYZE_SENTIMENT' AS nlu_option)",
+	} {
+		err := run(fmt.Sprintf("SELECT * FROM ML.UNDERSTAND_TEXT(MODEL `%[1]s.nl`, "+sql+")", ds))
+		if err == nil || !strings.Contains(err.Error(), "400") && !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := run(fmt.Sprintf("SELECT * FROM ML.TRANSLATE(MODEL `%s.nl`, TABLE `%s.reviews`, STRUCT('DETECT_LANGUAGE' AS translate_mode))", ds, ds)); err == nil ||
+		!strings.Contains(err.Error(), "ML.UNDERSTAND_TEXT") {
+		t.Errorf("ML.TRANSLATE of the Natural Language model: %v", err)
 	}
 }

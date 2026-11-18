@@ -321,6 +321,8 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 		// #1799: a Translation model.
 		"tr": `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"tr"},"creationTime":"1700000000000","lastModifiedTime":"1700000000000",
 "location":"US","etag":"e","remoteModelInfo":{"remoteServiceType":"CLOUD_AI_TRANSLATE_V3","connection":"projects/1/locations/us/connections/ai"}}`,
+		"nl": `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"nl"},"creationTime":"1700000000000","lastModifiedTime":"1700000000000",
+"location":"US","etag":"e","remoteModelInfo":{"remoteServiceType":"CLOUD_AI_NATURAL_LANGUAGE_V1","connection":"projects/1/locations/us/connections/ai"}}`,
 	}
 	var calls []string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -335,7 +337,8 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 	defer api.Close()
 	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
 	for id, fn := range map[string]string{"gen": "ML.GENERATE_TEXT(MODEL `d.gen`", "emb": "ML.GENERATE_EMBEDDING(MODEL `d.emb`",
-		"vis": "ML.ANNOTATE_IMAGE(MODEL `d.vis`, TABLE", "tr": "ML.TRANSLATE(MODEL `d.tr`, (SELECT comment AS text_content"} {
+		"vis": "ML.ANNOTATE_IMAGE(MODEL `d.vis`, TABLE", "tr": "ML.TRANSLATE(MODEL `d.tr`, (SELECT comment AS text_content",
+		"nl": "ML.UNDERSTAND_TEXT(MODEL `d.nl`, (SELECT comment AS text_content"} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
 		if err != nil || d.Unavailable != "" || len(d.Sections) != 1 {
 			t.Fatalf("%s: %v %+v", id, err, d)
@@ -349,7 +352,8 @@ func TestBigQueryRemoteModelPage(t *testing.T) {
 		all := strings.Join(props, "; ")
 		if !strings.Contains(all, "Type=Remote model") || !strings.Contains(all, "Connection=projects/1/locations/us/connections/ai") ||
 			!strings.Contains(all, map[string]string{"gen": "Endpoint=gemma-4-e2b-it-community", "emb": "Endpoint=embeddinggemma-300m-onnx-community",
-				"vis": "Remote service type=CLOUD_AI_VISION_V1", "tr": "Remote service type=CLOUD_AI_TRANSLATE_V3"}[id]) ||
+				"vis": "Remote service type=CLOUD_AI_VISION_V1", "tr": "Remote service type=CLOUD_AI_TRANSLATE_V3",
+				"nl": "Remote service type=CLOUD_AI_NATURAL_LANGUAGE_V1"}[id]) ||
 			!strings.Contains(all, fn) || !strings.Contains(all, "never Google's") {
 			t.Errorf("%s: %s", id, all)
 		}

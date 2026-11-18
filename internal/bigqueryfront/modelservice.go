@@ -35,13 +35,13 @@ import (
 //     table's columns with ml_annotate_image_result (JSON, the image's
 //     AnnotateImageResponse) and ml_annotate_image_status (STRING, empty
 //     on success, else the image's error).
-//   - CLOUD_AI_SPEECH_TO_TEXT_V2 (ML.TRANSCRIBE, modeltranscribe.go) and
-//     CLOUD_AI_TRANSLATE_V3 (ML.TRANSLATE, modeltranslate.go) are served
-//     since #1799.
-//   - CLOUD_AI_NATURAL_LANGUAGE_V1 (ML.UNDERSTAND_TEXT) and
-//     CLOUD_AI_DOCUMENT_V1 (ML.PROCESS_DOCUMENT): 501
-//     at CREATE MODEL, each naming why (serviceTypeRefusals): no local
-//     model answers them as the service does.
+//   - CLOUD_AI_SPEECH_TO_TEXT_V2 (ML.TRANSCRIBE, modeltranscribe.go),
+//     CLOUD_AI_TRANSLATE_V3 (ML.TRANSLATE, modeltranslate.go) and
+//     CLOUD_AI_NATURAL_LANGUAGE_V1 (ML.UNDERSTAND_TEXT, modelunderstand.go)
+//     are served since #1799.
+//   - CLOUD_AI_DOCUMENT_V1 (ML.PROCESS_DOCUMENT): 501 at CREATE MODEL,
+//     naming why (serviceTypeRefusals): no local model answers it as the
+//     service does.
 //
 // The connection rules are a remote LLM's (modelremote.go): a Cloud
 // resource connection in the dataset's location, bigquery.connections.use
@@ -65,8 +65,6 @@ var serviceTypeFunctions = map[string]string{
 // serviceTypeRefusals are the service types CloudBurrow cannot serve, and
 // why.
 var serviceTypeRefusals = map[string]string{
-	"CLOUD_AI_NATURAL_LANGUAGE_V1": "a remote model over the Cloud Natural Language API (ML.UNDERSTAND_TEXT): CloudBurrow has no local model " +
-		"that analyses entities, sentiment, syntax or categories as the Natural Language API does, and never calls Google (#1773).",
 	"CLOUD_AI_DOCUMENT_V1": "a remote model over the Document AI API (ML.PROCESS_DOCUMENT): CloudBurrow serves no Document AI API, " +
 		"so no processor can exist for DOCUMENT_PROCESSOR to name, and never calls Google (#1773).",
 }
@@ -139,6 +137,9 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 	}
 	if c.fn == "TRANSLATE" {
 		return f.translateSubquery(r, q, md, c, fname) // modeltranslate.go, #1799
+	}
+	if c.fn == "UNDERSTAND_TEXT" {
+		return f.understandSubquery(r, q, md, c, fname) // modelunderstand.go, #1799
 	}
 	if c.table == nil {
 		return "", 400, fname + " requires an object table: TABLE name"

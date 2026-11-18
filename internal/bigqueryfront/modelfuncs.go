@@ -32,7 +32,7 @@ var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIG
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
 	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
-	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true} // modelservice.go, #1773, #1799
+	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true} // modelservice.go, #1773, #1799
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -289,7 +289,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
 				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.HOLIDAY_INFO, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
-				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE and ML.TRANSLATE. Nothing was run.")
+				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE, ML.TRANSLATE and ML.UNDERSTAND_TEXT. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, q)
@@ -596,7 +596,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if c.ai && c.fn == "GENERATE_EMBEDDING" {
 		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
 	}
-	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" {
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" || c.fn == "UNDERSTAND_TEXT" {
 		fname := "ML." + c.fn
 		if c.ai {
 			fname = "AI." + c.fn

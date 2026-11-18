@@ -330,8 +330,9 @@ func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.Mo
 	}
 	// A model over a Cloud AI service names its service type, not an
 	// endpoint (#1773): a Vision model runs ML.ANNOTATE_IMAGE over an
-	// object table, a Speech-to-Text model ML.TRANSCRIBE and a Translation
-	// model ML.TRANSLATE over a text_content column (#1799).
+	// object table, a Speech-to-Text model ML.TRANSCRIBE, and a Translation
+	// model ML.TRANSLATE and a Natural Language model ML.UNDERSTAND_TEXT
+	// over a text_content column (#1799).
 	target := console.Property{Label: "Endpoint", Value: ri.Endpoint}
 	if ri.RemoteServiceType != "" {
 		target = console.Property{Label: "Remote service type", Value: ri.RemoteServiceType}
@@ -343,6 +344,10 @@ func (p bigqueryProvider) remoteModelDetail(ctx context.Context, md *bigquery.Mo
 		if ri.RemoteServiceType == "CLOUD_AI_TRANSLATE_V3" { // #1799
 			fn = "ML.TRANSLATE(MODEL `" + datasetID + "." + modelID + "`, (SELECT comment AS text_content FROM `" + datasetID + ".TABLE`), " +
 				"STRUCT('TRANSLATE_TEXT' AS translate_mode, 'en' AS target_language_code))"
+		}
+		if ri.RemoteServiceType == "CLOUD_AI_NATURAL_LANGUAGE_V1" { // #1799
+			fn = "ML.UNDERSTAND_TEXT(MODEL `" + datasetID + "." + modelID + "`, (SELECT comment AS text_content FROM `" + datasetID + ".TABLE`), " +
+				"STRUCT('ANALYZE_SENTIMENT' AS nlu_option))"
 		}
 	}
 	props := []console.Property{
