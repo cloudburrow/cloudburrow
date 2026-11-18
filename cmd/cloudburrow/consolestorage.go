@@ -26,7 +26,12 @@ func (p storageProvider) storageClient(ctx context.Context) (*storage.Client, er
 		option.WithoutAuthentication(),
 		// The JSON media path, which the backend serves at any Host. Its XML
 		// download path matches only the host it advertises to clients.
-		storage.WithJSONReads())
+		storage.WithJSONReads(),
+		// GCP_STORAGE_GO_ENABLE_OTEL_METRICS in the environment would
+		// otherwise turn on the client's metrics, which export to Cloud
+		// Monitoring (storage v1.70.0, metrics.go, newMetricsGCMExporter)
+		// after asking the metadata server where they run (#1825).
+		storage.WithDisabledClientMetrics())
 }
 
 // objectName joins a path's segments after the bucket into an object name.
