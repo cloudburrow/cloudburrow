@@ -37,7 +37,9 @@ import (
 // SignatureDef's (as LiteRT's signature runner names them), or its
 // subgraph's tensors' names when it has none. As for ONNX (modelonnx.go),
 // a port whose dimensions after the batch dimension are all 1 is a value
-// of a row, one with more an ARRAY of the row's values, row-major.
+// of a row, one with more an ARRAY of the row's values, row-major; a
+// fixed first dimension of more than one is part of the row's ARRAY too
+// (#1775), as each row runs the whole tensor.
 //
 // How it runs: on internal/tflitemodel, a pure-Go interpreter of LiteRT's
 // builtin operators checked against LiteRT's own output, so every build
@@ -106,6 +108,11 @@ func tfliteColumnOf(p tflitemodel.Port, what string) (tflitePortCol, int, string
 	free := 0
 	for k, d := range p.Shape {
 		if k == 0 {
+			// A fixed first dimension of more than one is not a batch a
+			// row fills once: the row holds all its values (#1775).
+			if d > 1 {
+				c.Array = true
+			}
 			continue
 		}
 		if d < 0 {
