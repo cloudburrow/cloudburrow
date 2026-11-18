@@ -76,46 +76,62 @@ func blockMeans(img image.Image) [16][3]float64 {
 	return out
 }
 
+// TestDecodeVideoFrames decodes each clip at 1 frame a second against
+// ffmpeg's frames. Each codec's clip also checks that an interval and a
+// rate pick the same frames; the VP9 profile 1 to 3 clips (options false)
+// share profile 0's demuxing and frame choice, and TestVP9ProfilesMatchFFmpeg
+// checks every one of their frames bit for bit, so they are not decoded
+// three times more under the race detector (#1761). The clips decode in
+// parallel.
 func TestDecodeVideoFrames(t *testing.T) {
-	for _, c := range []struct{ file, mt string }{
-		{"turtle-h264.mp4", "video/mp4"},
-		{"turtle-h265.mov", "video/quicktime"},
-		{"turtle-vp9.mp4", "video/mp4"},
-		{"turtle-av1.mp4", "video/mp4"},
-		{"turtle-vp9-444.mp4", "video/mp4"},
-		{"turtle-vp9-10bit.mp4", "video/mp4"},
-		{"turtle-vp9-422-12bit.mp4", "video/mp4"},
+	for _, c := range []struct {
+		file, mt string
+		options  bool
+	}{
+		{"turtle-h264.mp4", "video/mp4", true},
+		{"turtle-h265.mov", "video/quicktime", true},
+		{"turtle-vp9.mp4", "video/mp4", true},
+		{"turtle-av1.mp4", "video/mp4", true},
+		{"turtle-vp9-444.mp4", "video/mp4", false},
+		{"turtle-vp9-10bit.mp4", "video/mp4", false},
+		{"turtle-vp9-422-12bit.mp4", "video/mp4", false},
 	} {
-		data := readTestdata(t, c.file)
-		frames, err := DecodeVideo(c.mt, data, VideoOptions{})
-		if err != nil {
-			t.Fatalf("%s: %v", c.file, err)
-		}
-		if len(frames) != 3 {
-			t.Fatalf("%s: %d frames, want 3 (1 a second of 3 seconds)", c.file, len(frames))
-		}
-		for i, f := range frames {
-			if b := f.Bounds(); b.Dx() != 320 || b.Dy() != 180 {
-				t.Errorf("%s: frame %d is %v", c.file, i, b)
+		t.Run(c.file, func(t *testing.T) {
+			t.Parallel()
+			data := readTestdata(t, c.file)
+			frames, err := DecodeVideo(c.mt, data, VideoOptions{})
+			if err != nil {
+				t.Fatalf("%s: %v", c.file, err)
 			}
-			got := blockMeans(f)
-			for j := range got {
-				for k := range got[j] {
-					if d := math.Abs(got[j][k] - wantBlocks[c.file][i][j][k]); d > 0.6 {
-						t.Fatalf("%s: frame %d block %d channel %d is %.1f, ffmpeg's %.1f", c.file, i, j, k, got[j][k], wantBlocks[c.file][i][j][k])
+			if len(frames) != 3 {
+				t.Fatalf("%s: %d frames, want 3 (1 a second of 3 seconds)", c.file, len(frames))
+			}
+			for i, f := range frames {
+				if b := f.Bounds(); b.Dx() != 320 || b.Dy() != 180 {
+					t.Errorf("%s: frame %d is %v", c.file, i, b)
+				}
+				got := blockMeans(f)
+				for j := range got {
+					for k := range got[j] {
+						if d := math.Abs(got[j][k] - wantBlocks[c.file][i][j][k]); d > 0.6 {
+							t.Fatalf("%s: frame %d block %d channel %d is %.1f, ffmpeg's %.1f", c.file, i, j, k, got[j][k], wantBlocks[c.file][i][j][k])
+						}
 					}
 				}
 			}
-		}
-		// The interval and the rate pick the same frames.
-		one, err := DecodeVideo(c.mt, data, VideoOptions{Start: time.Second, End: 2 * time.Second})
-		if err != nil || len(one) != 1 || blockMeans(one[0]) != blockMeans(frames[1]) {
-			t.Errorf("%s: 1s to 2s: %d frames, %v; want the frame at 1s", c.file, len(one), err)
-		}
-		two, err := DecodeVideo(c.mt, data, VideoOptions{FPS: 2})
-		if err != nil || len(two) != 6 || blockMeans(two[2]) != blockMeans(frames[1]) || blockMeans(two[4]) != blockMeans(frames[2]) {
-			t.Errorf("%s: at 2 fps: %d frames, %v; want 6, every other one the 1 fps frame", c.file, len(two), err)
-		}
+			if !c.options {
+				return
+			}
+			// The interval and the rate pick the same frames.
+			one, err := DecodeVideo(c.mt, data, VideoOptions{Start: time.Second, End: 2 * time.Second})
+			if err != nil || len(one) != 1 || blockMeans(one[0]) != blockMeans(frames[1]) {
+				t.Errorf("%s: 1s to 2s: %d frames, %v; want the frame at 1s", c.file, len(one), err)
+			}
+			two, err := DecodeVideo(c.mt, data, VideoOptions{FPS: 2})
+			if err != nil || len(two) != 6 || blockMeans(two[2]) != blockMeans(frames[1]) || blockMeans(two[4]) != blockMeans(frames[2]) {
+				t.Errorf("%s: at 2 fps: %d frames, %v; want 6, every other one the 1 fps frame", c.file, len(two), err)
+			}
+		})
 	}
 }
 

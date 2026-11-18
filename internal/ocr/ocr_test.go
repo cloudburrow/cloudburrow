@@ -2,6 +2,7 @@ package ocr
 
 import (
 	"context"
+	"errors"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -54,14 +55,11 @@ func TestReadScan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	img := load(t, "scan.png")
+	g := gray(load(t, "scan.png"))
 	for _, deg := range []int{0, 90, 180, 270} {
-		g := gray(img)
-		// Turn the page clockwise by deg, as a scanner might have.
-		turned := g
-		for range deg / 90 {
-			turned = rotate(rotate(rotate(turned, 90), 90), 90)
-		}
+		// Turn the page clockwise by deg, as a scanner might have: rotate
+		// turns it counter-clockwise.
+		turned := rotate(g, (360-deg)%360)
 		start := time.Now()
 		r, err := Read(context.Background(), turned, 300)
 		if err != nil {
@@ -77,5 +75,20 @@ func TestReadScan(t *testing.T) {
 		if c > 0.05 {
 			t.Errorf("turned %d: CER %.3f over 0.05; text:\n%s", deg, c, r.Text)
 		}
+	}
+}
+
+// TestReadStopsWhenCancelled checks that a read whose context is done
+// stops (the runtime no longer closes the module on it, engine.call checks
+// it), and that the next read still works.
+func TestReadStopsWhenCancelled(t *testing.T) {
+	img := load(t, "scan.png")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Read(ctx, img, 300); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Read with a cancelled context = %v; want context.Canceled", err)
+	}
+	if r, err := Read(context.Background(), img, 300); err != nil || r.Model != "eng" {
+		t.Fatalf("Read after a cancelled one = %+v, %v", r, err)
 	}
 }
