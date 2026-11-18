@@ -30,7 +30,7 @@ import (
 //     sent to those revisions will get the same error as if the revisions
 //     were disabled."
 //
-// The page names no status code. 503 is UNVERIFIED (2026-11-18): it is the
+// The page names no status code. 503 is UNVERIFIED (re-read 2026-11-18): it is the
 // status of "Service Unavailable", and the body is "Service unavailable".
 //
 // Locally the service's URL is taken from Knative's route and given its own

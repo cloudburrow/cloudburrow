@@ -114,7 +114,8 @@ func unavailable(code int, body string) bool {
 // client, answers its URL 503 "Service unavailable", as Google's
 // manual-scaling page says ("any further requests to the service URL will
 // fail with a Service unavailable or Service disabled error"; the status
-// is UNVERIFIED), while the tag-only revision keeps serving through its tag
+// is UNVERIFIED, re-read 2026-11-18: no status code is named on
+// https://docs.cloud.google.com/run/docs/configuring/services/manual-scaling), while the tag-only revision keeps serving through its tag
 // URL ("revisions that are only active due to traffic tags are not
 // impacted"). MANUAL 1 serves the URL again.
 func TestRunServiceDisabledAnswersUnavailable(t *testing.T) {
