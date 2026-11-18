@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -69,6 +70,10 @@ type bqConnections struct {
 	path  string
 	logf  func(string, ...any)
 	now   func() time.Time
+	// resourceManager is the instance's Resource Manager, whose project
+	// policies testIamPermissions reads for bigquery.connections.use
+	// (#1770), as the remote models' check does (connectionauth.go).
+	resourceManager string
 }
 
 func connectionsStateFile(dir string) string { return filepath.Join(dir, "connections.json") }
@@ -351,11 +356,28 @@ func (c *bqConnections) serve(w http.ResponseWriter, r *http.Request, numbers *p
 			if raw, ok := req["permissions"]; ok {
 				_ = json.Unmarshal(raw, &perms)
 			}
+			// bigquery.connections.use is the one permission the
+			// instance checks (connectionauth.go, #1765): it is held
+			// as that check finds it, through the connection's policy
+			// or its project's, by the identity the front takes every
+			// caller to be (#1770). The other bigquery.connections.*
+			// permissions are checked nowhere, so are held.
 			var held []string
 			for _, p := range perms {
-				if strings.HasPrefix(p, "bigquery.connections.") {
-					held = append(held, p)
+				if !strings.HasPrefix(p, "bigquery.connections.") {
+					continue
 				}
+				if p == permConnectionsUse {
+					ok, code, msg := c.callerMayUse(r.Context(), m[1], number, numbers, cn)
+					if code != 0 {
+						fail(code, msg)
+						return true
+					}
+					if !ok {
+						continue
+					}
+				}
+				held = append(held, p)
 			}
 			res := map[string]any{}
 			if held != nil {
@@ -517,4 +539,48 @@ func (c *bqConnections) createCloudResource(number int64, location, id string) (
 	c.saveLocked()
 	cp := *cn
 	return &cp, nil
+}
+
+// callerMayUse is whether the caller holds bigquery.connections.use on cn
+// (#1770), as checkConnectionUse decides it: through an unconditioned
+// binding of the connection's policy or of its project's, whose ID is
+// raw, the project the request named, or the one number names.
+func (c *bqConnections) callerMayUse(ctx context.Context, raw string, number int64, numbers *projectNumbers, cn *bqConnection) (bool, int, string) {
+	id := raw
+	if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+		if known, ok := numbers.idOf(n); ok {
+			id = known
+		} else if named, ok := callerProjectIn(cn.bindings(), n, numbers); ok {
+			// A number the host did not send, derived from the ID: the
+			// policy's own binding to the caller of that project names it.
+			id = named
+		}
+	}
+	caller := "serviceAccount:" + callerIdentity(id)
+	if bindingsGrant(cn.bindings(), caller, permConnectionsUse) {
+		return true, 0, ""
+	}
+	proj, code, msg := front{resourceManager: c.resourceManager}.projectBindings(ctx, id)
+	if code != 0 {
+		return false, code, msg
+	}
+	return bindingsGrant(proj, caller, permConnectionsUse), 0, ""
+}
+
+// callerProjectIn is the project ID whose number is n, named by a binding
+// to the caller of that project (callerIdentity) in bindings.
+func callerProjectIn(bindings []policyBinding, n int64, numbers *projectNumbers) (string, bool) {
+	for _, b := range bindings {
+		for _, m := range b.Members {
+			rest, ok := strings.CutPrefix(strings.TrimSpace(m), "serviceAccount:cloudburrow-local@")
+			if !ok {
+				continue
+			}
+			id, ok := strings.CutSuffix(rest, ".iam.gserviceaccount.com")
+			if ok && id != "" && numbers.of(id) == n {
+				return id, true
+			}
+		}
+	}
+	return "", false
 }

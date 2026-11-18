@@ -129,9 +129,18 @@ func TestBigQueryConnectionAPI(t *testing.T) {
 		again.Bindings[0].Role != "roles/bigquery.connectionUser" {
 		t.Errorf("GetIamPolicy after set: %+v, %v", again, err)
 	}
-	perms, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: cr.Name, Permissions: []string{"bigquery.connections.use"}})
-	if err != nil || len(perms.Permissions) != 1 {
-		t.Errorf("TestIamPermissions: %+v, %v", perms, err)
+	// bigquery.connections.use is held as the instance checks it (#1770):
+	// granted here on the connection to the identity it takes every
+	// caller to be; bigquery.connections.get, checked nowhere, is held.
+	caller := "serviceAccount:cloudburrow-local@" + project + ".iam.gserviceaccount.com"
+	set.Bindings = []*iampb.Binding{{Role: "roles/bigquery.connectionUser", Members: []string{caller}}}
+	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: cr.Name, Policy: set}); err != nil {
+		t.Fatalf("SetIamPolicy to the caller: %v", err)
+	}
+	perms, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: cr.Name,
+		Permissions: []string{"bigquery.connections.use", "bigquery.connections.get", "bigquery.tables.get"}})
+	if err != nil || len(perms.Permissions) != 2 || perms.Permissions[0] != "bigquery.connections.use" {
+		t.Errorf("TestIamPermissions with the caller granted on the connection: %+v, %v", perms, err)
 	}
 
 	for _, n := range []string{cr.Name, sq.Name} {

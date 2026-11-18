@@ -218,18 +218,18 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{}                           // iam.go, #1231
-	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
-	settings := &projectOptions{}                   // projectoptions.go, #1375
-	jobRows := &jobsTable{logf: o.logf}             // jobstable.go, #1378
-	newest := &newestJobs{}                         // joblisting.go, #1633
-	open := &openJobs{}                             // jobsopen.go, #1633
-	tables := &tableSettings{}                      // tableoptions.go, #1390
-	linked := &linkedDatasets{}                     // loglinks.go, #1423
-	icebergs := &icebergTables{}                    // iceberg.go, #1427
-	dropped := &droppedStore{}                      // dropped.go, #1460
-	models := &bqModels{}                           // models.go, #1465
-	connections := &bqConnections{}                 // connections.go, #1755
+	iam := &iamPolicies{}                                             // iam.go, #1231
+	buffers := &streamBuffers{stamp: o.streamTimes}                   // streamingbuffer.go, #1273, #1370
+	settings := &projectOptions{}                                     // projectoptions.go, #1375
+	jobRows := &jobsTable{logf: o.logf}                               // jobstable.go, #1378
+	newest := &newestJobs{}                                           // joblisting.go, #1633
+	open := &openJobs{}                                               // jobsopen.go, #1633
+	tables := &tableSettings{}                                        // tableoptions.go, #1390
+	linked := &linkedDatasets{}                                       // loglinks.go, #1423
+	icebergs := &icebergTables{}                                      // iceberg.go, #1427
+	dropped := &droppedStore{}                                        // dropped.go, #1460
+	models := &bqModels{}                                             // models.go, #1465
+	connections := &bqConnections{resourceManager: o.resourceManager} // connections.go, #1755
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.logf != nil {

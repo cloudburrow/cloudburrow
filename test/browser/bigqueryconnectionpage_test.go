@@ -36,8 +36,12 @@ func TestBigQueryConnectionPageThroughTheBrowser(t *testing.T) {
 	t.Cleanup(func() { act("deleteconnection", map[string]string{"connection": id}) })
 
 	p.navigate("/bigquery" + q)
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view a")].some((a) => a.textContent.includes(%q))`, id))
-	p.clickText("#view a", id)
+	// The connection's row (its ID, then its type and service account)
+	// links to its page.
+	sel := fmt.Sprintf(`#view a[href*=%q]`, "/bigquery/-connections/us/"+id)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, sel))
+	var clicked bool
+	p.eval(fmt.Sprintf(`(document.querySelector(%q).click(), true)`, sel), &clicked)
 	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/bigquery/-connections/us/"+id))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Browser AI")`)
 	var text string
