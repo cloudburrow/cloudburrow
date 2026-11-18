@@ -556,7 +556,7 @@ func (c *bqConnections) callerMayUse(ctx context.Context, raw string, number int
 			id = named
 		}
 	}
-	caller := "serviceAccount:" + callerIdentity(id)
+	caller := front{resourceManager: c.resourceManager}.members(ctx, "serviceAccount:"+callerIdentity(id))
 	if bindingsGrant(cn.bindings(), caller, permConnectionsUse) {
 		return true, 0, ""
 	}

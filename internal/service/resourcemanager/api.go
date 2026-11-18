@@ -635,6 +635,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.folders.restRoutes(router, NewOrganizationsServer(s.projects.reg), ops)
 	s.folders.v2Routes(router, ops)
 	s.tags.restRoutes(router)
+	s.projects.reg.identityRoutes(router)
 	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)

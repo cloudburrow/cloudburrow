@@ -73,8 +73,9 @@ func roleGrants(role, perm string) bool {
 	return false
 }
 
-// bindingsGrant reports whether bindings give member perm.
-func bindingsGrant(bindings []policyBinding, member, perm string) bool {
+// bindingsGrant reports whether bindings give perm to an account whose
+// members (its own and its groups', principals) are members.
+func bindingsGrant(bindings []policyBinding, members []string, perm string) bool {
 	for _, b := range bindings {
 		if len(b.Condition) > 0 && string(b.Condition) != "null" {
 			continue
@@ -84,8 +85,13 @@ func bindingsGrant(bindings []policyBinding, member, perm string) bool {
 		}
 		for _, m := range b.Members {
 			m = strings.TrimSpace(m)
-			if m == "allUsers" || m == "allAuthenticatedUsers" || strings.EqualFold(m, member) {
+			if m == "allUsers" || m == "allAuthenticatedUsers" {
 				return true
+			}
+			for _, x := range members {
+				if strings.EqualFold(m, x) {
+					return true
+				}
 			}
 		}
 	}
@@ -155,13 +161,13 @@ func (f front) checkConnectionUse(ctx context.Context, connProject, project stri
 			return code, msg
 		}
 	}
-	caller := "serviceAccount:" + callerIdentity(project)
+	caller := f.members(ctx, "serviceAccount:"+callerIdentity(project))
 	if !bindingsGrant(cn.bindings(), caller, permConnectionsUse) && !bindingsGrant(connProj, caller, permConnectionsUse) {
 		return 403, fmt.Sprintf("Access Denied: Connection %s: Permission %s denied on connection %s (or it may not exist).",
 			cn.name(), permConnectionsUse, cn.name())
 	}
 	sa := cn.serviceAccount()
-	if sa == "" || !bindingsGrant(proj, "serviceAccount:"+sa, permVertexPredict) {
+	if sa == "" || !bindingsGrant(proj, f.members(ctx, "serviceAccount:"+sa), permVertexPredict) {
 		return 400, fmt.Sprintf("%s does not have the permission to access or use the endpoint. Please grant the Vertex AI user role "+
 			"(roles/aiplatform.user) to the %s on project %s.", sa, sa, project)
 	}
@@ -204,7 +210,7 @@ func (f front) ensureDefaultConnection(ctx context.Context, project string, numb
 	if code != 0 {
 		return nil, code, msg
 	}
-	caller := "serviceAccount:" + callerIdentity(project)
+	caller := f.members(ctx, "serviceAccount:"+callerIdentity(project))
 	if cn == nil {
 		if !bindingsGrant(proj, caller, permConnectionsCreate) {
 			return nil, 403, fmt.Sprintf("Access Denied: Project %s: The project has no default connection in %s, and making one needs "+
@@ -216,7 +222,7 @@ func (f front) ensureDefaultConnection(ctx context.Context, project string, numb
 		}
 	}
 	sa := cn.serviceAccount()
-	if sa != "" && !bindingsGrant(proj, "serviceAccount:"+sa, permVertexPredict) && bindingsGrant(proj, caller, permProjectSetIAM) {
+	if sa != "" && !bindingsGrant(proj, f.members(ctx, "serviceAccount:"+sa), permVertexPredict) && bindingsGrant(proj, caller, permProjectSetIAM) {
 		if code, msg := f.grantProjectRole(ctx, project, "roles/aiplatform.user", "serviceAccount:"+sa); code != 0 {
 			return nil, code, msg
 		}
@@ -259,4 +265,48 @@ func (f front) grantProjectRole(ctx context.Context, project, role, member strin
 		return 500, "cloudburrow: could not grant " + role + " on the project: " + errorMessage(body, status)
 	}
 	return 0, ""
+}
+
+// members are the policy members that name member's account: member
+// itself and group:G for each Cloud Identity group it belongs to, directly
+// or through nested groups (#1812), which the front asks Resource
+// Manager's Cloud Identity surface for (searchTransitiveGroups). The
+// accounts checked here are service accounts, which no domain: member
+// names. Without Resource Manager, or when it does not answer, member
+// alone: a group then grants nothing, never more.
+func (f front) members(ctx context.Context, member string) []string {
+	out := []string{member}
+	_, email, ok := strings.Cut(member, ":")
+	if !ok || f.resourceManager == "" {
+		return out
+	}
+	q := url.Values{}
+	q.Set("query", "member_key_id == '"+strings.ReplaceAll(email, "'", "")+"' && 'cloudidentity.googleapis.com/groups.discussion_forum' in labels")
+	q.Set("pageSize", "1000")
+	for page := 0; page < 20; page++ {
+		u := strings.TrimRight(f.resourceManager, "/") + "/v1/groups/-/memberships:searchTransitiveGroups?" + q.Encode()
+		status, body, err := serviceCall(ctx, "Cloud Identity searchTransitiveGroups of "+email, http.MethodGet, u, "", nil)
+		if err != nil || status != http.StatusOK {
+			return out
+		}
+		var resp struct {
+			Memberships []struct {
+				GroupKey struct {
+					ID string `json:"id"`
+				} `json:"groupKey"`
+			} `json:"memberships"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if json.Unmarshal(body, &resp) != nil {
+			return out
+		}
+		for _, m := range resp.Memberships {
+			out = append(out, "group:"+m.GroupKey.ID)
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		q.Set("pageToken", resp.NextPageToken)
+	}
+	return out
 }

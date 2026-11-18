@@ -55,7 +55,7 @@ func createForms(t *testing.T) map[string][]console.Field {
 		projectsProvider{}, storageProvider{}, pubsubProvider{}, tasksProvider{}, runProvider{}, runJobsProvider{},
 		secretsProvider{}, kmsProvider{}, schedulerProvider{},
 		bigtableProvider{}, spannerProvider{}, cloudSQLProvider{}, cloudSQLMySQLProvider{},
-		firestoreProvider{}, datastoreProvider{}, bigqueryProvider{},
+		firestoreProvider{}, datastoreProvider{}, bigqueryProvider{}, iamGroupsProvider{},
 	} {
 		creator, ok := p.(console.Creator)
 		if !ok {

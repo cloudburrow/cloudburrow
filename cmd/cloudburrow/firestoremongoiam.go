@@ -91,6 +91,7 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 	if err != nil {
 		return m
 	}
+	ix := newMemberIndex(reg, emails)
 	// A user credentials principal names its project by number; the
 	// front keys it by ID (firestoreadmin.UserCredsPrincipal).
 	ids := map[string]string{}
@@ -128,12 +129,10 @@ func (f *firestoreMongoIAM) payload(now time.Time) firestoreadmin.MongoIAM {
 					grant(key, p.ProjectID, b.Role, b.Condition)
 					continue
 				}
-				kind, email, ok := strings.Cut(member, ":")
-				email = strings.ToLower(email)
-				if !ok || (kind != "serviceAccount" && kind != "user") || !emails[email] {
-					continue
+				// group: and domain: members name their accounts (#1812).
+				for _, email := range ix.accounts(member) {
+					grant(email, p.ProjectID, b.Role, b.Condition)
 				}
-				grant(email, p.ProjectID, b.Role, b.Condition)
 			}
 		}
 	}

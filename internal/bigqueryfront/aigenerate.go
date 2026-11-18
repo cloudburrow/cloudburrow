@@ -717,7 +717,7 @@ func (f front) resolveAICall(r *http.Request, q queryOptions, project string, c 
 		if code != 0 {
 			return a, code, msg
 		}
-		if !bindingsGrant(proj, "serviceAccount:"+callerIdentity(project), permVertexPredict) {
+		if !bindingsGrant(proj, f.members(r.Context(), "serviceAccount:"+callerIdentity(project)), permVertexPredict) {
 			return a, 403, fmt.Sprintf("Access Denied: Project %s: The user %s does not have permission %s: "+
 				"grant the Vertex AI user role (roles/aiplatform.user), or pass a connection_id.", project, callerIdentity(project), permVertexPredict)
 		}

@@ -64,7 +64,9 @@ func (d serviceAccountDirectory) Granted(member, account, permission string) boo
 		for _, b := range pol.Bindings {
 			held := false
 			for _, m := range b.Members {
-				if strings.EqualFold(m, member) {
+				// A group: or domain: member holds it for its accounts
+				// (#1812).
+				if d.heldBy(m, member) {
 					held = true
 				}
 			}
@@ -122,4 +124,12 @@ func signAuthorizer(creds *metadata.Credentials, d serviceAccountDirectory) reso
 		}
 		return nil
 	}
+}
+
+// heldBy is whether the policy member m names the account member
+// (serviceAccount:EMAIL): itself, a group it is in (nested too) or its
+// domain (#1812).
+func (d serviceAccountDirectory) heldBy(m, member string) bool {
+	_, email, _ := strings.Cut(member, ":")
+	return strings.EqualFold(m, member) || d.reg.MemberNames(m, email)
 }

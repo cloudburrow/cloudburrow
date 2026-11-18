@@ -190,6 +190,10 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 	if p.writable(project) != nil {
 		return nil
 	}
+	return append(p.detailActions(ctx, path), p.tagActionsAt(path)...) // consolebigquerytags.go, #1780
+}
+
+func (p bigqueryProvider) detailActions(ctx context.Context, path []string) []console.Action {
 	switch len(path) {
 	case 1:
 		actions := []console.Action{{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()}}
@@ -423,6 +427,9 @@ func (p bigqueryProvider) tableMetadata(ctx context.Context, datasetID, tableID 
 func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
+		return err
+	}
+	if ok, err := p.tagActAt(ctx, path, action, values); ok { // consolebigquerytags.go, #1780
 		return err
 	}
 	switch {
