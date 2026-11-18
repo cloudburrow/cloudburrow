@@ -34,8 +34,16 @@ func TestConsoleIAMRoles(t *testing.T) {
 		t.Fatalf("Create in the organization = %q, %v", org, err)
 	}
 	l, _ := p.List(ctx, "console-roles")
-	if len(l.Items) != 2 || l.Items[0].Fields["Permissions"] != "2" || l.Items[0].Fields["Stage"] != "BETA" {
-		t.Fatalf("List = %+v", l.Items)
+	if len(l.Items) < 2400 || l.Items[0].Fields["Permissions"] != "2" || l.Items[0].Fields["Stage"] != "BETA" || l.Items[2].Fields["Type"] != "Predefined" {
+		t.Fatalf("List = %+v", l.Items[:3])
+	}
+	// A predefined role (#1746): its page lists its permissions, read-only.
+	pd, _ := p.Detail(ctx, "console-roles", []string{"predefined:storage.objectViewer"})
+	if pd.Unavailable != "" || pd.Edit != nil || pd.Summary[0].Value != "Storage Object Viewer" || len(pd.Sections[0].Listing.Items) == 0 {
+		t.Fatalf("a predefined role's Detail = %+v", pd)
+	}
+	if err := p.Delete(ctx, "console-roles", "predefined:storage.objectViewer"); err == nil {
+		t.Error("deleted a predefined role")
 	}
 	d, _ := p.Detail(ctx, "console-roles", []string{"consoleRole"})
 	if d.Unavailable != "" || d.Edit == nil || len(d.Sections[0].Listing.Items) != 2 {

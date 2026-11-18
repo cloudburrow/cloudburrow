@@ -3748,15 +3748,16 @@
     "Key": "iam",
     "Title": "IAM (custom roles)",
     "counts": {
-      "Unimplemented": 24,
-      "Verified": 7
+      "Unimplemented": 23,
+      "Verified": 8
     },
     "rows": [
       {
         "method": "google.iam.admin.v1.IAM/CreateRole",
         "status": "Verified",
         "tests": [
-          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
       {
@@ -3773,7 +3774,8 @@
         "method": "google.iam.admin.v1.IAM/DeleteRole",
         "status": "Verified",
         "tests": [
-          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
       {
@@ -3815,7 +3817,8 @@
         "method": "google.iam.admin.v1.IAM/GetRole",
         "status": "Verified",
         "tests": [
-          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
       {
@@ -3831,13 +3834,14 @@
       {
         "method": "google.iam.admin.v1.IAM/LintPolicy",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served: #1743 serves custom roles and QueryTestablePermissions only; grantable roles, auditable services and policy lint need Google's predefined role catalog, which CloudBurrow does not carry"
+        "note": "returns UNIMPLEMENTED (in-process check): not served yet: policy lint is not built (#1746 serves predefined roles and QueryGrantableRoles)"
       },
       {
         "method": "google.iam.admin.v1.IAM/ListRoles",
         "status": "Verified",
         "tests": [
-          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
       {
@@ -3858,12 +3862,14 @@
       {
         "method": "google.iam.admin.v1.IAM/QueryAuditableServices",
         "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served: #1743 serves custom roles and QueryTestablePermissions only; grantable roles, auditable services and policy lint need Google's predefined role catalog, which CloudBurrow does not carry"
+        "note": "returns UNIMPLEMENTED (in-process check): not served yet: auditable services are not built (#1746 serves predefined roles and QueryGrantableRoles)"
       },
       {
         "method": "google.iam.admin.v1.IAM/QueryGrantableRoles",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): not served: #1743 serves custom roles and QueryTestablePermissions only; grantable roles, auditable services and policy lint need Google's predefined role catalog, which CloudBurrow does not carry"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
+        ]
       },
       {
         "method": "google.iam.admin.v1.IAM/QueryTestablePermissions",
@@ -3896,7 +3902,8 @@
         "method": "google.iam.admin.v1.IAM/UndeleteRole",
         "status": "Verified",
         "tests": [
-          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles"
+          "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
       {

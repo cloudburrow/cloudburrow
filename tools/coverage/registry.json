@@ -498,7 +498,7 @@
   "google.iam.admin.v1.IAM/ListServiceAccounts": "unimplemented",
   "google.iam.admin.v1.IAM/PatchServiceAccount": "unimplemented",
   "google.iam.admin.v1.IAM/QueryAuditableServices": "unimplemented",
-  "google.iam.admin.v1.IAM/QueryGrantableRoles": "unimplemented",
+  "google.iam.admin.v1.IAM/QueryGrantableRoles": "implemented",
   "google.iam.admin.v1.IAM/QueryTestablePermissions": "implemented",
   "google.iam.admin.v1.IAM/SetIamPolicy": "unimplemented",
   "google.iam.admin.v1.IAM/SignBlob": "unimplemented",
