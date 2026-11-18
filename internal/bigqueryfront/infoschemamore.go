@@ -32,16 +32,18 @@ import (
 // (logicalbytes.go, #1458), and so is total_billable_bytes but in a
 // dataset billed by physical bytes, where it is NULL. last_modified_time,
 // "the most recent time that data was written to the partition", is the
-// latest change to its rows in the engine's change table (changeWrites),
-// the engine's transaction time, by the instance clock (#1487); NULL where
-// that table holds none (it keeps seven days, and none of a table made
-// before the engine kept them). An ingestion-time partitioned table's
-// change table keeps each change's _PARTITIONTIME (googlesqlite patch
-// 0050, #1458); one made before that patch has none, and its partitions'
-// last_modified_time is NULL. storage_tier is
-// ACTIVE for a table made in the last 90 days (no partition of it can have
-// gone 90 days unmodified, https://cloud.google.com/bigquery/pricing#storage),
-// and NULL otherwise. An ingestion-time partitioned table's partitions are
+// partition's last write the engine holds, in its change table or, since
+// googlesqlite patch 0090, its kept table (partitionlastwrites.go), the
+// engine's transaction time, by the instance clock (#1487); NULL where no
+// record is left (one let go of before patch 0090). An ingestion-time
+// partitioned table's change table keeps each change's _PARTITIONTIME
+// (googlesqlite patch 0050, #1458); one made before that patch has none,
+// and its partitions' last_modified_time is NULL. storage_tier is ACTIVE
+// for a table made in the last 90 days (no partition of it can have gone
+// 90 days unmodified, https://cloud.google.com/bigquery/pricing#storage),
+// and otherwise by the partition's last write: ACTIVE within 90 days,
+// LONG_TERM after, NULL where it is unknown. An ingestion-time partitioned
+// table's partitions are
 // its rows' _PARTITIONTIME, which CloudBurrow's engine keeps (#1277).
 //
 // The constraint views read each table's tableConstraints: the primary
@@ -138,6 +140,10 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 	}
 	project := projectOf(f.base)
 	now := f.buffers.clock()
+	hours, _, ok := f.timeTravelHours(r, dataset)
+	if !ok {
+		hours = 168
+	}
 	// total_billable_bytes is the logical bytes but in a dataset billed by
 	// physical bytes, where it is NULL (physical bytes are not kept).
 	billable := "p.b"
@@ -159,7 +165,12 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 		if !ok {
 			return "", http.StatusInternalServerError, "cloudburrow: could not read the range partitioning of " + name
 		}
-		tier := "CAST(NULL AS STRING)"
+		// storage_tier: ACTIVE for a table made less than 90 days ago
+		// (none of its partitions can have gone 90 days unmodified), else
+		// by the partition's last write (partitionlastwrites.go),
+		// LONG_TERM once 90 days old, NULL where it is unknown.
+		cut := "TIMESTAMP_MICROS(" + strconv.FormatInt(now.Add(-90*24*time.Hour).UnixMicro(), 10) + ")"
+		tier := "CASE WHEN c.t IS NULL THEN CAST(NULL AS STRING) WHEN c.t > " + cut + " THEN 'ACTIVE' ELSE 'LONG_TERM' END"
 		if ms, err := strconv.ParseInt(fmt.Sprint(t["creationTime"]), 10, 64); err == nil && now.Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
 			tier = "'ACTIVE'"
 		}
@@ -178,11 +189,12 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 		if id != "" {
 			parts += " GROUP BY 1"
 		}
-		// last_modified_time: the partition's latest change in the
-		// engine's change table (changeWrites), NULL where it has none.
+		// last_modified_time: the partition's last write the engine
+		// holds, in its change table or kept table (partitionlastwrites.go),
+		// NULL where it holds none.
 		changed := "SELECT CAST(NULL AS STRING) AS pid, CAST(NULL AS TIMESTAMP) AS t"
-		if c := f.changeWrites(r, project, dataset, name, pm.ingestion()); c != "" {
-			changed = "SELECT " + pid + " AS pid, MAX(_CHANGE_TIMESTAMP) AS t FROM " + c + " GROUP BY 1"
+		if c := f.lastWrites(r, project, dataset, name, pm, pid, hours); c != "" {
+			changed = "SELECT * FROM " + c
 		}
 		selects = append(selects, "SELECT "+head+"p.pid AS partition_id, p.n AS total_rows, p.b AS total_logical_bytes, "+
 			billable+" AS total_billable_bytes, c.t AS last_modified_time, "+tier+" AS storage_tier FROM ("+parts+") AS p LEFT JOIN ("+
