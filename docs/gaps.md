@@ -321,8 +321,10 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 Not gaps to close; each stays until its decision is amended.
 
-- **Cloud Storage ACLs and object IAM** (`bucketAccessControls.*`, `objectAccessControls.*`,
-  `defaultObjectAccessControls.*`, `objects.*IamPolicy`): 501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504.
+- **Cloud Storage object IAM** (`objects.getIamPolicy`, `setIamPolicy`, `testIamPermissions`):
+  501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504. The ACL methods
+  (`bucketAccessControls.*`, `objectAccessControls.*`, `defaultObjectAccessControls.*`) are
+  stored, not enforced, since #1233.
 - **IAM Conditions** on the policies of services Google does not list as allowing them (Pub/Sub,
   Cloud Tasks, Artifact Registry, Secure Source Manager, Cloud Functions): refused INVALID_ARGUMENT,
   as Google refuses them; served on projects, folders and the organization since #1742, and on the
@@ -330,11 +332,16 @@ Not gaps to close; each stays until its decision is amended.
   buckets with uniform bucket-level access, tag keys and values) since #1745. **Audit configs** are refused
   too, except on projects, folders and the organization, where they are stored, not acted on (#1486).
 - **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them,
-  but for Memorystore's IAM auth, which checks a client's token and the project's connect role (amended by #1614).
-- **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
-  service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
+  but for the checks it lists: Memorystore's IAM auth (#1614), Firestore with MongoDB
+  compatibility's sign-ins and command permissions (#1738), and IAM Credentials on service
+  accounts the IAM API created (#1747, #1751), each against this instance's minted tokens and the
+  project's stored policy.
+- **IAM Credentials `signBlob` as the instance's own account** (`-`, or the ADC fixture's
+  email): UNIMPLEMENTED, naming the reason, as that account is not an IAM service account and
+  has no key of its own. On an account the IAM API created it is served and checked (#1747);
+  the signature is local, so a signed URL made with it is accepted by no Google service.
 - **Cloud SQL IAM database authentication** (`generateEphemeralCert` with an access token,
-  `cloudsql.iam_authentication`, users of an IAM type): 501, as CloudBurrow has no identities
+  `cloudsql.iam_authentication`, users of an IAM type): 501, as no Cloud SQL sign-in here checks a Google identity
   ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
 - **Local AI and embeddings in per-PR CI**, and the default build's embeddings answering 501:
   maintainer decisions recorded in compatibility.md (§What CI does not run, §Local AI, #41).

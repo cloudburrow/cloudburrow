@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -443,7 +443,7 @@ page. Every compatibility.md row for these methods reads ***Stored, not enforced
 
 ### Memorystore IAM auth (amended 2026-11-17 by #1614)
 
-The one exception to rule 1, decided with #1614, which asked for Memorystore for Redis Cluster's
+The first exception to rule 1, decided with #1614, which asked for Memorystore for Redis Cluster's
 and Valkey's IAM auth "served as Google documents it". A client of a cluster or instance with
 IAM auth sends an access token as its AUTH password, and Google refuses a token it did not issue
 or whose principal lacks `redis.dbConnectionUser` (Redis Cluster) or `memorystore.dbConnectionUser`
@@ -451,9 +451,31 @@ or whose principal lacks `redis.dbConnectionUser` (Redis Cluster) or `memorystor
 Google. The token is checked the only way a local token can be: against the SHA-256s of the
 access tokens this instance minted, each with its account and expiry, and the project's stored
 policy (unconditioned bindings of those two roles, `serviceAccount:` and `user:` members; no basic
-roles, inheritance or conditions). Nothing else reads a stored policy; every other service still
-serves any caller (ADR-0004). The test that a principal without the role is refused proves only
+roles, inheritance or conditions; conditions are evaluated since #1742). Apart from the exceptions
+below, nothing else reads a stored policy; every other service still serves any caller (ADR-0004). The test that a principal without the role is refused proves only
 that this instance's own rule is applied, and its compatibility.md row says so.
+
+### Firestore with MongoDB compatibility and IAM Credentials (#1738, #1747, #1751)
+
+Three more exceptions to rule 1, each built in its maintainer's ticket (2026-11-17) and recorded
+here after the fact, on 2026-11-18, when the README, status.md and SECURITY.md were found still
+saying that no policy is read anywhere. They check the same things as Memorystore's IAM auth: a
+token this instance minted, by its SHA-256, and the roles (predefined or custom) and conditions
+of the project's stored policy. They never ask Google.
+
+- **Firestore with MongoDB compatibility** (#1738). A token sign-in (`PLAIN` as `access_token`,
+  or `MONGODB-OIDC`) needs a live token this instance minted. Each command needs the permissions
+  Google's IAM page lists for it, in the roles the principal holds on the database's project; a
+  SCRAM user's credentials are a principal of their own, with no permissions until granted.
+- **IAM Credentials** `generateAccessToken`, `generateIdToken`, `signBlob` and `signJwt` (#1747),
+  and the IAM API's deprecated `SignBlob` and `SignJwt` (#1751), on a service account the IAM API
+  created. The caller is the account its minted token names, and it needs the method's permission
+  on the account, its project, a folder above it or the organization: this one check follows
+  Google's hierarchy, because Google documents impersonation through inherited grants. The
+  instance's own account is not such an account, and keeps #303's behaviour: nothing is checked.
+
+As with Memorystore, a test that a principal without the role is refused proves only that this
+instance's own rule is applied, and the compatibility.md rows say so.
 
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row

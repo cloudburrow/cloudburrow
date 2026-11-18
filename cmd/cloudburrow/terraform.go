@@ -160,7 +160,7 @@ var terraformEndpoints = []terraformEndpoint{
 	// reached with its AUTH string, plans clean, updates its size and labels
 	// in place and destroys in TestTerraformRedisInstance, over the admin
 	// API's JSON on its port (Endpoints.MemorystoreAdmin), each instance a
-	// Valkey server of its own.
+	// server of its own, of its redis_version's image.
 	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Memorystore for Valkey (#1519): google_memorystore_instance applies,
 	// plans clean, changes and destroys in TestTerraformMemorystoreInstance,

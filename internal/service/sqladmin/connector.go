@@ -586,8 +586,9 @@ func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any
 // generateEphemeralCert is connect.generateEphemeralCert: it signs the
 // request's public key with the instance's CA, for one hour.
 // iamWhy is why IAM database authentication is not served: it signs a
-// database user in as a Google identity, and CloudBurrow has none (ADR-0004).
-const iamWhy = "IAM database authentication signs in as a Google identity, and CloudBurrow has no identities: " +
+// database user in as a Google identity, and no Cloud SQL sign-in here
+// checks one (ADR-0004; only the checks ADR-0006 lists read a token).
+const iamWhy = "IAM database authentication signs in as a Google identity, and no Cloud SQL sign-in here checks one: " +
 	"every local caller is trusted (docs/adr/0004-local-access-and-no-authentication.md)"
 
 func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine) (any, error) {

@@ -86,7 +86,8 @@ const (
 	// publishes no Memorystore emulator, and what runs is an open-source
 	// server of the kind Memorystore for Valkey and for Redis runs. The
 	// Memorystore admin API (redis.googleapis.com) describes this server, and
-	// runs a Valkey server of its own for each instance it creates (#1302).
+	// runs a server of its own for each instance it creates (#1302), Redis
+	// 6.2 or 7.0, or Valkey, by the instance's redis_version (#1386).
 	ServiceMemorystore Service = "memorystore"
 	// ServiceCloudSQLMySQL runs a real MySQL in the cluster (#297), the
 	// second Cloud SQL engine beside PostgreSQL, on the same terms: a real

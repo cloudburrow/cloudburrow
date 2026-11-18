@@ -569,8 +569,8 @@ func writeEnvJSON(w io.Writer, vars []envVar) {
 func printCredentials(w io.Writer, srv *metadata.Server, adcPath string) {
 	fmt.Fprintf(w, "  metadata:   http://%s  (Metadata-Flavor: Google required)\n", srv.Addr())
 	fmt.Fprintf(w, "  credentials: %s\n", adcPath)
-	fmt.Fprintln(w, "              generated locally and authorises nothing; CloudBurrow")
-	fmt.Fprintln(w, "              authenticates no request. `cloudburrow env` exports these.")
+	fmt.Fprintln(w, "              generated locally and authorises nothing; only the checks")
+	fmt.Fprintln(w, "              ADR-0006 lists read a token. `cloudburrow env` exports these.")
 }
 
 func serviceEnabled(cfg config.Config, s config.Service) bool {

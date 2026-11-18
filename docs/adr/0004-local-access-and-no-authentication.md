@@ -219,6 +219,21 @@ a loopback `Host` or `:authority` by hand is not caught. That takes code written
 the check, not an application calling Cloud Build as it would on Google, and it is why the steps
 stay off unless the developer turns them on.
 
+*Amendments recorded 2026-11-18*, when the README and status.md were found still repeating the
+first paragraph of this decision. Two things it says no longer hold, and both were decided in
+their own tickets:
+
+- **Signed URLs are verified** (#509, #577), failing closed: a bad signature, an unknown key
+  or an expired URL is 403, never 200. They verify against the HMAC keys and public keys this
+  instance holds, so a URL signed here proves nothing about Google, and one signed for Google
+  fails here.
+- **Some calls check a token this instance minted**, never one from Google, and never a
+  signature of Google's: IAM Credentials on a service account the IAM API created (an
+  unrecognised bearer is 401), Memorystore's IAM auth and Firestore with MongoDB
+  compatibility's token sign-ins. Each also reads the project's stored policy; those are the
+  exceptions [ADR-0006](0006-iam-policy-surface.md) lists. Every other service API still
+  ignores `Authorization` and serves any caller.
+
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.
 

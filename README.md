@@ -39,7 +39,7 @@ Started by default:
 | **Cloud Storage** | CloudBurrow | Buckets, objects, versioning, soft delete, retention and holds, lifecycle, CORS, IAM, HMAC keys, the XML API with multipart uploads, signed URLs, and **notifications to Pub/Sub** |
 | **Pub/Sub** | Google's own emulator | Topics, subscriptions, publish, pull, StreamingPull, push delivery |
 | **Cloud Tasks** | CloudBurrow | Queues, tasks, pause/resume, HTTP dispatch with retry |
-| **Cloud Run** | Knative Serving, behind a Cloud Run v2 adapter | Deploys real containers; env from Secret Manager; min-instances verified; max-instances, concurrency, timeout and resource limits mapped but not load-tested. **Jobs and executions** run as Kubernetes batch Jobs (gRPC only) |
+| **Cloud Run** | Knative Serving, behind a Cloud Run v2 adapter | Deploys real containers; env from Secret Manager; min-instances verified; max-instances, concurrency, timeout and resource limits mapped but not load-tested. **Jobs and executions** run as Kubernetes batch Jobs, over gRPC and JSON, so `gcloud run jobs` and Terraform reach them |
 | **Secret Manager** | CloudBurrow | Secrets and versions over gRPC and JSON. **Not a secret store** — nothing is authenticated |
 
 Opt-in with `--services`:
@@ -49,8 +49,9 @@ Opt-in with `--services`:
 | **Firestore** / **Datastore** | Google's own emulators | Documents, entities, collections and kinds |
 | **Bigtable** | Google's own emulator | Tables, column families, rows |
 | **Spanner** | Google's own emulator | Instances, databases, DDL, queries |
-| **Cloud KMS** | CloudBurrow | Symmetric keys, Encrypt and Decrypt. **Not a security boundary** — key material is stored unencrypted |
-| **Cloud SQL** | PostgreSQL in the cluster | A real PostgreSQL reached with an ordinary driver — **not** the Cloud SQL Admin API, which has no emulator |
+| **Cloud KMS** | CloudBurrow | Symmetric, asymmetric and MAC keys, import jobs, Autokey and EKM connections. **Not a security boundary** — key material is stored unencrypted |
+| **Memorystore** | Valkey, and Redis 6.2 and 7.0 for those versions | The Memorystore for Redis, Redis Cluster and Valkey admin APIs; each instance you create is a real server of its own, reached with any Redis client ([docs/memorystore.md](docs/memorystore.md)) |
+| **Cloud SQL** | PostgreSQL and MySQL in the cluster | Google publishes no Cloud SQL emulator, so each instance is a real PostgreSQL or MySQL server, reached with an ordinary driver or the Cloud SQL connectors; CloudBurrow serves the Cloud SQL Admin API over them (74 of 80 methods Verified) |
 
 And locally, on runtimes CloudBurrow builds:
 
@@ -108,21 +109,27 @@ The credentials authorise nothing; they exist so tooling that insists on them ru
 
 Worth reading before you rely on it — the full list is in [docs/status.md](docs/status.md):
 
-- **No IAM enforcement, anywhere.** No policy is evaluated and no identity is checked. Do not
-  use CloudBurrow to test whether your permissions are correct. Per
-  [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager, Cloud Tasks and Cloud KMS
-  store IAM policies, so code and Terraform that manage them run, and so do bucket IAM on Cloud
-  Storage (#504), Cloud Run services and jobs (#1216), and BigQuery tables, routines and row
-  access policies (#1231). Stored, never enforced: a `roles/run.invoker` binding does not close a
-  service's URL.
+- **IAM policies are stored, not enforced, apart from three named checks.** Do not use
+  CloudBurrow to test whether your permissions are correct. Per
+  [ADR-0006](docs/adr/0006-iam-policy-surface.md), the services that serve IAM methods (Secret
+  Manager, Cloud Tasks, Cloud KMS, Cloud Storage buckets and ACLs, Cloud Run, BigQuery, Pub/Sub,
+  Resource Manager, Artifact Registry, Spanner, Bigtable, Secure Source Manager and others) store
+  policies, so code and Terraform that manage them run, and no call of theirs reads them: a
+  `roles/run.invoker` binding does not close a service's URL. The exceptions check a token this
+  instance minted against the project's stored policy: Memorystore for Redis Cluster's and
+  Valkey's IAM auth (#1614), Firestore with MongoDB compatibility's sign-ins and per-command
+  permissions (#1738), and IAM Credentials' (and the IAM API's) token minting and signing on a
+  service account the IAM API created (#1747). They prove this instance applies its own rule,
+  not that your policy is right on Google.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
   cannot map is **refused with the field named**, not silently dropped.
 - **Cloud KMS is not a security boundary.** Key material is stored unencrypted; IAM policies
-  are stored, never enforced ([ADR-0006](docs/adr/0006-iam-policy-surface.md)); no HSM or EKM.
+  are stored, never enforced ([ADR-0006](docs/adr/0006-iam-policy-surface.md)); HSM and EKM
+  keys are served with no real HSM or external key manager behind them.
 - **Pub/Sub state does not survive a restart** — a limitation of Google's emulator, measured.
-- **Signed URLs are accepted on shape alone**, so signing correctness cannot be tested here.
-- **No GKE management APIs.** Cloud Run Jobs are served over gRPC only, so `gcloud run jobs`
-  and Terraform cannot reach them yet (#591). BigQuery is an opt-in community emulator that
+- **Signed URLs are verified, but only against local keys.** A bad signature, an unknown key or
+  an expired URL is 403; a URL signed here is accepted by no Google service.
+- **No GKE management APIs.** BigQuery is an opt-in community emulator that
   serves one project and keeps nothing across a restart; see
   [compatibility.md](docs/compatibility.md#bigquery-is-a-community-emulator).
 

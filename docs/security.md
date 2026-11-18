@@ -1,6 +1,7 @@
 # Local security model
 
-CloudBurrow is an unauthenticated emulator. It has no IAM, its credentials authorise nothing, and
+CloudBurrow is an unauthenticated emulator. It stores IAM policies without enforcing them, apart
+from the local checks [ADR-0006](adr/0006-iam-policy-surface.md) lists; its credentials authorise nothing, and
 its Secret Manager and Cloud KMS are not secret stores ([status.md](status.md)). What it does
 defend is the developer's machine: the instance's state, the admin API that wipes it, and the
 console's terminal, which is a shell. This page describes who can reach CloudBurrow's ports, what

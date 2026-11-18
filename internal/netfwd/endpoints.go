@@ -71,14 +71,15 @@ func EnvValueFor(service, addr string) string {
 //
 // An address on this list reads as "the service is here", and for every
 // emulator that is true. Cloud SQL is the exception: there is no Cloud SQL
-// emulator to run, so what is behind that address is a real PostgreSQL and
-// the management API is simply absent. Saying so beside the address is the
-// only place a reader is guaranteed to be looking.
+// emulator to run, so what is behind that address is a real PostgreSQL, and
+// the Cloud SQL Admin API is served on a port of its own (sqladmin). Saying
+// so beside the address is the only place a reader is guaranteed to be
+// looking.
 func ScopeNoteFor(service string) string {
 	switch service {
 	case "cloudsql":
 		return "a local SQL database, not the Cloud SQL Admin API — " +
-			"connect with an ordinary driver; there is no sqladmin endpoint"
+			"connect with an ordinary driver; the Admin API is CLOUDBURROW_SQLADMIN_ENDPOINT"
 	case "bigquery":
 		return "goccy/bigquery-emulator, not Google's; serves this instance's " +
 			"project only, and keeps nothing across a restart"
@@ -90,7 +91,7 @@ func ScopeNoteFor(service string) string {
 		return "the Spanner emulator's REST API for the endpoint above; Terraform's spanner_custom_endpoint"
 	case "cloudsql-mysql":
 		return "a local MySQL 8.4, not the Cloud SQL Admin API — " +
-			"connect with an ordinary driver; there is no sqladmin endpoint"
+			"connect with an ordinary driver; the Admin API is CLOUDBURROW_SQLADMIN_ENDPOINT"
 	case "memorystore":
 		return "a real Valkey (Redis-compatible) server, not the Memorystore admin API — " +
 			"connect with any Redis client; the admin API is CLOUDBURROW_MEMORYSTORE_ENDPOINT"

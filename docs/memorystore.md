@@ -5,7 +5,8 @@ server, in the cluster (#296). It follows the [Cloud SQL](cloudsql.md) decision 
 publishes no Memorystore emulator, so what runs is the kind of server Memorystore itself runs,
 giving an application a real data plane at a stable local address. Since #1302 the
 Memorystore admin API describes that server, and creates, resizes and deletes instances of
-your own, each a Valkey server of its own (§4).
+your own, each a server of its own running its `redis_version`: Redis 6.2 for `REDIS_6_X`,
+Redis 7.0 for `REDIS_7_0`, and Valkey 8.1 for `REDIS_7_2`, the default (§4).
 
 ## 1. What you get
 
@@ -77,9 +78,11 @@ server (`REDIS_7_2`, 1 GB: the server runs with `--maxmemory 1gb` and Memorystor
 `UpdateInstance` and `DeleteInstance` on it are FAILED_PRECONDITION. Run `up` without
 `memorystore` in `--services` to have none.
 
-**Instances you create** are each a Valkey server of their own: a Deployment and Service in the
-cluster, of the same image and settings, reached from the host through a tunnel of their own on
-an OS-assigned port, which the instance's `host` and `port` report.
+**Instances you create** are each a server of their own: a Deployment and Service in the
+cluster, with the settings of the server `up` runs and the image of the instance's
+`redis_version` (`redis:6.2` for `REDIS_6_X`, `redis:7.0` for `REDIS_7_0`, and the same Valkey 8.1
+image for `REDIS_7_2`, the default), reached from the host through a tunnel of their own on an
+OS-assigned port, which the instance's `host` and `port` report.
 
 ```go
 c, _ := redis.NewCloudRedisClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_MEMORYSTORE_ENDPOINT")),
