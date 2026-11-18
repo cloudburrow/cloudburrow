@@ -109,6 +109,11 @@ type Registry struct {
 	// a project was created or purged since r.mu was taken (numbers.go).
 	onNumbers      []func()
 	numbersChanged bool
+	// onRewrite are the OnMemberRewrite hooks, and rewrites the member
+	// rewrites since r.mu was taken, which unlock passes to them
+	// (serviceaccountprincipals.go).
+	onRewrite []func(from, to string) error
+	rewrites  []memberRewrite
 	// saTokenURI is the token endpoint a service account key file names
 	// (serviceaccountkeys.go).
 	saTokenURI string

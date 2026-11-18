@@ -777,9 +777,9 @@ func (r *Registry) QueryTestablePermissions(req *adminpb.QueryTestablePermission
 }
 
 // IAMAdminServer serves google.iam.admin.v1.IAM's role, permission,
-// grantable role, service account (serviceaccounts.go) and key methods;
-// the rest (SignBlob and SignJwt, deprecated for the IAM Credentials
-// API's, auditable services, lint) are UNIMPLEMENTED.
+// grantable role, service account (serviceaccounts.go) and key methods,
+// the deprecated SignBlob and SignJwt and the auditable services
+// (iamlegacy.go); LintPolicy is UNIMPLEMENTED.
 type IAMAdminServer struct {
 	adminpb.UnimplementedIAMServer
 	reg *Registry

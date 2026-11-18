@@ -23,6 +23,8 @@ package iampolicy
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
+	"strconv"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 
@@ -223,4 +225,83 @@ func auditConfigs(in []*iampb.AuditConfig) ([]AuditConfig, error) {
 // nothing is enforced and so nothing is denied.
 func Permissions(req *iampb.TestIamPermissionsRequest) *iampb.TestIamPermissionsResponse {
 	return &iampb.TestIamPermissionsResponse{Permissions: append([]string(nil), req.GetPermissions()...)}
+}
+
+// RewriteMember replaces the member from with to in every binding (to
+// empty drops it, and a binding left with no member), giving the policy a
+// new etag when anything changed; it reports whether anything did. A
+// deleted service account's bindings go through it (#1750, #1751): Google
+// shows serviceAccount:EMAIL as deleted:serviceAccount:EMAIL?uid=ID in
+// every policy that names it, turns it back on undelete and drops it when
+// the account is purged. A nil policy is unchanged.
+func (s *Stored) RewriteMember(from, to string) bool {
+	if s == nil {
+		return false
+	}
+	changed := false
+	var kept []Binding
+	for _, bd := range s.Bindings {
+		if !hasMember(bd.Members, from) {
+			kept = append(kept, bd)
+			continue
+		}
+		changed = true
+		var members []string
+		for _, m := range bd.Members {
+			if m == from {
+				m = to
+			}
+			if m != "" && !hasMember(members, m) {
+				members = append(members, m)
+			}
+		}
+		if len(members) > 0 {
+			kept = append(kept, Binding{Role: bd.Role, Members: members})
+		}
+	}
+	if !changed {
+		return false
+	}
+	s.Bindings = kept
+	s.Etag = make([]byte, 8)
+	_, _ = rand.Read(s.Etag)
+	return true
+}
+
+func hasMember(xs []string, x string) bool {
+	for _, y := range xs {
+		if y == x {
+			return true
+		}
+	}
+	return false
+}
+
+// RewriteMemberInRecord rewrites the member in the policy a JSON record
+// keeps under field (as a service's resource record keeps its
+// iampolicy.Stored), leaving every other field as it was. It returns the
+// new record and true when the policy changed.
+func RewriteMemberInRecord(raw []byte, field, from, to string) ([]byte, bool, error) {
+	var rec map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, false, err
+	}
+	p, ok := rec[field]
+	if !ok || !bytes.Contains(p, []byte(strconv.Quote(from)[1:len(strconv.Quote(from))-1])) {
+		return nil, false, nil
+	}
+	var s Stored
+	if err := json.Unmarshal(p, &s); err != nil {
+		return nil, false, err
+	}
+	if !s.RewriteMember(from, to) {
+		return nil, false, nil
+	}
+	b, err := json.Marshal(&s)
+	if err != nil {
+		return nil, false, err
+	}
+	rec[field] = b
+	out, err := json.Marshal(rec)
+	return out, err == nil, err
 }

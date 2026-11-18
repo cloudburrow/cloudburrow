@@ -508,6 +508,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err == nil && projects != nil {
 		projectRegistry = projects
 		wirePurge(adminAPI, projects)
+		wireMemberRewrites(projects, tasksSvc, secretsSvc, kmsSvc)
 		// Service accounts (#1747): a key file names this instance's
 		// token endpoint, and IAM Credentials and the token endpoint
 		// resolve accounts and keys in the registry.

@@ -13,11 +13,12 @@ package resourcemanager
 // can no longer be undeleted.
 //
 // The rewrite covers every policy the registry keeps: projects, folders,
-// the organization, service accounts and tags. Other services' own stored
-// policies (a bucket's, a topic's) keep the member as it was set.
+// the organization, service accounts and tags; and, through the hooks
+// OnMemberRewrite registers (#1751), the policies other services keep on
+// their own resources (a secret's, a key ring's, a queue's), as Google's
+// "appears in role bindings" covers every allow policy.
 
 import (
-	"crypto/rand"
 	"encoding/json"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -46,31 +47,9 @@ func (r *Registry) rewriteMemberLocked(from, to string) error {
 		if err := json.Unmarshal(b, &s); err != nil {
 			return apierror.Internal(err, "decode the IAM policy %s", k)
 		}
-		changed := false
-		kept := s.Bindings[:0]
-		for _, bd := range s.Bindings {
-			members := bd.Members[:0]
-			for _, m := range bd.Members {
-				if m != from {
-					members = append(members, m)
-					continue
-				}
-				changed = true
-				if to != "" && !contains(members, to) {
-					members = append(members, to)
-				}
-			}
-			bd.Members = members
-			if len(bd.Members) > 0 {
-				kept = append(kept, bd)
-			}
-		}
-		if !changed {
+		if !s.RewriteMember(from, to) {
 			continue
 		}
-		s.Bindings = kept
-		s.Etag = make([]byte, 8)
-		_, _ = rand.Read(s.Etag)
 		out, err := json.Marshal(&s)
 		if err != nil {
 			return apierror.Internal(err, "encode the IAM policy %s", k)
@@ -79,14 +58,22 @@ func (r *Registry) rewriteMemberLocked(from, to string) error {
 			return apierror.Internal(err, "store the IAM policy %s", k)
 		}
 	}
+	r.rewrites = append(r.rewrites, memberRewrite{from, to})
 	return nil
 }
 
-func contains(xs []string, x string) bool {
-	for _, y := range xs {
-		if y == x {
-			return true
-		}
-	}
-	return false
+// memberRewrite is one rewrite unlock passes to the OnMemberRewrite hooks.
+type memberRewrite struct{ from, to string }
+
+// OnMemberRewrite registers fn to be called when a deleted service
+// account's bindings change: from serviceAccount:EMAIL to
+// deleted:serviceAccount:EMAIL?uid=ID when it is deleted, back when it is
+// undeleted, and from the deleted identifier to "" (drop it) when it is
+// purged. fn rewrites the policies its service keeps on its own resources.
+// It is called without the registry's lock held, before the call that
+// changed the account returns; an error is logged.
+func (r *Registry) OnMemberRewrite(fn func(from, to string) error) {
+	r.mu.Lock()
+	defer r.unlock()
+	r.onRewrite = append(r.onRewrite, fn)
 }

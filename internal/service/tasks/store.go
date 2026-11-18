@@ -696,3 +696,29 @@ func (s *Store) get(key string, v any) error {
 func TaskName(queue, id string) string {
 	return fmt.Sprintf("%s/tasks/%s", strings.TrimSuffix(queue, "/"), id)
 }
+
+// RewriteIAMMember replaces the member from with to (dropping it when to
+// is empty) in every queue's policy: a deleted service account's bindings
+// (#1751), which the resource manager registry's OnMemberRewrite hook
+// passes here.
+func (s *Store) RewriteIAMMember(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys, err := s.db.List("tasks/queues/")
+	if err != nil {
+		return apierror.Internal(err, "list queues")
+	}
+	for _, k := range keys {
+		var q Queue
+		if err := s.get(k, &q); err != nil {
+			continue
+		}
+		if !q.IAMPolicy.RewriteMember(from, to) {
+			continue
+		}
+		if err := s.put(k, q); err != nil {
+			return err
+		}
+	}
+	return nil
+}
