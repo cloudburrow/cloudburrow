@@ -54,7 +54,7 @@ import (
 //     dependency edges would not be the API's. HTML documents,
 //     gcsContentUri and the V2 classification model are UNIMPLEMENTED too.
 //
-// UNVERIFIED (2026-11-18, the references define the fields, not these
+// UNVERIFIED (docs re-read 2026-11-18, the references define the fields, not these
 // values): the calibration of every score, magnitude, salience and
 // confidence, which are Gemma's estimates rounded and normalised here
 // (sentiment to one decimal, as the API's samples show; salience summing to
