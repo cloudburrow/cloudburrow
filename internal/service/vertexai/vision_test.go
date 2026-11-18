@@ -38,7 +38,7 @@ func TestAnnotateImagesText(t *testing.T) {
 	}
 	req := `{"requests":[{"image":{"content":"` + base64.StdEncoding.EncodeToString(png) + `"},"features":[{"type":"DOCUMENT_TEXT_DETECTION"}]},` +
 		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"TEXT_DETECTION"}]},` +
-		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"FACE_DETECTION"}]}]}`
+		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"LOGO_DETECTION"}]}]}`
 	rs := annotate(t, req)
 	if len(rs) != 3 {
 		t.Fatalf("%d responses", len(rs))
@@ -83,7 +83,7 @@ func TestAnnotateImagesText(t *testing.T) {
 	if e, _ := rs[1]["error"].(map[string]any); e["message"] != "Bad image data." || e["code"] != 3.0 {
 		t.Errorf("bad image: %v", rs[1])
 	}
-	if e, _ := rs[2]["error"].(map[string]any); e["code"] != 12.0 || !strings.Contains(e["message"].(string), "FACE_DETECTION") {
-		t.Errorf("face: %v", rs[2])
+	if e, _ := rs[2]["error"].(map[string]any); e["code"] != 12.0 || !strings.Contains(e["message"].(string), "LOGO_DETECTION") {
+		t.Errorf("logo: %v", rs[2])
 	}
 }

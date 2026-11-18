@@ -19,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
 	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
@@ -156,16 +157,24 @@ func attachScriptModels(cfg config.Config) {
 // MediaPipe's EfficientNet-Lite0 classifier is fetched from
 // storage.googleapis.com the first time one is labelled, into
 // <state-dir>/models, and checked against its pinned SHA-256.
+//
+// It does the same for OBJECT_LOCALIZATION and FACE_DETECTION, whose
+// MediaPipe EfficientDet-Lite0 and BlazeFace detectors are fetched the
+// first time an image needs one.
 func attachLabelModel(cfg config.Config) {
 	cache := embeddingCache(cfg)
-	m := localai.EfficientNetLite0
-	f := m.Pin.Files[0]
-	imagelabel.SetSource(func(ctx context.Context) (string, error) {
-		if _, err := os.Stat(cache.PinnedPath(m, f)); err != nil {
-			fmt.Fprintf(os.Stderr, "fetching MediaPipe %s (%s, Apache-2.0) for Vision LABEL_DETECTION...\n", f.Path, m.Repo)
+	pinned := func(m localai.Model, feature string) func(ctx context.Context) (string, error) {
+		f := m.Pin.Files[0]
+		return func(ctx context.Context) (string, error) {
+			if _, err := os.Stat(cache.PinnedPath(m, f)); err != nil {
+				fmt.Fprintf(os.Stderr, "fetching MediaPipe %s (%s, Apache-2.0) for Vision %s...\n", f.Path, m.Repo, feature)
+			}
+			return cache.FetchPinnedFile(ctx, m, f)
 		}
-		return cache.FetchPinnedFile(ctx, m, f)
-	})
+	}
+	imagelabel.SetSource(pinned(localai.EfficientNetLite0, "LABEL_DETECTION"))
+	imagedetect.SetObjectSource(pinned(localai.EfficientDetLite0, "OBJECT_LOCALIZATION"))
+	imagedetect.SetFaceSource(pinned(localai.BlazeFaceShortRange, "FACE_DETECTION"))
 }
 
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {

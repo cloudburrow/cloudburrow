@@ -16,7 +16,9 @@
 //     classes, in the order of labels_without_background.txt, which the
 //     model file carries as a zip archive appended to it.
 //
-// UNVERIFIED (2026-11-18): Vision's own preprocessing is not documented;
+// UNVERIFIED (docs re-read 2026-11-18, still unanswered:
+// https://docs.cloud.google.com/vision/docs/labels): Vision's own
+// preprocessing is not documented;
 // here the whole image is resized to 224×224 bilinearly (pixel centres
 // aligned, aspect ratio not kept, as MediaPipe's classifier does with no
 // region of interest) and its alpha dropped. The result is deterministic:

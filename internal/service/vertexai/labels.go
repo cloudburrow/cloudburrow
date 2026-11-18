@@ -19,7 +19,8 @@ import (
 // the API returns the default value of 10 results"); topicality equals
 // score, as in that page's sample.
 //
-// UNVERIFIED (2026-11-18):
+// UNVERIFIED (docs re-read 2026-11-18, still unanswered:
+// https://docs.cloud.google.com/vision/docs/labels):
 //   - the vocabulary: the labels are the 1,000 ImageNet classes the model
 //     knows (its own label text as description), not Vision's Knowledge
 //     Graph entities, so mid is omitted (no official mapping from ImageNet

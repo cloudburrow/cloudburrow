@@ -28,11 +28,13 @@ import (
 //     route reads text with Tesseract (internal/service/vertexai/vision.go);
 //     never to Google. TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are
 //     answered (text, with word and block boxes since #1799), IMAGE_PROPERTIES
-//     (dominant colors and a crop hint, computed from the pixels, #1799)
-//     and LABEL_DETECTION (ImageNet labels from Google's MediaPipe
-//     EfficientNet-Lite0 classifier, run locally, #1799);
-//     FACE_DETECTION, LANDMARK_DETECTION, LOGO_DETECTION
-//     and OBJECT_LOCALIZATION have no local model and are refused 501
+//     (dominant colors and a crop hint, computed from the pixels, #1799),
+//     LABEL_DETECTION (ImageNet labels from Google's MediaPipe
+//     EfficientNet-Lite0 classifier, run locally, #1799),
+//     OBJECT_LOCALIZATION (COCO objects from MediaPipe's EfficientDet-Lite0)
+//     and FACE_DETECTION (MediaPipe's BlazeFace), both run locally (#1799);
+//     LANDMARK_DETECTION and LOGO_DETECTION
+//     have no local model and are refused 501
 //     before anything is read. The output is the input
 //     table's columns with ml_annotate_image_result (JSON, the image's
 //     AnnotateImageResponse) and ml_annotate_image_status (STRING, empty
@@ -96,8 +98,8 @@ func checkServiceType(v string) (int, string) {
 // those the local endpoint answers.
 var visionFeatures = map[string]bool{
 	"TEXT_DETECTION": true, "DOCUMENT_TEXT_DETECTION": true, "IMAGE_PROPERTIES": true,
-	"FACE_DETECTION": false, "LANDMARK_DETECTION": false, "LOGO_DETECTION": false, "LABEL_DETECTION": true,
-	"OBJECT_LOCALIZATION": false,
+	"FACE_DETECTION": true, "LANDMARK_DETECTION": false, "LOGO_DETECTION": false, "LABEL_DETECTION": true,
+	"OBJECT_LOCALIZATION": true,
 }
 
 // parseStringArray reads an ARRAY<STRING> literal as mlStruct keeps it
@@ -162,7 +164,7 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 			if !served {
 				return "", 501, "Not implemented here: the " + u + " feature of " + fname + ": CloudBurrow has no local model for it " +
 					"(TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are read with local Tesseract OCR, IMAGE_PROPERTIES from the pixels, " +
-					"LABEL_DETECTION with a local image classifier) " +
+					"LABEL_DETECTION with a local image classifier, OBJECT_LOCALIZATION and FACE_DETECTION with local detectors) " +
 					"and never calls Google. Nothing was run."
 			}
 			features = append(features, u)
