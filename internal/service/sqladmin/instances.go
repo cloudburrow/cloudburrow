@@ -57,6 +57,13 @@ type Spec struct {
 	ReplicationPassword string `json:"replicationPassword,omitempty"`
 	// ReplicationStopped is set by stopReplica.
 	ReplicationStopped bool `json:"replicationStopped,omitempty"`
+	// AwaitingPrimary is set on a PostgreSQL read replica upgraded on its
+	// own (#1524): its server is a new, empty one of the newer major
+	// version, which does not replicate until its primary is upgraded to
+	// that version too and the replica is rebuilt from it ("The replicated
+	// databases of an upgraded replica are available only after you
+	// upgrade the primary instance").
+	AwaitingPrimary bool `json:"awaitingPrimaryUpgrade,omitempty"`
 	// Region is the region the instance was created in, "" for Region
 	// (#1381): a cross-region replica's differs from its primary's. Every
 	// server runs in the one cluster; the region is what the instance
@@ -210,7 +217,7 @@ func (s *Server) restore() {
 	s.emu.Lock()
 	s.restoreSourcesLocked()
 	for _, sp := range specs {
-		if s.engineLocked(sp.Name) != nil || !SupportedVersions[sp.DatabaseVersion] {
+		if served, _ := s.versionServed(sp.DatabaseVersion); s.engineLocked(sp.Name) != nil || !served {
 			continue
 		}
 		s.writes.byName[sp.Name] = &created{spec: sp, engine: w.prov.Engine(sp), state: "PENDING_CREATE"}
@@ -544,9 +551,9 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if b.DatabaseVersion == "" && !replica {
 		return nil, Errorf(http.StatusBadRequest, "Missing parameter: databaseVersion.")
 	}
-	if b.DatabaseVersion != "" && !SupportedVersions[b.DatabaseVersion] {
+	if served, why := s.versionServed(b.DatabaseVersion); b.DatabaseVersion != "" && !served {
 		if strings.HasPrefix(b.DatabaseVersion, "POSTGRES_") || strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
-			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, unservedVersionWhy(b.DatabaseVersion))
+			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, why)
 		}
 		if strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_") {
 			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, sqlServerVersionWhy)
@@ -571,6 +578,9 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 			spec.Region = b.Region
 		}
 	}
+	if err := legacyRefusal(spec); err != nil {
+		return nil, err
+	}
 	if replica && spec.Regional() {
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
 			"a read replica here is one server; make the primary REGIONAL, and its replicas follow it across a failover (docs/cloudsql.md)")
@@ -583,10 +593,20 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		if s.engine(b.Name) != nil {
 			return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
 		}
+		s.emu.RLock()
+		pc := s.writes.byName[b.MasterInstanceName]
+		s.emu.RUnlock()
+		if pc != nil && legacyMySQL(pc.spec.DatabaseVersion) {
+			// Before prepareReplica, which turns on the primary's GTIDs.
+			return nil, legacyUnimplemented("a read replica")
+		}
 		if err := s.prepareReplica(r.Context(), project, b, &spec); err != nil {
 			return nil, err
 		}
 		b.DatabaseVersion = spec.DatabaseVersion
+		if legacyMySQL(spec.DatabaseVersion) {
+			return nil, legacyUnimplemented("a read replica")
+		}
 	} else if b.Settings == nil || b.Settings.Tier == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}
@@ -728,7 +748,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		if c.spec.MasterInstanceName != "" {
 			// A MySQL replica upgraded on its own (#1462) is rebuilt on the
 			// new version from its primary, which goes on being the older
-			// version's, as a replica created fresh would be.
+			// version's, as a replica created fresh would be. A PostgreSQL
+			// one (#1524) cannot stream an older primary's WAL: its server
+			// is replaced by an empty one of the new version, which waits
+			// for its primary's upgrade (awaitPrimary).
 			c.state = "MAINTENANCE"
 			err = s.saveLocked()
 			s.emu.Unlock()
@@ -738,6 +761,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 			op := s.pending(base, project, name, "MAJOR_VERSION_UPGRADE")
 			opID, version, include := op["name"].(string), b.DatabaseVersion, b.IncludeReplicas
 			go func() {
+				if engineOf(version) == "POSTGRES" {
+					s.finish(opID, s.awaitPrimary(project, name, version, include))
+					return
+				}
 				err := s.upgradeReplica(name, version)
 				if err == nil && include {
 					err = s.upgradeReplicas(project, name, version)
@@ -775,6 +802,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		err = s.checkDRReplicaPatchLocked(next, b.raw)
 	}
 	if err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
+	if err := legacyRefusal(next); err != nil {
 		s.emu.Unlock()
 		return nil, err
 	}
@@ -968,9 +999,9 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if spec.Regional() {
 		in["secondaryGceZone"] = spec.zone(1 - spec.PrimaryNode())
 	}
-	// A MySQL replica is upgraded on its own (#1462); a PostgreSQL one
-	// only with its primary.
-	if up := upgradable(spec.DatabaseVersion); len(up) > 0 && (spec.MasterInstanceName == "" || spec.MySQL()) {
+	// A replica is upgraded on its own: MySQL's (#1462), and PostgreSQL's
+	// (#1524), which then waits for its primary's upgrade.
+	if up := upgradable(spec.DatabaseVersion); len(up) > 0 {
 		in["upgradableDatabaseVersions"] = up
 	}
 	if spec.MySQL() {

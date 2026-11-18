@@ -234,6 +234,8 @@ func (s *Server) switchover(r *http.Request, base, project, name string) (any, e
 		return fail(Errorf(http.StatusConflict, "Operation failed because the primary instance %s is %s.", pc.spec.Name, pc.state))
 	case spec.ReplicationStopped:
 		return fail(Errorf(http.StatusBadRequest, "Invalid request: replication to %s is stopped; start it with startReplica first.", name))
+	case spec.AwaitingPrimary:
+		return fail(unimplemented("a switchover to a replica waiting for its primary's major version upgrade", awaitingWhy(spec)))
 	case pc.spec.Regional():
 		return fail(unimplemented("a switchover from a high-availability (REGIONAL) primary",
 			"the primary becomes a read replica, and a read replica here is one server"))

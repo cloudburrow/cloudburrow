@@ -305,7 +305,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			versions = append(versions, sqladmin.EngineVersions("POSTGRES")...)
 		}
 		if enabled[config.ServiceCloudSQLMySQL] {
-			versions = append(versions, sqladmin.EngineVersions("MYSQL")...)
+			// MYSQL_5_6 and MYSQL_5_7 (#1524) are served where the node
+			// runs their linux/amd64 images; elsewhere a create is 501
+			// saying why.
+			versions = append(append(versions, "MYSQL_5_6", "MYSQL_5_7"), sqladmin.EngineVersions("MYSQL")...)
 		}
 		host := d.cfg.BindAddress
 		if host == "" || host == "0.0.0.0" || host == "::" {

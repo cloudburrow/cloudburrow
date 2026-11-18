@@ -489,7 +489,12 @@ func (m *MySQL) CreateUser(ctx context.Context, u User, password string) error {
 }
 
 func (m *MySQL) UpdateUser(ctx context.Context, u User, password string) error {
-	return m.exec(ctx, "ALTER USER "+myString(u.Name)+"@"+myString(hostOr(u.Host))+" IDENTIFIED BY "+myString(password))
+	acct := myString(u.Name) + "@" + myString(hostOr(u.Host))
+	if m.Version == "MYSQL_5_6" {
+		// MySQL 5.6's ALTER USER only expires a password (#1524).
+		return m.exec(ctx, "SET PASSWORD FOR "+acct+" = PASSWORD("+myString(password)+")")
+	}
+	return m.exec(ctx, "ALTER USER "+acct+" IDENTIFIED BY "+myString(password))
 }
 
 func (m *MySQL) DeleteUser(ctx context.Context, u User) error {

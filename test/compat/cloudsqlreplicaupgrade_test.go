@@ -102,12 +102,14 @@ func TestCloudSQLMySQLReplicaUpgradedOnItsOwn(t *testing.T) {
 
 // TestCloudSQLPostgresOldVersionsAndRefusals (#1462): a POSTGRES_10
 // instance is upgraded to POSTGRES_12 keeping its rows; a read replica of
-// it is created, and upgrading that replica on its own is 501 with why
-// (physical replication does not cross major versions). Changing a
+// it is created and upgraded to POSTGRES_13 on its own (#1524), which
+// leaves it an empty POSTGRES_13 server until its primary is upgraded to
+// POSTGRES_13 too, after which it replicates the primary's rows, old and
+// new; promoting it in between is 501. Changing a
 // PostgreSQL database's charset is 400, as Cloud SQL documents it is not
 // set through the API; a BAK import is 501 (SQL Server's); a legacy
 // failover replica is 400, as Cloud SQL refuses one since 2025.
-// covers: sql.instances.insert, sql.instances.patch, sql.instances.get, sql.instances.import, sql.instances.delete, sql.databases.insert, sql.databases.patch, sql.operations.get
+// covers: sql.instances.insert, sql.instances.patch, sql.instances.get, sql.instances.import, sql.instances.delete, sql.instances.promoteReplica, sql.databases.insert, sql.databases.patch, sql.operations.get
 func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -150,8 +152,53 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 	eventually(t, "the row on the POSTGRES_12 replica", func() error {
 		return e.root(t, h, rep.ConnectionName).QueryRow("SELECT count(*) FROM t WHERE v = 'kept'").Scan(&n)
 	})
-	_, err = svc.Instances.Patch(project, rep.Name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13"}).Do()
-	wantHTTP(t, "upgrading a PostgreSQL replica on its own", err, 501)
+	// The replica is upgraded on its own (#1524), before its primary, as
+	// Cloud SQL documents; its replicated databases are available only
+	// after the primary's upgrade.
+	op, err = svc.Instances.Patch(project, rep.Name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13"}).Do()
+	if err != nil {
+		t.Fatalf("upgrade the PostgreSQL replica on its own: %v", err)
+	}
+	if op.OperationType != "MAJOR_VERSION_UPGRADE" {
+		t.Errorf("operation type %s", op.OperationType)
+	}
+	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
+		t.Fatalf("upgrade the PostgreSQL replica: %+v", op.Error.Errors[0])
+	}
+	if r, err := svc.Instances.Get(project, rep.Name).Do(); err != nil || r.DatabaseVersion != "POSTGRES_13" || r.State != "RUNNABLE" ||
+		!strings.HasSuffix(r.MasterInstanceName, ":"+name) {
+		t.Fatalf("the replica after its upgrade: %+v %v", r, err)
+	}
+	if p, err := svc.Instances.Get(project, name).Do(); err != nil || p.DatabaseVersion != "POSTGRES_12" {
+		t.Errorf("the primary after its replica's upgrade: %+v %v", p, err)
+	}
+	_, err = svc.Instances.PromoteReplica(project, rep.Name).Do()
+	wantHTTP(t, "promoting a replica waiting for its primary's upgrade", err, 501)
+	// The primary's upgrade, without includeReplicasForMajorVersionUpgrade
+	// (its replica is already at POSTGRES_13), rebuilds the replica from it.
+	op, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13"}).Do()
+	if err != nil {
+		t.Fatalf("upgrade the primary after its replica: %v", err)
+	}
+	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
+		t.Fatalf("upgrade the primary after its replica: %+v", op.Error.Errors[0])
+	}
+	db = e.root(t, h, in.ConnectionName)
+	eventually(t, "a row on the upgraded primary", func() error { _, err := db.Exec("INSERT INTO t VALUES ('after')"); return err })
+	eventually(t, "the rows on the replica after its primary's upgrade", func() error {
+		var k int
+		if err := e.root(t, h, rep.ConnectionName).QueryRow("SELECT count(*) FROM t WHERE v IN ('kept', 'after')").Scan(&k); err != nil {
+			return err
+		}
+		if k != 2 {
+			return fmt.Errorf("%d of 2 rows on the replica", k)
+		}
+		return nil
+	})
+	if r, err := svc.Instances.Get(project, rep.Name).Do(); err != nil || r.DatabaseInstalledVersion == "" ||
+		!strings.HasPrefix(r.DatabaseInstalledVersion, "POSTGRES_13_") || r.State != "RUNNABLE" {
+		t.Errorf("the replica after its primary's upgrade: %+v %v", r, err)
+	}
 
 	op, err = svc.Databases.Insert(project, name, &sqladmin.Database{Name: "app"}).Do()
 	if err != nil {
@@ -172,7 +219,7 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 // TestGcloudSQLOldPostgresVersion (#1462): `gcloud sql instances create
 // --database-version=POSTGRES_12` creates an instance whose
 // databaseInstalledVersion is POSTGRES_12_22; `gcloud sql databases patch
-// --charset` of its database is refused (400), and `--database-version=MYSQL_5_7`
+// --charset` of its database is refused (400), and `--database-version=MYSQL_5_6`
 // is 501 naming why, through the configuration `cloudburrow gcloud-setup`
 // writes, with egress to Google blocked.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.databases.patch, sql.operations.get
@@ -196,9 +243,9 @@ func TestGcloudSQLOldPostgresVersion(t *testing.T) {
 		!strings.Contains(out, "can't be changed") {
 		t.Errorf("databases patch --charset: %v %s", err, out)
 	}
-	if out, err := g.run(nil, "sql", "instances", "create", name+"-x", "--project", g.project, "--database-version=MYSQL_5_7",
+	if out, err := g.run(nil, "sql", "instances", "create", name+"-x", "--project", g.project, "--database-version=MYSQL_5_6",
 		"--tier=db-custom-1-3840", "--region=us-central1", "--quiet"); err == nil || !strings.Contains(out, "linux/amd64 only") {
-		t.Errorf("create MYSQL_5_7: %v %s", err, out)
+		t.Errorf("create MYSQL_5_6: %v %s", err, out)
 	}
 }
 
