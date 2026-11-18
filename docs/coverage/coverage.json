@@ -5467,7 +5467,7 @@
     "Title": "Memorystore for Redis",
     "counts": {
       "Unimplemented": 4,
-      "Verified": 62
+      "Verified": 69
     },
     "rows": [
       {
@@ -5493,6 +5493,13 @@
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/CreateAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -5524,6 +5531,13 @@
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/DeleteAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -5573,6 +5587,20 @@
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:383 TestMemorystoreValkeyMigration"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/GetAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/GetAclPolicyRevision",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {
@@ -5637,6 +5665,20 @@
         ]
       },
       {
+        "method": "google.cloud.memorystore.v1.Memorystore/ListAclPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/ListAclPolicyRevisions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
+        ]
+      },
+      {
         "method": "google.cloud.memorystore.v1.Memorystore/ListAuthTokens",
         "status": "Verified",
         "tests": [
@@ -5686,6 +5728,13 @@
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:383 TestMemorystoreValkeyMigration",
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites"
+        ]
+      },
+      {
+        "method": "google.cloud.memorystore.v1.Memorystore/UpdateAclPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
       {

@@ -615,7 +615,10 @@ reason.
 `ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and
 restore through `managed_backup_source` or `gcs_source` are a Redis cluster's (§8), for an
 instance in either mode: a `CLUSTER_DISABLED` instance's backup is its primary's file, and a
-restore MIGRATEs the keys to its primary. Memorystore for Valkey has no ACL policies.
+restore MIGRATEs the keys to its primary. ACL policies (`google.cloud.memorystore.v1`
+`aclPolicies`, since #1578) are a Redis cluster's too: an instance's `acl_policy`, at create or
+through `UpdateInstance`, makes each rule a Valkey ACL user on every node; an update of the policy
+sets the new rules on every node of each attached instance (`internal/service/redisadmin/memorystoreacl.go`).
 
 In-transit encryption (`SERVER_AUTHENTICATION`) and `IAM_AUTH` are a Redis cluster's (§8): a CA of
 the instance's own, which `GetCertificateAuthority` returns as `managedServerCa` (gRPC

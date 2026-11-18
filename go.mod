@@ -21,7 +21,7 @@ require (
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.3.0
-	cloud.google.com/go/memorystore v1.5.0
+	cloud.google.com/go/memorystore v1.7.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
 	cloud.google.com/go/run v1.23.0
@@ -46,7 +46,7 @@ require (
 	github.com/google/differential-privacy/go/v4 v4.1.0
 	github.com/google/go-containerregistry v0.20.6
 	github.com/google/uuid v1.6.0
-	github.com/googleapis/gax-go/v2 v2.26.2
+	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/kazzmir/opus-go v1.7.0
 	github.com/klippa-app/go-pdfium v1.21.4
@@ -75,8 +75,8 @@ require (
 	golang.org/x/sys v0.49.0
 	google.golang.org/api v0.307.0
 	google.golang.org/genai v1.77.0
-	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d
-	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc
+	google.golang.org/genproto v0.0.0-20261012220534-4341edf3f941
+	google.golang.org/genproto/googleapis/api v0.0.0-20261012220534-4341edf3f941
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
@@ -181,3 +181,11 @@ require (
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	rsc.io/binaryregexp v0.2.0 // indirect
 )
+
+// genproto's googleapis/cloud/kms/v1, which tink-go-gcpkms v2.4.0's tests
+// import (test/compat/kmstink_test.go), is gone from genproto after
+// 2026-07-23, and cloud.google.com/go/memorystore v1.7.0 (the first with
+// Memorystore for Valkey's ACL policies, #1578) requires a later genproto:
+// the root module, whose packages this repo uses are all in this version,
+// stays at the last that has it, so `go mod tidy` resolves every test.
+replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20260723164925-7274b71286bd

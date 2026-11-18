@@ -12,6 +12,7 @@ import (
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -29,8 +30,9 @@ import (
 // when a node starts and again on every node when the policy is updated
 // or attached; users a policy no longer has are deleted (ACL DELUSER).
 // Each update is a revision of the policy, which GetAclPolicyRevision and
-// ListAclPolicyRevisions return. Memorystore for Valkey has no ACL
-// policies in its API.
+// ListAclPolicyRevisions return. Memorystore for Valkey's
+// google.cloud.memorystore.v1 aclPolicies (#1578) are the same machinery
+// over its instances (memorystoreacl.go).
 
 type aclRule struct {
 	Username string `json:"username"`
@@ -60,16 +62,94 @@ type aclPolicies struct {
 
 const aclPolicyPrefix = "aclpolicies/"
 
+// valkeyACLPolicyPrefix keeps Memorystore for Valkey's policies (#1578)
+// apart from Redis Cluster's, which may share a store and a name.
+const valkeyACLPolicyPrefix = "valkeyacl/"
+
+func (c *clusters) aclPrefix() string {
+	if c.valkey {
+		return valkeyACLPolicyPrefix
+	}
+	return aclPolicyPrefix
+}
+
+// aclAPI is the ACL policy methods over one API's instances: Redis
+// Cluster's clusters, or Memorystore for Valkey's instances (#1578), whose
+// requests and answers memorystore_acl.go converts.
+type aclAPI struct {
+	api *Server
+	get func() (*clusters, error)
+}
+
+func (s *ClusterServer) acls() *aclAPI { return &aclAPI{api: s.api, get: s.clusters} }
+
+// CreateAclPolicy implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) CreateAclPolicy(ctx context.Context, req *clusterpb.CreateAclPolicyRequest) (*clusterpb.AclPolicy, error) {
+	return s.acls().CreateAclPolicy(ctx, req)
+}
+
+// GetAclPolicy implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) GetAclPolicy(ctx context.Context, req *clusterpb.GetAclPolicyRequest) (*clusterpb.AclPolicy, error) {
+	return s.acls().GetAclPolicy(ctx, req)
+}
+
+// ListAclPolicies implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) ListAclPolicies(ctx context.Context, req *clusterpb.ListAclPoliciesRequest) (*clusterpb.ListAclPoliciesResponse, error) {
+	return s.acls().ListAclPolicies(ctx, req)
+}
+
+// UpdateAclPolicy implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.UpdateAclPolicyRequest) (*longrunningpb.Operation, error) {
+	return s.acls().UpdateAclPolicy(ctx, req)
+}
+
+// DeleteAclPolicy implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) DeleteAclPolicy(ctx context.Context, req *clusterpb.DeleteAclPolicyRequest) (*longrunningpb.Operation, error) {
+	return s.acls().DeleteAclPolicy(ctx, req)
+}
+
+// GetAclPolicyRevision implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) GetAclPolicyRevision(ctx context.Context, req *clusterpb.GetAclPolicyRevisionRequest) (*clusterpb.AclPolicyRevision, error) {
+	return s.acls().GetAclPolicyRevision(ctx, req)
+}
+
+// ListAclPolicyRevisions implements clusterpb.CloudRedisClusterServer.
+func (s *ClusterServer) ListAclPolicyRevisions(ctx context.Context, req *clusterpb.ListAclPolicyRevisionsRequest) (*clusterpb.ListAclPolicyRevisionsResponse, error) {
+	return s.acls().ListAclPolicyRevisions(ctx, req)
+}
+
+// policyOperation is an operation on an ACL policy, with the metadata of
+// c's API.
+func (c *clusters) policyOperation(name, verb string) string {
+	m := aclPolicyRE.FindStringSubmatch(name)
+	ops := c.api.created.ops
+	op := ops.Create("projects/"+m[1]+"/locations/"+m[2], name)
+	if c.valkey {
+		_ = ops.SetMetadata(op.Name, &memorystorepb.OperationMetadata{CreateTime: timestamppb.New(c.now()), Target: name, Verb: verb, ApiVersion: "v1"})
+	} else {
+		_ = ops.SetMetadata(op.Name, &clusterpb.OperationMetadata{CreateTime: timestamppb.New(c.now()), Target: name, Verb: verb, ApiVersion: "v1"})
+	}
+	return op.Name
+}
+
+// policyOut is p as c's API answers it.
+func (c *clusters) policyOut(p *clusterpb.AclPolicy) proto.Message {
+	if c.valkey {
+		return valkeyPolicy(p)
+	}
+	return p
+}
+
 var aclPolicyRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)/aclPolicies/([^/]+)$`)
 var aclRevisionRE = regexp.MustCompile(`^(projects/[^/]+/locations/[^/]+/aclPolicies/[^/]+)/revisions/([0-9]+)$`)
 
 func (c *clusters) acl() *aclPolicies {
 	c.aclOnce.Do(func() {
 		c.policies = &aclPolicies{byName: map[string]*aclPolicyRecord{}}
-		if c.db == nil || c.valkey {
+		if c.db == nil {
 			return
 		}
-		keys, _ := c.db.List(aclPolicyPrefix)
+		keys, _ := c.db.List(c.aclPrefix())
 		for _, k := range keys {
 			b, err := c.db.Get(k)
 			p := &aclPolicyRecord{}
@@ -89,12 +169,12 @@ func (c *clusters) savePolicy(p *aclPolicyRecord) error {
 	if err != nil {
 		return err
 	}
-	return c.db.Put(aclPolicyPrefix+clusterKey(p.Name), b)
+	return c.db.Put(c.aclPrefix()+clusterKey(p.Name), b)
 }
 
 // policyUsers are the ACL users of r's policy. Call with mu held.
 func (c *clusters) policyUsers(r *clusterRecord) map[string][]any {
-	if r.AclPolicy == "" || c.valkey {
+	if r.AclPolicy == "" {
 		return nil
 	}
 	a := c.acl()
@@ -119,9 +199,6 @@ func (c *clusters) policyUsers(r *clusterRecord) map[string][]any {
 func (c *clusters) attachPolicy(_ context.Context, name, parent string) (string, error) {
 	if name == "" {
 		return "", nil
-	}
-	if c.valkey {
-		return "", apierror.InvalidArgument("Memorystore for Valkey has no ACL policies")
 	}
 	if !strings.HasPrefix(name, parent+"/aclPolicies/") {
 		return "", apierror.InvalidArgument("acl_policy %q must be a policy of %s", name, parent)
@@ -198,8 +275,8 @@ func (c *clusters) attachedTo(name string) []string {
 	return out
 }
 
-func (s *ClusterServer) policies() (*clusters, *aclPolicies, error) {
-	c, err := s.clusters()
+func (s *aclAPI) policies() (*clusters, *aclPolicies, error) {
+	c, err := s.get()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -207,7 +284,7 @@ func (s *ClusterServer) policies() (*clusters, *aclPolicies, error) {
 }
 
 // CreateAclPolicy makes a policy, its first revision.
-func (s *ClusterServer) CreateAclPolicy(ctx context.Context, req *clusterpb.CreateAclPolicyRequest) (*clusterpb.AclPolicy, error) {
+func (s *aclAPI) CreateAclPolicy(ctx context.Context, req *clusterpb.CreateAclPolicyRequest) (*clusterpb.AclPolicy, error) {
 	c, a, err := s.policies()
 	if err != nil {
 		return nil, err
@@ -237,7 +314,7 @@ func (s *ClusterServer) CreateAclPolicy(ctx context.Context, req *clusterpb.Crea
 	return c.renderPolicy(p, nil, clusterpb.AclPolicy_ACTIVE), nil
 }
 
-func (s *ClusterServer) findPolicy(name string) (*clusters, *aclPolicyRecord, []string, error) {
+func (s *aclAPI) findPolicy(name string) (*clusters, *aclPolicyRecord, []string, error) {
 	if aclPolicyRE.FindStringSubmatch(name) == nil {
 		return nil, nil, nil, apierror.InvalidArgument("name must be projects/{project}/locations/{location}/aclPolicies/{acl_policy}, not %q", name)
 	}
@@ -258,7 +335,7 @@ func (s *ClusterServer) findPolicy(name string) (*clusters, *aclPolicyRecord, []
 }
 
 // GetAclPolicy describes a policy.
-func (s *ClusterServer) GetAclPolicy(ctx context.Context, req *clusterpb.GetAclPolicyRequest) (*clusterpb.AclPolicy, error) {
+func (s *aclAPI) GetAclPolicy(ctx context.Context, req *clusterpb.GetAclPolicyRequest) (*clusterpb.AclPolicy, error) {
 	c, p, attached, err := s.findPolicy(req.GetName())
 	if err != nil {
 		return nil, err
@@ -270,7 +347,7 @@ func (s *ClusterServer) GetAclPolicy(ctx context.Context, req *clusterpb.GetAclP
 }
 
 // ListAclPolicies lists a location's policies, in name order and paged.
-func (s *ClusterServer) ListAclPolicies(ctx context.Context, req *clusterpb.ListAclPoliciesRequest) (*clusterpb.ListAclPoliciesResponse, error) {
+func (s *aclAPI) ListAclPolicies(ctx context.Context, req *clusterpb.ListAclPoliciesRequest) (*clusterpb.ListAclPoliciesResponse, error) {
 	m := parentRE.FindStringSubmatch(req.GetParent())
 	if m == nil {
 		return nil, apierror.InvalidArgument("parent must be projects/{project}/locations/{location}, not %q", req.GetParent())
@@ -312,7 +389,7 @@ func (s *ClusterServer) ListAclPolicies(ctx context.Context, req *clusterpb.List
 
 // UpdateAclPolicy replaces a policy's rules, a new revision, and sets them
 // on every node of each cluster it is attached to.
-func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.UpdateAclPolicyRequest) (*longrunningpb.Operation, error) {
+func (s *aclAPI) UpdateAclPolicy(ctx context.Context, req *clusterpb.UpdateAclPolicyRequest) (*longrunningpb.Operation, error) {
 	for _, p := range req.GetUpdateMask().GetPaths() {
 		if p != "rules" {
 			return nil, apierror.InvalidArgument("update_mask path %q is not an updatable field of AclPolicy", p)
@@ -348,10 +425,7 @@ func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.Upda
 	}
 	a.byName[p.Name] = &next
 	a.pmu.Unlock()
-	m := aclPolicyRE.FindStringSubmatch(p.Name)
-	ops := c.api.created.ops
-	op := ops.Create("projects/"+m[1]+"/locations/"+m[2], p.Name)
-	_ = ops.SetMetadata(op.Name, &clusterpb.OperationMetadata{CreateTime: timestamppb.New(c.now()), Target: p.Name, Verb: "update", ApiVersion: "v1"})
+	opName := c.policyOperation(p.Name, "update")
 	type job struct {
 		snap  clusterRecord
 		users map[string][]any
@@ -360,7 +434,7 @@ func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.Upda
 	var jobs []job
 	for _, n := range attached {
 		r := c.byName[n]
-		c.busy[n] = op.Name
+		c.busy[n] = opName
 		jobs = append(jobs, job{*r, c.aclUsers(r), append([]*clusterNode(nil), r.Nodes...)})
 	}
 	c.mu.Unlock()
@@ -381,13 +455,13 @@ func (s *ClusterServer) UpdateAclPolicy(ctx context.Context, req *clusterpb.Upda
 		out := c.renderPolicy(&next, attached, clusterpb.AclPolicy_ACTIVE)
 		a.pmu.Unlock()
 		c.mu.Unlock()
-		c.finish(op.Name, out, err)
+		c.finish(opName, c.policyOut(out), err)
 	}()
-	return s.api.operation(op.Name)
+	return s.api.operation(opName)
 }
 
 // DeleteAclPolicy deletes a policy no cluster is attached to.
-func (s *ClusterServer) DeleteAclPolicy(ctx context.Context, req *clusterpb.DeleteAclPolicyRequest) (*longrunningpb.Operation, error) {
+func (s *aclAPI) DeleteAclPolicy(ctx context.Context, req *clusterpb.DeleteAclPolicyRequest) (*longrunningpb.Operation, error) {
 	c, p, attached, err := s.findPolicy(req.GetName())
 	if err != nil {
 		return nil, err
@@ -402,15 +476,12 @@ func (s *ClusterServer) DeleteAclPolicy(ctx context.Context, req *clusterpb.Dele
 	a.pmu.Lock()
 	delete(a.byName, p.Name)
 	if c.db != nil {
-		_ = c.db.Delete(aclPolicyPrefix + clusterKey(p.Name))
+		_ = c.db.Delete(c.aclPrefix() + clusterKey(p.Name))
 	}
 	a.pmu.Unlock()
-	m := aclPolicyRE.FindStringSubmatch(p.Name)
-	ops := c.api.created.ops
-	op := ops.Create("projects/"+m[1]+"/locations/"+m[2], p.Name)
-	_ = ops.SetMetadata(op.Name, &clusterpb.OperationMetadata{CreateTime: timestamppb.New(c.now()), Target: p.Name, Verb: "delete", ApiVersion: "v1"})
-	c.finish(op.Name, &emptypb.Empty{}, nil)
-	return s.api.operation(op.Name)
+	opName := c.policyOperation(p.Name, "delete")
+	c.finish(opName, &emptypb.Empty{}, nil)
+	return s.api.operation(opName)
 }
 
 func (c *clusters) renderRevision(p *aclPolicyRecord, rev aclRevision, attached []string) *clusterpb.AclPolicyRevision {
@@ -425,7 +496,7 @@ func (c *clusters) renderRevision(p *aclPolicyRecord, rev aclRevision, attached 
 }
 
 // GetAclPolicyRevision is one revision of a policy.
-func (s *ClusterServer) GetAclPolicyRevision(ctx context.Context, req *clusterpb.GetAclPolicyRevisionRequest) (*clusterpb.AclPolicyRevision, error) {
+func (s *aclAPI) GetAclPolicyRevision(ctx context.Context, req *clusterpb.GetAclPolicyRevisionRequest) (*clusterpb.AclPolicyRevision, error) {
 	m := aclRevisionRE.FindStringSubmatch(req.GetName())
 	if m == nil {
 		return nil, apierror.InvalidArgument("name must be projects/{project}/locations/{location}/aclPolicies/{acl_policy}/revisions/{revision}, not %q", req.GetName())
@@ -442,7 +513,7 @@ func (s *ClusterServer) GetAclPolicyRevision(ctx context.Context, req *clusterpb
 }
 
 // ListAclPolicyRevisions lists a policy's revisions.
-func (s *ClusterServer) ListAclPolicyRevisions(ctx context.Context, req *clusterpb.ListAclPolicyRevisionsRequest) (*clusterpb.ListAclPolicyRevisionsResponse, error) {
+func (s *aclAPI) ListAclPolicyRevisions(ctx context.Context, req *clusterpb.ListAclPolicyRevisionsRequest) (*clusterpb.ListAclPolicyRevisionsResponse, error) {
 	c, p, attached, err := s.findPolicy(req.GetParent())
 	if err != nil {
 		return nil, err
