@@ -439,12 +439,71 @@ func (p *Prefetcher) storeNodeImages(ctx context.Context, arts []Artifact) error
 			"--platform", p.Platform, name); err != nil {
 			return fmt.Errorf("pull %s: %w", a.Ref, err)
 		}
-		if err := p.save(ctx, a, "docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "export",
-			"--platform", p.Platform, "-", name); err != nil {
+		// Exported to a file in the node and copied out with docker cp,
+		// not streamed through docker exec's stdout: that stream lost its
+		// tail now and then, on a different image each time (Offline
+		// #1805: "archive gcr.io/google.com/cloudsdktool/google-cloud-cli@...:
+		// unexpected EOF"; before it, the kourier and controller images,
+		// one "unexpected EOF" and one "the archive has no manifest.json",
+		// which ctr export writes last), with docker exec exiting 0. docker
+		// cp reads the file through the daemon's archive API.
+		if _, err := p.Runner.Run(ctx, "docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "export",
+			"--platform", p.Platform, nodeExport, name); err != nil {
+			return fmt.Errorf("export %s: %w", a.Ref, err)
+		}
+		err := p.saveCopied(ctx, a, "docker", "cp", node+":"+nodeExport, "-")
+		// The next image is exported over it; removed so the node's disk
+		// holds one archive at a time.
+		_, _ = p.Runner.Run(ctx, "docker", "exec", node, "rm", "-f", nodeExport)
+		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// nodeExport is where the throwaway node's ctr writes an image's archive:
+// on the node's /var volume, not in /tmp, which kind mounts as tmpfs, so it
+// would hold a gigabytes-large image in memory, and which docker cp cannot
+// read ("Could not find the file", measured on a kind node).
+const nodeExport = "/var/cloudburrow-prefetch-export.tar"
+
+// saveCopied is save for `docker cp CONTAINER:FILE -`, which writes a tar
+// holding the one file: its entry is the archive.
+func (p *Prefetcher) saveCopied(ctx context.Context, a Artifact, name string, args ...string) error {
+	return writeAtomic(p.Cache.Path(a), func(w io.Writer) error {
+		pr, pw := io.Pipe()
+		done := make(chan error, 1)
+		go func() {
+			err := unwrapCopy(pr, w, CanonicalName(a.Ref))
+			_, _ = io.Copy(io.Discard, pr)
+			done <- err
+		}()
+		err := p.Runner.RunStdout(ctx, pw, name, args...)
+		_ = pw.CloseWithError(err)
+		if nerr := <-done; err == nil {
+			err = nerr
+		}
+		if err != nil {
+			return fmt.Errorf("archive %s: %w", a.Ref, err)
+		}
+		return nil
+	})
+}
+
+// unwrapCopy names the archive docker cp's tar holds as its first entry.
+func unwrapCopy(r io.Reader, w io.Writer, name string) error {
+	tr := tar.NewReader(r)
+	h, err := tr.Next()
+	if err != nil {
+		return fmt.Errorf("docker cp's tar: %w", err)
+	}
+	if h.Typeflag != tar.TypeReg {
+		return fmt.Errorf("docker cp's tar holds %s, not a file", h.Name)
+	}
+	// tr reads the entry's body, and ends with an unexpected EOF when the
+	// copy is short of the size its header gives.
+	return Name(tr, w, name)
 }
 
 // save streams an archive from a command into the cache, named and checked.
