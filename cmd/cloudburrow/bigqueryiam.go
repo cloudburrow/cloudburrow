@@ -84,6 +84,11 @@ func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 	if err != nil {
 		return m
 	}
+	// group: and domain: members name the accounts of a Cloud Identity
+	// group or of the instance's domain (#1812); the front matches a
+	// dataset's groupByEmail and domain entries by Principals.
+	ix := newMemberIndex(reg, emails)
+	m.Principals = principalsOf(reg, emails)
 	// A project's roles are its own policy's and, inherited, those of its
 	// folders and its organization (Resource Manager's hierarchy: "the
 	// effective policy for a resource is the union of the policy set on
@@ -126,7 +131,7 @@ func (b *bigqueryIAM) payload(now time.Time) bigqueryfront.BigQueryIAM {
 			if pol == nil {
 				continue
 			}
-			b.addBindings(&m, reg, emails, p.ProjectID, pol.Bindings)
+			b.addBindings(&m, reg, ix, p.ProjectID, pol.Bindings)
 		}
 	}
 	b.addTags(&m, reg, projects)
@@ -230,7 +235,7 @@ func (b *bigqueryIAM) addTags(m *bigqueryfront.BigQueryIAM, reg *resourcemanager
 
 // addBindings adds bindings' roles, on project, to m for the accounts
 // emails names.
-func (b *bigqueryIAM) addBindings(m *bigqueryfront.BigQueryIAM, reg *resourcemanager.Registry, emails map[string]bool,
+func (b *bigqueryIAM) addBindings(m *bigqueryfront.BigQueryIAM, reg *resourcemanager.Registry, ix memberIndex,
 	project string, bindings []iampolicy.Binding) {
 	for _, bd := range bindings {
 		if _, ok := bigqueryfront.BigQueryRoles[bd.Role]; !ok {
@@ -244,26 +249,28 @@ func (b *bigqueryIAM) addBindings(m *bigqueryfront.BigQueryIAM, reg *resourceman
 			m.CustomRoles[bd.Role] = bq
 		}
 		for _, member := range bd.Members {
-			kind, email, ok := strings.Cut(member, ":")
-			email = strings.ToLower(email)
-			if !ok || (kind != "serviceAccount" && kind != "user") || !emails[email] {
-				continue
-			}
-			if bd.Condition != nil {
-				if m.Conditional[email] == nil {
-					m.Conditional[email] = map[string][]bigqueryfront.BigQueryIAMCondition{}
-				}
-				m.Conditional[email][project] = append(m.Conditional[email][project],
-					bigqueryfront.BigQueryIAMCondition{Role: bd.Role, Expression: bd.Condition.Expression})
-				continue
-			}
-			if m.Roles[email] == nil {
-				m.Roles[email] = map[string][]string{}
-			}
-			if !slices.Contains(m.Roles[email][project], bd.Role) {
-				m.Roles[email][project] = append(m.Roles[email][project], bd.Role)
+			for _, email := range ix.accounts(member) {
+				b.grantMember(m, email, project, bd)
 			}
 		}
+	}
+}
+
+// grantMember gives email bd's role on project, or its condition.
+func (b *bigqueryIAM) grantMember(m *bigqueryfront.BigQueryIAM, email, project string, bd iampolicy.Binding) {
+	if bd.Condition != nil {
+		if m.Conditional[email] == nil {
+			m.Conditional[email] = map[string][]bigqueryfront.BigQueryIAMCondition{}
+		}
+		m.Conditional[email][project] = append(m.Conditional[email][project],
+			bigqueryfront.BigQueryIAMCondition{Role: bd.Role, Expression: bd.Condition.Expression})
+		return
+	}
+	if m.Roles[email] == nil {
+		m.Roles[email] = map[string][]string{}
+	}
+	if !slices.Contains(m.Roles[email][project], bd.Role) {
+		m.Roles[email][project] = append(m.Roles[email][project], bd.Role)
 	}
 }
 

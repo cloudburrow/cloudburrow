@@ -73,6 +73,10 @@ type IAMSource struct {
 	// or instance's name): a conditional binding counts where its
 	// condition holds for resource.
 	Members func(project, resource, role string) []string
+	// Principals are the members that name an account (#1812): its own,
+	// its Cloud Identity groups (nested too) and its domain, lower case.
+	// nil matches the account's own member only.
+	Principals func(email string) []string
 }
 
 // iamEvery is how often the nodes' IAM users are set again: expired tokens
@@ -178,17 +182,28 @@ func (c *clusters) iamUsers(r *clusterRecord) map[string][]any {
 		out["default"] = def
 		return out
 	}
-	allowed := map[string]bool{}
+	members := map[string]bool{}
 	for _, m := range c.iam.src.Members(r.project(), r.Name, r.connectRole()) {
-		kind, email, ok := strings.Cut(m, ":")
-		if ok && (kind == "serviceAccount" || kind == "user") {
-			allowed[strings.ToLower(email)] = true
+		members[strings.ToLower(strings.TrimSpace(m))] = true
+	}
+	allowed := func(email string) bool {
+		if members["serviceaccount:"+email] || members["user:"+email] {
+			return true
 		}
+		if c.iam.src.Principals == nil {
+			return false
+		}
+		for _, p := range c.iam.src.Principals(email) {
+			if members[strings.ToLower(p)] {
+				return true
+			}
+		}
+		return false
 	}
 	byEmail := map[string][]any{}
 	for _, t := range c.iam.src.Tokens(c.now()) {
 		email := strings.ToLower(t.Email)
-		if email == "" || !allowed[email] {
+		if email == "" || !allowed(email) {
 			continue
 		}
 		def = append(def, "#"+t.Hash)

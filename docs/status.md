@@ -119,8 +119,10 @@ and a rough size, is in [gaps.md](gaps.md).
   datasets, tables, routines, models, row access policies, table and routine policies, views
   and authorized views, with folder and organization inheritance and conditions, tag conditions
   on datasets and tables, job creators kept across a restart of the front, custom roles in table
-  and routine policies, and stored procedures' bodies (#1767, #1774, #1780; `group:` and
-  `domain:` members still grant nothing, [gaps.md](gaps.md)). The instance's own account is not such an account and is not checked
+  and routine policies, and stored procedures' bodies (#1767, #1774, #1780), and `group:` and
+  `domain:` members and a dataset's `groupByEmail` and `domain` entries, expanded through the
+  instance's Cloud Identity groups (nested too) and domain (#1812, as in the other minted-token
+  checks). The instance's own account is not such an account and is not checked
   ([credentials.md](credentials.md)); a BigQuery request without a minted token is served as it.
   The fifth is BigQuery remote models' connection permissions (#1765): `CREATE MODEL … REMOTE
   WITH CONNECTION` and each query of a remote model need `bigquery.connections.use` on the

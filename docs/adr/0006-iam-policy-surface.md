@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18), #1765 (BigQuery remote models' connection permissions, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18), #1765 (BigQuery remote models' connection permissions, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18), #1812 (Cloud Identity groups and domain members, 2026-11-18)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -507,9 +507,20 @@ so a caller's jobs stay its own across a restart of the front (the emulator's re
 as it does the jobs). The host gives the front every custom role with `bigquery.` permissions of
 each project and the organization, so a custom role named only in a table's or a routine's own
 policy grants. A routine called by a two-part name is checked as one called by three parts, and a
-stored procedure's body is checked for the tables it reads and the routines it calls. Still not
-read: `group:` and `domain:` members (and a dataset's `groupByEmail` and `domain` entries), as the
-instance has no Cloud Identity groups or domains to expand them with ([gaps.md](../gaps.md)).
+stored procedure's body is checked for the tables it reads and the routines it calls.
+
+Amended 2026-11-18 by #1812: the instance serves Cloud Identity's groups (`cloudidentity.googleapis.com`
+v1, on Resource Manager's port) under its organization's customer, `customers/C0cloudburrow`, in
+its domain, `cloudburrow.local`. A `group:G` member names every account that is a member of G,
+directly or through groups nested in it (Google: a group is "a named collection of Google
+Accounts", and members of a nested group inherit the outer group's roles), and
+`domain:cloudburrow.local` names every account whose email is in the domain (a service account's
+never is); any other domain names nobody, as the instance has no other Cloud Identity account. A
+dataset's `groupByEmail` and `domain` entries match the same way. This holds in the BigQuery
+per-project IAM above (project, folder and organization policies, table and routine policies,
+dataset entries), Memorystore's IAM auth, Firestore with MongoDB compatibility and IAM Credentials.
+BigQuery remote models' connection checks (#1765) expand `group:` members too: the front asks
+Cloud Identity (on Resource Manager's port) for the transitive groups of the account it checks.
 
 ### Firestore with MongoDB compatibility and IAM Credentials (#1738, #1747, #1751)
 

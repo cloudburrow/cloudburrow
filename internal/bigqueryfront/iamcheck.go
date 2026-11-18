@@ -67,8 +67,10 @@ import (
 // request.time, and the resource's effective tags (tagsFor, #1780). A
 // job's creator is kept in the front's state directory (keepCreators,
 // #1780). Custom roles are every one with bigquery. permissions the host
-// gives. group: and domain: members grant nothing: there are no Cloud
-// Identity groups here (docs/gaps.md). The tables a
+// gives. group: and domain: members, and a dataset's groupByEmail and
+// domain entries, name the accounts of a Cloud Identity group (nested
+// groups too) or of the instance's domain, which the host gives as
+// Principals (#1812). The tables a
 // view reads need bigquery.tables.getData of the caller unless they
 // authorize the view or its dataset (checkView); a routine a query calls
 // by its three- or two-part name needs bigquery.routines.get, and the
@@ -97,6 +99,13 @@ type BigQueryIAM struct {
 	// TagValues are every tag value by its namespaced name
 	// ("P/env/prod"), by which resourceTags name theirs.
 	TagValues map[string]iamcond.Tag `json:"tagValues,omitempty"`
+	// Principals are each account's members beyond its own (#1812):
+	// "group:G" for every Cloud Identity group it belongs to, directly or
+	// through nested groups, and "domain:D" for an account of the
+	// instance's domain, all lower case. They match a dataset's
+	// groupByEmail and domain entries, and group: and domain: members of a
+	// table's or a routine's own policy.
+	Principals map[string][]string `json:"principals,omitempty"`
 }
 
 // BigQueryTagPrefix is the service part of a BigQuery dataset's or
@@ -485,13 +494,49 @@ func (s *iamState) onProject(email, project, perm string) bool {
 	return s.onProjectFor(nil, email, bqResource{project: project}, perm)
 }
 
-// memberIs is whether a policy member names email.
-func memberIs(member, email string) bool {
+// memberIs is whether a policy member names email: as its own user: or
+// serviceAccount: member, or as one of principals, its groups and domain
+// (BigQueryIAM.Principals, #1812).
+func memberIs(member, email string, principals []string) bool {
 	if member == "allUsers" || member == "allAuthenticatedUsers" {
 		return true
 	}
 	kind, m, ok := strings.Cut(member, ":")
-	return ok && (kind == "user" || kind == "serviceAccount") && strings.EqualFold(m, email)
+	if !ok {
+		return false
+	}
+	switch kind {
+	case "user", "serviceAccount":
+		return strings.EqualFold(m, email)
+	case "group", "domain":
+		return slices.Contains(principals, kind+":"+strings.ToLower(m))
+	}
+	return false
+}
+
+// principalsLocked are email's groups and domain; s.mu is held.
+func (s *iamState) principalsLocked(email string) []string {
+	if s.iam == nil {
+		return nil
+	}
+	return s.iam.Principals[strings.ToLower(email)]
+}
+
+// entryNames is whether a dataset access entry names email: its
+// userByEmail, its groupByEmail or domain (through principals), or its
+// iamMember.
+func entryNames(userByEmail, groupByEmail, domain, iamMember, email string, principals []string) bool {
+	switch {
+	case userByEmail != "":
+		return strings.EqualFold(userByEmail, email)
+	case groupByEmail != "":
+		return slices.Contains(principals, "group:"+strings.ToLower(groupByEmail))
+	case domain != "":
+		return slices.Contains(principals, "domain:"+strings.ToLower(domain))
+	case iamMember != "":
+		return memberIs(iamMember, email, principals)
+	}
+	return false
 }
 
 // allowed is whether email holds perm on res: by its roles on the project
@@ -515,10 +560,12 @@ func (s *iamState) allowed(r *http.Request, next http.Handler, email string, res
 	now := s.clock()
 	var ds struct {
 		Access []struct {
-			Role        string `json:"role"`
-			UserByEmail string `json:"userByEmail"`
-			IAMMember   string `json:"iamMember"`
-			Condition   *struct {
+			Role         string `json:"role"`
+			UserByEmail  string `json:"userByEmail"`
+			GroupByEmail string `json:"groupByEmail"`
+			Domain       string `json:"domain"`
+			IAMMember    string `json:"iamMember"`
+			Condition    *struct {
 				Expression string `json:"expression"`
 			} `json:"condition"`
 		} `json:"access"`
@@ -533,8 +580,9 @@ func (s *iamState) allowed(r *http.Request, next http.Handler, email string, res
 			}
 		}
 		s.mu.Lock()
+		principals := s.principalsLocked(email)
 		for _, a := range ds.Access {
-			if !strings.EqualFold(a.UserByEmail, email) && (a.IAMMember == "" || !memberIs(a.IAMMember, email)) {
+			if !entryNames(a.UserByEmail, a.GroupByEmail, a.Domain, a.IAMMember, email, principals) {
 				continue
 			}
 			role := a.Role
@@ -570,12 +618,13 @@ func (s *iamState) allowed(r *http.Request, next http.Handler, email string, res
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	principals := s.principalsLocked(email)
 	for _, b := range bindings {
 		if !s.roleGrants(b.Role, perm) || !b.Grants(attrs) {
 			continue
 		}
 		for _, m := range b.Members {
-			if memberIs(m, email) {
+			if memberIs(m, email, principals) {
 				return true
 			}
 		}

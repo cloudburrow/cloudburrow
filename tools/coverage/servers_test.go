@@ -119,7 +119,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// The Cloud SQL Admin API's registry is its server's method table,
 		// and TestEveryUnservedMethodIsNotImplemented checks its 501s over
 		// HTTP (internal/service/sqladmin).
-		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") {
+		// Cloud Identity's (#1812) is groups_methods.go's table, and
+		// TestCloudIdentityUnservedAre501 checks its 501s over HTTP
+		// (internal/service/resourcemanager).
+		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") ||
+			strings.HasPrefix(m, "cloudidentity.") {
 			continue
 		}
 		// Cloud Run v1's is the adapter's method table, and

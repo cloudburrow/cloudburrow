@@ -122,7 +122,10 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
   API's) token minting and signing on a service account the IAM API created (#1747), and
   BigQuery's per-project IAM of a caller with such a token: jobs, datasets, tables, routines,
   models and their own policies, with folder and organization inheritance and conditions,
-  tag conditions included (#1767, #1774, #1780). The fifth, BigQuery remote models' connection permissions (#1765), checks
+  tag conditions included (#1767, #1774, #1780). In all four, a `group:` member names the
+  members of a Cloud Identity group the instance serves (nested groups too), and `domain:cloudburrow.local`
+  every account of the instance's domain; so do a BigQuery dataset's `groupByEmail` and `domain`
+  entries (#1812). The fifth, BigQuery remote models' connection permissions (#1765), checks
   `bigquery.connections.use` on the connection and its service account's Vertex AI User role.
   They prove this instance applies its own rule, not that your policy is right on Google.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
