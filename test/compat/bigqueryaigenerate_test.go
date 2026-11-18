@@ -18,8 +18,9 @@ import (
 // (gemini-3.5-flash-lite, no alias) is the local endpoint's NOT_FOUND in
 // status with a NULL result, never substituted; without connection_id the
 // caller needs the Vertex AI User role (403 without it), and with one the
-// connection's permissions (#1765); output_schema and model_params are
-// 501. The model's words are recorded, not asserted.
+// connection's permissions (#1765); model_params is 501 (output_schema
+// is TestBigQueryAIGenerateStructured's, #1771). The model's words are
+// recorded, not asserted.
 //
 // covers: bigquery.jobs.query
 func TestBigQueryAIGenerate(t *testing.T) {
@@ -65,7 +66,7 @@ func TestBigQueryAIGenerate(t *testing.T) {
 	if len(rows) != 1 || rows[0]["result"] != nil || !strings.Contains(fmt.Sprint(rows[0]["status"]), "NOT_FOUND") {
 		t.Errorf("the default endpoint with no alias: %v", rows)
 	}
-	for arg, want := range map[string]string{"output_schema => 'a STRING'": "output_schema", `model_params => JSON '{"generationConfig":{"temperature":0}}'`: "model_params"} {
+	for arg, want := range map[string]string{`model_params => JSON '{"generationConfig":{"temperature":0}}'`: "model_params"} {
 		if err := mlRun(h, c, fmt.Sprintf("SELECT AI.GENERATE('hi', endpoint => '%s', %s)", localModel, arg)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v", arg, err)
 		}
