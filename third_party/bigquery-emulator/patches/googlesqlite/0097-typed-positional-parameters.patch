@@ -1,0 +1,456 @@
+CloudBurrow patch 97 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1814). Applies after patch 0095.
+
+A positional parameter alone in the select list had no type: positional
+parameters were left undeclared, and an undeclared parameter with no type
+from its context is an INT64, so `SELECT ? AS a` with a STRING failed
+("strconv.ParseInt ... invalid syntax") and a FLOAT64 or BOOL was truncated
+to an integer. BigQuery gives the column the parameter's type
+(https://cloud.google.com/bigquery/docs/parameterized-queries). A
+statement's positional parameters are now declared, in order, when it has
+no more `?` than args and every arg is a scalar of a known type; undeclared
+parameters are turned off for that statement (go-googlesql allows no
+declared positional parameter while they are allowed) and back on after
+it. An ARRAY, STRUCT or NULL arg leaves them undeclared, as before.
+
+A Go value cannot be a NUMERIC, BIGNUMERIC, DATE, TIME, DATETIME,
+GEOGRAPHY, JSON or INTERVAL, so a named parameter of those types (as the
+emulator binds them, from text) was a STRING, and a DATETIME a TIMESTAMP.
+TypedParameter{Type, Value} binds the value of the type it names from its
+REST text (BYTES base64-encoded), and a parameter bound as one has that
+type.
+
+bare_positional_parameter_test.go (TestBarePositionalParameter).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1713,7 +1713,7 @@
+ // they do — wildcard-table pre-registration, StmtAction construction
+ // — can itself re-enter Analyze; keeping that outside this critical
+ // section is what prevents a self-deadlock.
+-func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string, zoned bool) (googlesql.ResolvedStatementNode, error) {
++func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, positional int, query string, zoned bool) (googlesql.ResolvedStatementNode, error) {
+ 	wasmAnalyzeMu.Lock()
+ 	defer wasmAnalyzeMu.Unlock()
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1456): with a default
+@@ -1728,8 +1728,12 @@
+ 		defer func() { a.opt = shared }()
+ 	}
+ 	a.opt.SetParameterMode(mode)
+-	if err := a.declareParameterTypes(mode, args); err != nil {
++	declared, err := a.declareParameterTypes(mode, args, positional)
++	if err != nil {
+ 		return nil, fmt.Errorf("failed to declare parameter types: %w", err)
++	}
++	if declared { // CloudBurrow patch (#1814)
++		defer func(opt *googlesql.AnalyzerOptions) { _ = undeclaredPositional(opt) }(a.opt)
+ 	}
+ 	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.lookupCatalog(a.namePath.path), tf()) // CloudBurrow patch (#1784)
+ 	if err != nil {
+@@ -1824,7 +1828,7 @@
+ 				// wildcard of the statement's project (project_scope.go).
+ 				a.catalog.registerWildcardTableByPath(a.namePath.mergePath(ids))
+ 			}
+-			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, zoned)
++			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, stmtFacts.positional, query, zoned)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -1867,20 +1871,28 @@
+ // e.g. UNNEST(@arr) which expects an ARRAY but cannot infer the
+ // element type.
+ //
+-// Positional parameters are deliberately left undeclared. go-googlesql
+-// disallows mixing declared positional parameters with
+-// SetAllowUndeclaredParameters(true), and the typing inference path
+-// the latter enables is the canonical way callers pass `?` placeholder
+-// values without an explicit schema.
++// CloudBurrow patch (cloudburrow/cloudburrow#1814): positional parameters
++// are declared too, when the statement has no more `?` than args and the
++// type of every arg is known. They were left undeclared, and an undeclared
++// parameter with no type from its context (a bare `SELECT ? AS a`) is an
++// INT64, so a STRING arg failed ("strconv.ParseInt ... invalid syntax") and
++// a FLOAT64 or BOOL one was truncated to an integer; BigQuery gives the
++// column the parameter's type. go-googlesql allows no declared positional
++// parameter while undeclared parameters are allowed, so they are turned
++// off for that statement; undeclaredPositional turns them back on. When an
++// arg's type is not known (a NULL), all of them stay undeclared, as before.
+ //
+ // Existing declared parameters are cleared each call so the same
+ // options instance can be reused across queries.
+-func (a *Analyzer) declareParameterTypes(mode googlesql.ParameterMode, args []driver.NamedValue) error {
++func (a *Analyzer) declareParameterTypes(mode googlesql.ParameterMode, args []driver.NamedValue, positional int) (bool, error) {
+ 	if err := a.opt.ClearQueryParameters(); err != nil {
+-		return err
++		return false, err
++	}
++	if mode == googlesql.ParameterModeParameterPositional {
++		return a.declarePositionalParameterTypes(args, positional)
+ 	}
+ 	if mode != googlesql.ParameterModeParameterNamed {
+-		return nil
++		return false, nil
+ 	}
+ 	for _, v := range args {
+ 		if v.Name == "" {
+@@ -1891,12 +1903,79 @@
+ 			continue
+ 		}
+ 		if err := a.opt.AddQueryParameter(strings.ToLower(v.Name), typ); err != nil {
+-			return err
++			return false, err
+ 		}
+ 	}
+-	return nil
++	return false, nil
+ }
+ 
++// declarePositionalParameterTypes declares the type of each positional
++// arg, in order, when there are at least as many args as the statement
++// has `?` and every arg's type is known, and reports whether it did.
++// CloudBurrow patch (cloudburrow/cloudburrow#1814).
++func (a *Analyzer) declarePositionalParameterTypes(args []driver.NamedValue, positional int) (bool, error) {
++	if err := a.opt.ClearPositionalQueryParameters(); err != nil {
++		return false, err
++	}
++	if positional == 0 || len(args) < positional {
++		return false, nil
++	}
++	typs := make([]googlesql.Googlesql_TypeNode, 0, positional)
++	for _, v := range args[:positional] {
++		if v.Name != "" {
++			return false, nil
++		}
++		typ, ok := positionalParameterType(v.Value)
++		if !ok {
++			return false, nil
++		}
++		typs = append(typs, typ)
++	}
++	if err := a.opt.SetAllowUndeclaredParameters(false); err != nil {
++		return false, err
++	}
++	for _, typ := range typs {
++		if err := a.opt.AddPositionalQueryParameter(typ); err != nil {
++			_ = undeclaredPositional(a.opt)
++			return false, err
++		}
++	}
++	return true, nil
++}
++
++// positionalParameterType is the type of a positional arg that is a
++// scalar of a known type. An ARRAY, a STRUCT (googleSQLTypeForValue's
++// STRING for a struct is not its type) or a NULL is not declared, so the
++// analyzer infers its type from its context, as it did.
++// CloudBurrow patch (cloudburrow/cloudburrow#1814).
++func positionalParameterType(v any) (googlesql.Googlesql_TypeNode, bool) {
++	switch x := v.(type) {
++	case nil:
++		return nil, false
++	case string:
++		if decoded, err := DecodeValue(x); err == nil {
++			switch decoded.(type) {
++			case nil, *value.ArrayValue, *value.StructValue, *value.RangeValue:
++				return nil, false
++			}
++		}
++	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, []byte:
++	default:
++		return nil, false
++	}
++	return googleSQLTypeForValue(v)
++}
++
++// undeclaredPositional clears the declared positional parameters and
++// allows undeclared parameters again, as the shared options are between
++// statements. CloudBurrow patch (cloudburrow/cloudburrow#1814).
++func undeclaredPositional(opt *googlesql.AnalyzerOptions) error {
++	if err := opt.ClearPositionalQueryParameters(); err != nil {
++		return err
++	}
++	return opt.SetAllowUndeclaredParameters(true)
++}
++
+ // googleSQLTypeForValue returns the GoogleSQL type for a value, when
+ // it can be deduced reliably. Conn.CheckNamedValue runs ahead of
+ // analysis and base64-encodes complex shapes; for those, we decode
+@@ -1968,6 +2047,22 @@
+ 		return makeSimpleType(factory, googlesql.TypeKindTypeTimestamp)
+ 	case value.DatetimeValue:
+ 		return makeSimpleType(factory, googlesql.TypeKindTypeDatetime)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1814): the types only a
++	// TypedParameter binds (a Go value cannot be one), so a parameter of
++	// one of them in the select list has its own type, not STRING.
++	case value.TimeValue:
++		return makeSimpleType(factory, googlesql.TypeKindTypeTime)
++	case *value.NumericValue:
++		if dv.IsBigNumeric {
++			return makeSimpleType(factory, googlesql.TypeKindTypeBignumeric)
++		}
++		return makeSimpleType(factory, googlesql.TypeKindTypeNumeric)
++	case value.JsonValue:
++		return makeSimpleType(factory, googlesql.TypeKindTypeJson)
++	case *value.GeographyValue:
++		return makeSimpleType(factory, googlesql.TypeKindTypeGeography)
++	case *value.IntervalValue:
++		return makeSimpleType(factory, googlesql.TypeKindTypeInterval)
+ 	case *value.ArrayValue:
+ 		// element type from the first non-nil element
+ 		var elemKind googlesql.TypeKind = googlesql.TypeKindTypeString
+--- a/internal/value/encoder.go
++++ b/internal/value/encoder.go
+@@ -146,6 +146,11 @@
+ 		}
+ 		return ret, nil
+ 	case reflect.Struct:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1814): a value of the
++		// type a TypedParameter names.
++		if p, ok := v.Interface().(TypedParameter); ok {
++			return p.value()
++		}
+ 		t, ok := v.Interface().(time.Time)
+ 		if ok {
+ 			return TimestampValue(t), nil
+--- /dev/null
++++ b/internal/value/typed_parameter.go
+@@ -0,0 +1,101 @@
++package value
++
++import (
++	"encoding/base64"
++	"fmt"
++	"math/big"
++	"strconv"
++	"strings"
++	"time"
++)
++
++// TypedParameter is a query argument given as BigQuery's REST API gives a
++// query parameter: the name of its GoogleSQL type and its value's text
++// (https://cloud.google.com/bigquery/docs/reference/rest/v2/QueryParameter).
++// A Go string, []byte or time.Time cannot say whether it is a NUMERIC, a
++// BYTES, a DATE, a TIME, a DATETIME, a GEOGRAPHY, a JSON or an INTERVAL; a
++// TypedParameter binds a value of its own type, so a parameter in the
++// select list has the type BigQuery gives it.
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1814).
++type TypedParameter struct {
++	// Type is the GoogleSQL type name: STRING, INT64, FLOAT64, BOOL,
++	// BYTES, NUMERIC, BIGNUMERIC, DATE, TIME, DATETIME, TIMESTAMP,
++	// GEOGRAPHY, JSON or INTERVAL (and the legacy names INTEGER, FLOAT,
++	// BOOLEAN, DECIMAL and BIGDECIMAL).
++	Type string
++	// Value is the value's text: BYTES base64-encoded, the others in
++	// their canonical text form.
++	Value string
++}
++
++// value is the parameter's value of its own type.
++func (p TypedParameter) value() (Value, error) {
++	s := p.Value
++	switch strings.ToUpper(p.Type) {
++	case "STRING":
++		return StringValue(s), nil
++	case "INT64", "INTEGER", "INT":
++		n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
++		if err != nil {
++			return nil, fmt.Errorf("invalid INT64 parameter value %q", s)
++		}
++		return IntValue(n), nil
++	case "FLOAT64", "FLOAT", "DOUBLE":
++		f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
++		if err != nil {
++			return nil, fmt.Errorf("invalid FLOAT64 parameter value %q", s)
++		}
++		return FloatValue(f), nil
++	case "BOOL", "BOOLEAN":
++		b, err := strconv.ParseBool(strings.TrimSpace(s))
++		if err != nil {
++			return nil, fmt.Errorf("invalid BOOL parameter value %q", s)
++		}
++		return BoolValue(b), nil
++	case "BYTES":
++		b, err := base64.StdEncoding.DecodeString(s)
++		if err != nil {
++			return nil, fmt.Errorf("invalid BYTES parameter value %q: not base64", s)
++		}
++		return BytesValue(b), nil
++	case "NUMERIC", "DECIMAL", "BIGNUMERIC", "BIGDECIMAL":
++		r, ok := new(big.Rat).SetString(strings.TrimSpace(s))
++		if !ok {
++			return nil, fmt.Errorf("invalid %s parameter value %q", strings.ToUpper(p.Type), s)
++		}
++		isBig := strings.HasPrefix(strings.ToUpper(p.Type), "BIG")
++		return &NumericValue{Rat: r, IsBigNumeric: isBig}, nil
++	case "DATE":
++		t, err := parseDate(s)
++		if err != nil {
++			return nil, fmt.Errorf("invalid DATE parameter value %q", s)
++		}
++		return DateValue(t), nil
++	case "TIME":
++		t, err := parseTime(s)
++		if err != nil {
++			return nil, fmt.Errorf("invalid TIME parameter value %q", s)
++		}
++		return TimeValue(t), nil
++	case "DATETIME":
++		t, err := parseDatetime(s)
++		if err != nil {
++			return nil, fmt.Errorf("invalid DATETIME parameter value %q", s)
++		}
++		return DatetimeValue(t), nil
++	case "TIMESTAMP":
++		t, err := parseTimestamp(s, time.UTC)
++		if err != nil {
++			return nil, fmt.Errorf("invalid TIMESTAMP parameter value %q", s)
++		}
++		return TimestampValue(t.UTC()), nil
++	case "GEOGRAPHY":
++		return GeographyFromWKT(s)
++	case "JSON":
++		return JsonValue(s), nil
++	case "INTERVAL":
++		return parseInterval(s)
++	}
++	return nil, fmt.Errorf("unsupported parameter type %q", p.Type)
++}
+--- /dev/null
++++ b/typed_parameter.go
+@@ -0,0 +1,10 @@
++package googlesqlite
++
++import "github.com/goccy/googlesqlite/internal/value"
++
++// TypedParameter is a query argument of the GoogleSQL type it names, given
++// as its text, as BigQuery's REST API gives a query parameter: a NUMERIC,
++// BIGNUMERIC, BYTES (base64), DATE, TIME, DATETIME, GEOGRAPHY (WKT), JSON
++// or INTERVAL bound as one is a value of that type, where a Go string is a
++// STRING. CloudBurrow patch (cloudburrow/cloudburrow#1814).
++type TypedParameter = value.TypedParameter
+--- /dev/null
++++ b/bare_positional_parameter_test.go
+@@ -0,0 +1,116 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestBarePositionalParameter is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1814): a positional parameter alone in the
++// select list was an undeclared INT64, so `SELECT ? AS a` with a STRING
++// failed ("strconv.ParseInt ... invalid syntax") and a FLOAT64 or BOOL was
++// truncated. A positional or named parameter has its arg's type, and a
++// TypedParameter's type is the one it names.
++func TestBarePositionalParameter(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=bare_positional_parameter")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	typed := func(typ, v string) googlesqlite.TypedParameter {
++		return googlesqlite.TypedParameter{Type: typ, Value: v}
++	}
++	for _, tc := range []struct {
++		arg      any
++		wantType string
++		want     string
++	}{
++		{"hello", "STRING", "hello"},
++		{int64(42), "INT64", "42"},
++		{3.5, "DOUBLE", "3.5"},
++		{true, "BOOL", "true"},
++		{[]byte("hi"), "BYTES", "aGk="},
++		{typed("STRING", "hello"), "STRING", "hello"},
++		{typed("INT64", "42"), "INT64", "42"},
++		{typed("FLOAT64", "3.5"), "DOUBLE", "3.5"},
++		{typed("BOOL", "true"), "BOOL", "true"},
++		{typed("BYTES", "aGk="), "BYTES", "aGk="},
++		{typed("NUMERIC", "1.25"), "NUMERIC", "1.25"},
++		{typed("BIGNUMERIC", "1.5"), "BIGNUMERIC", "1.5"},
++		{typed("DATE", "2024-01-02"), "DATE", "2024-01-02"},
++		{typed("TIME", "03:04:05.123456"), "TIME", "03:04:05.123456"},
++		{typed("DATETIME", "2024-01-02 03:04:05.123456"), "DATETIME", "2024-01-02T03:04:05.123456"},
++		{typed("TIMESTAMP", "2024-01-02 03:04:05.123456+00:00"), "TIMESTAMP", ""},
++		{typed("GEOGRAPHY", "POINT(1 2)"), "GEOGRAPHY", "POINT(1 2)"},
++		{typed("JSON", `{"a":1}`), "JSON", `{"a":1}`},
++		{typed("INTERVAL", "1-2 3 4:5:6"), "INTERVAL", "1-2 3 4:5:6"},
++	} {
++		for _, q := range []struct {
++			sql string
++			arg any
++		}{
++			{"SELECT ? AS a", tc.arg},
++			{"SELECT @p AS a", sql.Named("p", tc.arg)},
++		} {
++			rows, err := db.QueryContext(ctx, q.sql, q.arg)
++			if err != nil {
++				t.Errorf("%s with %#v: %v", q.sql, tc.arg, err)
++				continue
++			}
++			cts, err := rows.ColumnTypes()
++			if err != nil {
++				t.Fatal(err)
++			}
++			var typ struct{ Name string }
++			if err := json.Unmarshal([]byte(cts[0].DatabaseTypeName()), &typ); err != nil {
++				t.Fatalf("column type %q: %v", cts[0].DatabaseTypeName(), err)
++			}
++			if typ.Name != tc.wantType {
++				t.Errorf("%s with %#v: column type %s, want %s", q.sql, tc.arg, typ.Name, tc.wantType)
++			}
++			if !rows.Next() {
++				t.Errorf("%s with %#v: no row: %v", q.sql, tc.arg, rows.Err())
++				rows.Close()
++				continue
++			}
++			var got sql.NullString
++			if err := rows.Scan(&got); err != nil {
++				t.Errorf("%s with %#v: scan: %v", q.sql, tc.arg, err)
++			} else if tc.want != "" && got.String != tc.want {
++				t.Errorf("%s with %#v = %q, want %q", q.sql, tc.arg, got.String, tc.want)
++			}
++			rows.Close()
++		}
++	}
++
++	// Several of them, in their order; then a statement whose `?` takes
++	// its type from its context, and one with a NULL arg, still analyzed
++	// with undeclared parameters.
++	var (
++		s string
++		f float64
++		n int64
++	)
++	if err := db.QueryRowContext(ctx, "SELECT ? AS a, ? AS b, ? AS c", "x", 2.5, int64(7)).Scan(&s, &f, &n); err != nil {
++		t.Fatalf("three positional parameters: %v", err)
++	}
++	if s != "x" || f != 2.5 || n != 7 {
++		t.Errorf("three positional parameters = %q, %v, %v", s, f, n)
++	}
++	if err := db.QueryRowContext(ctx, "SELECT CONCAT(?, 'b')", "a").Scan(&s); err != nil || s != "ab" {
++		t.Errorf("CONCAT(?, 'b') = %q, %v", s, err)
++	}
++	var null sql.NullInt64
++	if err := db.QueryRowContext(ctx, "SELECT ? AS a", nil).Scan(&null); err != nil || null.Valid {
++		t.Errorf("SELECT ? with NULL = %v, %v", null, err)
++	}
++	if err := db.QueryRowContext(ctx, "SELECT 1 + ?", int64(1)).Scan(&n); err != nil || n != 2 {
++		t.Errorf("SELECT 1 + ? = %v, %v", n, err)
++	}
++}
