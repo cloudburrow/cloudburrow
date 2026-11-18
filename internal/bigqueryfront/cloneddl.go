@@ -52,8 +52,11 @@ import (
 // emulator does not delete a table when its expiration passes. Any other
 // option is 501.
 //
+// Another project's table is read, and the new table made, in its own
+// project (#1767), at a past time too (#1774): its history is read there.
+//
 // 501, nothing done: OR REPLACE (not in the
-// documented syntax), a table of another project, a dry run, legacy SQL,
+// documented syntax), a dry run, legacy SQL,
 // any of these statements inside a multi-statement script with a TEMP table
 // or function (checkDDL; another script is carried out a statement at a
 // time since #1459, scriptflow.go), and
@@ -221,21 +224,19 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			return
 		}
 	}
-	for _, t := range []tableRef{dest, src} {
-		if t.ProjectID != "" && t.ProjectID != project {
-			notImplemented(fmt.Sprintf("%s of a table of project %s, not the job's project %s", what, t.ProjectID, project))
-			return
-		}
-	}
+	// Another project's table is read, or made and written, in its own
+	// project (#1767): in is the destination's front. A table read at a
+	// past time is read within the job's project only.
+	in := f.inProject(refProject(dest, project))
 	if st.kind != "drop" {
-		if why := f.protectedRead(r, project, src.DatasetID, src.TableID, what); why != "" { // #1218
+		if why := f.protectedRead(r, refProject(src, project), src.DatasetID, src.TableID, what); why != "" { // #1218
 			writeError(w, http.StatusNotImplemented, "notImplemented", why)
 			return
 		}
 	}
 	d := f.copyTableMeta(r, dest)
 	done := func(op string) {
-		ddl := &ownDDL{target: tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: dest.TableID}, operation: op}
+		ddl := &ownDDL{target: tableRef{ProjectID: refProject(dest, project), DatasetID: dest.DatasetID, TableID: dest.TableID}, operation: op}
 		switch st.kind {
 		case "clone":
 			ddl.statementType = "CREATE_TABLE"
@@ -261,7 +262,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			notImplemented(fmt.Sprintf("DROP SNAPSHOT TABLE of %s, which is not a table snapshot. BigQuery's "+
 				"documentation does not say what it does; DROP TABLE deletes it", tableName(project, dest)))
 		default:
-			if status, got := f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil); status/100 != 2 {
+			if status, got := in.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil); status/100 != 2 {
 				failed(status, "backendError", errorMessage(got, status))
 				return
 			}
@@ -290,8 +291,8 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		failed(http.StatusConflict, "duplicate", "Already Exists: Table "+tableName(project, dest))
 		return
 	}
-	if status, _ := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)); status == http.StatusNotFound {
-		failed(http.StatusNotFound, "notFound", "Not found: Dataset "+project+":"+dest.DatasetID)
+	if status, _ := in.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)); status == http.StatusNotFound {
+		failed(http.StatusNotFound, "notFound", "Not found: Dataset "+refProject(dest, project)+":"+dest.DatasetID)
 		return
 	}
 	asOf := time.Time{}
@@ -300,11 +301,18 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		// before the time travel window fails, now is the table as it is,
 		// and a past time inside it is read from the table's change
 		// history (timetravel.go, #1460).
+		// Another project's table is read as it was in its own project
+		// (#1774), as a copy job's table@time of one is (copyjob.go): its
+		// change history is that project's.
+		sf := f
+		if refProject(src, project) != project {
+			sf = f.inProject(src.ProjectID)
+		}
 		var m partitionMeta
-		if status, got := f.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
+		if status, got := sf.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
 			_ = json.Unmarshal(got, &m)
 		}
-		past, code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf)
+		past, code, msg := sf.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf)
 		switch {
 		case code == http.StatusNotImplemented:
 			writeError(w, code, "notImplemented", msg)
@@ -313,7 +321,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			failed(code, "invalidQuery", msg)
 			return
 		case past != 0:
-			sub, code, msg := f.historySubquery(r, src.DatasetID, src.TableID, m, tableName(project, src), past, "TRUE")
+			sub, code, msg := sf.historySubquery(r, src.DatasetID, src.TableID, m, tableName(project, src), past, "TRUE")
 			if code != 0 {
 				writeError(w, code, "notImplemented", msg)
 				return
@@ -343,7 +351,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	if !asOf.IsZero() {
 		start = asOf.Format(time.RFC3339Nano) // the snapshot's or clone's time (#1460)
 	}
-	base := map[string]string{"projectId": project, "datasetId": src.DatasetID, "tableId": src.TableID}
+	base := map[string]string{"projectId": refProject(src, project), "datasetId": src.DatasetID, "tableId": src.TableID}
 	var extra map[string]any
 	switch {
 	case st.kind == "snapshot":
@@ -351,18 +359,18 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	case s.snapshot == nil:
 		extra = map[string]any{"cloneDefinition": map[string]any{"baseTableReference": base, "cloneTime": start}}
 	}
-	if msg := f.makeTableWith(r, dest, s.schema, partitionExtra([]copyTable{s}, extra)); msg != "" {
+	if msg := in.makeTableWith(r, dest, s.schema, partitionExtra([]copyTable{s}, extra)); msg != "" {
 		failed(http.StatusBadRequest, "invalidQuery", msg)
 		return
 	}
 	if msg := f.insertSelect(r, dest, []copyTable{s}); msg != "" {
-		f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
+		in.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 		failed(http.StatusInternalServerError, "backendError", msg)
 		return
 	}
 	if st.options != nil && st.options.sets() {
-		if msg := f.setTableOptions(r, dest.DatasetID, dest.TableID, *st.options, expiration, setExpiration); msg != "" {
-			f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
+		if msg := in.setTableOptions(r, dest.DatasetID, dest.TableID, *st.options, expiration, setExpiration); msg != "" {
+			in.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 			failed(http.StatusInternalServerError, "backendError", msg)
 			return
 		}

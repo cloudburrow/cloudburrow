@@ -159,9 +159,8 @@ func TestBigQueryLoadFromAFileSendsTheFileAsTheLoadsData(t *testing.T) {
 			t.Errorf("%v %v = %v, want %q", c.path, c.values, err, c.why)
 		}
 	}
-	if _, err := p.ActAtFile(ctx, "other", []string{"ds", "t"}, actLoadFile, nil, file("x")); err == nil {
-		t.Error("a load into another project was accepted")
-	}
+	// A load into another project is that project's (#1764); refused
+	// above, nothing was sent.
 	if len(uploads) != 0 {
 		t.Errorf("a refused load sent %q", uploads)
 	}

@@ -258,7 +258,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				"ML.GENERATE_TEXT and ML.GENERATE_EMBEDDING. Nothing was run.")
 			return true
 		}
-		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
+		project, dataset, id, ok := f.resolveModel(c.path, q)
 		if !ok {
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
 				Message: "Model name " + strings.Join(c.path, ".") + " missing dataset while no default dataset is set in the request."})

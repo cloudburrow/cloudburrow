@@ -24,9 +24,10 @@ import (
 // (bigqueryPurgeHeader), so the front keeps nothing of them for
 // undelete and forgets what it kept of the project's deleted tables.
 //
-// The emulator serves one project, the instance's own (docs/bigquery.md):
-// another project has no datasets, and its reset has nothing to do. A full
-// reset resets every project CloudBurrow knows of.
+// BigQuery serves every ACTIVE project of Resource Manager (#1764), so a
+// purged project's datasets are deleted here as the instance's are; a
+// project BigQuery never served answers 404, and its reset has nothing to
+// do. A full reset resets every project CloudBurrow knows of.
 type bigqueryResetter struct {
 	tunnel   func() *netfwd.Forwarder
 	projects func() []string
@@ -79,6 +80,29 @@ func (b *bigqueryResetter) ResetProject(ctx context.Context, project string) err
 	// The copies the front kept of tables deleted before, for undelete.
 	if err := c.Dataset(bigqueryDroppedDataset).DeleteWithContents(ctx); err != nil && !isHTTPStatus(err, http.StatusNotFound) {
 		errs = append(errs, fmt.Errorf("delete the front's deleted tables: %w", err))
+	}
+	// And its jobs, every user's (#1781): a project made again under a
+	// purged ID listed and read the purged project's.
+	jobs := c.Jobs(ctx)
+	jobs.AllUsers = true
+	var ids []*bigquery.Job
+	for {
+		j, err := jobs.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			if !isHTTPStatus(err, http.StatusNotFound) {
+				errs = append(errs, fmt.Errorf("list jobs: %w", err))
+			}
+			break
+		}
+		ids = append(ids, j)
+	}
+	for _, j := range ids {
+		if err := j.Delete(ctx); err != nil && !isHTTPStatus(err, http.StatusNotFound) {
+			errs = append(errs, fmt.Errorf("delete job %s: %w", j.ID(), err))
+		}
 	}
 	return errors.Join(errs...)
 }

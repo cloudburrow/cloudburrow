@@ -94,7 +94,7 @@ func TestBigQueryLoadFieldsOutsideTheSchema(t *testing.T) {
 		}
 	}
 	read := func(table, sql string) string {
-		return strings.Join(queryRows(t, ctx, c, h.Project(), ds.DatasetID, strings.ReplaceAll(sql, "{T}", table)), " / ")
+		return strings.Join(queryRows(t, ctx, c, c.Project(), ds.DatasetID, strings.ReplaceAll(sql, "{T}", table)), " / ")
 	}
 	withSchema := func(more func(*bigquery.FileConfig)) func(*bigquery.FileConfig) {
 		return func(fc *bigquery.FileConfig) {

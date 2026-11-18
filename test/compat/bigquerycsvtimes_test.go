@@ -80,7 +80,7 @@ func TestBigQueryCSVLoadTimeFormatsAndEncodings(t *testing.T) {
 		return err
 	}
 	read := func(table string) string {
-		return strings.Join(queryRows(t, ctx, c, h.Project(), ds.DatasetID, "SELECT CAST(d AS STRING), CAST(dt AS STRING), "+
+		return strings.Join(queryRows(t, ctx, c, c.Project(), ds.DatasetID, "SELECT CAST(d AS STRING), CAST(dt AS STRING), "+
 			"CAST(tm AS STRING), FORMAT_TIMESTAMP('%FT%TZ', ts, 'UTC'), FORMAT_TIMESTAMP('%FT%TZ', plain, 'UTC'), note FROM "+table), " / ")
 	}
 	formats := func(fc *bigquery.FileConfig) {
@@ -191,7 +191,7 @@ func TestBigQueryCSVLoadTimeFormatsAndEncodings(t *testing.T) {
 		if got := describeSchema(md.Schema); got != "d:DATE:NULLABLE iso:STRING:NULLABLE ts:TIMESTAMP:NULLABLE n:INTEGER:NULLABLE" {
 			t.Errorf("%s: the detected schema is %s", table, got)
 		}
-		rows := queryRows(t, ctx, c, h.Project(), ds.DatasetID, "SELECT CAST(d AS STRING), iso, FORMAT_TIMESTAMP('%FT%TZ', ts, 'UTC'), n FROM "+
+		rows := queryRows(t, ctx, c, c.Project(), ds.DatasetID, "SELECT CAST(d AS STRING), iso, FORMAT_TIMESTAMP('%FT%TZ', ts, 'UTC'), n FROM "+
 			table+" ORDER BY n")
 		if got := strings.Join(rows, " / "); got != "2018-12-03|2018-12-03|2020-07-01T16:00:00Z|1 / 2020-01-02|<nil>|2020-07-02T04:30:00Z|2" {
 			t.Errorf("%s: the rows read back %q", table, got)

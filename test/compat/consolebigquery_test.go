@@ -167,15 +167,17 @@ func TestConsoleBigQueryDatasetsSchemaAndQuery(t *testing.T) {
 		t.Errorf("after a refused DELETE the table has %d rows, want 4", md.NumRows)
 	}
 
-	// Another project: the harness's own, which the emulator does not serve.
+	// Another project: the harness's own, which Resource Manager does not
+	// have, so BigQuery does not serve it (#1764).
 	other := h.Project()
 	if other == project {
 		t.Fatalf("the harness project %q is the served one; the other-project check needs another", other)
 	}
 	var elsewhere consoleListing
 	consoleJSON(t, addr, http.MethodGet, "/api/resources/bigquery?project="+url.QueryEscape(other), "", &elsewhere)
-	if elsewhere.Unavailable != "" || len(elsewhere.Items) != 0 || !strings.Contains(elsewhere.Prompt, `"`+project+`"`) {
-		t.Errorf("another project showed %+v, want a prompt naming %q", elsewhere, project)
+	if elsewhere.Unavailable != "" || len(elsewhere.Items) != 0 || !strings.Contains(elsewhere.Prompt, `"`+other+`"`) ||
+		!strings.Contains(elsewhere.Prompt, "Resource Manager") {
+		t.Errorf("another project showed %+v, want a prompt naming %q and Resource Manager", elsewhere, other)
 	}
 	var elsewherePage consoleDetail
 	consoleJSON(t, addr, http.MethodGet, "/api/detail/bigquery?project="+url.QueryEscape(other)+"&name="+ds.DatasetID, "", &elsewherePage)

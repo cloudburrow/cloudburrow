@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -58,41 +60,61 @@ func TestTheBigQueryEditorRunsOnlyOneSelect(t *testing.T) {
 	}
 }
 
-// TestBigQueryOtherProjectsArePromptsNotErrors.
+// TestBigQueryOtherProjectsAreRead (#1764).
 //
-// The emulator serves one project. Any other gets a prompt naming the one it
-// serves — not the emulator's 404 as an error, and not an empty table that
-// says the project has no datasets (#698). Nothing is sent: the endpoint here
-// is a port nothing listens on, so a read would come back Unavailable.
-func TestBigQueryOtherProjectsArePromptsNotErrors(t *testing.T) {
+// BigQuery serves every project of the instance's Resource Manager, so the
+// project chosen in the toolbar is the one read, not the instance's
+// default; one BigQuery answers 404 "project P is not found" gets a prompt
+// that says why, not the 404 as an error and not an empty table that says
+// the project has no datasets (#698).
+func TestBigQueryOtherProjectsAreRead(t *testing.T) {
 	ctx := context.Background()
-	p := bigqueryProvider{endpoint: "127.0.0.1:1", project: "served-project"}
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":404,"message":"project other-project is not found","errors":[{"reason":"notFound","message":"project other-project is not found"}]}}`))
+	}))
+	defer srv.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(srv.URL, "http://"), project: "served-project"}
 
 	list, err := p.List(ctx, "other-project")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if list.Unavailable != "" || len(list.Items) != 0 {
-		t.Errorf("another project was read: unavailable %q, %d rows", list.Unavailable, len(list.Items))
+		t.Errorf("a project BigQuery does not serve: unavailable %q, %d rows", list.Unavailable, len(list.Items))
 	}
-	if !strings.Contains(list.Prompt, `"served-project"`) || !strings.Contains(list.Prompt, "one project") {
-		t.Errorf("the prompt does not name the one project served: %q", list.Prompt)
+	if !strings.Contains(list.Prompt, `"other-project"`) || !strings.Contains(list.Prompt, "Resource Manager") {
+		t.Errorf("the prompt does not say why: %q", list.Prompt)
 	}
-
-	d, err := p.Detail(ctx, "other-project", []string{"ds"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Prompt != list.Prompt || d.Unavailable != "" || len(d.Sections) != 0 {
-		t.Errorf("a dataset of another project opened as %+v", d)
+	if len(paths) == 0 || !strings.Contains(paths[0], "/projects/other-project/datasets") {
+		t.Errorf("the chosen project was not read: %v", paths)
 	}
 
-	if _, err := p.Query(ctx, "other-project", []string{"ds"}, "SELECT 1"); err == nil ||
-		!strings.Contains(err.Error(), "served-project") {
-		t.Errorf("a query in another project = %v, want the one-project message", err)
+	if _, err := p.Query(ctx, "other-project", []string{"ds"}, "SELECT 1"); err == nil {
+		t.Error("a query in a project BigQuery does not serve succeeded")
+	}
+	for _, path := range paths {
+		if strings.Contains(path, "served-project") {
+			t.Errorf("the instance's project was read instead of the chosen one: %s", path)
+		}
 	}
 
 	if list, _ := p.List(ctx, ""); list.Prompt == "" || list.Unavailable != "" {
 		t.Errorf("no project selected: %+v", list)
+	}
+
+	// The Job history screen and a job's page say so too, not "listing
+	// jobs: project other-project is not found".
+	jobs := bigqueryJobsProvider{bq: p}
+	if list, err := jobs.List(ctx, "other-project"); err != nil || list.Unavailable != "" || len(list.Items) != 0 ||
+		!strings.Contains(list.Prompt, `"other-project"`) || !strings.Contains(list.Prompt, "Resource Manager") {
+		t.Errorf("Job history of a project BigQuery does not serve = %+v, %v; want the prompt", list, err)
+	}
+	if d, err := jobs.Detail(ctx, "other-project", []string{"j"}); err != nil || d.Unavailable != "" ||
+		!strings.Contains(d.Prompt, `"other-project"`) {
+		t.Errorf("a job's page in a project BigQuery does not serve = %+v, %v; want the prompt", d, err)
 	}
 }

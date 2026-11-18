@@ -607,8 +607,6 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 	case strings.Contains(dest.TableID, "$"):
 		return answer(http.StatusNotImplemented, "into a partition ("+name+"), which CloudBurrow does not carry out "+
 			"for Avro")
-	case dest.ProjectID != "" && dest.ProjectID != projectOf(f.base):
-		return answer(http.StatusNotImplemented, "into another project's table, "+dest.ProjectID+":"+name)
 	case extra.Configuration.DryRun:
 		return answer(http.StatusNotImplemented, "in a dry run")
 	}
@@ -737,7 +735,8 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 	plan := &pqPlan{dest: tableRef{DatasetID: dest.DatasetID, TableID: dest.TableID},
 		createNever: strings.EqualFold(el.CreateDisposition, "CREATE_NEVER")}
 	write := strings.ToUpper(l.WriteDisposition)
-	status, got := f.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
+	df := f.dataFront(r, dest) // crossload.go, #1767
+	status, got := df.get(r, "/datasets/"+url.PathEscape(dest.DatasetID)+"/tables/"+url.PathEscape(dest.TableID))
 	avroWords := func(s string) string { return strings.ReplaceAll(s, "Parquet", "Avro") }
 	switch {
 	case status == http.StatusNotFound:
@@ -785,11 +784,11 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 		case "WRITE_TRUNCATE_DATA":
 			plan.kind = pqLoadTruncateData
 			var m pqMerge
-			plan.target, code, why = mergeParquet(old, file, nil, dest, projectOf(f.base), &m)
+			plan.target, code, why = mergeParquet(old, file, nil, dest, projectOf(df.base), &m)
 		case "", "WRITE_APPEND", "WRITE_EMPTY":
 			plan.kind, plan.writeEmpty = pqLoadAppend, write == "WRITE_EMPTY"
 			var m pqMerge
-			plan.target, code, why = mergeParquet(old, file, l.SchemaUpdateOptions, dest, projectOf(f.base), &m)
+			plan.target, code, why = mergeParquet(old, file, l.SchemaUpdateOptions, dest, projectOf(df.base), &m)
 			plan.relaxed = m.relaxed
 			if m.added {
 				plan.kind = pqLoadAdd
@@ -894,19 +893,19 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 		return answer(http.StatusNotImplemented, "whose rows CloudBurrow could not keep ("+err.Error()+")")
 	}
 
-	project := projectOf(f.base)
+	project := projectOf(df.base)
 	full := tableName(project, plan.dest)
 	if plan.kind == pqLoadNew {
 		if plan.createNever {
 			return fail(rowError{Reason: "notFound", Message: "Not found: Table " + full})
 		}
-		if status, _ := f.get(r, "/datasets/"+url.PathEscape(plan.dest.DatasetID)); status == http.StatusNotFound {
+		if status, _ := df.get(r, "/datasets/"+url.PathEscape(plan.dest.DatasetID)); status == http.StatusNotFound {
 			return fail(rowError{Reason: "notFound", Message: "Not found: Dataset " + project + ":" + plan.dest.DatasetID})
 		}
-	} else if plan.writeEmpty && !f.emptyTable(r, plan.dest.DatasetID, plan.dest.TableID, nil) {
+	} else if plan.writeEmpty && !df.emptyTable(r, plan.dest.DatasetID, plan.dest.TableID, nil) {
 		return fail(rowError{Reason: "duplicate", Message: "Already Exists: Table " + full})
 	}
-	if msg := f.carryOutParquet(r, plan, rows); msg != "" {
+	if msg := df.carryOutParquet(r, plan, rows); msg != "" {
 		return fail(rowError{Reason: "backendError", Message: "CloudBurrow could not load the Avro file's rows into " +
 			full + ": " + msg})
 	}

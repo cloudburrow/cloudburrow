@@ -59,7 +59,10 @@
         "patches/bigquery-emulator/0076-existing-job-is-409-duplicate.patch",
         "patches/bigquery-emulator/0085-temp-file-auto-vacuum.patch",
         "patches/bigquery-emulator/0086-result-rows-read-from-their-table.patch",
-        "patches/bigquery-emulator/0094-repeated-json-column-insert.patch"
+        "patches/bigquery-emulator/0091-known-projects-on-first-use.patch",
+        "patches/bigquery-emulator/0092-writes-into-another-projects-table.patch",
+        "patches/bigquery-emulator/0094-repeated-json-column-insert.patch",
+        "patches/bigquery-emulator/0096-names-in-the-default-datasets-project.patch"
       ]
     },
     {
@@ -128,7 +131,8 @@
         "patches/googlesqlite/0088-if-not-exists-streamed-at-column.patch",
         "patches/googlesqlite/0089-older-table-streamed-at-column.patch",
         "patches/googlesqlite/0090-kept-change-records.patch",
-        "patches/googlesqlite/0093-json-text-bound-in-a-struct.patch"
+        "patches/googlesqlite/0093-json-text-bound-in-a-struct.patch",
+        "patches/googlesqlite/0095-names-of-the-project.patch"
       ]
     },
     {

@@ -127,9 +127,6 @@ func (p bigqueryProvider) iamResource(project string, path []string) (string, bo
 	if project == "" {
 		project = p.project
 	}
-	if project != p.project {
-		return "", false, fmt.Errorf("BigQuery serves the project %s only", p.project)
-	}
 	if isRoutinePath(path) {
 		return "projects/" + project + "/datasets/" + path[0] + "/routines/" + path[2], true, nil
 	}
@@ -141,6 +138,8 @@ func (p bigqueryProvider) iamResource(project string, path []string) (string, bo
 
 // GetPolicy is tables.getIamPolicy or routines.getIamPolicy.
 func (p bigqueryProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
+
 	if isConnectionPath(path) { // consolebigqueryconnectionpage.go, #1770
 		return p.connectionPolicy(ctx, project, path[2])
 	}
@@ -180,6 +179,8 @@ func (p bigqueryProvider) GetPolicy(ctx context.Context, project string, path []
 // SetPolicy is tables.setIamPolicy or routines.setIamPolicy with the etag
 // the page read, so a policy changed meanwhile is refused.
 func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+	p = p.in(project) // #1764: the project chosen in the toolbar
+
 	if isConnectionPath(path) {
 		return p.setConnectionPolicy(ctx, project, path[2], pol)
 	}
@@ -217,6 +218,8 @@ func (p bigqueryProvider) SetPolicy(ctx context.Context, project string, path []
 // TestPermissions is tables.testIamPermissions or routines.testIamPermissions
 // (#1242).
 func (p bigqueryProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
+
 	if isConnectionPath(path) {
 		return p.testConnectionPermissions(ctx, project, path[2], perms)
 	}

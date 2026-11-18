@@ -83,7 +83,7 @@ func TestBigQueryJSONAutodetectLoad(t *testing.T) {
 		if got := describeSchema(md.Schema); got != want {
 			t.Errorf("%s: the detected schema is\n %s\nwant\n %s", table, got, want)
 		}
-		rows := queryRows(t, ctx, c, h.Project(), ds.DatasetID, "SELECT id, name, score, ok, day, clock, "+
+		rows := queryRows(t, ctx, c, c.Project(), ds.DatasetID, "SELECT id, name, score, ok, day, clock, "+
 			"FORMAT_TIMESTAMP('%FT%TZ', ts, 'UTC'), addr.city, addr.zip, ARRAY_LENGTH(tags), none IS NULL FROM "+table)
 		if got := strings.Join(rows, " / "); got != "12|ann|1|true|2020-01-02|12:34:56|2020-01-02T08:04:05Z|Oslo|150|2|true / "+
 			"13|bob|2.5|false|2020-01-03|<nil>|2020-01-02T03:04:00Z|Rome|<nil>|0|true" {

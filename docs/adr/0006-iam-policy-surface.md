@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -468,6 +468,37 @@ permissions Google's predefined-role catalogue (`internal/iamroles`) lists, or `
 (`cloudburrow-local@{project}.iam.gserviceaccount.com`). No conditions, custom roles or
 inheritance are evaluated. As with Memorystore, the test that a principal without the role is
 refused proves only that this instance's own rule is applied, and its compatibility.md row says so.
+
+### BigQuery per-project IAM of a minted token (amended 2026-11-17 by #1767)
+
+A third exception to rule 1, decided with #1767, which asked BigQuery to enforce "BigQuery's
+documented permissions on the job's project (`bigquery.jobs.create`) and on the data's project
+and dataset (`bigquery.tables.getData`, and the rest)" when a request carries a bearer token the
+instance minted, and to keep today's behaviour for every other request. The caller is known as
+Memorystore's IAM auth knows it: the SHA-256 of the request's bearer token against the instance's
+log of the access tokens it minted, which the host pushes to BigQuery's front with each account's
+roles on each project (the project's stored policy: unconditioned bindings, `serviceAccount:` and
+`user:` members, the predefined roles `internal/bigqueryfront/iamcheck.go` lists and custom roles
+by their `bigquery.` permissions) and which the front completes with the dataset's access entries.
+A request with no bearer token, with one the instance did not mint, or with one minted for the
+instance's own account (the ADC fixture's) is served as before, as the instance's ADC account with
+every permission: CloudBurrow cannot otherwise tell who sent it, and every client, test and console
+page that does not mint a token for another account keeps working. Its compatibility.md row says
+what is checked.
+
+Amended 2026-11-18 by #1774: the host now gives the front each project's roles with those
+inherited from its folders and its organization (Resource Manager's ancestry), and conditional
+bindings with their expressions, which the front evaluates with `internal/iamcond` for the resource
+it checks (BigQuery's `resource.name`, `resource.type` and `resource.service`, and
+`request.time`). A table's or a routine's own IAM policy (#1231), until then stored and returned
+and never read, now grants on that resource to a minted token's caller: the first exception to
+#1231's "nothing reads a table's or a routine's policy", for those callers alone. Jobs follow
+BigQuery's creator rule: the front records which minted caller ran each job, and that caller reads,
+lists and cancels it with `bigquery.jobs.create`; anyone else needs `bigquery.jobs.get`,
+`listAll` or `update`. The tables a view or a SQL routine reads are checked for the caller unless
+the source dataset authorizes the view, the routine or the view's dataset. Still not read (#1780):
+tags in conditions, `group:` and `domain:` members, and the creators of jobs run before the front
+last started.
 
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row

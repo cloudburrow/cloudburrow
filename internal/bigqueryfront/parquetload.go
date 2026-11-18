@@ -91,8 +91,11 @@ const (
 
 // pqPlan is a Parquet load the front carries out.
 type pqPlan struct {
-	kind        int
-	dest        tableRef
+	kind int
+	dest tableRef
+	// project is the table's project when it is another than the job's
+	// (#1767, crossload.go).
+	project     string
 	writeEmpty  bool
 	createNever bool
 	relaxed     bool
@@ -135,7 +138,11 @@ func (f front) parquetOwnLoad(w http.ResponseWriter, r *http.Request, plan *pqPl
 	if !ok {
 		return
 	}
-	project := projectOf(f.base)
+	df := f
+	if plan.project != "" {
+		df = f.inProject(plan.project) // its scratch dataset: parquetSchema's dataFront
+	}
+	project := projectOf(df.base)
 	name := tableName(project, plan.dest)
 
 	// The rows, as literals of the table's row type, one per line of a
@@ -220,17 +227,17 @@ func (f front) parquetOwnLoad(w http.ResponseWriter, r *http.Request, plan *pqPl
 			fail(rowError{Reason: "notFound", Message: "Not found: Table " + name})
 			return
 		}
-		if status, _ := f.get(r, "/datasets/"+url.PathEscape(plan.dest.DatasetID)); status == http.StatusNotFound {
+		if status, _ := df.get(r, "/datasets/"+url.PathEscape(plan.dest.DatasetID)); status == http.StatusNotFound {
 			fail(rowError{Reason: "notFound", Message: "Not found: Dataset " + project + ":" + plan.dest.DatasetID})
 			return
 		}
-	} else if plan.writeEmpty && !f.emptyTable(r, plan.dest.DatasetID, plan.dest.TableID, nil) {
+	} else if plan.writeEmpty && !df.emptyTable(r, plan.dest.DatasetID, plan.dest.TableID, nil) {
 		fail(rowError{Reason: "duplicate", Message: "Already Exists: Table " + name})
 		return
 	}
 
 	backend := func(msg string) { fail(rowError{Reason: "backendError", Message: msg}) }
-	if msg := f.carryOutParquet(r, plan, rows); msg != "" {
+	if msg := df.carryOutParquet(r, plan, rows); msg != "" {
 		backend("CloudBurrow could not load the Parquet file's rows into " + name + ": " + msg)
 		return
 	}

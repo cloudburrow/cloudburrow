@@ -103,6 +103,7 @@ func (bigqueryProvider) CreateForm() (string, []console.Field) {
 
 // Create implements console.Creator.
 func (p bigqueryProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return "", err
 	}
@@ -138,6 +139,7 @@ func (p bigqueryProvider) Create(ctx context.Context, project string, values map
 // table in it, which is what BigQuery's console deletes too. The confirmation
 // names the tables (DELETE_DETAIL in console.js).
 func (p bigqueryProvider) Delete(ctx context.Context, project, name string) error {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return err
 	}
@@ -156,14 +158,10 @@ func (p bigqueryProvider) deleteDataset(ctx context.Context, id string) error {
 	return c.Dataset(id).DeleteWithContents(ctx)
 }
 
-// writable is the precondition every write shares: the one project the
-// emulator serves.
+// writable is the precondition every write shares: a project chosen.
 func (p bigqueryProvider) writable(project string) error {
-	switch {
-	case project == "":
+	if project == "" {
 		return errors.New("choose a project first")
-	case project != p.project:
-		return errors.New(p.onlyProject(project))
 	}
 	return nil
 }
@@ -188,6 +186,7 @@ func bigqueryRefusal(err error) error {
 // offers Edit table and Delete table alone. Edit table's form is drawn from
 // the table as it is, so it is left out when the table cannot be read.
 func (p bigqueryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if p.writable(project) != nil {
 		return nil
 	}
@@ -422,6 +421,7 @@ func (p bigqueryProvider) tableMetadata(ctx context.Context, datasetID, tableID 
 
 // ActAt implements console.PathActor.
 func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return err
 	}

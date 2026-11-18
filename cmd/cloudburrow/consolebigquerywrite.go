@@ -273,6 +273,7 @@ func (p bigqueryProvider) WriteSpec(path []string) *console.WriteSpec {
 // WriteReport instead, whose sentence says what the statement did; Write is
 // the same call without it.
 func (p bigqueryProvider) Write(ctx context.Context, project string, path []string, statement string) (int64, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	_, err := p.WriteReport(ctx, project, path, statement)
 	return 0, err
 }
@@ -280,6 +281,7 @@ func (p bigqueryProvider) Write(ctx context.Context, project string, path []stri
 // WriteReport implements console.WriteReporter: the statement through
 // jobs.query, and what came back.
 func (p bigqueryProvider) WriteReport(ctx context.Context, project string, path []string, statement string) (string, error) {
+	p = p.in(project) // #1764: the project chosen in the toolbar
 	if err := p.writable(project); err != nil {
 		return "", err
 	}
