@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -121,5 +122,25 @@ func TestProjectsListIsResourceManagers(t *testing.T) {
 	(&knownProjects{}).client(engine).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/bigquery/v2/projects", nil))
 	if !strings.Contains(rec.Body.String(), `"engine"`) {
 		t.Errorf("with no Resource Manager: %s, want the engine's answer", rec.Body)
+	}
+}
+
+// TestUnreachableResourceManagerIsAskedOnce (#1764): a Resource Manager
+// that does not answer is asked once per unreachableTTL, not per request.
+func TestUnreachableResourceManagerIsAskedOnce(t *testing.T) {
+	var asked atomic.Int32
+	rm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer rm.Close()
+	k := &knownProjects{rm: rm.URL}
+	for i := 0; i < 3; i++ {
+		if k.isActive(context.Background(), "p") {
+			t.Fatal("a failed ask made p ACTIVE")
+		}
+	}
+	if n := asked.Load(); n != 1 {
+		t.Errorf("Resource Manager was asked %d times, want 1", n)
 	}
 }

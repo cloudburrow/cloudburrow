@@ -30,13 +30,24 @@ import (
 //
 // An ACTIVE answer is kept: once the engine has the project, the header
 // no longer matters. Any other answer is asked again after
-// unknownProjectTTL.
+// unknownProjectTTL, and a Resource Manager that did not answer after
+// unreachableTTL. Each ask is one attempt bounded by projectAskTimeout,
+// so a Resource Manager that is down slows no request for long; the
+// instance's own project, which the engine has from the start, is served
+// all the same.
 
 // KnownProjectHeader is bigquery-emulator patch 0091's header.
 const KnownProjectHeader = "X-Cloudburrow-Known-Project"
 
-// unknownProjectTTL is how long an answer other than ACTIVE is kept.
-const unknownProjectTTL = 2 * time.Second
+// unknownProjectTTL is how long an answer other than ACTIVE is kept, and
+// unreachableTTL how long Resource Manager's silence is.
+const (
+	unknownProjectTTL = 2 * time.Second
+	unreachableTTL    = 10 * time.Second
+)
+
+// projectAskTimeout bounds one projects.get of Resource Manager.
+var projectAskTimeout = 2 * time.Second
 
 // projectOfPath reads the project a BigQuery REST path names.
 var projectOfPath = regexp.MustCompile(`^(?:/upload)?(?:/bigquery/v2)?/projects/([^/]+)(?:/|$)`)
@@ -72,17 +83,24 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 		k.mu.Unlock()
 		return true
 	}
-	if t, ok := k.unknown[project]; ok && time.Since(t) < unknownProjectTTL {
+	if t, ok := k.unknown[project]; ok && time.Now().Before(t) {
 		k.mu.Unlock()
 		return false
 	}
 	k.mu.Unlock()
 	u := strings.TrimRight(k.rm, "/") + "/v3/projects/" + url.PathEscape(project)
-	status, body, err := serviceCall(ctx, "Resource Manager projects.get of "+project, http.MethodGet, u, "", nil)
+	actx, cancel := context.WithTimeout(ctx, projectAskTimeout)
+	status, body, err := serviceAttempt(actx, http.MethodGet, u, "", nil)
+	cancel()
 	var p struct {
 		State string `json:"state"`
 	}
 	active := err == nil && status == http.StatusOK && json.Unmarshal(body, &p) == nil && p.State == "ACTIVE"
+	ttl := unknownProjectTTL
+	if err != nil || status/100 == 5 {
+		logFront("bigquery front: Resource Manager projects.get of %s: %s; asked again in %s", project, describeAttempt(status, err), unreachableTTL)
+		ttl = unreachableTTL
+	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if active {
@@ -95,7 +113,7 @@ func (k *knownProjects) isActive(ctx context.Context, project string) bool {
 		if k.unknown == nil {
 			k.unknown = map[string]time.Time{}
 		}
-		k.unknown[project] = time.Now()
+		k.unknown[project] = time.Now().Add(ttl)
 	}
 	return active
 }
