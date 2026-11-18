@@ -149,7 +149,7 @@ func workerPoolRow(wp *runpb.WorkerPool) console.Resource {
 	return console.Resource{
 		Name: lastSegment(wp.GetName()), Status: workerPoolStatus(wp),
 		Fields: map[string]string{
-			"Instances":       fmt.Sprint(wp.GetScaling().GetManualInstanceCount()),
+			"Instances":       workerPoolScalingText(wp),
 			"Latest revision": orDash(lastSegment(wp.GetLatestCreatedRevision())),
 			"Image":           orDash(workerPoolImage(wp)),
 			"Age":             stampAge(wp.GetCreateTime()),
@@ -160,7 +160,7 @@ func workerPoolRow(wp *runpb.WorkerPool) console.Resource {
 // --- create, edit, scale and delete -------------------------------------------
 
 func (runWorkerPoolsProvider) CreateForm() (string, []console.Field) {
-	return "Deploy worker pool", []console.Field{
+	return "Deploy worker pool", append(append([]console.Field{
 		{
 			Name: "name", Label: "Worker pool name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens, starting with a letter; at most 63 characters.",
@@ -168,12 +168,7 @@ func (runWorkerPoolsProvider) CreateForm() (string, []console.Field) {
 			Section: "Worker pool settings",
 		},
 		runLabelsField("Worker pool settings"),
-		{
-			Name: "instances", Label: "Number of instances", Type: "text", Default: "1",
-			Help:    "Worker pools are scaled manually: this many instances run at all times.",
-			Pattern: `^[0-9]{1,4}$`,
-			Section: "Worker pool settings",
-		},
+	}, workerPoolScalingFields(runadapter.WorkerPoolScaling{}, "Scaling")...), []console.Field{
 		{
 			Name: "image", Label: "Container image URL", Type: "text", Required: true,
 			Help: "A tagged image, such as docker.io/library/busybox:1.36. A locally built one " +
@@ -190,13 +185,104 @@ func (runWorkerPoolsProvider) CreateForm() (string, []console.Field) {
 		{Name: "memory", Label: "Memory limit", Type: "text",
 			Help:    `Optional, as Kubernetes quantities: "512Mi", "1Gi". ` + runWorkerPoolNotOffered,
 			Pattern: `^[0-9]+(Ki|Mi|Gi|K|M|G)?$`, Section: "Resources"},
+	}...)
+}
+
+// workerPoolScalingFields are a pool's scaling settings (#1788), as the
+// discovery document defines them: Manual runs the number of instances;
+// Automatic scales between the minimum and the maximum, with a CPU
+// utilization target. Locally an automatic pool runs its minimum (#1789).
+func workerPoolScalingFields(cur runadapter.WorkerPoolScaling, section string) []console.Field {
+	mode := cur.Mode
+	if mode == "" {
+		mode = "MANUAL"
 	}
+	manual, minN, maxN, cpu := "1", "", "", ""
+	if cur.Manual != nil {
+		manual = fmt.Sprint(*cur.Manual)
+	} else if cur.Mode == "AUTOMATIC" {
+		manual = ""
+	}
+	if cur.Min != 0 {
+		minN = fmt.Sprint(cur.Min)
+	}
+	if cur.Max != 0 {
+		maxN = fmt.Sprint(cur.Max)
+	}
+	if cur.CPU != nil {
+		cpu = strconv.FormatFloat(float64(*cur.CPU), 'g', 3, 32)
+	}
+	return []console.Field{
+		{Name: "scalingMode", Label: "Scaling mode", Type: "select", Options: []string{"MANUAL", "AUTOMATIC"}, Default: mode,
+			Help: "Manual runs the number of instances below. Automatic scales between the minimum and maximum " +
+				"(locally it runs the minimum: growing on CPU is not implemented yet).", Section: section},
+		{Name: "instances", Label: "Number of instances", Type: "text", Default: manual,
+			Help: "Manual scaling: this many instances run at all times, split among revisions.", Pattern: `^[0-9]{0,4}$`, Section: section},
+		{Name: "minInstances", Label: "Minimum instances", Type: "text", Default: minN,
+			Help: "Automatic scaling: the fewest instances, split among revisions.", Pattern: `^[0-9]{0,4}$`, Section: section},
+		{Name: "maxInstances", Label: "Maximum instances", Type: "text", Default: maxN,
+			Help: "Automatic scaling: the most instances; at least the minimum.", Pattern: `^[0-9]{0,4}$`, Section: section},
+		{Name: "cpuUtilization", Label: "CPU utilization target", Type: "text", Default: cpu,
+			Help:    "Automatic scaling: 0.1 to 0.90, or 0 to disable CPU as a scaling threshold.",
+			Pattern: `^(0(\.[0-9]+)?|1(\.0+)?)?$`, Section: section},
+	}
+}
+
+// workerPoolScalingForm is the scaling the form describes, nil when it
+// names none (an edit form without the scaling fields).
+func workerPoolScalingForm(values map[string]string) (*runpb.WorkerPoolScaling, error) {
+	_, hasMode := values["scalingMode"]
+	if !hasMode && strings.TrimSpace(values["instances"]) == "" {
+		return nil, nil
+	}
+	s := runadapter.WorkerPoolScaling{Mode: strings.TrimSpace(values["scalingMode"])}
+	var err error
+	if s.Manual, err = instanceCount(values["instances"]); err != nil {
+		return nil, err
+	}
+	for _, f := range []struct {
+		key, what string
+		into      *int32
+	}{{"minInstances", "minimum instances", &s.Min}, {"maxInstances", "maximum instances", &s.Max}} {
+		n, err := optionalInt(values[f.key], f.what)
+		if err != nil {
+			return nil, err
+		}
+		*f.into = int32(n)
+	}
+	if v := strings.TrimSpace(values["cpuUtilization"]); v != "" {
+		f, err := strconv.ParseFloat(v, 32)
+		if err != nil {
+			return nil, fmt.Errorf("CPU utilization target: %q is not a number", v)
+		}
+		c := float32(f)
+		s.CPU = &c
+	}
+	return s.Message()
+}
+
+// workerPoolScalingText is a pool's instances for its row and page.
+func workerPoolScalingText(wp *runpb.WorkerPool) string {
+	s := runadapter.ReadWorkerPoolScaling(wp.GetScaling())
+	if s.Mode != "AUTOMATIC" {
+		return fmt.Sprint(wp.GetScaling().GetManualInstanceCount())
+	}
+	t := fmt.Sprintf("%d (automatic, %d to ", s.Min, s.Min)
+	if s.Max > 0 {
+		t += fmt.Sprint(s.Max)
+	} else {
+		t += "no maximum"
+	}
+	if s.CPU != nil && *s.CPU > 0 {
+		t += fmt.Sprintf(", CPU target %g", *s.CPU)
+	}
+	return t + ")"
 }
 
 func (runWorkerPoolsProvider) CreateOnPage() bool { return true }
 
-// workerPoolForm is the template and instance count the form describes.
-func workerPoolForm(values map[string]string) (*runpb.Container, *int32, error) {
+// workerPoolForm is the template and scaling the form describes.
+func workerPoolForm(values map[string]string) (*runpb.Container, *runpb.WorkerPoolScaling, error) {
 	image := strings.TrimSpace(values["image"])
 	if image == "" {
 		return nil, nil, errors.New("a container image is required")
@@ -225,8 +311,8 @@ func workerPoolForm(values map[string]string) (*runpb.Container, *int32, error) 
 	if len(limits) > 0 {
 		c.Resources = &runpb.ResourceRequirements{Limits: limits}
 	}
-	count, err := instanceCount(values["instances"])
-	return c, count, err
+	sc, err := workerPoolScalingForm(values)
+	return c, sc, err
 }
 
 func instanceCount(v string) (*int32, error) {
@@ -250,7 +336,7 @@ func (p runWorkerPoolsProvider) Create(ctx context.Context, project string, valu
 	if id == "" {
 		return "", errors.New("a worker pool name is required")
 	}
-	c, count, err := workerPoolForm(values)
+	c, sc, err := workerPoolForm(values)
 	if err != nil {
 		return "", err
 	}
@@ -263,7 +349,7 @@ func (p runWorkerPoolsProvider) Create(ctx context.Context, project string, valu
 		op, err := wc.CreateWorkerPool(ctx, &runpb.CreateWorkerPoolRequest{Parent: p.jobs().parent(project), WorkerPoolId: id,
 			WorkerPool: &runpb.WorkerPool{Labels: labels,
 				Template: &runpb.WorkerPoolRevisionTemplate{Containers: []*runpb.Container{c}},
-				Scaling:  &runpb.WorkerPoolScaling{ManualInstanceCount: count}}})
+				Scaling:  sc}})
 		if err != nil {
 			return err
 		}
@@ -310,7 +396,7 @@ func (p runWorkerPoolsProvider) Edit(ctx context.Context, project string, path [
 	if v, ok := values["name"]; ok && strings.TrimSpace(v) != path[0] {
 		return errors.New(runWorkerPoolNameImmutable)
 	}
-	next, count, err := workerPoolForm(values)
+	next, sc, err := workerPoolForm(values)
 	if err != nil {
 		return err
 	}
@@ -323,8 +409,8 @@ func (p runWorkerPoolsProvider) Edit(ctx context.Context, project string, path [
 		cur.Image, cur.Command, cur.Args, cur.Env = next.Image, next.Command, next.Args, next.Env
 		cur.Resources = next.Resources
 		wp.Template.Revision = ""
-		if count != nil {
-			wp.Scaling = &runpb.WorkerPoolScaling{ManualInstanceCount: count}
+		if sc != nil {
+			wp.Scaling = sc
 		}
 		if labels, ok, err := runLabels(values); err != nil {
 			return err
@@ -335,12 +421,10 @@ func (p runWorkerPoolsProvider) Edit(ctx context.Context, project string, path [
 	})
 }
 
-func scaleAction(current int32) console.Action {
-	return console.Action{ID: actScale, Label: "Scale", Fields: []console.Field{{
-		Name: "instances", Label: "Number of instances", Type: "text", Required: true, Default: fmt.Sprint(current),
-		Pattern: `^[0-9]{1,4}$`,
-		Help:    "Saved with UpdateWorkerPool. The running revision is kept; only its instance count changes.",
-	}}}
+// scaleAction is Scale: the pool's scaling settings, saved with
+// UpdateWorkerPool; the running revision is kept.
+func scaleAction(current *runpb.WorkerPoolScaling) console.Action {
+	return console.Action{ID: actScale, Label: "Scale", Fields: workerPoolScalingFields(runadapter.ReadWorkerPoolScaling(current), "")}
 }
 
 // DetailActions implements console.PathActor: a pool's Scale.
@@ -354,7 +438,7 @@ func (p runWorkerPoolsProvider) DetailActions(ctx context.Context, project strin
 		if err != nil {
 			return err
 		}
-		actions = []console.Action{scaleAction(wp.GetScaling().GetManualInstanceCount()), splitAction(wp)}
+		actions = []console.Action{scaleAction(wp.GetScaling()), splitAction(wp)}
 		return nil
 	})
 	return actions
@@ -430,15 +514,15 @@ func (p runWorkerPoolsProvider) ActAt(ctx context.Context, project string, path 
 	if len(path) != 1 || action != actScale {
 		return fmt.Errorf("unknown action %q", action)
 	}
-	count, err := instanceCount(values["instances"])
+	sc, err := workerPoolScalingForm(values)
 	if err != nil {
 		return err
 	}
-	if count == nil {
+	if sc == nil {
 		return errors.New("a number of instances is required")
 	}
 	return p.update(ctx, project, path[0], func(wp *runpb.WorkerPool) error {
-		wp.Scaling = &runpb.WorkerPoolScaling{ManualInstanceCount: count}
+		wp.Scaling = sc
 		return nil
 	})
 }
@@ -525,7 +609,7 @@ func workerPoolDetail(wp *runpb.WorkerPool, revisions console.Listing) console.D
 	summary := stored(
 		console.Property{Label: "Status", Value: workerPoolStatus(wp)},
 		console.Property{Label: "Region", Value: regionOf(wp.GetName())},
-		console.Property{Label: "Instances", Value: fmt.Sprint(wp.GetScaling().GetManualInstanceCount())},
+		console.Property{Label: "Instances", Value: workerPoolScalingText(wp)},
 		console.Property{Label: "Latest revision", Value: lastSegment(wp.GetLatestCreatedRevision())},
 		console.Property{Label: "Service account", Value: runAccountText(wp.GetTemplate().GetServiceAccount(), projectOf(wp.GetName()))},
 		console.Property{Label: "Message", Value: wp.GetTerminalCondition().GetMessage()},
@@ -583,8 +667,10 @@ func workerPoolEditForm(wp *runpb.WorkerPool) *console.EditForm {
 		"name": lastSegment(wp.GetName()), "image": c.GetImage(),
 		"command": shellJoin(c.GetCommand()), "args": shellJoin(c.GetArgs()),
 		"env": console.FormatMap(env), "labels": console.FormatMap(wp.GetLabels()),
-		"instances": fmt.Sprint(wp.GetScaling().GetManualInstanceCount()),
-		"cpu":       c.GetResources().GetLimits()["cpu"], "memory": c.GetResources().GetLimits()["memory"],
+		"cpu": c.GetResources().GetLimits()["cpu"], "memory": c.GetResources().GetLimits()["memory"],
+	}
+	for _, f := range workerPoolScalingFields(runadapter.ReadWorkerPoolScaling(wp.GetScaling()), "") {
+		prefill[f.Name] = f.Default
 	}
 	_, fields := runWorkerPoolsProvider{}.CreateForm()
 	for i := range fields {

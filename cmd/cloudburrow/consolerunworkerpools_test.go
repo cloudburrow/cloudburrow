@@ -77,7 +77,7 @@ func TestWorkerPoolEditFormRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workerPoolForm: %v", err)
 	}
-	if c.GetImage() != "img:1" || strings.Join(c.GetArgs(), "|") != "sleep 1" || c.GetEnv()[0].GetValue() != "b" || count == nil || *count != 2 {
+	if c.GetImage() != "img:1" || strings.Join(c.GetArgs(), "|") != "sleep 1" || c.GetEnv()[0].GetValue() != "b" || count.ManualInstanceCount == nil || count.GetManualInstanceCount() != 2 {
 		t.Errorf("the prefilled form reads back as %v, %v", c, count)
 	}
 }
@@ -118,5 +118,46 @@ func TestConsoleRunWorkerPoolSplit(t *testing.T) {
 	counts := runadapter.RevisionInstances(wp)
 	if counts[name+"/revisions/wp-00002-def"] != 3 || counts[name+"/revisions/wp-00001-abc"] != 1 {
 		t.Errorf("revision instances = %v", counts)
+	}
+}
+
+// TestConsoleRunWorkerPoolAutomaticScaling (#1788): the scaling settings
+// prefill from an AUTOMATIC pool and read back as set; the documented
+// limits are refused before a round trip.
+func TestConsoleRunWorkerPoolAutomaticScaling(t *testing.T) {
+	cpu := float32(0.6)
+	sc, err := runadapter.WorkerPoolScaling{Mode: "AUTOMATIC", Min: 2, Max: 5, CPU: &cpu}.Message()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wp := &runpb.WorkerPool{Name: "projects/p/locations/us-central1/workerPools/w", Scaling: sc,
+		Template: &runpb.WorkerPoolRevisionTemplate{Containers: []*runpb.Container{{Image: "img:1"}}}}
+	if got := workerPoolScalingText(wp); got != "2 (automatic, 2 to 5, CPU target 0.6)" {
+		t.Errorf("instances text = %q", got)
+	}
+	values := map[string]string{}
+	for _, f := range workerPoolEditForm(wp).Fields {
+		values[f.Name] = f.Default
+	}
+	if values["scalingMode"] != "AUTOMATIC" || values["minInstances"] != "2" || values["maxInstances"] != "5" || values["cpuUtilization"] != "0.6" {
+		t.Errorf("prefill = %v", values)
+	}
+	_, back, err := workerPoolForm(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := runadapter.ReadWorkerPoolScaling(back); s.Mode != "AUTOMATIC" || s.Min != 2 || s.Max != 5 || s.CPU == nil || *s.CPU != cpu {
+		t.Errorf("read back %+v", s)
+	}
+	for _, bad := range []map[string]string{
+		{"scalingMode": "AUTOMATIC", "minInstances": "3", "maxInstances": "2"},
+		{"scalingMode": "AUTOMATIC", "minInstances": "1", "cpuUtilization": "0.95"},
+	} {
+		if _, err := workerPoolScalingForm(bad); err == nil {
+			t.Errorf("%v was accepted", bad)
+		}
+	}
+	if a := scaleAction(sc); len(a.Fields) != 5 || a.Fields[0].Default != "AUTOMATIC" {
+		t.Errorf("Scale = %+v", a.Fields)
 	}
 }

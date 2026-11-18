@@ -16,7 +16,6 @@ import (
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -70,6 +69,10 @@ type Transcoder struct {
 	// gcloud redis sends and redis.googleapis.com accepts (#1302). Off, a
 	// FieldMask parameter is lowerCamelCase paths only, its JSON form.
 	SnakeCaseMasks bool
+	// Overlay, when set, adds the fields the API's discovery document
+	// publishes and its descriptors lack (#1788): request bodies and
+	// responses are decoded and encoded through it.
+	Overlay *Overlay
 
 	once     sync.Once
 	routes   []Route
@@ -335,7 +338,7 @@ func (t *Transcoder) serve(w http.ResponseWriter, r *http.Request, rt *Route, ca
 		writeStatusError(w, apierror.Internal(nil, "%s: the response is not a proto message", rt.RPC))
 		return
 	}
-	b, err := q.marshal().Marshal(msg)
+	b, err := t.Overlay.MarshalOptions(q.marshal(), msg)
 	if err != nil {
 		writeStatusError(w, apierror.Internal(err, "encode the response"))
 		return
@@ -437,8 +440,8 @@ func (t *Transcoder) decodeBody(r *http.Request, m proto.Message) error {
 	if len(bytes.TrimSpace(b)) == 0 {
 		return nil
 	}
-	if err := protojson.Unmarshal(b, m); err != nil {
-		if snakeMaskBody(b, m) {
+	if err := t.Overlay.Unmarshal(b, m); err != nil {
+		if snakeMaskBody(b, m, t.Overlay) {
 			return nil
 		}
 		return apierror.InvalidArgument("the request body is not a valid %s", m.ProtoReflect().Descriptor().Name())
@@ -450,7 +453,7 @@ func (t *Transcoder) decodeBody(r *http.Request, m proto.Message) error {
 // in snake_case ("updateMask": "display_name"), which protojson refuses
 // and Google accepts: Terraform's google_service_account sends one
 // (#1747). It reports whether that decoded the body into m.
-func snakeMaskBody(b []byte, m proto.Message) bool {
+func snakeMaskBody(b []byte, m proto.Message, o *Overlay) bool {
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(b, &raw) != nil {
 		return false
@@ -474,7 +477,7 @@ func snakeMaskBody(b []byte, m proto.Message) bool {
 		return false
 	}
 	rest, err := json.Marshal(raw)
-	if err != nil || protojson.Unmarshal(rest, m) != nil {
+	if err != nil || o.Unmarshal(rest, m) != nil {
 		return false
 	}
 	for fd, paths := range masks {

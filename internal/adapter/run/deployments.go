@@ -161,7 +161,7 @@ func quoteLabel(v string) string { return `"` + v + `"` }
 
 // configMap renders the ConfigMap holding a resource's spec.
 func (w workload) configMap(spec proto.Message, namespace, instance, resourceVersion string, extra map[string]string) (string, error) {
-	raw, err := protojson.Marshal(spec)
+	raw, err := runOverlay.Marshal(spec)
 	if err != nil {
 		return "", apierror.Internal(err, "encode %s %s", w.kind, w.name)
 	}
@@ -294,7 +294,7 @@ func (s *Server) specAt(ctx context.Context, w workload) (kconfigMap, error) {
 
 // decodeSpec decodes the spec a ConfigMap holds into into.
 func decodeSpec(cm kconfigMap, into proto.Message) error {
-	if err := protojson.Unmarshal([]byte(cm.Data[specDataKey]), into); err != nil {
+	if err := runOverlay.Unmarshal([]byte(cm.Data[specDataKey]), into); err != nil {
 		return apierror.Internal(err, "decode %s", cm.Metadata.Name)
 	}
 	return nil

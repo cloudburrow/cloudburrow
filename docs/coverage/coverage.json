@@ -779,7 +779,16 @@
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
+          "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "minInstanceCount above maxInstanceCount",
+            "test": "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling"
+          }
         ]
       },
       {
@@ -788,7 +797,8 @@
         "tests": [
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -807,8 +817,10 @@
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
+          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -841,8 +853,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
+          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
-          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
+          "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
         ]
       }
     ]
@@ -6641,9 +6655,9 @@
         "method": "storage.anywhereCaches.disable",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
@@ -6651,9 +6665,9 @@
         "method": "storage.anywhereCaches.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
@@ -6661,21 +6675,21 @@
         "method": "storage.anywhereCaches.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a zone outside the bucket's location",
-            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON"
           },
           {
             "code": "409",
             "case": "a second cache in the zone (ANYWHERE_CACHE_ALREADY_EXISTS)",
-            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6683,23 +6697,23 @@
         "method": "storage.anywhereCaches.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate"
         ]
       },
       {
         "method": "storage.anywhereCaches.pause",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a cache that is not running",
-            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6707,25 +6721,25 @@
         "method": "storage.anywhereCaches.resume",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate"
         ]
       },
       {
         "method": "storage.anywhereCaches.update",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate",
           "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "another update while one is pending",
-            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6905,14 +6919,14 @@
         "method": "storage.buckets.operations.advanceRelocateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:300 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate"
+          "test/compat/storageanywherecache_test.go:304 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "a relocation still syncing",
-            "test": "test/compat/storageanywherecache_test.go:300 TestStorageRelocate"
+            "test": "test/compat/storageanywherecache_test.go:304 TestStorageRelocate"
           }
         ]
       },
@@ -6920,16 +6934,16 @@
         "method": "storage.buckets.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:206 TestStorageAnywhereCachesControl",
-          "test/compat/storageanywherecache_test.go:300 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON",
+          "test/compat/storageanywherecache_test.go:210 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:304 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "an Anywhere Cache update's operation, and a done one",
-            "test": "test/compat/storageanywherecache_test.go:98 TestStorageAnywhereCachesJSON"
+            "test": "test/compat/storageanywherecache_test.go:100 TestStorageAnywhereCachesJSON"
           }
         ]
       },
@@ -6995,19 +7009,19 @@
         "method": "storage.buckets.relocate",
         "status": "Verified",
         "tests": [
-          "test/compat/storageanywherecache_test.go:300 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:385 TestGcloudStorageAnywhereCachesRelocate"
+          "test/compat/storageanywherecache_test.go:304 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:389 TestGcloudStorageAnywhereCachesRelocate"
         ],
         "unverified": [
           {
             "code": "400",
             "case": "the bucket's own location",
-            "test": "test/compat/storageanywherecache_test.go:300 TestStorageRelocate"
+            "test": "test/compat/storageanywherecache_test.go:304 TestStorageRelocate"
           },
           {
             "code": "409",
             "case": "a second relocation while one runs",
-            "test": "test/compat/storageanywherecache_test.go:300 TestStorageRelocate"
+            "test": "test/compat/storageanywherecache_test.go:304 TestStorageRelocate"
           }
         ]
       },
@@ -7325,7 +7339,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
-          "test/compat/storageanywherecache_test.go:478 TestStorageNotificationsWithoutPubSub"
+          "test/compat/storageanywherecache_test.go:482 TestStorageNotificationsWithoutPubSub"
         ]
       },
       {

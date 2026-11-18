@@ -23,7 +23,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 2 | 0 | 1 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 1 | 1 | 1 |
 | Cloud Tasks | 0 | 0 | 0 | 0 | 0 |
-| Cloud Run | 2 | 0 | 1 | 0 | 1 |
+| Cloud Run | 5 | 2 | 1 | 1 | 1 |
 | Cloud Scheduler | 1 | 0 | 0 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 5 | 0 | 1 | 3 | 1 |
@@ -36,7 +36,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **59** | **3** | **18** | **32** | **6** |
+| **Total** | **62** | **5** | **18** | **33** | **6** |
 
 ## Cloud Storage
 
@@ -97,6 +97,9 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 
 | Gap | Why open | Size |
 |---|---|---|
+| Worker pools: an `AUTOMATIC` pool runs its `minInstanceCount` and never grows toward `maxInstanceCount` on its `cpuScaling.cpuUtilization` target: nothing reads pod CPU in the kind cluster (#1789; the fields are served over REST since #1788) | not built yet | M |
+| Services: service-level `scaling` (`scalingMode`, `minInstanceCount`, `maxInstanceCount`, `manualInstanceCount`) is refused as not mapped, and revision `cpuUtilization` / `concurrencyUtilization` are not read (#1790) | not built yet | M |
+| Worker pools: a `minInstanceCount` above a set `maxInstanceCount` is INVALID_ARGUMENT, an unset `cpuUtilization` sets no CPU threshold, and `manualInstanceCount` is ignored (kept) under `AUTOMATIC` (#1789) | not documented by Google | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 | Cloud Build: BuildTriggers whose source names a hosted git service (GitHub, GitLab, Bitbucket, Cloud Source Repositories) or a `filename` in one are refused 501 with the reason; Secure Source Manager repositories run their `.cloudbuild/triggers.yaml` triggers on push (#1521), in the console and with gcloud and Terraform (#1527); Developer Connect connections to this instance's Secure Source Manager and their git repository links are served, and a triggers-file trigger runs through its `devConnectGitRepositoryLink` (#1546), while a BuildTrigger's `developerConnectEventConfig` and Cloud Build v2 repositories stay refused, as Google documents no Secure Source Manager type for either (#1546); rechecked (#1521): cloudbuild v1.35.0's protos still give a v2 `Connection` only GitHub, GitHub Enterprise, GitLab and Bitbucket configs, which need those hosted services and egress, and Cloud Source Repositories (`triggerTemplate`), which Google closed to new customers on 2024-06-17, is not served, so those triggers stay refused; Pub/Sub triggers are built (#1506). Artifact Registry: every format and method is served (#1531, #1539), and remote `DOCKER`, `PYTHON`, `NPM` and `MAVEN` repositories over another of the instance's repositories (`commonRepository.uri`) pull through and cache (#1546), while remote repositories over public or custom upstreams, and remote `APT` and `YUM` ones, are refused, as egress is off (#1546) (#1577) | no emulator support | M |
 
