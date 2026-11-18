@@ -2,10 +2,13 @@
 // that build.sh produces. internal/ocr calls them through wazero. Every
 // function takes and returns plain integers and pointers into the module's
 // linear memory, so the host needs no other glue.
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include <tesseract/baseapi.h>
+#include <tesseract/resultiterator.h>
 
 #define CB_EXPORT(name) extern "C" __attribute__((export_name(#name)))
 
@@ -44,6 +47,53 @@ CB_EXPORT(cb_set_image) void cb_set_image(tesseract::TessBaseAPI *api, const uns
 // order, to be released with cb_free_text; 0 on failure.
 CB_EXPORT(cb_get_text) char *cb_get_text(tesseract::TessBaseAPI *api) { return api->GetUTF8Text(); }
 CB_EXPORT(cb_free_text) void cb_free_text(char *t) { delete[] t; }
+
+// cb_get_layout returns the layout of the last recognition (call it after
+// cb_get_text, before cb_clear), to be released with cb_free: one line per
+// symbol in reading order, "flags left top right bottom conf text", where
+// flags holds B, P, L and W when the symbol begins a block, paragraph, text
+// line or word, and E when it ends its text line. Each beginning symbol is
+// preceded by a line "B|P|L|W left top right bottom conf" with that
+// element's box and confidence (x100). 0 when nothing was recognised.
+CB_EXPORT(cb_get_layout) char *cb_get_layout(tesseract::TessBaseAPI *api) {
+  tesseract::ResultIterator *it = api->GetIterator();
+  if (it == nullptr) return nullptr;
+  std::string out;
+  char buf[96];
+  const tesseract::PageIteratorLevel levels[] = {tesseract::RIL_BLOCK, tesseract::RIL_PARA, tesseract::RIL_TEXTLINE,
+                                                 tesseract::RIL_WORD};
+  const char names[] = {'B', 'P', 'L', 'W'};
+  if (!it->Empty(tesseract::RIL_SYMBOL)) {
+    do {
+      int l, t, r, b;
+      for (int i = 0; i < 4; i++) {
+        if (!it->IsAtBeginningOf(levels[i]) || !it->BoundingBox(levels[i], &l, &t, &r, &b)) continue;
+        std::snprintf(buf, sizeof buf, "%c %d %d %d %d %d\n", names[i], l, t, r, b,
+                      static_cast<int>(it->Confidence(levels[i]) * 100));
+        out += buf;
+      }
+      char *text = it->GetUTF8Text(tesseract::RIL_SYMBOL);
+      if (text == nullptr) continue;
+      if (!it->BoundingBox(tesseract::RIL_SYMBOL, &l, &t, &r, &b)) {
+        delete[] text;
+        continue;
+      }
+      std::string flags = "S";
+      if (it->IsAtFinalElement(tesseract::RIL_TEXTLINE, tesseract::RIL_SYMBOL)) flags += "E";
+      std::snprintf(buf, sizeof buf, "%s %d %d %d %d %d ", flags.c_str(), l, t, r, b,
+                    static_cast<int>(it->Confidence(tesseract::RIL_SYMBOL) * 100));
+      out += buf;
+      out += text;
+      out += "\n";
+      delete[] text;
+    } while (it->Next(tesseract::RIL_SYMBOL));
+  }
+  delete it;
+  char *res = static_cast<char *>(std::malloc(out.size() + 1));
+  if (res == nullptr) return nullptr;
+  std::memcpy(res, out.c_str(), out.size() + 1);
+  return res;
+}
 
 // cb_osd runs orientation and script detection (an engine initialised with
 // "osd"). out receives, as int32: the rotation in degrees that makes the

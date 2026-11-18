@@ -21,7 +21,8 @@ import (
 //     zero coordinates omitted ({} for the origin), as Vision's sample
 //     answers it for an image with no salient region.
 //
-// UNVERIFIED: Vision's colour clustering and score are not documented.
+// UNVERIFIED (re-read 2026-11-18, both pages above): Vision's colour
+// clustering and score are not documented.
 // Here the pixels (sampled on a grid of at most 512×512) are binned at
 // five bits a channel, neighbouring bins within a small RGB distance are
 // merged greedily from the most populous, each cluster's color is its

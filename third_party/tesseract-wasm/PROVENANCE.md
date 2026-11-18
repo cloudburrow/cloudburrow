@@ -42,7 +42,7 @@ sockets) directly with the SDK's clang at `-O2 -msimd128`, `-fno-exceptions`,
 needs. Leptonica is configured without any image codec library (`src/leptonica_config_auto.h`):
 Tesseract receives raw pixels. CloudBurrow's own sources, under this repository's licence:
 
-- `src/cbocr.cpp`: the module's exports (`cb_init`, `cb_set_image`, `cb_set_psm`, `cb_get_text`,
+- `src/cbocr.cpp`: the module's exports (`cb_init`, `cb_set_image`, `cb_set_psm`, `cb_get_text`, `cb_get_layout` (the result iterator's blocks, paragraphs, words and symbols with their boxes, #1799),
   `cb_osd`, ...), a thin layer over `tesseract::TessBaseAPI`;
 - `src/wasi_stubs.c`: `system` and `mkstemp`, which WASI lacks and Leptonica refers to for its
   debug display and temporary files, failing with `ENOSYS`;

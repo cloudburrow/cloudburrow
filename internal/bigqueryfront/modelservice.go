@@ -27,7 +27,7 @@ import (
 //     request, to the instance's local Vertex AI endpoint, whose Vision
 //     route reads text with Tesseract (internal/service/vertexai/vision.go);
 //     never to Google. TEXT_DETECTION and DOCUMENT_TEXT_DETECTION are
-//     answered (text, without boxes: docs/gaps.md), and IMAGE_PROPERTIES
+//     answered (text, with word and block boxes since #1799), and IMAGE_PROPERTIES
 //     (dominant colors and a crop hint, computed from the pixels, #1799);
 //     FACE_DETECTION, LANDMARK_DETECTION, LOGO_DETECTION, LABEL_DETECTION
 //     and OBJECT_LOCALIZATION have no local model and are refused 501

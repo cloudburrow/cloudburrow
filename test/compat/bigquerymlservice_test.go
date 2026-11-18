@@ -21,7 +21,9 @@ import (
 // bigquery/v2 client), and ML.ANNOTATE_IMAGE over an object table:
 // DOCUMENT_TEXT_DETECTION reads a scanned page's text (local Tesseract,
 // never Google) into ml_annotate_image_result's fullTextAnnotation with
-// an empty ml_annotate_image_status, and an object that is not an image
+// an empty ml_annotate_image_status, with each word's box in
+// textAnnotations and the page's blocks, paragraphs, words and symbols
+// (#1799), and an object that is not an image
 // is "Bad image data." in its row's status; the object table's columns
 // are kept. IMAGE_PROPERTIES answers the page's dominant colors and a
 // crop hint (#1799). LABEL_DETECTION (no local model) is refused 501, as are the
@@ -106,7 +108,12 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 	}
 
 	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT uri, content_type, ml_annotate_image_status AS status, "+
-		"JSON_VALUE(ml_annotate_image_result, '$.fullTextAnnotation.text') AS text "+
+		"JSON_VALUE(ml_annotate_image_result, '$.fullTextAnnotation.text') AS text, "+
+		"ARRAY_LENGTH(JSON_QUERY_ARRAY(ml_annotate_image_result, '$.textAnnotations')) AS annotations, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.textAnnotations[1].description') AS word, "+
+		"ARRAY_LENGTH(JSON_QUERY_ARRAY(ml_annotate_image_result, '$.textAnnotations[1].boundingPoly.vertices')) AS corners, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.fullTextAnnotation.pages[0].blocks[0].blockType') AS block_type, "+
+		"ARRAY_LENGTH(JSON_QUERY_ARRAY(ml_annotate_image_result, '$.fullTextAnnotation.pages[0].blocks[0].paragraphs[0].words[0].symbols')) AS symbols "+
 		"FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['document_text_detection'] AS vision_features)) ORDER BY uri", ds, ds))
 	if len(rows) != 2 {
 		t.Fatalf("rows: %v", rows)
@@ -116,6 +123,13 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 	}
 	if text, _ := rows[1]["text"].(string); rows[1]["status"] != "" || !strings.Contains(text, "INVOICE No. 2026-0417") || rows[1]["content_type"] != "image/png" {
 		t.Errorf("scanned page row: %v", rows[1])
+	}
+	// Word and block boxes (#1799): the whole text, then a word an entry
+	// with its four corners; blocks of paragraphs of words of symbols.
+	annotations, _ := rows[1]["annotations"].(int64)
+	symbols, _ := rows[1]["symbols"].(int64)
+	if r := rows[1]; r["corners"] != int64(4) || r["block_type"] != "TEXT" || r["word"] == nil || r["word"] == "" || annotations < 5 || symbols < 1 {
+		t.Errorf("text boxes of the scanned page: %v", r)
 	}
 
 	// IMAGE_PROPERTIES (#1799), computed from the pixels: the scanned
