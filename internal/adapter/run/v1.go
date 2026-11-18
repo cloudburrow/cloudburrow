@@ -644,7 +644,7 @@ func v1Meta(svc *runpb.Service, k ksvc, collection string) *runv1.ObjectMeta {
 	id, _ := ServiceID(svc.GetName())
 	project := projectOf(svc.GetName())
 	m := &runv1.ObjectMeta{
-		Name: id, Namespace: project, Labels: v1Labels(svc), Annotations: svc.GetAnnotations(),
+		Name: id, Namespace: project, Labels: v1Labels(svc), Annotations: v1ServiceScalingAnnotations(svc),
 		Generation: svc.GetGeneration(), ResourceVersion: svc.GetEtag(), Uid: svc.GetUid(),
 		SelfLink: fmt.Sprintf("/apis/serving.knative.dev/v1/namespaces/%s/%s/%s", project, collection, id),
 	}
@@ -856,6 +856,10 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				svc.Client = v
 			case v1ClientVersion:
 				svc.ClientVersion = v
+			case v1ServiceMinScale, v1ServiceMaxScale, v1ScalingMode, v1ManualInstanceCount:
+				if err := fromV1ServiceScaling(svc, k, v); err != nil {
+					return nil, err
+				}
 			case v1BuildImageURI, v1BuildName, v1BuildSourceLocation, v1BuildAutoUpdates, v1BuildID,
 				v1BuildFunctionTarget, v1BuildBaseImage:
 				// Which build produced the image, which `gcloud run deploy
