@@ -1,0 +1,14 @@
+tesseract.wasm contains:
+
+Tesseract OCR 5.5.4, Copyright the Tesseract OCR authors (originally Hewlett-Packard,
+developed by Google from 2006), licensed under the Apache License 2.0 (licenses/tesseract-LICENSE).
+
+Leptonica 1.87.0, Copyright (C) 2001-2020 Leptonica. All rights reserved. BSD 2-Clause
+(licenses/leptonica-LICENSE).
+
+wasi-libc (wasi-sdk 34), MIT (licenses/wasi-libc-LICENSE-MIT), including musl libc, MIT
+(licenses/musl-COPYRIGHT); libc++ and libc++abi from LLVM, Apache License 2.0 with LLVM
+Exceptions (licenses/libcxx-LICENSE.TXT).
+
+tessdata/ holds eng.traineddata and osd.traineddata from tessdata_fast 4.1.0, Copyright the
+Tesseract OCR authors, Apache License 2.0 (licenses/tessdata_fast-LICENSE).

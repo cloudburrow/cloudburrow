@@ -648,6 +648,14 @@
         "verification": "go.sum",
         "notes": "The pure Go WebAssembly runtime go-pdfium runs PDFium on for EmbedContent's PDF pages (#1723); an indirect requirement again since #1736, when AVIF moved from a vendored WebAssembly decoder to gen2brain/gav1d; no cgo and no dependencies beyond golang.org/x/sys, already required at the same version."
       },
+      "tesseractWasm": {
+        "version": "5.5.4",
+        "source": "https://github.com/tesseract-ocr/tesseract",
+        "license": "Apache-2.0",
+        "verification": "release-checksum",
+        "digest": "sha256:a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4",
+        "notes": "Vertex AI EmbedContent's document_ocr on scanned PDF pages (#1733, internal/ocr): Tesseract (Google's LSTM OCR engine) and Leptonica 1.87.0 (BSD-2-Clause, https://github.com/DanBloomberg/leptonica, sha256:c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7), compiled by third_party/tesseract-wasm/build.sh with wasi-sdk 34 (https://github.com/WebAssembly/wasi-sdk, Apache-2.0 WITH LLVM-exception; wasi-libc and musl MIT linked in) to a WASI module run on wazero, so no cgo. With tessdata_fast 4.1.0 eng and osd (Apache-2.0, https://github.com/tesseract-ocr/tessdata_fast) embedded. The module's SHA-256 is in tesseract.wasm.sha256 and CI's tesseract-wasm job rebuilds it (third_party/tesseract-wasm/PROVENANCE.md)."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",

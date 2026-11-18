@@ -172,6 +172,19 @@ jobs:
       - name: Run the patched modules' tests
         run: make bigquery-patch-tests
 
+  # Rebuilds third_party/tesseract-wasm/tesseract.wasm from its pinned
+  # Tesseract, Leptonica and wasi-sdk releases and fails unless the result
+  # matches the committed SHA-256 (#1733). About two minutes; not in
+  # ci-green, so not a required check.
+  tesseract-wasm:
+    name: rebuild tesseract.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rebuild and compare
+        run: WORK="$RUNNER_TEMP/tesseract-wasm" third_party/tesseract-wasm/build.sh --check
+
   check:
     name: check (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
