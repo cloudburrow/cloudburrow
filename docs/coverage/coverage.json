@@ -4255,7 +4255,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymlremoteiam_test.go:238 TestBigQueryMLRemoteDefaultConnection",
+          "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
           "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
@@ -10340,7 +10340,7 @@
           "test/compat/bigquerymlremote_test.go:217 TestBigQueryMLRemoteGenerateEmbedding",
           "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
-          "test/compat/bigquerymlremoteiam_test.go:238 TestBigQueryMLRemoteDefaultConnection",
+          "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/bigquerymlremoteoptions_test.go:28 TestBigQueryMLRemoteGenerationOptions",
           "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
@@ -10962,7 +10962,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
-          "test/compat/bigquerymlremoteiam_test.go:238 TestBigQueryMLRemoteDefaultConnection"
+          "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection"
         ]
       },
       {
