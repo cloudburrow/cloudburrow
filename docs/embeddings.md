@@ -402,3 +402,12 @@ docker run --rm -v "$PWD:/models" \
 ```
 
 `pip install litert-lm` provides `litert-lm-peek` and `litert-lm-builder`.
+
+> **Update 2026-11-17 (#1733): `document_ocr` on scanned PDFs.** A PDF page with no text layer (a
+> scan) is no longer refused with `document_ocr`: it is rendered again at 300 DPI and read with
+> Tesseract OCR (5.5.4, compiled to WebAssembly and run on wazero, `internal/ocr`), and its text
+> follows the page's image as text tokens, counted against the request's token limit like any
+> other text. A page with a text layer keeps PDFium's text. The models are tessdata_fast `eng`
+> and `osd`, embedded in the binary, so only the Latin script is read; an upside-down page is
+> turned back first. About 5 seconds a page. The compatibility test for it is written but has not
+> yet run, so it is not marked Verified.

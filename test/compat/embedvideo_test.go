@@ -202,6 +202,18 @@ func TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient(t *testing.T) {
 	}
 	t.Logf("PDF against the queries: %.3f", ps)
 
+	// A scanned PDF has no text layer: document_ocr reads it with OCR
+	// (#1733), adding the invoice's text (about 150 tokens) to the page.
+	scan := embeddingTestdata(t, "scan.pdf")
+	scanPage := must(embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_DOCUMENT, nil, inline("application/pdf", scan)))
+	scanOCR := must(embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_DOCUMENT,
+		&aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &yes}, inline("application/pdf", scan)))
+	added := scanOCR.GetUsageMetadata().GetPromptTokenCount() - scanPage.GetUsageMetadata().GetPromptTokenCount()
+	if added < 100 || cosine(scanOCR.GetEmbedding().GetValues(), scanPage.GetEmbedding().GetValues()) > 0.9999 {
+		t.Errorf("scan with document_ocr: %d tokens added; want the OCR text (about 150 tokens)", added)
+	}
+	t.Logf("scan with document_ocr: %d tokens added", added)
+
 	badFPS := inline("video/mp4", video)
 	badFPS.Metadata = &aiplatformpb.Part_VideoMetadata{VideoMetadata: &aiplatformpb.VideoMetadata{Fps: 30}}
 	for what, c := range map[string]struct {
@@ -213,7 +225,6 @@ func TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient(t *testing.T) {
 		"vp9 10-bit":  {[]*aiplatformpb.Part{inline("video/mp4", embeddingTestdata(t, "turtle-vp9-10bit.mp4"))}, nil, "VP9 profile 2"},
 		"fps":         {[]*aiplatformpb.Part{badFPS}, nil, "video_metadata.fps"},
 		"seven pages": {[]*aiplatformpb.Part{inline("application/pdf", embeddingTestdata(t, "seven-pages.pdf"))}, nil, "at most 6 pages"},
-		"scan ocr":    {[]*aiplatformpb.Part{inline("application/pdf", embeddingTestdata(t, "no-text.pdf"))}, &aiplatformpb.EmbedContentRequest_EmbedContentConfig{DocumentOcr: &yes}, "document_ocr"},
 	} {
 		_, err := embed(aiplatformpb.EmbedContentRequest_RETRIEVAL_DOCUMENT, c.cfg, c.parts...)
 		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), c.field) {

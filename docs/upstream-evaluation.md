@@ -898,3 +898,25 @@ CloudBurrow (AC-3 from ATSC A/52, SBR and PS on the copied aac-go, high-bit-dept
 reconstruction in the copied govpx). `arabian9ts/aac-go` is copied into `third_party/aac-go`
 ([PROVENANCE.md](../third_party/aac-go/PROVENANCE.md)): it has one release and no activity since,
 and SBR would be added there. `govulncheck ./...` reports nothing for `opus-go`.
+
+## Amendment: OCR for `document_ocr` on scanned PDFs (#1733)
+
+Google documents that `document_ocr` adds the text OCR reads from each PDF page. CloudBurrow now
+reads a page with no text layer with **Tesseract 5.5.4**, the LSTM engine Google developed and
+open-sourced (Apache-2.0), compiled here to a WASI WebAssembly module and run on wazero, like
+PDFium: no cgo, and the Linux CLI stays static.
+
+| Candidate | Licence | Runtime | Result |
+|---|---|---|---|
+| Tesseract 5.5.4 + Leptonica 1.87.0, built by `third_party/tesseract-wasm/build.sh` with wasi-sdk 34 | Apache-2.0; BSD-2-Clause | WASI module on `tetratelabs/wazero` (already required) | **Adopted**: CER 1.5-2.0% on the 300 DPI test scan, about 5 s a page |
+| tesseract.js core (Emscripten build) | Apache-2.0 | needs Emscripten's JavaScript glue | Rejected: not a WASI module; a prebuilt binary not built here |
+| `github.com/Danlock/gogosseract` | MIT | wazero, tesseract.js's Emscripten build | Rejected: wraps a prebuilt third-party module and its Emscripten glue |
+| `github.com/otiai10/gosseract` | MIT | cgo, libtesseract | Rejected: cgo |
+| PaddleOCR PP-OCRv5 (ONNX) | Apache-2.0 | ONNX Runtime (`-tags onnx` builds only) | Rejected: not Google-authored, and only in the ONNX build |
+
+Models: tessdata_fast 4.1.0 `eng` and `osd` (Apache-2.0), embedded gzipped (6.2 MB). A page is
+rendered again at 300 DPI, orientation and script detection turns an upside-down page back
+(automatic page segmentation reads a page turned a quarter as vertical text), and the text is read
+in reading order. Only the Latin script is read: other scripts' models (tessdata_fast `script/*`)
+are not fetched. Provenance: `third_party/tesseract-wasm/PROVENANCE.md`; `dependencies.json`
+`tesseractWasm`.
