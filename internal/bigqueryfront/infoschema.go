@@ -449,6 +449,9 @@ func columnsRows(project, dataset string, t infoTable) [][]string {
 			info, _ := gc["generatedExpressionInfo"].(map[string]any)
 			generated, expr, stored = sqlString("ALWAYS"), sqlOrNull(str(info, "generationExpression")), sqlString("YES")
 			async = "STRUCT(CAST(NULL AS STRUCT<message STRING>) AS blocking_error)"
+			if m := blockingErrorOf(project, dataset, str(t, "tableId"), str(t, "creationTime")); m != "" {
+				async = "STRUCT(STRUCT(" + sqlString(m) + " AS message) AS blocking_error)"
+			}
 		}
 		rows = append(rows, append(append([]string{}, head...), sqlString(name), strconv.Itoa(i+1),
 			yesNo(!strings.EqualFold(str(fl, "mode"), "REQUIRED")), sqlString(fieldSQLType(fl)), generated, expr,

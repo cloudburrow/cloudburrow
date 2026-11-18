@@ -98,41 +98,9 @@ func findAISearch(text string) ([]aiSearchCall, int, string) {
 		if len(pos) != 3 {
 			return nil, 400, "AI.SEARCH takes a base table, column_to_search and query_value"
 		}
-		base := pos[0]
-		switch {
-		case base[0].is("TABLE"):
-			p, n := readModelPath(base[1:])
-			if n == 0 || n+1 != len(base) {
-				return nil, 400, "Syntax error: expected a table name after TABLE"
-			}
-			c.table = p
-		case base[0].punct("(") && matchParen(base, 0) == len(base)-1:
-			inner := base[1 : len(base)-1]
-			if len(inner) == 0 || !inner[0].is("SELECT") {
-				return nil, 400, "The base_table_query of AI.SEARCH must be a SELECT ... FROM ... [WHERE ...] query"
-			}
-			idepth := tokenDepths(inner)
-			from := -1
-			for k, t := range inner {
-				if idepth[k] == 0 && (t.is("JOIN") || t.is("GROUP") || t.is("ORDER") || t.is("LIMIT") || t.is("HAVING") || t.is("UNION") || t.is("WITH") || t.is("QUALIFY") || t.punct(",") && from >= 0) {
-					return nil, 400, "The base_table_query of AI.SEARCH can use only SELECT, FROM and WHERE"
-				}
-				if idepth[k] == 0 && t.is("FROM") && from < 0 {
-					from = k
-				}
-			}
-			if from < 0 {
-				return nil, 400, "The base_table_query of AI.SEARCH must read a table: SELECT ... FROM ... [WHERE ...]"
-			}
-			p, n := readModelPath(inner[from+1:])
-			if n == 0 {
-				return nil, 400, "The base_table_query of AI.SEARCH must read one table"
-			}
-			c.table = p
-			c.query = text[inner[0].pos:inner[len(inner)-1].end]
-			c.fromAt = inner[from].pos - inner[0].pos
-		default:
-			return nil, 400, "The first argument of AI.SEARCH must be TABLE base_table or (base_table_query)"
+		var msg string
+		if c.table, c.query, c.fromAt, msg = parseSearchBase(text, pos[0], "AI.SEARCH"); msg != "" {
+			return nil, 400, msg
 		}
 		col, ok := stringLiteral(pos[1][0])
 		if len(pos[1]) != 1 || !ok {
@@ -253,34 +221,8 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall)
 		}
 	}
 	if v, ok := c.named["options"]; ok {
-		raw, ok := jsonArgument(v)
-		var opts map[string]json.RawMessage
-		if !ok || json.Unmarshal([]byte(raw), &opts) != nil {
-			return "", 400, "The options argument of AI.SEARCH must be a JSON object STRING literal"
-		}
-		_, fraction := opts["fraction_lists_to_search"]
-		brute := false
-		for k, x := range opts {
-			switch k {
-			case "fraction_lists_to_search":
-				fl, ok := aiJSONFloat(x)
-				if !ok || fl <= 0 || fl >= 1 {
-					return "", 400, "fraction_lists_to_search must be greater than 0.0 and less than 1.0"
-				}
-			case "use_brute_force":
-				if json.Unmarshal(x, &brute) != nil {
-					return "", 400, "use_brute_force must be a JSON boolean"
-				}
-			case "reranker":
-				if !rerank {
-					return "", 400, "options.reranker is only valid when rerank is TRUE"
-				}
-			default:
-				return "", 400, "Unknown AI.SEARCH option " + k
-			}
-		}
-		if brute && fraction {
-			return "", 400, "fraction_lists_to_search can't be combined with use_brute_force"
+		if msg := checkSearchOptions(v, rerank, "AI.SEARCH"); msg != "" {
+			return "", 400, msg
 		}
 	}
 	if rerank {

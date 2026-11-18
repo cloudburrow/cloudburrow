@@ -262,6 +262,20 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
 		return true
 	}
+	if msg := vectorIndexStatement(text); msg != "" { // vectorsearch.go, #1778
+		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+		return true
+	}
+	// VECTOR_SEARCH, brute force (vectorsearch.go, #1778).
+	if text, code, msg = f.rewriteVectorSearch(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
 	if fn := aiFunction(text); fn != "" {
 		why := map[string]string{
 			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +

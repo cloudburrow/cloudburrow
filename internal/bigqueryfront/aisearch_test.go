@@ -61,3 +61,57 @@ func TestRestFieldType(t *testing.T) {
 		t.Errorf("%s, want %s", got, embeddingColumnType)
 	}
 }
+
+func TestFindVectorSearch(t *testing.T) {
+	calls, code, msg := findVectorSearch("SELECT * FROM VECTOR_SEARCH(TABLE ds.base, 'e', (SELECT id, q FROM ds.qt), 'q', top_k => 2, distance_type => 'COSINE')")
+	if code != 0 || len(calls) != 1 || calls[0].column != "e" || calls[0].querySQL != "SELECT id, q FROM ds.qt" ||
+		calls[0].named["query_column_to_search"] != "'q'" || calls[0].named["top_k"] != "2" || strings.Join(calls[0].table, ".") != "ds.base" {
+		t.Fatalf("%+v %d %s", calls, code, msg)
+	}
+	calls, code, _ = findVectorSearch("SELECT * FROM VECTOR_SEARCH((SELECT id FROM ds.base WHERE id > 1), 'e', query_value => [1.0, 2.0], top_k => 1)")
+	if code != 0 || len(calls) != 1 || calls[0].query != "SELECT id FROM ds.base WHERE id > 1" || calls[0].named["query_value"] != "[1.0, 2.0]" {
+		t.Fatalf("single: %+v %d", calls, code)
+	}
+	calls, code, _ = findVectorSearch("SELECT * FROM VECTOR_SEARCH(TABLE ds.base, 'e', TABLE ds.qt)")
+	if code != 0 || strings.Join(calls[0].queryTable, ".") != "ds.qt" {
+		t.Fatalf("TABLE query: %+v %d", calls, code)
+	}
+	for _, sql := range []string{
+		"SELECT * FROM VECTOR_SEARCH(TABLE ds.base, 'e')",
+		"SELECT * FROM VECTOR_SEARCH(TABLE ds.base, 'e', TABLE ds.qt, query_value => [1.0])",
+		"SELECT * FROM VECTOR_SEARCH(TABLE ds.base, 'e', TABLE ds.qt, bogus => 1)",
+		"SELECT * FROM VECTOR_SEARCH((SELECT * FROM ds.a JOIN ds.b USING (id)), 'e', TABLE ds.qt)",
+		"SELECT * FROM VECTOR_SEARCH(TABLE ds.base, e, TABLE ds.qt)",
+	} {
+		if _, code, _ := findVectorSearch(sql); code != 400 {
+			t.Errorf("%s: %d, want 400", sql, code)
+		}
+	}
+	if got := searchDistance("DOT_PRODUCT", "a", "v"); got != "(-(SELECT SUM(x * v[OFFSET(i)]) FROM UNNEST(a) AS x WITH OFFSET i))" {
+		t.Errorf("DOT_PRODUCT: %s", got)
+	}
+	for _, o := range []string{`'{"use_brute_force": true, "fraction_lists_to_search": 0.5}'`, `'{"fraction_lists_to_search": 1}'`, `'{"reranker": "x"}'`, `'[]'`} {
+		if checkSearchOptions(o, false, "VECTOR_SEARCH") == "" {
+			t.Errorf("options %s accepted", o)
+		}
+	}
+	if m := checkSearchOptions(`JSON '{"fraction_lists_to_search": 0.2}'`, false, "VECTOR_SEARCH"); m != "" {
+		t.Errorf("fraction 0.2: %s", m)
+	}
+}
+
+func TestVectorIndexStatement(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"CREATE VECTOR INDEX i ON ds.t(e) OPTIONS(index_type = 'IVF')":  true,
+		"CREATE OR REPLACE VECTOR INDEX IF NOT EXISTS i ON ds.t(e)":     true,
+		"DROP VECTOR INDEX i ON ds.t":                                   true,
+		"ALTER VECTOR INDEX i ON ds.t SET OPTIONS (x = 1)":              true,
+		"SELECT 'CREATE VECTOR INDEX' AS s":                             false,
+		"SELECT * FROM ds.INFORMATION_SCHEMA.VECTOR_INDEXES":            false,
+		"CREATE TABLE ds.t (x INT64); CREATE VECTOR INDEX i ON ds.t(e)": true,
+	} {
+		if got := vectorIndexStatement(sql) != ""; got != want {
+			t.Errorf("%s: %v, want %v", sql, got, want)
+		}
+	}
+}

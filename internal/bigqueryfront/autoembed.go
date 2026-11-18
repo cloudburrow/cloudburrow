@@ -81,6 +81,9 @@ type genEmbedding struct {
 	// Connection is the connection_id, PROJECT.LOCATION.ID, or "" for
 	// model => 'embeddinggemma-300m'.
 	Connection string `json:"connection,omitempty"`
+	// renaming is set while an ALTER TABLE RENAME COLUMN of the column
+	// runs, so the background job does not take the column for dropped.
+	renaming bool
 }
 
 // embedNullStatus is the status of a NULL source's row, as the page quotes
@@ -388,7 +391,7 @@ func (f front) serveGeneratedColumns(w http.ResponseWriter, r *http.Request, q q
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: "invalidQuery", Message: msg})
 			return true
 		}
-		return false
+		return f.renameEmbeddingColumn(w, r, q, insert)
 	}
 	if code == 501 {
 		writeError(w, code, "notImplemented", msg)
@@ -755,6 +758,9 @@ func (g *embedGenerator) pass() {
 	for _, k := range keys {
 		t := tables[k]
 		e := *t.Embedding
+		if e.renaming {
+			continue
+		}
 		fields, meta, found := f.tableSchemaFields(r, e.Project, e.Dataset, e.Table)
 		hasColumn := slices.ContainsFunc(fields, func(fl map[string]any) bool { return strings.EqualFold(str(fl, "name"), e.Column) })
 		if !found || str(meta, "creationTime") != t.Created || !hasColumn {
@@ -804,6 +810,13 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 	if len(todo) == 0 {
 		return
 	}
+	// A blocking error stalls the whole column, as BigQuery's does, and
+	// is cleared by the next pass that can run.
+	blocked := f.generationBlocked(r, e)
+	setBlockingError(e, wkey, blocked)
+	if blocked != "" {
+		return
+	}
 	a := aiResolved{rm: &remoteModel{Model: e.Model, Endpoint: e.Endpoint, Location: e.Location, Embedding: true}, taskType: e.TaskType, title: e.Title, dims: e.Dims}
 	ctx := r.Context()
 	for key, s := range todo {
@@ -834,4 +847,186 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 			g.mu.Unlock()
 		}
 	}
+}
+
+// renameEmbeddingColumn serves ALTER TABLE t RENAME COLUMN e TO n of a
+// generated embedding column e, which keeps its generation under its new
+// name: "you can still drop or rename the generated embedding column"
+// (https://docs.cloud.google.com/bigquery/docs/autonomous-embedding-generation,
+// read 2026-11-18), and reports whether it did.
+func (f front) renameEmbeddingColumn(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
+	if len(f.tables.embeddings()) == 0 || !strings.Contains(strings.ToUpper(q.Query), "RENAME") {
+		return false
+	}
+	toks, ok := lex(q.Query)
+	if !ok || len(toks) < 3 || !toks[0].is("ALTER") || !toks[1].is("TABLE") {
+		return false
+	}
+	k := 2
+	if k+1 < len(toks) && toks[k].is("IF") && toks[k+1].is("EXISTS") {
+		k += 2
+	}
+	path, n := readModelPath(toks[k:])
+	if n == 0 {
+		return false
+	}
+	body := toks[k+n:]
+	if len(body) > 0 && body[len(body)-1].punct(";") {
+		body = body[:len(body)-1]
+	}
+	// One action: RENAME COLUMN [IF EXISTS] old TO new.
+	j := 2
+	if len(body) < 5 || !body[0].is("RENAME") || !body[1].is("COLUMN") {
+		return false
+	}
+	if body[j].is("IF") && j+1 < len(body) && body[j+1].is("EXISTS") {
+		j += 2
+	}
+	if j+2 >= len(body) || !body[j+1].is("TO") || j+3 != len(body) {
+		return false
+	}
+	project, dataset, table, ok := f.resolveModel(path, q)
+	if !ok {
+		return false
+	}
+	key := streamKey(project, dataset, table)
+	t, ok := f.tables.embeddingOf(key)
+	if !ok || !strings.EqualFold(body[j].text, t.Embedding.Column) || dryRun(r, insert) {
+		return false
+	}
+	_, meta, found := f.tableSchemaFields(r, project, dataset, table)
+	if !found || str(meta, "creationTime") != t.Created {
+		return false
+	}
+	old := *t.Embedding
+	g := old
+	g.Column, g.renaming = body[j+2].text, true
+	f.tables.setEmbedding(key, t.Created, &g)
+	rec := newRecorder()
+	f.runQuery(rec, r, q, insert)
+	var fields []map[string]any
+	for try := 0; try < 50; try++ {
+		fields, meta, found = f.tableSchemaFields(r, project, dataset, table)
+		if found && slices.ContainsFunc(fields, func(fl map[string]any) bool { return strings.EqualFold(str(fl, "name"), g.Column) }) {
+			break
+		}
+		fields = nil
+		if rec.status >= 400 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if fields == nil {
+		f.tables.setEmbedding(key, t.Created, &old) // the rename failed
+	} else {
+		for _, fl := range fields {
+			if strings.EqualFold(str(fl, "name"), g.Column) {
+				g.Column = str(fl, "name")
+			}
+		}
+		g.renaming = false
+		f.tables.setEmbedding(key, str(meta, "creationTime"), &g)
+		f.writeGeneratedSchema(r, g, meta)
+		f.tables.gen.wakeUp()
+	}
+	rec.copyTo(w)
+	return true
+}
+
+// refuseGeneratedLoad is the 400 of a load into d whose schema gives d's
+// generated embedding column, or "": "You can't directly write to
+// generated embedding columns" by bq load (the autonomous embedding
+// generation page, read 2026-11-18).
+func (f front) refuseGeneratedLoad(d tableRef, fields []field) string {
+	project := cmpOr(d.ProjectID, projectOf(f.base))
+	t, ok := f.tables.embeddingOf(streamKey(project, d.DatasetID, d.TableID))
+	if !ok {
+		return ""
+	}
+	for _, fl := range fields {
+		if strings.EqualFold(fl.Name, t.Embedding.Column) {
+			return "You can't write to the generated column " + t.Embedding.Column + " of " + d.DatasetID + "." + d.TableID + ": BigQuery generates its values; load without it"
+		}
+	}
+	return ""
+}
+
+// refuseGeneratedCopy is the 400 of a WRITE_APPEND copy (bq copy -a) into
+// a table with a generated embedding column from a source that has the
+// column, or "": the page lists bq copy -a among the writes it refuses.
+func (f front) refuseGeneratedCopy(r *http.Request, write string, srcs []tableRef, d tableRef) string {
+	if write != "WRITE_APPEND" {
+		return ""
+	}
+	project := cmpOr(d.ProjectID, projectOf(f.base))
+	t, ok := f.tables.embeddingOf(streamKey(project, d.DatasetID, d.TableID))
+	if !ok {
+		return ""
+	}
+	for _, s := range srcs {
+		fields, _, found := f.tableSchemaFields(r, cmpOr(s.ProjectID, project), s.DatasetID, strings.SplitN(s.TableID, "@", 2)[0])
+		if found && slices.ContainsFunc(fields, func(fl map[string]any) bool { return strings.EqualFold(str(fl, "name"), t.Embedding.Column) }) {
+			return "You can't write to the generated column " + t.Embedding.Column + " of " + d.DatasetID + "." + d.TableID + ": BigQuery generates its values"
+		}
+	}
+	return ""
+}
+
+// blockingErrors are the generated columns' blocking errors, by table key
+// and creation time (blockingKey): what INFORMATION_SCHEMA.COLUMNS'
+// async_generation_status.blocking_error.message reads.
+var blockingErrors sync.Map
+
+func blockingKey(project, dataset, table, created string) string {
+	return streamKey(project, dataset, table) + "\x00" + created
+}
+
+// setBlockingError keeps (or, for "", clears) e's blocking error; wkey is
+// the table's key and creation time, as the generator keeps them.
+func setBlockingError(e genEmbedding, wkey, msg string) {
+	created := wkey[strings.LastIndex(wkey, "\x00")+1:]
+	k := blockingKey(e.Project, e.Dataset, e.Table, created)
+	if msg == "" {
+		blockingErrors.Delete(k)
+		return
+	}
+	blockingErrors.Store(k, msg)
+}
+
+// blockingErrorOf is the blocking error of the generated column of the
+// table made at created, or "".
+func blockingErrorOf(project, dataset, table, created string) string {
+	if v, ok := blockingErrors.Load(blockingKey(project, dataset, table, created)); ok {
+		return v.(string)
+	}
+	return ""
+}
+
+// generationBlocked is the blocking error that stalls e's generation, or
+// "": of the ones the page lists ("Permission denied errors", "Not found
+// errors", ...), the two that can arise locally: e's connection deleted,
+// or its service account without the Vertex AI User role on the project,
+// whose message the page shows ("<service_account> does not have the
+// permission to access resources used by AI.EMBED. Please follow ...").
+func (f front) generationBlocked(r *http.Request, e genEmbedding) string {
+	if e.Connection == "" || f.connections == nil {
+		return ""
+	}
+	parts := strings.Split(e.Connection, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	cn, ok := f.connections.lookup(connectionProject(parts[0], f.numbers), parts[1], parts[2])
+	if !ok {
+		return "Not found: Connection " + e.Connection
+	}
+	proj, code, _ := f.projectBindings(r.Context(), e.Project)
+	if code != 0 {
+		return "" // no Resource Manager to read the grants from: the calls' own checks apply
+	}
+	if sa := cn.serviceAccount(); sa == "" || !bindingsGrant(proj, "serviceAccount:"+sa, permVertexPredict) {
+		return sa + " does not have the permission to access resources used by AI.EMBED. " +
+			"Please follow https://docs.cloud.google.com/bigquery/docs/permissions-for-ai-functions to set up permissions."
+	}
+	return ""
 }
