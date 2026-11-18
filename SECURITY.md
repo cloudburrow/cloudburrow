@@ -50,10 +50,12 @@ vulnerabilities in Google Cloud are documented properties here, not bugs
 [docs/security.md](docs/security.md):
 
 - **IAM policies are stored, not enforced** ([ADR-0006](docs/adr/0006-iam-policy-surface.md)),
-  apart from three local checks of a token this instance minted against the project's stored
-  policy: Memorystore's IAM auth, Firestore with MongoDB compatibility's sign-ins, and IAM
-  Credentials on service accounts the IAM API created. Those checks emulate Google's; they are
-  not a security boundary, and every other service serves any caller.
+  apart from four local checks of a token this instance minted against the project's stored
+  policy: Memorystore's IAM auth, Firestore with MongoDB compatibility's sign-ins, IAM
+  Credentials on service accounts the IAM API created, and BigQuery's per-project IAM of a
+  caller with such a token; and BigQuery remote models' connection permissions, checked for the
+  one identity the BigQuery front takes every caller to be. Those checks emulate Google's; they
+  are not a security boundary, and every other service serves any caller.
 - **The generated credentials authorise nothing.** They exist so tooling that insists on
   credentials runs offline ([docs/credentials.md](docs/credentials.md)).
 - **Secret Manager is not a secret store, and Cloud KMS is not a security boundary.** Key

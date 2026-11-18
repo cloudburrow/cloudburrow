@@ -102,21 +102,27 @@ linux/arm64 a Tier 2 platform. The cluster and SDK subset runs on linux/arm64 ni
 Worth reading before you hit these. Every remaining gap, grouped by service with why it is open
 and a rough size, is in [gaps.md](gaps.md).
 
-- **IAM policies are stored, not enforced, apart from three named checks.**
+- **IAM policies are stored, not enforced, apart from five named checks.**
   [ADR-0006](adr/0006-iam-policy-surface.md) adds policy *storage*: Secret Manager (#365),
   Cloud Tasks (#366), Cloud KMS key rings and keys (#428), Cloud Storage buckets and ACLs (#504,
   #1233), Cloud Run services and jobs (#1216), BigQuery tables, routines and row access policies
   (#1231), Pub/Sub (#1367, served by CloudBurrow's front over Google's emulator), Resource
   Manager's projects, folders and organization (#1368), Artifact Registry (#1304), Spanner,
   Bigtable and tags (#1486) and Secure Source Manager (#1527) store policies, and no call of
-  theirs reads one. The exceptions check a token this instance minted (by SHA-256, against its
+  theirs reads one but for BigQuery's below. Four exceptions check a token this instance minted (by SHA-256, against its
   own log of minted tokens) and the roles, custom roles and conditions of the project's stored
   policy: Memorystore for Redis Cluster's and Valkey's IAM auth (#1614), Firestore with MongoDB
   compatibility's token and SCRAM sign-ins and each command's permissions (#1738), and IAM
   Credentials' `generateAccessToken`, `generateIdToken`, `signBlob` and `signJwt`, and the IAM
-  API's `SignBlob` and `SignJwt`, on a service account the IAM API created (#1747, #1751). The
-  instance's own account is not such an account and is not checked
-  ([credentials.md](credentials.md)). These checks prove that this instance applies its own
+  API's `SignBlob` and `SignJwt`, on a service account the IAM API created (#1747, #1751), and
+  BigQuery's per-project IAM of a caller with a minted token: jobs (with the creator rule),
+  datasets, tables, routines, models, row access policies, table and routine policies, views
+  and authorized views, with folder and organization inheritance and conditions (#1767, #1774;
+  what is left is #1780). The instance's own account is not such an account and is not checked
+  ([credentials.md](credentials.md)); a BigQuery request without a minted token is served as it.
+  The fifth is BigQuery remote models' connection permissions (#1765): `CREATE MODEL … REMOTE
+  WITH CONNECTION` and each query of a remote model need `bigquery.connections.use` on the
+  connection, and its service account Vertex AI User on the model's project. These checks prove that this instance applies its own
   rule, not that a policy is right on Google. **Do not use CloudBurrow to test whether your
   permissions are correct.**
 - **Cloud KMS is not a security boundary, and has no IAM enforcement.** Key material sits

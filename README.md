@@ -109,18 +109,22 @@ The credentials authorise nothing; they exist so tooling that insists on them ru
 
 Worth reading before you rely on it — the full list is in [docs/status.md](docs/status.md):
 
-- **IAM policies are stored, not enforced, apart from three named checks.** Do not use
+- **IAM policies are stored, not enforced, apart from five named checks.** Do not use
   CloudBurrow to test whether your permissions are correct. Per
   [ADR-0006](docs/adr/0006-iam-policy-surface.md), the services that serve IAM methods (Secret
   Manager, Cloud Tasks, Cloud KMS, Cloud Storage buckets and ACLs, Cloud Run, BigQuery, Pub/Sub,
   Resource Manager, Artifact Registry, Spanner, Bigtable, Secure Source Manager and others) store
-  policies, so code and Terraform that manage them run, and no call of theirs reads them: a
-  `roles/run.invoker` binding does not close a service's URL. The exceptions check a token this
-  instance minted against the project's stored policy: Memorystore for Redis Cluster's and
-  Valkey's IAM auth (#1614), Firestore with MongoDB compatibility's sign-ins and per-command
-  permissions (#1738), and IAM Credentials' (and the IAM API's) token minting and signing on a
-  service account the IAM API created (#1747). They prove this instance applies its own rule,
-  not that your policy is right on Google.
+  policies, so code and Terraform that manage them run, and no call of theirs reads them but
+  for the exceptions below: a `roles/run.invoker` binding does not close a service's URL. Four
+  exceptions check a token this instance minted against the project's stored policy:
+  Memorystore for Redis Cluster's and Valkey's IAM auth (#1614), Firestore with MongoDB
+  compatibility's sign-ins and per-command permissions (#1738), IAM Credentials' (and the IAM
+  API's) token minting and signing on a service account the IAM API created (#1747), and
+  BigQuery's per-project IAM of a caller with such a token: jobs, datasets, tables, routines,
+  models and their own policies, with folder and organization inheritance and conditions
+  (#1767, #1774). The fifth, BigQuery remote models' connection permissions (#1765), checks
+  `bigquery.connections.use` on the connection and its service account's Vertex AI User role.
+  They prove this instance applies its own rule, not that your policy is right on Google.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
   cannot map is **refused with the field named**, not silently dropped.
 - **Cloud KMS is not a security boundary.** Key material is stored unencrypted; IAM policies

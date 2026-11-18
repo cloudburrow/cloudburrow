@@ -229,8 +229,10 @@ their own tickets:
   fails here.
 - **Some calls check a token this instance minted**, never one from Google, and never a
   signature of Google's: IAM Credentials on a service account the IAM API created (an
-  unrecognised bearer is 401), Memorystore's IAM auth and Firestore with MongoDB
-  compatibility's token sign-ins. Each also reads the project's stored policy; those are the
+  unrecognised bearer is 401), Memorystore's IAM auth, Firestore with MongoDB
+  compatibility's token sign-ins, and BigQuery's per-project IAM of a minted token's caller
+  (#1767; a BigQuery request without one is served as before). Each also reads the project's
+  stored policy; those, with BigQuery remote models' connection permissions (#1765), are the
   exceptions [ADR-0006](0006-iam-policy-surface.md) lists. Every other service API still
   ignores `Authorization` and serves any caller.
 
