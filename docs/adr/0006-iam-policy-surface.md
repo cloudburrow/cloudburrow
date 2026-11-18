@@ -455,6 +455,20 @@ roles, inheritance or conditions). Nothing else reads a stored policy; every oth
 serves any caller (ADR-0004). The test that a principal without the role is refused proves only
 that this instance's own rule is applied, and its compatibility.md row says so.
 
+### BigQuery remote models' connection permissions (amended 2026-11-17 by #1765)
+
+A second exception to rule 1, decided with #1765 (the maintainer's ticket), which asked for a
+remote model's connection permissions "as BigQuery documents them". `CREATE MODEL … REMOTE WITH
+CONNECTION` and every query of a remote model check that the caller holds
+`bigquery.connections.use` on the connection (the connection's own stored policy, or the
+project's), and that the connection's service account holds `aiplatform.endpoints.predict`
+(`roles/aiplatform.user`) on the model's project, through unconditioned bindings of roles whose
+permissions Google's predefined-role catalogue (`internal/iamroles`) lists, or `roles/owner` and
+`roles/editor`. The caller is the one identity the BigQuery front takes every caller to be
+(`cloudburrow-local@{project}.iam.gserviceaccount.com`). No conditions, custom roles or
+inheritance are evaluated. As with Memorystore, the test that a principal without the role is
+refused proves only that this instance's own rule is applied, and its compatibility.md row says so.
+
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row
 access policies, Pub/Sub's topics, subscriptions, snapshots and schemas, Resource Manager's

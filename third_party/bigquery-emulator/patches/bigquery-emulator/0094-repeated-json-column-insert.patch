@@ -1,0 +1,147 @@
+CloudBurrow patch 94 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1783). Applies after patch 0086; needs
+googlesqlite patch 0093.
+
+tabledata.insertAll (and a load) into a REPEATED JSON column bound the
+array through PARSE_JSON(?), the top-level JSON column's placeholder,
+which the engine refuses ("Value has type JSON which cannot be inserted
+into column aj, which has type ARRAY<JSON>"), so every such insert failed
+500. A REPEATED JSON column is bound as an array of each element's JSON
+text, which the engine reads as JSON (googlesqlite patch 0093). The test
+also holds a RECORD's JSON field and an ARRAY<STRUCT<JSON>>'s, which 0093
+fixes, through the official client's insertAll: JSON_VALUE of them reads
+the JSON. struct_json_field_test.go fails without the two patches and
+passes with them.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -754,7 +754,7 @@
+ 		if err := validateIdent("column", col.Name); err != nil {
+ 			return err
+ 		}
+-		if col.Type == types.JSON {
++		if col.Type == types.JSON && col.Mode != types.RepeatedMode {
+ 			// A JSON column cannot take a raw bound string: SQLite would store
+ 			// it as a JSON string literal (double-encoded). PARSE_JSON turns
+ 			// the bound JSON text into a proper JSON value.
+@@ -815,6 +815,32 @@
+ 				continue
+ 			}
+ 
++			if column.Type == types.JSON && column.Mode == types.RepeatedMode {
++				// CloudBurrow patch (cloudburrow/cloudburrow#1783): a
++				// REPEATED JSON column took PARSE_JSON(?) too, which the
++				// engine refuses ("Value has type JSON which cannot be
++				// inserted into column aj, which has type ARRAY<JSON>"), so
++				// every insertAll of one failed 500. The array is bound as
++				// it is, each element JSON text (or a value, marshaled),
++				// which the engine reads as JSON (googlesqlite patch 0093).
++				elems, ok := value.([]interface{})
++				if !ok {
++					return fmt.Errorf("column %s: a REPEATED JSON value is an array, got %T", column.Name, value)
++				}
++				texts := make([]interface{}, len(elems))
++				for i, e := range elems {
++					if e == nil {
++						continue
++					}
++					jsonText, err := jsonColumnText(e)
++					if err != nil {
++						return fmt.Errorf("failed to encode JSON value for column %s: %w", column.Name, err)
++					}
++					texts[i] = jsonText
++				}
++				values = append(values, texts)
++				continue
++			}
+ 			if column.Type == types.JSON {
+ 				// The PARSE_JSON(?) placeholder expects JSON text. A string
+ 				// value is already JSON text (clients json-encode it); any
+--- /dev/null
++++ b/server/struct_json_field_test.go
+@@ -0,0 +1,79 @@
++package server_test
++
++import (
++	"context"
++	"fmt"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestStructJSONFieldInsertAll is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1783): tabledata.insertAll of a RECORD with a
++// JSON field (or an ARRAY<STRUCT<JSON>>) stored the field as a JSON
++// string, so JSON_VALUE(s.d, '$.x') was NULL and the row read back as
++// quoted text; an insertAll into a REPEATED JSON column failed 500
++// ("Value has type JSON which cannot be inserted into column aj").
++func TestStructJSONFieldInsertAll(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	tb := client.Dataset("ds").Table("t")
++	schema := bigquery.Schema{
++		{Name: "j", Type: bigquery.JSONFieldType},
++		{Name: "s", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{{Name: "n", Type: bigquery.StringFieldType}, {Name: "d", Type: bigquery.JSONFieldType}}},
++		{Name: "a", Type: bigquery.RecordFieldType, Repeated: true, Schema: bigquery.Schema{{Name: "d", Type: bigquery.JSONFieldType}}},
++		{Name: "aj", Type: bigquery.JSONFieldType, Repeated: true},
++	}
++	if err := tb.Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
++		t.Fatal(err)
++	}
++	if err := tb.Inserter().Put(ctx, &bigquery.ValuesSaver{Schema: schema, Row: []bigquery.Value{`{"x":{"y":"z"}}`,
++		[]bigquery.Value{"a", `{"x":{"y":"z"}}`}, []bigquery.Value{[]bigquery.Value{`{"x":1}`}}, []bigquery.Value{`{"x":2}`, `3`}}}); err != nil {
++		t.Fatalf("insertAll: %v", err)
++	}
++	for _, tc := range []struct{ q, want string }{
++		{"SELECT JSON_VALUE(j, '$.x.y') FROM ds.t", "[z]"},
++		{"SELECT JSON_VALUE(s.d, '$.x.y') FROM ds.t", "[z]"},
++		{"SELECT TO_JSON_STRING(s.d) FROM ds.t", `[{"x":{"y":"z"}}]`},
++		{"SELECT JSON_VALUE(a[OFFSET(0)].d, '$.x') FROM ds.t", "[1]"},
++		{"SELECT JSON_VALUE(aj[OFFSET(0)], '$.x') FROM ds.t", "[2]"},
++		{"SELECT TO_JSON_STRING(aj) FROM ds.t", `[[{"x":2},3]]`},
++		{"SELECT s FROM ds.t", `[[a {"x":{"y":"z"}}]]`},
++	} {
++		it, err := client.Query(tc.q).Read(ctx)
++		if err != nil {
++			t.Errorf("%s: %v", tc.q, err)
++			continue
++		}
++		var row []bigquery.Value
++		if err := it.Next(&row); err != nil {
++			t.Errorf("%s: %v", tc.q, err)
++			continue
++		}
++		if got := fmt.Sprint(row); got != tc.want {
++			t.Errorf("%s = %s, want %s", tc.q, got, tc.want)
++		}
++	}
++}

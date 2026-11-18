@@ -50,8 +50,15 @@ import (
 // before 1.0, whose base_score it was; a classifier's margin 0); the mean, not a
 // learned default direction, for a NULL; float64 values, where XGBoost
 // keeps float32; the loss of an iteration (the mean squared error, or the
-// mean log loss). Refused 501 for a boosted tree model: num_parallel_tree,
-// subsample or colsample_* other than 1, booster_type DART, and
+// mean log loss). A boosted tree model's subsample, colsample_bytree,
+// colsample_bylevel and colsample_bynode under 1 and num_parallel_tree over
+// 1 (#1766) are drawn as a random forest's are (growTree), each round's
+// num_parallel_tree trees sharing its leaf weights; UNVERIFIED (docs
+// re-read 2026-11-17:
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-boosted-tree,
+// which documents the options but not the draw): the draws come from the
+// fixed seed 1504, so a model is the same each run but not Google's draw.
+// Refused 501 for a boosted tree model: booster_type DART, and
 // tree_method APPROX or HIST.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-boosted-tree
 //
@@ -64,6 +71,19 @@ import (
 // UNVERIFIED: the draws come from a fixed seed (1504), so a forest is the
 // same each run but not Google's draw.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-random-forest
+
+// treeSampled reports whether a boosted tree model samples rows or
+// columns, or grows several trees a round (a boosted random forest): a
+// subsample, colsample_bytree, colsample_bylevel or colsample_bynode
+// under 1, or num_parallel_tree over 1 (#1766).
+func treeSampled(o mlOptions) bool {
+	for _, v := range []float64{o.Subsample, o.ColsampleTree, o.ColsampleLevel, o.ColsampleNode} {
+		if v != 0 && v < 1 {
+			return true
+		}
+	}
+	return o.NumParallelTree > 1
+}
 
 // mlNode is one node of a tree: a split (Feat the encoded column, without
 // the intercept, Thr the value, Left and Right the children's indexes) or a
@@ -94,21 +114,10 @@ func isClassifierType(typ string) bool {
 	return typ == "LOGISTIC_REG" || typ == "BOOSTED_TREE_CLASSIFIER" || typ == "RANDOM_FOREST_CLASSIFIER" || typ == "DNN_CLASSIFIER" || typ == "DNN_LINEAR_COMBINED_CLASSIFIER"
 }
 
-// checkTreeSampling refuses a boosted tree model's sampling other than
-// 1 (its draw would be Google's), and a forest of fewer than two trees.
+// checkTreeSampling refuses a forest of fewer than two trees. A boosted
+// tree model's sampling (subsample, colsample_*, num_parallel_tree) is
+// drawn as a random forest's is (treeSampled, #1766).
 func checkTreeSampling(o mlOptions) (int, string) {
-	if isBoostedTree(o.ModelType) {
-		if o.NumParallelTree > 1 {
-			return 501, "Not implemented here: num_parallel_tree other than 1 for a boosted tree model (a boosted random forest draws its trees' rows at random). Nothing was run."
-		}
-		for name, v := range map[string]float64{"subsample": o.Subsample, "colsample_bytree": o.ColsampleTree, "colsample_bylevel": o.ColsampleLevel,
-			"colsample_bynode": o.ColsampleNode} {
-			if v != 0 && v != 1 {
-				return 501, "Not implemented here: " + name + " other than 1.0 for a boosted tree model: it samples rows or columns at random, as Google's " +
-					"XGBoost draws them. CloudBurrow builds every boosted tree on every row and column. Nothing was run."
-			}
-		}
-	}
 	if isRandomForest(o.ModelType) && o.given("num_parallel_tree") && o.NumParallelTree < 2 {
 		return 400, "num_parallel_tree must be at least 2 for a random forest model"
 	}
@@ -186,6 +195,10 @@ func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][
 	var rng *rand.Rand
 	if isRandomForest(o.ModelType) {
 		t.Strategy = "RANDOM_FOREST"
+		rng = rand.New(rand.NewSource(1504))
+	} else if treeSampled(o) {
+		// A sampled boosted tree model (#1766): each round's trees drawn
+		// as a forest's are, from the same fixed seed.
 		rng = rand.New(rand.NewSource(1504))
 	}
 	t.BaseScore = 0.5

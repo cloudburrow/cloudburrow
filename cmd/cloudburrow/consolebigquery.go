@@ -147,7 +147,7 @@ func (p bigqueryProvider) projectSummary(ctx context.Context, project string) []
 	return []console.PropertyGroup{{Heading: "Project", Properties: []console.Property{
 		{Label: "Project ID", Value: project},
 		{Label: "BigQuery service account", Value: email},
-	}}}
+	}}, p.connectionsSummary(ctx, project)}
 }
 
 func countTables(ctx context.Context, ds *bigquery.Dataset) (int, error) {
@@ -319,6 +319,7 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		props = append(props, console.Property{Label: "View query", Value: md.ViewQuery})
 	}
 	props = append(props, materializedViewProps(md)...) // #1390, consolebigquerymv.go
+	props = append(props, objectTableProps(md)...)      // #1783, consolebigqueryobjects.go
 	if len(md.Labels) > 0 {
 		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
 	}
@@ -346,6 +347,11 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			},
 			p.previewSection(ctx, t, md.Schema),
 		},
+	}
+	if isObjectTable(md) { // #1783: tabledata.list does not read an external table
+		detail.Sections[2] = p.objectPreviewSection(ctx, c, datasetID, tableID, md.Schema)
+		detail.Sections[0].Note = "An object table's schema is fixed: one row per Cloud Storage object."
+		return detail, nil
 	}
 	if base, part, ok := strings.Cut(tableID, "$"); ok {
 		// A partition's page (#1273): the table's, by the decorated name,

@@ -1,0 +1,102 @@
+CloudBurrow patch 93 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1783). Applies after patch 0090.
+
+A JSON value bound as its text inside a STRUCT or an ARRAY was cast to
+JSON by quoting it: StringValue.ToJSON is the string's JSON encoding. The
+emulator binds a tabledata.insertAll or load row's RECORD as a map whose
+JSON field is the client's JSON text, so a stored STRUCT<d JSON> kept d as
+a JSON string: TO_JSON_STRING(s.d) was "\"{\\\"x\\\":1}\"", JSON_VALUE(s.d,
+'$.x') NULL, and an object table's ref.details (an ObjectRef's JSON) could
+not be read as JSON. BigQuery has no cast or coercion from STRING to JSON
+in SQL, so a STRING reaching a cast to JSON is a bound value: valid JSON
+text is now read as the JSON it is, at any depth (STRUCT fields, ARRAY
+elements, ARRAY<STRUCT> fields). Text that is not JSON stays a JSON
+string, as before. struct_json_field_test.go fails without the patch and
+passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/encoder.go
++++ b/internal/encoder.go
+@@ -816,6 +816,18 @@
+ 		}
+ 		return &value.NumericValue{Rat: r, IsBigNumeric: true}, nil
+ 	case googlesql.TypeKindTypeJson:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1783): a JSON value
++		// bound as its text inside a STRUCT or an ARRAY (tabledata.insertAll
++		// and loads give a JSON field as JSON text; the emulator binds a
++		// RECORD as a map) was quoted into a JSON string, so a stored
++		// STRUCT<d JSON>'s d read back as "{\"x\":1}" and JSON_VALUE(s.d,
++		// '$.x') was NULL. A STRING cast to JSON here is never SQL's (BigQuery
++		// has no STRING to JSON cast or coercion): it is a bound value, and
++		// JSON text is read as the JSON it is. Text that is not JSON stays a
++		// JSON string, as before.
++		if sv, ok := v.(value.StringValue); ok && json.Valid([]byte(sv)) {
++			return value.JsonValue(string(sv)), nil
++		}
+ 		j, err := v.ToJSON()
+ 		if err != nil {
+ 			return nil, err
+--- /dev/null
++++ b/struct_json_field_test.go
+@@ -0,0 +1,56 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestStructJSONFieldBoundAsText is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1783): a JSON field of a STRUCT, or an element
++// of an ARRAY<JSON>, bound as its JSON text (as the emulator binds
++// tabledata.insertAll's and loads' rows) was stored as a JSON string, so
++// JSON_VALUE of it was NULL and TO_JSON_STRING quoted it. JSON text is
++// read as JSON at any depth; text that is not JSON stays a JSON string; a
++// JSON field made in SQL is unchanged.
++func TestStructJSONFieldBoundAsText(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=struct_json_field")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	if _, err := db.ExecContext(ctx, "CREATE TABLE `p.d.t` (id INT64, s STRUCT<n STRING, d JSON>, a ARRAY<STRUCT<d JSON>>, aj ARRAY<JSON>)"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := db.ExecContext(ctx, "INSERT INTO `p.d.t` (id, s, a, aj) VALUES (?, ?, ?, ?)", int64(1),
++		map[string]any{"n": "a", "d": `{"x":{"y":"z"}}`}, []any{map[string]any{"d": `{"x":1}`}}, []any{`{"x":2}`, `3`, `not json`}); err != nil {
++		t.Fatalf("bound INSERT: %v", err)
++	}
++	if _, err := db.ExecContext(ctx, `INSERT INTO `+"`p.d.t`"+` (id, s) VALUES (2, STRUCT<n STRING, d JSON>('b', JSON '"text"'))`); err != nil {
++		t.Fatalf("SQL INSERT: %v", err)
++	}
++	for _, tc := range []struct{ q, want string }{
++		{"SELECT JSON_VALUE(s.d, '$.x.y') FROM `p.d.t` WHERE id = 1", "z"},
++		{"SELECT TO_JSON_STRING(s.d) FROM `p.d.t` WHERE id = 1", `{"x":{"y":"z"}}`},
++		{"SELECT JSON_TYPE(s.d) FROM `p.d.t` WHERE id = 1", "object"},
++		{"SELECT TO_JSON_STRING(s) FROM `p.d.t` WHERE id = 1", `{"n":"a","d":{"x":{"y":"z"}}}`},
++		{"SELECT JSON_VALUE(a[OFFSET(0)].d, '$.x') FROM `p.d.t` WHERE id = 1", "1"},
++		{"SELECT JSON_VALUE(e.d, '$.x') FROM `p.d.t`, UNNEST(a) e WHERE id = 1", "1"},
++		{"SELECT TO_JSON_STRING(aj) FROM `p.d.t` WHERE id = 1", `[{"x":2},3,"not json"]`},
++		{"SELECT TO_JSON_STRING(s.d) FROM `p.d.t` WHERE id = 2", `"text"`},
++		{"SELECT JSON_TYPE(s.d) FROM `p.d.t` WHERE id = 2", "string"},
++	} {
++		var got sql.NullString
++		if err := db.QueryRowContext(ctx, tc.q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", tc.q, err)
++			continue
++		}
++		if got.String != tc.want {
++			t.Errorf("%s = %q, want %q", tc.q, got.String, tc.want)
++		}
++	}
++}

@@ -203,6 +203,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 		return append(actions,
 			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
 			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(true)},
+			console.Action{ID: actCreateObjectTable, Label: "Create object table", Fields: createObjectTableFields()}, // #1783
 			console.Action{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
 				Confirm: "Every table in the dataset, and every row in them, is deleted with it."})
 	case 2:
@@ -213,6 +214,9 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 				{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)},
 				deleteTable,
 			}
+		}
+		if err == nil && isObjectTable(md) { // #1783, consolebigqueryobjects.go
+			return objectTableActions(md)
 		}
 		if err == nil && md.Type == bigquery.MaterializedView { // #1390, consolebigquerymv.go
 			return []console.Action{
@@ -424,6 +428,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 	switch {
 	case action == actUndeleteDataset && len(path) == 0: // #1552, consolebigqueryundelete.go
 		return p.undeleteDataset(ctx, values)
+	case (action == actCreateConnection || action == actEditConnection || action == actDeleteConnection) && len(path) == 0:
+		return p.connectionAct(ctx, action, values) // consolebigqueryconnections.go, #1760
 	case action == "createtable" && len(path) == 1:
 		return p.createTable(ctx, path[0], values)
 	case action == actEditDataset && len(path) == 1:
@@ -433,6 +439,10 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 	case action == "insertrows" && len(path) == 2:
 		_, err := p.insertRows(ctx, path[0], path[1], values)
 		return err
+	case action == actRefreshObjectCache && len(path) == 2: // #1783, consolebigqueryobjects.go
+		return p.refreshObjectCache(ctx, path[0], path[1])
+	case action == actCreateObjectTable && len(path) == 1:
+		return p.createObjectTable(ctx, path[0], values)
 	case action == actRefreshMV && len(path) == 2: // #1390, consolebigquerymv.go
 		return p.refreshMaterializedView(ctx, path[0], path[1])
 	case action == "edittable" && len(path) == 2:

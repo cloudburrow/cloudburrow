@@ -465,6 +465,20 @@ func InClusterBuiltinStorageHost(namespace string) string {
 	return fmt.Sprintf("storage.%s.svc.cluster.local:%d", namespace, StoragePort)
 }
 
+// BigQueryServiceAgentDomain is the email domain of BigQuery connections'
+// service agents (#1786).
+const BigQueryServiceAgentDomain = "gcp-sa-bigquery-condel.iam.gserviceaccount.com"
+
+// IAMServiceAccountDomains are the email domains of every project's IAM
+// service accounts, NAME@PROJECT.iam.gserviceaccount.com, as the storage
+// server's --service-account-certs writes them (#1787).
+const IAMServiceAccountDomains = "*.iam.gserviceaccount.com"
+
+// InClusterBigQueryHost is the BigQuery front's in-cluster address.
+func InClusterBigQueryHost(namespace string) string {
+	return fmt.Sprintf("bigquery.%s.svc.cluster.local:%d", namespace, BigQueryPort)
+}
+
 // InClusterPubSubHost is the Pub/Sub emulator's in-cluster address, where
 // the storage server publishes notifications (#506).
 func InClusterPubSubHost(namespace string) string {

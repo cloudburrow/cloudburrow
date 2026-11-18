@@ -46,6 +46,10 @@ type Server struct {
 	numbers projectNumbers
 	// signingKeys verify RSA signed URLs, by service account (#509).
 	signingKeys map[string]*rsa.PublicKey
+	// certSources and certClient read the other accounts' certificates
+	// (signingcerts.go, #1786).
+	certSources map[string]string
+	certClient  *http.Client
 	// observe, faults and ring measure and fault requests (#513).
 	observe func(Call)
 	faults  Faulter
@@ -83,6 +87,11 @@ type Options struct {
 	// verified against, by service account email (#509). A signed URL for
 	// any other account is refused.
 	SigningKeys map[string]*rsa.PublicKey
+	// CertSources are where the certificates of accounts not in
+	// SigningKeys are read (http://host:port, serving
+	// /service_accounts/v1/metadata/x509/EMAIL), by the email's domain
+	// (#1786); an account of no domain here is refused.
+	CertSources map[string]string
 	// Observe is told of every request once it is served (#513); nil means
 	// none. It never sees a query string or a body.
 	Observe func(Call)
@@ -111,6 +120,10 @@ func NewServer(o Options) (*Server, error) {
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
 	s.signingKeys, s.observe, s.faults = o.SigningKeys, o.Observe, o.Faults
+	s.certSources = map[string]string{}
+	for d, base := range o.CertSources {
+		s.certSources[strings.ToLower(d)] = base
+	}
 	s.relayChannels, s.hierarchy = o.RelayChannels, o.Hierarchy
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {

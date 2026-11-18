@@ -25,10 +25,10 @@ func (p bigqueryProvider) ListActions(_ context.Context, project string) []conso
 	if p.writable(project) != nil {
 		return nil
 	}
-	return []console.Action{{ID: actUndeleteDataset, Label: "Undelete dataset", Fields: []console.Field{
+	return append([]console.Action{{ID: actUndeleteDataset, Label: "Undelete dataset", Fields: []console.Field{
 		{Name: "dataset", Label: "Dataset ID", Type: "text", Required: true, Pattern: `[A-Za-z0-9_]{1,1024}`,
 			Help: "The ID of a dataset deleted within its time travel window; it comes back with its tables, views, routines and models. BigQuery lists no deleted dataset, so type the ID it had."},
-	}}}
+	}}}, connectionActions()...) // consolebigqueryconnections.go, #1760
 }
 
 // undeleteDataset is datasets.undelete of the most recently deleted

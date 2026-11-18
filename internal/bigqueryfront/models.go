@@ -36,8 +36,10 @@ import (
 // detail a faithful result needs, as for DNNs, or Google's
 // infrastructure itself: AUTOML_*, imported TENSORFLOW models read from
 // Cloud Storage (ONNX runs in the onnx build, modelonnx.go, and XGBOOST
-// on internal/xgbmodel, modelxgb.go, #1711), and remote models over a Cloud resource
-// connection, which CloudBurrow has none of); a TRANSFORM clause; and the
+// on internal/xgbmodel, modelxgb.go, #1711; TENSORFLOW_LITE on
+// internal/tflitemodel, modeltflite.go, #1755; #1766), and remote models other than
+// LLM and embedding models on the local Vertex AI (modelremote.go, #1760; #1765); a
+// TRANSFORM clause; and the
 // options CloudBurrow does not carry out.
 
 // bqModel is a model the front keeps.
@@ -70,6 +72,10 @@ type bqModel struct {
 	ONNX *onnxImport `json:"onnx,omitempty"`
 	// XGB is an imported XGBoost model's (modelxgb.go, #1711).
 	XGB *xgbImport `json:"xgboost,omitempty"`
+	// TFLite is an imported TensorFlow Lite model's (modeltflite.go, #1755).
+	TFLite *tfliteImport `json:"tflite,omitempty"`
+	// Remote is a remote model's (modelremote.go, #1760).
+	Remote *remoteModel `json:"remote,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -279,7 +285,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX", "XGBOOST": "XGBOOST"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -305,6 +311,14 @@ func (md bqModel) resource(full bool) map[string]any {
 	}
 	if md.XGB != nil {
 		md.xgbResource(res) // modelxgb.go, #1711
+		return res
+	}
+	if md.TFLite != nil {
+		md.tfliteResource(res) // modeltflite.go, #1755
+		return res
+	}
+	if md.Remote != nil {
+		md.remoteResource(res) // modelremote.go, #1760
 		return res
 	}
 	var feats []map[string]any
@@ -710,6 +724,9 @@ type modelDDL struct {
 	// XGBoost model's INPUT and OUTPUT clauses.
 	onnxPath                    string
 	importInputs, importOutputs []importColumn
+	// remote is a remote model's connection and endpoint (modelremote.go,
+	// #1760).
+	remote *remoteDDL
 }
 
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
@@ -723,7 +740,6 @@ var unsupportedModelTypes = map[string]string{
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
 	"TENSORFLOW":            "an imported TensorFlow model needs the TensorFlow runtime, which CloudBurrow does not have",
-	"TENSORFLOW_LITE":       "an imported TensorFlow Lite model needs the TensorFlow Lite runtime, which CloudBurrow's BigQuery does not have",
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
@@ -798,9 +814,12 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 				return d, true, c, m
 			}
 			i = next
-		case stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
-			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Google-hosted Vertex AI or Cloud AI endpoint through a " +
-				"Cloud resource connection of the BigQuery Connection API, which CloudBurrow does not serve. Nothing was run."
+		case stmt[i].is("REMOTE"):
+			// A remote model on the local Vertex AI (modelremote.go, #1760).
+			c, m := parseRemote(stmt, i, &d)
+			return d, true, c, m
+		case stmt[i].is("OUTPUT"):
+			return d, true, 400, "Syntax error: OUTPUT comes after INPUT"
 		}
 	}
 	d.opts = defaultMLOptions()
@@ -818,7 +837,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 		for k := 0; k+2 < len(opts); k++ {
 			if opts[k].is("MODEL_TYPE") && opts[k+1].punct("=") && opts[k+2].kind == tokString {
 				if typ, ok := unquoteString(opts[k+2].text); ok {
-					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" {
+					if up := strings.ToUpper(typ); up == "ONNX" || up == "XGBOOST" || up == "TENSORFLOW_LITE" {
 						// An imported ONNX or XGBoost model (modelonnx.go,
 						// modelxgb.go, #1711): MODEL_PATH, and no TRANSFORM
 						// or query.
@@ -1015,10 +1034,6 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				return bad()
 			}
 			o.FeedbackType = strings.ToUpper(s)
-			if o.FeedbackType == "IMPLICIT" {
-				return 501, "Not implemented here: feedback_type IMPLICIT: implicit feedback's confidence weighting (wals_alpha) and ranking metrics " +
-					"are not carried out; CloudBurrow trains EXPLICIT matrix factorization. Nothing was run."
-			}
 		case "user_col", "item_col", "rating_col":
 			s, ok := str()
 			if !ok || s == "" {
@@ -1353,6 +1368,14 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			default:
 				o.SplitMethod = s
 			}
+		case "wals_alpha":
+			// An IMPLICIT matrix factorization's confidence weight
+			// (modelmf.go, #1766).
+			v, ok := num()
+			if !ok || v < 0 {
+				return bad()
+			}
+			o.WalsAlpha = &v
 		case "l1_reg", "l2_reg", "learn_rate", "ls_init_learn_rate", "min_rel_progress", "data_split_eval_fraction", "max_iterations":
 			v, ok := num()
 			if !ok || v < 0 {
@@ -1471,7 +1494,7 @@ var modelTypeOptions = map[string][]string{
 		"batch_size", "dropout", "warm_start"},
 	"AUTOENCODER": {"optimizer", "learn_rate", "activation_fn", "batch_size", "dropout", "hidden_units", "early_stop", "min_rel_progress",
 		"max_iterations", "warm_start", "l1_reg_activation"},
-	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
+	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "wals_alpha", "max_iterations", "early_stop",
 		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
 
@@ -1603,7 +1626,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return false
 	}
 	fail := func(code int, msg string) {
-		reason := map[int]string{400: "invalidQuery", 404: "notFound", 409: "duplicate", 501: "notImplemented"}[code]
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 409: "duplicate", 501: "notImplemented"}[code]
 		if code == 501 {
 			writeError(w, code, reason, msg)
 			return
@@ -1648,6 +1671,18 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	case had && !d.replace:
 		fail(409, fmt.Sprintf("Already Exists: Model %s:%s.%s", project, dataset, id))
 		return true
+	case d.remote != nil:
+		// A remote model on the local Vertex AI (modelremote.go, #1760).
+		rm, c, m := f.createRemote(r.Context(), d, project, loc)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		if !dry {
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Created: now, Modified: now,
+				Location: loc, Remote: rm})
+		}
 	case d.opts.ModelType == "ONNX":
 		// An imported ONNX model (modelonnx.go, #1711).
 		imp, data, c, m := f.importONNX(r.Context(), d.onnxPath)
@@ -1681,6 +1716,23 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "XGBOOST", Created: now, Modified: now,
 				Location: loc, Options: d.opts, XGB: imp})
+		}
+	case d.opts.ModelType == "TENSORFLOW_LITE":
+		// An imported TensorFlow Lite model (modeltflite.go, #1755).
+		imp, data, c, m := f.importTFLite(r, d)
+		if c != 0 {
+			fail(c, m)
+			return true
+		}
+		imp.ModelPath = d.onnxPath
+		if !dry {
+			if err := f.models.keepBlob(imp.SHA256, data); err != nil {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not keep the model's TensorFlow Lite file: "+err.Error())
+				return true
+			}
+			now := f.now().UnixMilli()
+			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: "TENSORFLOW_LITE", Created: now, Modified: now,
+				Location: loc, Options: d.opts, TFLite: imp})
 		}
 	default:
 		trainSQL := d.query

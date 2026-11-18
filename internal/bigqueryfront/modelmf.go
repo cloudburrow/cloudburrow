@@ -34,8 +34,8 @@ import (
 // default is ⌊log2 n⌋ of the n training rows, kept in [2, 200]; a row with
 // a NULL user, item or rating is dropped; a user or item not seen in
 // training is predicted NULL; factors are numbered from 1; the column
-// order of ML.RECOMMEND. Refused 501: IMPLICIT feedback (its weighting by
-// wals_alpha and ranking metrics), and a data split.
+// order of ML.RECOMMEND. IMPLICIT feedback is trainImplicitMF's (#1766);
+// a data split is refused 501.
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-matrix-factorization
 
 // mfTrained is a matrix factorization model's weights.
@@ -51,6 +51,9 @@ type mfTrained struct {
 	UserB      []float64   `json:"userBias"`
 	ItemB      []float64   `json:"itemBias"`
 	NumFactors int         `json:"numFactors"`
+	// Implicit is an IMPLICIT model's: ML.RECOMMEND answers
+	// predicted_<rating_col>_confidence (#1766).
+	Implicit bool `json:"implicit,omitempty"`
 }
 
 // applyMFDefaults sets a matrix factorization model's documented
@@ -71,14 +74,18 @@ func applyMFDefaults(o *mlOptions) {
 	if !o.given("l2_reg") {
 		o.L2 = 1
 	}
+	if o.FeedbackType == "IMPLICIT" && o.WalsAlpha == nil {
+		a := 40.0 // the documented default
+		o.WalsAlpha = &a
+	}
 }
 
 // trainMF trains a matrix factorization model of opts on rows.
 func trainMF(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
 	var t mlTrained
-	if opts.FeedbackType != "EXPLICIT" {
-		return t, mlUnimplemented("feedback_type %s: implicit feedback's confidence weighting (wals_alpha) and ranking metrics are not carried out; "+
-			"CloudBurrow trains EXPLICIT matrix factorization", opts.FeedbackType)
+	implicit := opts.FeedbackType == "IMPLICIT"
+	if !implicit && opts.given("wals_alpha") {
+		return t, mlInvalid("wals_alpha is only valid for feedback_type IMPLICIT")
 	}
 	find := func(name string) int {
 		for i, c := range cols {
@@ -111,10 +118,7 @@ func trainMF(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlF
 	default:
 		return t, mlInvalid("The rating column %s must be numeric", cols[ri].Name)
 	}
-	type obs struct {
-		u, i int
-		r    float64
-	}
+	type obs = mfObs
 	uIdx, iIdx := map[string]int{}, map[string]int{}
 	var users, items []string
 	count := 0
@@ -171,6 +175,9 @@ func trainMF(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlF
 	if k == 0 {
 		k = int(math.Floor(math.Log2(float64(n))))
 		k = max(2, min(k, 200))
+	}
+	if implicit {
+		return trainImplicitMF(t, opts, cols, ui, ii, ri, ut, it, users, items, data, k)
 	}
 	rng := rand.New(rand.NewSource(1504))
 	initF := func(m int) [][]float64 {
@@ -337,6 +344,10 @@ func (f front) mfSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		return "", 500, "cloudburrow: the model has no weights"
 	}
 	out := sqlIdent("predicted_" + t.Label)
+	if m.Implicit {
+		// BigQuery's column for an IMPLICIT model (#1766).
+		out = sqlIdent("predicted_" + t.Label + "_confidence")
+	}
 	uc, ic := sqlIdent(m.UserCol), sqlIdent(m.ItemCol)
 	switch c.fn {
 	case "RECOMMEND":
@@ -372,6 +383,10 @@ func (f front) mfSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		}
 		return "", 400, "The input of ML.RECOMMEND must have the user column " + m.UserCol + " or the item column " + m.ItemCol
 	case "EVALUATE":
+		if m.Implicit {
+			return "", 501, "Not implemented here: ML.EVALUATE of an IMPLICIT matrix factorization model: its ranking metrics (mean_average_precision, " +
+				"mean_squared_error, normalized_discounted_cumulative_gain, average_rank) are not computed (#1766). Nothing was run."
+		}
 		metrics := t.Eval
 		if c.input != "" {
 			cols, rows, code, msg := f.queryAllRows(r, q, c.input)
@@ -452,7 +467,11 @@ func (f front) mfSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 // mfResource sets a matrix factorization model's REST fields.
 func (md bqModel) mfResource(res map[string]any) (opts, metrics map[string]any) {
 	t, o := md.Trained, md.Options
-	res["labelColumns"] = []map[string]any{{"name": "predicted_" + t.Label, "type": map[string]string{"typeKind": "FLOAT64"}}}
+	label := "predicted_" + t.Label
+	if t.MF != nil && t.MF.Implicit {
+		label += "_confidence"
+	}
+	res["labelColumns"] = []map[string]any{{"name": label, "type": map[string]string{"typeKind": "FLOAT64"}}}
 	k := 0
 	if t.MF != nil {
 		k = t.MF.NumFactors
@@ -460,6 +479,12 @@ func (md bqModel) mfResource(res map[string]any) (opts, metrics map[string]any) 
 	opts = map[string]any{"numFactors": strconv.Itoa(k), "feedbackType": o.FeedbackType, "userColumn": o.UserCol, "itemColumn": o.ItemCol,
 		"l2Regularization": o.L2, "maxIterations": strconv.Itoa(o.MaxIterations), "earlyStop": o.EarlyStop,
 		"minRelativeProgress": o.MinRelProgress, "dataSplitMethod": o.SplitMethod}
+	if o.WalsAlpha != nil {
+		opts["walsAlpha"] = *o.WalsAlpha
+	}
+	if t.MF != nil && t.MF.Implicit {
+		return opts, map[string]any{}
+	}
 	num := func(k string) any {
 		if v := t.Eval[k]; v != nil {
 			return *v
@@ -470,4 +495,127 @@ func (md bqModel) mfResource(res map[string]any) (opts, metrics map[string]any) 
 		"meanSquaredError": num("mean_squared_error"), "meanSquaredLogError": num("mean_squared_log_error"),
 		"medianAbsoluteError": num("median_absolute_error"), "rSquared": num("r2_score")}}
 	return opts, metrics
+}
+
+// mfObs is one training row of a matrix factorization: user, item and
+// rating indices.
+type mfObs struct {
+	u, i int
+	r    float64
+}
+
+// trainImplicitMF trains an IMPLICIT matrix factorization by weighted
+// alternating least squares (WALS) over every user and item pair, as
+// BigQuery documents IMPLICIT models are trained (#1766), in the form of
+// Hu, Koren and Volinsky's "Collaborative Filtering for Implicit Feedback
+// Datasets" that the wals_alpha option names: a pair's preference is 1
+// when its rating is positive and 0 otherwise (every unobserved pair), its
+// confidence 1 + wals_alpha · rating, and each user's factors minimise
+// Σ_i c_ui (p_ui − x_u·y_i)² + l2_reg ‖x_u‖², then each item's for the
+// users'.
+//
+// UNVERIFIED (docs re-read 2026-11-17:
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-matrix-factorization,
+// which documents wals_alpha's default of 40 but not the objective in
+// this detail): ratings of one pair are summed; a rating ≤ 0 is an
+// unobserved pair; there are no intercepts (ML.WEIGHTS answers 0); the
+// loss is the confidence-weighted mean squared error over every pair; the
+// weights start from the same fixed seed as EXPLICIT; no evaluation
+// metrics are kept (ML.EVALUATE's ranking metrics are not computed).
+func trainImplicitMF(t mlTrained, opts mlOptions, cols []mlColumn, ui, ii, ri int, ut, it string, users, items []string, data []mfObs, k int) (mlTrained, *mlFail) {
+	alpha := 40.0
+	if opts.WalsAlpha != nil {
+		alpha = *opts.WalsAlpha
+	}
+	U, I := len(users), len(items)
+	R := make([][]float64, U)
+	for u := range R {
+		R[u] = make([]float64, I)
+	}
+	for _, o := range data {
+		R[o.u][o.i] += o.r
+	}
+	pref := func(u, i int) float64 {
+		if R[u][i] > 0 {
+			return 1
+		}
+		return 0
+	}
+	conf := func(u, i int) float64 {
+		if R[u][i] > 0 {
+			return 1 + alpha*R[u][i]
+		}
+		return 1
+	}
+	rng := rand.New(rand.NewSource(1504))
+	initF := func(m int) [][]float64 {
+		out := make([][]float64, m)
+		for a := range out {
+			out[a] = make([]float64, k)
+			for j := range out[a] {
+				out[a][j] = (rng.Float64() - 0.5) / math.Sqrt(float64(k))
+			}
+		}
+		return out
+	}
+	X, Y := initF(U), initF(I)
+	loss := func() float64 {
+		var s float64
+		for u := 0; u < U; u++ {
+			for i := 0; i < I; i++ {
+				d := pref(u, i) - dot(X[u], Y[i])
+				s += conf(u, i) * d * d
+			}
+		}
+		return s / float64(U*I)
+	}
+	// solve fits one row's factors for the other side's fixed: a ridge
+	// regression of l2_reg weighted by confidence.
+	solve := func(n int, other [][]float64, c func(j int) float64, p func(j int) float64) []float64 {
+		A := make([][]float64, k)
+		b := make([]float64, k)
+		for a := range A {
+			A[a] = make([]float64, k)
+			A[a][a] = opts.L2
+		}
+		for j := 0; j < n; j++ {
+			f, cw, pv := other[j], c(j), p(j)
+			for a := 0; a < k; a++ {
+				b[a] += cw * pv * f[a]
+				for bb := 0; bb < k; bb++ {
+					A[a][bb] += cw * f[a] * f[bb]
+				}
+			}
+		}
+		return solveLinear(A, b)
+	}
+	prev := loss()
+	for iter := 0; iter < opts.MaxIterations; iter++ {
+		start := time.Now()
+		for u := 0; u < U; u++ {
+			X[u] = solve(I, Y, func(i int) float64 { return conf(u, i) }, func(i int) float64 { return pref(u, i) })
+		}
+		for i := 0; i < I; i++ {
+			Y[i] = solve(U, X, func(u int) float64 { return conf(u, i) }, func(u int) float64 { return pref(u, i) })
+		}
+		l := loss()
+		t.Iterations = append(t.Iterations, mlIteration{Index: iter, Loss: l, DurationMs: time.Since(start).Milliseconds()})
+		if opts.EarlyStop && prev > 0 && (prev-l)/prev < opts.MinRelProgress {
+			break
+		}
+		if l == 0 {
+			break
+		}
+		prev = l
+	}
+	for a, b := 0, len(t.Iterations)-1; a < b; a, b = a+1, b-1 {
+		t.Iterations[a], t.Iterations[b] = t.Iterations[b], t.Iterations[a]
+	}
+	t.MF = &mfTrained{UserCol: cols[ui].Name, ItemCol: cols[ii].Name, UserType: ut, ItemType: it, Users: users, Items: items,
+		UserF: X, ItemF: Y, UserB: make([]float64, U), ItemB: make([]float64, I), NumFactors: k, Implicit: true}
+	t.Label, t.LabelType = cols[ri].Name, "FLOAT64"
+	t.Rows, t.EvalRows = len(data), len(data)
+	t.Features = []mlFeature{{Name: cols[ui].Name, Type: ut}, {Name: cols[ii].Name, Type: it}}
+	t.Eval = map[string]*float64{}
+	return t, nil
 }

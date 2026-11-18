@@ -186,3 +186,42 @@ func TestBoostedTreeLabelEncoding(t *testing.T) {
 		t.Errorf("one-hot: %+v, %v", tr.Features, fe)
 	}
 }
+
+// TestTrainSampledBoostedTree (#1766): a boosted tree model's subsample,
+// colsample_bynode and num_parallel_tree are drawn as a forest's are: the
+// model is the same each run, grows num_parallel_tree trees a round, and
+// a full sample is the unsampled model.
+func TestTrainSampledBoostedTree(t *testing.T) {
+	cols, rows := stepRows()
+	opts := func(sub, node float64, par int) mlOptions {
+		o := defaultMLOptions()
+		o.ModelType, o.LabelCols = "BOOSTED_TREE_REGRESSOR", []string{"y"}
+		o.Set = []string{"model_type", "input_label_cols", "max_iterations"}
+		o.MaxIterations = 5
+		o.Subsample, o.ColsampleNode, o.NumParallelTree = sub, node, par
+		applyTreeDefaults(&o)
+		if c, m := checkTreeSampling(o); c != 0 {
+			t.Fatalf("options %+v: %s", o, m)
+		}
+		return o
+	}
+	full, fe := trainModelT(opts(1, 1, 1), cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	a, fe := trainModelT(opts(0.5, 0.5, 3), cols, rows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	b, _ := trainModelT(opts(0.5, 0.5, 3), cols, rows)
+	x := []float64{1, 0.3}
+	if a.Strategy != "BOOSTED_TREE" || len(a.Trees) != 3*len(full.Trees) || a.treeMargin(x) != b.treeMargin(x) {
+		t.Fatalf("sampled: %s, %d trees (unsampled %d), %v vs %v", a.Strategy, len(a.Trees), len(full.Trees), a.treeMargin(x), b.treeMargin(x))
+	}
+	if a.treeMargin(x) == full.treeMargin(x) {
+		t.Errorf("the sample changed nothing: %v", a.treeMargin(x))
+	}
+	if !treeSampled(opts(1, 0.8, 1)) || treeSampled(opts(1, 1, 1)) {
+		t.Error("treeSampled")
+	}
+}
