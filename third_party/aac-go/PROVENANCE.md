@@ -93,8 +93,19 @@ with an error from `DecodeAU`/`Decode`): HE-AAC v2 parametric stereo with 34 ste
 (`iid_mode` or `icc_mode` 2 or 5), mixing procedure B (`icc_mode` 3 to 5), and IPD/OPD (a
 `ps_extension` with id 0 and `enable_ipdopd`). Their normative tables (the 34-band hybrid
 filterbank's prototype filters and band maps, the IPD/OPD Huffman books, mixing B's details) had
-no allowed source: OpenCORE and 3GPP's enhanced aacPlus implement baseline PS only, and the ISO
-text was not available. They were not written from memory, and no encoder at hand emits them
+no allowed source. With the whole OpenCORE directory read (2026-11-17), it still has none of them:
+for 34-band streams it averages the 34 IID/ICC indices down to 20 (`map34IndexTo20` in
+`ps_decode_bs_utils.cpp`) and filters with the 20-band bank, which is not the normative output and
+would not match ffmpeg; `ps_init_stereo_mixing.cpp` says "type Rb is not supported"; and
+`ps_read_data.cpp` skips the whole `ps_extension` by its byte count, so no IPD/OPD books or
+dequantisation. 3GPP's enhanced aacPlus is baseline PS only too, a search for a permissively
+licensed decoder with full PS found none (FDK AAC, under its own non-permissive licence and not
+read, is described as baseline as well), and ATSC A/52 is unrelated. What is missing, all in
+ISO/IEC 14496-3 subpart 8 (§8.6.4 and Annex 8.B), not available here: the IPD and OPD Huffman
+books (time and frequency) and their quantisation, the 34-band hybrid analysis and synthesis
+filters (the 12-, 8- and 4-band splits of QMF bands 0 to 4) with the 34-band parameter-to-band
+map and the decorrelator's 34-band settings, and mixing procedure B's angle tables and rotation.
+They were not written from memory, and no encoder at hand emits them
 (`aac_at` always sends `iid_mode` and `icc_mode` 1 without extensions, at every bitrate tried), so
 they could not have been checked against ffmpeg either. Also refused, out of scope: 960-sample
 frames and channel configuration 0 (a program_config_element).

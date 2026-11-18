@@ -24,9 +24,10 @@ const (
 
 // Delta bit allocation modes (clause 4.4.3.49).
 const (
-	dbaReuse = 0
-	dbaNew   = 1
-	dbaNone  = 2
+	dbaReuse    = 0
+	dbaNew      = 1
+	dbaNone     = 2
+	dbaReserved = 3
 )
 
 // header is a syncframe's syncinfo and bsi.
@@ -301,6 +302,26 @@ type dba struct {
 	mode            int
 	offst, ln, deba [8]int
 	nseg            int
+}
+
+// readDBA reads one channel's delta bit allocation for its mode
+// (cpldeltbae or deltbae): new segments, none, or the previous block's
+// (reuse). The reserved mode 3 is an error: A/52 clause 5.4.3.48 says a
+// decoder receiving it should not decode the audio, and mute.
+func readDBA(r *bitReader, d *dba, mode int) error {
+	switch mode {
+	case dbaNew:
+		d.mode = dbaNew
+		d.nseg = r.u(3) + 1
+		for s := range d.nseg {
+			d.offst[s], d.ln[s], d.deba[s] = r.u(5), r.u(4), r.u(3)
+		}
+	case dbaNone:
+		d.mode = dbaNone
+	case dbaReserved:
+		return errors.New("ac3: reserved delta bit allocation mode")
+	}
+	return nil
 }
 
 // frame is the state of one syncframe's decoding: what its blocks carry
@@ -1077,23 +1098,15 @@ func (f *frame) audblk(blk int) error {
 			for ch := range nf {
 				modes[ch] = r.u(2)
 			}
-			read := func(d *dba, mode int) {
-				switch mode {
-				case dbaNew:
-					d.mode = dbaNew
-					d.nseg = r.u(3) + 1
-					for s := range d.nseg {
-						d.offst[s], d.ln[s], d.deba[s] = r.u(5), r.u(4), r.u(3)
-					}
-				case dbaNone:
-					d.mode = dbaNone
+			if f.cplinu {
+				if err := readDBA(r, &f.dbas[cplCh], modes[cplCh]); err != nil {
+					return err
 				}
 			}
-			if f.cplinu {
-				read(&f.dbas[cplCh], modes[cplCh])
-			}
 			for ch := range nf {
-				read(&f.dbas[ch], modes[ch])
+				if err := readDBA(r, &f.dbas[ch], modes[ch]); err != nil {
+					return err
+				}
 			}
 		}
 	}

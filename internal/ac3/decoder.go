@@ -8,6 +8,20 @@
 // whose clauses and tables the code names. No other decoder's source was
 // read.
 //
+// Checked against ATSC A/52:2018 itself
+// (https://www.atsc.org/wp-content/uploads/2015/03/A52-2018.pdf, downloaded
+// 2026-11-17), whose clause and table numbers differ from ETSI's (A/52's
+// Table 7.6 is ETSI's 6.6, its E2.10 ETSI's E.1.9, its E3.1 ETSI's E.2.1,
+// its E4.1 ETSI's E.3.1): every
+// table here (frame sizes, the bit allocation tables, baptab, hebaptab, the
+// GAQ remapping constants, the frame exponent strategies, the default band
+// structures, the enhanced coupling and spectral extension tables, the
+// transform window and the seven VQ tables) matches it entry by entry, and
+// so do the bsi, audfrm and audblk syntax and the bit allocation, exponent,
+// coupling, rematrixing, dynamic range and spectral extension procedures,
+// except that a reserved delta bit allocation mode was ignored (it is now
+// refused, A/52 clause 5.4.3.48).
+//
 // AC-3 (bsid 0 to 8, with Annex D's alternate bit stream syntax) and E-AC-3
 // (bsid 11 to 16, Annex E) are decoded: every audio coding mode and the
 // LFE, exponent strategies, the parametric bit allocation with delta bit
