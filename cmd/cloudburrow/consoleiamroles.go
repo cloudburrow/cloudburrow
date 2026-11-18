@@ -5,8 +5,9 @@ package main
 // role, Delete and Undelete, over the same registry the IAM API's
 // projects.roles and organizations.roles serve, so a role made here is one
 // gcloud iam roles and Terraform see, and the API's refusals (an invalid
-// permission, a taken ID) are the form's. Predefined roles are not listed:
-// CloudBurrow carries no catalog of them.
+// permission, a taken ID) are the form's. Google's predefined roles
+// (#1746) are listed after them, as the console's Roles page lists both,
+// each with its title, stage and included permissions, read-only.
 
 import (
 	"context"
@@ -19,6 +20,7 @@ import (
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
@@ -29,9 +31,14 @@ type iamRolesProvider struct {
 func (iamRolesProvider) ID() string    { return "iam-roles" }
 func (iamRolesProvider) Title() string { return "Roles" }
 
-const iamRolesNote = "Custom roles of this project and of the organization (" + resourcemanager.OrganizationName + "). " +
+const iamRolesNote = "Custom roles of this project and of the organization (" + resourcemanager.OrganizationName + "), then Google's predefined roles. " +
 	"A role is granted on the IAM page; Firestore with MongoDB compatibility and Memorystore's IAM auth evaluate its permissions. " +
-	"A deleted role grants nothing, can be undeleted for 7 days and is gone after 44. Predefined roles are not listed."
+	"A deleted custom role grants nothing, can be undeleted for 7 days, loses its bindings after 37 and is gone after 44. " +
+	"Predefined roles cannot be changed; the basic roles' permissions are not listed, as Google's docs do not list them."
+
+// predefinedRolePrefix names a predefined role's row (roles/ID), which a
+// row name cannot hold as it is: it has a slash.
+const predefinedRolePrefix = "predefined:"
 
 // orgRolePrefix names an organization role's row, so a project role and
 // an organization role of the same ID are told apart; a role ID has no colon.
@@ -43,6 +50,9 @@ var roleStages = []string{"ALPHA", "BETA", "GA", "EAP", "DEPRECATED", "DISABLED"
 
 // roleName is a row's role name.
 func roleName(project, row string) (string, error) {
+	if id, ok := strings.CutPrefix(row, predefinedRolePrefix); ok {
+		return "roles/" + id, nil
+	}
 	if id, ok := strings.CutPrefix(row, orgRolePrefix); ok {
 		return resourcemanager.OrganizationName + "/roles/" + id, nil
 	}
@@ -53,6 +63,9 @@ func roleName(project, row string) (string, error) {
 }
 
 func roleRow(r *adminpb.Role) string {
+	if id, ok := strings.CutPrefix(r.GetName(), "roles/"); ok {
+		return predefinedRolePrefix + id
+	}
 	id := r.GetName()[strings.LastIndex(r.GetName(), "/")+1:]
 	if strings.HasPrefix(r.GetName(), "organizations/") {
 		return orgRolePrefix + id
@@ -87,7 +100,7 @@ func (p iamRolesProvider) roles(project string) ([]*adminpb.Role, error) {
 }
 
 func (p iamRolesProvider) List(_ context.Context, project string) (console.Listing, error) {
-	l := console.Listing{NameColumn: "Role ID", Columns: []string{"Title", "Type", "Stage", "Permissions"}, Noun: "custom roles", Note: iamRolesNote}
+	l := console.Listing{NameColumn: "Role ID", Columns: []string{"Title", "Type", "Stage", "Permissions"}, Noun: "roles", Note: iamRolesNote}
 	roles, err := p.roles(project)
 	if err != nil {
 		l.Unavailable = consoleErr(err)
@@ -102,6 +115,15 @@ func (p iamRolesProvider) List(_ context.Context, project string) (console.Listi
 			"Title": r.GetTitle(), "Type": kind, "Stage": r.GetStage().String(), "Permissions": strconv.Itoa(len(r.GetIncludedPermissions()))}}
 		row.Actions = p.Actions(row)
 		l.Items = append(l.Items, row)
+	}
+	for _, n := range iamroles.PredefinedNames() {
+		r := iamroles.Predefined(n)
+		perms := strconv.Itoa(len(r.Permissions))
+		if len(r.Permissions) == 0 {
+			perms = "-"
+		}
+		l.Items = append(l.Items, console.Resource{Name: predefinedRolePrefix + strings.TrimPrefix(n, "roles/"), Status: "ENABLED",
+			Fields: map[string]string{"Title": r.Title, "Type": "Predefined", "Stage": r.Stage, "Permissions": perms}})
 	}
 	l.Total = len(l.Items)
 	return l, nil
@@ -196,7 +218,7 @@ func (p iamRolesProvider) Detail(_ context.Context, project string, path []strin
 		{ID: "permissions", Label: "Permissions", Listing: perms},
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Role", Properties: props}}},
 	}}
-	if !r.GetDeleted() {
+	if !r.GetDeleted() && !strings.HasPrefix(r.GetName(), "roles/") {
 		d.Edit = &console.EditForm{Label: "Edit role", Fields: roleFields(r), Note: "The ID cannot change, as on Google."}
 	}
 	return d, nil
@@ -215,6 +237,9 @@ func (p iamRolesProvider) Edit(_ context.Context, project string, path []string,
 }
 
 func (p iamRolesProvider) Delete(_ context.Context, project, row string) error {
+	if strings.HasPrefix(row, predefinedRolePrefix) {
+		return errors.New("a predefined role cannot be deleted")
+	}
 	name, err := roleName(project, row)
 	if err != nil {
 		return err

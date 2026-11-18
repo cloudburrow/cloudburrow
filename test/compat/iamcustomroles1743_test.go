@@ -138,8 +138,8 @@ func TestIAMCustomRoles(t *testing.T) {
 	if l := list(adminpb.RoleView_BASIC, true); len(l) != 1 || !l[0].GetDeleted() {
 		t.Errorf("ListRoles show_deleted = %v", l)
 	}
-	if _, err := c.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: parent, RoleId: "compat_reader.v1", Role: &adminpb.Role{}}); status.Code(err) != codes.AlreadyExists {
-		t.Errorf("reusing a deleted role's ID = %v, want AlreadyExists", err)
+	if _, err := c.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: parent, RoleId: "compat_reader.v1", Role: &adminpb.Role{}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("reusing a deleted role's ID = %v, want FailedPrecondition", err)
 	}
 	if _, err := c.UpdateRole(ctx, &adminpb.UpdateRoleRequest{Name: role.GetName(), Role: &adminpb.Role{Title: "x"}}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("updating a deleted role = %v, want FailedPrecondition", err)

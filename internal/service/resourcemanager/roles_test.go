@@ -153,8 +153,8 @@ func TestCustomRolesThroughTheOfficialClient(t *testing.T) {
 	if _, err := c.UpdateRole(ctx, &adminpb.UpdateRoleRequest{Name: role.GetName(), Role: &adminpb.Role{Title: "x"}}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("updating a deleted role = %v", err)
 	}
-	if _, err := c.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: parent, RoleId: "reader.v1", Role: &adminpb.Role{}}); status.Code(err) != codes.AlreadyExists {
-		t.Errorf("reusing a deleted role's ID = %v", err)
+	if _, err := c.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: parent, RoleId: "reader.v1", Role: &adminpb.Role{}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("reusing a deleted role's ID = %v, want FailedPrecondition (Google's sample)", err)
 	}
 	now = now.Add(6 * 24 * time.Hour)
 	if got, err := c.UndeleteRole(ctx, &adminpb.UndeleteRoleRequest{Name: role.GetName()}); err != nil || got.GetDeleted() {
@@ -170,7 +170,34 @@ func TestCustomRolesThroughTheOfficialClient(t *testing.T) {
 	if _, err := c.UndeleteRole(ctx, &adminpb.UndeleteRoleRequest{Name: role.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("undeleting after 8 days = %v", err)
 	}
-	now = now.Add(37 * 24 * time.Hour)
+	bound := func() bool {
+		p, err := reg.IAMPolicy(parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range p.Bindings {
+			if b.Role == role.GetName() {
+				return true
+			}
+		}
+		return false
+	}
+	if !bound() {
+		t.Fatal("the deleted role's binding is gone after 8 days")
+	}
+	// 37 days after the deletion its bindings are removed; the role is
+	// still there, deleted, until 44.
+	now = now.Add(29 * 24 * time.Hour)
+	if _, err := c.QueryGrantableRoles(ctx, &adminpb.QueryGrantableRolesRequest{FullResourceName: "//cloudresourcemanager.googleapis.com/" + parent}); err != nil {
+		t.Fatal(err)
+	}
+	if bound() {
+		t.Error("the deleted role's binding is still in the policy 37 days after its deletion")
+	}
+	if got, err := c.GetRole(ctx, &adminpb.GetRoleRequest{Name: role.GetName()}); err != nil || !got.GetDeleted() {
+		t.Errorf("the role 37 days after its deletion = %v, %v", got, err)
+	}
+	now = now.Add(8 * 24 * time.Hour)
 	if _, err := c.GetRole(ctx, &adminpb.GetRoleRequest{Name: role.GetName()}); status.Code(err) != codes.NotFound {
 		t.Errorf("a role 45 days after its deletion = %v, want NotFound", err)
 	}
@@ -186,9 +213,88 @@ func TestCustomRolesThroughTheOfficialClient(t *testing.T) {
 	if perms, ok := reg.RolePermissions(org.GetName()); !ok || len(perms) != 0 {
 		t.Errorf("a DISABLED role grants %v", perms)
 	}
-	// Predefined roles are not served.
-	if _, err := c.GetRole(ctx, &adminpb.GetRoleRequest{Name: "roles/viewer"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetRole roles/viewer = %v, want Unimplemented", err)
+}
+
+// Predefined roles and queryGrantableRoles (#1746).
+func TestPredefinedRolesThroughTheOfficialClient(t *testing.T) {
+	reg, _, c := startIAMAdmin(t)
+	ctx := context.Background()
+	got, err := c.GetRole(ctx, &adminpb.GetRoleRequest{Name: "roles/storage.objectViewer"})
+	if err != nil || got.GetTitle() != "Storage Object Viewer" || got.GetStage() != adminpb.Role_GA || string(got.GetEtag()) != "\x00" ||
+		!strings.Contains(strings.Join(got.GetIncludedPermissions(), ","), "storage.objects.get") {
+		t.Fatalf("GetRole roles/storage.objectViewer = %v, %v", got, err)
+	}
+	if _, err := c.GetRole(ctx, &adminpb.GetRoleRequest{Name: "roles/no.such"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetRole of an unknown predefined role = %v, want NotFound", err)
+	}
+	var names []string
+	for token := ""; ; {
+		resp, err := c.ListRoles(ctx, &adminpb.ListRolesRequest{PageSize: 1000, PageToken: token})
+		if err != nil {
+			t.Fatalf("ListRoles: %v", err)
+		}
+		for _, r := range resp.GetRoles() {
+			if len(r.GetIncludedPermissions()) != 0 {
+				t.Fatalf("a BASIC list included permissions: %v", r.GetName())
+			}
+			names = append(names, r.GetName())
+		}
+		if token = resp.GetNextPageToken(); token == "" {
+			break
+		}
+	}
+	if len(names) < 2400 || !strings.HasPrefix(names[0], "roles/") {
+		t.Fatalf("ListRoles = %d roles", len(names))
+	}
+	full, err := c.ListRoles(ctx, &adminpb.ListRolesRequest{View: adminpb.RoleView_FULL, PageSize: 2})
+	if err != nil || len(full.GetRoles()) != 2 || len(full.GetRoles()[1].GetIncludedPermissions()) == 0 {
+		t.Errorf("a FULL list = %v, %v", full, err)
+	}
+	if _, err := c.DeleteRole(ctx, &adminpb.DeleteRoleRequest{Name: "roles/viewer"}); err == nil {
+		t.Error("deleted a predefined role")
+	}
+
+	if _, err := reg.Create(Project{ProjectID: "grant-project", Parent: OrganizationName}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: "projects/grant-project", RoleId: "mine", Role: &adminpb.Role{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: OrganizationName, RoleId: "orgs", Role: &adminpb.Role{}}); err != nil {
+		t.Fatal(err)
+	}
+	grantable := func(res string) map[string]bool {
+		out := map[string]bool{}
+		resp, err := c.QueryGrantableRoles(ctx, &adminpb.QueryGrantableRolesRequest{FullResourceName: res, PageSize: 1000})
+		for err == nil {
+			for _, r := range resp.GetRoles() {
+				out[r.GetName()] = true
+			}
+			if resp.GetNextPageToken() == "" {
+				break
+			}
+			resp, err = c.QueryGrantableRoles(ctx, &adminpb.QueryGrantableRolesRequest{FullResourceName: res, PageSize: 1000, PageToken: resp.GetNextPageToken()})
+		}
+		if err != nil {
+			t.Fatalf("QueryGrantableRoles %s: %v", res, err)
+		}
+		return out
+	}
+	p := grantable("//cloudresourcemanager.googleapis.com/projects/grant-project")
+	for _, want := range []string{"roles/storage.admin", "roles/viewer", "projects/grant-project/roles/mine", OrganizationName + "/roles/orgs"} {
+		if !p[want] {
+			t.Errorf("%s is not grantable on the project", want)
+		}
+	}
+	if p["roles/iam.organizationRoleAdmin"] || p["roles/resourcemanager.folderAdmin"] {
+		t.Error("an organization or folder role is grantable on the project")
+	}
+	o := grantable("//cloudresourcemanager.googleapis.com/" + OrganizationName)
+	if !o["roles/iam.organizationRoleAdmin"] || o["projects/grant-project/roles/mine"] || !o[OrganizationName+"/roles/orgs"] {
+		t.Error("the organization's grantable roles are wrong")
+	}
+	if _, err := c.QueryGrantableRoles(ctx, &adminpb.QueryGrantableRolesRequest{FullResourceName: "//storage.googleapis.com/projects/_/buckets/b"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("a bucket's grantable roles = %v, want Unimplemented", err)
 	}
 }
 
@@ -253,8 +359,8 @@ func TestCustomRolesOverREST(t *testing.T) {
 	if err != nil || len(q.Permissions) != 1000 || q.NextPageToken == "" {
 		t.Fatalf("QueryTestablePermissions = %d, %q, %v", len(q.Permissions), q.NextPageToken, err)
 	}
-	if _, err := svc.Roles.QueryGrantableRoles(&iamv1.QueryGrantableRolesRequest{
+	if _, err := svc.IamPolicies.QueryAuditableServices(&iamv1.QueryAuditableServicesRequest{
 		FullResourceName: "//cloudresourcemanager.googleapis.com/projects/rest-roles"}).Do(); code(err) != 501 {
-		t.Errorf("QueryGrantableRoles = %v, want 501", err)
+		t.Errorf("QueryAuditableServices = %v, want 501", err)
 	}
 }

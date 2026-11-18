@@ -120,7 +120,15 @@ func TestNoDetailShowsABlankProperty(t *testing.T) {
 				t.Fatalf("no rows, so no Detail was opened: seed this provider's backend in blankCheckDeps")
 			}
 			w := blankWalker{t: t, ctx: ctx, id: p.ID(), driller: driller}
+			predefined := 0
 			for _, row := range list.Items {
+				// IAM & Admin > Roles lists Google's 2,400-odd predefined
+				// roles, one page each from the same code: open a sample.
+				if strings.HasPrefix(row.Name, predefinedRolePrefix) {
+					if predefined++; predefined > 25 && !strings.HasPrefix(row.Name, predefinedRolePrefix+"storage.") {
+						continue
+					}
+				}
 				path := row.Opens
 				if path == nil {
 					path = []string{row.Name}
