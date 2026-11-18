@@ -140,7 +140,9 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
+| `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
+| `internal/iamroles/` | IAM's permission catalog and the permissions of the roles CloudBurrow's permission checks evaluate (#1743). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |
 | `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels, long-running port-forwards, streamed exec and log following, and an interactive exec on a pseudo-terminal for the console's terminal (#781). Every kubectl CloudBurrow runs outside `internal/cluster` goes through it: Secret Manager, Cloud KMS, the Cloud Run adapter, `internal/netfwd`, `internal/images`, `internal/components`, and in `cmd/cloudburrow` the console's reads and log follower, `logs`, `diagnose`, the Cloud SQL snapshots and the cluster-host Service; and `internal/terminal`. |
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
