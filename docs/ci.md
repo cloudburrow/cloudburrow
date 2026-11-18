@@ -178,6 +178,22 @@ dispatched on main, opens a `workflow-red` issue through `report-red-runs.yml`.
 `test/repo/upgrade_workflow_test.go` keeps the workflow's triggers, its download and its pass
 check in shape.
 
+### The Cloud SQL ephemeral nightly
+
+`.github/workflows/nightly-sql-ephemeral.yml` ("Cloud SQL ephemeral nightly", #1752) runs the
+compat job's `sql` shard, as `scripts/compat-shards.sh` defines it, on an instance brought up with
+`--mode ephemeral`, nightly at 06:47 UTC and by hand (`gh workflow run nightly-sql-ephemeral.yml`).
+The compat job runs the shard on a persistent instance only, and a created Cloud SQL server keeps
+its data differently in ephemeral mode: on a volume of its own that goes with the instance's record
+(#1740). The run fails unless the whole suite passed and `TestCloudSQLInstanceWrites`,
+`TestCloudSQLDemoteSkipReplicationSetup`, `TestCloudSQLDemotePostgres` and
+`TestCloudSQLExternalPostgresPrimary`, the tests that failed only in this mode, passed rather than
+skipped. The restart probes are not run: they measure persistent mode first, which the compat job
+already does. It never runs on a pull request, a merge group or a push, it is not a required check,
+and nothing in it reaches Google. A red scheduled run, or one dispatched on main, opens a
+`workflow-red` issue through `report-red-runs.yml`. `test/repo/nightly_sql_workflow_test.go` keeps it
+in shape.
+
 ### The embedded BigQuery emulator
 
 Every CLI embeds CloudBurrow's build of the BigQuery emulator (#1061,
