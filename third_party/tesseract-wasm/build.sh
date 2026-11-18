@@ -18,6 +18,13 @@ LEPTONICA_VERSION=1.87.0
 LEPTONICA_SHA256=c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7
 WASI_SDK_VERSION=34.0
 WASI_SDK_TAG=wasi-sdk-34
+# The sysroot (wasi-libc, libc++) and compiler-rt builtins come from the
+# release's host-independent archives, not from the host's SDK: each host's
+# SDK carries its own build of them (the macOS one differs, if only in the
+# source paths of libc++abi's assertions), and the module must be the same
+# bytes on every host.
+WASI_SYSROOT_SHA256=9d813544eeebe38b7b8f2244ed591de46b6db812c6dd1a257ff9f0d2a905a2be
+WASI_LIBCLANG_RT_SHA256=eee3e634dcf71aa22b1333391623cf5c9965a637dc428a27b1a858c026c587f1
 
 here=$(cd "$(dirname "$0")" && pwd)
 check=0
@@ -50,10 +57,20 @@ fetch "https://github.com/DanBloomberg/leptonica/releases/download/$LEPTONICA_VE
 fetch "https://github.com/WebAssembly/wasi-sdk/releases/download/$WASI_SDK_TAG/wasi-sdk-$WASI_SDK_VERSION-$host.tar.gz" \
 	"wasi-sdk-$WASI_SDK_VERSION-$host.tar.gz" "$sdk_sha"
 
-for d in "tesseract-$TESSERACT_VERSION" "leptonica-$LEPTONICA_VERSION" "wasi-sdk-$WASI_SDK_VERSION-$host"; do
+fetch "https://github.com/WebAssembly/wasi-sdk/releases/download/$WASI_SDK_TAG/wasi-sysroot-$WASI_SDK_VERSION.tar.gz" \
+	"wasi-sysroot-$WASI_SDK_VERSION.tar.gz" "$WASI_SYSROOT_SHA256"
+fetch "https://github.com/WebAssembly/wasi-sdk/releases/download/$WASI_SDK_TAG/libclang_rt-$WASI_SDK_VERSION.tar.gz" \
+	"libclang_rt-$WASI_SDK_VERSION.tar.gz" "$WASI_LIBCLANG_RT_SHA256"
+
+for d in "tesseract-$TESSERACT_VERSION" "leptonica-$LEPTONICA_VERSION" "wasi-sdk-$WASI_SDK_VERSION-$host" \
+	"wasi-sysroot-$WASI_SDK_VERSION" "libclang_rt-$WASI_SDK_VERSION"; do
 	[ -d "$d" ] || tar xzf "$d.tar.gz"
 done
 sdk=$work/wasi-sdk-$WASI_SDK_VERSION-$host
+sysroot=$work/wasi-sysroot-$WASI_SDK_VERSION
+# The release's builtins in place of the host SDK's own.
+rtdir=$("$sdk/bin/clang" --target=wasm32-wasip1 -print-resource-dir)/lib/wasm32-unknown-wasip1
+cp "$work/libclang_rt-$WASI_SDK_VERSION/wasm32-unknown-wasip1/libclang_rt.builtins.a" "$rtdir/libclang_rt.builtins.a"
 tess=$work/tesseract-$TESSERACT_VERSION
 lept=$work/leptonica-$LEPTONICA_VERSION
 
@@ -70,7 +87,7 @@ sed "s/@GENERIC_MAJOR_VERSION@/$major/; s/@GENERIC_MINOR_VERSION@/$minor/; s/@GE
 cp "$tess"/include/tesseract/*.h "$gen/tesseract/"
 
 # Fixed flags, and paths mapped away, so the module is the same on every host.
-common=(--target=wasm32-wasip1 --sysroot="$sdk/share/wasi-sysroot" -O2 -msimd128 -DNDEBUG
+common=(--target=wasm32-wasip1 --sysroot="$sysroot" -O2 -msimd128 -DNDEBUG
 	-fno-exceptions -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_PROCESS_CLOCKS -D_WASI_EMULATED_MMAN
 	-ffile-prefix-map="$work"=/build -ffile-prefix-map="$here"=/src -Wno-everything)
 cc=("$sdk/bin/clang" "${common[@]}" -std=gnu11 -DHAVE_CONFIG_H -I"$gen/leptonica")
@@ -87,7 +104,7 @@ lept_srcs=$(cd "$lept/src" && ls ./*.c | sed 's|^\./||' | LC_ALL=C sort)
 # Tesseract: the library without training, the SIMD back ends (WebAssembly
 # has the generic ones) or the viewer's sockets (svutil; GRAPHICS_DISABLED).
 tess_srcs=$(cd "$tess/src" && find api arch ccmain ccstruct ccutil classify cutil dict lstm textord wordrec viewer \
-	-name '*.cpp' | LC_ALL=C sort | grep -Ev '^arch/(dotproduct|intsimdmatrix)(avx|avx2|avx512|fma|neon|sse|rvv)\.cpp$|^viewer/svutil\.cpp$')
+	-name '*.cpp' | LC_ALL=C sort | grep -Ev '^arch/(dotproduct|intsimdmatrix)(avx|avx2|avx512|fma|neon|sse|rvv)\.cpp$|^viewer/svutil\.cpp$|^ccstruct/quadlsq\.cpp$')
 
 tess_inc=()
 for d in api arch ccmain ccstruct ccutil classify cutil dict lstm textord viewer wordrec; do tess_inc+=(-I"$tess/src/$d"); done
@@ -95,6 +112,11 @@ for d in api arch ccmain ccstruct ccutil classify cutil dict lstm textord viewer
 
 printf '%s\n' $lept_srcs | xargs -P "$jobs" -I{} sh -c 's=$0 o=$1; shift; "$@" -c "$s/src/{}" -o "$o/lept_$(echo {} | tr / _).o"' "$lept" "$obj" "${cc[@]}"
 printf '%s\n' $tess_srcs | xargs -P "$jobs" -I{} sh -c 's=$0 o=$1; shift; "$@" -c "$s/src/{}" -o "$o/tess_$(echo {} | tr / _).o"' "$tess" "$obj" "${cxx[@]}" "${tess_inc[@]}"
+# quadlsq.cpp's long double (fp128 in wasm32, soft-float library calls) is
+# the one place the SDK's clang does not give the same code on every host at
+# -O2 (the x86_64 Linux clang orders two stack temporaries the other way);
+# at -O0 every host agrees. It fits a baseline's quadratic, a small cost.
+"${cxx[@]}" "${tess_inc[@]}" -O0 -c "$tess/src/ccstruct/quadlsq.cpp" -o "$obj/tess_ccstruct_quadlsq.cpp.o"
 "${cxx[@]}" -c "$here/src/cbocr.cpp" -o "$obj/cbocr.o"
 "${cc[@]}" -c "$here/src/wasi_stubs.c" -o "$obj/wasi_stubs.o"
 
