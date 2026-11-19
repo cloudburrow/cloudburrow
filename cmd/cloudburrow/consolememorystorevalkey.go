@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
+	"google.golang.org/genproto/googleapis/type/timeofday"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -86,7 +88,7 @@ func valkeyMainEndpoint(inst *memorystorepb.Instance) string {
 
 // List implements console.Provider: the project's instances.
 func (p valkeyProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	l := console.Listing{Columns: []string{"Location", "Mode", "Endpoint", "Shards", "Replicas", "Node type", "Engine version"},
+	l := console.Listing{Columns: []string{"Location", "Cluster Mode", "Version", "Shards", "Replicas", "Node type", "Endpoint"},
 		NameColumn: "Instance ID", Noun: "instances", Note: valkeyNote}
 	api, _, err := p.api()
 	if err != nil {
@@ -101,13 +103,13 @@ func (p valkeyProvider) List(ctx context.Context, project string) (console.Listi
 	for _, i := range resp.GetInstances() {
 		l.Items = append(l.Items, console.Resource{Name: memorystoreID(i.GetName()), Status: i.GetState().String(),
 			Fields: map[string]string{
-				"Location":       strings.Split(i.GetName(), "/")[3],
-				"Mode":           i.GetMode().String(),
-				"Endpoint":       valkeyMainEndpoint(i),
-				"Shards":         strconv.Itoa(int(i.GetShardCount())),
-				"Replicas":       strconv.Itoa(int(i.GetReplicaCount())),
-				"Node type":      i.GetNodeType().String(),
-				"Engine version": i.GetEngineVersion(),
+				"Location":     strings.Split(i.GetName(), "/")[3],
+				"Cluster Mode": map[bool]string{true: "Disabled", false: "Enabled"}[i.GetMode() == memorystorepb.Instance_CLUSTER_DISABLED],
+				"Endpoint":     valkeyMainEndpoint(i),
+				"Shards":       strconv.Itoa(int(i.GetShardCount())),
+				"Replicas":     strconv.Itoa(int(i.GetReplicaCount())),
+				"Node type":    memorystoreOption(valkeyNodeTypeLabels, i.GetNodeType().String()),
+				"Version":      memorystoreOption(valkeyVersionLabels, i.GetEngineVersion()),
 			}})
 	}
 	l.Total = len(l.Items)
@@ -116,38 +118,70 @@ func (p valkeyProvider) List(ctx context.Context, project string) (console.Listi
 
 var valkeyNodeTypes = []string{"SHARED_CORE_NANO", "STANDARD_SMALL", "HIGHMEM_MEDIUM", "HIGHMEM_XLARGE"}
 
-// CreateForm implements console.Creator.
+// valkeyVersionLabels are the engine versions as Google names them.
+var valkeyVersionLabels = map[string]string{"VALKEY_7_2": "Valkey 7.2", "VALKEY_8_0": "Valkey 8.0", "VALKEY_9_0": "Valkey 9.0", "VALKEY_9_1": "Valkey 9.1"}
+
+// valkeyNodeTypeLabels are the node types as Google's page names them.
+var valkeyNodeTypeLabels = map[string]string{"SHARED_CORE_NANO": "shared-core-nano", "STANDARD_SMALL": "standard-small",
+	"HIGHMEM_MEDIUM": "highmem-medium", "HIGHMEM_XLARGE": "highmem-xlarge"}
+
+// CreateForm implements console.Creator: Google's Create instance page, in
+// its order (#1862): Instance ID, Region, Zonal availability, Cluster Mode,
+// Node type, Instance size, Replicas (default 1), Set up connection,
+// Security, Certificate authority management, Encryption, ACL policy, Data
+// persistence strategy, Automated backups, Maintenance and Choose version,
+// then this console's advanced options (Engine configs, Restore from
+// backup, Secondary of).
 func (valkeyProvider) CreateForm() (string, []console.Field) {
-	return "Create instance", []console.Field{
+	fields := []console.Field{
 		{Name: "id", Label: "Instance ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`,
-			Help: "4 to 63 lowercase letters, digits and hyphens, starting with a letter."},
+			Help: "4 to 63 lowercase letters, digits and hyphens, starting with a letter; unique in its region."},
 		{Name: "region", Label: "Region", Type: "text", Required: true, Default: redisadmin.Region},
-		{Name: "mode", Label: "Cluster mode", Type: "select", Default: "CLUSTER", Options: []string{"CLUSTER", "CLUSTER_DISABLED"},
-			Help: "CLUSTER_DISABLED is one primary and its replicas, of one shard."},
-		{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Default: "1", Pattern: `^[0-9]{1,3}$`},
-		{Name: "replicaCount", Label: "Replicas per shard", Type: "number", Default: "0", Pattern: `^[0-5]$`},
-		{Name: "nodeType", Label: "Node type", Type: "select", Default: "HIGHMEM_MEDIUM", Options: valkeyNodeTypes,
-			Help: "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB."},
-		{Name: "network", Label: "Network (PSC)", Type: "text", Help: "Optional. projects/{project}/global/networks/{network}: an endpoint is created on it."},
-		{Name: "engineConfigs", Label: "Engine configs", Type: "map", Help: "Optional. One key=value per line, such as maxmemory-policy."},
-		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
-			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
-		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
-			Help: "IAM_AUTH: clients send an access token as the AUTH string, taken only when this instance minted it for a principal granted roles/memorystore.dbConnectionUser on the project (IAM & Admin). It cannot be changed later."},
-		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
-			Help: "TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the instance's page adds and shows."},
-		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
-			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
-		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
-		{Name: "engineVersion", Label: "Engine version", Type: "select", Default: redisadmin.DefaultValkeyVersion, Options: valkeyEngineVersions},
-		{Name: "persistence", Label: "Persistence", Type: "select", Default: "DISABLED", Options: []string{"DISABLED", "RDB", "AOF"},
-			Help: "RDB snapshots or the append-only file keep the data across a restart of CloudBurrow; without, it is lost."},
-		{Name: "kmsKey", Label: "Customer-managed encryption key", Type: "text",
-			Help: "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}, a Cloud KMS key in the instance's region (#1557)."},
-		{Name: "primaryInstance", Label: "Secondary of (cross-instance replication)", Type: "text",
-			Help: "Optional, CLUSTER_DISABLED only. projects/{project}/locations/{location}/instances/{instance}: the instance replicates that primary and is read-only."},
 	}
+	fields = append(fields, memorystoreZonalFields()...)
+	fields = append(fields,
+		console.Field{Name: "mode", Label: "Cluster Mode", Type: "radio", Default: "CLUSTER", Options: []string{"CLUSTER", "CLUSTER_DISABLED"},
+			OptionLabels: map[string]string{"CLUSTER": "Enabled", "CLUSTER_DISABLED": "Disabled"},
+			Help:         "Enabled shards the keyspace; Disabled is one primary and its replicas, of one shard. It cannot be changed later."},
+		console.Field{Name: "nodeType", Label: "Node type", Type: "select", Default: "HIGHMEM_MEDIUM", Options: valkeyNodeTypes,
+			OptionLabels: valkeyNodeTypeLabels,
+			Help:         "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB. shared-core-nano has no SLA on Google: for development and testing."},
+		console.Field{Name: "shardCount", Label: "Instance size", Type: "number", Required: true, Default: "1", Pattern: `^[0-9]{1,3}$`,
+			Help: "The number of shards, which sets the instance's capacity; Cluster Mode Disabled has one."},
+		console.Field{Name: "replicaCount", Label: "Replicas", Type: "number", Default: "1", Pattern: `^[0-5]$`, Help: "0 to 5 replicas per shard."},
+		console.Field{Name: "network", Label: "Network", Type: "text", Section: msSectionConnection,
+			Help: "Optional. projects/{project}/global/networks/{network}: the network your applications connect from; an endpoint is created on it."},
+	)
+	fields = append(fields, memorystoreSecurityFields("instance")...)
+	fields = append(fields, memorystoreEncryptionFields("instance")...)
+	fields = append(fields,
+		console.Field{Name: "aclPolicy", Label: "Policy", Type: "text", Section: msSectionACL,
+			Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}, in the instance's region: its rules become ACL users on every node."},
+		memorystorePersistenceField("Memory Snapshot"))
+	fields = append(fields, memorystoreBackupFields()...)
+	fields = append(fields, memorystoreMaintenanceFields()...)
+	fields = append(fields,
+		console.Field{Name: "engineVersion", Label: "Choose version", Type: "radio", Default: redisadmin.DefaultValkeyVersion, Section: "Choose version",
+			Options:            []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0", "VALKEY_9_1"},
+			OptionLabels:       map[string]string{"VALKEY_7_2": "Valkey 7.2", "VALKEY_8_0": "Valkey 8.0", "VALKEY_9_0": "Valkey 9.0", "VALKEY_9_1": "Valkey 9.1"},
+			UnavailableOptions: map[string]string{"VALKEY_9_1": "Not available locally: CloudBurrow does not run a Valkey 9.1 server yet."},
+			Help:               "A version cannot be downgraded later."},
+		console.Field{Name: "engineConfigs", Label: "Engine configs", Type: "map", Section: msSectionAdvanced,
+			Help: "Optional. One key=value per line, such as maxmemory-policy."},
+		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
+			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
+		console.Field{Name: "primaryInstance", Label: "Secondary of (cross-instance replication)", Type: "text", Section: msSectionAdvanced,
+			ShowWhen: "mode=CLUSTER_DISABLED",
+			Help:     "Optional. projects/{project}/locations/{location}/instances/{instance}: the instance replicates that primary and is read-only."})
+	return "Create instance", fields
 }
+
+// CreateTitle implements console.CreateTitler.
+func (valkeyProvider) CreateTitle() string { return "Create a Valkey instance" }
+
+// CreateLayout implements console.CreateLayouter: one page under
+// headings, as Google's.
+func (valkeyProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 // valkeyEngineVersions are the engine_version values served (#1557).
 var valkeyEngineVersions = []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"}
@@ -176,14 +210,37 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 	in := &memorystorepb.Instance{ShardCount: shards, ReplicaCount: proto.Int32(replicas), EngineConfigs: configs,
 		NodeType: memorystorepb.Instance_NodeType(memorystorepb.Instance_NodeType_value[values["nodeType"]]),
 		Mode:     memorystorepb.Instance_Mode(memorystorepb.Instance_Mode_value[values["mode"]])}
-	if values["transitEncryption"] == "true" {
+	if memorystoreTLS(values) {
 		in.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
 	}
-	if values["iamAuth"] == "true" {
+	switch memorystoreAuthMode(values) {
+	case "IAM_AUTH":
 		in.AuthorizationMode = memorystorepb.Instance_IAM_AUTH
-	}
-	if values["tokenAuth"] == "true" {
+	case "TOKEN_AUTH":
 		in.AuthorizationMode = memorystorepb.Instance_TOKEN_AUTH
+	}
+	if values["zoneDistribution"] == "SINGLE_ZONE" {
+		in.ZoneDistributionConfig = &memorystorepb.ZoneDistributionConfig{Mode: memorystorepb.ZoneDistributionConfig_SINGLE_ZONE,
+			Zone: strings.TrimSpace(values["zone"])}
+	} else if values["zoneDistribution"] == "MULTI_ZONE" {
+		in.ZoneDistributionConfig = &memorystorepb.ZoneDistributionConfig{Mode: memorystorepb.ZoneDistributionConfig_MULTI_ZONE}
+	}
+	on, hour, retention, err := memorystoreAutoBackup(values)
+	if err != nil {
+		return "", err
+	}
+	if on {
+		in.AutomatedBackupConfig = &memorystorepb.AutomatedBackupConfig{AutomatedBackupMode: memorystorepb.AutomatedBackupConfig_ENABLED,
+			Retention: durationpb.New(retention),
+			Schedule: &memorystorepb.AutomatedBackupConfig_FixedFrequencySchedule_{FixedFrequencySchedule: &memorystorepb.AutomatedBackupConfig_FixedFrequencySchedule{
+				StartTime: &timeofday.TimeOfDay{Hours: hour}}}}
+	}
+	day, start, has, err := memorystoreCreateWindow(values)
+	if err != nil {
+		return "", err
+	}
+	if has {
+		in.MaintenancePolicy = &memorystorepb.MaintenancePolicy{WeeklyMaintenanceWindow: []*memorystorepb.WeeklyMaintenanceWindow{{Day: day, StartTime: start}}}
 	}
 	if pol := strings.TrimSpace(values["aclPolicy"]); pol != "" {
 		in.AclPolicy = proto.String(pol)
@@ -200,7 +257,7 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 	if m := values["persistence"]; m != "" && m != "DISABLED" {
 		in.PersistenceConfig = &memorystorepb.PersistenceConfig{Mode: memorystorepb.PersistenceConfig_PersistenceMode(memorystorepb.PersistenceConfig_PersistenceMode_value[m])}
 	}
-	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+	if k := memorystoreKMSKey(values); k != "" {
 		in.KmsKey = proto.String(k)
 	}
 	if pi := strings.TrimSpace(values["primaryInstance"]); pi != "" {
@@ -264,44 +321,54 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 			nets = append(nets, a.GetNetwork())
 		}
 	}
-	props := []console.Property{
+	// Google's instance page (#1862): Overview, Configuration,
+	// Connections, the Server CA, Token auth, Backups and ACL policies,
+	// Maintenance, and Monitoring, which reads Cloud Monitoring's metrics.
+	overview := []console.Property{
 		{Label: "State", Value: i.GetState().String()},
 		{Label: "Mode", Value: i.GetMode().String()},
+		{Label: "Shards", Value: strconv.Itoa(int(i.GetShardCount()))},
+		{Label: "Replicas per shard", Value: strconv.Itoa(int(i.GetReplicaCount()))},
+		{Label: "Node type", Value: memorystoreOption(valkeyNodeTypeLabels, i.GetNodeType().String())},
+		{Label: "Node capacity", Value: fmt.Sprintf("%g GB", i.GetNodeConfig().GetSizeGb())},
+		{Label: "Engine version", Value: i.GetEngineVersion()},
+		{Label: "Zonal availability", Value: memorystoreZones(i.GetZoneDistributionConfig().GetMode().String(), i.GetZoneDistributionConfig().GetZone())},
+		{Label: "Labels", Value: orDash(memorystorePairs(i.GetLabels()))},
+		{Label: "Deletion protection", Value: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
+		{Label: "Encryption", Value: i.GetEncryptionInfo().GetEncryptionType().String()},
+		{Label: "Customer-managed key", Value: orDash(i.GetKmsKey())},
 	}
+	if ks := i.GetEncryptionInfo().GetKmsKeyPrimaryState(); i.GetKmsKey() != "" && ks != memorystorepb.EncryptionInfo_KMS_KEY_STATE_UNSPECIFIED {
+		overview = append(overview, console.Property{Label: "Key state", Value: ks.String()})
+	}
+	ab := i.GetAutomatedBackupConfig()
+	config := []console.Property{
+		{Label: "Persistence", Value: i.GetPersistenceConfig().GetMode().String()},
+		{Label: "Automated backups", Value: memorystoreAutoBackupText(ab.GetAutomatedBackupMode() == memorystorepb.AutomatedBackupConfig_ENABLED,
+			ab.GetFixedFrequencySchedule().GetStartTime().GetHours(), ab.GetRetention().AsDuration())},
+		{Label: "Authorization", Value: i.GetAuthorizationMode().String()},
+		{Label: "ACL policy", Value: orDash(i.GetAclPolicy())},
+		// IAM auth checks the token (#1614): who may connect is the
+		// project's IAM policy, granted on the IAM page.
+		{Label: "IAM connect role", Value: valkeyIAMRole(i)},
+		{Label: "In-transit encryption", Value: i.GetTransitEncryptionMode().String()},
+		{Label: "Engine configs", Value: orDash(memorystorePairs(i.GetEngineConfigs()))},
+	}
+	config = append(config, valkeyReplicationProps(i)...)
+	var conns []console.Property
 	if i.GetMode() == memorystorepb.Instance_CLUSTER_DISABLED {
-		props = append(props,
+		conns = append(conns,
 			console.Property{Label: "Primary endpoint", Value: valkeyEndpoint(i, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY)},
 			console.Property{Label: "Reader endpoint", Value: valkeyEndpoint(i, memorystorepb.ConnectionType_CONNECTION_TYPE_READER)})
 	} else {
-		props = append(props, console.Property{Label: "Discovery endpoint", Value: valkeyEndpoint(i, memorystorepb.ConnectionType_CONNECTION_TYPE_DISCOVERY)})
+		conns = append(conns, console.Property{Label: "Discovery endpoint", Value: valkeyEndpoint(i, memorystorepb.ConnectionType_CONNECTION_TYPE_DISCOVERY)})
 	}
-	props = append(props,
-		console.Property{Label: "Shards", Value: strconv.Itoa(int(i.GetShardCount()))},
-		console.Property{Label: "Replicas per shard", Value: strconv.Itoa(int(i.GetReplicaCount()))},
-		console.Property{Label: "Node type", Value: i.GetNodeType().String()},
-		console.Property{Label: "Node capacity", Value: fmt.Sprintf("%g GB", i.GetNodeConfig().GetSizeGb())},
-		console.Property{Label: "Engine version", Value: i.GetEngineVersion()},
-		console.Property{Label: "Persistence", Value: i.GetPersistenceConfig().GetMode().String()},
-		console.Property{Label: "Authorization", Value: i.GetAuthorizationMode().String()},
-		console.Property{Label: "ACL policy", Value: orDash(i.GetAclPolicy())},
-		// IAM auth checks the token (#1614): who may connect is the
-		// project's IAM policy, granted on the IAM page.
-		console.Property{Label: "IAM connect role", Value: valkeyIAMRole(i)},
-		console.Property{Label: "In-transit encryption", Value: i.GetTransitEncryptionMode().String()},
-		console.Property{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
-		console.Property{Label: "Engine configs", Value: orDash(memorystorePairs(i.GetEngineConfigs()))},
-		console.Property{Label: "Labels", Value: orDash(memorystorePairs(i.GetLabels()))},
-		console.Property{Label: "Deletion protection", Value: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
-		console.Property{Label: "Encryption", Value: i.GetEncryptionInfo().GetEncryptionType().String()},
-		console.Property{Label: "Customer-managed key", Value: orDash(i.GetKmsKey())},
-	)
-	if ks := i.GetEncryptionInfo().GetKmsKeyPrimaryState(); i.GetKmsKey() != "" && ks != memorystorepb.EncryptionInfo_KMS_KEY_STATE_UNSPECIFIED {
-		props = append(props, console.Property{Label: "Key state", Value: ks.String()})
-	}
-	props = append(props, valkeyReplicationProps(i)...)
-	props = append(props, valkeyMaintenance(i).summary()...)
-	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	conns = append(conns, console.Property{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))})
+	d := console.Detail{Sections: []console.Section{
+		memorystorePropsTab("overview", "Overview", overview),
+		memorystorePropsTab("configuration", "Configuration", config),
+		memorystorePropsTab("connections", "Connections", conns),
+	}}
 	if i.GetTransitEncryptionMode() == memorystorepb.Instance_SERVER_AUTHENTICATION {
 		// The CA its clients trust (#1549), as GetCertificateAuthority
 		// returns it.
@@ -316,6 +383,7 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		}
 	}
 	d.Sections = append(d.Sections, p.authSections(ctx, api, i)...)
+	d.Sections = append(d.Sections, memorystorePropsTab("maintenance", "Maintenance", valkeyMaintenance(i).summary()), memorystoreMonitoring("instance"))
 	fields := []console.Field{}
 	if i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED {
 		fields = append(fields, console.Field{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,
@@ -324,11 +392,11 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 	fields = append(fields,
 		console.Field{Name: "replicaCount", Label: "Replicas per shard", Type: "number", Required: true, Pattern: `^[0-5]$`,
 			Default: strconv.Itoa(int(i.GetReplicaCount()))},
-		console.Field{Name: "nodeType", Label: "Node type", Type: "select", Default: i.GetNodeType().String(), Options: valkeyNodeTypes},
+		console.Field{Name: "nodeType", Label: "Node type", Type: "select", Default: i.GetNodeType().String(), Options: valkeyNodeTypes, OptionLabels: valkeyNodeTypeLabels},
 		console.Field{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
-		console.Field{Name: "engineVersion", Label: "Engine version", Type: "select", Default: i.GetEngineVersion(), Options: valkeyEngineVersions,
+		console.Field{Name: "engineVersion", Label: "Engine version", Type: "select", Default: i.GetEngineVersion(), Options: valkeyEngineVersions, OptionLabels: valkeyVersionLabels,
 			Help: "A later version upgrades the instance: new nodes are formed and loaded with a snapshot of its data."})
-	d.Edit = &console.EditForm{Label: "Edit instance", Fields: fields,
+	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit instance", Submit: "Save", Fields: fields,
 		Note: "Saved through UpdateInstance, shards or replicas one change at a time."}
 	return d, nil
 }

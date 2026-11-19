@@ -145,7 +145,7 @@ func TestConsoleValkeyInstances(t *testing.T) {
 			t.Fatalf("Detail %s = %+v, %v", tc.id, d, err)
 		}
 		props := map[string]string{}
-		for _, pr := range d.Sections[0].Groups[0].Properties {
+		for _, pr := range memorystoreAllProps(d) {
 			props[pr.Label] = pr.Value
 		}
 		if props["Mode"] != tc.mode || !strings.HasPrefix(props[tc.endpoint], "127.0.0.1:") || props["PSC networks"] != "projects/p/global/networks/default" ||
@@ -154,7 +154,8 @@ func TestConsoleValkeyInstances(t *testing.T) {
 		}
 		// In-transit encryption and IAM auth (#1549): the modes, and the
 		// Server CA tab with the instance's CA.
-		hasCA := len(d.Sections) > 1 && d.Sections[1].ID == "server-ca" && strings.Contains(d.Sections[1].Text, "BEGIN CERTIFICATE")
+		caTab := sectionByID(d, "server-ca")
+		hasCA := caTab != nil && strings.Contains(caTab.Text, "BEGIN CERTIFICATE")
 		if tc.tls && (props["In-transit encryption"] != "SERVER_AUTHENTICATION" || props["Authorization"] != "IAM_AUTH" || !hasCA) {
 			t.Errorf("%s with in-transit encryption: page shows %v, Server CA tab %v", tc.id, props, hasCA)
 		}

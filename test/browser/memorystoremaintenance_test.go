@@ -69,7 +69,7 @@ func TestMemorystoreMaintenanceThroughThePage(t *testing.T) {
 	p := open(t)
 	page := "/memorystore/" + id + "?project=" + project
 	p.navigate(page)
-	p.pageAction("Edit instance", map[string]string{"maintenanceDay": "SUNDAY", "maintenanceHour": "3"}, "")
+	p.pageAction("Edit", map[string]string{"maintenanceDay": "SUNDAY", "maintenanceHour": "3"}, "")
 	get("with a Sunday 03:00 window", func(in *redispb.Instance) bool {
 		ws := in.GetMaintenancePolicy().GetWeeklyMaintenanceWindow()
 		return len(ws) == 1 && ws[0].GetDay().String() == "SUNDAY" && ws[0].GetStartTime().GetHours() == 3

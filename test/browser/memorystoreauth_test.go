@@ -80,8 +80,15 @@ func TestMemorystoreTokenAuthBackupsAndACLThroughThePage(t *testing.T) {
 		for f, v := range fields {
 			p.setField("form.create-page #f-"+f, v)
 		}
-		p.run(chromedp.Click(chromedp.CSS(`form.create-page #f-tokenAuth`)),
-			chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
+		// Security is one choice (#1862): Token Auth holds TLS on, as
+		// Google's page does.
+		p.run(chromedp.Click(chromedp.CSS(`form.create-page label[for="f-security-1"]`)))
+		var held bool
+		p.eval(`(() => { const b = document.querySelector("form.create-page #f-transitEncryption"); return b.checked && b.disabled; })()`, &held)
+		if !held {
+			t.Errorf("%s: Token Auth does not check and lock Enable In-Transit Encryption (TLS)", screen)
+		}
+		p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 		p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q) && document.querySelector("form.create-page") === null`, fields["id"]))
 	}
 	page := func(screen, id string) {
@@ -127,6 +134,14 @@ func TestMemorystoreTokenAuthBackupsAndACLThroughThePage(t *testing.T) {
 	create("memorystore-valkey", "Create instance", map[string]string{"id": vid, "mode": "CLUSTER_DISABLED", "shardCount": "1",
 		"replicaCount": "0", "nodeType": "SHARED_CORE_NANO", "network": network})
 	page("memorystore-valkey", vid)
+	// Google's tabs (#1862), Monitoring in its place, not available here.
+	var tabs string
+	p.eval(`[...document.querySelectorAll("#view [role=tab]")].map((t) => t.textContent.trim()).join(",")`, &tabs)
+	for _, want := range []string{"Overview", "Configuration", "Connections", "Backups", "Maintenance", "Monitoring"} {
+		if !strings.Contains(tabs, want) {
+			t.Errorf("the Valkey instance's tabs are %q; want %s", tabs, want)
+		}
+	}
 	p.pageAction("Add token auth user", map[string]string{"user": "app"}, "")
 	if u, err := vc.ListTokenAuthUsers(ctx, &memorystorepb.ListTokenAuthUsersRequest{Parent: vname}).Next(); err != nil || u.GetName() != vname+"/tokenAuthUsers/app" {
 		t.Errorf("after Add token auth user, ListTokenAuthUsers = %v, %v", u, err)

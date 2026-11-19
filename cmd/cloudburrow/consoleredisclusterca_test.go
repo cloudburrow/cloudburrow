@@ -37,7 +37,7 @@ func TestConsoleRedisClusterServerCA(t *testing.T) {
 			t.Fatalf("Detail %s = %+v, %v", tc.id, d, err)
 		}
 		props := map[string]string{}
-		for _, pr := range d.Sections[0].Groups[0].Properties {
+		for _, pr := range memorystoreAllProps(d) {
 			props[pr.Label] = pr.Value
 		}
 		ca := sectionByID(d, "server-ca")
