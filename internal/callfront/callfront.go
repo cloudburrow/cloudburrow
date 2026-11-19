@@ -343,6 +343,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Each named database in an emulator project of its own
 			// (#1885), as the front's own calls keep it (dbs.client).
 			qd.SeparateDatabases(dbs.SawResource)
+			// The entities named databases kept before are moved
+			// to their emulator projects once (#1885); calls naming
+			// a named database wait for the move.
+			moved := make(chan struct{})
+			go dbs.MigrateDatabases(ctx, moved)
+			qd.HoldUntil(moved)
 		}
 		icpts = append(icpts, qd)
 	case *queries == "firestore":

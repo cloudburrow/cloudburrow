@@ -30,10 +30,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	pb "cloud.google.com/go/datastore/apiv1/datastorepb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -212,21 +215,66 @@ func routedTo(ctx context.Context, emulatorProject string) context.Context {
 
 // databasesClient is a Datastore client of the emulator that keeps named
 // databases in their emulator projects.
-type databasesClient struct{ c pb.DatastoreClient }
+type databasesClient struct {
+	c pb.DatastoreClient
+	// hold, if not nil, is closed when the named databases' entities
+	// kept the old way have been moved (callfront's MigrateDatabases):
+	// until then a call naming a named database waits.
+	hold <-chan struct{}
+}
 
 // DatabasesClient is c, a client of the Datastore emulator, with each named
 // database a call names kept in its own emulator project (#1885).
 func DatabasesClient(c pb.DatastoreClient) pb.DatastoreClient {
-	if _, ok := c.(databasesClient); ok {
-		return c
-	}
-	return databasesClient{c}
+	return DatabasesClientHeld(c, nil)
 }
 
-func mapped[Req request, Resp proto.Message](ctx context.Context, req Req, call func(context.Context, Req, ...grpc.CallOption) (Resp, error), opts []grpc.CallOption) (Resp, error) {
+// DatabasesClientHeld is DatabasesClient, whose calls naming a named
+// database wait for hold to close, if it is not nil.
+func DatabasesClientHeld(c pb.DatastoreClient, hold <-chan struct{}) pb.DatastoreClient {
+	if d, ok := c.(databasesClient); ok {
+		if hold == nil {
+			return d
+		}
+		c = d.c
+	}
+	return databasesClient{c, hold}
+}
+
+// maxHold is the longest a call waits for the move before it is answered
+// UNAVAILABLE, which clients retry.
+var maxHold = time.Minute
+
+// waitHold waits for hold to close.
+func waitHold(ctx context.Context, hold <-chan struct{}) error {
+	if hold == nil {
+		return nil
+	}
+	select {
+	case <-hold:
+		return nil
+	default:
+	}
+	t := time.NewTimer(maxHold)
+	defer t.Stop()
+	select {
+	case <-hold:
+		return nil
+	case <-ctx.Done():
+		return status.FromContextError(ctx.Err()).Err()
+	case <-t.C:
+		return status.Error(codes.Unavailable, "the Datastore emulator is moving named databases' entities to their own projects; retry")
+	}
+}
+
+func mappedHeld[Req request, Resp proto.Message](ctx context.Context, hold <-chan struct{}, req Req, call func(context.Context, Req, ...grpc.CallOption) (Resp, error), opts []grpc.CallOption) (Resp, error) {
 	out, ok := mapRequest(req)
 	if !ok {
 		return call(ctx, req, opts...)
+	}
+	if err := waitHold(ctx, hold); err != nil {
+		var zero Resp
+		return zero, err
 	}
 	resp, err := call(routedTo(ctx, out.GetProjectId()), out, opts...)
 	if err == nil {
@@ -236,35 +284,35 @@ func mapped[Req request, Resp proto.Message](ctx context.Context, req Req, call 
 }
 
 func (d databasesClient) Lookup(ctx context.Context, in *pb.LookupRequest, opts ...grpc.CallOption) (*pb.LookupResponse, error) {
-	return mapped(ctx, in, d.c.Lookup, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.Lookup, opts)
 }
 
 func (d databasesClient) RunQuery(ctx context.Context, in *pb.RunQueryRequest, opts ...grpc.CallOption) (*pb.RunQueryResponse, error) {
-	return mapped(ctx, in, d.c.RunQuery, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.RunQuery, opts)
 }
 
 func (d databasesClient) RunAggregationQuery(ctx context.Context, in *pb.RunAggregationQueryRequest, opts ...grpc.CallOption) (*pb.RunAggregationQueryResponse, error) {
-	return mapped(ctx, in, d.c.RunAggregationQuery, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.RunAggregationQuery, opts)
 }
 
 func (d databasesClient) BeginTransaction(ctx context.Context, in *pb.BeginTransactionRequest, opts ...grpc.CallOption) (*pb.BeginTransactionResponse, error) {
-	return mapped(ctx, in, d.c.BeginTransaction, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.BeginTransaction, opts)
 }
 
 func (d databasesClient) Commit(ctx context.Context, in *pb.CommitRequest, opts ...grpc.CallOption) (*pb.CommitResponse, error) {
-	return mapped(ctx, in, d.c.Commit, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.Commit, opts)
 }
 
 func (d databasesClient) Rollback(ctx context.Context, in *pb.RollbackRequest, opts ...grpc.CallOption) (*pb.RollbackResponse, error) {
-	return mapped(ctx, in, d.c.Rollback, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.Rollback, opts)
 }
 
 func (d databasesClient) AllocateIds(ctx context.Context, in *pb.AllocateIdsRequest, opts ...grpc.CallOption) (*pb.AllocateIdsResponse, error) {
-	return mapped(ctx, in, d.c.AllocateIds, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.AllocateIds, opts)
 }
 
 func (d databasesClient) ReserveIds(ctx context.Context, in *pb.ReserveIdsRequest, opts ...grpc.CallOption) (*pb.ReserveIdsResponse, error) {
-	return mapped(ctx, in, d.c.ReserveIds, opts)
+	return mappedHeld(ctx, d.hold, in, d.c.ReserveIds, opts)
 }
 
 const datastoreService = "/google.datastore.v1.Datastore/"
@@ -368,4 +416,14 @@ func protoString(b []byte, num protowire.Number) string {
 		b = b[l:]
 	}
 	return ""
+}
+
+// EntityToEmulator is e, an entity of project p's named database kept the
+// way the emulator kept it before #1885 (in p, its key naming the
+// database), as the front keeps it now: every partition ID in it, its key's
+// and its key-valued properties', naming its database's emulator project.
+func EntityToEmulator(e *pb.Entity, p string) *pb.Entity {
+	out := proto.Clone(e).(*pb.Entity)
+	walkPartitions(out.ProtoReflect(), func(pid *pb.PartitionId) { toEmulator(pid, p) })
+	return out
 }

@@ -39,7 +39,15 @@ type Datastore struct {
 	// sawDatabase is told each named database a call the front answers
 	// names, "projects/p/databases/d".
 	sawDatabase func(resource string)
+	// hold, if not nil, holds calls naming a named database until it
+	// closes (HoldUntil).
+	hold <-chan struct{}
 }
+
+// HoldUntil has every call naming a named database wait until done closes:
+// the move of the entities kept the old way to their emulator projects
+// (#1885). Call it before the front serves.
+func (d *Datastore) HoldUntil(done <-chan struct{}) { d.hold = done }
 
 // SeparateDatabases has the front answer every Datastore call naming a
 // named database, kept in an emulator project of its own (#1885); saw,
@@ -122,7 +130,7 @@ func (d *Datastore) emulator() (pb.DatastoreClient, error) {
 		c = pb.NewDatastoreClient(conn)
 	}
 	if d.databases {
-		c = DatabasesClient(c)
+		c = DatabasesClientHeld(c, d.hold)
 	}
 	return c, nil
 }
