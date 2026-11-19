@@ -700,6 +700,33 @@ Google's Secure Source Manager has two surfaces: the Cloud console's instances, 
 - [x] Code owners (#1928, <https://docs.cloud.google.com/secure-source-manager/docs/codeowners>, read 2026-11-19): Add branch rule's Require Code Owner Review on Pull Requests (the Branch rules tab's Code owners column); a pull request's Code owners tab lists what the base branch's CODEOWNERS files require of its changed files, one row per section and owner set: Section, Owners, Approvals needed, Approved by (owners whose approval of the head commit counts), Files, each Satisfied, Pending or Optional, under a note naming the files read and whether a branch rule enforces them; the page's summary has Code owners ("1 of 2 satisfied; required by branch rule main"); Merge pull request is refused until they are satisfied. A CODEOWNERS file's page has a Checks tab: its status (valid, or how many lines have syntax errors) and each line's Error or Information (a rule for other branches), with the line's text and the details. Google's page draws these as highlighted lines with the details on hover, and does not document its pull request page's code owner display: the layout here is CloudBurrow's (UNVERIFIED, re-read 2026-11-19: <https://docs.cloud.google.com/secure-source-manager/docs/codeowners>).
 - [ ] Not yet: line comments from the diff itself (the plus icon beside a line: here Add line comment takes the file and line), the diff's Whitespace, Split view and diff options menus, and pending review comments kept between page loads (Review sends one line comment with its summary); Enable service account authentication for a webhook (the pinned API has no field); an issue's Labels, Milestones and Assignees and the Issues and Pull requests tabs' Assignee, Type, Sort and Assigned to me filters, which the API holds none of; Initialize repository's templates; the code view's commit history, tags and blame; a file's syntax highlighting; Create repository is a dialog on the instance's page, not the web interface's page of its own.
 
+### 4.8 Cross-product consistency (#1868)
+
+A round across products rather than within one: every list, create, detail and
+not-served page of an instance started with the storage, run, emulators,
+memorystore and sql shards' services, walked in headless Chrome (each page's
+title-line actions, filter bar, column chooser, table, pager, empty, error and
+"Not available locally" states, and each create flow's page or dialog and its
+buttons), compared product with product and with Google's documented
+conventions. The ones fixed are fixed in the shared framework
+(`internal/console/assets/console.js`), so every product follows.
+
+| Pattern | Google's convention | What differed | State |
+|---|---|---|---|
+| Empty list | The table stays: filter bar, column headers, column chooser and pager, with the empty message in the table | An empty list was a bare card: no table, filter bar, View options, info-panel toggle or pager, so a product's toolbar changed shape with its row count (every list with no rows: Buckets, Topics, Queues, Services, Secrets, Key rings, Datasets, …); and it was never polled, so a resource made with an SDK did not appear until Refresh | Fixed: an empty list is drawn by `renderTableInto` like a full one, the empty state inside the table, and polled |
+| Empty-state wording | Says what the page can do | The emptied table said "Create one here" on read-only lists (Domain mappings, Functions, Key inventory, Job history, Operations); the empty card did not | Fixed: `emptyListHint` words both from the screen's create capability |
+| Service not started | A product whose API is not enabled says so and points at enabling it | A page of a service the instance was not started with (Memorystore, Backup and DR, …) was a red error card, "could not read this", with the internal `no such service` and a Retry that cannot succeed | Fixed: `renderNotStarted`, the "Not available locally" state, naming the product and `up --services`, linking to the API Library |
+| "Not available locally" styling | One style for a page the console cannot serve | A provider's own "Not available locally: …" answer (GKE's Gateways, with no Gateway API on kind) was drawn as the red error card with Retry, while every other such page is the neutral "Not available locally" state | Fixed: such an answer is drawn as that state |
+| Menu item not available | Google's label, disabled | Row menus draw Google's label disabled with the reason as tooltip; Credentials' Create credentials suffixed the label ("OAuth client ID — not available locally", "Service account — not served") | Fixed: `unavailableMenuItem`, the row menus' convention |
+| Title-line actions | Create (with plus), Refresh, info-panel toggle, in that order | Consistent on every list with rows; on empty lists the toggle was missing (above) | Fixed with the empty list |
+| Dialog buttons | Cancel, then the action, at the right | Consistent: every dialog draws Cancel before its action | — |
+| Create page buttons | Create, then Cancel, at the bottom-left | Consistent: every create page draws its submit before Cancel | — |
+| Delete confirmation | Per product: type `delete` (Pub/Sub topic), type the ID (Cloud SQL instance, project), or confirm only (Cloud Storage bucket, Cloud Run service) | Every delete, and the local AI pages' Download and Deploy, asks for the full name typed back | Open: #1931 |
+| Create flow: page or dialog | A page for a resource's create flow | Projects list's Create project is a dialog while New project and Manage resources' Create project are a page; Create folder, Create log scope, Secure Source Manager's Create instance, Pub/Sub's Create snapshot, Autokey's Create key handle and Add label are dialogs | Open: #1932 |
+| Create labels | The product docs' wording, sentence case | "Create Instance" (Cloud SQL), "Create Repository" (Artifact Registry), "Create Database" are title case; some create pages end in Create, others repeat the button label | Open: #1933 |
+| Detail pages | Back arrow, "<Kind> details", actions on the title line, tabs | Consistent since round 2 (§4.7): every detail route declares `kind` | — |
+| Loading | A progress indicator, then the data | Consistent: `loadingState` everywhere, with "Still loading …" and Cancel after 8 s | — |
+
 ## 5. Routes, scoping, accessibility, viewports
 
 ### Routes

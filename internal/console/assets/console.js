@@ -2799,6 +2799,17 @@ async function renderDashboard(view) {
 // the screen being rebuilt around it.
 const PAGE_SIZES = [25, 50, 100];
 
+// emptyListHint is the line under an empty list's "No <noun> yet": what this
+// screen can do about it. A list screen without a create control says it is
+// read-only rather than naming a button that is not there; a table inside a
+// resource page offers its own actions above it.
+function emptyListHint(caps, listScreen) {
+  if (caps.create) return "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.";
+  if (!listScreen) return "Nothing here yet.";
+  return "Nothing here yet. This screen is read-only, so anything that appears " +
+    "will have been created by an SDK, the CLI, or CloudBurrow itself.";
+}
+
 function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const caps = opts.rowControls ? capabilityOf(route.service) : {};
   // Actions on the page that take the checked rows, such as Compose on a
@@ -3126,8 +3137,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             }))
         : el("div", { class: "state state-inline" },
             el("h2", { text: `No ${noun} yet` }),
-            el("p", { text: "Create one here, or with an SDK, the CLI or gcloud — " +
-                            "it will appear either way." }),
+            el("p", { text: emptyListHint(caps, opts.rowControls) }),
             caps.create
               ? el("button", { class: "primary", text: caps.create.label,
                   onclick: () => startCreate(route, caps.create, refresh) })
@@ -5048,6 +5058,14 @@ async function renderList(view, route) {
   try {
     data = await api(listURL, { signal: cancel.signal });
   } catch (err) {
+    // A page whose service this instance was not started with is not a
+    // failure to read it: it is drawn as every other page CloudBurrow does
+    // not serve here is, in the "Not available locally" style (#1868), not
+    // as a red error naming an internal "no such service".
+    if (!isCancelled(err) && /^no such service/.test(String(err.message))) {
+      renderNotStarted(view, route);
+      return;
+    }
     setChildren(view, ...header,
       isCancelled(err)
         ? cancelledState(`${route.title} not loaded`, () => renderList(view, route))
@@ -5112,6 +5130,18 @@ async function renderList(view, route) {
   // An unreachable backend is an error state, never an empty table: an empty
   // table says "you have none", which sends a developer to debug their code.
   if (data.unavailable) {
+    // A provider saying what this instance does not serve is the "Not
+    // available locally" state every such page draws (#1868), not a red
+    // read failure with a Retry that can never succeed.
+    const notLocal = /^Not available locally:\s*/.exec(data.unavailable);
+    if (notLocal) {
+      setChildren(view, ...header,
+        el("div", { class: "state", id: "not-available-locally" },
+          el("h2", { text: "Not available locally" }),
+          el("p", { text: data.unavailable.slice(notLocal[0].length) })));
+      announce(`${route.title}: not available locally`);
+      return;
+    }
     setChildren(view, ...header,
       errorState(`${route.title} unavailable`, data.unavailable, () => renderList(view, route)));
     announce(`${route.title} unavailable`);
@@ -5147,26 +5177,13 @@ async function renderList(view, route) {
       announce(data.serverFilter.error ? `Filter refused` : `No ${noun} match the filter`);
       return;
     }
-    const empty = emptyState(`No ${noun} yet`,
-      caps.create
-        ? "Create one here, or with an SDK, the CLI or gcloud — it will appear either way."
-        : "Nothing here yet. This screen is read-only, so anything that appears " +
-          "will have been created by an SDK, the CLI, or CloudBurrow itself.");
-    if (caps.create) {
-      empty.append(el("button", { class: "primary", text: caps.create.label,
-        onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
-    }
-    empty.append(...listActionButtons(route, data, () => renderList(view, route)));
-    // The title line carries the same Create, and Refresh, as a list with
-    // rows does (#1842).
-    setChildren(headerActions(header),
-      caps.create ? createButton(caps.create.label,
-        () => startCreate(route, caps.create, () => renderList(view, route))) : null,
-      refreshButton(() => renderList(view, route)));
-    setChildren(view, ...header, noteBanner(data.note), empty);
-    announce(`No ${noun}`);
-    openAskedListAction(route, data, () => renderList(view, route));
-    return;
+    // Otherwise an empty list is the same table as a full one (cross-product
+    // consistency, #1868): Google's lists keep their filter bar, column
+    // headers, column chooser, info-panel toggle and pager with no rows, the
+    // empty state drawn inside the table. Drawing a bare card instead made
+    // a product's toolbar change shape with its row count, and an empty
+    // list was never polled, so a resource made with an SDK did not appear.
+    // The table's own empty row says what this screen can do (emptyListHint).
   }
 
   renderTableInto(view, header, data, noun, () => renderList(view, route), route,
@@ -7436,6 +7453,14 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
   });
 }
 
+// unavailableMenuItem is a menu item Google's menu has that this instance
+// cannot perform: drawn disabled under Google's own label, the reason in its
+// tooltip and accessible description, as overflowMenu draws one (#1863).
+function unavailableMenuItem(label, reason) {
+  return el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled",
+    "aria-disabled": "true", title: reason, "aria-description": reason, text: label });
+}
+
 // overflowMenu puts a row's actions behind one control.
 function overflowMenu(actions, name) {
   const menu = el("div", { class: "overflow-menu", hidden: true, role: "menu" },
@@ -7776,6 +7801,22 @@ function renderUnavailable(view, route) {
     el("div", { class: "state" },
       el("h2", { text: "Not available locally" }),
       el("p", { text: route.unavailable })));
+  announce(`${route.title}: not available locally`);
+}
+
+// renderNotStarted is a page CloudBurrow serves whose service this instance
+// was not started with (#1868). Drawn as renderUnavailable draws a page
+// CloudBurrow never serves, so the two read alike, with what to do about it
+// and a link to the API Library, which marks what this instance was not
+// started with — the local counterpart of Google's "enable the API" page.
+function renderNotStarted(view, route) {
+  const product = route.productTitle || route.title;
+  setChildren(view, pageHeader(route.title, "Not available locally"),
+    el("div", { class: "state", id: "not-started" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: `This instance was not started with ${product}. ` +
+        "Start an instance with it in up's --services to use this page." }),
+      el("a", { class: "button secondary", href: `/apis/library${scopeSearch()}`, text: "Open the API Library" })));
   announce(`${route.title}: not available locally`);
 }
 
@@ -17622,10 +17663,12 @@ function renderAPICredentials(view) {
   const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
     el("button", { type: "button", class: "overflow-item", role: "menuitem", id: "credentials-create-api-key", text: "API key",
       onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
-    el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "OAuth client ID — not available locally" }),
+    // Google's label, its reason as the tooltip and description, as every
+    // row menu draws an item this instance cannot perform (#1868).
+    unavailableMenuItem("OAuth client ID", "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve."),
     served.has("iam-service-accounts")
       ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
-      : el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "Service account — not served" }));
+      : unavailableMenuItem("Service account", "Not available locally: this instance was not started with IAM service accounts."));
   trigger.addEventListener("click", () => {
     menu.hidden = !menu.hidden;
     trigger.setAttribute("aria-expanded", String(!menu.hidden));
