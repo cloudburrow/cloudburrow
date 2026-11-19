@@ -1674,6 +1674,10 @@ func (bigtableProvider) CreateForm() (string, []console.Field) {
 	return "Create table", bigtableCreateTableFields()
 }
 
+// CreateSubmit implements console.CreateSubmitter: Google's Create table
+// ends in Create.
+func (bigtableProvider) CreateSubmit() string { return "Create" }
+
 // Create implements console.Creator for Bigtable.
 func (p bigtableProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {

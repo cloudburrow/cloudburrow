@@ -106,7 +106,11 @@ func TestBigtableConsoleParity1858(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	for _, k := range []string{"a1", "a2", "b1"} {
-		bigtableWrite(t, client, "orders", k, map[string][]byte{"cf1:v": []byte("val-" + k)})
+		m := bigtable.NewMutation()
+		m.Set("cf1", "v", bigtable.Now(), []byte("val-"+k))
+		if err := client.Open("orders").Apply(ctx, k, m); err != nil {
+			t.Fatalf("Apply to %s: %v", k, err)
+		}
 	}
 	p.navigate("/bigtable-instances/" + id + q)
 	p.waitFor(`document.querySelector("#tab-studio") !== null`)
