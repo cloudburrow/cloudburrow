@@ -226,7 +226,6 @@ func TestTerraformBigQueryIAM(t *testing.T) {
 	c, project := bigqueryClient(t, h) // skips without CLOUDBURROW_TEST_BIGQUERY
 	svc := bigqueryService(t, h)
 	m := newTFModule(t)
-	ctx := h.Context()
 	ds := "tf_" + strings.ReplaceAll(h.Project(), "-", "_")
 
 	base := fmt.Sprintf(`
@@ -275,7 +274,7 @@ resource "google_bigquery_routine" "r" {
 	table := func(id string) func() map[string][]string {
 		return func() map[string][]string {
 			t.Helper()
-			p, err := c.Dataset(ds).Table(id).IAM().Policy(ctx)
+			p, err := c.Dataset(ds).Table(id).IAM().Policy(h.Context())
 			if err != nil {
 				t.Fatalf("Table(%s).IAM().Policy: %v", id, err)
 			}
@@ -296,7 +295,7 @@ resource "google_bigquery_routine" "r" {
 			"project": fmt.Sprintf("%q", project), "dataset_id": "google_bigquery_routine.r.dataset_id", "routine_id": "google_bigquery_routine.r.routine_id"},
 			read: func() map[string][]string {
 				t.Helper()
-				p, err := svc.Routines.GetIamPolicy(routine, &bq.GetIamPolicyRequest{}).Context(ctx).Do()
+				p, err := svc.Routines.GetIamPolicy(routine, &bq.GetIamPolicyRequest{}).Context(h.Context()).Do()
 				if err != nil {
 					t.Fatalf("routines.getIamPolicy: %v", err)
 				}
@@ -310,24 +309,25 @@ resource "google_bigquery_routine" "r" {
 	runTFIAMPhases(t, m, base, [2]string{"roles/bigquery.dataViewer", "roles/bigquery.dataEditor"}, targets)
 
 	// Destroy took the dataset, and the tables, view and routine with it.
-	if _, err := c.Dataset(ds).Metadata(ctx); !isCode(err, http.StatusNotFound) {
+	if _, err := c.Dataset(ds).Metadata(h.Context()); !isCode(err, http.StatusNotFound) {
 		t.Errorf("the dataset after destroy: %v; want 404", err)
 	}
-	if _, err := svc.Routines.GetIamPolicy(routine, &bq.GetIamPolicyRequest{}).Context(ctx).Do(); !isCode(err, http.StatusNotFound) {
+	if _, err := svc.Routines.GetIamPolicy(routine, &bq.GetIamPolicyRequest{}).Context(h.Context()).Do(); !isCode(err, http.StatusNotFound) {
 		t.Errorf("routines.getIamPolicy after destroy: %v; want 404", err)
 	}
 }
 
 // TestTerraformRunIAM (#1236): google_cloud_run_v2_service_iam_* and
 // google_cloud_run_v2_job_iam_* against the Cloud Run adapter (#1216), over
-// its JSON API, read back with the official gRPC clients.
+// its JSON API, read back with the official gRPC clients. Each client call
+// takes its own h.Context(): one taken at the start expired during
+// Terraform's phases, which took 41 to 64 s on CI (#1872).
 // covers: google.cloud.run.v2.Services/GetIamPolicy, google.cloud.run.v2.Services/SetIamPolicy, google.cloud.run.v2.Jobs/GetIamPolicy, google.cloud.run.v2.Jobs/SetIamPolicy
 func TestTerraformRunIAM(t *testing.T) {
 	h := New(t)
 	svcs := runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
 	jobs, _ := runJobClients(t, h)
 	m := newTFModule(t)
-	ctx := h.Context()
 	// Knative names are the IDs, shared across projects, so they carry the
 	// test's unique suffix.
 	suffix := strings.TrimPrefix(h.Project(), "cb-test-")
@@ -382,16 +382,16 @@ resource "google_cloud_run_v2_job" "j" {
 	}
 	targets := []tfIAMTarget{
 		{kind: "google_cloud_run_v2_service", label: "s", policyData: true, ref: ref("google_cloud_run_v2_service.s"),
-			read: read(func(r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return svcs.GetIamPolicy(ctx, r) }, svc)},
+			read: read(func(r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return svcs.GetIamPolicy(h.Context(), r) }, svc)},
 		{kind: "google_cloud_run_v2_job", label: "j", policyData: true, ref: ref("google_cloud_run_v2_job.j"),
-			read: read(func(r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return jobs.GetIamPolicy(ctx, r) }, job)},
+			read: read(func(r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return jobs.GetIamPolicy(h.Context(), r) }, job)},
 	}
 	runTFIAMPhases(t, m, base, [2]string{"roles/run.invoker", "roles/run.developer"}, targets)
 
-	if _, err := svcs.GetService(ctx, &runpb.GetServiceRequest{Name: svc}); status.Code(err) != codes.NotFound {
+	if _, err := svcs.GetService(h.Context(), &runpb.GetServiceRequest{Name: svc}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetService after destroy: %v; want NotFound", err)
 	}
-	if _, err := jobs.GetJob(ctx, &runpb.GetJobRequest{Name: job}); status.Code(err) != codes.NotFound {
+	if _, err := jobs.GetJob(h.Context(), &runpb.GetJobRequest{Name: job}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetJob after destroy: %v; want NotFound", err)
 	}
 }
