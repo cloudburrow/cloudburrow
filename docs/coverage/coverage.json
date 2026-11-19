@@ -8542,6 +8542,7 @@
           "test/compat/consoledatastoreaggregate_test.go:25 TestConsoleDatastoreAggregate",
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/datastoregql_test.go:24 TestDatastoreGQLAggregation",
+          "test/compat/datastoregqlkeys1885_test.go:30 TestDatastoreNamedDatabaseKeysInGQLCursorsAndErrors",
           "test/compat/datastoremethods_test.go:92 TestDatastoreAggregation"
         ]
       },
@@ -8552,6 +8553,7 @@
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/datastoregql_test.go:84 TestDatastoreExplain",
+          "test/compat/datastoregqlkeys1885_test.go:30 TestDatastoreNamedDatabaseKeysInGQLCursorsAndErrors",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"

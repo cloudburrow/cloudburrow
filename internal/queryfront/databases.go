@@ -190,6 +190,8 @@ func mapRequest[R request](req R) (R, bool) {
 		}
 	}
 	walkPartitions(out.ProtoReflect(), func(p *pb.PartitionId) { toEmulator(p, project) })
+	mapGQL(out, project, database)
+	rewriteCursors(out.ProtoReflect(), project, EmulatorProject(project, database))
 	m := out.ProtoReflect()
 	fields := m.Descriptor().Fields()
 	m.Set(fields.ByName("project_id"), protoreflect.ValueOfString(EmulatorProject(project, database)))
@@ -277,10 +279,28 @@ func mappedHeld[Req request, Resp proto.Message](ctx context.Context, hold <-cha
 		return zero, err
 	}
 	resp, err := call(routedTo(ctx, out.GetProjectId()), out, opts...)
-	if err == nil {
-		mapResponse(resp)
+	if err != nil {
+		return resp, errorFromEmulator(err, out.GetProjectId())
 	}
-	return resp, err
+	mapResponse(resp)
+	if p, _, ok := FromEmulatorProject(out.GetProjectId()); ok {
+		rewriteCursors(resp.ProtoReflect(), out.GetProjectId(), p)
+	}
+	return resp, nil
+}
+
+// errorFromEmulator is err with the emulator project ep it names, if it
+// names it, as the project it keeps: a caller never sees an emulator
+// project.
+func errorFromEmulator(err error, ep string) error {
+	st, ok := status.FromError(err)
+	if !ok || !strings.Contains(st.Message(), ep) {
+		return err
+	}
+	p, _, _ := FromEmulatorProject(ep)
+	spb := st.Proto()
+	spb.Message = strings.ReplaceAll(spb.Message, ep, p)
+	return status.FromProto(spb).Err()
 }
 
 func (d databasesClient) Lookup(ctx context.Context, in *pb.LookupRequest, opts ...grpc.CallOption) (*pb.LookupResponse, error) {
