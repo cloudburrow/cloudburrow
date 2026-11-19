@@ -286,7 +286,7 @@ func (md bqModel) resource(full bool) map[string]any {
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
 			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW",
-			"CONTRIBUTION_ANALYSIS": "CONTRIBUTION_ANALYSIS"}[md.Options.ModelType],
+			"CONTRIBUTION_ANALYSIS": "CONTRIBUTION_ANALYSIS", "TRANSFORM_ONLY": "TRANSFORM_ONLY"}[md.Options.ModelType],
 	}
 	if md.Options.AutoML != nil {
 		res["modelType"] = md.Options.AutoML.Type // modelautoml.go, #1776
@@ -884,7 +884,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	if d.opts.ModelType == "TRANSFORM_ONLY" && len(d.transform) == 0 {
 		// "TRANSFORM (select_list) OPTIONS(MODEL_TYPE = 'TRANSFORM_ONLY')"
 		// (bigqueryml-syntax-create-transform): the clause is not optional
-		// (the text is UNVERIFIED, 2026-11-19).
+		// (the text is UNVERIFIED, docs re-read 2026-11-19).
 		return d, true, 400, "A TRANSFORM_ONLY model requires a TRANSFORM clause"
 	}
 	if d.opts.ModelType == "MATRIX_FACTORIZATION" {

@@ -91,7 +91,8 @@ func clusterRadii(X [][]float64, cs [][]float64, typ string) []float64 {
 	return out
 }
 
-// normalized is a distance over a radius (UNVERIFIED for radius 0).
+// normalized is a distance over a radius (UNVERIFIED for radius 0, docs
+// re-read 2026-11-19).
 func normalized(d, radius float64) float64 {
 	if radius == 0 {
 		if d == 0 {

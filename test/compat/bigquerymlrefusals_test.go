@@ -282,7 +282,7 @@ func TestBigQueryMLTransformOnly(t *testing.T) {
 		t.Fatalf("CREATE MODEL on ML.TRANSFORM: %v", err)
 	}
 	pred := mlQuery(t, h, c, fmt.Sprintf("SELECT predicted_y FROM ML.PREDICT(MODEL `%s.lin`, "+
-		"(SELECT * FROM ML.TRANSFORM(MODEL `%s.tf`, (SELECT 4.0 AS a, 0.0 AS y))))", name, name))
+		"(SELECT * FROM ML.TRANSFORM(MODEL `%s.tf`, (SELECT 4.0 AS a, 0.0 AS y, 'k' AS keep))))", name, name))
 	if len(pred) != 1 || !near(pred[0]["predicted_y"], 13, 1e-6) {
 		t.Errorf("ML.PREDICT of transformed rows: %v; want 13", pred)
 	}

@@ -155,7 +155,7 @@ func TestBigQueryMLContributionAnalysis(t *testing.T) {
 		"AS SELECT * FROM `%s.monthly`", name, name)); err != nil {
 		t.Fatalf("CREATE MODEL by category: %v", err)
 	}
-	cr := mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.GET_INSIGHTS(MODEL `%s.bycat`) WHERE 'category=hats' IN UNNEST(contributors)", name))
+	cr := mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.GET_INSIGHTS(MODEL `%s.bycat`) WHERE ARRAY_TO_STRING(contributors, ',') = 'category=hats'", name))
 	if len(cr) != 1 {
 		t.Fatalf("category=hats rows: %v", cr)
 	}
