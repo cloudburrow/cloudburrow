@@ -1457,8 +1457,8 @@ func workloadDetail(item map[string]any) console.Detail {
 		Groups: []console.PropertyGroup{
 			{Heading: "Selector", Properties: sortedPairs(labels)},
 		},
-		Note: "Read-only. This console does not edit cluster objects; CloudBurrow " +
-			"owns this cluster and workloads are created through Cloud Run or kubectl.",
+		Note: "This console does not edit cluster objects: a workload is made with Workloads' Deploy, " +
+			"through Cloud Run, or with kubectl.",
 	}
 
 	return console.Detail{

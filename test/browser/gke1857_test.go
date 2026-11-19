@@ -55,7 +55,8 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 
 	// The cluster's page.
 	p.clickText("#view tbody a", cluster)
-	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Cluster details"`)
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Cluster details" &&
+		document.querySelectorAll("#view [role=tab]").length > 0`)
 	var tabs string
 	p.eval(`[...document.querySelectorAll("#view [role=tab]")].map((b) => b.textContent).join(",")`, &tabs)
 	if tabs != "Details,Nodes,Storage,Observability,Logs" {
@@ -68,16 +69,17 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 		t.Errorf("disabled with the reason: %q, want Edit, Upgrade and Delete", disabled)
 	}
 	p.clickText("#view button", "Connect")
-	p.waitFor(`[...document.querySelectorAll("dialog[open] textarea")].some((a) => a.value.includes("export KUBECONFIG=") && a.value.includes("kubectl config use-context kind-"))`)
-	p.eval(`(() => { document.querySelector("dialog[open]").close(); return true; })()`, nil)
+	p.waitFor(`[...document.querySelectorAll(".modal:not(.is-closing) textarea")].some((a) => a.value.includes("export KUBECONFIG=") && a.value.includes("kubectl config use-context kind-"))`)
+	p.clickText(".modal:not(.is-closing) button", "Cancel")
+	p.waitFor(`document.querySelector(".modal:not(.is-closing)") === null`)
 	p.clickText("#view [role=tab]", "Nodes")
 	p.waitFor(`[...document.querySelectorAll("#detail-panel a")].some((a) => new URL(a.href).pathname.startsWith("/kubernetes/nodes/"))`)
 
 	// Create cluster: Autopilot or Standard, refused with the reason.
 	p.navigate("/kubernetes/clusters/create")
-	p.waitFor(`document.querySelector("#view form") !== null && [...document.querySelectorAll("#view input[type=radio][name=mode]")].length === 2`)
+	p.waitFor(`document.querySelector("#view form") !== null && [...document.querySelectorAll("#view input[type=radio][name=f-mode-choice]")].length === 2`)
 	var refused bool
-	p.eval(`[...document.querySelectorAll("#view input[type=radio][name=mode]")].every((r) => r.disabled) &&
+	p.eval(`[...document.querySelectorAll("#view input[type=radio][name=f-mode-choice]")].every((r) => r.disabled) &&
 		document.querySelector("#view form").textContent.includes("#1913")`, &refused)
 	if !refused {
 		t.Error("Create cluster's Autopilot and Standard are not drawn disabled with the reason")
@@ -85,7 +87,7 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 
 	// Workloads: system objects hidden, then shown.
 	p.navigate("/kubernetes/workloads")
-	p.waitFor(`document.querySelector("#scope-system") !== null && document.querySelector("#view table") !== null`)
+	p.waitFor(`document.querySelector("#scope-system") !== null && document.querySelector("#view .loading") === null`)
 	var coredns bool
 	p.eval(`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "coredns")`, &coredns)
 	if coredns {
@@ -118,7 +120,7 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 	p.navigate("/kubernetes/workloads/" + name)
 	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Workload details" &&
 		document.querySelectorAll("#view [role=tab]").length >= 7`)
-	p.eval(`[...document.querySelectorAll("#view [role=tablist]")][0] && [...[...document.querySelectorAll("#view [role=tablist]")][0].querySelectorAll("[role=tab]")].map((b) => b.textContent).join(",")`, &tabs)
+	p.eval(`[...document.querySelectorAll("#view [role=tablist]")][0] && [...[...document.querySelectorAll("#view [role=tablist]")][0].querySelectorAll("[role=tab]")].filter((b) => !b.hidden).map((b) => b.textContent).join(",")`, &tabs)
 	if tabs != "Overview,Details,Observability,Revision history,Events,Logs,YAML" {
 		t.Errorf("the workload's tabs are %q", tabs)
 	}
@@ -143,7 +145,8 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 
 	// Secrets & ConfigMaps and Object Browser.
 	p.navigate("/kubernetes/config")
-	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Secrets & ConfigMaps" && document.querySelector("#view table") !== null`)
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Secrets & ConfigMaps" &&
+		document.querySelector("#scope-system") !== null && document.querySelector("#view .loading") === null`)
 	p.navigate("/kubernetes/object-browser")
 	p.waitFor(`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent === "deployments.apps")`)
 	p.clickText("#view tbody a", "deployments.apps")
