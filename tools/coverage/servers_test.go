@@ -1,6 +1,7 @@
 package main
 
 import (
+	dsadminpb "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"context"
@@ -25,6 +26,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -93,6 +95,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	ai.SetModelGarden(&modelgarden.Manager{})
 	ai.RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
+	dsadminpb.RegisterDatastoreAdminServer(srv, callfront.NewDatastoreAdmin("127.0.0.1:1", ""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.

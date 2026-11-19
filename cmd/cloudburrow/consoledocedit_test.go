@@ -53,7 +53,7 @@ func TestEditFormsRoundTripTheStoredType(t *testing.T) {
 			t.Errorf("Firestore %#v offers no edit", v)
 			continue
 		}
-		back, err := parseFirestoreValue(c, "demo", typ, raw)
+		back, err := parseFirestoreValue(context.Background(), c, "demo", typ, raw)
 		if err != nil {
 			t.Errorf("Firestore %#v: the form's own %s %q is refused: %v", v, typ, raw, err)
 			continue
@@ -166,12 +166,12 @@ func TestTypedValuesAreReadAsTheirTypeNeverGuessed(t *testing.T) {
 		{"map", `{"n": 1, "d": 1.0}`, map[string]any{"n": int64(1), "d": 1.0}},
 		{"array", `[]`, []any{}},
 	} {
-		got, err := parseFirestoreValue(c, "demo", tc.typ, tc.raw)
+		got, err := parseFirestoreValue(context.Background(), c, "demo", tc.typ, tc.raw)
 		if err != nil || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("Firestore %s %q = %#v, %v; want %#v", tc.typ, tc.raw, got, err, tc.want)
 		}
 	}
-	ref, err := parseFirestoreValue(c, "demo", "reference",
+	ref, err := parseFirestoreValue(context.Background(), c, "demo", "reference",
 		"projects/demo/databases/(default)/documents/users/alice")
 	if r, _ := ref.(*firestore.DocumentRef); err != nil || r == nil || r.ID != "alice" {
 		t.Errorf("a full document name is not read as a reference: %#v, %v", ref, err)
@@ -182,7 +182,7 @@ func TestTypedValuesAreReadAsTheirTypeNeverGuessed(t *testing.T) {
 		{"reference", "projects/other/databases/(default)/documents/users/alice"},
 		{"map", "[1]"}, {"array", `{"a": 1}`}, {"map", "{"}, {"bytes", "x"},
 	} {
-		if v, err := parseFirestoreValue(c, "demo", tc[0], tc[1]); err == nil {
+		if v, err := parseFirestoreValue(context.Background(), c, "demo", tc[0], tc[1]); err == nil {
 			t.Errorf("Firestore %s %q was accepted as %#v", tc[0], tc[1], v)
 		}
 	}
@@ -233,7 +233,7 @@ func TestDocumentAndEntityActionsAreOfferedWhereTheyApply(t *testing.T) {
 		want  map[int][]string
 	}{
 		{firestoreProvider{}, map[int][]string{
-			1: {"adddocument"}, 2: {"addfield", "startcollection", "deletedocument"}, 3: {"deletefield"}}},
+			1: {"adddocument", "deletecollection"}, 2: {"addfield", "startcollection", "deletedocument", "deletefields"}, 3: {"deletefield"}}},
 		{datastoreProvider{}, map[int][]string{
 			1: {"createentity"}, 2: {"addproperty", "createchild", "deleteentity"}, 3: {"deleteproperty"}}},
 	} {
@@ -245,7 +245,9 @@ func TestDocumentAndEntityActionsAreOfferedWhereTheyApply(t *testing.T) {
 			for _, a := range tc.actor.DetailActions(ctx, "demo", make([]string, depth)) {
 				ids = append(ids, a.ID)
 				deletes := strings.HasPrefix(a.ID, "delete")
-				if a.Destructive != deletes || a.Leaves != deletes {
+				// Delete document fields (#1845) keeps the document, so its page stays.
+				leaves := deletes && a.ID != "deletefields"
+				if a.Destructive != deletes || a.Leaves != leaves {
 					t.Errorf("%T %s: destructive %v, leaves %v", tc.actor, a.ID, a.Destructive, a.Leaves)
 				}
 				if deletes && len(a.Fields) > 0 {
@@ -765,7 +767,7 @@ func TestDatastoreKeyValuesRoundTripThroughEditProperty(t *testing.T) {
 // reference into this project's default database and any other value be
 // edited.
 func TestFirestoreEditFieldRefusesAForeignReference(t *testing.T) {
-	check := editableFirestoreField("p")
+	check := editableFirestoreField(context.Background(), "p")
 	for _, name := range []string{
 		"projects/other/databases/(default)/documents/users/alice",
 		"projects/p/databases/second/documents/users/alice",

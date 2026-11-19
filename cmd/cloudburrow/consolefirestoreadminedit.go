@@ -81,6 +81,50 @@ func createIndexFields() []console.Field {
 	}
 }
 
+// createVectorIndexFields are Create vector index's inputs, as Google's
+// (https://docs.cloud.google.com/firestore/native/docs/vector-search, read
+// 2026-11-19): the collection, the vector field and its dimensions.
+func createVectorIndexFields() []console.Field {
+	return []console.Field{
+		{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
+		{Name: "prefix", Label: "Fields (optional)", Type: "textarea",
+			Help: "Fields before the vector field, one per line with ascending or descending, for a pre-filtered vector search."},
+		{Name: "field", Label: "Vector field path", Type: "text", Required: true},
+		{Name: "dimension", Label: "Dimensions", Type: "text", Required: true, Pattern: `^[0-9]{1,4}$`,
+			Help: "The number of dimensions of the vector embeddings, at most 2048."},
+		{Name: "queryScope", Label: "Query scope", Type: "select", Default: "COLLECTION",
+			Options: []string{"COLLECTION", "COLLECTION_GROUP"}},
+	}
+}
+
+// vectorIndex is the index Create vector index's values describe: the
+// prefix fields, then the vector field with a flat index of its dimensions.
+func vectorIndex(values map[string]string) (*adminpb.Index, string, error) {
+	cg := strings.TrimSpace(values["collectionGroup"])
+	if cg == "" || strings.Contains(cg, "/") {
+		return nil, "", fmt.Errorf("collection ID %q is not a collection ID", cg)
+	}
+	field := strings.TrimSpace(values["field"])
+	if field == "" {
+		return nil, "", errors.New("a vector field path is required")
+	}
+	dim, err := strconv.Atoi(strings.TrimSpace(values["dimension"]))
+	if err != nil || dim < 1 || dim > 2048 {
+		return nil, "", fmt.Errorf("dimensions %q is not a whole number from 1 to 2048", values["dimension"])
+	}
+	var fields []*adminpb.Index_IndexField
+	if strings.TrimSpace(values["prefix"]) != "" {
+		if fields, err = parseIndexFields(values["prefix"]); err != nil {
+			return nil, "", err
+		}
+	}
+	fields = append(fields, &adminpb.Index_IndexField{FieldPath: field, ValueMode: &adminpb.Index_IndexField_VectorConfig_{
+		VectorConfig: &adminpb.Index_IndexField_VectorConfig{Dimension: int32(dim),
+			Type: &adminpb.Index_IndexField_VectorConfig_Flat{Flat: &adminpb.Index_IndexField_VectorConfig_FlatIndex{}}}}})
+	scope := adminpb.Index_QueryScope(adminpb.Index_QueryScope_value[values["queryScope"]])
+	return &adminpb.Index{QueryScope: scope, Fields: fields}, cg, nil
+}
+
 // parseIndexFields reads Create index's Fields lines.
 func parseIndexFields(raw string) ([]*adminpb.Index_IndexField, error) {
 	var out []*adminpb.Index_IndexField
@@ -214,6 +258,28 @@ func hasOverride(f *adminpb.Field) bool {
 	return f.GetTtlConfig() != nil || (f.GetIndexConfig() != nil && !f.GetIndexConfig().GetUsesAncestorConfig())
 }
 
+// firestoreTabActions are the actions drawn at the top of each tab of a
+// database's page, in Google's words (#1845): Create Index, Add Exemption,
+// Export and Import, Create backup schedule and Create Policy.
+func firestoreTabActions() map[string][]console.Action {
+	add, _ := fieldOverrideFields(nil)
+	add = append([]console.Field{
+		{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
+		{Name: "field", Label: "Field path", Type: "text", Required: true},
+	}, add...)
+	transfer := firestoreTransferActions()
+	return map[string][]console.Action{
+		"indexes": {{ID: "createindex", Label: "Create Index", Fields: createIndexFields()},
+			// Google's Create Index offers Create vector index (#1845); the local
+			// Firestore answers FindNearest, so the index is offered here too.
+			{ID: "createvectorindex", Label: "Create vector index", Fields: createVectorIndexFields()}},
+		"fields":       {{ID: "addfield", Label: "Add Exemption", Fields: add}},
+		"importexport": transfer[:2],
+		"schedules":    {disasterRecoveryEdit(nil, nil)},
+		"ttl":          {createTTLAction()},
+	}
+}
+
 // indexActions are an index row's actions.
 func indexActions() []console.Action {
 	return []console.Action{{ID: "deleteindex", Label: "Delete index", Destructive: true}}
@@ -223,9 +289,9 @@ func indexActions() []console.Action {
 func fieldActions(f *adminpb.Field) []console.Action {
 	var out []console.Action
 	if fields, ok := fieldOverrideFields(f); ok {
-		out = append(out, console.Action{ID: "editfield", Label: "Edit field override", Fields: fields})
+		out = append(out, console.Action{ID: "editfield", Label: "Edit exemption", Fields: fields})
 	}
-	return append(out, console.Action{ID: "deletefield", Label: "Delete field override", Destructive: true,
+	return append(out, console.Action{ID: "deletefield", Label: "Delete exemption", Destructive: true,
 		Confirm: "The field's TTL policy and index settings are removed, and it takes the database's automatic index settings again."})
 }
 
@@ -251,17 +317,13 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 		if err != nil {
 			return nil
 		}
-		add, _ := fieldOverrideFields(nil)
-		add = append([]console.Field{
-			{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
-			{Name: "field", Label: "Field path", Type: "text", Required: true},
-		}, add...)
-		acts := append([]console.Action{
-			{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)},
-			{ID: "createindex", Label: "Create index", Fields: createIndexFields()},
-			{ID: "addfield", Label: "Add field override", Fields: add},
-			{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()},
-		}, firestoreTransferActions()...)
+		tabs := firestoreTabActions()
+		acts := []console.Action{{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)}}
+		for _, tab := range []string{"indexes", "fields", "importexport", "schedules", "ttl"} {
+			acts = append(acts, tabs[tab]...)
+		}
+		// Bulk delete and Clone stay beside the title.
+		acts = append(acts, firestoreTransferActions()[2:]...)
 		if d.DatabaseEdition == adminpb.Database_ENTERPRISE {
 			acts = append(acts,
 				console.Action{ID: "runpipeline", Label: "Run pipeline", Fields: runPipelineFields()},
@@ -299,6 +361,12 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 			return nil
 		}
 		return indexActions()
+	case firestoreTTLSegment:
+		f, err := c.GetField(ctx, &adminpb.GetFieldRequest{Name: db + "/collectionGroups/" + path[2] + "/fields/" + path[3]})
+		if err != nil || f.GetTtlConfig() == nil {
+			return nil
+		}
+		return ttlActions()
 	case firestoreFieldsSegment:
 		f, err := c.GetField(ctx, &adminpb.GetFieldRequest{Name: db + "/collectionGroups/" + path[2] + "/fields/" + path[3]})
 		if err != nil || !hasOverride(f) {
@@ -322,10 +390,16 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 	}
 	defer c.Close()
 	db := p.dbName(project, path[0])
+	if action == editDisasterRecovery && len(path) == 1 {
+		return actDisasterRecovery(ctx, c, db, values)
+	}
 	if ok, err := actSchedule(ctx, c, db, path, action, values); ok {
 		return err
 	}
 	if ok, err := actTransfer(ctx, c, db, path, action, values); ok {
+		return err
+	}
+	if ok, err := actTTL(ctx, c, db, path, action, values); ok {
 		return err
 	}
 	switch {
@@ -376,6 +450,16 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 			_, err = op.Wait(ctx)
 		}
 		return err
+	case action == "createvectorindex" && len(path) == 1:
+		in, cg, err := vectorIndex(values)
+		if err != nil {
+			return err
+		}
+		op, err := c.CreateIndex(ctx, &adminpb.CreateIndexRequest{Parent: db + "/collectionGroups/" + cg, Index: in})
+		if err == nil {
+			_, err = op.Wait(ctx)
+		}
+		return err
 	case action == "addfield" && len(path) == 1:
 		cg, field := strings.TrimSpace(values["collectionGroup"]), strings.TrimSpace(values["field"])
 		if cg == "" || strings.Contains(cg, "/") || field == "" {
@@ -387,7 +471,7 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 			return err
 		}
 		if hasOverride(cur) {
-			return fmt.Errorf("%s in %s already has an override: edit it on its row in Field overrides", field, cg)
+			return fmt.Errorf("%s in %s already has an override: edit it on its row in Single field", field, cg)
 		}
 		return updateField(ctx, c, fieldOverrideUpdate(name, values))
 	case len(path) == 4 && path[1] == firestoreIndexesSegment && action == "deleteindex":

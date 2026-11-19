@@ -339,3 +339,6 @@ func (l logWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// WriteGRPCStatus answers a gRPC call with a Trailers-Only status (#1880).
+func WriteGRPCStatus(w http.ResponseWriter, code int, msg string) { writeGRPCStatus(w, code, msg) }

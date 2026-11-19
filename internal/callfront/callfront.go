@@ -267,7 +267,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
 	// The instance's Cloud Storage, which Firestore exports are written to
 	// and imports read from (#1500).
-	storage := fs.String("storage", "", "the instance's Cloud Storage base URL, for Firestore exports and imports")
+	storage := fs.String("storage", "", "the instance's Cloud Storage base URL, for Firestore's and Datastore's exports and imports")
 	// The query RPCs the emulator does not serve, answered by the front
 	// from calls it does (#1405).
 	// The Spanner instance updates the emulator refuses, answered by the
@@ -290,6 +290,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Organization policies (#1890): where the host's Resource Manager
 	// answers them, for Firestore's databases and Spanner's instances.
 	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, which the Firestore Admin API and the Spanner front ask for organization policies (what `up` passes, #1890)")
+	// Datastore mode databases and customer-managed keys (#1880, #1881):
+	// the Firestore front's Admin API is their record, the Datastore
+	// front serves their entities, and the host's Cloud KMS their keys.
+	firestoreAdminAddr := fs.String("firestore-admin-addr", "", "the Firestore front (host:port), whose Admin API says which databases the Datastore API serves (with --datastore-databases)")
+	datastoreAddr := fs.String("datastore", "", "the Datastore front (host:port), which clears a deleted Datastore mode database's entities (with --firestore-admin)")
+	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin)")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -300,6 +306,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if *mongoListen != "" && !*firestoreAdmin {
 		fmt.Fprintln(stderr, "call-front: --mongodb-listen needs --firestore-admin")
+		return ErrUsage
+	}
+	if (*datastoreAddr != "" || *kmsAddr != "") && !*firestoreAdmin {
+		fmt.Fprintln(stderr, "call-front: --datastore and --kms need --firestore-admin")
+		return ErrUsage
+	}
+	if *firestoreAdminAddr != "" && !*datastoreDBs {
+		fmt.Fprintln(stderr, "call-front: --firestore-admin-addr needs --datastore-databases")
 		return ErrUsage
 	}
 	if *queries != "" && *queries != "datastore" && *queries != "firestore" {
@@ -321,18 +335,50 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var icpts Intercepts
 	var docs *firestoreadmin.Documents
 	var err error
-	switch *queries {
-	case "datastore":
-		icpts = append(icpts, queryfront.NewDatastore(*upstream))
-	case "firestore":
+	if *datastoreDBs && *firestoreAdminAddr != "" {
+		// The gate goes first: a refused call is answered before any
+		// other intercept or the emulator sees it.
+		icpts = append(icpts, newDatastoreGate(*firestoreAdminAddr))
+	}
+	var dbs *datastoreDatabases
+	if *datastoreDBs {
+		dbs = newDatastoreDatabases(*upstream, logger.Printf)
+	}
+	switch {
+	case *queries == "datastore" || (*datastoreDBs && *queries == ""):
+		qd := queryfront.NewDatastore(*upstream)
+		if dbs != nil {
+			// Each named database in an emulator project of its own
+			// (#1885), as the front's own calls keep it (dbs.client).
+			qd.SeparateDatabases(dbs.SawResource)
+			// The entities named databases kept before are moved
+			// to their emulator projects once (#1885); calls naming
+			// a named database wait for the move.
+			moved := make(chan struct{})
+			go dbs.MigrateDatabases(ctx, moved)
+			qd.HoldUntil(moved)
+		}
+		icpts = append(icpts, qd)
+	case *queries == "firestore":
 		icpts = append(icpts, queryfront.NewFirestore(*upstream))
 	}
-	if *datastoreDBs {
-		icpts = append(icpts, newDatastoreDatabases(*upstream, logger.Printf))
+	if dbs != nil {
+		if len(icpts) > 0 {
+			if g, ok := icpts[0].(*datastoreGate); ok {
+				dbs.gate = g
+			}
+		}
+		// The Datastore Admin API (#1884): exports and imports through
+		// the instance's Cloud Storage, and indexes.
+		icpts = append(icpts, dbs, newDatastoreAdmin(dbs, *storage))
 	}
 	if *firestoreAdmin {
 		fa := firestoreadmin.New(*upstream)
 		fa.SetStorage(*storage)
+		fa.SetDatastore(*datastoreAddr)
+		if err := fa.SetKMS(*kmsAddr); err != nil {
+			return fmt.Errorf("Cloud KMS at %s: %w", *kmsAddr, err)
+		}
 		if *stateDir != "" {
 			if err := fa.KeepState(ctx, *stateDir, logger.Printf); err != nil {
 				return fmt.Errorf("the Firestore Admin API's state: %w", err)
@@ -350,7 +396,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fa.Start(ctx)
 		// The emulator runs as an Enterprise edition one (#1703); the
 		// guard keeps a Standard database's writes to Standard's values.
-		icpts = append(icpts, fa, fa.EditionGuard())
+		// The access gate goes first (#1880, #1881): a Datastore mode
+		// database's, or an inaccessible key's, data calls are refused
+		// before anything else reads them.
+		icpts = append(icpts, fa.AccessGate(), fa, fa.EditionGuard())
 		if *mongoListen != "" {
 			// TLS only, as Google requires (#1738): the certificate the
 			// instance issued, in the front's environment.

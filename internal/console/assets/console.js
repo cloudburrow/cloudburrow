@@ -210,15 +210,41 @@ const ROUTES = [
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
 
+  // Firestore's menu is Google's (#1845): Databases first, then a
+  // database's own pages. `tabOf` makes a menu entry a tab of the database
+  // being looked at ((default) elsewhere), so Indexes, Import/Export,
+  // Disaster recovery and Time-to-live open that database's tab; each
+  // entry's own address leads to (default)'s. Security rules, Usage,
+  // Insights and Key Visualizer are in Google's place and say why they are
+  // not available. Databases is not under /firestore/, where it would
+  // shadow a collection named "databases".
+  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
+    product: "firestore", productTitle: "Firestore" },
   // `crumb` names the breadcrumb's first link where the page's menu title
   // ("Data") would not say which product a document is in (#1842).
   { path: "/firestore", service: "firestore", title: "Data", crumb: "Firestore", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
-  // The project's Firestore databases, each with its settings, indexes and
-  // field overrides (#1331, #1343). Not under /firestore/, where it would
-  // shadow a collection named "databases".
-  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
-    product: "firestore", productTitle: "Firestore" },
+  ...[["query", "Query builder"], ["indexes", "Indexes"], ["importexport", "Import/Export"],
+    ["schedules", "Disaster recovery"], ["ttl", "Time-to-live"]].map(([tab, title]) => ({
+    path: "/firestore-" + tab, service: "firestore-databases", icon: "firestore", title, section: "Databases",
+    product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
+    redirect: "/firestore-databases/(default)?tab=" + tab })),
+  { path: "/firestore-rules", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Security rules", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Firestore Security Rules are kept by the Firebase Rules API, which CloudBurrow does not serve. " +
+      "Server client libraries, which reach the local Firestore, ignore rules, as they do on Google's." },
+  { path: "/firestore-usage", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Usage", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Usage charts read Cloud Monitoring metrics, which CloudBurrow does not emulate. Each call to " +
+      "Firestore is in the console's Requests page." },
+  { path: "/firestore-insights", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Insights", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Query insights are gathered by Google's Firestore query statistics, which the local Firestore " +
+      "does not record. Query Explain is on an Enterprise database's page." },
+  { path: "/firestore-key-visualizer", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Key Visualizer", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Key Visualizer draws Google's access-pattern heatmaps from its storage servers; the local " +
+      "Firestore keeps none." },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Tables", kind: "Table",  section: "Databases",
     product: "bigtable", productTitle: "Bigtable" },
@@ -682,8 +708,12 @@ const scopeKeyOf = (service) => capabilityOf(service).scope || "";
 function carryScope(url, service) {
   const key = scopeKeyOf(service);
   if (!key) return url;
-  const value = new URLSearchParams(location.search).get(key);
-  if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
+  // A Filterer's own pickers (Listing.Filters, #1846) travel with it.
+  const here = new URLSearchParams(location.search);
+  for (const k of [key, ...(capabilityOf(service).filters || [])]) {
+    const value = here.get(k);
+    if (value && !url.searchParams.has(k)) url.searchParams.set(k, value);
+  }
   return url;
 }
 
@@ -722,7 +752,7 @@ function scopeSubtitle(service) {
 
 // scopePicker is a list screen's picker for its scope: choosing puts it in
 // the address (the default leaves it out) and redraws.
-function scopePicker(spec, reload) {
+function scopePicker(spec, reload, clears = []) {
   const id = `scope-${spec.key}`;
   const select = el("select", { id, name: spec.key },
     ...(spec.options || []).map((o) =>
@@ -731,6 +761,9 @@ function scopePicker(spec, reload) {
     const params = new URLSearchParams(location.search);
     if (select.value && select.value !== spec.default) params.set(spec.key, select.value);
     else params.delete(spec.key);
+    // A filter after this one was chosen among this one's (#1846): a
+    // kind of another namespace.
+    for (const k of clears) params.delete(k);
     const qs = params.toString();
     history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
     reload();
@@ -3288,7 +3321,12 @@ function detailHref(route, path) {
 // It draws the provider's listing with the same renderer as the list screen:
 // one table implementation, so the two cannot drift apart, and sorting and
 // filtering work here for free.
+// SELECT_SECTION selects a tab of the detail page on screen, for a grouped
+// section's own strip (#1845).
+let SELECT_SECTION = null;
+
 async function renderDetail(view, route, resourcePath) {
+  SELECT_SECTION = null;
   const segments = Array.isArray(resourcePath) ? resourcePath : [resourcePath];
   const name = segments[segments.length - 1];
   const project = new URLSearchParams(location.search).get("project") || "";
@@ -3404,7 +3442,14 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   const queryable = capabilityOf(route.service).query;
-  if (queryable) {
+  // A placeholder (console.KindQuery) puts the query tab in the
+  // provider's order under its own label, as Firestore's database page
+  // has its Query builder (#1845); with no form for the page it is dropped.
+  const ownQuery = sections.find((s) => s.id === "query" && s.kind === "query");
+  if (ownQuery) {
+    ownQuery.query = ownQuery.query || data.query || queryable;
+    if (!ownQuery.query) sections.splice(sections.indexOf(ownQuery), 1);
+  } else if (queryable) {
     // The provider may narrow the form to the resource being looked at — a
     // Bigtable table's column families are not a Firestore collection's fields —
     // so the resource's own query spec wins over the service-wide one.
@@ -3485,6 +3530,18 @@ async function renderDetail(view, route, resourcePath) {
           onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
         })));
       note = note ? el("div", {}, bar, note) : bar;
+    }
+
+    // A grouped section's own strip, its siblings' labels (#1845).
+    if (section.group) {
+      const members = sections.map((s, i) => [s, i]).filter(([s]) => s.group === section.group);
+      const sub = el("div", { class: "tab-strip sub-tabs", role: "tablist", "aria-label": `${section.group} tabs` },
+        ...members.map(([s, i]) => el("button", {
+          class: "tab" + (i === current ? " is-selected" : ""), role: "tab", id: `subtab-${s.id}`,
+          "aria-selected": i === current ? "true" : "false", tabindex: i === current ? "0" : "-1",
+          text: s.label, onclick: () => SELECT_SECTION && SELECT_SECTION(i),
+        })));
+      note = note ? el("div", {}, sub, note) : sub;
     }
 
     // A section's own tabs (#1860): Google's Cloud SQL Connections page
@@ -3842,23 +3899,33 @@ async function renderDetail(view, route, resourcePath) {
   // nothing, and the real console does not draw one either.
   let strip = null;
   if (sections.length > 1) {
+    // Sections sharing a `group` are one tab under the group's name, with
+    // their own labels on a strip inside it (#1845): Google's Indexes page
+    // holds its Manual and Automatic tabs. The group's tab is its first
+    // member's; selecting it opens that member.
+    const leadOf = (i) => {
+      const g = sections[i].group;
+      return g ? sections.findIndex((s) => s.group === g) : i;
+    };
     const tabs = sections.map((section, i) =>
       el("button", {
-        class: "tab" + (i === current ? " is-selected" : ""),
+        class: "tab" + (leadOf(current) === i ? " is-selected" : ""),
         role: "tab", id: `tab-${section.id}`,
-        "aria-selected": i === current ? "true" : "false",
+        "aria-selected": leadOf(current) === i ? "true" : "false",
         "aria-controls": "detail-panel",
-        tabindex: i === current ? "0" : "-1",
-        text: section.label,
+        tabindex: leadOf(current) === i ? "0" : "-1",
+        hidden: leadOf(i) !== i,
+        text: section.group && leadOf(i) === i ? section.group : section.label,
         onclick: () => select(i),
       }));
 
     const select = (i) => {
       current = i;
       tabs.forEach((tab, j) => {
-        tab.classList.toggle("is-selected", j === i);
-        tab.setAttribute("aria-selected", j === i ? "true" : "false");
-        tab.setAttribute("tabindex", j === i ? "0" : "-1");
+        const on = j === leadOf(i);
+        tab.classList.toggle("is-selected", on);
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.setAttribute("tabindex", on ? "0" : "-1");
       });
       // The tab is part of the address, so a colleague can be sent the tab
       // rather than the resource.
@@ -3872,9 +3939,10 @@ async function renderDetail(view, route, resourcePath) {
       }
       panel.setAttribute("aria-labelledby", `tab-${sections[i].id}`);
       drawPanel();
-      tabs[i].focus();
+      if (!tabs[i].hidden) tabs[i].focus();
       announce(`${sections[i].label} selected`);
     };
+    SELECT_SECTION = select;
 
     // A side menu (#1860) is the same tablist, drawn down the left of the
     // page as Google's Cloud SQL instance menu is.
@@ -3886,11 +3954,14 @@ async function renderDetail(view, route, resourcePath) {
     strip.addEventListener("keydown", (e) => {
       const fwd = data.sideNav ? "ArrowDown" : "ArrowRight";
       const bwd = data.sideNav ? "ArrowUp" : "ArrowLeft";
+      // Over the tabs drawn: a group's members after its first are not.
+      const shown = sections.map((_, i) => i).filter((i) => leadOf(i) === i);
+      const at = Math.max(0, shown.indexOf(leadOf(current)));
       const step = e.key === fwd ? 1 : e.key === bwd ? -1
-        : e.key === "Home" ? -current : e.key === "End" ? sections.length - 1 - current : 0;
+        : e.key === "Home" ? -at : e.key === "End" ? shown.length - 1 - at : 0;
       if (!step && e.key !== "Home" && e.key !== "End") return;
       e.preventDefault();
-      select((current + step + sections.length) % sections.length);
+      select(shown[(at + step + shown.length) % shown.length]);
     });
     if (!data.sideNav) crumb.append(strip);
   }
@@ -3932,8 +4003,12 @@ async function renderDetail(view, route, resourcePath) {
     navigate(route.path);
   };
   const leaves = (a) => a.leaves || (a.destructive && a.id.startsWith("delete") && segments.length > 1);
+  // An action a tab draws at its top (Section.Actions) is drawn there only,
+  // not beside the title as well (#1845): Google's Create Index is on the
+  // Indexes tab, not on the database's title line.
+  const onTabs = new Set(sections.flatMap((s) => (s.actions || []).map((a) => a.id)));
   const pageActions = [
-    ...(data.actions || []).map((a) =>
+    ...(data.actions || []).filter((a) => !onTabs.has(a.id)).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
@@ -4123,7 +4198,9 @@ function listActionButtons(route, data, onDone) {
   const onSelection = new Set((data.selectActions || []).map((a) => a.id));
   return (data.actions || []).filter((a) => !onSelection.has(a.id)).map((a) => el("button", {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
-    onclick: () => openActionForm(route, [], a, onDone, data.noun || route.title),
+    // One that is a link opens its page: the Datastore page's Indexes
+    // (#1846).
+    onclick: () => (a.href ? navigate(a.href) : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
 }
 
@@ -4835,7 +4912,9 @@ async function renderList(view, route) {
     header.push(...listingSummary(data));
   }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
-  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route)));
+  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
+  (data.filters || []).forEach((f, i, all) =>
+    header.push(scopePicker(f, () => renderList(view, route), all.slice(i + 1).map((x) => x.key))));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -5405,6 +5484,7 @@ function queryFormPane(route, segments, spec, onDone) {
   const results = el("div", { class: "query-results" });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const run = el("button", { class: "primary", type: "submit", text: spec.label || "Run" });
+  followTabLabels(fields.nodes, run, spec);
 
   const execute = async (e) => {
     if (e) e.preventDefault();
@@ -5446,10 +5526,24 @@ function queryFormPane(route, segments, spec, onDone) {
     el("form", { class: "card query-form", novalidate: true, onsubmit: execute },
       ...fields.nodes,
       el("div", { class: "card-actions" }, run,
-        el("button", { class: "secondary", type: "button", text: "Clear results",
+        el("button", { class: "secondary", type: "button", text: spec.clearLabel || "Clear results",
           onclick: () => { setChildren(results); error.hidden = true; } }))),
     error,
     results);
+}
+
+// followTabLabels names the run button for the tab showing in the form's
+// tab strip, as Google's Query by GQL is run with Run query (#1846).
+function followTabLabels(nodes, run, spec) {
+  const labels = spec.tabLabels || {};
+  if (!Object.keys(labels).length) return;
+  const strips = nodes.flatMap((n) => (n.querySelectorAll ? [...n.querySelectorAll(".form-tabs")] : []));
+  const name = () => {
+    const shown = strips.map((s) => labels[s.dataset.selected]).find(Boolean);
+    run.textContent = shown || spec.label || "Run";
+  };
+  for (const s of strips) new MutationObserver(name).observe(s, { attributes: true, attributeFilter: ["data-selected"] });
+  name();
 }
 
 // --- create form ------------------------------------------------------
@@ -5461,6 +5555,69 @@ function queryFormPane(route, segments, spec, onDone) {
 // of one description would drift, and validation is the part that would drift
 // silently — the half that still looked right while accepting what the API
 // refuses.
+
+// attachCompletions has Ctrl+Space in a text control open a list of the
+// words that begin with the word at the cursor (all of them at a word's
+// start); Up and Down move through it, Enter or a click puts the chosen
+// word in place of the one typed, and Escape closes it (#1846).
+function attachCompletions(control, words) {
+  const list = el("ul", { class: "completions", role: "listbox", hidden: true, "aria-label": "Completions" });
+  list.id = `${control.id || control.name}-completions`;
+  control.setAttribute("aria-autocomplete", "list");
+  control.setAttribute("aria-controls", list.id);
+  let shown = [], active = 0;
+  const wordAt = () => {
+    const end = control.selectionStart ?? control.value.length;
+    let start = end;
+    while (start > 0 && /[A-Za-z0-9_$`]/.test(control.value[start - 1])) start--;
+    return { start, end, typed: control.value.slice(start, end) };
+  };
+  const close = () => { list.hidden = true; shown = []; control.setAttribute("aria-expanded", "false"); };
+  const choose = (w) => {
+    const { start, end } = wordAt();
+    control.value = control.value.slice(0, start) + w + control.value.slice(end);
+    const at = start + w.length;
+    control.setSelectionRange(at, at);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    close();
+    control.focus();
+  };
+  const draw = () => {
+    setChildren(list, ...shown.map((w, i) => {
+      const item = el("li", { role: "option", text: w, class: i === active ? "active" : "" });
+      item.setAttribute("aria-selected", String(i === active));
+      item.addEventListener("mousedown", (e) => { e.preventDefault(); choose(w); });
+      return item;
+    }));
+  };
+  const open = () => {
+    const typed = wordAt().typed.replace(/^`/, "").toLowerCase();
+    shown = words.filter((w) => w.replace(/^`/, "").toLowerCase().startsWith(typed));
+    active = 0;
+    if (!list.isConnected) control.after(list);
+    if (!shown.length) { close(); return; }
+    draw();
+    list.hidden = false;
+    control.setAttribute("aria-expanded", "true");
+  };
+  control.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); open(); return; }
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active + (e.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length;
+      draw();
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      choose(shown[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  });
+  control.addEventListener("input", () => { if (!list.hidden) open(); });
+  control.addEventListener("blur", () => setTimeout(close, 150));
+}
 
 function buildCreateForm(spec) {
   // A hidden field is what the form was drawn from, sent back unchanged so
@@ -5520,6 +5677,9 @@ function buildCreateForm(spec) {
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
+    // Ctrl+Space offers the field's completions at the cursor, as Google's
+    // Query by GQL offers the namespace's kinds (#1846).
+    if ((f.completions || []).length && !isCheck && !isSelect) attachCompletions(control, f.completions);
     // An immutable field is shown so the operator can see which resource they
     // are editing, and refused so the form does not accept a change the API
     // will not apply. Disabled rather than hidden: hiding it would read as
@@ -5551,7 +5711,19 @@ function buildCreateForm(spec) {
     const node = isCheck
       ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
           el("div", { class: "check-line" }, control, label), help, unavailable, error)
-      : el("div", { class: "form-row" }, label, control, help, error);
+      : el("div", { class: "form-row" }, label,
+          // Browse (#1845): a gs:// field chooses a bucket of this
+          // instance's Cloud Storage, as Google's Choose Destination does.
+          f.browse === "storage" ? el("div", { class: "browse-row" }, control,
+            el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
+              onclick: () => browseBuckets(control) }))
+          // A Cloud KMS key field (#1881) chooses an ENCRYPT_DECRYPT key of
+          // this instance's Cloud KMS in the location the form's own
+          // location fields hold, as Google's key picker does.
+          : f.browse === "kms" ? el("div", { class: "browse-row" }, control,
+            el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
+              onclick: () => browseKeys(control, formKMSLocation(entries)) })) : control,
+          help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
@@ -5799,7 +5971,13 @@ function buildCreateForm(spec) {
       // An immutable field is context, not input. Sending it back would ask
       // the API to set a value to what it already is, which some APIs accept
       // and others reject as an attempt to change an immutable field.
-      return Object.fromEntries([...hiddenValues(hidden), ...entries
+      // A hidden field named "tab:<section>" is sent the tab showing in
+      // that section, as Datastore's Query by kind and Query by GQL
+      // (#1846).
+      const tabsShown = nodes.flatMap((n) => (n.querySelectorAll ? [...n.querySelectorAll(".form-tabs")] : []))
+        .filter((t) => hidden.some((h) => h.name === `tab:${t.dataset.section}`))
+        .map((t) => [`tab:${t.dataset.section}`, t.dataset.selected || ""]);
+      return Object.fromEntries([...hiddenValues(hidden), ...tabsShown, ...entries
         .filter((e) => !e.field.immutable && e.field.type !== "file" && !e.inactive)
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
@@ -5830,7 +6008,10 @@ function formTabs(section, entries) {
   const panels = tabs.map((t, i) => el("div", { class: "form-tab-panel tab-panel", role: "tabpanel",
     id: `${base}-${slug(t.name)}`, "aria-labelledby": `${base}-${slug(t.name)}-tab`, hidden: i !== 0 },
     ...t.entries.map((e) => e.node)));
+  const strip = el("div", { class: "tab-strip form-tabs", role: "tablist", "aria-label": section,
+    "data-section": section, "data-selected": tabs[0].name });
   const select = (i) => {
+    strip.dataset.selected = tabs[i].name;
     buttons.forEach((b, j) => {
       b.classList.toggle("is-selected", i === j);
       b.setAttribute("aria-selected", i === j ? "true" : "false");
@@ -5853,9 +6034,8 @@ function formTabs(section, entries) {
       } }));
     panels[i].addEventListener("form-tab-show", () => select(i));
   });
-  return [...plain,
-    el("div", { class: "tab-strip form-tabs", role: "tablist", "aria-label": section }, ...buttons),
-    ...panels];
+  strip.append(...buttons);
+  return [...plain, strip, ...panels];
 }
 
 // radioEntry is a "radio" field: one radio button per option, the choice
@@ -6264,7 +6444,10 @@ function groupEntry(f, id, errorId, helpId) {
   const list = el("div", { class: "group-rows", role: "list" });
   const rowValue = (r) => Object.fromEntries(sub.map((s, i) =>
     [s.name, s.type === "checkbox" ? String(r.controls[i].checked) : r.controls[i].value.trim()]));
-  const blank = (v) => Object.values(v).every((x) => x === "" || x === "false");
+  // A row is blank when its text is: a checkbox checked by default (the
+  // Datastore Create entity's Indexed, #1846) or a select's first choice
+  // does not make it a row.
+  const blank = (v) => sub.every((s) => s.type === "checkbox" || s.type === "select" || v[s.name] === "");
   const sync = () => {
     const values = rows.map(rowValue).filter((v) => !blank(v));
     control.value = values.length ? JSON.stringify(values) : "";
@@ -6288,11 +6471,16 @@ function groupEntry(f, id, errorId, helpId) {
     const r = { controls: [] };
     const cells = sub.map((s) => {
       const label = `${s.label} ${n}`;
+      // A select subfield is a dropdown of its options (#1845: a Query
+      // builder WHERE clause's operator).
       const c = s.type === "textarea"
         ? el("textarea", { rows: "2", "aria-label": label, spellcheck: "false" })
+        : s.type === "select"
+        ? el("select", { "aria-label": label },
+            ...(s.options || []).map((o) => el("option", { value: o, text: (s.optionLabels || {})[o] || o || "None" })))
         : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
                         autocomplete: "off", spellcheck: "false" });
-      if (s.type === "checkbox") c.checked = value[s.name] === "true";
+      if (s.type === "checkbox") c.checked = (value[s.name] ?? s.default) === "true";
       else c.value = value[s.name] || s.default || "";
       c.addEventListener("input", sync);
       c.addEventListener("change", sync);
@@ -7394,6 +7582,7 @@ function dispatch(view) {
     });
   }
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
+  if (match.service === "firestore") return renderFirestoreData(view, match);
   // The old address still works, so a link someone saved keeps resolving.
   const legacy = new URLSearchParams(location.search).get("resource");
   if (legacy) return renderDetail(view, match, [legacy]);
@@ -7914,7 +8103,21 @@ function drawProductNav() {
   });
   // The page this screen is on: the list itself, or the list a resource or
   // a create form belongs to.
-  const current = pages.find((page) => page.path === here.path);
+  // A `tabOf` entry (#1845) is current on its page's tab, and links to
+  // the tab of the resource being looked at.
+  const tabHere = new URLSearchParams(location.search).get("tab");
+  const ownerPath = (page) => page.tabOf ? page.tabOf.route : null;
+  const resourceHere = (page) => {
+    const prefix = ownerPath(page) + "/";
+    if (!location.pathname.startsWith(prefix)) return "(default)";
+    return decodeURIComponent(location.pathname.slice(prefix.length).split("/")[0]) || "(default)";
+  };
+  const current = pages.find((page) => page.tabOf && here.path === page.tabOf.route &&
+      location.pathname.startsWith(page.tabOf.route + "/") && tabHere === page.tabOf.tab) ||
+    pages.find((page) => page.path === here.path && !page.tabOf);
+  const hrefOf = (page) => page.tabOf
+    ? `${page.tabOf.route}/${encodeURIComponent(resourceHere(page))}${scopeSearch()}${scopeSearch() ? "&" : "?"}tab=${page.tabOf.tab}`
+    : page.path + scopeSearch();
   setChildren(host,
     el("div", { class: "product-nav-head" },
       el("span", { class: "nav-icon", "aria-hidden": "true" }, markFor(here)),
@@ -7923,7 +8126,7 @@ function drawProductNav() {
     el("ul", { id: "product-nav-pages", hidden: collapsed ? true : null }, ...pages.map((page) =>
       el("li", {},
         el("a", {
-          href: page.path + scopeSearch(),
+          href: hrefOf(page),
           class: page === current ? "is-current" : null,
           "aria-current": page === current ? "page" : null,
           text: page.navTitle || page.title,
@@ -13129,6 +13332,389 @@ async function requestCharts(samples = []) {
           el("li", { text: `${s}: ${data.unmeasured_label}` })))
       : null);
 }
+
+// browseBuckets is a gs:// field's Browse (#1845): the project's buckets in
+// this instance's Cloud Storage, one of which fills the field as
+// gs://BUCKET/. It is drawn over the form it was opened from.
+async function browseBuckets(control) {
+  const { dialog, close } = openModal({ labelledBy: "browse-title" });
+  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "buckets" }));
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "browse-title", text: "Select a bucket" }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
+  try {
+    const list = await api(`/api/resources/storage?project=${encodeURIComponent(currentProject())}`);
+    const items = list.items || [];
+    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+    if (!items.length) return setChildren(body, el("p", { class: "unavailable", text: "This project has no buckets. Create one in Cloud Storage first." }));
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...items.map((b) => el("li", { class: "fs-row" },
+      el("button", { type: "button", class: "fs-row-link", text: b.name, onclick: () => {
+        control.value = `gs://${b.name}/`;
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+        close();
+        control.focus();
+      } })))));
+    body.querySelector("button").focus();
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
+  }
+}
+
+// formKMSLocation is the Cloud KMS location of the location a create
+// form's fields hold (#1881): its locationType, multiRegion and region, as
+// Create a Firestore database has them. A multi-region's keys are in
+// Cloud KMS's matching multi-region: us for nam5, europe for eur3
+// (https://docs.cloud.google.com/firestore/native/docs/use-cmek).
+function formKMSLocation(entries) {
+  const value = (name) => {
+    const e = entries.find((x) => x.field.name === name);
+    return e ? e.control.value : "";
+  };
+  const loc = value("locationType") === "region" ? value("region") : value("multiRegion");
+  return ({ nam5: "us", eur3: "europe" })[loc] || loc;
+}
+
+// browseKeys is a Cloud KMS key field's Browse (#1881): the project's
+// ENCRYPT_DECRYPT keys in location, from this instance's Cloud KMS, one of
+// which fills the field with its resource name.
+async function browseKeys(control, location) {
+  const { dialog, close } = openModal({ labelledBy: "browse-title" });
+  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "keys" }));
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "browse-title", text: "Select a Cloud KMS key" }),
+    el("p", { class: "form-help", text: `Keys in ${location}, the database's Cloud KMS location.` }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
+  const project = currentProject();
+  try {
+    const list = await api(`/api/resources/kms?project=${encodeURIComponent(project)}`);
+    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+    const rings = (list.items || []).filter((r) => (r.fields || {}).Location === location);
+    const keys = [];
+    for (const r of rings) {
+      const d = await api(`/api/detail/kms?project=${encodeURIComponent(project)}&name=${encodeURIComponent(r.name)}`);
+      const sec = (d.sections || []).find((x) => x.id === "keys");
+      for (const k of (sec && sec.listing && sec.listing.items) || []) {
+        if ((k.fields || {}).Purpose === "ENCRYPT_DECRYPT") keys.push({ name: `${r.name}/cryptoKeys/${k.name}`, state: k.status });
+      }
+    }
+    if (!keys.length) {
+      return setChildren(body, el("p", { class: "unavailable",
+        text: `This project has no symmetric keys in ${location}. Create a key ring and key there in Cloud KMS first.` }));
+    }
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...keys.map((k) => el("li", { class: "fs-row" },
+      el("button", { type: "button", class: "fs-row-link", text: k.name, title: k.state || "", onclick: () => {
+        control.value = k.name;
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+        close();
+        control.focus();
+      } })))));
+    body.querySelector("button").focus();
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", text: `Cloud KMS cannot be read: ${err.message}` }));
+  }
+}
+
+// --- Firestore's Data panel (#1845, round 2) ------------------------------
+//
+// Google's Firestore Studio Data viewer is a panel of three columns
+// (https://docs.cloud.google.com/firestore/native/docs/using-console, read
+// 2026-11-19): the database's collections (or, inside a subcollection, the
+// parent document's), the selected collection's documents, and the selected
+// document's subcollections and fields. Start collection, Add document and
+// Add field are at the top of their columns; a collection's menu has Delete
+// collection and its filter button Add filters; a document's menu has Delete
+// document and Delete document fields; a field is edited by clicking it and
+// deleted with the icon beside it. Edit path opens any path, and Panel
+// settings is Google's Project panel settings dialog (Show non-existent
+// parents, Realtime updates enabled). The database travels as ?database=,
+// so every database of the project is browsed here, and the selection as
+// ?path=. Each read and change goes through the routes the drill-down pages
+// use, which stay reachable from each column's Open link.
+const FS_PANEL_SETTINGS_KEY = "cb-firestore-panel-settings";
+const FS_PANEL_FILTERS = new Map();
+let FS_PANEL_TIMER = null;
+
+function fsPanelSettings() {
+  try {
+    return { showMissing: true, realtime: true,
+      ...JSON.parse(localStorage.getItem(FS_PANEL_SETTINGS_KEY) || "{}") };
+  } catch { return { showMissing: true, realtime: true }; }
+}
+
+function fsPanelPath() {
+  const raw = new URLSearchParams(location.search).get("path") || "";
+  return raw.split("/").filter(Boolean);
+}
+
+function fsPanelGo(segments) {
+  const url = new URL(location.href);
+  if (segments.length) url.searchParams.set("path", segments.join("/"));
+  else url.searchParams.delete("path");
+  history.pushState(history.state, "", url.pathname + url.search);
+}
+
+async function renderFirestoreData(view, route) {
+  if (FS_PANEL_TIMER) { clearInterval(FS_PANEL_TIMER); FS_PANEL_TIMER = null; }
+  const project = currentProject();
+  const settings = fsPanelSettings();
+  const redraw = () => renderFirestoreData(view, route);
+  const q = (segments) => `?project=${encodeURIComponent(project)}` +
+    segments.map((s) => `&name=${encodeURIComponent(s)}`).join("");
+
+  const editPath = el("button", { class: "header-button", type: "button", id: "fs-edit-path", text: "Edit path",
+    onclick: () => fsEditPath(redraw) });
+  const panelSettings = el("button", { class: "header-button", type: "button", id: "fs-panel-settings",
+    text: "Panel settings", onclick: () => fsPanelSettingsDialog(redraw) });
+  const header = pageHeader("Data", project ? `Project ${project}` + scopeSubtitle(route.service) : "All projects",
+    { actions: [editPath, panelSettings, refreshButton(async () => redraw())] });
+  setChildren(view, header, loadingState(4, { what: "collections" }));
+
+  let list;
+  try {
+    list = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header, errorState("Data unavailable", String(err.message), redraw));
+  }
+  if (list.prompt) return setChildren(view, header, emptyState("Choose a project", list.prompt));
+  if (list.unavailable) return setChildren(view, header, errorState("Data unavailable", list.unavailable, redraw));
+  const picker = list.scope ? scopePicker(list.scope, redraw) : null;
+  const database = (list.scope && list.scope.selected) || "(default)";
+
+  // The selection: P alternates collection and document IDs. The middle
+  // column is the deepest collection selected, the right one its document.
+  const P = fsPanelPath();
+  const colEnd = P.length % 2 === 1 ? P.length : P.length - 1;
+  const colPath = colEnd > 0 ? P.slice(0, colEnd).join("/") : "";
+  const docId = P.length % 2 === 0 && P.length ? P[P.length - 1] : "";
+  const parentDoc = colEnd >= 3 ? [P.slice(0, colEnd - 2).join("/"), P[colEnd - 2]] : null;
+
+  const visible = (items) => (items || []).filter((i) => settings.showMissing || !i.absent);
+  const column = (id, title, actions, body, menu) => el("section", { class: "fs-column card", id, "aria-label": title },
+    el("div", { class: "fs-column-head" },
+      el("h2", { class: "fs-column-title", text: title }),
+      menu || null),
+    actions ? el("div", { class: "fs-column-actions" }, ...actions) : null,
+    body);
+  const rowList = (items, selected, onPick, extra) => el("ul", { class: "fs-rows", role: "list" },
+    ...items.map((item) => el("li", { class: "fs-row" + (item.name === selected ? " is-selected" : "") +
+        (item.absent ? " is-absent" : "") },
+      el("button", { type: "button", class: "fs-row-link", text: item.name, "aria-current": item.name === selected ? "true" : null,
+        onclick: () => onPick(item) }),
+      extra ? extra(item) : null)));
+  const menuOf = (label, entries) => {
+    const sel = el("select", { class: "fs-menu", "aria-label": label },
+      el("option", { value: "", text: "⋮" }),
+      ...entries.map((e) => el("option", { value: e.id, text: e.label })));
+    sel.addEventListener("change", () => {
+      const e = entries.find((x) => x.id === sel.value);
+      sel.value = "";
+      if (e) e.run();
+    });
+    return sel;
+  };
+  const act = (path, action, after) => runAction(route, path, action, after || redraw, NO_ROW);
+
+  // Left: the database's collections, or the parent document's subcollections.
+  let leftItems, leftTitle, leftStart;
+  if (parentDoc) {
+    const d = await api(`/api/detail/${route.service}${q(parentDoc)}`).catch((err) => ({ unavailable: err.message }));
+    const subs = (d.sections || []).find((s) => s.id === "collections");
+    leftItems = ((subs && subs.listing && subs.listing.items) || []).map((i) => ({ name: i.name }));
+    leftTitle = parentDoc[1];
+    leftStart = (d.actions || []).find((a) => a.id === "startcollection");
+  } else {
+    leftItems = list.items || [];
+    leftTitle = database;
+  }
+  const selectedCol = colPath ? colPath.split("/").pop() : "";
+  const startRoot = capabilityOf(route.service).create;
+  const left = column("fs-collections", leftTitle, [
+    el("button", { type: "button", class: "secondary", id: "fs-start-collection", text: "Start collection",
+      onclick: () => parentDoc && leftStart
+        ? act(parentDoc, leftStart, (name) => { redraw(); })
+        : startRoot && openCreateForm(route, startRoot, (name) => { if (name) fsPanelGo([name]); redraw(); }) }),
+  ], leftItems.length
+    ? rowList(leftItems, selectedCol, (item) => {
+        fsPanelGo(parentDoc ? [...P.slice(0, colEnd - 1), item.name] : [item.name]);
+        redraw();
+      })
+    : el("p", { class: "unavailable", text: parentDoc ? "This document has no subcollections." : "This database has no collections." }));
+
+  const columns = [left];
+  // Middle: the collection's documents, with its filter and its menu.
+  if (colPath) {
+    const filter = FS_PANEL_FILTERS.get(database + "|" + colPath);
+    let docs = [];
+    let failure = "";
+    let addDoc = null;
+    try {
+      const d = await api(`/api/detail/${route.service}${q([colPath])}`);
+      if (d.unavailable) failure = d.unavailable;
+      const sec = (d.sections || []).find((s) => s.id === "documents");
+      docs = (sec && sec.listing && sec.listing.items) || [];
+      addDoc = (d.actions || []).find((a) => a.id === "adddocument");
+      if (filter) {
+        const res = await send(`/api/query/${route.service}?project=${encodeURIComponent(project)}`, "POST",
+          { Path: [colPath], Values: { field: filter.field, op: filter.op, value: filter.value, limit: "500" } });
+        const names = new Set(((res.listing || {}).items || []).map((i) => i.name));
+        docs = docs.filter((x) => names.has(x.name));
+      }
+    } catch (err) { failure = String(err.message); }
+    const filterButton = el("button", { type: "button", class: "header-button" + (filter ? " is-active" : ""),
+      id: "fs-filter", text: filter ? `Filter: ${filter.field} ${filter.op} ${filter.value}` : "Filter",
+      "aria-label": "Filter list", onclick: () => fsFilterDialog(database + "|" + colPath, filter, redraw) });
+    const deleteCollection = { id: "deletecollection", label: "Delete collection", destructive: true,
+      confirm: "Every document in the collection, and in each of their subcollections, is deleted." };
+    const menu = menuOf(`Collection ${selectedCol} menu`, [
+      { id: "deletecollection", label: "Delete collection",
+        run: () => act([colPath], deleteCollection, () => { fsPanelGo(P.slice(0, colEnd - 1)); redraw(); }) },
+      { id: "open", label: "Open collection page", run: () => navigate(detailHref(route, [colPath])) },
+    ]);
+    const docsShown = visible(docs);
+    columns.push(column("fs-documents", selectedCol,
+      [addDoc ? el("button", { type: "button", class: "secondary", id: "fs-add-document", text: "Add document",
+        onclick: () => act([colPath], addDoc) }) : null, filterButton].filter(Boolean),
+      failure ? el("p", { class: "form-error", text: failure })
+        : docsShown.length ? rowList(docsShown, docId, (item) => { fsPanelGo([...P.slice(0, colEnd), item.name]); redraw(); })
+          : el("p", { class: "unavailable", text: filter ? "No documents match the filter." : "This collection has no documents." }),
+      menu));
+  }
+
+  // Right: the document's subcollections and fields.
+  if (colPath && docId) {
+    const docPath = [colPath, docId];
+    let d;
+    try { d = await api(`/api/detail/${route.service}${q(docPath)}`); } catch (err) { d = { unavailable: String(err.message) }; }
+    const fields = ((d.sections || []).find((s) => s.id === "fields") || {}).listing || {};
+    const subs = ((d.sections || []).find((s) => s.id === "collections") || {}).listing || {};
+    const acts = d.actions || [];
+    const find = (id) => acts.find((a) => a.id === id);
+    const menu = menuOf(`Document ${docId} menu`, [
+      find("deletedocument") && { id: "deletedocument", label: "Delete document",
+        run: () => act(docPath, find("deletedocument"), () => { fsPanelGo(P.slice(0, colEnd)); redraw(); }) },
+      find("deletefields") && { id: "deletefields", label: "Delete document fields", run: () => act(docPath, find("deletefields")) },
+      { id: "open", label: "Open document page", run: () => navigate(detailHref(route, docPath)) },
+    ].filter(Boolean));
+    const editField = async (name) => {
+      try {
+        const f = await api(`/api/detail/${route.service}${q([...docPath, name])}`);
+        if (f.edit) return openEditForm(route, [...docPath, name], f.edit, redraw);
+        navigate(detailHref(route, [...docPath, name]));
+      } catch (err) { notify(`Cannot edit ${name}: ${err.message}`, "error"); }
+    };
+    const fieldRows = (fields.items || []).map((item) => el("li", { class: "fs-row fs-field" },
+      el("button", { type: "button", class: "fs-row-link", title: "Edit field", "aria-label": `Edit field ${item.name}`,
+        onclick: () => editField(item.name) },
+        el("span", { class: "fs-field-name", text: item.name + ": " }),
+        el("span", { class: "fs-field-value", text: (item.fields || {}).Value || "" }),
+        el("span", { class: "fs-field-type", text: ` (${(item.fields || {}).Type || ""})` })),
+      el("button", { type: "button", class: "icon-button danger fs-field-delete", "aria-label": `Delete field ${item.name}`,
+        text: "✕", onclick: () => act([...docPath, item.name],
+          { id: "deletefield", label: "Delete field", destructive: true }) })));
+    columns.push(column("fs-document", docId, [
+      find("startcollection") ? el("button", { type: "button", class: "secondary", id: "fs-start-subcollection",
+        text: "Start collection", onclick: () => act(docPath, find("startcollection")) }) : null,
+      find("addfield") ? el("button", { type: "button", class: "secondary", id: "fs-add-field", text: "Add field",
+        onclick: () => act(docPath, find("addfield")) }) : null,
+    ].filter(Boolean),
+    d.unavailable ? el("p", { class: "form-error", text: d.unavailable }) : el("div", {},
+      (subs.items || []).length
+        ? rowList(subs.items, "", (item) => { fsPanelGo([...P.slice(0, colEnd), docId, item.name]); redraw(); })
+        : null,
+      fieldRows.length ? el("ul", { class: "fs-rows fs-fields", role: "list" }, ...fieldRows)
+        : el("p", { class: "unavailable", text: fields.note || "This document has no fields." })),
+    menu));
+  }
+
+  const crumbs = el("nav", { class: "breadcrumb fs-path", "aria-label": "Path" },
+    el("button", { type: "button", class: "fs-row-link", text: database, onclick: () => { fsPanelGo([]); redraw(); } }),
+    ...P.flatMap((s, i) => [el("span", { "aria-hidden": "true", text: " > " }),
+      el("button", { type: "button", class: "fs-row-link", text: s, onclick: () => { fsPanelGo(P.slice(0, i + 1)); redraw(); } })]));
+  setChildren(view, header, picker, crumbs, el("div", { class: "fs-panel", id: "fs-panel" }, ...columns));
+  announce(`${database} data opened`);
+  // Realtime updates (Panel settings): the panel is read again every few
+  // seconds while it is on screen, as Google's listens for changes.
+  if (settings.realtime) {
+    const panel = view.querySelector("#fs-panel");
+    FS_PANEL_TIMER = setInterval(() => {
+      if (!panel.isConnected) { clearInterval(FS_PANEL_TIMER); FS_PANEL_TIMER = null; return; }
+      if (document.querySelector(".modal") || document.hidden) return;
+      redraw();
+    }, 10000);
+  }
+}
+
+function fsEditPath(redraw) {
+  const { dialog, close } = openModal({ labelledBy: "fs-edit-path-title" });
+  const input = el("input", { type: "text", id: "fs-path-input", value: fsPanelPath().join("/"),
+    "aria-label": "Path", placeholder: "users/alice" });
+  dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+    e.preventDefault();
+    fsPanelGo(input.value.split("/").filter(Boolean));
+    close();
+    redraw();
+  } },
+  el("h2", { id: "fs-edit-path-title", text: "Edit path" }),
+  el("p", { class: "form-help", text: "A collection or document path, such as users or users/alice/orders/o1." }),
+  input,
+  el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+    el("button", { type: "submit", class: "primary", text: "Go" }))));
+  input.focus();
+}
+
+function fsPanelSettingsDialog(redraw) {
+  const s = fsPanelSettings();
+  const { dialog, close } = openModal({ labelledBy: "fs-settings-title" });
+  const box = (id, label, on) => el("label", { class: "checkbox-row" },
+    el("input", { type: "checkbox", id, checked: on }), el("span", { text: " " + label }));
+  dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+    e.preventDefault();
+    const next = { showMissing: dialog.querySelector("#fs-show-missing").checked,
+      realtime: dialog.querySelector("#fs-realtime").checked };
+    try { localStorage.setItem(FS_PANEL_SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage refused */ }
+    close();
+    redraw();
+  } },
+  el("h2", { id: "fs-settings-title", text: "Project panel settings" }),
+  box("fs-show-missing", "Show non-existent parents", s.showMissing),
+  box("fs-realtime", "Realtime updates enabled", s.realtime),
+  el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+    el("button", { type: "submit", class: "primary", text: "Save" }))));
+}
+
+function fsFilterDialog(key, current, redraw) {
+  const { dialog, close } = openModal({ labelledBy: "fs-filter-title" });
+  const field = el("input", { type: "text", id: "fs-filter-field", value: (current || {}).field || "", "aria-label": "Field" });
+  const op = el("select", { id: "fs-filter-op", "aria-label": "Operator" },
+    ...["==", "!=", "<", "<=", ">", ">=", "in", "array-contains"].map((o) =>
+      el("option", { value: o, text: o, selected: o === ((current || {}).op || "==") })));
+  const value = el("input", { type: "text", id: "fs-filter-value", value: (current || {}).value || "", "aria-label": "Value" });
+  dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+    e.preventDefault();
+    if (field.value.trim()) FS_PANEL_FILTERS.set(key, { field: field.value.trim(), op: op.value, value: value.value });
+    else FS_PANEL_FILTERS.delete(key);
+    close();
+    redraw();
+  } },
+  el("h2", { id: "fs-filter-title", text: "Add filters" }),
+  el("label", { for: "fs-filter-field", text: "Filter by field" }), field,
+  el("label", { for: "fs-filter-op", text: "Condition" }), op,
+  el("label", { for: "fs-filter-value", text: "Value" }), value,
+  el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "secondary", id: "fs-filter-clear", text: "Clear filter",
+      onclick: () => { FS_PANEL_FILTERS.delete(key); close(); redraw(); } }),
+    el("button", { type: "submit", class: "primary", text: "Apply" }))));
+  field.focus();
+}
+
 
 // --- Connect and About (#802) -----------------------------------------
 //

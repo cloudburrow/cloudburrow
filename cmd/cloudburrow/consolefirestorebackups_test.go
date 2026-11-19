@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin/fstest"
 )
@@ -80,10 +81,10 @@ func TestConsoleFirestoreTransferAndBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, err := p.Detail(ctx, "p", at)
-	if err != nil || len(d.Sections) != 4 || d.Sections[3].ID != "backups" || len(d.Sections[3].Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 6 || len(fsSection(d, "schedules").Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
-	row := d.Sections[3].Listing.Items[0]
+	row := fsSection(d, "schedules").Listing.Items[0]
 	if row.Fields["State"] != "Ready" || row.Fields["Documents"] != "5" || row.Fields["Location"] != "nam5" {
 		t.Errorf("the backup row = %+v", row.Fields)
 	}
@@ -99,7 +100,17 @@ func TestConsoleFirestoreTransferAndBackups(t *testing.T) {
 	if err := p.ActAt(ctx, "p", row.ActsOn, "deletebackup", nil); err != nil {
 		t.Fatalf("Delete backup: %v", err)
 	}
-	if d, _ := p.Detail(ctx, "p", at); len(d.Sections[3].Listing.Items) != 0 {
-		t.Errorf("backups after Delete backup = %+v", d.Sections[3].Listing.Items)
+	if d, _ := p.Detail(ctx, "p", at); len(fsSection(d, "schedules").Listing.Items) != 0 {
+		t.Errorf("backups after Delete backup = %+v", fsSection(d, "schedules").Listing.Items)
 	}
+}
+
+// fsSection is the database page's tab id, or an empty one.
+func fsSection(d console.Detail, id string) console.Section {
+	for _, s := range d.Sections {
+		if s.ID == id {
+			return s
+		}
+	}
+	return console.Section{}
 }

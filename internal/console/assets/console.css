@@ -2190,3 +2190,35 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .iam-condition { display: grid; gap: 4px; margin-top: 8px; }
 .iam-condition[hidden], .iam-role-pop[hidden] { display: none; }
 .iam-condition input, .iam-condition textarea, #iam-new-principals { width: 100%; box-sizing: border-box; }
+
+/* Firestore's Data panel (#1845): three columns, collections | documents |
+   fields, as Google's Firestore Studio draws them; one column under another
+   on a narrow screen. */
+.fs-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 8px; }
+.fs-panel .fs-column { margin: 0; border-radius: 0; min-height: 320px; overflow: auto; }
+.fs-panel .fs-column + .fs-column { border-left: none; }
+.fs-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fs-column-title { font-size: var(--text-body-size); margin: 0; overflow-wrap: anywhere; }
+.fs-column-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.fs-rows { list-style: none; margin: 0; padding: 0; }
+.fs-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.fs-row.is-selected { background: var(--selected, rgba(26, 115, 232, 0.12)); }
+.fs-row.is-absent .fs-row-link { font-style: italic; }
+.fs-row-link { background: none; border: none; color: inherit; cursor: pointer; text-align: left; padding: 6px 8px;
+  flex: 1; overflow-wrap: anywhere; font: inherit; }
+.fs-field-type { opacity: 0.7; }
+.fs-path { margin: 8px 0; }
+.fs-menu { width: auto; }
+@media (max-width: 720px) {
+  .fs-panel { grid-template-columns: minmax(0, 1fr); }
+  .fs-panel .fs-column + .fs-column { border-left: 1px solid var(--border, #dadce0); border-top: none; }
+}
+.browse-row { display: flex; gap: 8px; align-items: center; }
+.browse-row > input { flex: 1; min-width: 0; }
+
+/* Ctrl+Space completions at a text control's cursor (#1846). */
+.completions { list-style: none; margin: 2px 0 0; padding: 4px 0; max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--border, #dadce0); border-radius: var(--radius-control); background: var(--surface, #fff);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); font-family: var(--mono, monospace); }
+.completions li { padding: 4px 12px; cursor: pointer; }
+.completions li.active, .completions li:hover { background: var(--hover, #e8f0fe); }

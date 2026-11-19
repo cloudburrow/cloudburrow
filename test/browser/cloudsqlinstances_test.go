@@ -65,6 +65,7 @@ func waitSQL(t *testing.T, svc *sqladmin.Service, project string, op *sqladmin.O
 func (p *tab) pageAction(label string, values map[string]string, confirm string) string {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
+	// Beside the title, or at the top of the tab whose action it is (#1845).
 	where := p.findAction(label)
 	if where == "" {
 		p.t.Fatalf("the page offers no %s", label)

@@ -57,7 +57,7 @@ func TestDatastoreElementsAreListedAndAddressed(t *testing.T) {
 	}
 	var got []row
 	for _, el := range datastoreElements(nestedFixture()) {
-		v := datastoreValueGo(el.Value, "demo")
+		v := datastoreValueGo(el.Value, datastoreHome{project: "demo"})
 		_, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps), el.Value.GetExcludeFromIndexes())
 		seg := datastoreElementSegment(el.Steps)
 		back, err := parseDatastoreElement(seg)
@@ -99,7 +99,7 @@ func TestDatastoreElementsAreListedAndAddressed(t *testing.T) {
 func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 	orig := nestedFixture()
 	for _, el := range datastoreElements(orig) {
-		v := datastoreValueGo(el.Value, "demo")
+		v := datastoreValueGo(el.Value, datastoreHome{project: "demo"})
 		fields, _, ok := datastoreElementForm(v, isDatastoreKeyStep(el.Steps), el.Value.GetExcludeFromIndexes())
 		if !ok {
 			continue
@@ -114,7 +114,7 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 			continue
 		}
 		prop := proto.Clone(orig).(*datastorepb.Value)
-		if err := setDatastoreElement(prop, "demo", "items", el.Steps, parsed, datastoreExcludedValue(values)); err != nil {
+		if err := setDatastoreElement(prop, datastoreHome{project: "demo"}, "items", el.Steps, parsed, datastoreExcludedValue(values)); err != nil {
 			t.Errorf("%v: %v", el.Steps, err)
 			continue
 		}
@@ -126,10 +126,10 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 	// A change.
 	when := time.Date(2027, 1, 2, 3, 4, 5, 6000, time.UTC)
 	prop := proto.Clone(orig).(*datastorepb.Value)
-	if err := setDatastoreElement(prop, "demo", "items", []any{6, "when"}, when, nil); err != nil {
+	if err := setDatastoreElement(prop, datastoreHome{project: "demo"}, "items", []any{6, "when"}, when, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := setDatastoreElement(prop, "demo", "items", []any{0}, datastore.NameKey("Order", "id=8", nil), nil); err != nil {
+	if err := setDatastoreElement(prop, datastoreHome{project: "demo"}, "items", []any{0}, datastore.NameKey("Order", "id=8", nil), nil); err != nil {
 		t.Fatal(err)
 	}
 	gotWhen := prop.GetArrayValue().GetValues()[6].GetEntityValue().GetProperties()["when"]
@@ -163,7 +163,7 @@ func TestDatastoreEditValueWritesOnlyThatValue(t *testing.T) {
 		prop := proto.Clone(orig).(*datastorepb.Value)
 		parsed, err := parseDatastoreElementValue(tc.values, isDatastoreKeyStep(tc.steps))
 		if err == nil {
-			err = setDatastoreElement(prop, "demo", "items", tc.steps, parsed, nil)
+			err = setDatastoreElement(prop, datastoreHome{project: "demo"}, "items", tc.steps, parsed, nil)
 		}
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v %v: err %v, want one naming %q", tc.steps, tc.values, err, tc.want)
@@ -182,7 +182,7 @@ func TestDatastoreEmbeddedEntityKeyKeepsItsPartition(t *testing.T) {
 		Key: &datastorepb.Key{PartitionId: &datastorepb.PartitionId{ProjectId: "other", DatabaseId: "db2"},
 			Path: []*datastorepb.Key_PathElement{{Kind: "Order", IdType: &datastorepb.Key_PathElement_Id{Id: 7}}}},
 		Properties: map[string]*datastorepb.Value{"n": {ValueType: &datastorepb.Value_IntegerValue{IntegerValue: 1}}}}}}
-	got := datastoreValueGo(v, "demo")
+	got := datastoreValueGo(v, datastoreHome{project: "demo"})
 	if typ := datastoreType(got); typ != "entity" {
 		t.Errorf("type %q, want entity", typ)
 	}
@@ -190,7 +190,7 @@ func TestDatastoreEmbeddedEntityKeyKeepsItsPartition(t *testing.T) {
 		t.Errorf("rendered %q, want %q", s, want)
 	}
 	arr := &datastorepb.Value{ValueType: &datastorepb.Value_ArrayValue{ArrayValue: &datastorepb.ArrayValue{Values: []*datastorepb.Value{v}}}}
-	if s, want := renderDatastoreValue(datastoreValueGo(arr, "demo"), false), `[{"__key__": key(Order/id=7 (project other, database db2)), "n": 1}]`; s != want {
+	if s, want := renderDatastoreValue(datastoreValueGo(arr, datastoreHome{project: "demo"}), false), `[{"__key__": key(Order/id=7 (project other, database db2)), "n": 1}]`; s != want {
 		t.Errorf("in an array, rendered %q, want %q", s, want)
 	}
 	if _, _, ok := formatDatastoreValue(got, false); ok {
@@ -198,7 +198,7 @@ func TestDatastoreEmbeddedEntityKeyKeepsItsPartition(t *testing.T) {
 	}
 	for _, el := range datastoreElements(v) {
 		if isDatastoreKeyStep(el.Steps) {
-			if _, _, ok := datastoreElementForm(datastoreValueGo(el.Value, "demo"), true, false); ok {
+			if _, _, ok := datastoreElementForm(datastoreValueGo(el.Value, datastoreHome{project: "demo"}), true, false); ok {
 				t.Error("another project's embedded entity key is offered Edit value")
 			}
 		}

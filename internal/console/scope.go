@@ -70,3 +70,11 @@ func WithScopeValue(ctx context.Context, key, value string) context.Context {
 	q.Set(key, value)
 	return context.WithValue(ctx, scopeContextKey{}, q)
 }
+
+// Filterer is a provider whose list screen narrows its rows by pickers of
+// its own (Listing.Filters), each in the query parameter FilterKeys names,
+// which its screens carry on every request and link as they carry the
+// scope.
+type Filterer interface {
+	FilterKeys() []string
+}

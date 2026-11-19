@@ -69,6 +69,7 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
@@ -218,6 +219,10 @@ var areas = []area{
 	// serves the documents API alone.
 	{Key: "firestoreadmin", Title: "Firestore Admin API", Own: true, Services: []string{"google.firestore.admin.v1.FirestoreAdmin"}},
 	{Key: "datastore", Title: "Datastore", Services: []string{"google.datastore.v1.Datastore"}},
+	// The Datastore Admin API (#1884) is CloudBurrow's own, served by the
+	// Datastore pod's call front (internal/callfront): exports, imports
+	// and indexes, which the emulator does not serve.
+	{Key: "datastoreadmin", Title: "Datastore Admin API", Own: true, Services: []string{"google.datastore.admin.v1.DatastoreAdmin"}},
 	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin", "google.bigtable.admin.v2.BigtableInstanceAdmin"}},
 	{Key: "spanner", Title: "Spanner", Services: []string{"google.spanner.v1.Spanner", "google.spanner.admin.database.v1.DatabaseAdmin", "google.spanner.admin.instance.v1.InstanceAdmin"}},
 	// BigQuery (#993): the community emulator behind CloudBurrow's

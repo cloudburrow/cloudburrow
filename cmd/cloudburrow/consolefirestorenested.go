@@ -91,13 +91,13 @@ func (p firestoreProvider) rawFirestore() (c firestorepb.FirestoreClient, done f
 	return firestorepb.NewFirestoreClient(conn), func() { _ = conn.Close() }, nil
 }
 
-func firestoreDatabaseName(project string) string {
-	return "projects/" + project + "/databases/(default)"
+func firestoreDatabaseName(ctx context.Context, project string) string {
+	return "projects/" + project + "/databases/" + firestoreDatabaseIn(ctx)
 }
 
 // firestoreDocumentName is a document's full name, after checking that
 // collection is a collection path and id a document ID.
-func firestoreDocumentName(project, collection, id string) (string, error) {
+func firestoreDocumentName(ctx context.Context, project, collection, id string) (string, error) {
 	parts := strings.Split(collection, "/")
 	if len(parts)%2 == 0 || slicesContainsEmpty(parts) {
 		return "", fmt.Errorf("%q is not a collection path: a collection is an ID, or document path/ID, "+
@@ -106,7 +106,7 @@ func firestoreDocumentName(project, collection, id string) (string, error) {
 	if id == "" || strings.Contains(id, "/") {
 		return "", fmt.Errorf("%q is not a document ID: an ID has no slash", id)
 	}
-	return firestoreDocumentsPrefix(project) + collection + "/" + id, nil
+	return firestoreDocumentsPrefix(ctx, project) + collection + "/" + id, nil
 }
 
 func slicesContainsEmpty(parts []string) bool {
@@ -122,7 +122,7 @@ func slicesContainsEmpty(parts []string) bool {
 // client's Get does, and returns it as stored.
 func readRawDocument(ctx context.Context, c firestorepb.FirestoreClient, project, name string) (*firestorepb.Document, error) {
 	stream, err := c.BatchGetDocuments(ctx, &firestorepb.BatchGetDocumentsRequest{
-		Database: firestoreDatabaseName(project), Documents: []string{name}})
+		Database: firestoreDatabaseName(ctx, project), Documents: []string{name}})
 	if err != nil {
 		return nil, err
 	}
@@ -140,14 +140,14 @@ func readRawDocument(ctx context.Context, c firestorepb.FirestoreClient, project
 		}
 	}
 	if doc == nil {
-		return nil, status.Errorf(codes.NotFound, "document %s does not exist", strings.TrimPrefix(name, firestoreDocumentsPrefix(project)))
+		return nil, status.Errorf(codes.NotFound, "document %s does not exist", strings.TrimPrefix(name, firestoreDocumentsPrefix(ctx, project)))
 	}
 	return doc, nil
 }
 
 // lookupFirestoreField reads a document and one of its fields as stored.
 func (p firestoreProvider) lookupFirestoreField(ctx context.Context, project, collection, id, field string) (*firestorepb.Document, *firestorepb.Value, error) {
-	name, err := firestoreDocumentName(project, collection, id)
+	name, err := firestoreDocumentName(ctx, project, collection, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -325,17 +325,17 @@ func firestoreValuePB(v any) (*firestorepb.Value, error) {
 // parseFirestorePB reads a form's type and value as the stored value the
 // official client would write for it. A reference is always one into this
 // project's default database.
-func parseFirestorePB(project, typ, raw string) (*firestorepb.Value, error) {
+func parseFirestorePB(ctx context.Context, project, typ, raw string) (*firestorepb.Value, error) {
 	if strings.TrimSpace(typ) == "reference" {
-		rel, err := firestoreReferencePath(project, raw)
+		rel, err := firestoreReferencePath(ctx, project, raw)
 		if err != nil {
 			return nil, err
 		}
 		return &firestorepb.Value{ValueType: &firestorepb.Value_ReferenceValue{
-			ReferenceValue: firestoreDocumentsPrefix(project) + rel}}, nil
+			ReferenceValue: firestoreDocumentsPrefix(ctx, project) + rel}}, nil
 	}
 	// Every other type is read without a client: only a reference needs one.
-	v, err := parseFirestoreValue(nil, project, typ, raw)
+	v, err := parseFirestoreValue(ctx, nil, project, typ, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -345,15 +345,15 @@ func parseFirestorePB(project, typ, raw string) (*firestorepb.Value, error) {
 // firestoreLocalReference is the document path a reference names inside
 // this project's default database, and false for one in another project or
 // database.
-func firestoreLocalReference(project, name string) (string, bool) {
-	rel, ok := strings.CutPrefix(name, firestoreDocumentsPrefix(project))
+func firestoreLocalReference(ctx context.Context, project, name string) (string, bool) {
+	rel, ok := strings.CutPrefix(name, firestoreDocumentsPrefix(ctx, project))
 	return rel, ok && rel != ""
 }
 
 // firestoreForeignReferenceNote says why a reference is offered no edit.
 func firestoreForeignReferenceNote(name string) string {
-	return "This reference names " + name + ", a document in another project or database than this one's " +
-		"default. The form writes a reference into this project's default database, so saving it would change " +
+	return "This reference names " + name + ", a document in another project or database than this one. " +
+		"The form writes a reference into this database, so saving it would change " +
 		"which document it names; it cannot be edited here. It can be removed."
 }
 
@@ -361,13 +361,13 @@ func firestoreForeignReferenceNote(name string) string {
 // holds it: the type the form names and the text parseFirestorePB reads
 // back to the same value. ok is false, with why, for a value the form cannot
 // hold without changing it.
-func formatFirestorePB(project string, v *firestorepb.Value) (typ, raw, why string, ok bool) {
+func formatFirestorePB(ctx context.Context, project string, v *firestorepb.Value) (typ, raw, why string, ok bool) {
 	switch t := v.GetValueType().(type) {
 	case *firestorepb.Value_ArrayValue, *firestorepb.Value_MapValue:
 		return "", "", "A map or array inside a field is changed value by value: each value inside it is listed " +
 			"after it, with Edit value, and Add value and Remove value change what it holds.", false
 	case *firestorepb.Value_ReferenceValue:
-		rel, local := firestoreLocalReference(project, t.ReferenceValue)
+		rel, local := firestoreLocalReference(ctx, project, t.ReferenceValue)
 		if !local {
 			return "", "", firestoreForeignReferenceNote(t.ReferenceValue), false
 		}
@@ -456,9 +456,9 @@ func firestoreAddValueAction(target *firestorepb.Value) console.Action {
 // array; Remove value on every value. Each carries the digest of drawn, the
 // whole field as read. The action route checks the same things again before
 // writing.
-func firestoreElementActions(project string, el firestoreElement, drawn *firestorepb.Value) []console.Action {
+func firestoreElementActions(ctx context.Context, project string, el firestoreElement, drawn *firestorepb.Value) []console.Action {
 	var out []console.Action
-	if typ, raw, _, ok := formatFirestorePB(project, el.Value); ok {
+	if typ, raw, _, ok := formatFirestorePB(ctx, project, el.Value); ok {
 		out = append(out, console.Action{ID: "editvalue", Label: "Edit value", Fields: []console.Field{
 			{Name: "type", Label: "Type", Type: "text", Required: true, Default: typ, Pattern: firestoreElementTypePattern,
 				Help: "One of " + firestoreElementTypeList + "."},
@@ -478,7 +478,7 @@ func firestoreElementActions(project string, el firestoreElement, drawn *firesto
 // firestoreElementsSection is a map or array field's Elements tab: every
 // value inside it, each opening its own page. base is where v is inside the
 // field: none for the field itself, and an element's steps on its page.
-func firestoreElementsSection(project, collection, id, field string, base []any, v, drawn *firestorepb.Value) (console.Section, bool) {
+func firestoreElementsSection(ctx context.Context, project, collection, id, field string, base []any, v, drawn *firestorepb.Value) (console.Section, bool) {
 	if !isFirestoreContainer(v) {
 		return console.Section{}, false
 	}
@@ -495,7 +495,7 @@ func firestoreElementsSection(project, collection, id, field string, base []any,
 			Name:    firestoreElementLabel(field, el.Steps),
 			Fields:  map[string]string{"Type": firestoreType(gv), "Value": firestoreRowValue(gv)},
 			Opens:   at,
-			Actions: firestoreElementActions(project, el, drawn),
+			Actions: firestoreElementActions(ctx, project, el, drawn),
 			ActsOn:  at,
 		})
 	}
@@ -537,7 +537,7 @@ func (p firestoreProvider) elementDetail(ctx context.Context, project, collectio
 	gv := firestoreValueGo(v)
 	d := console.Detail{
 		Summary: []console.Property{
-			{Label: "Document", Value: strings.TrimPrefix(doc.GetName(), firestoreDocumentsPrefix(project))},
+			{Label: "Document", Value: strings.TrimPrefix(doc.GetName(), firestoreDocumentsPrefix(ctx, project))},
 			{Label: "Field", Value: field},
 			{Label: "Element", Value: label},
 			{Label: "Type", Value: firestoreType(gv)},
@@ -545,12 +545,12 @@ func (p firestoreProvider) elementDetail(ctx context.Context, project, collectio
 		Sections: []console.Section{{ID: "value", Label: "Value", Kind: console.KindText, Text: renderFirestoreValue(gv)}},
 		Trail:    firestoreElementTrail(collection, id, field, label),
 	}
-	if _, _, why, ok := formatFirestorePB(project, v); !ok {
+	if _, _, why, ok := formatFirestorePB(ctx, project, v); !ok {
 		d.Sections[0].Note = why
 	} else {
 		d.Sections[0].Note = "Edit value writes back this value only; nothing else in the document is written."
 	}
-	if sec, ok := firestoreElementsSection(project, collection, id, field, steps, v, prop); ok {
+	if sec, ok := firestoreElementsSection(ctx, project, collection, id, field, steps, v, prop); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
@@ -601,12 +601,12 @@ func (p firestoreProvider) elementActions(ctx context.Context, project string, p
 	if err != nil {
 		return nil
 	}
-	return firestoreElementActions(project, firestoreElement{Steps: steps, Value: v}, prop)
+	return firestoreElementActions(ctx, project, firestoreElement{Steps: steps, Value: v}, prop)
 }
 
 // setFirestoreElement replaces the value steps address inside the field with
 // the form's value, and returns the steps of what changed.
-func setFirestoreElement(prop *firestorepb.Value, project, field string, steps []any, values map[string]string) ([]any, error) {
+func setFirestoreElement(ctx context.Context, prop *firestorepb.Value, project, field string, steps []any, values map[string]string) ([]any, error) {
 	label := firestoreElementLabel(field, steps)
 	if len(steps) == 0 {
 		return nil, errors.New("a field is changed with Edit field")
@@ -627,10 +627,10 @@ func setFirestoreElement(prop *firestorepb.Value, project, field string, steps [
 		return nil, err
 	}
 	// Checked again here: the form was drawn earlier.
-	if _, _, why, ok := formatFirestorePB(project, old); !ok {
+	if _, _, why, ok := formatFirestorePB(ctx, project, old); !ok {
 		return nil, fmt.Errorf("%s: %s", label, why)
 	}
-	nv, err := parseFirestorePB(project, typ, values["value"])
+	nv, err := parseFirestorePB(ctx, project, typ, values["value"])
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", label, err)
 	}
@@ -646,7 +646,7 @@ func setFirestoreElement(prop *firestorepb.Value, project, field string, steps [
 // addFirestoreElement adds a value to the map or array steps address inside
 // the field, as Add value's form names it, and returns the steps of what
 // changed: the new key of a map, or the array.
-func addFirestoreElement(prop *firestorepb.Value, project, field string, steps []any, values map[string]string) ([]any, error) {
+func addFirestoreElement(ctx context.Context, prop *firestorepb.Value, project, field string, steps []any, values map[string]string) ([]any, error) {
 	label := firestoreElementLabel(field, steps)
 	target, err := firestoreValueAt(prop, steps, label)
 	if err != nil {
@@ -669,7 +669,7 @@ func addFirestoreElement(prop *firestorepb.Value, project, field string, steps [
 			// Firestore's rule, refused here so the form says it plainly.
 			return nil, errors.New("an array cannot hold an array; Firestore refuses one")
 		}
-		nv, err := parseFirestorePB(project, typ, values["value"])
+		nv, err := parseFirestorePB(ctx, project, typ, values["value"])
 		if err != nil {
 			return nil, fmt.Errorf("%s[%d]: %v", label, at, err)
 		}
@@ -685,7 +685,7 @@ func addFirestoreElement(prop *firestorepb.Value, project, field string, steps [
 		return nil, fmt.Errorf("the map %s already has a key %q; change it with Edit value", label, key)
 	}
 	at := append(append([]any{}, steps...), key)
-	nv, err := parseFirestorePB(project, typ, values["value"])
+	nv, err := parseFirestorePB(ctx, project, typ, values["value"])
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", firestoreElementLabel(field, at), err)
 	}
@@ -792,7 +792,7 @@ func (p firestoreProvider) changeFirestoreField(ctx context.Context, project str
 		return errors.New("choose a project first")
 	}
 	collection, id, field := path[0], path[1], path[2]
-	name, err := firestoreDocumentName(project, collection, id)
+	name, err := firestoreDocumentName(ctx, project, collection, id)
 	if err != nil {
 		return err
 	}
@@ -819,7 +819,7 @@ func (p firestoreProvider) changeFirestoreField(ctx context.Context, project str
 	if err != nil {
 		return err
 	}
-	_, err = c.Commit(ctx, &firestorepb.CommitRequest{Database: firestoreDatabaseName(project),
+	_, err = c.Commit(ctx, &firestorepb.CommitRequest{Database: firestoreDatabaseName(ctx, project),
 		Writes: []*firestorepb.Write{firestoreFieldWrite(name, field, changed, at, doc.GetUpdateTime())}})
 	return err
 }
@@ -836,11 +836,11 @@ func (p firestoreProvider) actOnFirestoreValue(ctx context.Context, project stri
 	switch {
 	case action == "editvalue" && len(path) == 4:
 		return true, p.changeFirestoreField(ctx, project, path, values, func(prop *firestorepb.Value) ([]any, error) {
-			return setFirestoreElement(prop, project, path[2], steps, values)
+			return setFirestoreElement(ctx, prop, project, path[2], steps, values)
 		})
 	case action == "addvalue" && (len(path) == 3 || len(path) == 4):
 		return true, p.changeFirestoreField(ctx, project, path, values, func(prop *firestorepb.Value) ([]any, error) {
-			return addFirestoreElement(prop, project, path[2], steps, values)
+			return addFirestoreElement(ctx, prop, project, path[2], steps, values)
 		})
 	case action == "removevalue" && len(path) == 4:
 		return true, p.changeFirestoreField(ctx, project, path, values, func(prop *firestorepb.Value) ([]any, error) {

@@ -1105,7 +1105,7 @@ func TestHiddenFieldsAreSentBackAsTheyCame(t *testing.T) {
 	for _, want := range []string{
 		`const hidden = spec.fields.filter((f) => f.type === "hidden");`,
 		`const entries = spec.fields.filter((f) => f.type !== "hidden").map((f) => {`,
-		`return Object.fromEntries([...hiddenValues(hidden), ...entries`,
+		`return Object.fromEntries([...hiddenValues(hidden), ...tabsShown, ...entries`,
 		`if ((action.fields || []).some((f) => f.type !== "hidden")) {`,
 		`if (carried.length) body.Values = Object.fromEntries(carried);`,
 		`const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);`,

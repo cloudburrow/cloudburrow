@@ -217,6 +217,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetVertexAI(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.LocalAI))
 	}
+	if firestoreKMS(cfg) {
+		// Firestore's customer-managed keys (#1881) are checked against
+		// this process's Cloud KMS, through cloudburrow-host: its port is
+		// fixed now, since the front's arguments name it.
+		if err := pinKMSPort(&cfg); err != nil {
+			return err
+		}
+		comps.SetKMS(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace, cfg.Endpoints.KMS))
+	}
 	if serviceEnabled(cfg, config.ServiceFirestore) {
 		// Firestore with MongoDB compatibility serves TLS only (#1738),
 		// with a certificate of the instance's own CA, which
@@ -909,7 +918,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -924,6 +933,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			// The Pub/Sub front reads CMEK topics' keys (#1874).
 			if pubsubKMS {
+				published["kms"] = true
+			}
+			// The Firestore front checks customer-managed keys (#1881).
+			if firestoreKMS(cfg) {
 				published["kms"] = true
 			}
 		}

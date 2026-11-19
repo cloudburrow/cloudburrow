@@ -192,6 +192,11 @@ type Listing struct {
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
+	// Filters are pickers drawn after Scope that narrow the rows, each
+	// in a query parameter of its own, as Google's Datastore Entities
+	// page has Namespace and Kind (#1846). A Filterer's screens carry
+	// them on every request; choosing one clears those after it.
+	Filters []*Scope `json:"filters,omitempty"`
 	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
 	// Storage Settings page has Project access and Interoperability (#1843):
 	// the tab whose ID is ListTab holds the rows, with the screen's create
@@ -298,6 +303,11 @@ type Field struct {
 	// object of file name to contents.
 	Follows   string                       `json:"follows,omitempty"`
 	Templates map[string]map[string]string `json:"templates,omitempty"`
+	// Completions, on a text or textarea field, are the words Ctrl+Space
+	// offers at the cursor, those beginning with the word being typed, as
+	// Google's Query by GQL offers the namespace's kinds (#1846): choosing
+	// one with Enter or a click puts it in place of that word.
+	Completions []string `json:"completions,omitempty"`
 	// KeyPattern and ValuePattern, on a "map" field, are what the API
 	// accepts as each entry's key and value, and MaxEntries how many entries
 	// it takes (0: any number). The browser checks every line against them
@@ -328,6 +338,13 @@ type Field struct {
 	// (#1864): its value lowercased, other characters made dashes, as
 	// Google's Create service account derives the ID from the name.
 	DeriveFrom string `json:"deriveFrom,omitempty"`
+	// Browse names what the field's Browse button chooses from: "storage" is
+	// a bucket of this instance's Cloud Storage, filled in as gs://BUCKET/,
+	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
+	// of this instance's Cloud KMS in the location the form's
+	// locationType, multiRegion and region fields hold, filled in as its
+	// resource name (#1881).
+	Browse string `json:"browse,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
 	// disabled, with the reason beside it, so the option stays visible and
@@ -719,6 +736,11 @@ const (
 	// where the provider lists it, as Google's service page has Metrics,
 	// SLOs, Logs, Revisions (#1852); otherwise it is appended last.
 	KindLogs SectionKind = "logs"
+	// KindQuery is a placeholder for the query tab, drawn where the
+	// provider lists it and under its Label, as Firestore's database page
+	// has its Query builder first (#1845). The form is the provider's
+	// QueryForm for the page; a page with none drops it.
+	KindQuery SectionKind = "query"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -732,6 +754,10 @@ type Section struct {
 	ID string `json:"id"`
 	// Label is the tab's text.
 	Label string `json:"label"`
+	// Group, when set, draws this section and the others with the same Group
+	// as one tab named Group, with their labels on a strip inside it, as
+	// Google's Firestore Indexes page holds Manual and Automatic (#1845).
+	Group string `json:"group,omitempty"`
 	// Kind selects the content field below. Empty means Listing, so this is
 	// backward compatible by construction.
 	Kind SectionKind `json:"kind,omitempty"`
@@ -1555,7 +1581,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
 			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
-			"page": caps.Page, "scope": caps.Scope,
+			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -1760,6 +1786,9 @@ type capabilities struct {
 	// Scope is the query parameter a Scoper's screens carry on every request
 	// and link, empty for a service scoped by the project alone.
 	Scope string `json:"scope,omitempty"`
+	// Filters are the query parameters a Filterer's screens carry with
+	// the scope (Listing.Filters).
+	Filters []string `json:"filters,omitempty"`
 }
 
 // QuerySpec is a query surface: either a statement box or a form.
@@ -1771,6 +1800,12 @@ type QuerySpec struct {
 	Hint   string  `json:"hint,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 	Label  string  `json:"label,omitempty"`
+	// TabLabels name the run button while a tab of the form's tab strip
+	// shows, as Google's Query by GQL runs with Run query where Query by
+	// kind runs with Run (#1846); Label otherwise. ClearLabel names the
+	// button that clears the results, "Clear results" when empty.
+	TabLabels  map[string]string `json:"tabLabels,omitempty"`
+	ClearLabel string            `json:"clearLabel,omitempty"`
 	// Write is the statement box's read-write mode, where this resource has
 	// one. Set per resource by the server from the provider's WriteSpec, so a
 	// page offers the mode exactly where the query route will accept it.
@@ -1906,6 +1941,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if sc, ok := p.(Scoper); ok {
 		c.Scope = sc.ScopeKey()
+	}
+	if f, ok := p.(Filterer); ok {
+		c.Filters = f.FilterKeys()
 	}
 	return c
 }

@@ -140,3 +140,8 @@ func resourceOf(h http.Header) string {
 	}
 	return ""
 }
+
+// ResourceOf is the resource a gRPC call's routing headers name, as the
+// call log records it: for an intercept that must know a call's database
+// before the call is passed on (#1880).
+func ResourceOf(h http.Header) string { return resourceOf(h) }

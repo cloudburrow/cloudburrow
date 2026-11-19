@@ -461,7 +461,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   local BROWSER_ENV BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
   # As in CI: the emulators shard's tests also read back through the
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+  # And Cloud KMS, whose key the Create a Firestore database page chooses
+  # (#1881).
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi
   # The memorystore shard's read back through the Memorystore admin API.
   if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).

@@ -313,7 +313,15 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb"),
 				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile)}
 		}},
-		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
+		// The Firestore Admin API lists the Datastore mode databases the
+		// page's database picker offers (#1883).
+		{config.ServiceDatastore, func(a string) console.Provider {
+			fs := ""
+			if enabled[config.ServiceFirestore] {
+				fs = forwardedAddr(d.forwarders, string(config.ServiceFirestore))
+			}
+			return datastoreProvider{endpoint: a, firestore: fs}
+		}},
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		// Instances, clusters, app profiles and instance IAM, through the
 		// instance admin API the Bigtable front serves (#1358).

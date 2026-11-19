@@ -33,6 +33,28 @@ type Datastore struct {
 	grpc *grpc.Server
 	// client overrides the emulator's client (tests).
 	client pb.DatastoreClient
+	// databases: each named database is kept in its own emulator project
+	// (databases.go, #1885), and the front answers every call naming one.
+	databases bool
+	// sawDatabase is told each named database a call the front answers
+	// names, "projects/p/databases/d".
+	sawDatabase func(resource string)
+	// hold, if not nil, holds calls naming a named database until it
+	// closes (HoldUntil).
+	hold <-chan struct{}
+}
+
+// HoldUntil has every call naming a named database wait until done closes:
+// the move of the entities kept the old way to their emulator projects
+// (#1885). Call it before the front serves.
+func (d *Datastore) HoldUntil(done <-chan struct{}) { d.hold = done }
+
+// SeparateDatabases has the front answer every Datastore call naming a
+// named database, kept in an emulator project of its own (#1885); saw,
+// if not nil, is told each such database ("projects/p/databases/d").
+// Call it before the front serves.
+func (d *Datastore) SeparateDatabases(saw func(resource string)) {
+	d.databases, d.sawDatabase = true, saw
 }
 
 // NewDatastore returns the front for the Datastore emulator at emulator
@@ -55,8 +77,12 @@ func newDatastoreWith(emulator string, opts ...grpc.ServerOption) *Datastore {
 func (d *Datastore) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, d.grpc) }
 
 // Claims reports whether r is a RunAggregationQuery call, or a RunQuery
-// call with explain_options (explain.go), over gRPC or REST.
+// call with explain_options (explain.go) or a filter the emulator does
+// not serve (operators.go), over gRPC or REST.
 func (d *Datastore) Claims(r *http.Request) bool {
+	if d.databases && namesDatabase(r) != "" {
+		return true
+	}
 	if isGRPC(r) {
 		return r.URL.Path == datastoreAggregation || (r.URL.Path == datastoreRunQuery && asksExplain(r))
 	}
@@ -69,32 +95,32 @@ func (d *Datastore) Claims(r *http.Request) bool {
 // ServeHTTP answers a call Claims claimed.
 func (d *Datastore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isGRPC(r) {
+		if d.databases && d.sawDatabase != nil {
+			if res := namesDatabase(r); res != "" {
+				d.sawDatabase(res)
+			}
+		}
 		d.grpc.ServeHTTP(w, r)
 		return
 	}
-	if datastoreRunQueryREST.MatchString(r.URL.Path) {
-		d.serveRunQueryREST(w, r)
-		return
-	}
-	req := &pb.RunAggregationQueryRequest{}
-	if err := readJSON(r, req); err != nil {
-		writeError(w, err)
-		return
-	}
-	req.ProjectId = datastoreAggregationREST.FindStringSubmatch(r.URL.Path)[1]
-	resp, err := d.runAggregation(forwardHTTP(r.Context(), r), req)
-	writeReply(w, resp, err)
+	// Every REST call the front claims, JSON or the protobuf the Java
+	// client sends, in a named database or the default one.
+	d.serveDatabaseREST(w, r)
 }
 
 func (d *Datastore) emulator() (pb.DatastoreClient, error) {
-	if d.client != nil {
-		return d.client, nil
+	c := d.client
+	if c == nil {
+		conn, err := d.up.get()
+		if err != nil {
+			return nil, err
+		}
+		c = pb.NewDatastoreClient(conn)
 	}
-	conn, err := d.up.get()
-	if err != nil {
-		return nil, err
+	if d.databases {
+		c = DatabasesClientHeld(c, d.hold)
 	}
-	return pb.NewDatastoreClient(conn), nil
+	return c, nil
 }
 
 // RunAggregationQuery runs the nested query through the emulator and
@@ -311,10 +337,16 @@ func (d *Datastore) runAggregation(ctx context.Context, req *pb.RunAggregationQu
 		if bound >= 0 && seen >= bound {
 			break
 		}
-		resp, err := client.RunQuery(ctx, &pb.RunQueryRequest{
+		rq := &pb.RunQueryRequest{
 			ProjectId: req.GetProjectId(), DatabaseId: req.GetDatabaseId(), PartitionId: req.GetPartitionId(),
 			ReadOptions: ro, QueryType: &pb.RunQueryRequest_Query{Query: q},
-		})
+		}
+		var resp *pb.RunQueryResponse
+		if needsOperators(q) {
+			resp, err = d.runOperators(ctx, client, rq)
+		} else {
+			resp, err = client.RunQuery(ctx, rq)
+		}
 		if err != nil {
 			return nil, err
 		}

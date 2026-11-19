@@ -51,8 +51,9 @@ type LifecycleComponent struct {
 	// from (#1392), and the storage server a project's and a folder's
 	// parents (#1532), or "".
 	resourceManager string
-	// kms is Cloud KMS's in-cluster address, through cloudburrow-host,
-	// or "" (#1874).
+	// kms is Cloud KMS's in-cluster address (host:port), through
+	// cloudburrow-host, for the Pub/Sub front's CMEK topics (#1874) and the
+	// Firestore front's customer-managed keys (#1881), or "".
 	kms string
 	// iamCheck is whether the in-cluster servers ask the host's evaluator,
 	// at resourceManager's address, before serving (up
@@ -115,7 +116,8 @@ type EarlierStorage interface {
 func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStorage = m }
 
 // SetKMS records Cloud KMS's in-cluster address, for the Pub/Sub front's
-// CMEK topics (#1874).
+// CMEK topics (#1874) and the Firestore front's customer-managed keys
+// (#1881).
 func (c *LifecycleComponent) SetKMS(addr string) { c.kms = addr }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
@@ -300,6 +302,24 @@ func (c *LifecycleComponent) Backends() []Backend {
 				}
 				if s == config.ServiceFirestore && c.enabled(config.ServiceStorage) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+				}
+				// Datastore mode databases (#1880): the Admin API, in
+				// Firestore's front, is their record, and Datastore's
+				// front serves and clears their entities.
+				if s == config.ServiceFirestore && c.enabled(config.ServiceDatastore) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--datastore", InClusterFrontHost(c.installer.Namespace, "datastore", DatastorePort))
+				}
+				// Datastore's exports and imports too (#1884).
+				if s == config.ServiceDatastore && c.enabled(config.ServiceStorage) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+				}
+				if s == config.ServiceDatastore && c.enabled(config.ServiceFirestore) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--firestore-admin-addr", InClusterFrontHost(c.installer.Namespace, "firestore", FirestorePort))
+				}
+				// Customer-managed keys (#1881) are checked against the
+				// host's Cloud KMS, through cloudburrow-host.
+				if s == config.ServiceFirestore && c.kms != "" {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--kms", c.kms)
 				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {

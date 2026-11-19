@@ -54,6 +54,7 @@ var compatSections = map[string]string{
 	"firestore":      "## Optional services",
 	"firestoreadmin": "## Optional services",
 	"datastore":      "## Optional services",
+	"datastoreadmin": "## Optional services",
 	"bigtable":       "## Optional services",
 	"spanner":        "## Optional services",
 	// BigQuery's REST methods (#993) are in the same section, named by their
