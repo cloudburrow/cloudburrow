@@ -223,6 +223,7 @@ var gcloudOverrides = []struct {
 	// Spanner's admin REST API and the Firestore Admin API (#1461).
 	{"spanner", []string{"SPANNER_REST"}},
 	{"firestore", []string{"FIRESTORE"}},
+	{"datastore", []string{"DATASTORE"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

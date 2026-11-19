@@ -15,6 +15,7 @@ package firestoreadmin
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -43,6 +44,9 @@ type savedState struct {
 	// BackupKeys are the backups' customer-managed encryption, by backup
 	// name (#1881).
 	BackupKeys map[string][]byte `json:"backupKeys,omitempty"`
+	// EntityBackups are the backups of Datastore mode databases, whose
+	// copies are Datastore entities (#1884).
+	EntityBackups []string `json:"entityBackups,omitempty"`
 	// Seen is every database a documents call has named (seen.go, #1550).
 	Seen []string `json:"seen,omitempty"`
 	// UserCreds are the user credentials, each with its password's
@@ -145,6 +149,12 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 			return fmt.Errorf("the documents of the backup %s: %w", name, err)
 		}
 		b := &backup{meta: meta, cmek: keys[name]}
+		if slices.Contains(s.EntityBackups, name) {
+			b.datastore, b.entities = true, parts
+			backups[name] = b
+			st.MarkRead(name, b)
+			continue
+		}
 		for _, p := range parts {
 			d := &firestorepb.Document{}
 			if err := proto.Unmarshal(p, d); err != nil {
@@ -229,6 +239,12 @@ func (a *Admin) save() error {
 		if b.cmek != nil {
 			backupKeys[name] = b.cmek
 		}
+		if b.datastore {
+			s.EntityBackups = append(s.EntityBackups, name)
+			entities := b.entities
+			copies[name] = frontstate.Copy{Data: b, Encode: func() ([]byte, error) { return frontstate.Pack(entities...), nil }}
+			continue
+		}
 		docs := b.docs
 		copies[name] = frontstate.Copy{Data: b, Encode: func() ([]byte, error) {
 			parts := make([][]byte, 0, len(docs))
@@ -242,6 +258,7 @@ func (a *Admin) save() error {
 			return frontstate.Pack(parts...), nil
 		}}
 	}
+	slices.Sort(s.EntityBackups)
 	m, e = frontstate.EncodeMap(metas)
 	enc(&s.Backups, m, e)
 	if len(backupKeys) > 0 {

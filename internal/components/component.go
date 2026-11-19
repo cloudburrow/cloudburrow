@@ -254,6 +254,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 				if s == config.ServiceFirestore && c.enabled(config.ServiceDatastore) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--datastore", InClusterFrontHost(c.installer.Namespace, "datastore", DatastorePort))
 				}
+				// Datastore's exports and imports too (#1884).
+				if s == config.ServiceDatastore && c.enabled(config.ServiceStorage) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+				}
 				if s == config.ServiceDatastore && c.enabled(config.ServiceFirestore) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--firestore-admin-addr", InClusterFrontHost(c.installer.Namespace, "firestore", FirestorePort))
 				}

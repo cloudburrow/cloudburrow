@@ -169,6 +169,20 @@ func (d *datastoreDatabases) forget(ctx context.Context, project string) ([]stri
 	for _, db := range sortedKeys(dbs) {
 		muts = append(muts, &pb.Mutation{Operation: &pb.Mutation_Delete{Delete: markerKey(project, db)}})
 	}
+	// The project's Datastore Admin API indexes go with it (#1884).
+	ixs, err := c.RunQuery(withRouting(ctx), &pb.RunQueryRequest{ProjectId: MarkerProject,
+		QueryType: &pb.RunQueryRequest_Query{Query: &pb.Query{
+			Kind: []*pb.KindExpression{{Name: indexKind}},
+			Filter: &pb.Filter{FilterType: &pb.Filter_PropertyFilter{PropertyFilter: &pb.PropertyFilter{
+				Property: &pb.PropertyReference{Name: "project"}, Op: pb.PropertyFilter_EQUAL,
+				Value: &pb.Value{ValueType: &pb.Value_StringValue{StringValue: project}}}}},
+		}}})
+	if err != nil {
+		return nil, fmt.Errorf("read the indexes: %w", err)
+	}
+	for _, r := range ixs.GetBatch().GetEntityResults() {
+		muts = append(muts, &pb.Mutation{Operation: &pb.Mutation_Delete{Delete: r.GetEntity().GetKey()}})
+	}
 	if len(muts) > 0 {
 		if _, err := c.Commit(withRouting(ctx), &pb.CommitRequest{ProjectId: MarkerProject,
 			Mode: pb.CommitRequest_NON_TRANSACTIONAL, Mutations: muts}); err != nil {

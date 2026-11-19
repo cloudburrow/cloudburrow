@@ -247,22 +247,3 @@ func TestAccessGateAndPath(t *testing.T) {
 		t.Errorf("AccessPath for the Datastore mode database = %s, %v", w.Body, err)
 	}
 }
-
-func TestDatastoreModeRefusesDocumentCopies(t *testing.T) {
-	a, _, _ := cmekAdmin(t)
-	if err := create(a, "ds-db", &adminpb.Database{LocationId: "nam5", Type: adminpb.Database_DATASTORE_MODE}); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if _, err := a.ExportDocuments(ctx, &adminpb.ExportDocumentsRequest{Name: "projects/p/databases/ds-db", OutputUriPrefix: "gs://b/x"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ExportDocuments: %v, want Unimplemented", err)
-	}
-	if _, err := a.CreateBackupSchedule(ctx, &adminpb.CreateBackupScheduleRequest{Parent: "projects/p/databases/ds-db",
-		BackupSchedule: &adminpb.BackupSchedule{}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateBackupSchedule: %v, want Unimplemented", err)
-	}
-	// Delete has nothing to clear without the Datastore front.
-	if _, err := a.DeleteDatabase(ctx, &adminpb.DeleteDatabaseRequest{Name: "projects/p/databases/ds-db"}); err != nil {
-		t.Errorf("DeleteDatabase: %v", err)
-	}
-}

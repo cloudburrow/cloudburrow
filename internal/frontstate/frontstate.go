@@ -271,6 +271,22 @@ const DatastoreForgetPath = "/cloudburrow/datastore/databases/forget"
 // API's DeleteDatabase of a Datastore mode database (#1880).
 const DatastoreClearPath = "/cloudburrow/datastore/databases/clear"
 
+// The paths on the Datastore call front that copy a database's entities
+// for the Firestore Admin API (#1884), each a POST ?project=&database=:
+// DatastoreDumpPath answers every entity, in every namespace, as Pack of
+// google.datastore.v1.Entity messages; DatastoreLoadPath upserts such a
+// body into the database; DatastoreDeletePath deletes the entities a JSON
+// {"kinds", "namespaces"} filter takes; DatastoreExportPath and
+// DatastoreImportPath export to and import from the instance's Cloud
+// Storage, in the Datastore Admin API's export format.
+const (
+	DatastoreDumpPath   = "/cloudburrow/datastore/databases/dump"
+	DatastoreLoadPath   = "/cloudburrow/datastore/databases/load"
+	DatastoreDeletePath = "/cloudburrow/datastore/databases/delete"
+	DatastoreExportPath = "/cloudburrow/datastore/databases/export"
+	DatastoreImportPath = "/cloudburrow/datastore/databases/import"
+)
+
 // FirestoreAccessPath is the path on the Firestore call front that answers
 // a GET ?name=projects/p/databases/d&api=firestore|datastore with whether
 // that API serves the database's data calls, {"code": 0}, or the gRPC code

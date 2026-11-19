@@ -34,6 +34,7 @@ Do not edit these files by hand.
 | [Firestore](firestore.md) | 17 | 17 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Datastore Admin API](datastoreadmin.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 84 | 83 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 64 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 55 | 55 | 0 | 0 | 0 | 0 | 0 | 0 |

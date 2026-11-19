@@ -40,6 +40,10 @@ var (
 type backup struct {
 	meta *adminpb.Backup
 	docs []*firestorepb.Document
+	// datastore marks a Datastore mode database's backup, whose copy is
+	// entities, google.datastore.v1 Entity messages (#1884), not docs.
+	datastore bool
+	entities  [][]byte
 	// cmek is the database's encryption when the backup was taken, with
 	// the key's version then in use (#1881), or nil.
 	cmek *adminpb.Database_CmekConfig
@@ -59,7 +63,7 @@ func (a *Admin) takeBackup(ctx context.Context, dbName, schedule string) error {
 		return status.Errorf(codes.NotFound, "Backup schedule %s not found.", schedule)
 	}
 	project := dbNameRe.FindStringSubmatch(db.Name)[1]
-	loc, uid, retention := db.LocationId, db.Uid, s.Retention.AsDuration()
+	loc, uid, retention, entityMode := db.LocationId, db.Uid, s.Retention.AsDuration(), isDatastoreMode(db)
 	var cmek *adminpb.Database_CmekConfig
 	if c := db.GetCmekConfig(); c != nil {
 		// Google encrypts a backup with the key's primary version when
@@ -71,14 +75,24 @@ func (a *Admin) takeBackup(ctx context.Context, dbName, schedule string) error {
 	}
 	a.mu.Unlock()
 	snap := a.now()
-	docs, err := a.readAll(ctx, dbName)
-	if err != nil {
-		return err
+	var docs []*firestorepb.Document
+	var entities [][]byte
+	stats := &adminpb.Backup_Stats{}
+	if entityMode {
+		if entities, err = a.dumpEntities(ctx, dbName); err != nil {
+			return err
+		}
+		stats.SizeBytes, stats.DocumentCount = partsBytes(entities), int64(len(entities))
+	} else {
+		if docs, err = a.readAll(ctx, dbName); err != nil {
+			return err
+		}
+		stats.SizeBytes, stats.DocumentCount = docBytes(docs), int64(len(docs))
 	}
 	b := &adminpb.Backup{Name: "projects/" + project + "/locations/" + loc + "/backups/" + uuid(),
 		Database: dbName, DatabaseUid: uid, SnapshotTime: timestamppb.New(snap),
 		ExpireTime: timestamppb.New(snap.Add(retention)), State: adminpb.Backup_READY,
-		Stats: &adminpb.Backup_Stats{SizeBytes: docBytes(docs), DocumentCount: int64(len(docs))}}
+		Stats: stats}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for n := range a.indexes {
@@ -86,7 +100,7 @@ func (a *Admin) takeBackup(ctx context.Context, dbName, schedule string) error {
 			b.Stats.IndexCount++
 		}
 	}
-	a.backups[b.Name] = &backup{meta: b, docs: docs, cmek: cmek}
+	a.backups[b.Name] = &backup{meta: b, docs: docs, datastore: entityMode, entities: entities, cmek: cmek}
 	a.lastBackup[schedule] = snap
 	return nil
 }
@@ -256,13 +270,22 @@ func (a *Admin) RestoreDatabase(ctx context.Context, req *adminpb.RestoreDatabas
 	db, err := a.newDatabase(req.GetParent(), req.GetDatabaseId(), bm[2], req.GetTags())
 	if err == nil {
 		db.CmekConfig = cmek
+		if b.datastore {
+			// A restored database takes its backup's mode.
+			db.Type = adminpb.Database_DATASTORE_MODE
+		}
 	}
-	docs := b.docs
+	docs, entityMode, entities := b.docs, b.datastore, b.entities
 	a.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	if err := a.writeAll(ctx, db.Name, docs); err != nil {
+	if entityMode {
+		err = a.loadEntities(ctx, db.Name, entities)
+	} else {
+		err = a.writeAll(ctx, db.Name, docs)
+	}
+	if err != nil {
 		return nil, err
 	}
 	a.mu.Lock()
@@ -298,11 +321,7 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 		a.mu.Unlock()
 		return nil, status.Errorf(codes.NotFound, "The database %s with that database_uid does not exist.", src.Name)
 	}
-	if err := documentsOnly(src, "clones"); err != nil {
-		a.mu.Unlock()
-		return nil, err
-	}
-	srcName, srcLoc, srcEdition := src.Name, src.LocationId, src.DatabaseEdition
+	srcName, srcLoc, srcEdition, srcType := src.Name, src.LocationId, src.DatabaseEdition, src.Type
 	var source *adminpb.Database_CmekConfig
 	if src.GetCmekConfig() != nil {
 		source = proto.Clone(src.GetCmekConfig()).(*adminpb.Database_CmekConfig)
@@ -317,15 +336,23 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 	db, err := a.newDatabase(req.GetParent(), req.GetDatabaseId(), srcLoc, req.GetTags())
 	if err == nil {
 		// A clone keeps its source's edition, as on Google.
-		db.DatabaseEdition, db.CmekConfig = srcEdition, cmek
+		// and its mode (#1884).
+		db.DatabaseEdition, db.CmekConfig, db.Type = srcEdition, cmek, srcType
 	}
 	a.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	docs, err := a.readAll(ctx, srcName)
-	if err == nil {
-		err = a.writeAll(ctx, db.Name, docs)
+	if srcType == adminpb.Database_DATASTORE_MODE {
+		var entities [][]byte
+		if entities, err = a.dumpEntities(ctx, srcName); err == nil {
+			err = a.loadEntities(ctx, db.Name, entities)
+		}
+	} else {
+		var docs []*firestorepb.Document
+		if docs, err = a.readAll(ctx, srcName); err == nil {
+			err = a.writeAll(ctx, db.Name, docs)
+		}
 	}
 	if err != nil {
 		return nil, err

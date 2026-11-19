@@ -266,7 +266,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
 	// The instance's Cloud Storage, which Firestore exports are written to
 	// and imports read from (#1500).
-	storage := fs.String("storage", "", "the instance's Cloud Storage base URL, for Firestore exports and imports")
+	storage := fs.String("storage", "", "the instance's Cloud Storage base URL, for Firestore's and Datastore's exports and imports")
 	// The query RPCs the emulator does not serve, answered by the front
 	// from calls it does (#1405).
 	// The Spanner instance updates the emulator refuses, answered by the
@@ -345,7 +345,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				dbs.gate = g
 			}
 		}
-		icpts = append(icpts, dbs)
+		// The Datastore Admin API (#1884): exports and imports through
+		// the instance's Cloud Storage, and indexes.
+		icpts = append(icpts, dbs, newDatastoreAdmin(dbs, *storage))
 	}
 	if *firestoreAdmin {
 		fa := firestoreadmin.New(*upstream)

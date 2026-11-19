@@ -147,6 +147,11 @@ var gcloudVerified = []struct {
 	// firestore appends v1/. TestGcloudFirestoreBackupSchedules lists
 	// databases and drives backup schedules.
 	{config.ServiceFirestore, "firestore", "/", false, false},
+	// The Datastore Admin API (#1884), on the Datastore port, which the
+	// front in its pod serves beside the emulator's data API; gcloud
+	// datastore appends v1/. TestGcloudDatastoreExportImport drives export
+	// and import.
+	{config.ServiceDatastore, "datastore", "/", false, false},
 }
 
 // spannerRESTEndpoint keys the Spanner admin REST row (#1461): Spanner's
@@ -201,7 +206,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
-		config.ServiceFirestore: cfg.Endpoints.Firestore}
+		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServiceDatastore: cfg.Endpoints.Datastore}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask

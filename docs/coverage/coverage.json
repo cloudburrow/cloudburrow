@@ -8209,6 +8209,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -8217,6 +8218,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CloneDatabase",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -8225,6 +8227,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
@@ -8312,6 +8315,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ExportDocuments",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -8377,6 +8381,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ImportDocuments",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -8393,6 +8398,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
@@ -8441,6 +8447,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
         "status": "Verified",
         "tests": [
+          "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
@@ -8541,6 +8548,59 @@
           "test/compat/datastoregql_test.go:84 TestDatastoreExplain",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "datastoreadmin",
+    "Title": "Datastore Admin API",
+    "counts": {
+      "Verified": 6
+    },
+    "rows": [
+      {
+        "method": "google.datastore.admin.v1.DatastoreAdmin/CreateIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport"
+        ]
+      },
+      {
+        "method": "google.datastore.admin.v1.DatastoreAdmin/DeleteIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport"
+        ]
+      },
+      {
+        "method": "google.datastore.admin.v1.DatastoreAdmin/ExportEntities",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
+          "test/compat/datastoreadmin1884_test.go:395 TestGcloudDatastoreExportImport"
+        ]
+      },
+      {
+        "method": "google.datastore.admin.v1.DatastoreAdmin/GetIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport"
+        ]
+      },
+      {
+        "method": "google.datastore.admin.v1.DatastoreAdmin/ImportEntities",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
+          "test/compat/datastoreadmin1884_test.go:395 TestGcloudDatastoreExportImport"
+        ]
+      },
+      {
+        "method": "google.datastore.admin.v1.DatastoreAdmin/ListIndexes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport"
         ]
       }
     ]
