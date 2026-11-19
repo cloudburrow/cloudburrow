@@ -104,7 +104,8 @@ func TestPubSubDefinitionsSurviveAnEmulatorRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sch.Close()
+	// Closed after every cleanup below, which deletes through it.
+	t.Cleanup(func() { _ = sch.Close() })
 	project := "projects/" + h.Project()
 	name := func(kind, id string) string { return fmt.Sprintf("%s/%s/restore1608-%s", project, kind, id) }
 
@@ -199,6 +200,7 @@ func TestPubSubDefinitionsSurviveAnEmulatorRestart(t *testing.T) {
 		return topics, subs, revs, snap
 	}
 	topicsBefore, subsBefore, revsBefore, snapBefore := read()
+	checkChanges := changeBeforeRestart(t, ctx, c, sch, project, name)
 	if revsBefore != 2 {
 		t.Fatalf("before the restart the schema has %d revisions, want 2", revsBefore)
 	}
@@ -227,6 +229,7 @@ func TestPubSubDefinitionsSurviveAnEmulatorRestart(t *testing.T) {
 	if revsAfter != 2 {
 		t.Errorf("after the emulator restarted, the schema has %d revisions, want 2", revsAfter)
 	}
+	checkChanges()
 	if snapAfter.GetTopic() != snapBefore.GetTopic() || fmt.Sprint(snapAfter.GetLabels()) != fmt.Sprint(snapBefore.GetLabels()) ||
 		snapAfter.GetExpireTime().AsTime().After(snapBefore.GetExpireTime().AsTime()) {
 		t.Errorf("after the emulator restarted, the snapshot reads %v; want %v, expiring no later", snapAfter, snapBefore)

@@ -518,7 +518,9 @@ func (f *Front) checkPublish(topic string, msgs []*pubsubpb.PubsubMessage) error
 		return nil
 	}
 	if ss.GetSchema() == deletedSchemaName {
-		return apierror.InvalidArgument("Invalid data in message: the topic's schema has been deleted.")
+		// Google's emulator's answer for an AVRO schema deleted under a
+		// topic (TestPubSubDefinitionsSurviveAnEmulatorRestart, #1867).
+		return apierror.NotFound("Schema associated with topic deleted.")
 	}
 	revs, ok := f.keptSchema(ss.GetSchema())
 	if !ok {

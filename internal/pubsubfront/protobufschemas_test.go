@@ -224,6 +224,10 @@ func TestProtobufSchemaTopic(t *testing.T) {
 	if err != nil || got.GetSchemaSettings().GetSchema() != deletedSchemaName {
 		t.Errorf("GetTopic after the schema is deleted = %v, %v", got, err)
 	}
+	if _, err := fx.client.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: parent + "/topics/t-json",
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte(`{}`)}}}); status.Code(err) != codes.NotFound {
+		t.Errorf("Publish after the schema is deleted: %v; want NOT_FOUND, as Google's emulator answers for AVRO", err)
+	}
 }
 
 // Over REST: create, validate a message and publish to a bound topic, as
