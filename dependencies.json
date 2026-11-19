@@ -1240,6 +1240,26 @@
         "updateFeed": "github-releases",
         "verification": "image-digest",
         "digestNote": "The registry lists this manifest under infrastructure-public-image-f1fbebc, v0.64.0 and latest; upstream cloudbuild.yaml:17-29 tags each build infrastructure-public-image-$SHORT_SHA."
+      },
+      "iso14496_26Conformance": {
+        "version": "ISO/IEC 14496-26:2024 (2nd edition), mpeg4audio-conformance2ndEd_20230125",
+        "source": "https://standards.iso.org/iso-iec/14496/-26/ed-2/en/",
+        "license": "ISO copyright; published on ISO's Publicly Available Standards server for conformance testing",
+        "redistribution": "never committed, never shipped: fetched at test time into the user's cache directory (os.UserCacheDir()/cloudburrow-test/iso-14496-26-ed2), by HTTP range requests out of the zips, only when CLOUDBURROW_TEST_DOWNLOADS is set",
+        "scope": "test-only",
+        "usedBy": "third_party/aac-go TestPSFullConformance and test/compat TestEmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient (#1754), through internal/isoconformance",
+        "verification": "checksum",
+        "skipDiscovery": "A dated conformance package on ISO's server, not a release depcheck can compare; re-pinned by hand if ISO republishes it (the zips' sizes are pinned too).",
+        "zipBytes": {"compressedMp4.zip": 1207540409, "referencesWav.zip": 9849662301},
+        "files": [
+          {"zip": "compressedMp4.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/compressedMp4/al_sbr_ps_03.mp4", "bytes": 28612, "sha256": "717153ee39f505e897e3dc22357b39dbf0470c8033c7e0c76d5b3b68d6d8e238", "md5": "17f7d06f1c0dee51e7ca4a01d06b453b"},
+          {"zip": "compressedMp4.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/compressedMp4/al_sbr_ps_04.mp4", "bytes": 28612, "sha256": "89669b9f796678db2a9bf13cc33a0617e6864bf1b0152fa717ba3616d869a749", "md5": "596100860fe4ed5e53fcfcd5a1648f73"},
+          {"zip": "compressedMp4.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/compressedMp4/al_sbr_ps_06.mp4", "bytes": 56598, "sha256": "42d273c6260d2541d07e297257aa3238ebbcc1cb9eac5cf71bbfba69a6238132", "md5": "726dd94f7c29da1dc11314c837c37400"},
+          {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_03_ur.wav", "bytes": 1302716, "sha256": "3b905534a0e90922dcde26048a0023f405bd1f496d6e35586fddda5502dbaafa", "md5": "0f4d0ddcd52d8ca7ea4de16a3c6aefd1"},
+          {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_04_ur.wav", "bytes": 1302716, "sha256": "d00d6d52a362a31b362010e30f422898eb48ecd8829cfdbbbe0fabd927c41d35", "md5": "8d885cbc26f0a2764f83d17522de6562"},
+          {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_06_ur.wav", "bytes": 2605244, "sha256": "e2ef76b498971db8871190e2102eadc747870ca00c83d0e9add7fb9be7d4e817", "md5": "a170700536bd15130a58d2cbe22ee99d"}
+        ],
+        "notes": "HE-AAC v2 streams with parametric stereo beyond baseline (fine IID and mixing B; IPD/OPD; 34 bands) and their unrestricted-PS reference decodes. md5 is ISO's own (mpeg4audio-conformance2ndEd_20230125.md5); sha256 was measured on the members downloaded 2026-11-19. internal/isoconformance holds the same pins (TestDependenciesRecordThePins)."
       }
     },
     "realTools": {
