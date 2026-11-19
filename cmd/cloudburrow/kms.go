@@ -323,3 +323,23 @@ func printKMSWarning(w io.Writer, s *kmsService) {
 	fmt.Fprintf(w, "  unencrypted in %s, and anyone with access to it\n", backend)
 	fmt.Fprintf(w, "  can read it. Never use CloudBurrow's KMS to protect real data.\n")
 }
+
+// firestoreKMS reports whether the Firestore front checks customer-managed
+// keys against this process's Cloud KMS (#1881): both are served.
+func firestoreKMS(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceFirestore) && serviceEnabled(cfg, config.ServiceKMS)
+}
+
+// pinKMSPort chooses Cloud KMS's port now when it is OS-assigned (0), so
+// the Firestore front can be told it before the API binds.
+func pinKMSPort(cfg *config.Config) error {
+	if cfg.Endpoints.KMS != 0 {
+		return nil
+	}
+	l, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddress, "0"))
+	if err != nil {
+		return fmt.Errorf("choose a port for Cloud KMS: %w", err)
+	}
+	cfg.Endpoints.KMS = l.Addr().(*net.TCPAddr).Port
+	return l.Close()
+}

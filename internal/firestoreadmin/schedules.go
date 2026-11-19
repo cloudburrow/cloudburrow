@@ -63,6 +63,9 @@ func (a *Admin) createSchedule(req *adminpb.CreateBackupScheduleRequest) (*admin
 	if err != nil {
 		return nil, err
 	}
+	if err := documentsOnly(db, "backups"); err != nil {
+		return nil, err
+	}
 	in := req.GetBackupSchedule()
 	if in == nil {
 		return nil, status.Error(codes.InvalidArgument, "backup_schedule is required.")

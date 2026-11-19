@@ -30,8 +30,15 @@ func TestConsoleFirestoreCreateDatabasePage(t *testing.T) {
 	if err != nil || req.GetDatabase().GetLocationId() != "eur3" {
 		t.Errorf("a multi-region: %v, %v", req, err)
 	}
+	// Datastore mode (#1880) and a Cloud KMS key (#1881) are served.
+	req, err = createDatabaseRequest("p", map[string]string{"database": "dsdb", "mode": "datastore",
+		"encryption": "kms", "kmsKey": " projects/p/locations/us/keyRings/r/cryptoKeys/k "})
+	if err != nil || req.GetDatabase().GetType() != adminpb.Database_DATASTORE_MODE ||
+		req.GetDatabase().GetCmekConfig().GetKmsKeyName() != "projects/p/locations/us/keyRings/r/cryptoKeys/k" {
+		t.Errorf("Datastore mode with a key: %v, %v", req, err)
+	}
 	for _, bad := range []map[string]string{
-		{"database": "x123", "mode": "datastore"},
+		{"database": "x123", "mode": "datastore", "edition": "ENTERPRISE"},
 		{"database": "x123", "rules": "open"},
 		{"database": "x123", "encryption": "kms"},
 		{"database": "x123", "locationType": "region", "region": "mars-north1"},
@@ -46,7 +53,7 @@ func TestConsoleFirestoreCreateDatabasePage(t *testing.T) {
 	for _, f := range fields {
 		names = append(names, f.Name)
 	}
-	if got := strings.Join(names, ","); got != "database,edition,mode,rules,locationType,multiRegion,region,encryption,pitr,deleteProtection" {
+	if got := strings.Join(names, ","); got != "database,edition,mode,rules,locationType,multiRegion,region,encryption,kmsKey,pitr,deleteProtection" {
 		t.Errorf("the fields = %s", got)
 	}
 }

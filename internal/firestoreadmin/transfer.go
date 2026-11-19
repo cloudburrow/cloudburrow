@@ -234,6 +234,9 @@ func (a *Admin) liveDatabase(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := documentsOnly(db, "exports, imports and bulk deletes"); err != nil {
+		return "", err
+	}
 	return db.Name, nil
 }
 

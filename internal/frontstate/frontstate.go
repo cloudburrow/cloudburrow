@@ -265,6 +265,19 @@ const ResetPath = "/cloudburrow/front-state/reset"
 // forgets them, for the project's purge (#1550).
 const DatastoreForgetPath = "/cloudburrow/datastore/databases/forget"
 
+// DatastoreClearPath is the path on the Datastore call front that answers
+// a POST ?project=&database= by deleting every entity of that named
+// database, in every namespace, and forgetting it: the Firestore Admin
+// API's DeleteDatabase of a Datastore mode database (#1880).
+const DatastoreClearPath = "/cloudburrow/datastore/databases/clear"
+
+// FirestoreAccessPath is the path on the Firestore call front that answers
+// a GET ?name=projects/p/databases/d&api=firestore|datastore with whether
+// that API serves the database's data calls, {"code": 0}, or the gRPC code
+// and message of its refusal (#1880, #1881): the Datastore front asks it
+// before it passes a call on.
+const FirestoreAccessPath = "/cloudburrow/firestore/databases/access"
+
 // ServeReset answers a call to ResetPath with reset, passing it the
 // project= parameter: "" for every project.
 func ServeReset(w http.ResponseWriter, r *http.Request, reset func(project string) error) {

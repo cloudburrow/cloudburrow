@@ -85,13 +85,12 @@ func knownLocation(list [][2]string, id string) bool {
 }
 
 const (
-	fsNoDatastoreMode = "Not available locally: CloudBurrow's Firestore serves Native mode; a Datastore mode " +
-		"database is the Datastore product's, on its own page."
 	fsNoRulesAPI = "Not available locally: CloudBurrow serves no Firebase Security Rules API, so no rules are " +
 		"written. Server client libraries ignore rules, as on Google's, and that is what reaches this database."
-	fsNoCMEK = "Not available locally: the local Firestore encrypts with no Cloud KMS key (CreateDatabase " +
-		"refuses cmek_config)."
 )
+
+// kmsKeyPattern is a Cloud KMS key's resource name, as cmek_config takes it.
+const kmsKeyPattern = `projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+`
 
 // CreateForm implements console.Creator: Google's Create a Firestore
 // database, in its order.
@@ -105,9 +104,10 @@ func (firestoreDatabasesProvider) CreateForm() (string, []console.Field) {
 			OptionLabels: map[string]string{"STANDARD": "Standard edition", "ENTERPRISE": "Enterprise edition"},
 			Help:         "Enterprise edition runs pipelines and MongoDB compatibility. It cannot be changed later."},
 		{Name: "mode", Label: "Data access mode", Type: "radio", Options: []string{fsModeNative, fsModeDatastore}, Default: fsModeNative,
-			OptionLabels:       map[string]string{fsModeNative: "Firestore Native", fsModeDatastore: "Datastore mode"},
-			UnavailableOptions: map[string]string{fsModeDatastore: fsNoDatastoreMode},
-			Help:               "Determines which API and client libraries you can use."},
+			OptionLabels: map[string]string{fsModeNative: "Firestore Native", fsModeDatastore: "Datastore mode"},
+			// A Datastore mode database is served through the Datastore
+			// API (#1880), and browsed on the Datastore page.
+			Help: "Determines which API and client libraries you can use. A Datastore mode database is Standard edition, served through the Datastore API."},
 		{Name: "rules", Label: "Security rules", Type: "radio", Options: []string{fsRulesRestrictive, fsRulesOpen}, Default: fsRulesRestrictive,
 			OptionLabels:       map[string]string{fsRulesRestrictive: "Restrictive", fsRulesOpen: "Open"},
 			UnavailableOptions: map[string]string{fsRulesOpen: fsNoRulesAPI},
@@ -121,8 +121,12 @@ func (firestoreDatabasesProvider) CreateForm() (string, []console.Field) {
 			ShowWhen: "locationType=" + fsLocationRegion},
 		{Name: "encryption", Label: "Encryption options", Type: "radio", Section: "Encryption options",
 			Options: []string{fsEncryptionGoogle, fsEncryptionKMS}, Default: fsEncryptionGoogle,
-			OptionLabels:       map[string]string{fsEncryptionGoogle: "Google-managed encryption key", fsEncryptionKMS: "Cloud KMS key"},
-			UnavailableOptions: map[string]string{fsEncryptionKMS: fsNoCMEK}},
+			OptionLabels: map[string]string{fsEncryptionGoogle: "Google-managed encryption key", fsEncryptionKMS: "Cloud KMS key"}},
+		// The key, checked against this instance's Cloud KMS (#1881).
+		{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Section: "Encryption options", Pattern: kmsKeyPattern,
+			Browse: "kms", ShowWhen: "encryption=" + fsEncryptionKMS,
+			Help: "A symmetric key in the database's location: Cloud KMS's us for nam5, europe for eur3, the same region otherwise. " +
+				"Disabling or destroying its version makes the database's data inaccessible until it is enabled again."},
 		{Name: "pitr", Label: "Enable point-in-time recovery (PITR)", Type: "checkbox", Default: "false", Section: "Disaster recovery",
 			Help: "Keeps every version of the documents for 7 days. Stored and returned; the local Firestore reads no earlier version."},
 		{Name: "deleteProtection", Label: "Enable delete protection", Type: "checkbox", Default: "false", Section: "Disaster recovery",
@@ -147,7 +151,10 @@ func createDatabaseRequest(project string, values map[string]string) (*adminpb.C
 	switch values["mode"] {
 	case "", fsModeNative:
 	case fsModeDatastore:
-		return nil, errors.New(fsNoDatastoreMode)
+		if db.DatabaseEdition == adminpb.Database_ENTERPRISE {
+			return nil, errors.New("a Datastore mode database is Standard edition: choose Standard edition, or Firestore Native")
+		}
+		db.Type = adminpb.Database_DATASTORE_MODE
 	default:
 		return nil, fmt.Errorf("data access mode %q is not native or datastore", values["mode"])
 	}
@@ -161,7 +168,11 @@ func createDatabaseRequest(project string, values map[string]string) (*adminpb.C
 	switch values["encryption"] {
 	case "", fsEncryptionGoogle:
 	case fsEncryptionKMS:
-		return nil, errors.New(fsNoCMEK)
+		key := strings.TrimSpace(values["kmsKey"])
+		if key == "" {
+			return nil, errors.New("choose the Cloud KMS key to encrypt the database with")
+		}
+		db.CmekConfig = &adminpb.Database_CmekConfig{KmsKeyName: key}
 	default:
 		return nil, fmt.Errorf("encryption %q is not google or kms", values["encryption"])
 	}

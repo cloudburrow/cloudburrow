@@ -58,6 +58,9 @@ type datastoreDatabases struct {
 	// known is the databases recorded since the front started,
 	// "projects/p/databases/d".
 	known map[string]bool
+	// gate is the front's access gate (datastoregate.go), nil without
+	// the Firestore Admin API.
+	gate *datastoreGate
 }
 
 func newDatastoreDatabases(upstream string, logf func(string, ...any)) *datastoreDatabases {
@@ -252,11 +255,17 @@ func restDatabase(contentType string, b []byte) string {
 	return body.DatabaseID
 }
 
-// Claims claims ForgetPath.
-func (d *datastoreDatabases) Claims(r *http.Request) bool { return r.URL.Path == ForgetPath }
+// Claims claims ForgetPath and frontstate.DatastoreClearPath.
+func (d *datastoreDatabases) Claims(r *http.Request) bool {
+	return r.URL.Path == ForgetPath || r.URL.Path == frontstate.DatastoreClearPath
+}
 
-// ServeHTTP answers ForgetPath.
+// ServeHTTP answers ForgetPath and frontstate.DatastoreClearPath.
 func (d *datastoreDatabases) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == frontstate.DatastoreClearPath {
+		d.serveClear(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)

@@ -40,6 +40,9 @@ type savedState struct {
 	OpOrder    []string             `json:"opOrder,omitempty"`
 	Backups    map[string][]byte    `json:"backups,omitempty"`
 	LastBackup map[string]time.Time `json:"lastBackup,omitempty"`
+	// BackupKeys are the backups' customer-managed encryption, by backup
+	// name (#1881).
+	BackupKeys map[string][]byte `json:"backupKeys,omitempty"`
 	// Seen is every database a documents call has named (seen.go, #1550).
 	Seen []string `json:"seen,omitempty"`
 	// UserCreds are the user credentials, each with its password's
@@ -127,6 +130,10 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 	if err != nil {
 		return err
 	}
+	keys, err := frontstate.DecodeMap(s.BackupKeys, func() *adminpb.Database_CmekConfig { return &adminpb.Database_CmekConfig{} })
+	if err != nil {
+		return err
+	}
 	backups := make(map[string]*backup, len(metas))
 	for name, meta := range metas {
 		raw, err := st.ReadCopy(name)
@@ -137,7 +144,7 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 		if err != nil {
 			return fmt.Errorf("the documents of the backup %s: %w", name, err)
 		}
-		b := &backup{meta: meta}
+		b := &backup{meta: meta, cmek: keys[name]}
 		for _, p := range parts {
 			d := &firestorepb.Document{}
 			if err := proto.Unmarshal(p, d); err != nil {
@@ -216,8 +223,12 @@ func (a *Admin) save() error {
 	enc(&s.Ops, m, e)
 	metas := make(map[string]*adminpb.Backup, len(a.backups))
 	copies := make(map[string]frontstate.Copy, len(a.backups))
+	backupKeys := map[string]*adminpb.Database_CmekConfig{}
 	for name, b := range a.backups {
 		metas[name] = b.meta
+		if b.cmek != nil {
+			backupKeys[name] = b.cmek
+		}
 		docs := b.docs
 		copies[name] = frontstate.Copy{Data: b, Encode: func() ([]byte, error) {
 			parts := make([][]byte, 0, len(docs))
@@ -233,6 +244,10 @@ func (a *Admin) save() error {
 	}
 	m, e = frontstate.EncodeMap(metas)
 	enc(&s.Backups, m, e)
+	if len(backupKeys) > 0 {
+		m, e = frontstate.EncodeMap(backupKeys)
+		enc(&s.BackupKeys, m, e)
+	}
 	for name, c := range a.userCreds {
 		b, e := proto.Marshal(c.UserCreds)
 		if e != nil && err == nil {

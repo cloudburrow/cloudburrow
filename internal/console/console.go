@@ -298,7 +298,10 @@ type Field struct {
 	ShowWhen string `json:"showWhen,omitempty"`
 	// Browse names what the field's Browse button chooses from: "storage" is
 	// a bucket of this instance's Cloud Storage, filled in as gs://BUCKET/,
-	// as Google's Choose Destination does (#1845).
+	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
+	// of this instance's Cloud KMS in the location the form's
+	// locationType, multiRegion and region fields hold, filled in as its
+	// resource name (#1881).
 	Browse string `json:"browse,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and

@@ -62,6 +62,10 @@ type LifecycleComponent struct {
 	// address (host:port), which BigQuery's front converts imported
 	// TENSORFLOW models on (#1775), or "".
 	tfConverter string
+	// kms is the in-cluster address (host:port) of the host's Cloud KMS,
+	// which the Firestore front checks customer-managed keys against
+	// (#1881), or "".
+	kms string
 	// vertexAI is the local Vertex AI endpoint's in-cluster address
 	// (host:port), given to the BigQuery front for remote models (#1760).
 	vertexAI string
@@ -129,6 +133,10 @@ func (c *LifecycleComponent) SetServiceAccountCerts(addr string) { c.serviceAcco
 // SetTFConverter records the in-cluster address of the TensorFlow
 // SavedModel converter, for BigQuery's front (#1775).
 func (c *LifecycleComponent) SetTFConverter(addr string) { c.tfConverter = addr }
+
+// SetKMS records the in-cluster address of the host's Cloud KMS, for the
+// Firestore front's customer-managed keys (#1881).
+func (c *LifecycleComponent) SetKMS(addr string) { c.kms = addr }
 
 // SetVertexAI records the in-cluster address of the instance's local
 // Vertex AI endpoint, which BigQuery ML's remote models run on (#1760).
@@ -239,6 +247,20 @@ func (c *LifecycleComponent) Backends() []Backend {
 				}
 				if s == config.ServiceFirestore && c.enabled(config.ServiceStorage) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+				}
+				// Datastore mode databases (#1880): the Admin API, in
+				// Firestore's front, is their record, and Datastore's
+				// front serves and clears their entities.
+				if s == config.ServiceFirestore && c.enabled(config.ServiceDatastore) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--datastore", InClusterFrontHost(c.installer.Namespace, "datastore", DatastorePort))
+				}
+				if s == config.ServiceDatastore && c.enabled(config.ServiceFirestore) {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--firestore-admin-addr", InClusterFrontHost(c.installer.Namespace, "firestore", FirestorePort))
+				}
+				// Customer-managed keys (#1881) are checked against the
+				// host's Cloud KMS, through cloudburrow-host.
+				if s == config.ServiceFirestore && c.kms != "" {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--kms", c.kms)
 				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {

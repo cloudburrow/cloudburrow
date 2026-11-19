@@ -5364,7 +5364,13 @@ function buildCreateForm(spec) {
           // instance's Cloud Storage, as Google's Choose Destination does.
           f.browse === "storage" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
-              onclick: () => browseBuckets(control) })) : control,
+              onclick: () => browseBuckets(control) }))
+          // A Cloud KMS key field (#1881) chooses an ENCRYPT_DECRYPT key of
+          // this instance's Cloud KMS in the location the form's own
+          // location fields hold, as Google's key picker does.
+          : f.browse === "kms" ? el("div", { class: "browse-row" }, control,
+            el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
+              onclick: () => browseKeys(control, formKMSLocation(entries)) })) : control,
           help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -12077,6 +12083,63 @@ async function browseBuckets(control) {
     body.querySelector("button").focus();
   } catch (err) {
     setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
+  }
+}
+
+// formKMSLocation is the Cloud KMS location of the location a create
+// form's fields hold (#1881): its locationType, multiRegion and region, as
+// Create a Firestore database has them. A multi-region's keys are in
+// Cloud KMS's matching multi-region: us for nam5, europe for eur3
+// (https://docs.cloud.google.com/firestore/native/docs/use-cmek).
+function formKMSLocation(entries) {
+  const value = (name) => {
+    const e = entries.find((x) => x.field.name === name);
+    return e ? e.control.value : "";
+  };
+  const loc = value("locationType") === "region" ? value("region") : value("multiRegion");
+  return ({ nam5: "us", eur3: "europe" })[loc] || loc;
+}
+
+// browseKeys is a Cloud KMS key field's Browse (#1881): the project's
+// ENCRYPT_DECRYPT keys in location, from this instance's Cloud KMS, one of
+// which fills the field with its resource name.
+async function browseKeys(control, location) {
+  const { dialog, close } = openModal({ labelledBy: "browse-title" });
+  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "keys" }));
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "browse-title", text: "Select a Cloud KMS key" }),
+    el("p", { class: "form-help", text: `Keys in ${location}, the database's Cloud KMS location.` }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
+  const project = currentProject();
+  try {
+    const list = await api(`/api/resources/kms?project=${encodeURIComponent(project)}`);
+    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+    const rings = (list.items || []).filter((r) => (r.fields || {}).Location === location);
+    const keys = [];
+    for (const r of rings) {
+      const d = await api(`/api/detail/kms?project=${encodeURIComponent(project)}&name=${encodeURIComponent(r.name)}`);
+      const sec = (d.sections || []).find((x) => x.id === "keys");
+      for (const k of (sec && sec.listing && sec.listing.items) || []) {
+        if ((k.fields || {}).Purpose === "ENCRYPT_DECRYPT") keys.push({ name: `${r.name}/cryptoKeys/${k.name}`, state: k.status });
+      }
+    }
+    if (!keys.length) {
+      return setChildren(body, el("p", { class: "unavailable",
+        text: `This project has no symmetric keys in ${location}. Create a key ring and key there in Cloud KMS first.` }));
+    }
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...keys.map((k) => el("li", { class: "fs-row" },
+      el("button", { type: "button", class: "fs-row-link", text: k.name, title: k.state || "", onclick: () => {
+        control.value = k.name;
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+        close();
+        control.focus();
+      } })))));
+    body.querySelector("button").focus();
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", text: `Cloud KMS cannot be read: ${err.message}` }));
   }
 }
 

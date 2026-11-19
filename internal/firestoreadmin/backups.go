@@ -40,6 +40,9 @@ var (
 type backup struct {
 	meta *adminpb.Backup
 	docs []*firestorepb.Document
+	// cmek is the database's encryption when the backup was taken, with
+	// the key's version then in use (#1881), or nil.
+	cmek *adminpb.Database_CmekConfig
 }
 
 // takeBackup backs the database up for the schedule named schedule.
@@ -57,6 +60,15 @@ func (a *Admin) takeBackup(ctx context.Context, dbName, schedule string) error {
 	}
 	project := dbNameRe.FindStringSubmatch(db.Name)[1]
 	loc, uid, retention := db.LocationId, db.Uid, s.Retention.AsDuration()
+	var cmek *adminpb.Database_CmekConfig
+	if c := db.GetCmekConfig(); c != nil {
+		// Google encrypts a backup with the key's primary version when
+		// it is taken: the newest in use.
+		cmek = &adminpb.Database_CmekConfig{KmsKeyName: c.KmsKeyName}
+		if n := len(c.ActiveKeyVersion); n > 0 {
+			cmek.ActiveKeyVersion = []string{c.ActiveKeyVersion[n-1]}
+		}
+	}
 	a.mu.Unlock()
 	snap := a.now()
 	docs, err := a.readAll(ctx, dbName)
@@ -74,7 +86,7 @@ func (a *Admin) takeBackup(ctx context.Context, dbName, schedule string) error {
 			b.Stats.IndexCount++
 		}
 	}
-	a.backups[b.Name] = &backup{meta: b, docs: docs}
+	a.backups[b.Name] = &backup{meta: b, docs: docs, cmek: cmek}
 	a.lastBackup[schedule] = snap
 	return nil
 }
@@ -221,9 +233,6 @@ func (a *Admin) newDatabase(parent, id, loc string, tags map[string]string) (*ad
 }
 
 func (a *Admin) RestoreDatabase(ctx context.Context, req *adminpb.RestoreDatabaseRequest) (*longrunningpb.Operation, error) {
-	if req.GetEncryptionConfig().GetCustomerManagedEncryption() != nil {
-		return nil, status.Error(codes.Unimplemented, "customer-managed encryption is not served here: the emulator does not encrypt with Cloud KMS keys")
-	}
 	start := a.now()
 	a.mu.Lock()
 	b, err := a.backup(req.GetBackup())
@@ -236,7 +245,18 @@ func (a *Admin) RestoreDatabase(ctx context.Context, req *adminpb.RestoreDatabas
 		a.mu.Unlock()
 		return nil, status.Errorf(codes.InvalidArgument, "the backup %s is not in the project %s", b.meta.Name, req.GetParent())
 	}
+	source := b.cmek
+	a.mu.Unlock()
+	// By default a restored database takes the backup's encryption (#1881).
+	cmek, err := a.encryptionFor(ctx, req.GetEncryptionConfig(), source, bm[2])
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
 	db, err := a.newDatabase(req.GetParent(), req.GetDatabaseId(), bm[2], req.GetTags())
+	if err == nil {
+		db.CmekConfig = cmek
+	}
 	docs := b.docs
 	a.mu.Unlock()
 	if err != nil {
@@ -253,9 +273,6 @@ func (a *Admin) RestoreDatabase(ctx context.Context, req *adminpb.RestoreDatabas
 }
 
 func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseRequest) (*longrunningpb.Operation, error) {
-	if req.GetEncryptionConfig().GetCustomerManagedEncryption() != nil {
-		return nil, status.Error(codes.Unimplemented, "customer-managed encryption is not served here: the emulator does not encrypt with Cloud KMS keys")
-	}
 	snap := req.GetPitrSnapshot()
 	if snap == nil || snap.GetDatabase() == "" || snap.GetSnapshotTime() == nil {
 		return nil, status.Error(codes.InvalidArgument, "pitr_snapshot is required, with its database and snapshot_time.")
@@ -281,11 +298,26 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 		a.mu.Unlock()
 		return nil, status.Errorf(codes.NotFound, "The database %s with that database_uid does not exist.", src.Name)
 	}
-	srcName := src.Name
-	db, err := a.newDatabase(req.GetParent(), req.GetDatabaseId(), src.LocationId, req.GetTags())
+	if err := documentsOnly(src, "clones"); err != nil {
+		a.mu.Unlock()
+		return nil, err
+	}
+	srcName, srcLoc, srcEdition := src.Name, src.LocationId, src.DatabaseEdition
+	var source *adminpb.Database_CmekConfig
+	if src.GetCmekConfig() != nil {
+		source = proto.Clone(src.GetCmekConfig()).(*adminpb.Database_CmekConfig)
+	}
+	a.mu.Unlock()
+	// By default a clone takes its source's encryption (#1881).
+	cmek, err := a.encryptionFor(ctx, req.GetEncryptionConfig(), source, srcLoc)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	db, err := a.newDatabase(req.GetParent(), req.GetDatabaseId(), srcLoc, req.GetTags())
 	if err == nil {
 		// A clone keeps its source's edition, as on Google.
-		db.DatabaseEdition = src.DatabaseEdition
+		db.DatabaseEdition, db.CmekConfig = srcEdition, cmek
 	}
 	a.mu.Unlock()
 	if err != nil {

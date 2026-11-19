@@ -27,7 +27,7 @@ import (
 //   - Time-to-live in the menu opens (default)'s Time-to-live tab, whose
 //     Create Policy makes the policy GetField reads, offset and all;
 //   - Create a Firestore database is a page: Datastore mode and a Cloud KMS
-//     key are drawn disabled, and a Region choice makes the database
+//     key are offered (#1880, #1881), and a Region choice makes the database
 //     GetDatabase reads in that region;
 //   - the Query builder runs a WHERE clause against the database's
 //     documents, written with the official client, and COUNT counts them.
@@ -93,8 +93,9 @@ func TestFirestorePagesMatchGooglesConsoleThroughTheBrowser(t *testing.T) {
 	p.eval(`({ Title: document.querySelector("#view h1").textContent.trim(),
 		DatastoreOff: document.querySelector("#f-mode-1").disabled, KMSOff: document.querySelector("#f-encryption-1").disabled,
 		On: document.querySelector("#f-mode-0").checked })`, &page)
-	if page.Title != "Create a Firestore database" || !page.DatastoreOff || !page.KMSOff || !page.On {
-		t.Errorf("the create page = %+v; want Google's title, Native mode chosen, Datastore mode and Cloud KMS key disabled", page)
+	// Datastore mode (#1880) and a Cloud KMS key (#1881) are offered.
+	if page.Title != "Create a Firestore database" || page.DatastoreOff || page.KMSOff || !page.On {
+		t.Errorf("the create page = %+v; want Google's title, Native mode chosen, Datastore mode and Cloud KMS key offered", page)
 	}
 	dbID := "parity-" + strings.ToLower(strings.ReplaceAll(project, "_", "-"))
 	if len(dbID) > 60 {

@@ -8234,6 +8234,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestoredatastoremode1880_test.go:231 TestFirestoreCMEK",
+          "test/compat/firestoredatastoremode1880_test.go:354 TestGcloudFirestoreDatastoreModeAndKMSKey",
+          "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/groupmembers1812_test.go:99 TestFirestoreMongoDBGroupMember1812"
@@ -8273,7 +8276,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases"
         ]
       },
       {
@@ -8337,6 +8341,9 @@
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestoredatastoremode1880_test.go:231 TestFirestoreCMEK",
+          "test/compat/firestoredatastoremode1880_test.go:354 TestGcloudFirestoreDatastoreModeAndKMSKey",
+          "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
@@ -8397,6 +8404,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
