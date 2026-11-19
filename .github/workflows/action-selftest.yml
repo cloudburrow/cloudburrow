@@ -48,6 +48,14 @@ on:
         type: string
         required: false
         default: source
+      ref:
+        description: >-
+          The ref every job checks out, so the action under test is the one at
+          the release's tag even when the release was called by another
+          workflow (#1898). Empty: the event's own ref.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -64,6 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - id: diff
         # The SHAs arrive through the environment, never interpolated into
@@ -97,6 +106,8 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       # Which flags reach which CLI version (#679): seconds, no dependencies.
       - name: Action unit tests
         run: node --test action/lib.test.js
@@ -137,6 +148,8 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
@@ -177,6 +190,8 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - name: Install kubectl
         run: |
           curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"

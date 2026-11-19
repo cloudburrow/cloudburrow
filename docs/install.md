@@ -10,13 +10,14 @@ Every release has one archive per platform (darwin and linux, arm64 and amd64), 
 checksum list. The attestation proves an archive was built by this repository's release workflow.
 A checksum served beside the archive proves only that the two agree.
 
-**Only a commit CI has passed is released.** The release workflow's first job,
-`require-ci-green`, looks up the tagged commit's `ci-green` check (the one check the merge queue
-requires, which fails when any CI job failed) and stops the release before anything is built
-unless one has succeeded for that exact SHA. A commit merged through the merge queue already has
-one: the queue tested that same commit. If CI for the commit is still running, the job waits for
-it, checking once a minute for up to 45 minutes; a commit with no CI run, or none that passed,
-fails at once with an error naming the SHA.
+**Only a commit main's full CI run has passed is released.** The release workflow's first job,
+`require-ci-green`, looks up the tagged commit's own push run of CI on `main` and stops the release
+before anything is built unless that run passed in full, the compatibility shards and the
+integration suite included (#1898). A pull request's `ci-green` is not enough: pull-request CI runs
+the fast jobs only. If the run is still in progress, the job waits for it, checking once a minute
+for up to two hours; a commit with no such run, or none that passed, fails at once with an error
+naming the SHA. Releases are made every one to two days from the newest such commit
+([Releasing](ci.md#releasing)).
 
 **A release is latest only once it has passed its smoke test.** The workflow publishes it as a
 prerelease, then its `smoke` job installs it the way a user would on Linux and macOS (the

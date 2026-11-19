@@ -367,8 +367,17 @@ func TestReleaseGateRunsFirst(t *testing.T) {
 	if n := needs(t, gate); len(n) != 0 {
 		t.Errorf("%s needs %v; it must run first", gateJob, n)
 	}
-	if !strings.Contains(gate, "run: sh scripts/require-ci-green.sh \"${GITHUB_SHA}\"") {
-		t.Errorf("%s does not run scripts/require-ci-green.sh on GITHUB_SHA", gateJob)
+	// A release, pushed or called, needs main's full push run; only a dry
+	// run settles for ci-green (#1898). The SHA is the checked-out tag's, not
+	// GITHUB_SHA, which is the caller's when the scheduled release calls.
+	for _, want := range []string{
+		`sha="$(git rev-parse HEAD)"`,
+		`sh scripts/require-ci-green.sh --main-push "${sha}"`,
+		`sh scripts/require-ci-green.sh "${sha}"`,
+	} {
+		if !strings.Contains(gate, want) {
+			t.Errorf("%s does not run %s", gateJob, want)
+		}
 	}
 	if !strings.Contains(gate, "GH_TOKEN: ${{ github.token }}") {
 		t.Errorf("%s does not give gh the workflow token", gateJob)

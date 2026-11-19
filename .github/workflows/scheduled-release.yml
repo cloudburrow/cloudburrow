@@ -1,0 +1,162 @@
+name: Scheduled release
+
+# A release every one to two days, from the newest commit on main whose own
+# push run of ci.yml passed in full, compat shards included (#1898). A pull
+# request's ci-green is never enough: pull-request CI runs the fast jobs only.
+# scripts/scheduled-release.sh decides (the commit, whether it is time, the
+# version, the notes); docs/ci.md#releasing describes the rules, and how to
+# pause, force or dry-run a release.
+#
+# Nothing is committed to main. The notes are generated from the landings
+# since the last tag and kept in the annotated tag's message, which
+# scripts/release-notes.sh reads when CHANGELOG.md has no section for the
+# tag. A tag pushed with GITHUB_TOKEN starts no workflow, so this calls
+# release.yml with the tag (workflow_call): the same jobs, gate, signing,
+# smoke tests, promotion and tap update as a pushed tag. No secret beyond
+# the ones release.yml already reads.
+on:
+  # Four times a day, so a release goes out soon after the 24 and 48 hour
+  # marks rather than up to a day later; at most one release per 24 hours
+  # whatever the schedule.
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Dry run: decide and print the commit, version and notes, and tag and
+          release nothing. Untick to release for real.
+        type: boolean
+        required: false
+        default: true
+      force:
+        description: >-
+          Release now, ignoring the 24 and 48 hour rules. The commit must still
+          have passed main's full CI run and be newer than the last release.
+        type: boolean
+        required: false
+        default: false
+      version:
+        description: >-
+          The version to release (vX.Y.Z), instead of the computed minor or
+          patch bump. It must be newer than the last tag.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# One at a time, and never cancelled: a run that has pushed its tag must go
+# on to release it.
+concurrency:
+  group: scheduled-release
+  cancel-in-progress: false
+
+jobs:
+  # Read-only: reads main, the tags and CI's runs, and decides.
+  plan:
+    name: pick the commit and the version
+    # The RELEASE_SCHEDULE_PAUSED repository variable pauses the schedule; a
+    # manual dispatch still runs.
+    if: github.event_name != 'schedule' || vars.RELEASE_SCHEDULE_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      # The scripts come from the ref the run is on (main, for the
+      # schedule); the decision always reads origin/main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Fetch every tag
+        run: git fetch --force --tags --quiet origin
+      - name: Decide
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+          VERSION: ${{ inputs.version }}
+        run: sh scripts/scheduled-release.sh "${RUNNER_TEMP}/notes.md"
+      - name: Pass the notes on, and summarise
+        id: notes
+        env:
+          RELEASE: ${{ steps.plan.outputs.release }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          SHA: ${{ steps.plan.outputs.sha }}
+          REASON: ${{ steps.plan.outputs.reason }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -eu
+          {
+            echo "## Scheduled release"
+            echo
+            if [ "${RELEASE}" != true ]; then
+              echo "Nothing to release: ${REASON}."
+            else
+              if [ "${DRY_RUN}" = true ]; then
+                echo "**Dry run**: would tag and release **${TAG}** at \`${SHA}\` (${REASON})."
+              else
+                echo "Tagging and releasing **${TAG}** at \`${SHA}\` (${REASON})."
+              fi
+              echo
+              echo "### Release notes"
+              echo
+              sed 1d "${RUNNER_TEMP}/notes.md"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+          [ "${RELEASE}" = true ] || exit 0
+          delimiter="NOTES_$(openssl rand -hex 16)"
+          { echo "notes<<${delimiter}"; cat "${RUNNER_TEMP}/notes.md"; echo "${delimiter}"; } >> "${GITHUB_OUTPUT}"
+
+  # The only job here that writes, and it runs nothing from the source tree:
+  # it creates the annotated tag object and its ref through the API, with the
+  # notes as the tag message verbatim.
+  tag:
+    name: push the annotated tag
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Create the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          NOTES: ${{ needs.plan.outputs.notes }}
+        run: |
+          set -eu
+          printf '%s\n' "${TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::bad tag '${TAG}'"; exit 1; }
+          printf '%s\n' "${SHA}" | grep -Eq '^[0-9a-f]{40}$' || { echo "::error::bad SHA '${SHA}'"; exit 1; }
+          message="$(printf 'CloudBurrow %s\n\n%s\n' "${TAG}" "${NOTES}")"
+          object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags" \
+            -f tag="${TAG}" -f message="${message}" -f object="${SHA}" -f type=commit --jq .sha)"
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${object}" --jq .ref
+          echo "Tagged ${TAG} at ${SHA}"
+
+  # The real release, exactly as a pushed tag runs it.
+  release:
+    name: release
+    needs: [plan, tag]
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      checks: read
+      actions: read
+    uses: ./.github/workflows/release.yml
+    with:
+      release_tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit
