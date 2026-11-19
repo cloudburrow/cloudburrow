@@ -606,3 +606,68 @@ func TestIAMEnforcementJSON(t *testing.T) {
 	p.grant("roles/cloudtasks.viewer")
 	waitGranted(t, "GetQueue over JSON", get)
 }
+
+// covers: google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions
+//
+// TestIAMEnforcementJSONTestIamPermissions (#1879): TestIamPermissions
+// over JSON, through the official Secret Manager client's REST transport
+// with a minted token, answers only the requested permissions the caller
+// holds, as over gRPC: none without a role, secretmanager.secrets.get and
+// not secretmanager.versions.access as a viewer; the instance's own account
+// holds both.
+func TestIAMEnforcementJSONTestIamPermissions(t *testing.T) {
+	h := New(t)
+	smEndpoint := h.Endpoint(EnvSecrets)
+	h.Endpoint(EnvResourceManager)
+	h.Endpoint(EnvMetadata)
+	requireIAMEnforcement(t)
+	ctx := h.Context()
+	project := iamProject(t, h, "iejt-")
+	p := newIAMPrincipal(t, h, project, "iejt")
+	restAs := func(token string) []option.ClientOption {
+		hc := &http.Client{}
+		if token != "" {
+			hc.Transport = &oauth2.Transport{Source: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})}
+		}
+		t.Cleanup(hc.CloseIdleConnections)
+		return []option.ClientOption{option.WithEndpoint("http://" + strings.TrimPrefix(smEndpoint, "http://")), option.WithHTTPClient(hc)}
+	}
+	owner, err := secretmanager.NewRESTClient(ctx, restAs("")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+	secret := "projects/" + project + "/secrets/tip"
+	if _, err := owner.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: "projects/" + project, SecretId: "tip",
+		Secret: &secretmanagerpb.Secret{Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{
+			Automatic: &secretmanagerpb.Replication_Automatic{}}}}}); err != nil {
+		t.Fatalf("CreateSecret: %v", err)
+	}
+	as, err := secretmanager.NewRESTClient(ctx, restAs(p.token)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = as.Close() })
+	ask := []string{"secretmanager.secrets.get", "secretmanager.versions.access"}
+	test := func(c *secretmanager.Client) []string {
+		t.Helper()
+		resp, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: secret, Permissions: ask})
+		if err != nil {
+			t.Fatalf("TestIamPermissions over JSON: %v", err)
+		}
+		return resp.GetPermissions()
+	}
+	if got := test(as); len(got) != 0 {
+		t.Errorf("TestIamPermissions over JSON without a role = %v; want none", got)
+	}
+	p.grant("roles/secretmanager.viewer")
+	waitGranted(t, "TestIamPermissions over JSON as a viewer", func() error {
+		if got := test(as); len(got) != 1 || got[0] != "secretmanager.secrets.get" {
+			return fmt.Errorf("got %v; want only secretmanager.secrets.get", got)
+		}
+		return nil
+	})
+	if got := test(owner); len(got) != 2 {
+		t.Errorf("TestIamPermissions over JSON as the instance's account = %v; want both", got)
+	}
+}

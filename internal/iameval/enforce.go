@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -247,6 +248,10 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
+		if strings.HasSuffix(full, "/TestIamPermissions") {
+			e.testPermissionsJSON(w, r, svc, fields["resource"], next)
+			return
+		}
 		_, row := ForMethod(svc, full)
 		if row == nil {
 			next.ServeHTTP(w, r)
@@ -293,4 +298,49 @@ func runtimeHTTPStatus(c codes.Code) int {
 		return http.StatusUnauthorized
 	}
 	return http.StatusInternalServerError
+}
+
+// testPermissionsJSON is testPermissions over JSON: the handler's answer,
+// {"permissions": [...]}, keeps only those the caller holds on resource.
+func (e *Enforcer) testPermissionsJSON(w http.ResponseWriter, r *http.Request, svc *Service, resource string, next http.Handler) {
+	c := Caller{Owner: true}
+	if b := Bearer(r.Header.Get("Authorization")); b != "" && e.CallerOf != nil {
+		c = e.CallerOf(b)
+	}
+	if c.Invalid {
+		WriteJSONStatus(w, Unauthenticated())
+		return
+	}
+	if c.Owner {
+		next.ServeHTTP(w, r)
+		return
+	}
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, r)
+	var out map[string]any
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+		for k, v := range rec.Header() {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes())
+		return
+	}
+	held := []any{}
+	if perms, ok := out["permissions"].([]any); ok {
+		for _, p := range perms {
+			if ps, ok := p.(string); ok && e.Eval.Check(e.Request(r.Context(), svc, c.Email, ps, resource)).Granted {
+				held = append(held, ps)
+			}
+		}
+	}
+	if len(held) == 0 {
+		delete(out, "permissions")
+	} else {
+		out["permissions"] = held
+	}
+	b, _ := json.Marshal(out)
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
 }
