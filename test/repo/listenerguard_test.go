@@ -22,6 +22,7 @@ var guardedElsewhere = map[string]string{
 	"internal/service/secrets/server.go":     "s.handler() returns h2c.NewHandler(hostguard.Wrap(...))",
 	"internal/service/vertexai/lifecycle.go": "mixedHandler serves hostguard.Wrap'd REST and gRPC",
 	"internal/netfwd/guard.go":               "the guard itself: guardHandler checks Host and Origin",
+	"cmd/cloudburrow/terraform_intercept.go": "the --intercept-hardcoded proxy (#1578) lives for one terraform run and answers only CONNECT to an intercepted host (a browser cannot send CONNECT); the inner server has no listener, only those tunnels, and serves only an intercepted Host",
 }
 
 // TestEveryHTTPListenerIsGuarded (#1586): three in-process REST APIs

@@ -270,6 +270,39 @@ Run, Cloud Scheduler and Resource Manager), and any other enabled service, Cloud
 them, is named in a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
 that `cloudburrow terraform` did not write is never replaced.
 
+**Hard-coded Google hosts: `--intercept-hardcoded` (opt-in, #1578).** When a plan's
+`google_bigquery_table` schema drops a column, `hashicorp/google` (8.4.0 to 8.12.0 and its main
+branch) lists the table's row access policies at a literal
+`https://bigquery.googleapis.com/bigquery/v2/.../rowAccessPolicies`, to decide whether to replace
+the table. No provider setting moves it: not `big_query_custom_endpoint`, not `universe_domain`
+(it only rewrites the default base paths), not any `GOOGLE_*` variable, and the provider's HTTP
+client rewrites no hosts. It ignores that call's error, so without help the plan goes ahead in
+place, where Google's would replace a table with row access policies. With the flag, for every
+subcommand but `init`:
+
+```sh
+cloudburrow terraform --intercept-hardcoded -- plan
+```
+
+- the wrapper mints, in memory, an ephemeral CA (valid one day, name-constrained to
+  `bigquery.googleapis.com`) and a leaf for that host. Only the CA **certificate** is written, to
+  a `terraform-intercept-*` directory in the instance's state directory, removed when the run
+  ends. Neither private key is written or printed, and nothing is installed in a keychain or
+  system trust store.
+- it starts an HTTPS proxy on loopback that accepts `CONNECT bigquery.googleapis.com:443` alone,
+  terminates TLS there and sends each `/bigquery/v2/` request, path unchanged, to the instance's
+  BigQuery front. Any other host, port, path or plain proxy request is refused 403: nothing is
+  forwarded to the internet. The run ends with a line naming how many requests it served and what
+  it refused.
+- only the Terraform process gets `HTTPS_PROXY`/`HTTP_PROXY` (that proxy), `NO_PROXY` reset to
+  loopback, `SSL_CERT_FILE`/`SSL_CERT_DIR` (that CA alone) and
+  `GODEBUG=x509sslcertoverrideplatform=1`.
+
+Linux honours `SSL_CERT_FILE` with every Go. On macOS only a provider built with Go 1.27 or later
+does; the released providers through 8.12.0 are built with Go 1.26, so there the wrapper warns, the
+call fails its TLS check (still locally) and the plan behaves as without the flag.
+`TestTerraformBigQueryTableDropColumnIntercepted` (emulators shard) covers it.
+
 The original manual run, full create/read/destroy against the `hashicorp/google` provider:
 
 ```
