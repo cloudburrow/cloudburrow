@@ -146,7 +146,11 @@ func parseImportJob(field, name string) error {
 	return nil
 }
 
-func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRequest) (*kmspb.ImportJob, error) {
+func (s *Server) CreateImportJob(ctx context.Context, req *kmspb.CreateImportJobRequest) (*kmspb.ImportJob, error) {
+	return retryChanged(func() (*kmspb.ImportJob, error) { return s.createImportJob(ctx, req) })
+}
+
+func (s *Server) createImportJob(_ context.Context, req *kmspb.CreateImportJobRequest) (*kmspb.ImportJob, error) {
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -209,7 +213,7 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 		}
 	}
 	if res, err := s.toImportJob(j); err == nil {
-		if err := checkCustom(name, orgpolicy.TypeKMSImportJob, orgpolicy.MethodCreate, res); err != nil {
+		if err := s.checkUnlocked([]string{dbKey(ringPrefix, req.GetParent()), dbKey(importJobPrefix, name)}, name, orgpolicy.TypeKMSImportJob, orgpolicy.MethodCreate, res); err != nil {
 			return nil, err
 		}
 	}
@@ -415,7 +419,11 @@ func importedMaterial(a algo, key []byte) ([]byte, error) {
 // ENABLED at once (on Google it passes through PENDING_IMPORT), records its
 // import job and import time, and is not made primary. Re-importing into an
 // existing version (crypto_key_version) is UNIMPLEMENTED.
-func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+func (s *Server) ImportCryptoKeyVersion(ctx context.Context, req *kmspb.ImportCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	return retryChanged(func() (*kmspb.CryptoKeyVersion, error) { return s.importCryptoKeyVersion(ctx, req) })
+}
+
+func (s *Server) importCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -491,7 +499,7 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	n := k.Next
 	v := keyVersion{Name: versionName(k.Name, n), Created: now, Material: mat, Algorithm: storedAlgorithm(a),
 		ImportJob: j.Name, Imported: now, ProtectionLevel: k.ProtectionLevel, TrustedWrapping: req.GetTrustedWrappingEnabled()}
-	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(keyPrefix, k.Name), dbKey(importJobPrefix, j.Name), dbKey(versionPrefix, v.Name)}, v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {

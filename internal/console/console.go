@@ -249,6 +249,12 @@ type Provider interface {
 // so that a field only ever appears when the service behind it can actually
 // accept it — a form offering something the API refuses is the working-looking
 // control the parity specification forbids.
+// Link is a document a Field names: its label and its https URL.
+type Link struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type Field struct {
 	Name  string `json:"name"`
 	Label string `json:"label"`
@@ -370,11 +376,21 @@ type Field struct {
 	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
 	// does not run (#1860).
 	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// Links are documents the field is about, drawn as links under its
+	// help: Microsoft's licence terms beside Cloud SQL for SQL Server's
+	// licence checkbox (#1916). Each opens in a new tab.
+	Links []Link `json:"links,omitempty"`
 	// VisibleWhen shows the field only while each named field of the same
 	// form holds the given value ("true"/"false" for a checkbox); a hidden
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// CheckedWhen, on a checkbox, checks it and holds it checked while
+	// another field of the form holds a value, in ShowWhen's "name=value"
+	// form ("a|b" for either): Memorystore's Security choice of IAM Auth or
+	// Token Auth checks and locks Enable In-Transit Encryption (TLS)
+	// (#1862). Held, the box is still sent.
+	CheckedWhen string `json:"checkedWhen,omitempty"`
 	// Upload, on a textarea, is the label of a file chooser beside it whose
 	// text file is read into the textarea, as Google's Create secret takes
 	// the Secret value typed or from Upload file (#1850). The value is still

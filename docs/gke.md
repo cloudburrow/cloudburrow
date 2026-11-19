@@ -1,6 +1,6 @@
 # Kubernetes Engine API (`container.googleapis.com` v1)
 
-`--services gke` (#1913) serves the Kubernetes Engine API in the CLI process, gRPC and JSON on `--port-gke` (default `9029`). Each cluster it creates is a **real local Kubernetes cluster**: a kind cluster of its own, made the way the instance's own cluster is. Compatibility status, method by method, is in [compatibility.md](compatibility.md#kubernetes-engine-api--googlecontainerv1).
+`--services gke` (#1913) serves the Kubernetes Engine API in the CLI process, gRPC and JSON on `--port-gke` (default `9030`). Each cluster it creates is a **real local Kubernetes cluster**: a kind cluster of its own, made the way the instance's own cluster is. Compatibility status, method by method, is in [compatibility.md](compatibility.md#kubernetes-engine-api--googlecontainerv1).
 
 ## Why kind, not k3d
 

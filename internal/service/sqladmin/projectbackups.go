@@ -370,6 +370,9 @@ func (s *Server) finalBackupOf(r *http.Request) (finalBackup, error) {
 // takeFinalBackup dumps e into a FINAL backup before its instance is
 // removed; it is kept when the instance is gone.
 func (s *Server) takeFinalBackup(project string, e Engine, fb finalBackup) error {
+	if err := sqlServerEngine(e, "a final backup"); err != nil {
+		return err
+	}
 	b := s.backups
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	b.mu.Lock()

@@ -102,6 +102,9 @@ func (s *Server) takePITRBase(name string) error {
 // pitrUnavailable is why an instance cannot be recovered to a time, or
 // nil when it can.
 func (s *Server) pitrUnavailable(e Engine) error {
+	if err := sqlServerEngine(e, "point-in-time recovery"); err != nil {
+		return err
+	}
 	if s.pitr() == nil {
 		return unimplemented("point-in-time recovery", "this server was started without a backup store (docs/cloudsql.md)")
 	}

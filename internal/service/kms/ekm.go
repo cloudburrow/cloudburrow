@@ -187,7 +187,11 @@ func (s *Server) Ekm() *EkmServer { return &EkmServer{s: s} }
 
 var ekmFilterFields = fieldSupport{"name": {"=", "!=", ":"}}
 
-func (e *EkmServer) CreateEkmConnection(_ context.Context, req *kmspb.CreateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
+func (e *EkmServer) CreateEkmConnection(ctx context.Context, req *kmspb.CreateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
+	return retryChanged(func() (*kmspb.EkmConnection, error) { return e.createEkmConnection(ctx, req) })
+}
+
+func (e *EkmServer) createEkmConnection(_ context.Context, req *kmspb.CreateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
 	s := e.s
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
@@ -219,7 +223,7 @@ func (e *EkmServer) CreateEkmConnection(_ context.Context, req *kmspb.CreateEkmC
 	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("EkmConnection %s already exists", name))
 	}
-	if err := checkCustom(name, orgpolicy.TypeKMSEkmConnection, orgpolicy.MethodCreate, c.proto()); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(ekmConnectionPrefix, name)}, name, orgpolicy.TypeKMSEkmConnection, orgpolicy.MethodCreate, c.proto()); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(ekmConnectionPrefix, name), c); err != nil {
@@ -287,7 +291,11 @@ func (e *EkmServer) ListEkmConnections(_ context.Context, req *kmspb.ListEkmConn
 // crypto_space_path. An etag that is not the stored one is ABORTED, as
 // Google's etags are elsewhere (UNVERIFIED here).
 // Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/ekm_service.proto
-func (e *EkmServer) UpdateEkmConnection(_ context.Context, req *kmspb.UpdateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
+func (e *EkmServer) UpdateEkmConnection(ctx context.Context, req *kmspb.UpdateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
+	return retryChanged(func() (*kmspb.EkmConnection, error) { return e.updateEkmConnection(ctx, req) })
+}
+
+func (e *EkmServer) updateEkmConnection(_ context.Context, req *kmspb.UpdateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
 	s := e.s
 	in := req.GetEkmConnection()
 	if err := parseEkmConnection("ekm_connection.name", in.GetName()); err != nil {
@@ -341,7 +349,7 @@ func (e *EkmServer) UpdateEkmConnection(_ context.Context, req *kmspb.UpdateEkmC
 	if err := checkCryptoSpace(c); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if err := checkCustom(c.Name, orgpolicy.TypeKMSEkmConnection, orgpolicy.MethodUpdate, c.proto()); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(ekmConnectionPrefix, c.Name)}, c.Name, orgpolicy.TypeKMSEkmConnection, orgpolicy.MethodUpdate, c.proto()); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(ekmConnectionPrefix, c.Name), c); err != nil {
@@ -365,7 +373,11 @@ func (e *EkmServer) GetEkmConfig(_ context.Context, req *kmspb.GetEkmConfigReque
 
 // UpdateEkmConfig sets or clears default_ekm_connection, which must name an
 // EkmConnection in the same location.
-func (e *EkmServer) UpdateEkmConfig(_ context.Context, req *kmspb.UpdateEkmConfigRequest) (*kmspb.EkmConfig, error) {
+func (e *EkmServer) UpdateEkmConfig(ctx context.Context, req *kmspb.UpdateEkmConfigRequest) (*kmspb.EkmConfig, error) {
+	return retryChanged(func() (*kmspb.EkmConfig, error) { return e.updateEkmConfig(ctx, req) })
+}
+
+func (e *EkmServer) updateEkmConfig(_ context.Context, req *kmspb.UpdateEkmConfigRequest) (*kmspb.EkmConfig, error) {
 	s := e.s
 	in := req.GetEkmConfig()
 	loc, err := parseEkmConfig("ekm_config.name", in.GetName())
@@ -405,7 +417,11 @@ func (e *EkmServer) UpdateEkmConfig(_ context.Context, req *kmspb.UpdateEkmConfi
 		return nil, apierror.Wrap(err)
 	}
 	c.Name, c.Default = in.GetName(), def
-	if err := checkCustom(c.Name, orgpolicy.TypeKMSEkmConfig, orgpolicy.MethodUpdate,
+	configKeys := []string{dbKey(ekmConfigPrefix, c.Name)}
+	if def != "" {
+		configKeys = append(configKeys, dbKey(ekmConnectionPrefix, def))
+	}
+	if err := s.checkUnlocked(configKeys, c.Name, orgpolicy.TypeKMSEkmConfig, orgpolicy.MethodUpdate,
 		&kmspb.EkmConfig{Name: c.Name, DefaultEkmConnection: c.Default}); err != nil {
 		return nil, err
 	}

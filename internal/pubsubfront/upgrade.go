@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
@@ -53,7 +54,8 @@ func (f *Front) httpServer(grpcSrv *grpc.Server) *frontHTTP {
 		h2:       &http2.Server{MaxConcurrentStreams: 1 << 16},
 		upgraded: map[net.Conn]bool{},
 	}
-	h := f.Handler(grpcSrv)
+	// Disabled APIs (#1914): refused before the front serves a call.
+	h := apienable.Gate(nil, "pubsub.googleapis.com", f.Handler(grpcSrv))
 	s.Server = &http.Server{
 		// The Host and Origin checks (#1587) come before an Upgrade: h2c
 		// is taken, so the request asking for it is checked like any

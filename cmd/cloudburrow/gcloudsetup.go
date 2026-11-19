@@ -98,6 +98,10 @@ var gcloudVerified = []struct {
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},
+	// The API Keys API (#1915): gcloud services api-keys calls v2, which
+	// gcloud appends. TestGcloudServicesAPIKeys drives create, list,
+	// describe, get-key-string, update, lookup, delete and undelete.
+	{apiKeysService, "apikeys", "/", true, false},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
 	// the Run port beside v2. A command given --region calls
 	// {region}-{host}, which gcloud derives from this override, so on
@@ -111,6 +115,12 @@ var gcloudVerified = []struct {
 	// TestGcloudRunDeploySource and TestGcloudBuildsSubmit drive them.
 	{config.ServiceRun, "artifactregistry", "/", false, false},
 	{config.ServiceRun, "cloudbuild", "/", false, false},
+	// Container Analysis (#1912), on the Run port under
+	// /containeranalysis/, as its v1 paths are beside Artifact Registry's
+	// and Cloud Run v1's; gcloud appends v1/. `gcloud artifacts docker
+	// images list --show-occurrences` and `describe
+	// --show-package-vulnerability` read it: TestGcloudArtifactsVulnerabilityScanning.
+	{config.ServiceRun, "containeranalysis", "/containeranalysis/", false, false},
 	// Cloud Functions v2 (#1377), on the Run port; gcloud functions appends
 	// v2/. TestGcloudFunctions drives deploy --gen2, describe, list and
 	// delete, gated as the Functions tests are.
@@ -227,6 +237,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
+		apiKeysService:         cfg.Endpoints.APIKeys,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE}

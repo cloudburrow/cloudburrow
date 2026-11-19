@@ -296,8 +296,9 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	}
 	// One drawer row per product (#1842): Key Management, Memorystore,
 	// Firestore, Bigtable, Cloud Logging, APIs & Services and IAM & Admin
-	// each hold their pages rather than appearing once per page.
-	for _, product := range []string{"Agent Platform", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager",
+	// each hold their pages rather than appearing once per page. Resource
+	// Manager's pages are IAM & Admin's, as Google's are (#1865).
+	for _, product := range []string{"Agent Platform", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage",
 		"Key Management", "Memorystore", "Firestore", "Bigtable", "Cloud Logging", "APIs & Services", "IAM & Admin"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
@@ -1010,7 +1011,7 @@ func TestEveryDialogSharesOneModalShell(t *testing.T) {
 		`if (opener && opener.isConnected && opener.focus) opener.focus();`,
 		`if (e.key !== "Tab") return;`,
 		`for (const n of inerted) n.inert = true;`,
-		`for (const n of inerted) n.inert = false;`,
+		`for (const n of inerted) if (!n.classList.contains("is-closing")) n.inert = false;`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("openModal is missing %q", want)

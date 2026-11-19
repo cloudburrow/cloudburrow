@@ -120,6 +120,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
+| `internal/apienable/` | Refuses calls to an API disabled in their project with Google's `SERVICE_DISABLED` (#1914): the gRPC interceptors and HTTP gate the in-process services and the in-cluster servers wrap, the Service Usage server's decision, and the host endpoint the in-cluster servers ask, with a one-second cache. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
 | `internal/bigqueryfront/` | The checks in front of the BigQuery emulator (#861), run in its pod by `cloudburrow-storage bigquery-front` (#902): IDs, schemas, DDL, jobs and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`, and what the emulator would report done without doing is 501. |
@@ -152,8 +153,10 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/grpchttp/` | Builds gRPC servers that are served through `ServeHTTP` (h2c) with `WaitForHandlers`, and stops them so `Stop` waits for every call's handler, its stats `End` included, before returning (#1804). `grpchttptest` holds the shared regression-test helpers. |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
+| `internal/iamcheck/` | How the servers CloudBurrow runs in the cluster (Cloud Storage, Pub/Sub's front) ask the host's one evaluator, `internal/iameval`, whether a request's caller holds a permission, under `up --iam-enforcement=on` (#1879). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
 | `internal/iameval/` | CloudBurrow's one evaluator of IAM allow policies (#1879): whether a principal holds a permission on a resource, and why, for `--iam-enforcement`, Policy Troubleshooter and Policy Analyzer. |
+| `internal/grafeas/` | Container Analysis (#1912): the Grafeas v1 API's notes and occurrences, their AIP-160 filters and IAM, and the vulnerability summary, persisted in the instance's state directory. |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/iamroles/` | IAM's permission catalog and the permissions of the roles CloudBurrow's permission checks evaluate (#1743). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |
@@ -168,6 +171,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |
 | `internal/netfwd/` | Publishes in-cluster Services on host loopback addresses (port-forward tunnels), with the Host check in front of the tunnels that carry HTTP (#725). |
+| `internal/orgpolicy/` | Evaluates organization policies where the services ask (#1890): a constraint's effective policy down the hierarchy, the checks each enforced list or boolean constraint makes, and custom constraints' CEL conditions on the fields each service documents (#1891, #1895). |
 | `internal/paging/` | Pagination with deterministic ordering; invalid page tokens refused. |
 | `internal/prediction/` | The Vertex AI custom prediction container contract. |
 | `internal/prefetch/` | Offline cache of the node, backend and Knative artifacts a first `up` downloads (#604). |
@@ -178,6 +182,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/s2ops/` | The S2 operations github.com/golang/geo does not port, for GoogleSQL for Bigtable's `ST_UNION`, `ST_UNION_AGG`, `ST_INTERSECTION`, `ST_DIFFERENCE`, `ST_BUFFER`, `ST_BUFFERWITHTOLERANCE` and `ST_SIMPLIFY` (#1728, #1735): Go ports of the S2 C++ library's `S2BooleanOperation`, `S2Builder` with its snapping and edge-chain simplification, `S2Builder::Graph`, the `S2PolygonLayer`, `S2PolylineVectorLayer`, `S2PointVectorLayer` and `ClosedSetNormalizer` layers, `S2WindingOperation` and `S2BufferOperation`, with S2's unit tests (Apache-2.0; its PROVENANCE.md). |
 | `internal/spannerfront/` | The Spanner instance updates the emulator refuses (#1461), answered in the Spanner pod's call front (`--spanner-instances`) over gRPC and the admin REST port: `UpdateInstance` of the display name, compute capacity and labels, kept in memory and laid over the emulator's `GetInstance` and `ListInstances`, its done operation answered by `GetOperation`; `UpdateDatabase` of a database's drop protection, enforced on `DropDatabase` and `DeleteInstance`. The admin methods the emulator refuses with an empty message (backups, backup schedules, instance configurations, `MoveInstance`, …) are refused `UNIMPLEMENTED` by the front, naming why. |
 | `internal/pubsubfront/` | The front the Pub/Sub pod runs before Google's emulator (`cloudburrow-storage pubsub-front`), for gRPC and the REST API on one port: passes every call through, and enforces subscription expiration, which the emulator stores and never acts on (#873); relays the emulator's pushes so a successful one counts as activity, refuses exactly-once delivery on a push subscription, and reads and restores the expiration clocks and the projects named for `cloudburrow state` (#880), over REST as over gRPC (#908), routing each connection by its first request, gRPC to grpc-go's own transport and anything else to net/http, which routes each request by its content type, so REST over h2c is served (#909, #950); applies the labels updates the emulator refuses (#949); keeps what the emulator does not store in a file on the pod's emptyDir, so a restart of the front alone loses nothing (#898). |
+| `internal/osvscan/` | Artifact Registry's vulnerability scanning (#1912): the pinned OSV-Scanner and OSV database snapshot (prefetched, SHA-256 checked), the offline scan of an image archive, and the conversion of its findings into Artifact Analysis's occurrences. |
 | `internal/registry/` | Artifact Registry's Docker registry: the Docker Registry HTTP API v2 over a content-addressed store in the instance's state directory (#1383). |
 | `internal/resource/` | Google resource-name parsing and formatting, project and location scoping. |
 | `internal/rpmfixture/` | Builds small, installable `.rpm` packages in Go for tests (#1539): a signature header with the header and payload digests, an immutable-region header with files, dependencies and changelog, and a gzip cpio payload; rpm and dnf install them with `gpgcheck=0`. |
@@ -191,9 +196,10 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
+| `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/gke/` | The Kubernetes Engine API v1 (clusters, node pools, operations), built by us (#1913); each cluster is a kind cluster that `internal/cluster`'s `GKE` makes and resizes. |
 | `internal/service/privateca/` | Certificate Authority Service v1 (CA pools, CAs, certificates, real X.509 signed in process), built by us (#1834). |
-| `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, disabling is stored, not enforced (#1352). |
+| `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, and a disabled API's calls are refused SERVICE_DISABLED, through `internal/apienable` (#1352, #1914). |
 | `internal/service/sqladmin/` | The Cloud SQL Admin API (sqladmin v1 and v1beta4) over the PostgreSQL and MySQL servers, built by us (#1301). |
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |
 | `internal/service/tasks/` | Cloud Tasks queues, tasks and HTTP dispatch, built by us. |

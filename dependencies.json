@@ -458,6 +458,74 @@
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
+      "cloudSQLServer2017": {
+        "$comment": "SQL Server 2017 14.0.3570.2, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2017_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2017-latest",
+        "version": "14.0.3570.2",
+        "digest": "sha256:5f6fd78f8752390dbd3584b91dee463f1f4b2b30beef9af3fd35753d32940c52",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2017-latest."
+      },
+      "cloudSQLServer2019": {
+        "$comment": "SQL Server 2019 15.0.4510.2, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2019_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2019-latest",
+        "version": "15.0.4510.2",
+        "digest": "sha256:debdc21628cddd1a4433371c601c8dee9bad3533ae8b18fe9dc8c5596368b10d",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2019-latest."
+      },
+      "cloudSQLServer2022": {
+        "$comment": "SQL Server 2022 16.0.4325.4, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2022_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2022-latest",
+        "version": "16.0.4325.4",
+        "digest": "sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2022-latest."
+      },
+      "cloudSQLServer2025": {
+        "$comment": "SQL Server 2025 17.0.5065.9, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2025_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2025-latest",
+        "version": "17.0.5065.9",
+        "digest": "sha256:05644dad1266ca3d445d1e8f6d2ebb9a6a03df9a39376e0f7b48917356dca9d9",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2025-latest."
+      },
       "cloudSQLMySQL80": {
         "$comment": "MySQL 8.0.46, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
         "image": "mysql:8.0",
@@ -652,6 +720,13 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Promoted from indirect to direct for h2c, which lets Secret Manager serve gRPC and JSON on one port. Same version as before; no new dependency was added."
+      },
+      "goMSSQL": {
+        "module": "github.com/microsoft/go-mssqldb",
+        "version": "1.10.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Cloud SQL for SQL Server (#1916): internal/service/sqladmin reaches a SQL Server instance's server as sa, to make its sqlserver user, databases, users and flags, as pgx and go-sql-driver/mysql reach PostgreSQL and MySQL. Microsoft's own pure-Go driver; Google publishes none. Only its root package is imported (no Azure or Kerberos packages)."
       },
       "goCreackPty": {
         "module": "github.com/creack/pty",
@@ -1204,6 +1279,78 @@
         "verification": "lock-file-hashes",
         "digest": null,
         "notes": "The lock file carries each registry's hashes for linux_amd64, linux_arm64, darwin_amd64 and darwin_arm64; OpenTofu's registry serves different packages, so its hashes differ from Terraform's. init installs the provider only if its package matches a locked hash."
+      }
+    },
+    "scanning": {
+      "$comment": "Artifact Registry's vulnerability scanning (#1912): downloaded by `cloudburrow prefetch --vulnerability-scanning`, each file checked against these SHA-256s (internal/osvscan/pins.go holds the same values; a test compares them), and run offline. Nothing is redistributed: every user downloads from the upstream.",
+      "osvScanner": {
+        "version": "v2.7.1",
+        "source": "https://github.com/google/osv-scanner",
+        "license": "Apache-2.0",
+        "redistribution": "download-only; fetched by cloudburrow prefetch from the project's GitHub release, never shipped",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "digest": null,
+        "checksums": {
+          "osv-scanner_darwin_amd64": "sha256:b8420d5485ba792626315f1bf9a5a2046e971d38eea75bf9090c38852dbc3b1b",
+          "osv-scanner_darwin_arm64": "sha256:b22c02877a811c8f78956e8643efa554932b7378f590d13f8e97d4e9448a29f3",
+          "osv-scanner_linux_amd64": "sha256:fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8",
+          "osv-scanner_linux_arm64": "sha256:983d22fbad9724514e3fcc6acc83b5fa64c5ffa6b0d9f510028f22c1b223ff81"
+        },
+        "sizes": {
+          "osv-scanner_darwin_amd64": 59352784,
+          "osv-scanner_darwin_arm64": 55745714,
+          "osv-scanner_linux_amd64": 58187936,
+          "osv-scanner_linux_arm64": 54198432
+        },
+        "notes": "SHA-256s are the release's osv-scanner_SHA256SUMS entries, which match the assets' GitHub digests. Run as `scan image --archive --offline --all-packages` with OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY at the prefetched snapshot and every proxy variable at 127.0.0.1:9."
+      },
+      "osvDatabase": {
+        "version": "2026-11-19",
+        "source": "https://google.github.io/osv.dev/data/#data-dumps",
+        "license": "mixed: each OSV record keeps its source database's licence (for example CC-BY-4.0 for the GitHub Advisory Database, the Go vulnerability database and PyPA's advisory database); the distributions' trackers (Alpine secdb, Debian security tracker, Ubuntu CVE tracker) set their own terms",
+        "redistribution": "download-only; fetched by cloudburrow prefetch from OSV's public bucket, never shipped",
+        "updateFeed": "none",
+        "skipDiscovery": "A data snapshot, not a release: OSV rewrites each ecosystem's all.zip several times a day. The pin is an object generation of the versioned bucket osv-vulnerabilities, which keeps old generations for about a week, so the pin is moved (pins.go and here together) when a prefetch reports 404.",
+        "verification": "sha256-on-download",
+        "digest": null,
+        "snapshots": {
+          "Alpine": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Alpine/all.zip?generation=1795080781716943",
+            "sha256": "sha256:82c1e6b3a170cdc7e663061fc3a766a6c90ec73ac071aa34403bebaed0cca457",
+            "size": 9276935
+          },
+          "Debian": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Debian/all.zip?generation=1795096995130005",
+            "sha256": "sha256:6005ba6323158727283dac884ff01b5693fc57861afb046c85ce2bffe79bc576",
+            "size": 82263485
+          },
+          "Go": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip?generation=1795050195126703",
+            "sha256": "sha256:525f77fa536859d59215442f6ba98caf100ca7f1bef2dd9a242d9f3fb0f89757",
+            "size": 12956844
+          },
+          "Maven": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Maven/all.zip?generation=1795051974553992",
+            "sha256": "sha256:fd1c96321a41c535c3f4cab7fc4db24f46c659e143eb62493c1a634a917f1c97",
+            "size": 10547334
+          },
+          "PyPI": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip?generation=1795082587433272",
+            "sha256": "sha256:51d4295bbe14768b99f0b8b91b01b708d8230ac296c8722cc5e29e66d28e8ee4",
+            "size": 38075455
+          },
+          "npm": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip?generation=1795095210470062",
+            "sha256": "sha256:0601339e91c58525433117f107327a55c96a060534c5614ee6375f6f7bf366f9",
+            "size": 221817800
+          },
+          "Ubuntu": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip?generation=1795077206037621",
+            "sha256": "sha256:7490ea001180541e8bb10acae93aff85ca368842986cd4d22e68b9ce82d7fb6a",
+            "size": 819766997
+          }
+        }
       }
     }
   },

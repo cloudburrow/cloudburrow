@@ -386,6 +386,10 @@ Flags of prefetch, besides up's:
     	also build BigQuery ML's TensorFlow converter image (2.3 GB) into the
     	host's Docker, which CREATE MODEL ... MODEL_TYPE='TENSORFLOW' otherwise
     	builds on its first use and cannot build offline
+  -vulnerability-scanning[=ECOSYSTEM,...]
+    	also download OSV-Scanner and the pinned OSV database (Alpine, Debian,
+    	Ubuntu, Go, Maven, npm, PyPI: 1.2 GB; or only the ecosystems named),
+    	which Artifact Registry's vulnerability scanning runs offline
 
 `)
 	case "trust":

@@ -933,7 +933,7 @@ jobs:
           # The Logs Explorer reads entries written through the Logging API (#1410).
           # And the kubeconfig, with which the Kubernetes Engine test removes the
           # deployment its Deploy made (#1857).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,KUBECONFIG; fi
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
           # Cloud Logging and BigQuery's official clients.
           if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi

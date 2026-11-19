@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
@@ -85,6 +86,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// enforcement (#1890).
 		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
 		defer orgpolicy.Use(nil)
+		// Disabled APIs (#1914) are the host's too.
+		apienable.Use(&apienable.Remote{Base: *resourceManager})
+		defer apienable.Use(nil)
 	}
 	if *mode != "persistent" && *mode != "ephemeral" {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)
@@ -161,7 +165,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	hs := &http.Server{Handler: hostguard.WrapHost(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
+	hs := &http.Server{Handler: hostguard.WrapHost(apienable.Gate(nil, "storage.googleapis.com", srv, srv.APIEnableOptions()), AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()

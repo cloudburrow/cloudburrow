@@ -112,7 +112,7 @@ func TestConsoleArtifactRegistryCreateRemoteRepository(t *testing.T) {
 // Google's Create repository page (#1855): a Multi-Region location, a
 // customer-managed key, immutable image tags, cleanup policies in dry run,
 // a Maven version policy and a virtual repository's upstream rows each
-// reach CreateRepository; Go, Kubeflow Pipelines, a preset upstream and
+// reach CreateRepository; a preset upstream and
 // vulnerability scanning, drawn disabled, are refused.
 func TestConsoleArtifactRegistryCreatePage(t *testing.T) {
 	ctx := context.Background()
@@ -143,7 +143,8 @@ func TestConsoleArtifactRegistryCreatePage(t *testing.T) {
 	r, _, err := p.repository(proj, "multi")
 	if err != nil || !strings.Contains(r.GetName(), "/locations/us/") || r.GetKmsKeyName() != key || !r.GetDockerConfig().GetImmutableTags() ||
 		!r.GetCleanupPolicyDryRun() || r.GetCleanupPolicies()["untagged"].GetCondition().GetOlderThan().GetSeconds() != 30*86400 ||
-		r.GetLabels()["team"] != "web" {
+		r.GetLabels()["team"] != "web" ||
+		r.GetVulnerabilityScanningConfig().GetEnablementConfig().String() != "DISABLED" {
 		t.Fatalf("the repository = %v, %v", r, err)
 	}
 	l, _ := p.List(ctx, "")
@@ -179,10 +180,7 @@ func TestConsoleArtifactRegistryCreatePage(t *testing.T) {
 		t.Errorf("the virtual repository's upstreams = %v", ups)
 	}
 	for name, v := range map[string]map[string]string{
-		"Go":                     {"format": "GO"},
-		"Kubeflow Pipelines":     {"format": "KFP"},
-		"a preset upstream":      {"mode": "REMOTE_REPOSITORY", "remoteSource": arRemotePreset, "upstream": "base"},
-		"vulnerability scanning": {"vulnerabilityScanning": arEnabled},
+		"a preset upstream": {"mode": "REMOTE_REPOSITORY", "remoteSource": arRemotePreset, "upstream": "base"},
 	} {
 		v["id"], v["location"] = "refused", "us-east1"
 		if _, err := p.Create(ctx, "", v); err == nil || !strings.Contains(err.Error(), "Not available locally") {

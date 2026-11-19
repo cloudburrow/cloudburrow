@@ -355,7 +355,7 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 	for _, l := range []struct{ name, path string }{
 		{"Secret Manager", "/secrets"}, {"Cloud Scheduler", "/scheduler/jobs"}, {"Cloud Tasks", "/tasks/queues"},
 		{"projects", "/projects"}, {"resource hierarchy", "/resource-hierarchy"}, {"tags", "/tags"},
-		{"IAM", "/iam-admin/iam"}, {"IAM roles", "/iam-admin/roles"}, {"IAM service accounts", "/iam-admin/serviceaccounts"}, {"APIs & Services", "/apis"},
+		{"IAM", "/iam-admin/iam"}, {"IAM roles", "/iam-admin/roles"}, {"IAM service accounts", "/iam-admin/serviceaccounts"},
 		{"Kubernetes workloads", "/kubernetes/workloads"}, {"pods", "/kubernetes/pods"},
 		{"Kubernetes services", "/kubernetes/services"}, {"Kubernetes jobs", "/kubernetes/jobs"},
 		{"deleted buckets", "/storage/deleted"},
@@ -363,6 +363,9 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 		pages = append(pages, listAndCreate(l.name, l.path, project)...)
 	}
 	for _, l := range []struct{ name, path string }{
+		{"APIs & Services", "/apis"}, {"API Library", "/apis/library"}, {"API Library entry", "/apis/library/storage.googleapis.com"},
+		{"API metrics", "/apis/api/storage.googleapis.com/metrics"}, {"API credentials tab", "/apis/api/storage.googleapis.com/credentials"},
+		{"Credentials", "/apis/credentials"},
 		{"Service Usage operations", "/apis/operations"}, {"nodes", "/kubernetes/nodes"},
 		{"Kubernetes storage", "/kubernetes/storage"}, {"events", "/kubernetes/events"},
 		{"Kubernetes clusters", "/kubernetes/clusters"}, {"Secrets & ConfigMaps", "/kubernetes/config"},
@@ -371,6 +374,7 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 		{"Model Garden", "/agent-platform/model-garden"}, {"Studio", "/agent-platform/studio"}, {"Embeddings", "/agent-platform/studio/embeddings"},
 		{"Local models", "/agent-platform/model-garden/local-models"}, {"Online prediction", "/agent-platform/online-prediction/endpoints"},
 		{"Monitoring", "/monitoring"}, {"Fault injection", "/faults"}, {"Instance", "/instance"},
+		{"Manage resources", "/cloud-resource-manager"}, {"IAM tags", "/iam-admin/tags"}, {"IAM settings", "/iam-admin/settings"},
 		{"secret", "/secrets/a11y-secret"}, {"queue", "/tasks/queues/us-central1/a11y-queue"},
 		{"scheduler job", "/scheduler/jobs/us-central1/a11y-job"}, {"project", "/projects/" + project},
 	} {

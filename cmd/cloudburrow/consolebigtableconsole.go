@@ -37,12 +37,9 @@ const bigtableTablesSegment = "tables"
 
 // The reasons a Google choice is drawn disabled.
 const (
-	// Measured 2026-11-19 (bttest, cloud.google.com/go/bigtable v1.58.0):
-	// CreateTable keeps no row_key_schema and GetTable returns none.
-	bigtableNoRowKeySchema = "Not available locally: the Bigtable emulator keeps no row key schema (CreateTable drops it and GetTable returns none), so SQL could not read a row key by its fields."
-	bigtableNoKMS          = "Not available locally: the Bigtable front encrypts nothing with a Cloud KMS key; every instance uses Google-managed encryption."
-	bigtableNoInMemory     = "Not available locally: the in-memory tier is turned on per cluster here, with Edit memory layer on the Clusters page; the emulator serves every read from memory either way."
-	bigtableNoAutoBkp      = "Not available locally: the Bigtable front takes no automated backups. Create backup on the Backups page takes one."
+	bigtableNoKMS      = "Not available locally: the Bigtable front encrypts nothing with a Cloud KMS key; every instance uses Google-managed encryption."
+	bigtableNoInMemory = "Not available locally: the in-memory tier is turned on per cluster here, with Edit memory layer on the Clusters page; the emulator serves every read from memory either way."
+	bigtableNoAutoBkp  = "Not available locally: the Bigtable front takes no automated backups. Create backup on the Backups page takes one."
 )
 
 func bigtableEdition(e bigtable.Edition) string {
@@ -722,11 +719,15 @@ func bigtableFamilyGroup(def string) console.Field {
 
 // bigtableCreateTableFields are Create table's inputs.
 func bigtableCreateTableFields() []console.Field {
-	return []console.Field{
+	fields := []console.Field{
 		{Name: "table", Label: "Table ID", Type: "text", Required: true, Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,49}$`,
 			Help: "1 to 50 letters, digits, hyphens, underscores and periods. It is permanent."},
 		bigtableFamilyGroup(`[{"family":"cf1","type":"Standard"}]`),
-		{Name: "rowKeySchema", Label: "Define row key schema", Type: "checkbox", Unavailable: bigtableNoRowKeySchema},
+		{Name: "rowKeySchema", Label: "Define row key schema", Type: "checkbox",
+			Help: "The row key's segments, each with its type and encoding, which GoogleSQL reads the key by: each segment is a column of the table."},
+	}
+	fields = append(fields, bigtableRowKeySchemaFields("rowKeySchema")...)
+	return append(fields, []console.Field{
 		{Name: "changeStream", Label: "Enable change stream", Type: "checkbox",
 			Help: "Records every change to the table, read with ReadChangeStream."},
 		{Name: "retention", Label: "Retention period (days)", Type: "text", Default: "1", Pattern: `^[1-7]$`, ShowWhen: "changeStream",
@@ -734,7 +735,106 @@ func bigtableCreateTableFields() []console.Field {
 		{Name: "protected", Label: "Deletion protection", Type: "checkbox",
 			Help: "While it is on, Bigtable refuses to delete the table or its column families."},
 		{Name: "automatedBackup", Label: "Automated backup", Type: "checkbox", Unavailable: bigtableNoAutoBkp},
+	}...)
+}
+
+// bigtableRowKeySchemaFields are a row key schema's inputs, shown while
+// the checkbox show is checked, as Google's Define row key schema holds
+// them (#1900): the Encoding, the Delimiter of DelimitedBytes (# by
+// default), and a row per segment with its Type and Byte encoding.
+func bigtableRowKeySchemaFields(show string) []console.Field {
+	return []console.Field{
+		{Name: "rowKeyEncoding", Label: "Encoding", Type: "select", Default: "DelimitedBytes", ShowWhen: show,
+			Options: []string{"DelimitedBytes", "OrderedCodeBytes", "Singleton"},
+			Help:    "DelimitedBytes joins the segments with the delimiter; OrderedCodeBytes with 0x00 0x01, escaping null bytes; Singleton is a key of one segment."},
+		{Name: "rowKeyDelimiter", Label: "Delimiter", Type: "text", Default: "#", ShowWhen: show + "&rowKeyEncoding=DelimitedBytes"},
+		{Name: "rowKeySegments", Label: "Row key segments", Type: console.GroupFieldType, AddLabel: "Add row key segment", ShowWhen: show,
+			Default: `[{"segment":"","type":"STRING","byteEncoding":"Default"}]`,
+			Help:    "Byte encoding: Default is UTF-8 bytes for STRING, raw for BYTES and big-endian bytes for INT64 and TIMESTAMP (microseconds since the epoch).",
+			Group: []console.Field{
+				{Name: "segment", Label: "Segment", Type: "text", Required: true, Pattern: `^[A-Za-z_][A-Za-z0-9_]{0,127}$`},
+				{Name: "type", Label: "Type", Type: "select", Default: "STRING", Options: []string{"STRING", "BYTES", "INT64", "TIMESTAMP"}},
+				{Name: "byteEncoding", Label: "Byte encoding", Type: "select", Default: "Default", Options: []string{"Default", "BigEndianBytes", "OrderedCodeBytes"}},
+			}},
 	}
+}
+
+// bigtableRowKeySchema is the schema the fields of bigtableRowKeySchemaFields
+// describe.
+func bigtableRowKeySchema(values map[string]string) (*bigtable.StructType, error) {
+	rows, err := console.ParseGroup(values["rowKeySegments"])
+	if err != nil {
+		return nil, fmt.Errorf("row key segments: %w", err)
+	}
+	st := &bigtable.StructType{}
+	for _, r := range rows {
+		name := strings.TrimSpace(r["segment"])
+		if name == "" {
+			return nil, errors.New("every row key segment needs a name")
+		}
+		enc := r["byteEncoding"]
+		var i64 bigtable.Int64Encoding = bigtable.BigEndianBytesEncoding{}
+		if enc == "OrderedCodeBytes" {
+			i64 = bigtable.Int64OrderedCodeBytesEncoding{}
+		}
+		var ft bigtable.Type
+		switch r["type"] {
+		case "", "STRING":
+			ft = bigtable.StringType{Encoding: bigtable.StringUtf8BytesEncoding{}}
+		case "BYTES":
+			ft = bigtable.BytesType{Encoding: bigtable.RawBytesEncoding{}}
+		case "INT64":
+			ft = bigtable.Int64Type{Encoding: i64}
+		case "TIMESTAMP":
+			ft = bigtable.TimestampType{Encoding: bigtable.TimestampUnixMicrosInt64Encoding{UnixMicrosInt64Encoding: i64}}
+		default:
+			return nil, fmt.Errorf("row key segment %s: type %q is not STRING, BYTES, INT64 or TIMESTAMP", name, r["type"])
+		}
+		if enc != "" && enc != "Default" && (r["type"] == "STRING" || r["type"] == "BYTES" || r["type"] == "") {
+			return nil, fmt.Errorf("row key segment %s: a %s segment takes the default byte encoding", name, r["type"])
+		}
+		st.Fields = append(st.Fields, bigtable.StructField{FieldName: name, FieldType: ft})
+	}
+	if len(st.Fields) == 0 {
+		return nil, errors.New("a row key schema needs at least one segment")
+	}
+	switch values["rowKeyEncoding"] {
+	case "", "DelimitedBytes":
+		st.Encoding = bigtable.StructDelimitedBytesEncoding{Delimiter: []byte(values["rowKeyDelimiter"])}
+	case "OrderedCodeBytes":
+		st.Encoding = bigtable.StructOrderedCodeBytesEncoding{}
+	case "Singleton":
+		st.Encoding = bigtable.StructSingletonEncoding{}
+	default:
+		return nil, fmt.Errorf("row key encoding %q is not DelimitedBytes, OrderedCodeBytes or Singleton", values["rowKeyEncoding"])
+	}
+	return st, nil
+}
+
+// describeRowKeySchema is a schema in one line: its encoding and its
+// segments with their types.
+func describeRowKeySchema(st *bigtable.StructType) string {
+	var segs []string
+	for _, f := range st.Fields {
+		typ := "BYTES"
+		switch f.FieldType.(type) {
+		case bigtable.StringType:
+			typ = "STRING"
+		case bigtable.Int64Type:
+			typ = "INT64"
+		case bigtable.TimestampType:
+			typ = "TIMESTAMP"
+		}
+		segs = append(segs, f.FieldName+" "+typ)
+	}
+	enc := "Singleton"
+	switch e := st.Encoding.(type) {
+	case bigtable.StructDelimitedBytesEncoding:
+		enc = fmt.Sprintf("DelimitedBytes %q", e.Delimiter)
+	case bigtable.StructOrderedCodeBytesEncoding:
+		enc = "OrderedCodeBytes"
+	}
+	return strings.Join(segs, ", ") + " (" + enc + ")"
 }
 
 // familyConf is one row of the column families field as the client's
@@ -770,9 +870,6 @@ func createBigtableTable(ctx context.Context, admin *bigtable.AdminClient, value
 	if table == "" {
 		return "", errors.New("a table ID is required")
 	}
-	if values["rowKeySchema"] == "true" {
-		return "", errors.New(bigtableNoRowKeySchema)
-	}
 	if values["automatedBackup"] == "true" {
 		return "", errors.New(bigtableNoAutoBkp)
 	}
@@ -807,6 +904,13 @@ func createBigtableTable(ctx context.Context, admin *bigtable.AdminClient, value
 	}
 	if values["protected"] == "true" {
 		conf.DeletionProtection = bigtable.Protected
+	}
+	if values["rowKeySchema"] == "true" {
+		st, err := bigtableRowKeySchema(values)
+		if err != nil {
+			return "", err
+		}
+		conf.RowKeySchema = st
 	}
 	if err := admin.CreateTableFromConf(ctx, conf); err != nil {
 		return "", fmt.Errorf("creating the table: %w", err)
@@ -870,13 +974,22 @@ func editTableFields(info *bigtable.TableInfo) []console.Field {
 	if info.DeletionProtection == bigtable.Protected {
 		protection = "PREVENT"
 	}
-	return []console.Field{
+	fields := []console.Field{
 		bigtableFamilyGroup("[" + strings.Join(rows, ",") + "]"),
 		{Name: "changeStream", Label: "Enable change stream", Type: "checkbox", Default: strconv.FormatBool(retention > 0)},
 		{Name: "retention", Label: "Retention period (days)", Type: "text", Default: days, Pattern: `^[1-7]$`, ShowWhen: "changeStream"},
 		{Name: "protection", Label: "Deletion protection", Type: "radio", Default: protection, Options: []string{"PREVENT", "ENABLE"},
 			OptionLabels: map[string]string{"PREVENT": "Prevent deletion", "ENABLE": "Enable deletion"}},
 	}
+	// A row key schema is created on a table without one and deleted from
+	// one with one; it is never changed in place (#1900).
+	if info.RowKeySchema != nil {
+		return append(fields, console.Field{Name: "deleteRowKeySchema", Label: "Delete row key schema", Type: "checkbox",
+			Help: "The row key schema: " + describeRowKeySchema(info.RowKeySchema) + ". A schema cannot be changed: delete it, then create the new one."})
+	}
+	fields = append(fields, console.Field{Name: "rowKeySchema", Label: "Create row key schema", Type: "checkbox",
+		Help: "The row key's segments, each with its type and encoding, which GoogleSQL reads the key by."})
+	return append(fields, bigtableRowKeySchemaFields("rowKeySchema")...)
 }
 
 // editTable applies the Edit table pane.
@@ -945,6 +1058,20 @@ func editTable(ctx context.Context, admin *bigtable.AdminClient, table string, v
 	} else if retention > 0 {
 		if err := admin.UpdateTableDisableChangeStream(ctx, table); err != nil {
 			return err
+		}
+	}
+	switch {
+	case info.RowKeySchema != nil && values["deleteRowKeySchema"] == "true":
+		if err := admin.UpdateTableRemoveRowKeySchema(ctx, table); err != nil {
+			return fmt.Errorf("deleting the row key schema: %w", err)
+		}
+	case info.RowKeySchema == nil && values["rowKeySchema"] == "true":
+		st, err := bigtableRowKeySchema(values)
+		if err != nil {
+			return err
+		}
+		if err := admin.UpdateTableWithRowKeySchema(ctx, table, *st); err != nil {
+			return fmt.Errorf("creating the row key schema: %w", err)
 		}
 	}
 	if values["protection"] == "PREVENT" && info.DeletionProtection != bigtable.Protected {

@@ -104,6 +104,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
@@ -329,7 +330,11 @@ func (f *Front) Server() *grpc.Server {
 		grpc.UnknownServiceHandler(f.handle),
 		// Every call is recorded for the CLI's metrics, request log and
 		// traces (calls.go, #1266).
-		grpc.StreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, isStreamingPull)),
+		grpc.ChainStreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, isStreamingPull),
+			// Disabled APIs (#1914), by the call's routing headers, after
+			// the call log, so a refused call is logged as the client
+			// sees it.
+			apienable.StreamInterceptor(nil, "pubsub.googleapis.com")),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		// The official clients ping streaming pulls; the server's default
 		// policy would answer a ping more often than every five minutes by

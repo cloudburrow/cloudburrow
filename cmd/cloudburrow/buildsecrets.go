@@ -59,6 +59,13 @@ func (r *runService) useBuildSecrets(sm *secretsService, kms *kmsService) {
 	}
 	if kms != nil {
 		r.buildKMS = buildKMSDecrypter{svc: kms}
+		// Artifact Registry repositories' customer-managed keys (#1897).
+		runadapter.UseRepositoryKMS(func() runadapter.RepositoryKMS {
+			if api := kms.API(); api != nil {
+				return api
+			}
+			return nil
+		})
 	}
 }
 

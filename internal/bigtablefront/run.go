@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
@@ -37,6 +38,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *resourceManager != "" {
 		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
 		defer orgpolicy.Use(nil)
+		// Disabled APIs (#1914) are the host's too.
+		apienable.Use(&apienable.Remote{Base: *resourceManager})
+		defer apienable.Use(nil)
 	}
 	f, err := New(*upstream, logger.Printf)
 	if err != nil {

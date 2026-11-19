@@ -29,6 +29,7 @@ func TestRepositoryImmutableTagsAndKMSKey(t *testing.T) {
 	}
 	UseRegistry(st)
 	t.Cleanup(func() { UseRegistry(nil) })
+	useFakeKMS(t)
 	s := NewServer(&Knative{}, "t", time.Minute)
 	a := s.ArtifactRegistry()
 	ctx := context.Background()

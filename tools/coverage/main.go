@@ -56,6 +56,7 @@ import (
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
 
+	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -97,6 +98,8 @@ import (
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
+	_ "google.golang.org/genproto/googleapis/devtools/containeranalysis/v1"
+	_ "google.golang.org/genproto/googleapis/grafeas/v1"
 )
 
 // area is one generated page.
@@ -132,6 +135,9 @@ var areas = []area{
 	// Eventarc (#1877), on the Run port: triggers delivering Pub/Sub and
 	// Cloud Storage events to Cloud Run as CloudEvents.
 	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc"}},
+	// Container Analysis (#1912), on the Run port: Grafeas's notes and
+	// occurrences, which Artifact Registry's vulnerability scanning writes.
+	{Key: "containeranalysis", Title: "Container Analysis", Own: true, Services: []string{"grafeas.v1.Grafeas", "google.devtools.containeranalysis.v1.ContainerAnalysis"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.
@@ -239,6 +245,10 @@ var areas = []area{
 	// official generated client's.
 	{Key: "serviceusage", Title: "Service Usage API (v1)", Own: true,
 		Methods: serviceusageMethods()},
+	// The API Keys API (#1915): CloudBurrow's own, JSON only, as gcloud and
+	// Terraform call it. Its methods are the official generated client's
+	// (google.golang.org/api/apikeys/v2), from the server's own table.
+	{Key: "apikeys", Title: "API Keys API (v2)", Own: true, Methods: apikeysMethods()},
 	// The Backup and DR Service (#1433): CloudBurrow's own, JSON only, for
 	// Cloud SQL. Its methods are the official generated client's
 	// (google.golang.org/api/backupdr/v1).
@@ -369,6 +379,17 @@ func pubsubIAMMethods() []string {
 func serviceusageMethods() []string {
 	var out []string
 	for id := range serviceusagesvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// apikeysMethods is every method of the apikeys v2 discovery document, from
+// the server's own table (internal/service/apikeys).
+func apikeysMethods() []string {
+	var out []string
+	for id := range apikeyssvc.MethodStatuses() {
 		out = append(out, id)
 	}
 	sort.Strings(out)
@@ -719,7 +740,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
 		rmsvc.CloudIdentityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {

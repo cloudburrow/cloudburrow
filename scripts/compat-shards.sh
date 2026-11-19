@@ -69,7 +69,8 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # screens are served only by the run shard's instance (#700), as are Cloud
 # Logging's admin screens (TestLoggingAdmin*, #1226), and Secret Manager's
 # screens (TestSecretManager*, #1850), whose regional secrets and CMEK need
-# its Cloud KMS; the BigQuery,
+# its Cloud KMS, and Eventarc's (TestEventarc*, #1877), whose triggers
+# deliver to a Cloud Run service; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
@@ -89,7 +90,7 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG (storage, which
 # serves Secret Manager, Cloud Scheduler and Cloud Tasks).
 COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -152,8 +153,9 @@ compat_shard() {
       # Cloud Logging as TASKS_LOGGING (#1256): only the Cloud Tasks
       # dispatch log test reads it, so the Logging tests run in served.
       # Service Usage (#1352), always served, with the Terraform and gcloud
-      # tests that need Cloud Storage beside it.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,TASKS_LOGGING
+      # tests that need Cloud Storage beside it; and the API Keys API
+      # (#1915), always served too.
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,TASKS_LOGGING
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
@@ -219,6 +221,11 @@ compat_shard() {
       # (#1568): the customer-managed and regional secrets, Terraform's data
       # sources, Cloud Storage volumes and Pub/Sub build triggers.
       FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
+      # Artifact Registry's cleanup policies run every minute rather than
+      # Google's "approximately one day" (#1897): `up` reads the variable,
+      # and TestArtifactRegistryCleanupPolicies, which skips without one
+      # of 2m or less, reads the same, so it runs here.
+      export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud

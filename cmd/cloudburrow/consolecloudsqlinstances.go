@@ -14,6 +14,7 @@ import (
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // cloudSQLInstancesProvider is Cloud SQL's Instances page (#1330): every
@@ -194,8 +195,13 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
 		in.DiskEncryptionConfiguration = &sqladminapi.DiskEncryptionConfiguration{KmsKeyName: k}
 	}
-	_, err = svc.Instances.Insert(project, in).Context(ctx).Do()
-	if err != nil {
+	call := svc.Instances.Insert(project, in).Context(ctx)
+	if sqladmin.IsSQLServer(in.DatabaseVersion) && v["mssqlEula"] == "true" {
+		// The user's own acceptance of Microsoft's licence for this
+		// instance, the checkbox they checked (#1916); never sent otherwise.
+		call.Header().Set(sqladmin.EULAHeader, "Y")
+	}
+	if _, err = call.Do(); err != nil {
 		return "", sqlAPIError(err)
 	}
 	return name, nil

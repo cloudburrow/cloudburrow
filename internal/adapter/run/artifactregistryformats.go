@@ -41,6 +41,19 @@ type fmtFile struct {
 	Size     int64             `json:"size"`
 	Uploaded time.Time         `json:"uploaded"`
 	Meta     map[string]string `json:"meta,omitempty"`
+	// repo is the repository whose index the copy was read from, whose
+	// key (if any) its content is sealed with.
+	repo string
+}
+
+// blob reads the file's content.
+func (f fmtFile) blob(st *registry.Store) (registry.ReadSeekCloser, error) {
+	return st.OpenRepoBlob(repoOf(f.repo), f.Digest)
+}
+
+// bytes reads the file's whole content.
+func (f fmtFile) bytes(st *registry.Store) ([]byte, error) {
+	return st.ReadRepoBlob(repoOf(f.repo), f.Digest)
 }
 
 // fmtRepo is one repository's index.
@@ -113,6 +126,7 @@ func dropFormatRepo(repoName string) {
 var servedFormats = map[arpb.Repository_Format]string{
 	arpb.Repository_DOCKER: "docker", arpb.Repository_PYTHON: "python", arpb.Repository_NPM: "npm",
 	arpb.Repository_MAVEN: "maven", arpb.Repository_GENERIC: "generic", arpb.Repository_APT: "apt", arpb.Repository_YUM: "yum",
+	arpb.Repository_GO: "go", arpb.Repository_KFP: "kfp",
 }
 
 // formatURL is a repository's registryUri: Docker's is RepositoryURL;
@@ -171,13 +185,13 @@ func addFile(repoName, id, pkg, version string, b []byte, meta map[string]string
 	if st == nil {
 		return nil, apierror.FailedPrecondition("this instance has no registry store")
 	}
-	d, err := st.PutBlob(b)
+	d, err := st.PutRepoBlob(repoOf(repoName), b)
 	if err != nil {
 		return nil, err
 	}
 	m := md5.Sum(b)
 	f := &fmtFile{ID: id, Package: pkg, Version: version, Digest: d, MD5: hex.EncodeToString(m[:]), Size: int64(len(b)),
-		Uploaded: time.Now().UTC(), Meta: meta}
+		Uploaded: time.Now().UTC(), Meta: meta, repo: repoName}
 	fmtState.mu.Lock()
 	defer fmtState.mu.Unlock()
 	r := fmtRepoLocked(repoName)
@@ -203,6 +217,7 @@ func repoFilesOf(repoName string) []fmtFile {
 	out := make([]fmtFile, len(r.Files))
 	for i, f := range r.Files {
 		out[i] = *f
+		out[i].repo = repoName
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

@@ -54,7 +54,7 @@ const memorystoreNote = "The instance memorystore is the Valkey server --service
 // List implements console.Provider: the project's instances.
 func (p memorystoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{
-		Columns:    []string{"Location", "Version", "Endpoint", "Tier", "Capacity", "AUTH"},
+		Columns:    []string{"Version", "Location", "Tier", "Capacity", "Primary endpoint", "Read endpoint", "Labels"},
 		NameColumn: "Instance ID",
 		Noun:       "instances",
 		Note:       memorystoreNote,
@@ -69,12 +69,13 @@ func (p memorystoreProvider) List(ctx context.Context, project string) (console.
 			Name:   memorystoreID(inst.GetName()),
 			Status: inst.GetState().String(),
 			Fields: map[string]string{
-				"Location": inst.GetLocationId(),
-				"Version":  inst.GetRedisVersion(),
-				"Endpoint": memorystoreEndpoint(inst),
-				"Tier":     inst.GetTier().String(),
-				"Capacity": fmt.Sprintf("%d GB", inst.GetMemorySizeGb()),
-				"AUTH":     map[bool]string{true: "Enabled", false: "Disabled"}[inst.GetAuthEnabled()],
+				"Version":          memorystoreOption(memorystoreVersionLabels, inst.GetRedisVersion()),
+				"Location":         inst.GetLocationId(),
+				"Tier":             memorystoreOption(memorystoreTierLabels, inst.GetTier().String()),
+				"Capacity":         fmt.Sprintf("%d GB", inst.GetMemorySizeGb()),
+				"Primary endpoint": memorystoreEndpoint(inst),
+				"Read endpoint":    orDash(memorystoreReadEndpoint(inst)),
+				"Labels":           orDash(memorystorePairs(inst.GetLabels())),
 			},
 		}
 		r.Actions = p.Actions(r)
@@ -150,39 +151,64 @@ func (p memorystoreProvider) Act(ctx context.Context, project, name, action stri
 	return p.backend.Flush(ctx)
 }
 
-// CreateForm implements console.Creator: CreateInstance's fields that work
-// here: BASIC or STANDARD_HA (#1385), with read replicas. Versions the
-// API refuses are not offered.
+// memorystoreVersionLabels are the versions as Google's Version menu
+// names them.
+var memorystoreVersionLabels = map[string]string{"REDIS_3_2": "Redis 3.2", "REDIS_4_0": "Redis 4.0", "REDIS_5_0": "Redis 5.0",
+	"REDIS_6_X": "Redis 6.x", "REDIS_7_0": "Redis 7.0", "REDIS_7_2": "Redis 7.2"}
+
+// memorystoreTierLabels are the tiers as Google names them.
+var memorystoreTierLabels = map[string]string{"BASIC": "Basic", "STANDARD_HA": "Standard"}
+
+// CreateForm implements console.Creator: Google's Create a Redis instance
+// page, in its order (#1862): Instance ID, Display name, Tier, Region and
+// Zone, Version, Capacity, Enable AUTH, Enable in-transit encryption,
+// Authorized network and the configurations; the read replicas, CMEK and
+// labels CreateInstance also takes are under Advanced options. Versions
+// the API refuses are not offered.
 func (memorystoreProvider) CreateForm() (string, []console.Field) {
 	return "Create instance", []console.Field{
 		{Name: "id", Label: "Instance ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,38}[a-z0-9])?$`,
-			Help: "1 to 40 lowercase letters, digits and hyphens, starting with a letter."},
-		{Name: "displayName", Label: "Display name", Type: "text"},
+			Help: "1 to 40 lowercase letters, digits and hyphens, starting with a letter; unique in its region."},
+		{Name: "displayName", Label: "Display name", Type: "text", Help: "Optional."},
+		{Name: "tier", Label: "Tier", Type: "radio", Default: "BASIC", Options: []string{"BASIC", "STANDARD_HA"}, OptionLabels: memorystoreTierLabels,
+			Help: "Basic is one server; Standard is a primary and replicas, each a server of its own, with failover."},
 		{Name: "region", Label: "Region", Type: "text", Required: true, Default: redisadmin.Region,
 			Help: "CloudBurrow does not place instances geographically."},
-		{Name: "memorySizeGb", Label: "Capacity (GB)", Type: "number", Required: true, Default: "1", Pattern: `^[0-9]{1,3}$`,
-			Help: "1 to 300: the server's maxmemory."},
-		{Name: "tier", Label: "Tier", Type: "select", Default: "BASIC", Options: []string{"BASIC", "STANDARD_HA"},
-			Help: "STANDARD_HA is a primary and replicas, each a server of its own, with failover."},
-		{Name: "readReplicas", Label: "Enable read replicas", Type: "checkbox",
-			Help: "STANDARD_HA only, 5 GB or more: a read endpoint over the replicas. It cannot be turned off later."},
-		{Name: "replicaCount", Label: "Replicas", Type: "number", Pattern: `^[0-5]?$`,
-			Help: "STANDARD_HA: 1 without read replicas, 1 to 5 with them (default 2)."},
+		{Name: "zone", Label: "Zone", Type: "text", Pattern: `^([a-z]+-[a-z]+[0-9]+-[a-z])?$`,
+			Help: "Optional: Any, the region's zone a, when empty. Standard tier places its replicas in the region's other zones."},
 		{Name: "redisVersion", Label: "Version", Type: "select", Default: redisadmin.DefaultRedisVersion, Options: redisadmin.Versions,
-			Help: "REDIS_3_2 is Redis 3.2.12, REDIS_4_0 Redis 4.0.14, REDIS_5_0 Redis 5.0.14, REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey 8.1. Read replicas need REDIS_5_0 or later, in-transit encryption REDIS_6_X or later."},
+			OptionLabels: memorystoreVersionLabels,
+			Help:         "Redis 3.2 is Redis 3.2.12, 4.0 Redis 4.0.14, 5.0 Redis 5.0.14, 6.x Redis 6.2, 7.0 Redis 7.0 and 7.2 Valkey 8.1. Read replicas need Redis 5.0 or later, in-transit encryption Redis 6.x or later."},
+		{Name: "memorySizeGb", Label: "Capacity", Type: "number", Required: true, Default: "1", Pattern: `^[0-9]{1,3}$`,
+			Help: "1 to 300 GB: the server's maxmemory."},
 		{Name: "authEnabled", Label: "Enable AUTH", Type: "checkbox",
-			Help: "Clients must AUTH with the instance's AUTH string, which GetInstanceAuthString returns."},
+			Help: "Clients must AUTH with the instance's AUTH string, which its page shows (GetInstanceAuthString)."},
 		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
-			Help: "SERVER_AUTHENTICATION: the server serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
-		{Name: "customerManagedKey", Label: "Customer-managed encryption key (CMEK)", Type: "text",
+			Help: "The server serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
+		{Name: "authorizedNetwork", Label: "Authorized network", Type: "text", Default: "default",
+			Help: "The VPC network clients connect from. Every client on this machine, or in its Kubernetes cluster, reaches the instance whichever network is named."},
+		{Name: "redisConfigs", Label: "Configurations", Type: "map",
+			Help: "Optional (Add Configuration). One key=value per line: maxmemory-policy, notify-keyspace-events, activedefrag, " +
+				"lfu-decay-time, lfu-log-factor, stream-node-max-bytes, stream-node-max-entries, maxmemory-gb."},
+		{Name: "readReplicas", Label: "Enable read replicas", Type: "checkbox", Section: msSectionAdvanced, VisibleWhen: map[string]string{"tier": "STANDARD_HA"},
+			Help: "Standard tier only, 5 GB or more: a read endpoint over the replicas. It cannot be turned off later."},
+		{Name: "replicaCount", Label: "Replicas", Type: "number", Pattern: `^[0-5]?$`, Section: msSectionAdvanced, VisibleWhen: map[string]string{"tier": "STANDARD_HA"},
+			Help: "Standard tier: 1 without read replicas, 1 to 5 with them (default 2)."},
+		{Name: "customerManagedKey", Label: "Customer-managed encryption key (CMEK)", Type: "text", Section: msSectionAdvanced,
 			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
 			Help:    "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}: a Cloud KMS key in the instance's region. It cannot be changed later; while the key is disabled or destroyed the instance is suspended."},
-		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
-		{Name: "redisConfigs", Label: "Redis configs", Type: "map",
-			Help: "Optional. One key=value per line: maxmemory-policy, notify-keyspace-events, activedefrag, " +
-				"lfu-decay-time, lfu-log-factor, stream-node-max-bytes, stream-node-max-entries, maxmemory-gb."},
+		{Name: "labels", Label: "Labels", Type: "map", Section: msSectionAdvanced, Help: "Optional. One key=value per line."},
 	}
 }
+
+// CreateTitle implements console.CreateTitler: Google's page title.
+func (memorystoreProvider) CreateTitle() string { return "Create a Redis instance" }
+
+// CreateSubmit implements console.CreateSubmitter: the page ends in Create.
+func (memorystoreProvider) CreateSubmit() string { return "Create" }
+
+// CreateLayout implements console.CreateLayouter: one page, as Google's.
+func (memorystoreProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 // CreateOnPage implements console.PageCreator.
 func (memorystoreProvider) CreateOnPage() bool { return true }
@@ -203,7 +229,8 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 		return "", err
 	}
 	region := strings.TrimSpace(values["region"])
-	in := &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: int32(size), DisplayName: values["displayName"],
+	in := &redispb.Instance{LocationId: strings.TrimSpace(values["zone"]), AuthorizedNetwork: authorizedNetwork(project, values["authorizedNetwork"]),
+		Tier: redispb.Instance_BASIC, MemorySizeGb: int32(size), DisplayName: values["displayName"],
 		AuthEnabled: values["authEnabled"] == "true", Labels: labels, RedisConfigs: configs, RedisVersion: values["redisVersion"]}
 	if values["transitEncryption"] == "true" {
 		in.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
@@ -231,6 +258,16 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 		return "", err
 	}
 	return memorystoreID("projects/" + project + "/locations/" + region + "/instances/" + strings.TrimSpace(values["id"])), nil
+}
+
+// authorizedNetwork is the Authorized network as CreateInstance takes it:
+// a network's name is projects/{project}/global/networks/{name}.
+func authorizedNetwork(project, v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.Contains(v, "/") {
+		return v
+	}
+	return "projects/" + project + "/global/networks/" + v
 }
 
 // wait polls an operation until it is done, and returns its error.
@@ -286,37 +323,48 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the instance: " + consoleErr(err)}, nil
 	}
-	props := []console.Property{
+	// Google's instance page (#1862): Overview, Configuration,
+	// Connections, then the Server CA, Maintenance, and Monitoring, which
+	// reads Cloud Monitoring's metrics.
+	overview := []console.Property{
 		{Label: "State", Value: inst.GetState().String()},
-		{Label: "Endpoint", Value: memorystoreEndpoint(inst)},
-		{Label: "Version", Value: inst.GetRedisVersion()},
-		{Label: "Tier", Value: inst.GetTier().String()},
+		{Label: "Display name", Value: orDash(inst.GetDisplayName())},
+		{Label: "Version", Value: memorystoreOption(memorystoreVersionLabels, inst.GetRedisVersion())},
+		{Label: "Tier", Value: memorystoreOption(memorystoreTierLabels, inst.GetTier().String())},
 		{Label: "Capacity", Value: fmt.Sprintf("%d GB", inst.GetMemorySizeGb())},
+		{Label: "Location", Value: orDash(inst.GetLocationId())},
+		{Label: "Encryption", Value: memorystoreEncryption(inst)},
+		{Label: "Labels", Value: orDash(memorystorePairs(inst.GetLabels()))},
+	}
+	config := []console.Property{
 		{Label: "AUTH", Value: map[bool]string{true: "Enabled", false: "Disabled"}[inst.GetAuthEnabled()]},
 		{Label: "In-transit encryption", Value: memorystoreTransit(inst)},
-		{Label: "Encryption", Value: memorystoreEncryption(inst)},
-		{Label: "Display name", Value: orDash(inst.GetDisplayName())},
-		{Label: "Labels", Value: orDash(memorystorePairs(inst.GetLabels()))},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(inst.GetRedisConfigs()))},
 		{Label: "Persistence", Value: memorystorePersistence(inst.GetPersistenceConfig())},
+	}
+	conns := []console.Property{
+		{Label: "Endpoint", Value: memorystoreEndpoint(inst)},
+		{Label: "Authorized network", Value: orDash(inst.GetAuthorizedNetwork())},
+		{Label: "Connection mode", Value: inst.GetConnectMode().String()},
 	}
 	if inst.GetTier() == redispb.Instance_STANDARD_HA {
 		var nodes []string
 		for _, n := range inst.GetNodes() {
 			nodes = append(nodes, n.GetId()+" ("+n.GetZone()+")")
 		}
-		props = append(props,
-			console.Property{Label: "Replicas", Value: strconv.Itoa(int(inst.GetReplicaCount()))},
-			console.Property{Label: "Read replicas", Value: inst.GetReadReplicasMode().String()},
-			console.Property{Label: "Read endpoint", Value: orDash(memorystoreReadEndpoint(inst))},
+		overview = append(overview,
 			console.Property{Label: "Primary zone", Value: inst.GetCurrentLocationId()},
-			console.Property{Label: "Alternative zone", Value: inst.GetAlternativeLocationId()},
+			console.Property{Label: "Alternative zone", Value: inst.GetAlternativeLocationId()})
+		config = append(config,
+			console.Property{Label: "Replicas", Value: strconv.Itoa(int(inst.GetReplicaCount()))},
+			console.Property{Label: "Read replicas", Value: inst.GetReadReplicasMode().String()})
+		conns = append(conns,
+			console.Property{Label: "Read endpoint", Value: orDash(memorystoreReadEndpoint(inst))},
 			console.Property{Label: "Nodes", Value: strings.Join(nodes, ", ")})
 	}
-	props = append(props, memorystoreMaintenanceSummary(inst)...)
 	if inst.GetAuthEnabled() {
 		if a, err := p.api().GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); err == nil {
-			props = append(props, console.Property{Label: "AUTH string", Value: orDash(a.GetAuthString())})
+			conns = append(conns, console.Property{Label: "AUTH string", Value: orDash(a.GetAuthString())})
 		}
 	}
 	if rs := inst.GetSuspensionReasons(); len(rs) > 0 {
@@ -324,13 +372,16 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		for _, r := range rs {
 			names = append(names, r.String())
 		}
-		props = append(props, console.Property{Label: "Suspension reasons", Value: strings.Join(names, ", ")})
+		overview = append(overview, console.Property{Label: "Suspension reasons", Value: strings.Join(names, ", ")})
 	}
 	if m := inst.GetStatusMessage(); m != "" {
-		props = append(props, console.Property{Label: "Status", Value: m})
+		overview = append(overview, console.Property{Label: "Status", Value: m})
 	}
-	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	d := console.Detail{Sections: []console.Section{
+		memorystorePropsTab("overview", "Overview", overview),
+		memorystorePropsTab("configuration", "Configuration", config),
+		memorystorePropsTab("connections", "Connections", conns),
+	}}
 	if cas := inst.GetServerCaCerts(); len(cas) > 0 {
 		// The server CA its clients trust, as the Memorystore console's
 		// Security tab offers it for download (#1413).
@@ -341,17 +392,18 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		}
 		d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
 	}
+	d.Sections = append(d.Sections, memorystorePropsTab("maintenance", "Maintenance", memorystoreMaintenanceSummary(inst)), memorystoreMonitoring("instance"))
 	if memorystoreID(name) == redisadmin.InstanceID {
 		return d, nil
 	}
 	d.Edit = &console.EditForm{
-		Label: "Edit instance",
+		Label: "Edit", Title: "Edit Redis instance", Submit: "Save",
 		Fields: []console.Field{
 			{Name: "displayName", Label: "Display name", Type: "text", Default: inst.GetDisplayName()},
-			{Name: "memorySizeGb", Label: "Capacity (GB)", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,
-				Default: strconv.Itoa(int(inst.GetMemorySizeGb())), Help: "1 to 300: set on the running server, which keeps its keys."},
+			{Name: "memorySizeGb", Label: "Capacity", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,
+				Default: strconv.Itoa(int(inst.GetMemorySizeGb())), Help: "1 to 300 GB: set on the running server, which keeps its keys."},
 			{Name: "labels", Label: "Labels", Type: "map", Default: console.FormatMap(inst.GetLabels())},
-			{Name: "redisConfigs", Label: "Redis configs", Type: "map", Default: console.FormatMap(inst.GetRedisConfigs()),
+			{Name: "redisConfigs", Label: "Configurations", Type: "map", Default: console.FormatMap(inst.GetRedisConfigs()),
 				Help: "A config removed here goes back to its default."},
 			{Name: "persistence", Label: "Persistence", Type: "select", Default: memorystorePersistenceChoice(inst.GetPersistenceConfig()),
 				Options: memorystorePersistenceChoices,
@@ -441,6 +493,27 @@ func (p memorystoreProvider) Edit(ctx context.Context, project string, path []st
 		return err
 	}
 	return p.wait(ctx, op.GetName())
+}
+
+// memorystorePropsTab is a tab of properties.
+func memorystorePropsTab(id, label string, props []console.Property) console.Section {
+	return console.Section{ID: id, Label: label, Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props}}}
+}
+
+// memorystoreMonitoring is the Monitoring tab, in Google's place.
+func memorystoreMonitoring(what string) console.Section {
+	return console.Section{ID: "monitoring", Label: "Monitoring",
+		Unavailable: "Not available locally: the " + what + "'s Monitoring charts read Cloud Monitoring metrics, which CloudBurrow does not emulate. " +
+			"INFO and the Valkey server's own statistics are read with a client."}
+}
+
+// memorystoreOption is a value as Google's page names it, the value itself
+// when it has no name.
+func memorystoreOption(labels map[string]string, v string) string {
+	if l, ok := labels[v]; ok {
+		return l
+	}
+	return v
 }
 
 // memorystorePairs is a map as key=value pairs, in key order.

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
 	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -273,8 +274,76 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 			{Label: "Annotations", Value: annotations},
 			{Label: "Tags", Value: orDash(strings.Join(m.Tags, ", "))}, {Label: "Media type", Value: m.MediaType},
 			{Label: "Size", Value: humanBytes(m.ImageSize)}, {Label: "Uploaded", Value: stampAge(timestamppb.New(m.Uploaded))}},
-		Sections: []console.Section{{ID: "files", Label: "Layers", Listing: files}, manifest},
+		Sections: []console.Section{{ID: "files", Label: "Layers", Listing: files}, manifest, vulnerabilitiesSection(repo, image, m.Digest)},
 	}, nil
+}
+
+// vulnerabilitiesSection is an image version's Vulnerabilities tab
+// (#1912): Artifact Analysis's scan status and the VULNERABILITY
+// occurrences it wrote, most severe first, as Google's tab lists them.
+func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Section {
+	sec := console.Section{ID: "vulnerabilities", Label: "Vulnerabilities", Listing: console.Listing{
+		Columns:    []string{"Effective severity", "CVSS", "Fix available", "Package", "Package type", "Installed version", "Fixed version"},
+		NameColumn: "Name", Noun: "vulnerabilities"}}
+	var vulns []*grafeaspb.Occurrence
+	var disc *grafeaspb.DiscoveryOccurrence
+	for _, o := range runadapter.ImageOccurrences(repo, image, digest) {
+		switch {
+		case o.GetDiscovery() != nil:
+			disc = o.GetDiscovery()
+		case o.GetVulnerability() != nil:
+			vulns = append(vulns, o)
+		}
+	}
+	if disc == nil {
+		cfg := runadapter.RepositoryScanning(repo)
+		if cfg.GetEnablementState() != arpb.Repository_VulnerabilityScanningConfig_SCANNING_ACTIVE {
+			sec.Listing.Unavailable = "Vulnerability scanning is not active for this repository: " + cfg.GetEnablementStateReason()
+		} else {
+			sec.Listing.Unavailable = "This image was not scanned: it was pushed before scanning was active. Push it again under a new digest to scan it."
+		}
+		return sec
+	}
+	switch disc.GetAnalysisStatus() {
+	case grafeaspb.DiscoveryOccurrence_PENDING, grafeaspb.DiscoveryOccurrence_SCANNING:
+		sec.Listing.Unavailable = "Scanning: the results appear here when the scan finishes."
+		return sec
+	case grafeaspb.DiscoveryOccurrence_FINISHED_FAILED, grafeaspb.DiscoveryOccurrence_FINISHED_UNSUPPORTED:
+		sec.Listing.Unavailable = "The scan did not complete: " + disc.GetAnalysisStatusError().GetMessage()
+		return sec
+	}
+	sort.SliceStable(vulns, func(i, j int) bool {
+		a, b := vulns[i].GetVulnerability(), vulns[j].GetVulnerability()
+		if a.GetEffectiveSeverity() != b.GetEffectiveSeverity() {
+			return a.GetEffectiveSeverity() > b.GetEffectiveSeverity()
+		}
+		return a.GetCvssScore() > b.GetCvssScore()
+	})
+	for _, o := range vulns {
+		v := o.GetVulnerability()
+		fix := "No"
+		if v.GetFixAvailable() {
+			fix = "Yes"
+		}
+		var pi *grafeaspb.VulnerabilityOccurrence_PackageIssue
+		if len(v.GetPackageIssue()) > 0 {
+			pi = v.GetPackageIssue()[0]
+		}
+		fixed := pi.GetFixedVersion().GetFullName()
+		if fixed == "" {
+			fixed = "-"
+		}
+		cvss := "-"
+		if v.GetCvssScore() > 0 {
+			cvss = strconv.FormatFloat(float64(v.GetCvssScore()), 'f', 1, 32)
+		}
+		sev := strings.TrimPrefix(v.GetEffectiveSeverity().String(), "SEVERITY_")
+		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: v.GetShortDescription(), Fields: map[string]string{
+			"Effective severity": sev, "CVSS": cvss, "Fix available": fix, "Package": orDash(pi.GetAffectedPackage()),
+			"Package type": orDash(pi.GetPackageType()), "Installed version": orDash(pi.GetAffectedVersion().GetFullName()), "Fixed version": fixed}})
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return sec
 }
 
 // DetailActions are Delete at each level, and Add tag and Remove tag on a

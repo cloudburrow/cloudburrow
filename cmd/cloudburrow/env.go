@@ -500,6 +500,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Service Usage API v1, REST, plaintext; read by no client library: pass http://" + su + "/ to option.WithEndpoint"})
 	}
 
+	// The API Keys API (#1915): gcloud services api-keys, and Terraform's
+	// google_apikeys_key through apikeys_custom_endpoint.
+	if cfg.Endpoints.APIKeys > 0 {
+		ak := addr(cfg.Endpoints.APIKeys)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_APIKEYS", "http://" + ak + "/",
+				"read by gcloud; gcloud services api-keys"},
+			envVar{cliEndpointVar("apikeys"), ak,
+				"the API Keys API v2, REST, plaintext; read by no client library: pass http://" + ak + "/ to option.WithEndpoint"})
+	}
+
 	// Resource Manager (#298). gcloud reads the override; the client
 	// libraries do not, and need the endpoint in client options. gcloud's
 	// projects commands call v1, served beside v3 since #301
@@ -619,6 +630,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		// started with --port-base exported the default 9021.
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
+		"apikeys":           &e.APIKeys,
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
 		"gke":               &e.GKE,

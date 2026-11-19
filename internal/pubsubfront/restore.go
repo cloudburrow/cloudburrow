@@ -443,6 +443,7 @@ func (f *Front) restoreDefinitions(ctx context.Context) {
 		revisions[name] = ids
 	}
 
+	bindings := false // a binding to a deleted schema kept
 	for _, name := range sortedKeys(d.topics) {
 		t := proto.Clone(d.topics[name]).(*pubsubpb.Topic)
 		if ss := t.GetSchemaSettings(); ss != nil {
@@ -454,12 +455,30 @@ func (f *Front) restoreDefinitions(ctx context.Context) {
 				ss.LastRevisionId = n
 			}
 		}
-		err := emulatorCall(ctx, func(c context.Context) error { _, err := pub.CreateTopic(c, t); return err })
-		if !exists(err) && t.GetSchemaSettings() != nil {
+		gone := t.GetSchemaSettings().GetSchema() == deletedSchemaName
+		var err error
+		if !gone {
+			err = emulatorCall(ctx, func(c context.Context) error { _, err := pub.CreateTopic(c, t); return err })
+		}
+		if gone || (!exists(err) && t.GetSchemaSettings() != nil) {
 			// Its schema is gone ("_deleted-schema_"), which no create
-			// can name.
+			// can name: the topic is created without it, and the front
+			// keeps the binding, as it does a Protocol Buffer schema's
+			// (protobufschemas.go), so the topic still names
+			// "_deleted-schema_" and refuses a publish, as Google's does.
+			ss := t.GetSchemaSettings()
 			t.SchemaSettings = nil
 			err = emulatorCall(ctx, func(c context.Context) error { _, err := pub.CreateTopic(c, t); return err })
+			if exists(err) {
+				ss = proto.Clone(ss).(*pubsubpb.SchemaSettings)
+				ss.Schema = deletedSchemaName
+				f.mu.Lock()
+				if _, ok := f.topicSchemas[name]; !ok {
+					f.topicSchemas[name] = ss
+					bindings = true
+				}
+				f.mu.Unlock()
+			}
 		}
 		if !exists(err) {
 			fail("the topic", name, err)
@@ -490,6 +509,9 @@ func (f *Front) restoreDefinitions(ctx context.Context) {
 		}
 	}
 	f.defsMu.Unlock()
+	if bindings {
+		f.persist()
+	}
 
 	f.reconcileAll(ctx, true)
 	f.logf("pubsub front: created again %d topics, %d subscriptions, %d schemas and %d snapshots; %d failed",

@@ -75,6 +75,8 @@ type savedState struct {
 	ChangeStreams map[string]savedChangeLog `json:"changeStreams,omitempty"`
 	// Seen is every instance a call has named (seen.go, #1550).
 	Seen []string `json:"seen,omitempty"`
+	// RowKeySchemas is the tables' row key schemas (#1900).
+	RowKeySchemas map[string][]byte `json:"rowKeySchemas,omitempty"`
 }
 
 // persister is the front's state directory.
@@ -84,7 +86,7 @@ type persister struct {
 }
 
 func encodeTableCopy(c *tableCopy) ([]byte, error) {
-	fam, err := proto.Marshal(&btapb.Table{ColumnFamilies: c.families})
+	fam, err := proto.Marshal(&btapb.Table{ColumnFamilies: c.families, RowKeySchema: c.schema})
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func decodeTableCopy(b []byte) (*tableCopy, error) {
 	if err := proto.Unmarshal(parts[1], rows); err != nil {
 		return nil, err
 	}
-	c := &tableCopy{families: t.ColumnFamilies, rows: rows.Entries}
+	c := &tableCopy{families: t.ColumnFamilies, schema: t.RowKeySchema, rows: rows.Entries}
 	if c.families == nil {
 		c.families = map[string]*btapb.ColumnFamily{}
 	}
@@ -252,6 +254,10 @@ func (f *Front) restoreState(st *frontstate.Store, s *savedState) error {
 	for name, v := range s.SQLViews {
 		sqlv[name] = &sqlView{name: name, query: v.Query, etag: v.Etag, protected: v.Protected}
 	}
+	keys, err := frontstate.DecodeMap(s.RowKeySchemas, func() *btapb.Type_Struct { return &btapb.Type_Struct{} })
+	if err != nil {
+		return err
+	}
 	policies := make(map[string]*iampolicy.Stored, len(s.TablePolicys))
 	for name, p := range s.TablePolicys {
 		if p != nil {
@@ -265,6 +271,7 @@ func (f *Front) restoreState(st *frontstate.Store, s *savedState) error {
 	f.instances.byNm, f.instances.ops, f.instances.opsQ, f.instances.layers = byNm, ops, s.OpsQ, layers
 	f.instances.mu.Unlock()
 	f.seen.set(s.Seen)
+	f.keys.reset(keys)
 	f.copies.mu.Lock()
 	f.copies.backups, f.copies.snapshots, f.copies.deleted = backups, snapshots, deleted
 	f.copies.mu.Unlock()
@@ -395,6 +402,12 @@ func (f *Front) snapshotState() (*savedState, map[string]frontstate.Copy, error)
 	if err != nil {
 		return nil, nil, err
 	}
+	f.keys.mu.Lock()
+	s.RowKeySchemas, err = frontstate.EncodeMap(f.keys.byName)
+	f.keys.mu.Unlock()
+	if err != nil {
+		return nil, nil, err
+	}
 	f.sqlViews.mu.Lock()
 	if len(f.sqlViews.byName) > 0 {
 		s.SQLViews = make(map[string]savedSQLView, len(f.sqlViews.byName))
@@ -458,6 +471,7 @@ func (f *Front) ResetState(ctx context.Context) error {
 	f.tableIAM.policies = map[string]*iampolicy.Stored{}
 	f.tableIAM.mu.Unlock()
 	f.changes.reset()
+	f.keys.reset(nil)
 	f.persist.mu.Lock()
 	st := f.persist.state
 	f.persist.mu.Unlock()

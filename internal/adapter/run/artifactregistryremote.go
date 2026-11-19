@@ -75,7 +75,7 @@ func remoteUpstream(r *arpb.Repository) string {
 
 const outsideUpstream = "this instance's remote repositories pull only from another Artifact Registry repository it holds, " +
 	"named by remote_repository_config.common_repository.uri (projects/{project}/locations/{location}/repositories/{repository}), " +
-	"as Google documents; egress is off, and the instance makes no calls off the machine"
+	"as Google documents; a preset or custom upstream is refused by design: egress is off, and the instance makes no calls off the machine"
 
 // checkRemote accepts a remote repository whose upstream is a standard
 // repository of its format on this instance.
@@ -127,6 +127,44 @@ func lookupRegistryUpstream(repo registry.Repo) (registry.Repo, bool) {
 		return registry.Repo{}, true
 	}
 	return repoOf(up), true
+}
+
+// lookupRegistryVirtual is the Docker registry's Virtual: a virtual DOCKER
+// repository's upstreams, highest priority first, as Google documents
+// ("Higher priority values take precedence over lower values"; equal ones
+// in the order they were given). An upstream that is itself virtual is
+// replaced by its own upstreams, each repository once, so a pull reads
+// standard and remote repositories only.
+func lookupRegistryVirtual(repo registry.Repo) ([]registry.Repo, bool) {
+	name := "projects/" + repo.Project + "/locations/" + repo.Location + "/repositories/" + repo.Repository
+	r, ok := repoFormat(name)
+	if !ok || r.GetMode() != arpb.Repository_VIRTUAL_REPOSITORY {
+		return nil, false
+	}
+	seen := map[string]bool{name: true}
+	var out []registry.Repo
+	var walk func(r *arpb.Repository)
+	walk = func(r *arpb.Repository) {
+		ups := append([]*arpb.UpstreamPolicy(nil), r.GetVirtualRepositoryConfig().GetUpstreamPolicies()...)
+		sort.SliceStable(ups, func(i, j int) bool { return ups[i].GetPriority() > ups[j].GetPriority() })
+		for _, u := range ups {
+			if seen[u.GetRepository()] {
+				continue
+			}
+			seen[u.GetRepository()] = true
+			up, ok := repoFormat(u.GetRepository())
+			if !ok {
+				continue
+			}
+			if up.GetMode() == arpb.Repository_VIRTUAL_REPOSITORY {
+				walk(up)
+				continue
+			}
+			out = append(out, repoOf(u.GetRepository()))
+		}
+	}
+	walk(r)
+	return out, true
 }
 
 // readRepos are the repositories a read searches: the repository; a
@@ -206,6 +244,12 @@ func (p *pkgRequest) cacheThrough(from string, f fmtFile) {
 // cacheFile adds f to a remote repository's index unless it holds a file
 // of that ID already.
 func cacheFile(remote, from string, f fmtFile) {
+	// A repository with a customer-managed key keeps its own sealed copy.
+	if st := RegistryStore(); st != nil {
+		if err := st.MountBlob(repoOf(from), repoOf(remote), f.Digest); err != nil {
+			return
+		}
+	}
 	fmtState.mu.Lock()
 	defer fmtState.mu.Unlock()
 	r := fmtRepoLocked(remote)

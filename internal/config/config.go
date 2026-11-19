@@ -326,6 +326,10 @@ type Endpoints struct {
 	// (serviceusage.googleapis.com, #1352), served in process: which APIs
 	// each project has enabled. Always bound, as Resource Manager is.
 	ServiceUsage int `json:"serviceUsage"`
+	// APIKeys is the host port of the API Keys API v2
+	// (apikeys.googleapis.com, #1915), served in process: each project's
+	// API keys. Always bound, as Service Usage is.
+	APIKeys int `json:"apiKeys"`
 	// BackupDR is the host port of the Backup and DR Service API
 	// (backupdr.googleapis.com, #1433), served in process.
 	BackupDR int `json:"backupdr"`
@@ -404,6 +408,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"cloudsql", &e.CloudSQL},
 		{"sqladmin", &e.SQLAdmin},
 		{"serviceusage", &e.ServiceUsage},
+		{"apikeys", &e.APIKeys},
 		{"backupdr", &e.BackupDR},
 		{"privateca", &e.PrivateCA},
 		{"gke", &e.GKE},
@@ -634,6 +639,14 @@ type Config struct {
 	// default) when policies are stored and never enforced (ADR-0006).
 	IAMEnforcement string `json:"iamEnforcement,omitempty"`
 
+	// AcceptMSSQLEULA is the user's acceptance of Microsoft's SQL Server
+	// licence for the Cloud SQL for SQL Server instances this instance
+	// creates (#1916): set only by `up --accept-mssql-eula` or
+	// CLOUDBURROW_ACCEPT_MSSQL_EULA=Y, never by a configuration file, which
+	// a repository can ship and the developer has not necessarily read, so
+	// nobody accepts it on the user's behalf. Source.MSSQLEULA says which.
+	AcceptMSSQLEULA bool `json:"-"`
+
 	// HooksDir holds ready.d and shutdown.d, scripts run on the host when
 	// the instance becomes ready and before it stops (#285). A missing
 	// directory runs nothing. Relative paths are taken from the working
@@ -653,6 +666,10 @@ type Config struct {
 	// never from a pod (ADR-0004). A discovered ./cloudburrow.json cannot
 	// set it.
 	CloudBuildHostSteps bool `json:"cloudbuildHostSteps,omitempty"`
+
+	// ArtifactRegistryCleanupInterval is how often Artifact Registry's
+	// cleanup policies run (#1897); zero is Google's, about once a day.
+	ArtifactRegistryCleanupInterval Duration `json:"artifactRegistryCleanupInterval,omitempty"`
 
 	// AppEngineURL is the base URL of a local HTTP server standing in for
 	// the App Engine app (#1506): Cloud Tasks and Cloud Scheduler deliver an
@@ -705,6 +722,9 @@ type Source struct {
 	// file chose, which would let a repository vouch for itself; empty when
 	// there is no home directory to use.
 	TrustDir string
+	// MSSQLEULA is how AcceptMSSQLEULA was set: "flag" or "env", "" when
+	// it was not.
+	MSSQLEULA string
 }
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
@@ -780,8 +800,12 @@ func Default() Config {
 			TFConvert: 9027,
 			// Certificate Authority Service (#1834): the next free port.
 			PrivateCA: 9028,
-			// The Kubernetes Engine API (#1913): the next free port.
-			GKE: 9029,
+			// The API Keys API (#1915), always on beside Service Usage: the
+			// next free port.
+			APIKeys: 9029,
+			// The Kubernetes Engine API (#1913): the next free port after the
+			// API Keys API's 9029.
+			GKE: 9030,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

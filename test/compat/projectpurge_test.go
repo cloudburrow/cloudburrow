@@ -70,7 +70,10 @@ func TestAPurgedProjectsIDStartsEmpty(t *testing.T) {
 	id := v1ID(h, "pg-")
 	parent := "projects/" + id
 	const boolC = "constraints/compute.requireOsLogin"
-	const api = "secretmanager.googleapis.com"
+	// The disabled API is Resource Manager's, which keeps answering when
+	// disabled (docs/serviceusage.md): a disabled Secret Manager would
+	// refuse the secret this test reads (#1914).
+	const api = "cloudresourcemanager.googleapis.com"
 
 	create := func() *rmpb.Project {
 		t.Helper()

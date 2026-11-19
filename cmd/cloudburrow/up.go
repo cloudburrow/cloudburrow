@@ -11,6 +11,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -352,6 +353,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.
 		api := loggingSvc.api
+		// Artifact Registry's cleanup runs write their audit entries the
+		// same way (#1897).
+		runadapter.UseCleanupLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
 		tasksSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err
@@ -395,6 +402,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server
+	// And the API Keys API (#1915).
+	var apiKeysRef *apikeys.Server
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -423,6 +432,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects:     func() []string { return registered() },
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
+		apiKeys:      func() *apikeys.Server { return apiKeysRef },
 		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
 		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
@@ -698,7 +708,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	serviceUsageSrv := newServiceUsageServer(cfg, projects, projects.Backing())
 	if serviceUsageSrv != nil {
 		serviceUsageRef = serviceUsageSrv
+		// Artifact Registry's scanning reads the Container Scanning API's
+		// state in each project (#1912).
+		scanningServiceUsage.Store(serviceUsageSrv)
 		coord.Register(serviceUsageSrv)
+	}
+	// The API Keys API (#1915), each project's keys, in the same store.
+	apiKeysSrv := newAPIKeysServer(cfg, projects, projects.Backing())
+	if apiKeysSrv != nil {
+		apiKeysRef = apiKeysSrv
+		coord.Register(apiKeysSrv)
 	}
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
@@ -735,6 +754,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		coord.Register(backupDRSrv)
 	}
+	// Disabled APIs are enforced as Google enforces them (#1914): every
+	// API is enabled in every project until someone disables it.
+	useAPIEnablement(serviceUsageSrv, rmSrv, apiGated{tasks: tasksSvc, run: runSvc, scheduler: schedulerSvc,
+		memorystore: memorystoreAdminSvc, logging: loggingSvc, kms: kmsSvc, secrets: secretsSvc, sqlAdmin: sqlAdminSrv, backupDR: backupDRSrv})
+	// API keys are checked where Google checks them (#1915).
+	defer useAPIKeys(apiKeysSrv, rmSrv)()
 
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
@@ -793,16 +818,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,
-		memorystore:  memorystoreAdminSvc,
-		faults:       faults,
-		metaAddr:     metaSrv.Addr,
-		ingress:      ingressAddr,
-		mysql:        mysqlCreds,
-		serviceUsage: serviceUsageSrv,
-		backupdr:     backupDRSrv,
-		sqlAdmin:     sqlAdminSrv,
-		privateCA:    privateCASvc,
-		gke:          gkeSvc,
+		memorystore:    memorystoreAdminSvc,
+		faults:         faults,
+		metaAddr:       metaSrv.Addr,
+		ingress:        ingressAddr,
+		mysql:          mysqlCreds,
+		serviceUsage:   serviceUsageSrv,
+		apiKeys:        apiKeysSrv,
+		requestMetrics: requestMetrics,
+		backupdr:       backupDRSrv,
+		sqlAdmin:       sqlAdminSrv,
+		privateCA:      privateCASvc,
+		gke:            gkeSvc,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -888,6 +915,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
+		if a := apiKeysSrv.Addr(); a != "" {
+			live["apikeys"] = a
+		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}
@@ -937,7 +967,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
-			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
+			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
@@ -1347,6 +1377,10 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		iam = info.IAMEnforcement
 	}
 	fmt.Fprintf(stdout, "iam:        enforcement %s\n", iam)
+	// Microsoft's SQL Server licence (#1916): who accepted it, when, how.
+	for _, l := range mssqlEULALines(readMSSQLEULAStatus(cfg)) {
+		fmt.Fprintln(stdout, l)
+	}
 	fmt.Fprintln(stdout, "\nservice persistence:")
 	for _, s := range cfg.EnabledServices() {
 		note := "survives restart in persistent mode"

@@ -19,6 +19,10 @@ import (
 // EnvPrefix is the prefix for every CloudBurrow environment variable.
 const EnvPrefix = "CLOUDBURROW_"
 
+// MSSQLEULAURL is Microsoft's End-User Licensing Agreement for the SQL
+// Server container image, as its ACCEPT_EULA variable links it.
+const MSSQLEULAURL = "https://go.microsoft.com/fwlink/?LinkId=746388"
+
 // DefaultFileName is the configuration file looked for in the working
 // directory when no path is given.
 const DefaultFileName = "cloudburrow.json"
@@ -182,6 +186,7 @@ type rawFlags struct {
 	cloudsqlConn     string
 	allowRemote      bool
 	cbHostSteps      bool
+	acceptMSSQLEULA  bool
 	appEngineURL     string
 	emulatorHeapMiB  int
 	bigQueryHeapMiB  int
@@ -214,6 +219,7 @@ type rawFlags struct {
 	memorystore      int
 	memorystoreAdmin int
 	serviceUsage     int
+	apiKeys          int
 	cloudsqlMySQL    int
 	cloudsql         int
 	metadata         int
@@ -237,6 +243,7 @@ type rawFlags struct {
 	services         string
 	shutdownTimeout  time.Duration
 	readyTimeout     time.Duration
+	arCleanup        time.Duration
 	logLevel         string
 	iamEnforcement   string
 	corsOrigins      listFlag
@@ -281,7 +288,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.sqladmin, "port-sqladmin", 0, "Cloud SQL Admin API host port (0 = OS-assigned; default 9020)")
 	fs.IntVar(&r.backupdr, "port-backupdr", 0, "Backup and DR Service API host port (0 = OS-assigned; default 9024)")
 	fs.IntVar(&r.privateca, "port-privateca", 0, "Certificate Authority Service API host port (0 = OS-assigned; default 9028)")
-	fs.IntVar(&r.gke, "port-gke", 0, "Kubernetes Engine API host port (0 = OS-assigned; default 9029)")
+	fs.IntVar(&r.gke, "port-gke", 0, "Kubernetes Engine API host port (0 = OS-assigned; default 9030)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
@@ -294,6 +301,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
 	fs.IntVar(&r.memorystore, "port-memorystore", 0, "Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)")
 	fs.IntVar(&r.serviceUsage, "port-serviceusage", 0, "Service Usage API (serviceusage.googleapis.com) host port (0 = OS-assigned; default 9023)")
+	fs.IntVar(&r.apiKeys, "port-apikeys", 0, "API Keys API (apikeys.googleapis.com) host port (0 = OS-assigned; default 9029)")
 	fs.IntVar(&r.memorystoreAdmin, "port-memorystore-admin", 0, "Memorystore admin API (redis.googleapis.com) host port (0 = OS-assigned; default 9021)")
 	fs.IntVar(&r.cloudsqlMySQL, "port-cloudsql-mysql", 0, "Cloud SQL for MySQL host port (0 = OS-assigned; default 9017)")
 	fs.IntVar(&r.cloudsql, "port-cloudsql", 0, "Cloud SQL for PostgreSQL host port (0 = OS-assigned; default 9019)")
@@ -319,8 +327,10 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.services, "services", "", servicesUsage())
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
+	fs.DurationVar(&r.arCleanup, "artifact-registry-cleanup-interval", 0, "how often Artifact Registry's cleanup policies run (default 24h, about daily as Google's)")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
+	fs.BoolVar(&r.acceptMSSQLEULA, "accept-mssql-eula", false, "accept Microsoft's End-User Licensing Agreement for SQL Server ("+MSSQLEULAURL+") yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
 	fs.IntVar(&r.emulatorHeapMiB, "emulator-heap-mib", 0, fmt.Sprintf("maximum Java heap, in MiB, of the Pub/Sub, Firestore and Datastore emulators, which also sizes their containers' memory limit; 0 = unbounded (default %d)", DefaultEmulatorHeapMiB))
@@ -501,6 +511,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_MEMORYSTORE", &cfg.Endpoints.Memorystore},
 		{"PORT_MEMORYSTORE_ADMIN", &cfg.Endpoints.MemorystoreAdmin},
 		{"PORT_SERVICEUSAGE", &cfg.Endpoints.ServiceUsage},
+		{"PORT_APIKEYS", &cfg.Endpoints.APIKeys},
 		{"PORT_CLOUDSQL_MYSQL", &cfg.Endpoints.CloudSQLMySQL},
 		{"PORT_CLOUDSQL", &cfg.Endpoints.CloudSQL},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
@@ -573,6 +584,21 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.BigQueryHeapMiB = n
 	}
+	if v := getenv(EnvPrefix + "ARTIFACT_REGISTRY_CLEANUP_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("%sARTIFACT_REGISTRY_CLEANUP_INTERVAL: must be a duration such as 24h (got %q)", EnvPrefix, v)
+		}
+		cfg.ArtifactRegistryCleanupInterval = Duration(d)
+	}
+	// Microsoft's licence (#1916): exactly Y, as the image's own
+	// ACCEPT_EULA=Y, so nothing vaguer reads as an acceptance.
+	if v := getenv(EnvPrefix + "ACCEPT_MSSQL_EULA"); v != "" {
+		if v != "Y" {
+			return fmt.Errorf("%sACCEPT_MSSQL_EULA: must be Y, which accepts Microsoft's SQL Server licence (%s) (got %q)", EnvPrefix, MSSQLEULAURL, v)
+		}
+		cfg.AcceptMSSQLEULA, cfg.Source.MSSQLEULA = true, "env"
+	}
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -634,6 +660,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-memorystore", raw.memorystore, &cfg.Endpoints.Memorystore},
 		{"port-memorystore-admin", raw.memorystoreAdmin, &cfg.Endpoints.MemorystoreAdmin},
 		{"port-serviceusage", raw.serviceUsage, &cfg.Endpoints.ServiceUsage},
+		{"port-apikeys", raw.apiKeys, &cfg.Endpoints.APIKeys},
 		{"port-cloudsql-mysql", raw.cloudsqlMySQL, &cfg.Endpoints.CloudSQLMySQL},
 		{"port-cloudsql", raw.cloudsql, &cfg.Endpoints.CloudSQL},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},
@@ -705,8 +732,18 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	if set["iam-enforcement"] {
 		cfg.IAMEnforcement = raw.iamEnforcement
 	}
+	if set["artifact-registry-cleanup-interval"] {
+		cfg.ArtifactRegistryCleanupInterval = Duration(raw.arCleanup)
+	}
 	if set["cloudbuild-host-steps"] {
 		cfg.CloudBuildHostSteps = raw.cbHostSteps
+	}
+	if set["accept-mssql-eula"] {
+		cfg.AcceptMSSQLEULA = raw.acceptMSSQLEULA
+		cfg.Source.MSSQLEULA = ""
+		if raw.acceptMSSQLEULA {
+			cfg.Source.MSSQLEULA = "flag"
+		}
 	}
 	if set["appengine-url"] {
 		cfg.AppEngineURL = raw.appEngineURL

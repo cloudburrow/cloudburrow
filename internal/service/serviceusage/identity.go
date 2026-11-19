@@ -77,6 +77,12 @@ var serviceAgents = map[string]string{
 	"redis.googleapis.com": "cloud-redis.iam.gserviceaccount.com",
 	// Backup and DR Service Agent.
 	"backupdr.googleapis.com": "gcp-sa-backupdr.iam.gserviceaccount.com",
+	// API Keys Service Account.
+	"apikeys.googleapis.com": "gcp-sa-apikeys.iam.gserviceaccount.com",
+	// Container Analysis Service Agent.
+	"containeranalysis.googleapis.com": "container-analysis.iam.gserviceaccount.com",
+	// Container Scanning Service Agent.
+	"containerscanning.googleapis.com": "gcp-sa-containerscanning.iam.gserviceaccount.com",
 }
 
 // noPrimaryAgent are the served services

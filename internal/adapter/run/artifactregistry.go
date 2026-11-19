@@ -106,7 +106,7 @@ func (a *ArtifactRegistryServer) GetRepository(_ context.Context, req *arpb.GetR
 	if !ok {
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
-	return proto.Clone(r).(*arpb.Repository), nil
+	return withScanning(proto.Clone(r).(*arpb.Repository)), nil
 }
 
 // ListRepositories lists a location's repositories, by name.
@@ -135,7 +135,7 @@ func (a *ArtifactRegistryServer) ListRepositories(_ context.Context, req *arpb.L
 	out := &arpb.ListRepositoriesResponse{}
 	for name, r := range repositories.repos {
 		if strings.HasPrefix(name, req.GetParent()+"/repositories/") && match(name) {
-			out.Repositories = append(out.Repositories, proto.Clone(r).(*arpb.Repository))
+			out.Repositories = append(out.Repositories, withScanning(proto.Clone(r).(*arpb.Repository)))
 		}
 	}
 	sort.Slice(out.Repositories, func(i, j int) bool {
@@ -174,7 +174,7 @@ func repositoryNameFilter(filter string) (func(string) bool, error) {
 
 // CreateRepository stores a repository and returns its operation, already
 // done with the repository, as Artifact Registry's completes in moments.
-// Every format but KFP and GO is served (#1531, artifactregistryformats.go);
+// Every format but RUBY is served (#1531, #1897, artifactregistryformats.go);
 // a remote repository's upstream must be one of this instance's (checkMode).
 func (a *ArtifactRegistryServer) CreateRepository(ctx context.Context, req *arpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
@@ -188,13 +188,15 @@ func (a *ArtifactRegistryServer) CreateRepository(ctx context.Context, req *arpb
 		r = &arpb.Repository{}
 	}
 	if _, ok := servedFormats[r.GetFormat()]; !ok {
-		return nil, apierror.Unimplemented("format %v is not supported: DOCKER, PYTHON, NPM, MAVEN, GENERIC, APT and YUM repositories are", r.GetFormat())
+		return nil, apierror.Unimplemented("format %v is not supported: DOCKER, PYTHON, NPM, MAVEN, GENERIC, APT, YUM, GO and KFP repositories are", r.GetFormat())
 	}
 	if err := checkMode(req.GetParent(), r); err != nil {
 		return nil, err
 	}
-	// Cleanup policies are stored and read back, as documented; nothing
-	// here runs them, as Artifact Registry runs them only daily.
+	// Cleanup policies run in the background (artifactregistrycleanup.go).
+	if err := checkCleanupPolicies(r); err != nil {
+		return nil, err
+	}
 	if err := checkRepositoryKMSKey(req.GetParent(), r.GetKmsKeyName()); err != nil {
 		return nil, err
 	}
@@ -219,6 +221,12 @@ func (a *ArtifactRegistryServer) CreateRepository(ctx context.Context, req *arpb
 	}
 	r.Name, r.CreateTime, r.UpdateTime = name, now, now
 	r.RegistryUri = formatURL(name, r.GetFormat())
+	// Only enablement_config is the caller's (#1912); the state is
+	// worked out on every read.
+	if in := r.GetVulnerabilityScanningConfig(); in != nil {
+		r.VulnerabilityScanningConfig = nil
+		setScanningConfig(r, in, now.AsTime())
+	}
 	if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodCreate); err != nil {
 		return nil, err
 	}
@@ -229,10 +237,11 @@ func (a *ArtifactRegistryServer) CreateRepository(ctx context.Context, req *arpb
 	}
 	repositories.repos[name] = r
 	saveRepositoriesLocked()
+	setRepositoryKey(name, r.GetKmsKeyName())
 	repositories.mu.Unlock()
 	op := a.s.ops.Create(req.GetParent(), name)
 	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
-	_ = a.s.ops.Succeed(op.Name, proto.Clone(r))
+	_ = a.s.ops.Succeed(op.Name, withScanning(proto.Clone(r).(*arpb.Repository)))
 	return a.s.toProtoOperation(op.Name)
 }
 
@@ -251,47 +260,76 @@ func (a *ArtifactRegistryServer) UpdateRepository(ctx context.Context, req *arpb
 		if in.GetDockerConfig() != nil {
 			paths = append(paths, "docker_config")
 		}
+		if in.GetVulnerabilityScanningConfig() != nil {
+			paths = append(paths, "vulnerability_scanning_config")
+		}
 	}
 	for _, p := range paths {
 		switch p {
-		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run", "docker_config", "docker_config.immutable_tags":
+		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run", "docker_config", "docker_config.immutable_tags",
+			"vulnerability_scanning_config", "vulnerability_scanning_config.enablement_config":
 		default:
-			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels, cleanup policies and docker_config.immutable_tags can change", p)
+			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels, cleanup policies, docker_config.immutable_tags and vulnerability_scanning_config.enablement_config can change", p)
 		}
 	}
-	repositories.mu.Lock()
-	defer repositories.mu.Unlock()
-	r, ok := repositories.repos[in.GetName()]
-	if !ok {
-		return nil, apierror.NotFound("Requested entity was not found.")
-	}
-	r = proto.Clone(r).(*arpb.Repository)
-	for _, p := range paths {
-		switch p {
-		case "description":
-			r.Description = in.GetDescription()
-		case "labels":
-			r.Labels = in.GetLabels()
-		case "cleanup_policies":
-			r.CleanupPolicies = in.GetCleanupPolicies()
-		case "cleanup_policy_dry_run":
-			r.CleanupPolicyDryRun = in.GetCleanupPolicyDryRun()
-		case "docker_config", "docker_config.immutable_tags":
-			if r.GetFormat() != arpb.Repository_DOCKER {
-				return nil, apierror.InvalidArgument("docker_config is only for a DOCKER repository")
+	// The custom-constraint check runs outside repositories.mu (#1902), as
+	// CreateRepository's does: it may call the host's evaluator, which is
+	// slow and may call back into Artifact Registry (a delete of this
+	// repository deadlocked against a locked check in #1855). The update is
+	// applied only if the stored repository is still the one it was built
+	// from; one changed meanwhile is built again, one deleted is NOT_FOUND.
+	for attempt := 0; ; attempt++ {
+		repositories.mu.Lock()
+		cur, ok := repositories.repos[in.GetName()]
+		repositories.mu.Unlock()
+		if !ok {
+			return nil, apierror.NotFound("Requested entity was not found.")
+		}
+		r := proto.Clone(cur).(*arpb.Repository)
+		for _, p := range paths {
+			switch p {
+			case "description":
+				r.Description = in.GetDescription()
+			case "labels":
+				r.Labels = in.GetLabels()
+			case "cleanup_policies":
+				r.CleanupPolicies = in.GetCleanupPolicies()
+			case "cleanup_policy_dry_run":
+				r.CleanupPolicyDryRun = in.GetCleanupPolicyDryRun()
+			case "docker_config", "docker_config.immutable_tags":
+				if r.GetFormat() != arpb.Repository_DOCKER {
+					return nil, apierror.InvalidArgument("docker_config is only for a DOCKER repository")
+				}
+				r.FormatConfig = &arpb.Repository_DockerConfig{DockerConfig: &arpb.Repository_DockerRepositoryConfig{
+					ImmutableTags: in.GetDockerConfig().GetImmutableTags()}}
+			case "vulnerability_scanning_config", "vulnerability_scanning_config.enablement_config":
+				setScanningConfig(r, in.GetVulnerabilityScanningConfig(), time.Now())
 			}
-			r.FormatConfig = &arpb.Repository_DockerConfig{DockerConfig: &arpb.Repository_DockerRepositoryConfig{
-				ImmutableTags: in.GetDockerConfig().GetImmutableTags()}}
+		}
+		if err := checkCleanupPolicies(r); err != nil {
+			return nil, err
+		}
+		r.UpdateTime = timestamppb.New(time.Now())
+		if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodUpdate); err != nil {
+			return nil, err
+		}
+		repositories.mu.Lock()
+		if repositories.repos[in.GetName()] == cur {
+			repositories.repos[in.GetName()] = r
+			saveRepositoriesLocked()
+			repositories.mu.Unlock()
+			return withScanning(proto.Clone(r).(*arpb.Repository)), nil
+		}
+		repositories.mu.Unlock()
+		if attempt == repositoryUpdateRetries {
+			return nil, apierror.Aborted("The repository was changed by another request while this one was checked against custom organization policy constraints; retry.")
 		}
 	}
-	r.UpdateTime = timestamppb.New(time.Now())
-	if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodUpdate); err != nil {
-		return nil, err
-	}
-	repositories.repos[in.GetName()] = r
-	saveRepositoriesLocked()
-	return proto.Clone(r).(*arpb.Repository), nil
 }
+
+// repositoryUpdateRetries is how many times UpdateRepository builds its
+// update again after a concurrent change before it is refused ABORTED.
+const repositoryUpdateRetries = 8
 
 // DeleteRepository removes a repository, and every image its registry
 // holds, and returns its operation, already done. Images built under its
@@ -320,6 +358,7 @@ func RemoveRepository(name string) bool {
 	}
 	delete(repositories.repos, name)
 	saveRepositoriesLocked()
+	setRepositoryKey(name, "")
 	if _, ok := repositories.policies[name]; ok {
 		delete(repositories.policies, name)
 		saveRepositoryPoliciesLocked()
@@ -379,9 +418,12 @@ func loadRepositories(st *registry.Store) {
 	}
 	repositories.mu.Lock()
 	defer repositories.mu.Unlock()
+	keys := map[string]string{}
 	for _, r := range list.GetRepositories() {
 		repositories.repos[r.GetName()] = r
+		keys[r.GetName()] = r.GetKmsKeyName()
 	}
+	loadCMEK(st, keys)
 	loadRepositoryPoliciesLocked(st)
 	loadARConfig(st)
 	loadFormats(st)
@@ -392,10 +434,9 @@ var repositoryKMSKeyRE = regexp.MustCompile(`^projects/[^/]+/locations/([^/]+)/k
 
 // checkRepositoryKMSKey checks a new repository's kms_key_name: a
 // CryptoKey name in the repository's own location, as Google requires of
-// a customer-managed encryption key. The key is stored and read back; it
-// encrypts nothing here, as the registry's content-addressed blobs are
-// shared across repositories and kept as pushed, and it cannot change
-// after creation (UpdateRepository refuses the path).
+// a customer-managed encryption key. The repository's content is then
+// encrypted with it (artifactregistrycmek.go); it cannot change after
+// creation (UpdateRepository refuses the path).
 func checkRepositoryKMSKey(parent, key string) error {
 	if key == "" {
 		return nil
@@ -409,6 +450,17 @@ func checkRepositoryKMSKey(parent, key string) error {
 		return apierror.InvalidArgument("kms_key_name %q is in location %s: a repository's key must be in its own location, %s", key, m[1], loc)
 	}
 	return nil
+}
+
+// maxUpstreamPolicies is Google's limit of a virtual repository's upstreams.
+const maxUpstreamPolicies = 30
+
+// repoParent is a repository name's projects/*/locations/* part.
+func repoParent(name string) string {
+	if i := strings.LastIndex(name, "/repositories/"); i >= 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // checkMode accepts a standard repository; a remote one whose upstream is
@@ -429,23 +481,36 @@ func checkMode(parent string, r *arpb.Repository) error {
 		return apierror.Unimplemented("repository mode %v is not supported", r.GetMode())
 	}
 	switch r.GetFormat() {
-	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN:
+	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN, arpb.Repository_DOCKER, arpb.Repository_GO:
 	default:
-		return apierror.Unimplemented("virtual %v repositories are not supported: PYTHON, NPM and MAVEN ones are", r.GetFormat())
+		return apierror.Unimplemented("virtual %v repositories are not supported: DOCKER, PYTHON, NPM, MAVEN and GO ones are", r.GetFormat())
 	}
 	ups := r.GetVirtualRepositoryConfig().GetUpstreamPolicies()
 	if len(ups) == 0 {
 		return apierror.InvalidArgument("a virtual repository needs virtual_repository_config.upstream_policies")
 	}
+	// https://docs.cloud.google.com/artifact-registry/quotas: "Max upstream
+	// policies for virtual repositories" is 30.
+	if len(ups) > maxUpstreamPolicies {
+		return apierror.InvalidArgument("a virtual repository can have at most %d upstream policies; got %d", maxUpstreamPolicies, len(ups))
+	}
+	_, loc, _ := resource.ParseLocation(parent)
 	repositories.mu.Lock()
 	defer repositories.mu.Unlock()
 	for _, u := range ups {
+		// An upstream is in the virtual repository's location, in any
+		// project, as Google documents.
 		up, ok := repositories.repos[u.GetRepository()]
-		if !ok || !strings.HasPrefix(u.GetRepository(), parent+"/repositories/") {
-			return apierror.InvalidArgument("upstream %q is not a repository in %s", u.GetRepository(), parent)
+		if _, uloc, err := resource.ParseLocation(repoParent(u.GetRepository())); !ok || err != nil || uloc != loc {
+			return apierror.InvalidArgument("upstream %q is not a repository in location %s", u.GetRepository(), loc)
 		}
-		if up.GetFormat() != r.GetFormat() || (up.GetMode() != arpb.Repository_STANDARD_REPOSITORY && up.GetMode() != arpb.Repository_REMOTE_REPOSITORY) {
-			return apierror.InvalidArgument("upstream %q must be a standard or remote %v repository", u.GetRepository(), r.GetFormat())
+		if up.GetFormat() != r.GetFormat() {
+			return apierror.InvalidArgument("upstream %q must be a %v repository", u.GetRepository(), r.GetFormat())
+		}
+		// Python, npm and Maven virtual repositories read standard and
+		// remote upstreams; Docker's take virtual ones too.
+		if up.GetMode() == arpb.Repository_VIRTUAL_REPOSITORY && r.GetFormat() != arpb.Repository_DOCKER {
+			return apierror.Unimplemented("upstream %q is a virtual repository: only a virtual DOCKER repository reads virtual upstreams here", u.GetRepository())
 		}
 	}
 	return nil

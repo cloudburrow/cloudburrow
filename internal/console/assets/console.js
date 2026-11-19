@@ -45,6 +45,10 @@ function agentPlatformRoutes() {
   // A page Google's console has and CloudBurrow does not serve.
   const absent = (path, title, group, api, about, docs, instead) =>
     page(path, title, group, { service: null, screen: "not-served", notServed: true, api, about, docs, instead });
+  // The pages that run locally keep their place in the product menu while
+  // their local backend is off (listedWhenOff), as Google's menu always has
+  // them: each draws its off state, saying how to start it, and the
+  // overview marks it "off".
   return [
     page(AP_PATHS.overview, "Overview", null, { service: null, screen: "ap-overview" }),
     page(AP_PATHS.modelGarden, "Model Garden", null, { service: null, screen: "model-garden" }),
@@ -62,20 +66,20 @@ function agentPlatformRoutes() {
     absent(`${AP}/rag`, "RAG Engine", "Agent Builder", "projects.locations.ragCorpora",
       "Corpora of your documents for retrieval-augmented generation", AP_DOCS + "build"),
     // Agent Studio.
-    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground" }),
-    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings" }),
+    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground", listedWhenOff: true }),
+    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings", listedWhenOff: true }),
     absent(`${AP}/studio/media`, "Media Studio", "Agent Studio", "Imagen, Veo and Lyria generation",
       "Generate images, video, speech and music (Agent Media Studio)", AP_DOCS + "agent-studio"),
     absent(`${AP}/studio/prompt-gallery`, "Prompt gallery", "Agent Studio", null,
       "Sample prompts to open in Studio", AP_DOCS + "agent-studio",
       "Studio sends your own prompts to the local model."),
     // Models.
-    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models" }),
+    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models", listedWhenOff: true }),
     absent(`${AP}/models`, "Model Registry", "Models", "projects.locations.models",
       "Models uploaded or trained in a project, with their versions", AP_DOCS + "models"),
     absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
       "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
-    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict" }),
+    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict", listedWhenOff: true }),
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
@@ -301,15 +305,23 @@ const ROUTES = [
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
-  { path: "/memorystore", service: "memorystore", title: "Redis", kind: "Instance", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
-  // Memorystore for Redis Cluster (#1519), a page of its own beside the
-  // instances, as the Memorystore console's Redis Cluster tab is.
-  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Redis Cluster", kind: "Cluster", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
+  // Google's Memorystore menu (#1862): Valkey, Redis Cluster, Redis and
+  // Memcached, each page titled "Memorystore for <product>". Memcached
+  // (memcache.googleapis.com) is not served: its page says so in Google's
+  // place.
   // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
-  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", kind: "Instance", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey",
+    navTitle: "Valkey", kind: "Instance", section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  // Memorystore for Redis Cluster (#1519), a page of its own beside the
+  // instances, as the Memorystore console's Redis Cluster page is.
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore for Redis Cluster",
+    navTitle: "Redis Cluster", kind: "Cluster", section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore", service: "memorystore", title: "Memorystore for Redis", navTitle: "Redis", kind: "Instance",
+    section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore-memcached", screen: "unavailable", service: null, requires: "memorystore", icon: "memorystore",
+    title: "Memorystore for Memcached", navTitle: "Memcached", section: "Databases", product: "memorystore", productTitle: "Memorystore",
+    unavailable: "Memorystore for Memcached is the Memcache API (memcache.googleapis.com), which CloudBurrow does not serve. " +
+      "Memorystore for Valkey, Redis Cluster and Redis are served: their pages are in this menu." },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", kind: "Backup vault", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
@@ -523,23 +535,52 @@ const ROUTES = [
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
-  // Resource Manager is one product with three pages here: projects, the
-  // organization and its folders (#1294), and tags (#1295). The product key
-  // stays "projects", so a pin made before the other pages were routed keeps
-  // pointing at it. Resource hierarchy and Tags had providers but no route,
-  // so neither was reachable from the console.
-  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
-  // provider but no route.
-  { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
+  // Resource Manager's own pages (#1294, #1295) are IAM & Admin's since
+  // #1865, as Google's console has them: Manage resources
+  // (/cloud-resource-manager) is the tree of the organization, folders and
+  // projects, and Tags is /iam-admin/tags, so the drawer has no Resource
+  // Manager row. These addresses stay: a project's, a folder's and the
+  // organization's pages (liens, organization policies, app management,
+  // Purge project now) and a tag key's page are here, and the lists still
+  // answer by their address. `navHidden` keeps them out of the menu, and
+  // `navAs` marks the IAM & Admin page they belong to.
+  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/cloud-resource-manager" },
+  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/cloud-resource-manager" },
+  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/iam-admin/tags" },
+  // APIs & Services (#1352, #1866), Google's menu in Google's order.
+  // Enabled APIs & services (/apis, Google's /apis/dashboard) is the
+  // dashboard's Traffic, Errors and Median latency charts over the table of
+  // enabled APIs (renderAPIsDashboard); an API's page is
+  // /apis/api/<name>/<tab> (Overview, Metrics, Quotas & System Limits,
+  // Credentials) with Disable API. Library is /apis/library, an API's
+  // Library page /apis/library/<name> with Enable or Manage. Credentials
+  // holds Create credentials, the API keys (#1915: Create, each key's page
+  // /apis/credentials/key/<id> with its restrictions, Show key, Rotate key
+  // and Delete, and Restore deleted credentials at
+  // /apis/credentials/restore) and the service accounts; OAuth clients are
+  // not served, which it says. Their calls are the serviceusage provider's
+  // Studio (consoleapis.go, consoleapikeys.go).
+  { path: "/apis", service: "serviceusage", screen: "apis-dashboard", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/dashboard", redirect: "/apis", title: "Enabled APIs & services" },
+  { path: "/apis/library", service: "serviceusage", screen: "apis-library", icon: "serviceusage", title: "Library", kind: "API", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/credentials", service: "serviceusage", screen: "apis-credentials", icon: "serviceusage", title: "Credentials", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "The OAuth consent screen is Google Auth Platform's (Branding, Audience, Clients, Data Access, Verification Center), which CloudBurrow does not serve: a local instance signs no user in with OAuth, and its APIs take a service account key or no credentials at all." },
+  { path: "/apis/credentials/agreements", title: "Page usage agreements", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "Page usage agreements are the terms of service a project has accepted for Google's APIs. A local instance has no terms to accept." },
+  { path: "/apis/credentials/domainverification", title: "Domain verification", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "Domain verification proves to Google that a project owns a domain, for push notifications and OAuth redirects. A local instance reaches no outside domain, so there is nothing to verify." },
   // Service Usage operations (#1530): what operations.list answers, with
-  // Delete.
+  // Delete. Google's menu has no such page; it is kept after Google's.
   { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", kind: "Operation", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
@@ -563,9 +604,10 @@ const ROUTES = [
   // IAM & Admin, so it is in this menu too.
   { path: "/iam-admin/tags", service: "tags", icon: "iam", title: "Tags", kind: "Tag key", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/labels" },
-  // Manage resources (#1864): Resource Manager's projects, the page Google's
-  // IAM & Admin menu opens at /cloud-resource-manager.
-  { path: "/cloud-resource-manager", service: "projects", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
+  // Manage resources (#1864, #1865): the page Google's IAM & Admin menu
+  // opens at /cloud-resource-manager, the organization's tree of folders
+  // and projects (renderManageResources).
+  { path: "/cloud-resource-manager", service: "projects", screen: "manage-resources", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/audit" },
 ];
 
@@ -1911,7 +1953,7 @@ async function renderProducts(view) {
               el("span", {}, el("span", { class: "catalogue-name", text: productTitle(entry) }),
                 pagesOf(key).length > 1
                   ? el("span", { class: "catalogue-pages",
-                                 text: pagesOf(key).map((pg) => pg.title).join(" · ") })
+                                 text: pagesOf(key).filter((pg) => !pg.navHidden).map((pg) => pg.title).join(" · ") })
                   : null)),
             el("button", {
               class: "nav-pin" + (pinned ? " is-pinned" : ""),
@@ -5220,7 +5262,11 @@ function openModal({ labelledBy, canClose = () => true }) {
     dialog.classList.add("is-closing");
     dialog.inert = true;
     setTimeout(() => dialog.remove(), OVERLAY_EXIT_MS);
-    for (const n of inerted) n.inert = false;
+    // A dialog that closed while this one was over it (a form that opened
+    // this one from its submit, as Rotate key opens the new key's) stays
+    // inert for the rest of its exit: woken, it would take the clicks meant
+    // for the page under it until it is removed.
+    for (const n of inerted) if (!n.classList.contains("is-closing")) n.inert = false;
     // Back to the button that opened it, not to the top of the page: a
     // keyboard user who cancels a create should be where they started.
     if (opener && opener.isConnected && opener.focus) opener.focus();
@@ -5822,7 +5868,15 @@ function buildCreateForm(spec) {
       // from the control's own `required`, so announcing "star" as well would
       // be saying it twice.
       f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null);
-    const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    // Field.Links (#1916): the documents a field is about, such as the
+    // licence a checkbox accepts, under its help. Only https links are drawn.
+    const links = (f.links || []).filter((l) => /^https:\/\//.test(l.url || ""));
+    const helpText = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    const help = links.length
+      ? el("div", { class: "form-links" }, helpText, el("p", { class: "form-help" },
+          ...links.flatMap((l, i) => [i ? " · " : null,
+            el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })]).filter(Boolean)))
+      : helpText;
     const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
     const unavailable = unavailableId
       ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;
@@ -6023,6 +6077,30 @@ function buildCreateForm(spec) {
       if (other) other.control.addEventListener("change", show);
     }
     show();
+  }
+
+  // A checkbox checked and held while another field holds a value
+  // (checkedWhen, #1862): Memorystore's Security choice of IAM Auth or Token
+  // Auth checks and locks Enable In-Transit Encryption (TLS), as Google's
+  // Create instance does. Released, it keeps its state and is free again.
+  for (const entry of entries) {
+    const cond = entry.field.checkedWhen;
+    if (!cond || !entry.isCheck) continue;
+    const [name, choice = ""] = cond.split("=");
+    const other = byName.get(name);
+    if (!other) continue;
+    const hold = () => {
+      const on = choice.split("|").includes(valueText(other));
+      if (on && !entry.control.checked) {
+        entry.control.checked = true;
+        entry.control.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      entry.control.disabled = on || !!entry.field.immutable;
+      entry.node.classList.toggle("is-held", on);
+      entry.control.title = on ? `Held on by ${other.field.label}` : "";
+    };
+    other.control.addEventListener("change", hold);
+    hold();
   }
 
   // A field made from another (#1864): until it is edited by hand it
@@ -6905,7 +6983,7 @@ function projectIdFrom(name, suffix) {
 async function renderNewProject(view) {
   const route = ROUTES.find((r) => r.service === "projects");
   const caps = capabilityOf("projects");
-  const listHref = "/projects" + scopeSearch();
+  const listHref = "/cloud-resource-manager" + scopeSearch();
   const header = pageHeader("New project", "", { back: listHref, backLabel: "Back to Manage resources" });
   if (!route || !caps.create) {
     return setChildren(view, header,
@@ -7755,7 +7833,14 @@ function dispatch(view) {
   if (match.screen === "bigquery-studio") return renderBigQueryStudio(view);
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
+  if (match.screen === "apis-dashboard" && !resourcePath.length) return renderAPIsDashboard(view);
+  if (match.screen === "apis-dashboard" && resourcePath[0] === "api" && resourcePath[1]) return renderAPIPage(view, resourcePath[1], resourcePath[2] || "overview");
+  if (match.screen === "apis-library") return renderAPILibrary(view, resourcePath[0] || "");
+  if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
+  if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
+  if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
+  if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
   // Custom constraints (#1891): the list, Create custom constraint, and
   // each one's edit page.
   if (match.service === "iam-orgpolicies" && resourcePath[0] === "custom-constraints") {
@@ -8262,10 +8347,12 @@ function drawProductNav() {
   if (!host) return;
 
   const here = productOfLocation();
-  // Only the pages this instance serves, as the drawer lists only those.
+  // Only the pages this instance serves, as the drawer lists only those,
+  // and the Agent Platform pages that draw their own off state
+  // (listedWhenOff), which Google's menu always lists.
   const served = new Set(SERVICES.map((sv) => sv.id));
   const pages = here
-    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r === here) && !r.navHidden &&
+    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r.listedWhenOff || r === here) && !r.navHidden &&
         (!r.requires || served.has(r.requires) || r === here))
     : [];
   if (!pages.length) {
@@ -8954,7 +9041,7 @@ const SHORTCUTS = [
   { keys: "g then l", what: "Go to the Logs Explorer", go: "/logs" },
   { keys: "g then a", what: "Go to Activity", go: "/activity" },
   { keys: "g then m", what: "Go to Monitoring", go: "/monitoring" },
-  { keys: "g then p", what: "Go to Resource Manager", go: "/projects" },
+  { keys: "g then p", what: "Go to Manage resources", go: "/cloud-resource-manager" },
   { keys: "Enter", what: "Inspect the focused table row" },
   { keys: "⌘/Ctrl + Enter", what: "Run the statement in a query editor" },
   { keys: "Escape", what: "Close a dialog, menu or panel" },
@@ -16788,4 +16875,965 @@ function renderSpannerStudio(panel, route, segments, project) {
       resultTabs,
       results)));
   loadExplorer();
+}
+// Manage resources (#1865), Google's page of that name: the organization,
+// its folders and the projects under each in one tree table (Name, ID,
+// Status, Labels, Tags, Actions), Create project (the New project page)
+// and Create folder on the title line, Move and Delete for the checked
+// row, Resources pending deletion with Restore and the date each is
+// deleted, and the info panel: the row's Permissions (Add principal,
+// Remove), Labels (a project's) and Tags (Add tag, Remove). The screen's
+// calls are the projects provider's Studio (consolemanageresources.go);
+// Permissions are the row's page's own (/api/permissions/iam for a
+// project, /api/permissions/hierarchy for a folder or the organization).
+function mrCall(call, body = {}) {
+  return send(`/api/studio/projects?call=${encodeURIComponent(call)}`, "POST", body);
+}
+
+// mrForm is a small dialog form: title, its fields (buildCreateForm's),
+// and submit, which gets the values and throws to show an error.
+function mrForm({ id, title, label, fields, note, submit, destructive = false }) {
+  const form = buildCreateForm({ label, fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: `${id}-title`, canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: destructive ? "primary danger" : "primary", text: label });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const onsubmit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !form.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    try {
+      await submit(form.values());
+      submitting = false;
+      close();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  dialog.append(el("form", { class: "modal-body", id, novalidate: true, onsubmit },
+    el("h2", { id: `${id}-title`, text: title }),
+    note ? el("p", { class: "form-help", text: note }) : null,
+    error, ...form.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  form.focusFirst();
+}
+
+function renderManageResources(view) {
+  let tree = null;
+  let pending = new URLSearchParams(location.search).get("view") === "pending";
+  const collapsed = new Set();
+  let selected = null;
+  let panelOpen = false;
+  const body = el("div", { id: "mr-body" }, loadingState(4, { what: "resources" }));
+
+  const key = (n) => `${n.kind}:${n.id}`;
+  const byKey = () => new Map((tree ? tree.nodes : []).map((n) => [key(n), n]));
+  const parentKey = (n) => {
+    if (!n.parent) return n.kind === "organization" ? null : "none";
+    const [kind, id] = n.parent.split("/");
+    return `${kind === "organizations" ? "organization" : "folder"}:${id}`;
+  };
+  const label = (n) => n.kind === "organization" ? n.name : `${n.name}`;
+  const kindWord = (n) => n.kind === "organization" ? "Organization" : n.kind === "folder" ? "Folder" : "Project";
+  const pageOf = (n) => n.kind === "project" ? `/projects/${encodeURIComponent(n.id)}`
+    : n.kind === "folder" ? `/resource-hierarchy/${encodeURIComponent(n.id)}` : "/resource-hierarchy/organization";
+  // Where Move can put a row: the organization, or an active folder that is
+  // not the row itself or under it; a project may also have no organization.
+  const destinations = (n) => {
+    const nodes = tree.nodes.filter((x) => x.state === "ACTIVE" && (x.kind === "organization" || x.kind === "folder"));
+    const map = byKey();
+    const under = (x) => {
+      for (let k = key(x), i = 0; k && i < 12; i++) {
+        if (k === key(n)) return true;
+        const node = map.get(k);
+        if (!node) return false;
+        k = parentKey(node);
+      }
+      return false;
+    };
+    const out = nodes.filter((x) => n.kind !== "folder" || !under(x)).map((x) => x.kind === "organization" ? `organizations/${x.id}` : `folders/${x.id}`);
+    return out;
+  };
+  const destLabels = () => {
+    const out = {};
+    for (const x of tree.nodes) {
+      if (x.kind === "organization") out[`organizations/${x.id}`] = `${x.name} (organization)`;
+      if (x.kind === "folder") out[`folders/${x.id}`] = `${x.name} (folder ${x.id})`;
+    }
+    return out;
+  };
+
+  const run = async (what, call, req) => {
+    const op = recordOperation(what);
+    try {
+      const res = await mrCall(call, req);
+      op.succeeded("", res.operation);
+      notify(what);
+      await reload();
+      return res;
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      throw err;
+    }
+  };
+
+  const createFolder = () => mrForm({
+    id: "mr-create-folder", title: "Create folder", label: "Create",
+    note: "A folder groups projects and other folders under the organization.",
+    fields: [
+      { name: "displayName", label: "Folder name", type: "text", required: true,
+        pattern: "^[\\p{L}\\p{N}]([\\p{L}\\p{N} _\\-]{0,28}[\\p{L}\\p{N}])?$",
+        help: "Up to 30 letters, numbers, spaces, hyphens and underscores, starting and ending with a letter or number; unique among the folders beside it." },
+      { name: "parent", label: "Location", type: "select", required: true, options: destinations({ kind: "project", id: "" }),
+        optionLabels: destLabels(), default: tree.nodes.find((x) => x.kind === "organization") ? `organizations/${tree.nodes.find((x) => x.kind === "organization").id}` : "",
+        help: "The organization or folder to create it in." },
+    ],
+    submit: (v) => run(`Created folder ${v.displayName}`, "folder", { displayName: v.displayName, parent: v.parent }),
+  });
+
+  const move = (n) => mrForm({
+    id: "mr-move", title: `Move "${label(n)}"`, label: "Move",
+    note: n.kind === "project"
+      ? "Moving a project changes the policies it inherits: the folders' and the organization's."
+      : "Moving a folder moves everything in it, and changes the policies they inherit.",
+    fields: [{ name: "parent", label: "Destination", type: "select", required: true,
+      options: destinations(n).filter((d) => d !== n.parent), optionLabels: destLabels(),
+      help: "Select a destination: the organization, or a folder." }],
+    submit: (v) => run(`Moved ${kindWord(n).toLowerCase()} ${label(n)}`, "move", { kind: n.kind, id: n.id, parent: v.parent }),
+  });
+
+  const remove = (n) => confirmDestructive(n.kind === "project" ? {
+    title: `Shut down ${label(n)}?`,
+    detail: `This shuts down project ${n.id}: all billing and traffic serving stop, and every resource in it is scheduled for deletion. ` +
+      "The project is kept for 30 days, when Restore under Resources pending deletion brings it back; then it is deleted.",
+    confirmWord: n.id, confirmLabel: "Shut down", consequence: "",
+    onConfirm: () => run(`Shut down project ${n.id}`, "delete", { kind: n.kind, id: n.id }),
+  } : {
+    title: `Delete folder ${label(n)}?`,
+    detail: "Only an empty folder is deleted. It is kept for 30 days, when Restore under Resources pending deletion brings it back.",
+    confirmWord: n.name, confirmLabel: "Delete", consequence: "",
+    onConfirm: () => run(`Deleted folder ${label(n)}`, "delete", { kind: n.kind, id: n.id }),
+  });
+
+  const restore = (n) => run(`Restored ${kindWord(n).toLowerCase()} ${label(n)}`, "restore", { kind: n.kind, id: n.id });
+
+  const editLabels = (n) => mrForm({
+    id: "mr-labels", title: `Labels of ${label(n)}`, label: "Save",
+    note: "A label is a key and a value: lowercase letters, numbers, underscores and dashes, up to 63 characters; at most 64 labels.",
+    fields: [{ name: "labels", label: "Labels", type: "map", default: JSON.stringify(n.labels || {}),
+      help: "One per line: key=value." }],
+    submit: (v) => run(`Saved the labels of ${n.id}`, "labels", { id: n.id, labels: v.labels ? JSON.parse(v.labels) : {} }),
+  });
+
+  const addTag = (n) => mrForm({
+    id: "mr-add-tag", title: `Add tag to ${label(n)}`, label: "Save",
+    note: "Each resource carries one value of a tag key. Tag keys and values are made on the Tags page.",
+    fields: [{ name: "value", label: "Value", type: "select", required: true, options: tree.tagValues,
+      help: "The tag key and its value, as KEY_NAMESPACE/KEY/VALUE." }],
+    submit: (v) => run(`Added tag ${v.value} to ${label(n)}`, "tag", { kind: n.kind, id: n.id, value: v.value }),
+  });
+
+  // The info panel: the selected row's Permissions, Labels and Tags.
+  const openPanel = async (n) => {
+    MODAL_SIDE_NEXT = true;
+    const { dialog, close } = openModal({ labelledBy: "mr-panel-title" });
+    const service = n.kind === "project" ? "iam" : "hierarchy";
+    const segment = n.kind === "project" ? n.id : n.kind === "folder" ? n.id : "organization";
+    // A project's IAM page is scoped to that project, not the selected one.
+    const scope = n.kind === "project" ? n.id : currentProject();
+    const content = el("div", { id: "mr-panel-content" }, el("p", { class: "unavailable", text: "reading…" }));
+    const tabs = ["permissions", ...(n.kind === "project" ? ["labels"] : []), "tags"];
+    let tab = "permissions";
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Info panel" });
+    const drawStrip = () => setChildren(strip, ...tabs.map((t) => el("button", {
+      type: "button", role: "tab", id: `mr-panel-tab-${t}`, class: "tab" + (t === tab ? " is-selected" : ""),
+      "aria-selected": String(t === tab), text: t === "permissions" ? "Permissions" : t === "labels" ? "Labels" : "Tags",
+      onclick: () => { tab = t; drawStrip(); draw(); } })));
+    const refreshRow = () => (tree.nodes.find((x) => key(x) === key(n)) || n);
+    // Each draw has a number: a Permissions read that answers after the
+    // panel moved to another tab, or was drawn again, is dropped.
+    let drawn = 0;
+    // A form opened over the panel returns focus to the button that
+    // opened it; a redraw replaces that button, so focus goes back to the
+    // selected tab rather than the page behind the dialog.
+    const keepFocus = () => setTimeout(() => {
+      const other = [...document.querySelectorAll(".modal.is-open")].some((m) => !m.contains(dialog) && !dialog.contains(m));
+      if (dialog.isConnected && !dialog.contains(document.activeElement) && !other) {
+        document.getElementById(`mr-panel-tab-${tab}`)?.focus();
+      }
+    }, 0);
+    const draw = async () => {
+      const row = refreshRow();
+      const mine = ++drawn;
+      keepFocus();
+      if (tab === "labels") {
+        const entries = Object.entries(row.labels || {});
+        return setChildren(content,
+          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-edit-labels",
+            text: "Edit labels", onclick: () => editLabels(row) })),
+          entries.length ? el("table", { id: "mr-panel-labels" }, el("thead", {}, el("tr", {}, el("th", { text: "Key" }), el("th", { text: "Value" }))),
+            el("tbody", {}, ...entries.map(([k, v]) => el("tr", {}, el("td", { class: "mono", text: k }), el("td", { class: "mono", text: v })))))
+            : el("p", { class: "form-help", text: "No labels." }));
+      }
+      if (tab === "tags") {
+        return setChildren(content,
+          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag",
+            text: "Add tag", disabled: tree.tagValues.length ? null : "disabled", onclick: () => addTag(row) })),
+          tree.tagValues.length ? null : el("p", { class: "form-help", text: "No tag values exist yet: create a tag key and its values on the Tags page." }),
+          (row.tags || []).length ? el("table", { id: "mr-panel-tags" }, el("thead", {}, el("tr", {}, el("th", { text: "Tag" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
+            el("tbody", {}, ...row.tags.map((t) => el("tr", {}, el("td", { class: "mono", text: t }),
+              el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove tag ${t}`, text: "Remove",
+                onclick: async () => { try { await run(`Removed tag ${t} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: t }); draw(); } catch (err) { notify(err.message, "error"); } } }))))))
+            : el("p", { class: "form-help", text: "No tags are bound here." }));
+      }
+      let section;
+      try {
+        const d = await api(`/api/detail/${service}?project=${encodeURIComponent(scope)}&name=${encodeURIComponent(segment)}`);
+        section = (d.sections || []).find((s) => s.kind === "permissions");
+      } catch (err) {
+        if (mine !== drawn) return;
+        return setChildren(content, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+      if (mine !== drawn) return;
+      if (!section || !section.permissions) {
+        return setChildren(content, el("p", { class: "form-help", text: section && section.unavailable ? section.unavailable : "This resource has no IAM policy to show." }));
+      }
+      const pview = section.permissions;
+      const change = (b) => send(`/api/permissions/${service}?project=${encodeURIComponent(scope)}`, "POST",
+        { Path: [segment], Etag: pview.etag, ...b });
+      const rows = (pview.bindings || []).flatMap((b) => (b.members || []).map((m) => ({ member: m, role: b.role, conditional: b.conditional || null })))
+        .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+      setChildren(content,
+        el("div", { class: "section-actions" }, el("button", { type: "button", class: "primary", id: "mr-panel-add-principal",
+          text: "Add principal", onclick: () => openGrantForm(pview, label(row), change, () => draw()) })),
+        pview.note ? el("p", { class: "form-help", text: pview.note }) : null,
+        rows.length ? el("table", { id: "mr-panel-permissions" },
+          el("thead", {}, el("tr", {}, el("th", { text: "Principal" }), el("th", { text: "Role" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.member }), el("td", { class: "mono", text: r.role }),
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove ${r.member} from ${r.role}`, text: "Remove",
+              onclick: () => confirmDestructive({
+                title: `Remove ${r.member} from ${r.role}?`, detail: `${r.member} will no longer hold ${r.role} on ${label(row)}.`,
+                confirmWord: r.member, confirmLabel: "Remove", consequence: "",
+                onConfirm: async () => {
+                  const op = recordOperation(`Remove ${r.member} from ${r.role} on ${label(row)}`);
+                  try { const res = await change({ Remove: { Member: r.member, Role: r.role, Condition: r.conditional } }); op.succeeded("", res.operation); }
+                  catch (err) { op.failed(err.message, err.operation); throw err; }
+                  notify(`Removed ${r.member} from ${r.role}`);
+                  draw();
+                } }) }))))))
+          : el("p", { class: "form-help", text: "No principals hold a role here." }));
+    };
+    drawStrip();
+    dialog.append(el("div", { class: "modal-body", id: "mr-panel" },
+      el("h2", { id: "mr-panel-title", text: `${kindWord(n)} "${label(n)}"` }),
+      el("p", { class: "form-help mono", text: n.resource }),
+      strip, content,
+      el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+    dialog.addEventListener("cb-closed", () => { panelOpen = false; drawBar(); });
+    panelOpen = true;
+    drawBar();
+    draw();
+  };
+
+  const moveButton = el("button", { type: "button", class: "header-button", id: "mr-move", text: "Move", disabled: "disabled",
+    onclick: () => selected && move(selected) });
+  const deleteButton = el("button", { type: "button", class: "header-button", id: "mr-delete", text: "Delete", disabled: "disabled",
+    onclick: () => selected && remove(selected) });
+  const infoButton = el("button", { type: "button", class: "header-button", id: "mr-info-panel", disabled: "disabled",
+    onclick: () => selected && openPanel(selected) });
+  const pendingLink = el("a", { id: "mr-pending", href: "#" });
+  pendingLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    pending = !pending;
+    const u = new URL(location.href);
+    if (pending) u.searchParams.set("view", "pending"); else u.searchParams.delete("view");
+    history.replaceState(history.state, "", u.pathname + u.search);
+    selected = null;
+    drawBar();
+    draw();
+  });
+  const filterInput = el("input", { type: "search", class: "filter", id: "mr-filter", placeholder: "Filter", "aria-label": "Filter resources",
+    oninput: () => draw() });
+  const bar = el("div", { class: "list-actions", id: "mr-actions" });
+  const drawBar = () => {
+    const live = selected && selected.state === "ACTIVE" && selected.kind !== "organization";
+    moveButton.disabled = !live;
+    deleteButton.disabled = !live;
+    infoButton.disabled = !selected || pending;
+    infoButton.textContent = panelOpen ? "Hide info panel" : "Show info panel";
+    pendingLink.textContent = pending ? "Back to Manage resources" : "Resources pending deletion";
+    moveButton.hidden = pending;
+    deleteButton.hidden = pending;
+    infoButton.hidden = pending;
+    setChildren(bar, moveButton, deleteButton, infoButton, filterInput, pendingLink);
+  };
+
+  const statusText = (n) => n.state === "ACTIVE" ? "Active" : n.state === "DELETE_REQUESTED" ? "Pending deletion" : n.state;
+  const labelText = (n) => Object.entries(n.labels || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+  const rowActions = (n) => {
+    const acts = [];
+    if (n.state === "DELETE_REQUESTED") {
+      acts.push({ label: "Restore", run: () => restore(n).catch((err) => notify(err.message, "error")) });
+    } else {
+      if (n.kind === "project") acts.push({ label: "Settings", run: () => navigate(`/iam-admin/settings/${encodeURIComponent(n.id)}?project=${encodeURIComponent(n.id)}`) });
+      if (n.kind !== "organization") acts.push({ label: "Move", run: () => move(n) });
+      acts.push({ label: "Permissions", run: () => { selected = n; openPanel(n); } });
+      if (n.kind === "project") acts.push({ label: "Labels", run: () => editLabels(n) });
+      acts.push({ label: "Tags", run: () => { selected = n; openPanel(n).then(() => document.getElementById("mr-panel-tab-tags")?.click()); } });
+      if (n.kind !== "organization") acts.push({ label: "Delete", destructive: true, run: () => remove(n) });
+    }
+    return overflowMenu(acts, label(n));
+  };
+
+  const draw = () => {
+    if (!tree) return;
+    const q = filterInput.value.trim().toLowerCase();
+    const matches = (n) => !q || [n.name, n.id, statusText(n), labelText(n), ...(n.tags || [])].some((s) => (s || "").toLowerCase().includes(q));
+    if (pending) {
+      const rows = tree.nodes.filter((n) => n.state === "DELETE_REQUESTED" && matches(n));
+      if (!rows.length) return setChildren(body, emptyState("No resources pending deletion", "A project you shut down, or a folder you delete, is listed here for 30 days, when it can be restored."));
+      return setChildren(body, el("div", { class: "table-wrap" }, el("table", { id: "mr-pending-table" },
+        el("thead", {}, el("tr", {}, el("th", { text: "Name" }), el("th", { text: "ID" }), el("th", { text: "Type" }),
+          el("th", { text: "Deletion requested" }), el("th", { text: "Deletion date" }), el("th", {}, el("span", { class: "sr-only", text: "Restore" })))),
+        el("tbody", {}, ...rows.map((n) => el("tr", { "data-resource": key(n) },
+          el("td", { text: n.name }), el("td", { class: "mono", text: n.id }), el("td", { text: kindWord(n) }),
+          el("td", { text: n.deleteTime ? new Date(n.deleteTime).toLocaleString() : "" }), el("td", { text: n.purgeTime || "" }),
+          el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Restore ${n.name}`, text: "Restore",
+            onclick: () => restore(n).catch((err) => notify(err.message, "error")) }))))))));
+    }
+    const live = tree.nodes.filter((n) => n.state !== "DELETE_REQUESTED");
+    const children = new Map();
+    for (const n of live) {
+      const p = parentKey(n);
+      if (!children.has(p)) children.set(p, []);
+      children.get(p).push(n);
+    }
+    for (const list of children.values()) list.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || a.name.localeCompare(b.name));
+    // A row is shown when it matches, or when something under it does.
+    const shown = new Map();
+    const visit = (n) => {
+      let any = matches(n);
+      for (const c of children.get(key(n)) || []) any = visit(c) || any;
+      shown.set(key(n), any);
+      return any;
+    };
+    const roots = [...(children.get(null) || []), ...(children.get("none") || [])];
+    for (const r of roots) visit(r);
+    const rows = [];
+    const walk = (n, depth) => {
+      if (!shown.get(key(n))) return;
+      const kids = (children.get(key(n)) || []).filter((c) => shown.get(key(c)));
+      const open = q || !collapsed.has(key(n));
+      const toggle = kids.length ? el("button", { type: "button", class: "icon-button mr-toggle", "aria-expanded": String(!!open),
+        "aria-label": `${open ? "Collapse" : "Expand"} ${label(n)}`, text: open ? "▾" : "▸",
+        onclick: () => { if (collapsed.has(key(n))) collapsed.delete(key(n)); else collapsed.add(key(n)); draw(); } })
+        : el("span", { class: "mr-toggle-space", "aria-hidden": "true" });
+      // A checkbox per row, as Google's tree has; Move, Delete and the info
+      // panel act on one row, so checking one clears the others.
+      const check = el("input", { type: "checkbox", class: "mr-select", "aria-label": `Select ${label(n)}`,
+        checked: selected && key(selected) === key(n) ? true : null,
+        onchange: (e) => {
+          selected = e.target.checked ? n : null;
+          for (const other of body.querySelectorAll("input.mr-select")) if (other !== e.target) other.checked = false;
+          drawBar();
+        } });
+      rows.push(el("tr", { "data-resource": key(n), "data-kind": n.kind, "aria-level": String(depth + 1) },
+        el("td", {}, check),
+        el("td", { class: "mr-name" },
+          el("span", { style: `display:inline-block;width:${depth * 20}px`, "aria-hidden": "true" }), toggle,
+          el("span", { class: "mr-kind", text: `${kindWord(n)} ` }),
+          el("a", { href: pageOf(n) + scopeSearch(), text: label(n) })),
+        el("td", { class: "mono", text: n.id }),
+        el("td", { text: statusText(n) }),
+        el("td", { text: labelText(n) }),
+        el("td", { text: (n.tags || []).join(", ") }),
+        el("td", { class: "row-actions" }, rowActions(n))));
+      if (open) for (const c of kids) walk(c, depth + 1);
+    };
+    for (const r of roots) walk(r, 0);
+    if (!rows.length) return setChildren(body, emptyState("No resources match", "Clear the filter to see every resource."));
+    setChildren(body, el("div", { class: "table-wrap" }, el("table", { id: "mr-tree", role: "treegrid", "aria-label": "Resources" },
+      el("thead", {}, el("tr", {},
+        el("th", {}, el("span", { class: "sr-only", text: "Select" })),
+        el("th", { text: "Name" }), el("th", { text: "ID" }), el("th", { text: "Status" }),
+        el("th", { text: "Labels" }), el("th", { text: "Tags" }),
+        el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+      el("tbody", {}, ...rows))));
+  };
+
+  const reload = async () => {
+    try {
+      tree = await mrCall("tree");
+    } catch (err) {
+      setChildren(body, errorState("Resources unavailable", String(err.message), () => reload()));
+      return;
+    }
+    if (selected) selected = tree.nodes.find((x) => key(x) === key(selected)) || null;
+    drawBar();
+    draw();
+  };
+
+  const header = pageHeader("Manage resources", "", { actions: [
+    Object.assign(createButton("Create project", () => navigate("/projectcreate")), { id: "mr-create-project" }),
+    Object.assign(createButton("Create folder", () => tree && createFolder()), { id: "mr-create-folder-button" }),
+    refreshButton(() => reload())] });
+  drawBar();
+  setChildren(view, header, noteBanner(mrNoteText), bar, body);
+  reload();
+}
+
+const mrNoteText = "One local organization; a project you shut down is kept 30 days, when Restore brings it back, then purged. " +
+  "IAM policies are stored, and enforced only with up --iam-enforcement=on.";
+
+// --- APIs & Services (#1866) -------------------------------------------
+//
+// Google's APIs & Services pages over the local Service Usage API: the
+// Enabled APIs & services dashboard (Traffic, Errors and Median latency
+// charts above the enabled APIs, with Requests, Errors and Latency), the
+// Library (search and categories over every API CloudBurrow serves, the
+// ones this instance does not serve marked so), each API's page (Overview,
+// Metrics, Quotas & System Limits, Credentials, Disable API) and
+// Credentials. Counts are the instance's own request counters, which are
+// kept per API for every project together; an API whose calls are not
+// counted says so rather than showing a zero.
+
+function apisCall(call, body = {}) {
+  const project = currentProject();
+  return send(`/api/studio/serviceusage?call=${encodeURIComponent(call)}&project=${encodeURIComponent(project || "")}`, "POST", body);
+}
+
+function apisNeedProject(view, title) {
+  setChildren(view, pageHeader(title, ""),
+    emptyState("Select a project", "APIs are enabled per project. Choose one in the toolbar."));
+}
+
+const apisNumber = (n) => Number(n || 0).toLocaleString("en-US");
+const apisErrors = (t) => !t.measured ? "Not counted" : t.requests ? `${((t.errors / t.requests) * 100).toFixed(1)}%` : "0%";
+const apisLatency = (v, t) => !t.measured ? "Not counted" : v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`;
+
+// apisSeries adds up the request charts' series of the given services,
+// sample by sample: calls per second, the share that failed, and the
+// call-weighted median latency.
+function apisSeries(data, names) {
+  const byAt = new Map();
+  for (const svc of (data && data.services) || []) {
+    if (!names.has(svc.service)) continue;
+    for (const p of svc.points || []) {
+      const at = p.at;
+      const acc = byAt.get(at) || { at, rate: 0, failed: 0, weighted: 0, weight: 0 };
+      acc.rate += p.rate;
+      if (p.error_rate !== null && p.error_rate !== undefined) acc.failed += p.rate * p.error_rate;
+      if (p.p50_ms !== null && p.p50_ms !== undefined && p.rate > 0) { acc.weighted += p.rate * p.p50_ms; acc.weight += p.rate; }
+      byAt.set(at, acc);
+    }
+  }
+  return [...byAt.values()].sort((a, b) => (a.at < b.at ? -1 : 1)).map((a) => ({
+    at: a.at, rate: a.rate,
+    errorPct: a.rate > 0 ? (a.failed / a.rate) * 100 : null,
+    p50: a.weight > 0 ? a.weighted / a.weight : null,
+  }));
+}
+
+async function apisCharts(names, idPrefix) {
+  let data = null;
+  try { data = await api("/api/metrics/requests"); } catch (err) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: `Request charts unavailable: ${err.message}` });
+  }
+  if (!names.size) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: "Not available locally: this API's calls are not counted by this instance." });
+  }
+  const pts = apisSeries(data, names);
+  const last = pts.length ? pts[pts.length - 1] : null;
+  return el("div", { class: "charts", id: `${idPrefix}-charts` },
+    chartCard("Traffic", pts.map((p) => ({ value: p.rate })), {
+      label: "Requests per second", current: last ? `${last.rate.toFixed(2)}/s` : "",
+      foot: "Requests per second, every project on this instance",
+    }),
+    chartCard("Errors", pts.map((p) => ({ value: p.errorPct })), {
+      label: "Errors as a percentage of requests", max: 100,
+      current: last && last.errorPct !== null ? `${last.errorPct.toFixed(1)}%` : "",
+      foot: "Percent of requests that failed (any code but OK, or HTTP 4xx and 5xx)",
+    }),
+    chartCard("Median latency", pts.map((p) => ({ value: p.p50 })), {
+      label: "Median latency in milliseconds",
+      current: last && last.p50 !== null ? `${last.p50.toFixed(1)} ms` : "",
+      foot: "Median estimated from the latency histogram",
+    }));
+}
+
+function apisDisable(name, title, project, after) {
+  mrForm({
+    id: "api-disable", title: `Disable ${title}?`, label: "Disable", destructive: true, fields: [],
+    note: `${name} is recorded as disabled for project ${project}: Service Usage, gcloud and Terraform report it DISABLED. ` +
+      "Re-enable it from the Library.",
+    submit: async () => {
+      const op = recordOperation(`Disable ${name} on ${project}`);
+      try { await apisCall("disable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+      notify(`Disabled ${title}`);
+      after();
+    },
+  });
+}
+
+async function apisEnable(name, title, project) {
+  const op = recordOperation(`Enable ${name} on ${project}`);
+  try { await apisCall("enable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+  notify(`Enabled ${title}`);
+}
+
+function renderAPIsDashboard(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "APIs & Services");
+  const body = el("div", { id: "apis-dashboard-body" }, loadingState(5, { what: "APIs" }));
+  const filter = el("input", { type: "search", class: "filter", id: "apis-filter", placeholder: "Filter", "aria-label": "Filter enabled APIs and services" });
+  let list = [];
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const rows = list.filter((a) => a.state === "ENABLED" && (!q || a.title.toLowerCase().includes(q) || a.name.includes(q)));
+    setChildren(body, el("div", { class: "table-wrap" },
+      el("table", { class: "table", id: "apis-table" },
+        el("thead", {}, el("tr", {}, ...["Name", "Requests", "Errors", "Latency, median", "Latency, 95%"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...(rows.length ? rows.map((a) => el("tr", { "data-api": a.name },
+          el("td", {}, el("a", { href: `/apis/api/${encodeURIComponent(a.name)}/metrics${scopeSearch()}`, text: a.title })),
+          el("td", { text: a.totals.measured ? apisNumber(a.totals.requests) : "Not counted" }),
+          el("td", { text: apisErrors(a.totals) }),
+          el("td", { text: apisLatency(a.totals.p50Ms, a.totals) }),
+          el("td", { text: apisLatency(a.totals.p95Ms, a.totals) })))
+          : [el("tr", {}, el("td", { colspan: "5", text: q ? "No enabled API matches the filter." : "No API is enabled in this project." }))])))));
+  };
+  filter.addEventListener("input", draw);
+  const charts = el("div", { id: "apis-dashboard-charts-slot" });
+  const reload = async () => {
+    try {
+      const data = await apisCall("apis");
+      list = data.apis || [];
+      draw();
+      const names = new Set(list.filter((a) => a.state === "ENABLED" && a.metricsService).map((a) => a.metricsService));
+      setChildren(charts, await apisCharts(names, "apis-dashboard"));
+    } catch (err) {
+      setChildren(body, errorState("Could not list the project's APIs", err.message, reload));
+    }
+  };
+  const enable = el("a", { class: "header-button primary", id: "apis-enable", href: "/apis/library" + scopeSearch(), html: ICON_ADD },
+    el("span", { text: "Enable APIs and services" }));
+  setChildren(view, pageHeader("APIs & Services", "", { actions: [enable, refreshButton(() => reload())] }),
+    noteBanner(apiCountersNote), charts, el("div", { class: "filter-bar" }, filter), body);
+  reload();
+}
+
+const apiCountersNote = "Requests, errors and latency are this instance's own request counters (/metrics), " +
+  "for every project together: CloudBurrow does not keep them per project.";
+
+const API_TABS = [["overview", "Overview"], ["metrics", "Metrics"], ["quotas", "Quotas & System Limits"], ["credentials", "Credentials"]];
+
+async function renderAPIPage(view, name, tab) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "API/Service details");
+  if (!API_TABS.some(([id]) => id === tab)) tab = "overview";
+  setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), loadingState(4, { what: name }));
+  let data;
+  try { data = await apisCall("api", { service: name }); } catch (err) {
+    setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), errorState(`Could not read ${name}`, err.message));
+    return;
+  }
+  const a = data.api;
+  const redraw = () => renderAPIPage(view, name, tab);
+  const actions = [];
+  if (a.state === "ENABLED") {
+    actions.push(el("button", { type: "button", class: "header-button", id: "api-disable-button", text: "Disable API",
+      onclick: () => apisDisable(a.name, a.title, project, () => navigate("/apis")) }));
+  } else if (a.state === "DISABLED") {
+    actions.push(el("button", { type: "button", class: "header-button primary", id: "api-enable-button", text: "Enable",
+      onclick: async () => { await apisEnable(a.name, a.title, project); redraw(); } }));
+  }
+  const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${a.title} sections` },
+    ...API_TABS.map(([id, label]) => el("a", { role: "tab", id: `api-tab-${id}`, class: "tab" + (id === tab ? " is-selected" : ""),
+      "aria-selected": String(id === tab), href: `/apis/api/${encodeURIComponent(a.name)}/${id}${scopeSearch()}`, text: label })));
+  const panel = el("div", { role: "tabpanel", id: "api-tab-panel", "aria-labelledby": `api-tab-${tab}` });
+  const dl = (pairs) => el("dl", { class: "api-facts" }, ...pairs.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+  if (tab === "overview") {
+    setChildren(panel,
+      el("p", { text: a.summary || "" }),
+      dl([["Service name", a.name], ["Type", "Public API"], ["Status", a.state === "ENABLED" ? "Enabled" : a.state === "DISABLED" ? "Disabled" : "Not available locally"],
+        ["Category", a.category || ""], ["Served by", "This CloudBurrow instance"]]),
+      a.unavailable ? el("p", { class: "unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
+      el("h2", { text: "Traffic" }), await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-overview"));
+  } else if (tab === "metrics") {
+    const methods = data.methods || [];
+    setChildren(panel,
+      a.sharedWith && a.sharedWith.length ? el("p", { class: "form-help", text: `Counted together with ${a.sharedWith.join(", ")}, which the same local server serves.` }) : null,
+      await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-metrics"),
+      el("h2", { text: "Methods" }),
+      !a.totals.measured ? el("p", { class: "unavailable", id: "api-methods", text: "Not available locally: this API's calls are not counted by this instance." })
+        : el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-methods" },
+          el("thead", {}, el("tr", {}, ...["Method", "Requests", "Errors", "Latency, median", "Latency, 95%"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(methods.length ? methods.map((m) => el("tr", {},
+            el("td", { class: "mono", text: m.method }), el("td", { text: apisNumber(m.requests) }), el("td", { text: apisErrors(m) }),
+            el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
+            : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
+  } else if (tab === "quotas") {
+    setChildren(panel, el("div", { class: "state", id: "api-quotas" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: "Quotas are the Cloud Quotas and Service Usage consumer quota APIs', which CloudBurrow does not serve. " +
+        "The per-request limits Google documents for this API, such as sizes and counts, are enforced by the local service itself." })));
+  } else {
+    setChildren(panel, apisCredentialSections("api-credentials"));
+  }
+  setChildren(view, pageHeader(a.title, `${a.name} · project ${project}`, { back: "/apis" + scopeSearch(), actions }), strip, panel);
+  announce(`${a.title}: ${API_TABS.find(([id]) => id === tab)[1]}`);
+}
+
+const API_CATEGORIES = ["Big data", "Compute", "Databases", "Developer tools", "Management tools", "Security", "Storage"];
+
+async function renderAPILibrary(view, name) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, name ? "API Library" : "API Library");
+  let data;
+  setChildren(view, pageHeader("API Library", ""), loadingState(4, { what: "the API Library" }));
+  try { data = await apisCall("apis"); } catch (err) {
+    setChildren(view, pageHeader("API Library", ""), errorState("Could not read the API Library", err.message));
+    return;
+  }
+  const list = data.apis || [];
+  if (name) {
+    const a = list.find((x) => x.name === name);
+    if (!a) {
+      setChildren(view, pageHeader("API Library", "", { back: "/apis/library" + scopeSearch() }),
+        emptyState("Not available locally", `CloudBurrow does not serve ${name}.`));
+      return;
+    }
+    const action = a.unavailable
+      ? el("button", { type: "button", class: "primary", id: "library-enable", disabled: "disabled", text: "Enable" })
+      : a.state === "ENABLED"
+        ? el("a", { class: "button primary", id: "library-manage", href: `/apis/api/${encodeURIComponent(a.name)}/metrics${scopeSearch()}`, text: "Manage" })
+        : el("button", { type: "button", class: "primary", id: "library-enable", text: "Enable",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { await apisEnable(a.name, a.title, project); navigate(`/apis/api/${encodeURIComponent(a.name)}/metrics`); }
+            catch (err) { notify(err.message, "error"); e.currentTarget.disabled = false; }
+          } });
+    setChildren(view, pageHeader(a.title, a.name, { back: "/apis/library" + scopeSearch() }),
+      el("div", { class: "card", id: "library-api" },
+        el("p", { text: a.summary || "" }),
+        el("div", { class: "page-header-actions" }, action,
+          a.state === "ENABLED" ? el("span", { class: "status ok", id: "library-api-enabled", text: "API Enabled" }) : null),
+        a.unavailable ? el("p", { class: "unavailable", id: "library-unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
+        el("dl", { class: "api-facts" }, el("dt", { text: "Category" }), el("dd", { text: a.category || "" }),
+          el("dt", { text: "Service name" }), el("dd", { class: "mono", text: a.name }))));
+    announce(`${a.title} in the API Library`);
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  const search = el("input", { type: "search", id: "library-search", class: "filter", placeholder: "Search for APIs & Services",
+    "aria-label": "Search for APIs & Services", value: params.get("q") || "" });
+  let category = params.get("filter") || "";
+  const cats = el("div", { class: "library-categories", role: "group", "aria-label": "Category" });
+  const grid = el("div", { class: "library-grid", id: "library-results" });
+  const draw = () => {
+    setChildren(cats, ...["", ...API_CATEGORIES].map((c) => el("button", { type: "button",
+      class: "chip" + (c === category ? " is-selected" : ""), "aria-pressed": String(c === category), "data-category": c || "all",
+      text: c || "All", onclick: () => { category = c; draw(); } })));
+    const q = search.value.trim().toLowerCase();
+    const rows = list.filter((a) => (!category || a.category === category) &&
+      (!q || a.title.toLowerCase().includes(q) || a.name.includes(q) || (a.summary || "").toLowerCase().includes(q)));
+    setChildren(grid, ...(rows.length ? rows.map((a) => el("a", { class: "card library-card", "data-api": a.name,
+      href: `/apis/library/${encodeURIComponent(a.name)}${scopeSearch()}` },
+      el("h3", { text: a.title }),
+      el("p", { class: "form-help", text: a.category || "" }),
+      el("p", { text: a.summary || "" }),
+      a.unavailable ? el("p", { class: "unavailable", text: "Not available locally" })
+        : a.state === "ENABLED" ? el("p", { class: "status ok", text: "Enabled" }) : el("p", { class: "status", text: "Disabled" })))
+      : [emptyState("No results", "No API CloudBurrow serves matches the search.")]));
+  };
+  search.addEventListener("input", draw);
+  draw();
+  setChildren(view, pageHeader("Welcome to the API Library", "The APIs CloudBurrow serves, with those this instance was not started with marked not available locally.",
+    { back: "/apis" + scopeSearch() }), el("div", { class: "filter-bar" }, search), cats, grid);
+}
+
+// apisCredentialSections is the Credentials page's lists, also an API's
+// Credentials tab: API keys and OAuth 2.0 client IDs are not served, the
+// service accounts are IAM's.
+function apisCredentialSections(idPrefix) {
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const accounts = el("div", { id: `${idPrefix}-service-accounts` });
+  if (served.has("iam-service-accounts") && currentProject()) {
+    setChildren(accounts, loadingState(2));
+    api(`/api/resources/iam-service-accounts?project=${encodeURIComponent(currentProject())}`).then((data) => {
+      const items = data.items || [];
+      setChildren(accounts, el("div", { class: "table-wrap" }, el("table", { class: "table" },
+        el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Email" }), el("th", { scope: "col", text: "Name" }))),
+        el("tbody", {}, ...(items.length ? items.map((r) => el("tr", {},
+          el("td", {}, el("a", { href: `/iam-admin/serviceaccounts/${encodeURIComponent(r.name)}${scopeSearch()}`, text: r.name })),
+          el("td", { text: (r.fields && (r.fields["Display name"] || r.fields.Name)) || "" })))
+          : [el("tr", {}, el("td", { colspan: "2", text: "No service accounts to display" }))])))),
+        el("p", {}, el("a", { href: "/iam-admin/serviceaccounts" + scopeSearch(), text: "Manage service accounts" })));
+    }).catch((err) => setChildren(accounts, el("p", { class: "unavailable", text: err.message })));
+  } else {
+    setChildren(accounts, el("p", { class: "unavailable", text: "Service accounts are IAM's, which this instance does not serve." }));
+  }
+  return el("div", { class: "api-credentials", id: idPrefix },
+    el("h2", { text: "API Keys" }), apiKeysTable(idPrefix),
+    el("h2", { text: "OAuth 2.0 Client IDs" }),
+    el("p", { class: "unavailable", id: `${idPrefix}-oauth`, text: "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve." }),
+    el("h2", { text: "Service Accounts" }), accounts);
+}
+
+function renderAPICredentials(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Credentials");
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const trigger = el("button", { type: "button", class: "header-button primary", id: "credentials-create", "aria-haspopup": "menu",
+    "aria-expanded": "false", html: ICON_ADD }, el("span", { text: "Create credentials" }));
+  const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
+    el("button", { type: "button", class: "overflow-item", role: "menuitem", id: "credentials-create-api-key", text: "API key",
+      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
+    el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "OAuth client ID — not available locally" }),
+    served.has("iam-service-accounts")
+      ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
+      : el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "Service account — not served" }));
+  trigger.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    trigger.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  const restore = el("a", { class: "header-button", id: "credentials-restore", href: "/apis/credentials/restore" + scopeSearch(), text: "Restore deleted credentials" });
+  setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu), restore] }),
+    el("p", { class: "subtitle", text: "Create credentials to access your enabled APIs." }),
+    apisCredentialSections("credentials"));
+}
+
+// API keys (#1915): the Credentials page's table, Create credentials > API
+// key, each key's page (Name, Application restrictions, API restrictions,
+// Show key, Rotate key, Delete, and Delete the previous key after a
+// rotation) and Restore deleted credentials, over the local API Keys API.
+
+function apiKeyShow(title, keyString, id, extra) {
+  const { dialog, close } = openModal({ labelledBy: "api-key-shown-title" });
+  const field = el("input", { type: "text", id: "api-key-string", class: "mono", readonly: "readonly", value: keyString, "aria-label": "Your API key" });
+  const copy = el("button", { type: "button", class: "secondary", id: "api-key-copy", text: "Copy",
+    onclick: async () => { try { await navigator.clipboard.writeText(keyString); notify("Copied the API key"); } catch { field.select(); } } });
+  dialog.append(el("div", { class: "modal-body", id: "api-key-shown" },
+    el("h2", { id: "api-key-shown-title", text: title }),
+    extra ? el("p", { class: "form-help", text: extra }) : null,
+    el("label", { class: "form-field" }, el("span", { class: "form-label", text: "Your API key" }), field),
+    el("div", { class: "modal-actions" }, copy,
+      id ? el("a", { class: "button secondary", id: "api-key-edit-link", href: `/apis/credentials/key/${encodeURIComponent(id)}${scopeSearch()}`, text: "Edit API key", onclick: () => close() }) : null,
+      el("button", { type: "button", class: "primary", id: "api-key-close", text: "Close", onclick: () => close() }))));
+  field.focus();
+  field.select();
+}
+
+async function apiKeyCreate(project, after) {
+  const op = recordOperation(`Create an API key in ${project}`);
+  let k;
+  try { k = await apisCall("key-create", {}); op.succeeded(""); } catch (err) { op.failed(err.message); notify(err.message, "error"); return; }
+  apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header. " +
+    "It has no restrictions: restrict it on its page.");
+  notify("Created API key");
+  if (after) after(); else if (location.pathname === "/apis/credentials") navigate("/apis/credentials");
+}
+
+async function apiKeyReveal(id) {
+  try {
+    const d = await apisCall("key-string", { id });
+    apiKeyShow("API key", d.keyString, null, "");
+  } catch (err) { notify(err.message, "error"); }
+}
+
+function apiKeyDelete(k, after) {
+  mrForm({
+    id: "api-key-delete", title: `Delete API key ${k.displayName || k.id}?`, label: "Delete", destructive: true, fields: [],
+    note: "Applications using this key stop working. You can restore it from Restore deleted credentials for 30 days, after which it is purged.",
+    submit: async () => {
+      const op = recordOperation(`Delete API key ${k.id}`);
+      try { await apisCall("key-delete", { id: k.id }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+      notify("Deleted API key");
+      after();
+    },
+  });
+}
+
+function apiKeysTable(idPrefix) {
+  const box = el("div", { id: `${idPrefix}-api-keys` }, loadingState(2, { what: "API keys" }));
+  const load = async () => {
+    let data;
+    try { data = await apisCall("keys", {}); } catch (err) {
+      setChildren(box, el("p", { class: "unavailable", text: err.message }));
+      return;
+    }
+    const keys = data.keys || [];
+    setChildren(box, el("div", { class: "table-wrap" }, el("table", { class: "table", id: `${idPrefix}-api-keys-table` },
+      el("thead", {}, el("tr", {}, ...["Name", "Creation date", "Restrictions", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(keys.length ? keys.map((k) => el("tr", { "data-key": k.id },
+        el("td", {}, el("a", { href: `/apis/credentials/key/${encodeURIComponent(k.id)}${scopeSearch()}`, text: k.displayName || k.id })),
+        el("td", { text: new Date(k.createTime).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) }),
+        el("td", { text: k.summary }),
+        el("td", {},
+          el("button", { type: "button", class: "link-button", "data-action": "show-key", text: "Show key", onclick: () => apiKeyReveal(k.id) }),
+          el("a", { class: "link-button", "data-action": "edit-key", href: `/apis/credentials/key/${encodeURIComponent(k.id)}${scopeSearch()}`, text: "Edit API key" }),
+          el("button", { type: "button", class: "link-button", "data-action": "delete-key", text: "Delete API key", onclick: () => apiKeyDelete(k, load) }))))
+        : [el("tr", {}, el("td", { colspan: "4", text: "No API keys to display" }))])))));
+  };
+  load();
+  return box;
+}
+
+// apiKeyLines are a textarea's non-empty lines.
+const apiKeyLines = (v) => v.split("\n").map((l) => l.trim()).filter(Boolean);
+
+async function renderAPIKeyPage(view, id) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Edit API key");
+  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
+  let k, apis;
+  try {
+    k = await apisCall("key", { id });
+    apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
+  } catch (err) {
+    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
+    return;
+  }
+  const r = k.restrictions || {};
+  const app = r.browserKeyRestrictions ? "browser" : r.serverKeyRestrictions ? "server" : r.androidKeyRestrictions ? "android" : r.iosKeyRestrictions ? "ios" : "none";
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const field = (label, input, help) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }), input,
+    help ? el("span", { class: "form-help", text: help }) : null);
+  const name = el("input", { type: "text", id: "api-key-name", value: k.displayName || "", maxlength: 63 });
+  const lines = (id, values, help, label) => {
+    const t = el("textarea", { id, rows: 4, class: "mono" });
+    t.value = (values || []).join("\n");
+    return { node: field(label, t, help), t };
+  };
+  const browser = lines("api-key-referrers", (r.browserKeyRestrictions || {}).allowedReferrers, "One website per line, such as *.example.com/* or www.example.com/path.", "Website restrictions");
+  const server = lines("api-key-ips", (r.serverKeyRestrictions || {}).allowedIps, "One IPv4 or IPv6 address or subnet (CIDR) per line.", "IP address restrictions");
+  const android = lines("api-key-android", ((r.androidKeyRestrictions || {}).allowedApplications || []).map((a) => `${a.packageName},${a.sha1Fingerprint}`),
+    "One app per line: package name, comma, SHA-1 certificate fingerprint.", "Android restrictions");
+  const ios = lines("api-key-ios", (r.iosKeyRestrictions || {}).allowedBundleIds, "One bundle ID per line, such as com.example.app.", "iOS restrictions");
+  const appBoxes = { browser: browser.node, server: server.node, android: android.node, ios: ios.node };
+  const show = () => {
+    const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
+    for (const [kname, node] of Object.entries(appBoxes)) node.hidden = kname !== v;
+    const restrict = (view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict";
+    apiList.hidden = !restrict;
+  };
+  const radio = (group, value, label, current) => el("label", { class: "check-line", for: `${group}-${value}` },
+    el("input", { type: "radio", name: group, value, id: `${group}-${value}`, checked: value === current ? "checked" : null, onchange: show }),
+    el("span", { text: label }));
+  const targets = new Set((r.apiTargets || []).map((t) => t.service.toLowerCase()));
+  const apiList = el("fieldset", { class: "check-list", id: "api-key-api-list" }, el("legend", { text: "Selected APIs" }),
+    ...apis.map((a) => el("label", { class: "check-line", for: `api-key-target-${a.name}` },
+      el("input", { type: "checkbox", id: `api-key-target-${a.name}`, value: a.name, checked: targets.has(a.name) ? "checked" : null }),
+      el("span", { text: `${a.title} (${a.name})` }))));
+  const restrictions = () => {
+    const out = {};
+    const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
+    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: apiKeyLines(browser.t.value) };
+    if (v === "server") out.serverKeyRestrictions = { allowedIps: apiKeyLines(server.t.value) };
+    if (v === "android") out.androidKeyRestrictions = { allowedApplications: apiKeyLines(android.t.value).map((l) => {
+      const [packageName, sha1Fingerprint] = l.split(",").map((x) => (x || "").trim());
+      return { packageName, sha1Fingerprint };
+    }) };
+    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: apiKeyLines(ios.t.value) };
+    if ((view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict") {
+      const picked = [...apiList.querySelectorAll("input:checked")].map((c) => ({ service: c.value }));
+      // Methods already on a kept target stay as they were.
+      out.apiTargets = picked.map((t) => (r.apiTargets || []).find((o) => o.service.toLowerCase() === t.service) || t);
+    }
+    return out;
+  };
+  const save = el("button", { type: "submit", class: "primary", id: "api-key-save", text: "Save" });
+  const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const rs = restrictions();
+    if (rs.apiTargets && !rs.apiTargets.length) { error.textContent = "Select at least one API, or choose Don't restrict key."; error.hidden = false; return; }
+    save.disabled = true;
+    const op = recordOperation(`Update API key ${id}`);
+    try {
+      await apisCall("key-update", { id, displayName: name.value.trim(), restrictions: rs });
+      op.succeeded("");
+      notify("Saved API key");
+      navigate("/apis/credentials");
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = err.message;
+      error.hidden = false;
+      save.disabled = false;
+    }
+  } },
+  error,
+  field("Name", name, "A display name, at most 63 characters."),
+  el("h2", { text: "Key restrictions" }),
+  el("h3", { text: "Application restrictions" }),
+  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
+    radio("api-key-app", "none", "None", app), radio("api-key-app", "browser", "Websites", app), radio("api-key-app", "server", "IP addresses", app),
+    radio("api-key-app", "android", "Android apps", app), radio("api-key-app", "ios", "iOS apps", app)),
+  browser.node, server.node, android.node, ios.node,
+  el("h3", { text: "API restrictions" }),
+  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
+    radio("api-key-api", "none", "Don't restrict key", (r.apiTargets || []).length ? "restrict" : "none"),
+    radio("api-key-api", "restrict", "Restrict key", (r.apiTargets || []).length ? "restrict" : "none")),
+  apiList,
+  el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
+  const actions = [
+    el("button", { type: "button", class: "header-button", id: "api-key-show", text: "Show key", onclick: () => apiKeyReveal(id) }),
+    el("button", { type: "button", class: "header-button", id: "api-key-rotate", text: "Rotate key", onclick: () => mrForm({
+      id: "api-key-rotate-form", title: "Rotate key", label: "Create",
+      fields: [{ name: "displayName", label: "Name", default: `${k.displayName || k.id} (rotated)`, help: "The new key's name. It gets this key's restrictions." }],
+      note: "A new key is created with this key's restrictions. This key keeps working until you delete it from the new key's page (Delete the previous key).",
+      submit: async (v) => {
+        const op = recordOperation(`Rotate API key ${id}`);
+        let nk;
+        try { nk = await apisCall("key-rotate", { id, displayName: v.displayName }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+        navigate(`/apis/credentials/key/${encodeURIComponent(nk.id)}`);
+        apiKeyShow("API key created", nk.keyString, null, "Copy the new key into your applications, then delete the previous key.");
+      } }) }),
+    el("button", { type: "button", class: "header-button", id: "api-key-delete-button", text: "Delete", onclick: () => apiKeyDelete(k, () => navigate("/apis/credentials")) }),
+  ];
+  const previous = k.previous ? el("section", { class: "card", id: "api-key-previous" },
+    el("h2", { text: "Previous key" }),
+    el("p", { text: `${k.previous.displayName || k.previous.id}, created ${new Date(k.previous.createTime).toLocaleString()}, still works until you delete it.` }),
+    el("button", { type: "button", class: "secondary", id: "api-key-delete-previous", text: "Delete the previous key", onclick: async () => {
+      const op = recordOperation(`Delete the previous key of ${id}`);
+      try { await apisCall("key-delete-previous", { id }); op.succeeded(""); notify("Deleted the previous key"); renderAPIKeyPage(view, id); }
+      catch (err) { op.failed(err.message); notify(err.message, "error"); }
+    } })) : null;
+  setChildren(view, pageHeader("Edit API key", `${k.name} · created ${new Date(k.createTime).toLocaleString()}`, { back, actions }), previous, form);
+  show();
+  announce(`Edit API key ${k.displayName || k.id}`);
+}
+
+async function renderAPIKeysRestore(view) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Restore deleted credentials");
+  setChildren(view, pageHeader("Restore deleted credentials", "", { back }), loadingState(3, { what: "deleted credentials" }));
+  let data;
+  try { data = await apisCall("keys", { deleted: true }); } catch (err) {
+    setChildren(view, pageHeader("Restore deleted credentials", "", { back }), errorState("Could not list deleted credentials", err.message));
+    return;
+  }
+  const keys = data.keys || [];
+  setChildren(view, pageHeader("Restore deleted credentials", "Credentials deleted in the last 30 days can be restored.", { back }),
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-keys-deleted" },
+      el("thead", {}, el("tr", {}, ...["Name", "Type", "Deletion date", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(keys.length ? keys.map((k) => el("tr", { "data-key": k.id },
+        el("td", { text: k.displayName || k.id }), el("td", { text: "API key" }),
+        el("td", { text: new Date(k.deleteTime).toLocaleString() }),
+        el("td", {}, el("button", { type: "button", class: "link-button", "data-action": "restore-key", text: "Restore", onclick: async () => {
+          const op = recordOperation(`Restore API key ${k.id}`);
+          try { await apisCall("key-undelete", { id: k.id }); op.succeeded(""); notify("Restored API key"); renderAPIKeysRestore(view); }
+          catch (err) { op.failed(err.message); notify(err.message, "error"); }
+        } }))))
+        : [el("tr", {}, el("td", { colspan: "4", text: "No deleted credentials to restore" }))])))));
+  announce("Restore deleted credentials");
 }

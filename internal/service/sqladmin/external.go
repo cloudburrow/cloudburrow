@@ -196,7 +196,7 @@ func (s *Server) insertSource(base, project string, b instanceBody) (any, error)
 			return nil, Errorf(http.StatusBadRequest, "Invalid request: dumpFilePath is for a MySQL source; a PostgreSQL source is seeded by a managed import.")
 		}
 	case strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_"):
-		return nil, unimplemented("databaseVersion "+b.DatabaseVersion, sqlServerVersionWhy)
+		return nil, sqlServerUnimplemented("a source representation instance")
 	case !strings.HasPrefix(b.DatabaseVersion, "MYSQL_"):
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for databaseVersion: %s.", b.DatabaseVersion)
 	}

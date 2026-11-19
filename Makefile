@@ -236,14 +236,17 @@ RACE_PKGS ?= ./...
 #    register allocator), vertexai 35 s and 97 s; on macos-latest beside the
 #    other packages, 236 s and 261 s, and TestDecodePDFOCRSixPages past the
 #    5 m timeout on macOS and Linux.
-# The timeout is twice the worst measured time.
+# The timeout is twice the worst measured time. They run one package at a
+# time (-p 1): together, three race-instrumented wazero compiles were
+# terminated on CI's ubuntu-latest runner two and a half minutes in
+# (Landing 152, run on 14c33a7f), which looks like memory pressure.
 WASM_PKGS         := ./internal/speech/ ./internal/embedding/ ./internal/service/vertexai/
 WASM_TEST_TIMEOUT ?= 10m
 .PHONY: test-race
 test-race:
 ifeq ($(RACE_PKGS),./...)
 	go test -race -timeout $(TEST_TIMEOUT) $$(go list ./... | grep -vxF -e "$$(go list $(WASM_PKGS))")
-	go test -race -timeout $(WASM_TEST_TIMEOUT) $(WASM_PKGS)
+	go test -race -p 1 -timeout $(WASM_TEST_TIMEOUT) $(WASM_PKGS)
 else
 	go test -race -timeout $(TEST_TIMEOUT) $(RACE_PKGS)
 endif

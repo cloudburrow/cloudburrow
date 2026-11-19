@@ -28,6 +28,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -118,6 +119,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
 	runSrv.DeveloperConnect().Register(srv)
+	grafeas.NewServer(grafeas.NewStore(nil)).Register(srv)
 	// FunctionService alone: its IAM and Locations mixins are KMS's above;
 	// and Cloud Functions v1 (#1428) over the same functions.
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
@@ -150,7 +152,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// Cloud Identity's (#1812) is groups_methods.go's table, and
 		// TestCloudIdentityUnservedAre501 checks its 501s over HTTP
 		// (internal/service/resourcemanager).
-		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") ||
+		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
 			strings.HasPrefix(m, "cloudidentity.") {
 			continue
 		}

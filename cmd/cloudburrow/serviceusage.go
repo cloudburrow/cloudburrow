@@ -21,10 +21,16 @@ var serviceUsageAPIs = []struct {
 }{
 	{"", serviceusage.API{Name: "cloudresourcemanager.googleapis.com", Title: "Cloud Resource Manager API"}},
 	{"", serviceusage.API{Name: "serviceusage.googleapis.com", Title: "Service Usage API"}},
+	{"", serviceusage.API{Name: "apikeys.googleapis.com", Title: "API Keys API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
 	{config.ServicePubSub, serviceusage.API{Name: "pubsub.googleapis.com", Title: "Cloud Pub/Sub API"}},
 	{config.ServiceTasks, serviceusage.API{Name: "cloudtasks.googleapis.com", Title: "Cloud Tasks API"}},
 	{config.ServiceRun, serviceusage.API{Name: "run.googleapis.com", Title: "Cloud Run Admin API"}},
+	// Container Analysis and Artifact Registry's scanning (#1912), on the
+	// Run port: the Container Scanning API is off until a project enables
+	// it, as on Google, and turns on the scanning of pushed images.
+	{config.ServiceRun, serviceusage.API{Name: "containeranalysis.googleapis.com", Title: "Container Analysis API"}},
+	{config.ServiceRun, serviceusage.API{Name: "containerscanning.googleapis.com", Title: "Container Scanning API", Disabled: true}},
 	{config.ServiceSecrets, serviceusage.API{Name: "secretmanager.googleapis.com", Title: "Secret Manager API"}},
 	{config.ServiceKMS, serviceusage.API{Name: "cloudkms.googleapis.com", Title: "Cloud Key Management Service (KMS) API"}},
 	{config.ServiceScheduler, serviceusage.API{Name: "cloudscheduler.googleapis.com", Title: "Cloud Scheduler API"}},
@@ -106,6 +112,18 @@ func newServiceUsageServer(cfg config.Config, reg *resourcemanager.Registry, st 
 		return nil
 	}
 	served, unserved := serviceUsageCatalog(cfg)
-	return serviceusage.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ServiceUsage)),
+	srv := serviceusage.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ServiceUsage)),
 		served, unserved, st, serviceUsageProjects{reg: reg})
+	srv.Dependents = serviceUsageDependents
+	return srv
 }
+
+// serviceUsageDependents are the dependencies Google documents among the
+// APIs CloudBurrow serves (#1914), by the API depended on. Google's
+// documented dependents of the BigQuery API (Binary Authorization, Google
+// Kubernetes Engine, Google Cloud APIs, Dataprep, Open Service Broker,
+// Telecom Data Fabric: https://docs.cloud.google.com/bigquery/docs/enable-assets)
+// are none of them served, and no other dependency among the served APIs
+// is documented, so the table is empty; services.disable's
+// disableDependentServices rules apply to whatever is added here.
+var serviceUsageDependents = map[string][]string{}

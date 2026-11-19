@@ -268,9 +268,18 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 	}
 	_, err := svc.Instances.Delete(project, up).Do()
 	wantHTTP(t, "delete of the instance up runs", err, http.StatusBadRequest)
-	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "old-" + suffix, DatabaseVersion: "MYSQL_5_6",
+	// MYSQL_8_0_31 is a minor version Cloud SQL pins, which no image here
+	// serves (CloudBurrow runs one MySQL 8.0, MYSQL_8_0).
+	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "old-" + suffix, DatabaseVersion: "MYSQL_8_0_31",
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "a version no multi-architecture image provides", err, http.StatusNotImplemented)
+	wantHTTP(t, "a version no image here serves", err, http.StatusNotImplemented)
+	if !mssqlOptedIn() {
+		// SQL Server is served once its user accepts Microsoft's licence (#1916).
+		_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "ms-" + suffix, DatabaseVersion: "SQLSERVER_2022_STANDARD",
+			RootPassword: "Str0ng!Passw0rd", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
+		wantHTTP(t, "SQL Server with no licence acceptance", err, http.StatusPreconditionFailed)
+		wantEULARefusal(t, "SQL Server with no licence acceptance", err, "")
+	}
 	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "rep-" + suffix, DatabaseVersion: "POSTGRES_17",
 		MasterInstanceName: up, ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true},
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()

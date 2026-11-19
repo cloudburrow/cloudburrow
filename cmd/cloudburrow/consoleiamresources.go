@@ -278,10 +278,11 @@ func (iamSettingsProvider) ID() string    { return "iam-settings" }
 func (iamSettingsProvider) Title() string { return "Settings" }
 
 // List is the selected project's one row, Google's Settings page; its page
-// has Edit (Project name) and Shut down is on Manage resources.
+// has Edit (Project name) and Shut down (#1865), as Google's Settings page
+// does, which Manage resources' Delete also makes.
 func (p iamSettingsProvider) List(_ context.Context, project string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Project ID", Columns: []string{"Project name", "Project number", "Location"}, Noun: "projects",
-		Note: "The selected project's settings. Shut down (delete) a project from Manage resources."}
+		Note: "The selected project's settings. Shut down, on its page or Manage resources' Delete, schedules the project for deletion: it is kept 30 days, when Restore brings it back, then purged."}
 	if project == "" {
 		l.Prompt = "Settings are per project. Choose one in the toolbar."
 		return l, nil
@@ -332,6 +333,32 @@ func (p iamSettingsProvider) Edit(_ context.Context, _ string, path []string, va
 	return err
 }
 
+// settingsShutDown is Google's Shut down on the Settings page: the
+// project is DELETE_REQUESTED for 30 days, then purged (#1865).
+const settingsShutDown = "shut-down"
+
+// DetailActions is Shut down, on an active project.
+func (p iamSettingsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	pr, err := p.registry.Get(path[0])
+	if err != nil || pr.State != resourcemanager.StateActive {
+		return nil
+	}
+	return []console.Action{{ID: settingsShutDown, Label: "Shut down", Destructive: true,
+		Confirm: "all billing and traffic serving stop, and every resource in the project is scheduled for deletion. " +
+			"The project is kept for 30 days, when Restore on Manage resources' Resources pending deletion brings it back; then it is deleted"}}
+}
+
+func (p iamSettingsProvider) ActAt(_ context.Context, _ string, path []string, action string, _ map[string]string) error {
+	if len(path) != 1 || action != settingsShutDown {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	_, err := p.registry.Delete(path[0])
+	return err
+}
+
 var (
 	_ console.Driller   = iamOrgPoliciesProvider{}
 	_ console.PathActor = iamOrgPoliciesProvider{}
@@ -341,4 +368,5 @@ var (
 	_ console.Editor    = iamLabelsProvider{}
 	_ console.Driller   = iamSettingsProvider{}
 	_ console.Editor    = iamSettingsProvider{}
+	_ console.PathActor = iamSettingsProvider{}
 )

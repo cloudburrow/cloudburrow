@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -46,6 +47,9 @@ type loggingService struct {
 	// (#314), which is what `cloudburrow logs --service logging` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// requests reports each JSON request to the admin event log (#591).
 	requests func(rest.Request)
 	console  *console.Recorder
@@ -305,6 +309,7 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
+	s.server.Gate(s.apiGate, "logging.googleapis.com")
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
 		s.server.ServerOptions(s.tracing.ServerOptions()...)

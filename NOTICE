@@ -25,6 +25,15 @@ internal/console/assets/vendor/xterm/.
 The binary is linked with github.com/creack/pty, Copyright (c) 2011 Keith
 Rarick, under the MIT License.
 
+The binary is linked with Microsoft's SQL Server driver,
+github.com/microsoft/go-mssqldb v1.10.0, Copyright (c) 2012 The Go Authors
+and Copyright (c) Microsoft Corporation, under the BSD 3-Clause License, and
+with its dependencies github.com/golang-sql/civil and
+github.com/golang-sql/sqlexp (Apache License, Version 2.0) and
+github.com/shopspring/decimal (MIT License). CloudBurrow does not ship or
+start Microsoft SQL Server itself: a Cloud SQL for SQL Server instance pulls
+Microsoft's image, whose licence its user accepts (#1916).
+
 The binary is linked with Google's differential privacy library
 (github.com/google/differential-privacy/go/v4 v4.1.0), Copyright Google LLC,
 under the Apache License, Version 2.0, and with its dependencies
@@ -113,3 +122,12 @@ generated from the holidays package 0.84 (https://github.com/vacanza/holidays),
 Copyright (c) Vacanza Team and individual contributors, Copyright (c)
 dr-prodigy 2017-2023, Copyright (c) ryanss 2014-2017, under the MIT License;
 the licence text and the source's digest are in third_party/python-holidays/.
+
+`cloudburrow prefetch --vulnerability-scanning` downloads, and Artifact
+Registry's vulnerability scanning runs, Google's OSV-Scanner
+(https://github.com/google/osv-scanner, release v2.7.1), Copyright Google
+LLC, under the Apache License, Version 2.0, and a snapshot of the OSV
+database (https://google.github.io/osv.dev/data/#data-dumps), whose records
+each keep the licence of the database they come from. Neither is part of
+this repository or of a release archive: each user downloads them from their
+upstream, checked against the SHA-256s in dependencies.json (scanning).

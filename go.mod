@@ -15,11 +15,13 @@ require (
 	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/container v1.56.1
+	cloud.google.com/go/containeranalysis v0.21.1
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/developerconnect v1.2.0
 	cloud.google.com/go/eventarc v1.27.1
 	cloud.google.com/go/firestore v1.26.0
 	cloud.google.com/go/functions v1.26.0
+	cloud.google.com/go/grafeas v0.6.1
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
@@ -56,6 +58,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/linkedin/goavro/v2 v2.15.0
+	github.com/microsoft/go-mssqldb v1.10.0
 	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.72.1
 	github.com/redis/go-redis/v9 v9.23.0
@@ -99,6 +102,8 @@ require (
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/glog v1.2.5 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
@@ -107,6 +112,7 @@ require (
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/stretchr/testify v1.12.1 // indirect

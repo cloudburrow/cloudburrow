@@ -504,6 +504,10 @@ func (f *Front) changeStreamMethods() map[string]method {
 		admin + "GetTable":     unary(func() *btapb.GetTableRequest { return &btapb.GetTableRequest{} }, f.getTable),
 		admin + "UpdateTable":  unary(func() *btapb.UpdateTableRequest { return &btapb.UpdateTableRequest{} }, f.updateTable),
 		admin + "DropRowRange": unary(func() *btapb.DropRowRangeRequest { return &btapb.DropRowRangeRequest{} }, f.dropRowRange),
+		// The row key schema (rowkeyschema.go, #1900).
+		admin + "ListTables": unary(func() *btapb.ListTablesRequest { return &btapb.ListTablesRequest{} }, f.listTables),
+		admin + "ModifyColumnFamilies": unary(func() *btapb.ModifyColumnFamiliesRequest { return &btapb.ModifyColumnFamiliesRequest{} },
+			f.modifyColumnFamilies),
 	}
 }
 
@@ -606,9 +610,21 @@ func (f *Front) createTable(ctx context.Context, req *btapb.CreateTableRequest) 
 			return nil, err
 		}
 	}
+	rks := req.GetTable().GetRowKeySchema()
+	if rks != nil {
+		if err := checkRowKeySchema(rks, req.GetTable().GetColumnFamilies()); err != nil {
+			return nil, err
+		}
+		req = proto.Clone(req).(*btapb.CreateTableRequest)
+		req.Table.RowKeySchema = nil
+	}
 	t, err := btapb.NewBigtableTableAdminClient(f.upstream).CreateTable(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if rks != nil {
+		f.keys.set(t.GetName(), rks)
+		t.RowKeySchema = rks
 	}
 	f.startGC(ctx, t)
 	if cfg != nil {
@@ -619,12 +635,13 @@ func (f *Front) createTable(ctx context.Context, req *btapb.CreateTableRequest) 
 	return t, nil
 }
 
-// withConfig is t with its change_stream_config, in the views that hold
-// it.
+// withConfig is t with its change_stream_config and row_key_schema, in
+// the views that hold them.
 func (f *Front) withConfig(t *btapb.Table, view btapb.Table_View) *btapb.Table {
 	switch view {
 	case btapb.Table_VIEW_UNSPECIFIED, btapb.Table_SCHEMA_VIEW, btapb.Table_FULL:
 		t.ChangeStreamConfig = f.changes.config(t.GetName())
+		t.RowKeySchema = f.keys.get(t.GetName())
 	}
 	return t
 }
@@ -637,8 +654,8 @@ func (f *Front) getTable(ctx context.Context, req *btapb.GetTableRequest) (proto
 	return f.withConfig(t, req.GetView()), nil
 }
 
-// updateTable serves the change_stream_config paths of UpdateTable and
-// forwards the others to the emulator.
+// updateTable serves the change_stream_config and row_key_schema paths of
+// UpdateTable and forwards the others to the emulator.
 func (f *Front) updateTable(ctx context.Context, req *btapb.UpdateTableRequest) (proto.Message, error) {
 	name := req.GetTable().GetName()
 	if !tableNameRe.MatchString(name) {
@@ -649,8 +666,18 @@ func (f *Front) updateTable(ctx context.Context, req *btapb.UpdateTableRequest) 
 	}
 	var rest []string
 	stream, retention := false, time.Duration(0)
+	keys, rks := false, (*btapb.Type_Struct)(nil)
 	for _, p := range req.GetUpdateMask().GetPaths() {
 		switch p {
+		case rowKeySchemaPath:
+			if _, err := btapb.NewBigtableTableAdminClient(f.upstream).GetTable(ctx, &btapb.GetTableRequest{Name: name, View: btapb.Table_NAME_ONLY}); err != nil {
+				return nil, err
+			}
+			r, err := f.updateRowKeySchema(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			keys, rks = true, r
 		case "change_stream_config", "change_stream_config.retention_period":
 			stream = true
 			if cfg := req.GetTable().GetChangeStreamConfig(); cfg != nil {
@@ -669,6 +696,7 @@ func (f *Front) updateTable(ctx context.Context, req *btapb.UpdateTableRequest) 
 	if len(rest) > 0 {
 		fwd := proto.Clone(req).(*btapb.UpdateTableRequest)
 		fwd.Table.ChangeStreamConfig = nil
+		fwd.Table.RowKeySchema = nil
 		fwd.UpdateMask = &fieldmaskpb.FieldMask{Paths: rest}
 		op, err := c.UpdateTable(ctx, fwd)
 		if err != nil {
@@ -683,6 +711,9 @@ func (f *Front) updateTable(ctx context.Context, req *btapb.UpdateTableRequest) 
 	if stream {
 		f.changes.set(name, retention)
 		f.collectGarbage(ctx, name)
+	}
+	if keys {
+		f.keys.set(name, rks)
 	}
 	t, err := c.GetTable(ctx, &btapb.GetTableRequest{Name: name, View: btapb.Table_SCHEMA_VIEW})
 	if err != nil {

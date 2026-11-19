@@ -519,7 +519,11 @@ func destroyScheduledOf(k *kmspb.CryptoKey) (time.Duration, error) {
 // newMaterial makes the material of a new version of k.
 func newMaterial(k cryptoKey) ([]byte, error) { return generate(k.algorithm()) }
 
-func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+func (s *Server) CreateCryptoKey(ctx context.Context, req *kmspb.CreateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+	return retryChanged(func() (*kmspb.CryptoKey, error) { return s.createCryptoKey(ctx, req) })
+}
+
+func (s *Server) createCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -629,7 +633,7 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 		}
 	}
 	if res, err := s.toKey(k); err == nil {
-		if err := checkCustom(name, orgpolicy.TypeKMSCryptoKey, orgpolicy.MethodCreate, res); err != nil {
+		if err := s.checkUnlocked([]string{dbKey(ringPrefix, req.GetParent()), dbKey(keyPrefix, name)}, name, orgpolicy.TypeKMSCryptoKey, orgpolicy.MethodCreate, res); err != nil {
 			return nil, err
 		}
 	}
@@ -738,7 +742,11 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	return resp, nil
 }
 
-func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+func (s *Server) CreateCryptoKeyVersion(ctx context.Context, req *kmspb.CreateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	return retryChanged(func() (*kmspb.CryptoKeyVersion, error) { return s.createCryptoKeyVersion(ctx, req) })
+}
+
+func (s *Server) createCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -775,7 +783,7 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 		return nil, apierror.Wrap(err)
 	}
 	v.TrustedWrapping = trusted
-	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(keyPrefix, k.Name), dbKey(versionPrefix, v.Name)}, v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
@@ -941,7 +949,11 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 // without rotating the key (update-external-key-path, #1469). The codes for
 // a bad mask, a bad target and a version past disabling are UNVERIFIED.
 // Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
-func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+func (s *Server) UpdateCryptoKeyVersion(ctx context.Context, req *kmspb.UpdateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	return retryChanged(func() (*kmspb.CryptoKeyVersion, error) { return s.updateCryptoKeyVersion(ctx, req) })
+}
+
+func (s *Server) updateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	in := req.GetCryptoKeyVersion()
 	key, _, err := parseCryptoKeyVersion("crypto_key_version.name", in.GetName())
 	if err != nil {
@@ -1019,7 +1031,7 @@ func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryp
 	if setState {
 		v.State = target.String()
 	}
-	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodUpdate, s.toVersion(v)); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(keyPrefix, key), dbKey(versionPrefix, v.Name)}, v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodUpdate, s.toVersion(v)); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
@@ -1317,7 +1329,11 @@ func validateLabels(labels map[string]string) error {
 // Immutable and output-only fields are refused naming the path; the codes
 // are UNVERIFIED.
 // Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
-func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+func (s *Server) UpdateCryptoKey(ctx context.Context, req *kmspb.UpdateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+	return retryChanged(func() (*kmspb.CryptoKey, error) { return s.updateCryptoKey(ctx, req) })
+}
+
+func (s *Server) updateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
 	in := req.GetCryptoKey()
 	if err := parseCryptoKey("crypto_key.name", in.GetName()); err != nil {
 		return nil, apierror.Wrap(err)
@@ -1430,7 +1446,11 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 		return nil, apierror.Wrap(err)
 	}
 	if res, err := s.toKey(k); err == nil {
-		if err := checkCustom(k.Name, orgpolicy.TypeKMSCryptoKey, orgpolicy.MethodUpdate, res); err != nil {
+		keys := []string{dbKey(keyPrefix, k.Name)}
+		if k.Primary > 0 {
+			keys = append(keys, dbKey(versionPrefix, versionName(k.Name, k.Primary)))
+		}
+		if err := s.checkUnlocked(keys, k.Name, orgpolicy.TypeKMSCryptoKey, orgpolicy.MethodUpdate, res); err != nil {
 			return nil, err
 		}
 	}
