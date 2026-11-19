@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/compute/metadata v0.10.0
+	cloud.google.com/go/container v1.56.1
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/developerconnect v1.2.0
 	cloud.google.com/go/eventarc v1.27.1

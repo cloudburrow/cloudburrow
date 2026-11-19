@@ -79,6 +79,8 @@ type consoleDeps struct {
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
+	gke *gkeService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -608,6 +610,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceKMS:           "Cloud KMS",
 	config.ServiceBackupDR:      "Backup and DR",
 	config.ServicePrivateCA:     "Certificate Authority Service",
+	config.ServiceGKE:           "Kubernetes Engine",
 }
 
 func serviceTitle(s config.Service) string {

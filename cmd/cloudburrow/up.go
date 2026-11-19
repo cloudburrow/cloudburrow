@@ -323,6 +323,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		privateCASvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 	}
 	privateCASvc.register(coord)
+	// The Kubernetes Engine API (#1913), in process; its clusters are
+	// kind clusters of their own.
+	gkeSvc := newGKEService(cfg)
+	gkeSvc.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
@@ -412,6 +416,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:        mysqlCreds,
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
+		gke:          gkeSvc,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -481,6 +486,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if privateCASvc != nil {
 		privateCASvc.tracing = tracing
+	}
+	if gkeSvc != nil {
+		gkeSvc.tracing = tracing
+		gkeSvc.calls = callEvents(recorder, requestMetrics, "gke")
+		gkeSvc.interpose = append(gkeSvc.interpose, grpctransport.LogInterceptor(logger, "gke"), faults.Interceptor("gke"))
+		gkeSvc.requests = requestEvents(recorder, requestMetrics, "gke")
 	}
 	if loggingSvc != nil {
 		loggingSvc.tracing = tracing
@@ -791,6 +802,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		backupdr:     backupDRSrv,
 		sqlAdmin:     sqlAdminSrv,
 		privateCA:    privateCASvc,
+		gke:          gkeSvc,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -872,6 +884,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := privateCASvc.Addr(); a != "" {
 			live["privateca"] = a
+		}
+		if a := gkeSvc.Addr(); a != "" {
+			live["gke"] = a
 		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()

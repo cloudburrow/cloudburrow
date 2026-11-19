@@ -478,6 +478,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"Certificate Authority Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
+	// The Kubernetes Engine API (#1913): gcloud container clusters and
+	// node-pools, and Terraform's google_container_* through
+	// container_custom_endpoint.
+	if gkeEnabled(cfg) && cfg.Endpoints.GKE != 0 {
+		ge := addr(cfg.Endpoints.GKE)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CONTAINER", "http://" + ge + "/", "read by gcloud; gcloud container clusters, node-pools and operations"},
+			envVar{cliEndpointVar("gke"), ge,
+				"the Kubernetes Engine API v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
 	if cfg.Endpoints.ServiceUsage > 0 {
@@ -610,6 +621,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"serviceusage":      &e.ServiceUsage,
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
+		"gke":               &e.GKE,
 		"onnx":              &e.ONNX,
 		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured

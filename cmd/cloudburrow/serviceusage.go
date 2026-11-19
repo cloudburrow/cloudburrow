@@ -40,6 +40,7 @@ var serviceUsageAPIs = []struct {
 	{sqlAdminEndpoint, serviceusage.API{Name: "sqladmin.googleapis.com", Title: "Cloud SQL Admin API"}},
 	{config.ServiceBackupDR, serviceusage.API{Name: "backupdr.googleapis.com", Title: "Backup and DR Service API"}},
 	{config.ServicePrivateCA, serviceusage.API{Name: "privateca.googleapis.com", Title: "Certificate Authority API"}},
+	{config.ServiceGKE, serviceusage.API{Name: "container.googleapis.com", Title: "Kubernetes Engine API"}},
 }
 
 // serviceUsageCatalog splits serviceUsageAPIs into what this instance

@@ -66,6 +66,8 @@ type adminDeps struct {
 	backupDR func() *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
+	gke *gkeService
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -157,6 +159,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.run != nil {
 		// Repositories and projects' settings (#1543), served beside Cloud Run.
 		api.RegisterResetter(artifactRegistryResetter{})
+	}
+	if d.gke != nil {
+		api.RegisterResetter(&gkeResetter{svc: d.gke})
 	}
 	if d.privateCA != nil {
 		api.RegisterResetter(&privateCAResetter{svc: d.privateCA})

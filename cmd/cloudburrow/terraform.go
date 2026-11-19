@@ -141,6 +141,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// and _certificate apply, plan clean and destroy in
 	// TestTerraformPrivateCA.
 	{config.ServicePrivateCA, "privateca_custom_endpoint", "GOOGLE_PRIVATECA_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// The Kubernetes Engine API (#1913), so google_container_* never
+	// reaches Google; no Terraform test drives it yet.
+	{config.ServiceGKE, "container_custom_endpoint", "GOOGLE_CONTAINER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
