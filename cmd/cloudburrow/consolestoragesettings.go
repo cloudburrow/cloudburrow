@@ -150,6 +150,12 @@ func (p storageSettingsProvider) List(ctx context.Context, project string) (cons
 		{Label: "Project ID", Value: project},
 		{Label: "Cloud Storage service account", Value: email},
 	}}}
+	listing.Tabs = []console.Section{
+		{ID: "project-access", Label: "Project access",
+			Note: "The project's Cloud Storage service account, which acts for Cloud Storage in this project."},
+		{ID: "interoperability", Label: "Interoperability"},
+	}
+	listing.ListTab = "interoperability"
 	listing.Note = "Interoperability: the project's HMAC keys. A key's secret is shown once, when it " +
 		"is created; a key can be deleted once it is inactive."
 	for _, k := range keys {

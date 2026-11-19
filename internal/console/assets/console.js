@@ -78,16 +78,34 @@ const ROUTES = [
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
-  // Cloud Storage is one product with three pages: buckets; the project's
-  // soft-deleted buckets, which the bucket list no longer holds (#789); and
-  // Settings, with the project's service account and HMAC keys (#792).
+  // Cloud Storage is one product. Its menu follows Google's (#1843):
+  // Buckets, Observability, Storage Intelligence's Configuration, Inventory
+  // reports, Transfer data and Settings. Observability, Inventory reports
+  // and Transfer data are other services (Cloud Monitoring, Storage
+  // Insights, Storage Transfer Service) CloudBurrow does not run, so their
+  // pages say so in Google's place. The project's soft-deleted buckets
+  // (#789) are on Buckets through View options, as Google shows them;
+  // /storage/deleted, their page before, leads there.
   { path: "/storage/browser",  service: "storage",          title: "Buckets", kind: "Bucket",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
-    product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/observability", screen: "unavailable", icon: "storage", title: "Observability", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage",
+    unavailable: "Cloud Storage's Observability dashboards read Cloud Monitoring metrics, which CloudBurrow does not " +
+      "emulate. Each bucket's requests are in Logs Explorer and in the console's Requests page." },
+  { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Configuration",
+    navTitle: "Storage Intelligence", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/inventory-reports", screen: "unavailable", icon: "storage", title: "Inventory reports", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage",
+    unavailable: "Inventory reports are written by Storage Insights, which CloudBurrow does not run. " +
+      "A bucket's objects can be listed on its Objects tab or with objects.list." },
+  { path: "/storage/transfer", screen: "unavailable", icon: "storage", title: "Transfer data", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage",
+    unavailable: "Transfer data opens Storage Transfer Service, which CloudBurrow does not run. Objects can be " +
+      "copied between buckets with an object's Copy, or uploaded with Upload files and Upload folder." },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
+  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
+    navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Data", section: "Databases",
@@ -3079,9 +3097,19 @@ async function renderDetail(view, route, resourcePath) {
         errorState(`${section.label} unavailable`, failure, reload));
     }
 
-    const note = section.note
+    let note = section.note
       ? el("p", { class: "unavailable", text: section.note })
       : null;
+    // A tab's own actions, at the top of the tab rather than beside the
+    // page title: Google's Lifecycle tab has Add a rule (#1843).
+    if ((section.actions || []).length) {
+      const bar = el("div", { class: "action-bar section-actions", id: `section-actions-${section.id}` },
+        ...section.actions.map((a) => el("button", {
+          type: "button", class: "secondary" + (a.destructive ? " danger" : ""), text: a.label,
+          onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
+        })));
+      note = note ? el("div", {}, bar, note) : bar;
+    }
 
     // The provider says what the section holds. Inferring it from whichever
     // field happened to be populated would put the decision in the client,
@@ -3096,7 +3124,11 @@ async function renderDetail(view, route, resourcePath) {
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
-        return drawPermissionsSection(panel, section, reload);
+        // Its own actions over the principals: a bucket's access control
+        // and Switch to (#1843).
+        drawPermissionsSection(panel, section, reload);
+        if (note) panel.prepend(note);
+        return;
       case "query":
         return setChildren(panel,
           queryPane(route, segments, section.query, () => {}));
@@ -3173,7 +3205,14 @@ async function renderDetail(view, route, resourcePath) {
       // Show versions (#853): the same place listed with every generation,
       // live and noncurrent, from the storage server's versions=true.
       up.append(versionsToggle(() => drawPanel()));
+      // Google's Show list (#1843): Soft-deleted objects only draws the
+      // bucket's soft-deleted objects, with Restore, in the Objects tab.
+      const softSection = sections.find((sc) => sc.id === "deleted");
+      if (softSection) up.append(objectsShowPicker(() => drawPanel()));
       note = note ? el("div", {}, note, up) : up;
+      if (softSection && objectsShow === OBJECTS_SHOW_SOFT) {
+        return drawListingSection(into, { ...softSection, uploadTo: null }, note, reload);
+      }
       if (readStored(VERSIONS_KEY, false)) return drawVersionsSection(into, section, note, reload);
     }
     if (!(list.items || []).length) {
@@ -3466,6 +3505,40 @@ async function renderDetail(view, route, resourcePath) {
         onclick: () => runAction(route, segments, a, leaves(a) ? leavePage : reloadPage, NO_ROW, data.title || null),
       })),
   ];
+  // An object's page (#1843): Download and Delete beside its title, as on
+  // Google's object details, through the same routes the object rows use.
+  if ((data.object || []).length === 2) {
+    const q = objectQuery(data.object);
+    const label = data.object.join("/");
+    pageActions.unshift(el("button", {
+      class: "secondary", text: "Download", id: "object-page-download",
+      onclick: () => {
+        const a = el("a", { href: `/api/objects/${route.service}/download?${q}`, download: "" });
+        document.body.append(a);
+        a.click();
+        a.remove();
+      },
+    }));
+    pageActions.push(el("button", {
+      class: "secondary danger", text: "Delete", id: "object-page-delete",
+      onclick: () => confirmDestructive({
+        title: `Delete ${label}?`,
+        confirmWord: data.object[1].split("/").pop() || data.object[1],
+        onConfirm: async () => {
+          const op = recordOperation(`Delete ${label}`);
+          try {
+            const res = await send(`/api/objects/${route.service}?${q}`, "DELETE");
+            op.succeeded("", res.operation);
+            notify(`Deleted ${label}`);
+            leavePage();
+          } catch (err) {
+            op.failed(err.message, err.operation);
+            throw err;
+          }
+        },
+      }),
+    }));
+  }
   if (data.reveal) {
     pageActions.push(el("button", {
       class: "secondary", text: data.reveal,
@@ -3908,6 +3981,19 @@ const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 // as the Cloud Storage console keeps it.
 const VERSIONS_KEY = "cloudburrow.storage.versions";
 
+// The Objects tab's Show list (#1843), for this page view.
+const OBJECTS_SHOW_LIVE = "Live objects only";
+const OBJECTS_SHOW_SOFT = "Soft-deleted objects only";
+let objectsShow = OBJECTS_SHOW_LIVE;
+
+function objectsShowPicker(onChange) {
+  const select = el("select", { id: "objects-show", name: "show" },
+    ...[OBJECTS_SHOW_LIVE, OBJECTS_SHOW_SOFT].map((o) =>
+      el("option", { value: o, text: o, selected: o === objectsShow })));
+  select.addEventListener("change", () => { objectsShow = select.value; onChange(); });
+  return el("label", { class: "objects-show", for: "objects-show" }, "Show ", select);
+}
+
 function versionsToggle(onChange) {
   const box = el("input", { type: "checkbox", id: "object-versions-toggle",
     checked: readStored(VERSIONS_KEY, false) });
@@ -4007,31 +4093,34 @@ async function previewObject(route, q, label) {
 }
 
 function uploadControl(route, prefix, reload) {
-  const input = el("input", { type: "file", id: "object-upload-input", hidden: true,
-    "aria-label": "Choose a file to upload" });
+  // Google's Objects tab offers Upload files and Upload folder (#1843). A
+  // folder's files keep their paths under it; each file is its own upload,
+  // through the same route, so the limit and the ledger are per file.
+  const input = el("input", { type: "file", id: "object-upload-input", hidden: true, multiple: true,
+    "aria-label": "Choose files to upload" });
+  const folderInput = el("input", { type: "file", id: "object-upload-folder-input", hidden: true,
+    "aria-label": "Choose a folder to upload" });
+  folderInput.setAttribute("webkitdirectory", "");
   const status = el("span", { class: "status", id: "object-upload-status" });
   const button = el("button", { type: "button", class: "secondary", id: "object-upload",
-    text: "Upload file", onclick: () => input.click() });
-  input.addEventListener("change", async () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    const where = [...prefix, file.name].join("/");
-    // Checked here so an oversized file is refused before it is sent; the
-    // server refuses it regardless.
-    let limit = null;
-    try { limit = (await api("/api/settings")).uploadLimitBytes; } catch { /* the server checks */ }
+    text: "Upload files", onclick: () => input.click() });
+  const folderButton = el("button", { type: "button", class: "secondary", id: "object-upload-folder",
+    text: "Upload folder", onclick: () => folderInput.click() });
+  const uploadOne = async (file, limit) => {
+    const rel = (file.webkitRelativePath || "").split("/").filter(Boolean);
+    const dirs = rel.length > 1 ? rel.slice(0, -1) : [];
+    const into = [...prefix, ...dirs];
+    const where = [...into, file.name].join("/");
     if (limit && file.size > limit) {
       notify(`${file.name} is larger than the upload limit of ${formatBytes(limit)}; change it in Settings`, "error");
-      input.value = "";
-      return;
+      return false;
     }
     const form = new FormData();
     form.append("file", file, file.name);
     const op = recordOperation(`Upload ${where}`);
-    button.disabled = true;
     status.textContent = `Uploading ${file.name}…`;
     try {
-      const res = await fetch(`/api/objects/${route.service}/upload?${objectQuery(prefix)}`,
+      const res = await fetch(`/api/objects/${route.service}/upload?${objectQuery(into)}`,
         { method: "POST", body: form, credentials: "same-origin" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -4041,17 +4130,36 @@ function uploadControl(route, prefix, reload) {
       }
       op.succeeded("", data.operation);
       notify(`Uploaded ${data.uploaded}`);
-      reload();
+      return true;
     } catch (err) {
       op.failed(err.message, err.operation);
       notify(`Could not upload ${file.name}: ${err.message}`, "error");
+      return false;
+    }
+  };
+  const uploadAll = async (from) => {
+    const files = [...(from.files || [])];
+    if (!files.length) return;
+    // Checked here so an oversized file is refused before it is sent; the
+    // server refuses it regardless.
+    let limit = null;
+    try { limit = (await api("/api/settings")).uploadLimitBytes; } catch { /* the server checks */ }
+    button.disabled = true;
+    folderButton.disabled = true;
+    let any = false;
+    try {
+      for (const file of files) any = (await uploadOne(file, limit)) || any;
     } finally {
       button.disabled = false;
+      folderButton.disabled = false;
       status.textContent = "";
-      input.value = "";
+      from.value = "";
     }
-  });
-  return el("div", { class: "card-actions" }, button, input, status);
+    if (any) reload();
+  };
+  input.addEventListener("change", () => uploadAll(input));
+  folderInput.addEventListener("change", () => uploadAll(folderInput));
+  return el("div", { class: "card-actions" }, button, folderButton, input, folderInput, status);
 }
 
 // The upload limit, a server-side setting: it is what the server enforces,
@@ -4226,7 +4334,34 @@ async function renderList(view, route) {
   const noun = data.noun || route.title.toLowerCase();
   // What the screen says about its scope before its rows, such as the
   // project's Cloud Storage service account over its HMAC keys (#792).
-  header.push(...listingSummary(data));
+  // A list screen drawn as tabs (#1843): Google's Cloud Storage Settings
+  // has Project access, whose content is the summary, and
+  // Interoperability, which holds the rows.
+  if ((data.tabs || []).length) {
+    const wanted = new URLSearchParams(location.search).get("tab");
+    const tabs = data.tabs;
+    const current = Math.max(0, tabs.findIndex((t) => t.id === wanted));
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${route.title} sections` },
+      ...tabs.map((t, i) => el("button", {
+        class: "tab" + (i === current ? " is-selected" : ""), role: "tab", id: `tab-${t.id}`,
+        "aria-selected": i === current ? "true" : "false", tabindex: i === current ? "0" : "-1",
+        text: t.label,
+        onclick: () => {
+          const url = new URL(location.href);
+          url.searchParams.set("tab", t.id);
+          history.replaceState(history.state, "", url);
+          renderList(view, route);
+        },
+      })));
+    header.push(strip);
+    if (tabs[current].id !== data.listTab) {
+      setChildren(view, ...header, noteBanner(tabs[current].note), ...listingSummary(data));
+      announce(`${tabs[current].label} selected`);
+      return;
+    }
+  } else {
+    header.push(...listingSummary(data));
+  }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
   if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route)));
 
@@ -4329,7 +4464,14 @@ function serverFilterBox(spec, reload) {
 // propertyValue is a property's <dd>: its value, as a link when the
 // provider names the page it opens (#1554).
 function propertyValue(prop) {
-  return el("dd", {}, prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value);
+  const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
+  if (!prop.copy) return el("dd", {}, value);
+  // A Copy button of its own, labelled as Google labels it: Copy URL,
+  // Copy gsutil URI (#1843).
+  const button = copyButton(prop.value, prop.label);
+  button.textContent = prop.copy;
+  button.classList.add("property-copy");
+  return el("dd", { class: "has-copy" }, el("span", { class: "property-copy-value" }, value), button);
 }
 
 // listingSummary draws a listing's summary groups as the same property cards
@@ -4854,6 +4996,11 @@ function buildCreateForm(spec) {
     // hidden textarea, so validation, dirtiness and submission are the same
     // code as every other field's.
     if (f.type === "schema") return schemaEntry(f, id, errorId, helpId);
+    // A choice drawn as radio buttons, as Google draws a bucket's access
+    // control and its storage class choice (#1843). The value travels in a
+    // hidden input, so dirtiness, validation and submission are the same
+    // code as every other field's.
+    if (f.type === "radio") return radioEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -4968,20 +5115,30 @@ function buildCreateForm(spec) {
   // namespace needs uniform bucket-level access and excludes object
   // versioning (#1203). Checked, it sets them and holds them there, so the
   // form cannot submit what the API refuses; unchecked, they are free again.
+  // A radio choice is named "name=value": hierarchical namespace holds the
+  // access control on Uniform (#1843).
   const byName = new Map(entries.map((e) => [e.field.name, e]));
   for (const entry of entries) {
     const f = entry.field;
-    const ties = [...(f.requires || []).map((n) => [n, true]), ...(f.excludes || []).map((n) => [n, false])]
-      .map(([n, value]) => [byName.get(n), value])
-      .filter(([other]) => other && other.isCheck && !other.field.immutable);
+    const tie = (n, value) => {
+      const [name, choice] = n.split("=");
+      return [byName.get(name), choice === undefined ? value : choice];
+    };
+    const ties = [...(f.requires || []).map((n) => tie(n, true)), ...(f.excludes || []).map((n) => tie(n, false))]
+      .filter(([other]) => other && (other.isCheck || other.isRadio) && !other.field.immutable);
     if (!entry.isCheck || !ties.length) continue;
     const hold = () => {
       const on = entry.control.checked;
       for (const [other, value] of ties) {
-        if (on) other.control.checked = value;
-        other.control.disabled = on;
+        if (other.isRadio) {
+          if (on) other.choose(value);
+          other.hold(on);
+        } else {
+          if (on) other.control.checked = value;
+          other.control.disabled = on;
+        }
         other.node.classList.toggle("is-held", on);
-        other.control.title = on ? `Held ${value ? "on" : "off"} by ${f.label}` : "";
+        other.control.title = on ? `Held ${value === true ? "on" : value === false ? "off" : value} by ${f.label}` : "";
       }
     };
     entry.control.addEventListener("change", hold);
@@ -5060,6 +5217,40 @@ function buildCreateForm(spec) {
         })]);
     },
   };
+}
+
+// radioEntry is a "radio" field: one radio button per option, the choice
+// kept in a hidden input whose value is submitted (#1843).
+function radioEntry(f, id, errorId, helpId) {
+  const control = el("input", { type: "hidden", id, name: f.name });
+  control.value = f.default || (f.options || [])[0] || "";
+  const radios = (f.options || []).map((o, i) => {
+    const r = el("input", { type: "radio", id: `${id}-${i}`, name: `${id}-choice`, value: o });
+    r.checked = o === control.value;
+    r.addEventListener("change", () => {
+      if (!r.checked) return;
+      control.value = o;
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    if (f.immutable) r.disabled = true;
+    return r;
+  });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row is-radio", role: "radiogroup",
+                                "aria-describedby": helpId || null },
+    el("legend", { text: f.label }),
+    control,
+    ...radios.map((r, i) => el("div", { class: "check-line" }, r,
+      el("label", { for: r.id, text: f.options[i] }))),
+    help, error);
+  const choose = (value) => {
+    control.value = value;
+    for (const r of radios) r.checked = r.value === value;
+  };
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, isRadio: true,
+           choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable; },
+           focus: () => (radios.find((r) => r.checked) || radios[0] || control).focus() };
 }
 
 // schemaEntry is a "schema" field: one row per column, each a name, a type
@@ -5381,13 +5572,13 @@ async function renderCreatePage(view, route) {
 
   // A full page with a back arrow to the list, as Google's create flows are
   // (#1842).
-  const header = [pageHeader(caps.create ? caps.create.label : "Create",
+  const header = [pageHeader(caps.create ? (caps.create.title || caps.create.label) : "Create",
     project ? `Project ${project}` : "All projects",
     { back: listHref, backLabel: `Back to ${target.title}` })];
   header[0].prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
     el("a", { href: listHref, text: target.title }),
     el("span", { "aria-hidden": "true", text: "/" }),
-    el("span", { text: caps.create ? caps.create.label : "Create" })));
+    el("span", { text: caps.create ? (caps.create.title || caps.create.label) : "Create" })));
 
   if (!caps.create) {
     setChildren(view, ...header,
@@ -5430,7 +5621,7 @@ async function renderCreatePage(view, route) {
       ...steps.nodes,
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
-  announce(`${caps.create.label} form`);
+  announce(`${caps.create.title || caps.create.label} form`);
 }
 
 // createSteps lays a create form out as Google's create pages are (#1842):
@@ -5892,6 +6083,16 @@ function route() {
   }
 }
 
+// renderUnavailable is a page Google's console has whose service
+// CloudBurrow does not run (#1843): its place in the menu, and why.
+function renderUnavailable(view, route) {
+  setChildren(view, pageHeader(route.title, "Not available locally"),
+    el("div", { class: "state" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: route.unavailable })));
+  announce(`${route.title}: not available locally`);
+}
+
 // routeFor resolves an address to a screen and, past it, a resource path.
 //
 // docs/console-parity.md section 5 promises /storage/browser/{bucket} and
@@ -5917,6 +6118,14 @@ function routeFor(pathname) {
 }
 
 function dispatch(view) {
+  // A page that moved (#1843): /storage/deleted is Buckets' View options
+  // now. The project, and anything else in the address, comes along.
+  const moved = ROUTES.find((r) => r.redirect && r.path === location.pathname);
+  if (moved) {
+    const to = new URL(moved.redirect, location.origin);
+    for (const [k, v] of new URLSearchParams(location.search)) to.searchParams.set(k, v);
+    history.replaceState(history.state, "", to.pathname + to.search);
+  }
   markCurrent();
   drawProductNav();
 
@@ -5948,6 +6157,7 @@ function dispatch(view) {
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
   if (match.screen === "connect") return renderConnect(view);
+  if (match.screen === "unavailable") return renderUnavailable(view, match);
   if (!match.service) return renderDashboard(view);
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
   // The old address still works, so a link someone saved keeps resolving.
@@ -6436,7 +6646,7 @@ function drawProductNav() {
   // Only the pages this instance serves, as the drawer lists only those.
   const served = new Set(SERVICES.map((sv) => sv.id));
   const pages = here
-    ? pagesOf(productKey(here)).filter((r) => !r.service || served.has(r.service) || r === here)
+    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r === here) && !r.navHidden)
     : [];
   if (!pages.length) {
     host.hidden = true;

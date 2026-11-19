@@ -198,11 +198,13 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 		t.Errorf("after the browser's edit the object reads %v", props)
 	}
 
-	// Run lifecycle now, on the bucket's page.
+	// Run lifecycle now, on the bucket's Lifecycle tab (#1843).
 	p.clickText("#view .breadcrumb a", bucket)
+	p.waitFor(`document.querySelector("#tab-lifecycle") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#tab-lifecycle`)))
 	label := "Run lifecycle now (CloudBurrow extension)"
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === %q)`, label))
-	p.clickText("#view .page-actions button", label)
+	p.waitFor(sectionButton(label))
+	p.clickText("#view .section-actions button", label)
 	p.waitFor(`document.querySelector(".modal.is-open #f-scope") !== null`)
 	var help string
 	p.eval(`document.querySelector(".modal.is-open").textContent`, &help)

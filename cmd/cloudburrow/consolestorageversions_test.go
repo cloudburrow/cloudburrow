@@ -252,7 +252,7 @@ func TestStorageRunLifecycleNow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := actionByID(t, d.Actions, "runlifecycle")
+	run := actionByID(t, tabActions(d, "lifecycle"), "runlifecycle")
 	if !strings.Contains(run.Label, "CloudBurrow extension") || !strings.Contains(run.Fields[0].Help, "/_cloudburrow/lifecycle") {
 		t.Errorf("Run lifecycle now is not labelled a CloudBurrow extension: %+v", run)
 	}
