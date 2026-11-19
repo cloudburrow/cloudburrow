@@ -1188,10 +1188,13 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				}
 				ids = append(ids, s)
 			}
-			if len(ids) != 1 {
-				return 501, "Not implemented here: time_series_id_col of more than one column; CloudBurrow forecasts series identified by one STRING or INT64 column. Nothing was run."
+			if len(ids) == 0 {
+				return bad()
 			}
-			o.TS.IDCol = ids[0]
+			o.TS.IDCol, o.TS.IDCols = ids[0], nil
+			if len(ids) > 1 {
+				o.TS.IDCols = ids
+			}
 		case "horizon", "auto_arima_max_order", "auto_arima_min_order", "trend_smoothing_window_size", "min_time_series_length", "max_time_series_length":
 			v, ok := num()
 			if !ok || v != float64(int(v)) {
@@ -1431,16 +1434,13 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			allowed := map[string][]string{
 				"optimize_strategy":   {"AUTO_STRATEGY", "BATCH_GRADIENT_DESCENT", "NORMAL_EQUATION"},
 				"learn_rate_strategy": {"LINE_SEARCH", "CONSTANT"},
-				"data_split_method":   {"AUTO_SPLIT", "RANDOM", "CUSTOM", "NO_SPLIT"},
+				"data_split_method":   {"AUTO_SPLIT", "RANDOM", "CUSTOM", "SEQ", "NO_SPLIT"},
 			}[name]
 			found := false
 			for _, a := range allowed {
 				found = found || a == s
 			}
 			if !found {
-				if name == "data_split_method" && s == "SEQ" {
-					return 501, "Not implemented here: data_split_method SEQ. CloudBurrow splits AUTO_SPLIT, RANDOM, CUSTOM and NO_SPLIT. Nothing was run."
-				}
 				return bad()
 			}
 			switch name {

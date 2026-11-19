@@ -448,6 +448,15 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 				isEval[i] = true
 			}
 		}
+	case "SEQ":
+		if si < 0 {
+			return t, mlInvalid("data_split_col must be specified when data_split_method is SEQ")
+		}
+		split, fe := seqSplit(cols[si], kept, si, frac)
+		if fe != nil {
+			return t, fe
+		}
+		copy(isEval, split)
 	}
 	var train, eval []int
 	for i := range kept {
