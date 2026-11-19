@@ -1042,6 +1042,39 @@
         "gatedCandidate": "litert-community/embeddinggemma-300m (gated: auto, 401; holds per-NPU .tflite rather than a bundle)",
         "notes": "The runtime half works: embedding_litert_lm_main builds, ships and initialises. See docs/embeddings.md.",
         "skipDiscovery": "Nothing to discover: the gap is an export format, not a version."
+      },
+      "modelGardenVLLM": {
+        "$comment": "ModelGardenService.Deploy's engine for Hugging Face text-generation models (#1840, internal/modelgarden): the engine Model Garden uses, its official CPU build. Run by `docker run` beside the instance's cluster when a model is deployed, never at `up`.",
+        "image": "docker.io/vllm/vllm-openai-cpu:v0.34.0",
+        "digest": "sha256:1640fdc27ae499572f611ffd4dc55e0b07ce97608f33566d5834c98671b115d4",
+        "version": "v0.34.0",
+        "source": "https://github.com/vllm-project/vllm",
+        "license": "Apache-2.0",
+        "redistribution": "not redistributed: pulled from Docker Hub by Docker when a model is first deployed",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Multi-arch index resolved 2026-11-18 (linux/arm64 sha256:b520027f79d524e7254b7cb652efbf8f8e05fa792df650c3f3e382a708f889f9, 1.25 GB compressed; linux/amd64 sha256:b14c3a46a4b08852b32528643e070d57f3731cccb0fa33ef86d4f3b3f8ac36c4, 1.71 GB). 5.46 GB unpacked on arm64. Google's own Model Garden container (pytorch-vllm-serve) is GPU-only and x86-only, so the upstream CPU image runs with Model Garden's serving arguments.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect vllm/vllm-openai-cpu:<tag>`."
+      },
+      "modelGardenTEI": {
+        "$comment": "ModelGardenService.Deploy's engine for Hugging Face feature-extraction and sentence-similarity models (#1840, internal/modelgarden): Hugging Face Text Embeddings Inference, the engine Model Garden uses for embeddings, its CPU build.",
+        "image": "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9",
+        "digest": "sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d",
+        "version": "1.9",
+        "source": "https://github.com/huggingface/text-embeddings-inference",
+        "license": "Apache-2.0",
+        "redistribution": "not redistributed: pulled from GHCR by Docker when an embedding model is first deployed",
+        "updateFeed": "ghcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "notes": "Resolved 2026-11-18. Published for linux/amd64 only (there is no arm64 CPU image), so an arm64 host runs it emulated with --platform linux/amd64; measured working under Docker Desktop on Apple silicon. 938 MB unpacked.",
+        "skipDiscovery": "GHCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect ghcr.io/huggingface/text-embeddings-inference:<tag>`."
       }
     },
     "consoleTerminal": {

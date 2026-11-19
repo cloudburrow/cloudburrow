@@ -28,7 +28,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 )
 
 //go:embed assets
@@ -956,7 +958,13 @@ type Server struct {
 	prediction *Prediction
 	// localModels, when set, offers the Local models page (#1306).
 	localModels LocalModels
-	metrics     MetricsSource
+	hfModels    *hfmodels.Manager
+	// garden and hfDeploy are Model Garden's Hugging Face deployments
+	// (#1840, hfdeploy.go); nil offers no Deploy.
+	garden    *modelgarden.Manager
+	hfDeploy  HFDeployer
+	hfProject string
+	metrics   MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -1086,6 +1094,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
 	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
 	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)
+	mux.HandleFunc("GET /api/ai/model-garden", s.handleModelGarden)
+	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
+	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
+	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
+	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
+	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
+	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
@@ -1124,6 +1139,15 @@ func (s *Server) Handler() http.Handler {
 		// the path.
 		if isAsset(r.URL.Path) {
 			files.ServeHTTP(w, r)
+			return
+		}
+		// Vertex AI's pages moved when Google renamed it Agent Platform
+		// (#1839); an address saved before then still lands on its page.
+		if to, ok := RenamedAIPath(r.URL.Path); ok {
+			if r.URL.RawQuery != "" {
+				to += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, to, http.StatusMovedPermanently)
 			return
 		}
 		s.serveShell(w, r)

@@ -5417,9 +5417,176 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Verified": 14
+      "Unimplemented": 22,
+      "Verified": 22
     },
     "rows": [
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/DeleteEndpoint",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/DeployModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/GetEndpoint",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/ListEndpoints",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/MutateDeployedModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/UndeployModel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpoint",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpointLongRunning",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelGardenService/Deploy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/BatchImportEvaluatedAnnotations",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/BatchImportModelEvaluationSlices",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/CopyModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/DeleteModel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/DeleteModelVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ExportModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/GetModel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/GetModelEvaluation",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/GetModelEvaluationSlice",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ImportModelEvaluation",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ListModelEvaluationSlices",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ListModelEvaluations",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersionCheckpoints",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/ListModels",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/MergeVersionAliases",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/UpdateExplanationDataset",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/UpdateModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.ModelService/UploadModel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
         "status": "Verified",
@@ -5543,6 +5710,98 @@
         "tests": [
           "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
         ]
+      }
+    ]
+  },
+  {
+    "Key": "vertexaiv1beta1",
+    "Title": "Vertex AI PredictionService v1beta1",
+    "counts": {
+      "Unimplemented": 15,
+      "Verified": 1
+    },
+    "rows": [
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/ChatCompletions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/CountTokens",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/DirectPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/DirectRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/EmbedContent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/Explain",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/GenerateContent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/Predict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/RawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/ServerStreamingPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamDirectPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamDirectRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamGenerateContent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamingPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamingRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
   },

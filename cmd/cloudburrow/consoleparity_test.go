@@ -1579,7 +1579,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleConnectIsTheInstancesEnv", "TestConnectVariablesAreEnvJSON", "TestAboutIsTheBuildsVersion", "TestConsoleDiagnoseBundleHoldsNoCredentials", "TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle"}},
 	{Resource: "Local AI models",
 		Routes: []string{"GET /admin/local-models", "POST /admin/local-models/{id}/{action}"},
-		Screen: "/ai/local-models", Offers: "Local models: each catalogued model's state (not pinned, not downloaded, " +
+		Screen: "/agent-platform/model-garden/local-models", Offers: "Local models: each catalogued model's state (not pinned, not downloaded, " +
 			"downloading with progress, downloaded, loaded), Download (a pinned, ungated model, its exact size confirmed, " +
 			"each file checked against its pinned SHA-256), Cancel, Load, Unload and Delete (#1306), through the same " +
 			"manager the admin routes drive; the Studio lists each model's state and links to it and to Embeddings (#1396)",
@@ -1587,7 +1587,7 @@ var parityRows = []parityRow{
 			"TestStudioReachesModelManagementAndTheEmbeddingView", "TestConsoleLocalModelsLoadEmbedUnload",
 			"TestConsoleLocalModelsUnloadDeleteDownloadLoad", "TestStudioManagesLocalModelsAndTestsEmbeddings"}},
 	{Resource: "Vertex AI custom prediction (serving contract)",
-		Screen: "/ai/predict", Offers: "Online prediction: the Cloud Run services configured with the contract's AIP_* variables, " +
+		Screen: "/agent-platform/online-prediction/endpoints", Offers: "Online prediction: the Cloud Run services configured with the contract's AIP_* variables, " +
 			"JSON instances and parameters, Predict, the container's status and body verbatim, and Explain with " +
 			"its Sampled Shapley spec (#1454); Vertex's Endpoint, the explanation methods that need gradients or an " +
 			"Example index, and batch prediction named as not served (#869)",
@@ -1597,7 +1597,7 @@ var parityRows = []parityRow{
 	// these screens already send, through the same handlers.
 	{Resource: "Vertex AI PredictionService: Predict and RawPredict", Service: "vertexai",
 		Methods: []string{"PredictionService/Predict", "PredictionService/RawPredict"},
-		Screen:  "/ai/predict", Offers: "Online prediction sends a deployed container the request Predict relays " +
+		Screen:  "/agent-platform/online-prediction/endpoints", Offers: "Online prediction sends a deployed container the request Predict relays " +
 			"(instances and parameters, the container's answer verbatim); Embeddings sends the text-embedding :predict " +
 			"a Predict on the publisher model runs, and Method RawPredict the same body unwrapped as the :rawPredict " +
 			"a RawPredict on the publisher model runs (#1284)",
@@ -1606,7 +1606,7 @@ var parityRows = []parityRow{
 			"TestGRPCRawPredictOnTheEmbeddingModel", "TestRawPredictREST"}},
 	{Resource: "Vertex AI PredictionService: Explain", Service: "vertexai",
 		Methods: []string{"PredictionService/Explain"},
-		Screen:  "/ai/predict", Offers: "Online prediction: Explain sends the instances and parameters with " +
+		Screen:  "/agent-platform/online-prediction/endpoints", Offers: "Online prediction: Explain sends the instances and parameters with " +
 			"explanation_spec_override (Sampled Shapley path count, each feature's input_baselines) to the endpoint's " +
 			":explain, and shows the attributions per feature, the baseline and instance outputs, and the API's " +
 			"body or refusal verbatim; integrated gradients, XRAI and example-based explanations are named as " +
@@ -1615,7 +1615,7 @@ var parityRows = []parityRow{
 			"TestExplainSendsTheSpecOverrideAndShowsAttributionsPerFeature", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser"}},
 	{Resource: "Vertex AI PredictionService: EmbedContent", Service: "vertexai",
 		Methods: []string{"PredictionService/EmbedContent"},
-		Screen:  "/ai/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +
+		Screen:  "/agent-platform/studio/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +
 			"an EmbedContent on the publisher model runs, with its task type and output dimensionality, and shows " +
 			"the API's answer or refusal verbatim (#1244); the playground names the model (any ID is sent as typed, " +
 			"and the API's 404 for text-embedding-005 or textembedding-gecko shown), and shows each whole vector " +
@@ -1635,18 +1635,18 @@ var parityRows = []parityRow{
 			"TestEmbedContentAudioAndFileDataOnEmbeddingGemma2", "TestEmbedContentWebPAndBMPOnEmbeddingGemma2"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/GenerateContent"},
-		Screen:  "/ai/playground", Offers: "Playground: Stream off sends the generateContent subset GenerateContent serves, through the same API path, and shows the one answer (#1257)",
+		Screen:  "/agent-platform/studio", Offers: "Playground: Stream off sends the generateContent subset GenerateContent serves, through the same API path, and shows the one answer (#1257)",
 		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestStreamGenerateContentThroughThePredictionClient", "TestGRPCGenerateContentMatchesTheJSONRoute"}},
 	{Resource: "Vertex AI PredictionService: StreamGenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/StreamGenerateContent"},
-		Screen:  "/ai/playground", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
+		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
 		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod",
 			"TestStreamGenerateContentThroughThePredictionClient", "TestGRPCStreamGenerateContentEmitsOneMessagePerChunk"}},
 	// Streaming and direct predict (#1285) carry the same requests in another
 	// framing, served by the same code.
 	{Resource: "Vertex AI PredictionService: StreamRawPredict", Service: "vertexai",
 		Methods: []string{"PredictionService/StreamRawPredict"},
-		Screen:  "/ai/playground", Offers: "Playground: Raw with Stream on sends the body as :streamRawPredict, which StreamRawPredict serves from the same code, and shows each chunk as it arrives; Raw with Stream off sends :rawPredict (#1284, #1285)",
+		Screen:  "/agent-platform/studio", Offers: "Playground: Raw with Stream on sends the body as :streamRawPredict, which StreamRawPredict serves from the same code, and shows each chunk as it arrives; Raw with Stream off sends :rawPredict (#1284, #1285)",
 		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestStreamingPredictOnTheGenerationModel",
 			"TestGRPCStreamRawPredictStreamsGeneration", "TestStreamRawPredictREST"}},
 	{Resource: "Vertex AI PredictionService: tensor predict", Service: "vertexai",
@@ -1658,7 +1658,7 @@ var parityRows = []parityRow{
 	// grpcPorts, the Cloud Run port named h2c.
 	{Resource: "Vertex AI PredictionService: DirectRawPredict", Service: "vertexai",
 		Methods: []string{"PredictionService/DirectRawPredict"},
-		Screen:  "/ai/predict", Offers: "Online prediction: on an endpoint whose model declares grpcPorts (its gRPC port in the endpoint's facts), " +
+		Screen:  "/agent-platform/online-prediction/endpoints", Offers: "Online prediction: on an endpoint whose model declares grpcPorts (its gRPC port in the endpoint's facts), " +
 			"the DirectRawPredict form sends a method name and the input bytes (base64) to the container's gRPC server, as DirectRawPredict " +
 			"relays them, and shows the output bytes (base64 and hex) or the container's status (#1477)",
 		Tests: []string{"TestConsoleDirectRawPredictThroughTheConsoleAPI", "TestDirectRawPredictOnAModelWithGRPCPorts",
@@ -1666,6 +1666,26 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI PredictionService: streaming raw predict on a gRPC model", Service: "vertexai",
 		Methods:  []string{"PredictionService/StreamDirectRawPredict", "PredictionService/StreamingRawPredict"},
 		Excluded: "the streaming forms of the DirectRawPredict the Online prediction page sends: the same method_name and input bytes on a stream held open both ways, which a request-and-answer form has no way to hold; the page's DirectRawPredict calls the same method on the same container (#1477)"},
+	// Model Garden's Hugging Face deployments (#1840).
+	{Resource: "Model Garden: deploy a Hugging Face model", Service: "vertexai",
+		Methods: []string{"ModelGardenService/Deploy", "EndpointService/GetEndpoint", "EndpointService/ListEndpoints"},
+		Screen:  "/agent-platform/endpoints", Offers: "Model Garden: Deploy on a downloaded Hugging Face model runs Deploy (accepting a gated model's " +
+			"licence as accept_eula) and opens Endpoints, which lists the deployments with their serving container and state " +
+			"(Deploying with its step and progress, Ready, Failed with the reason) and the selected endpoint's details: its resource " +
+			"name, model, revision, licence, image and REST paths",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	{Resource: "Model Garden: test, undeploy and delete a deployment", Service: "vertexai",
+		Methods: []string{"EndpointService/UndeployModel", "EndpointService/DeleteEndpoint", "ModelService/GetModel",
+			"ModelService/ListModels", "ModelService/DeleteModel"},
+		Screen: "/agent-platform/endpoints", Offers: "Endpoints: Undeploy frees the engine container; Delete undeploys and deletes the " +
+			"endpoint and its model, keeping the downloaded files, which Model Garden's Delete files removes; the details show the " +
+			"model's container image (the Model's containerSpec)",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	{Resource: "Model Garden: chat completions", Service: "vertexaiv1beta1",
+		Methods: []string{"PredictionService/ChatCompletions"},
+		Screen:  "/agent-platform/endpoints", Offers: "Endpoints' Test your model: Predict sends Model Garden's prompt instance (or TEI's " +
+			"inputs) and shows the prediction; Chat completion sends the OpenAI chat body ChatCompletions relays and shows the reply",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

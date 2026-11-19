@@ -111,12 +111,12 @@ func TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser(t *testing.T) {
 	}
 
 	p := open(t)
-	p.navigate("/ai/predict?project=" + project)
+	p.navigate("/agent-platform/online-prediction/endpoints?project=" + project)
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#predict-endpoint option")].some((o) => o.value === %q)`, name))
 	var pages []string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &pages)
 	if !contains(pages, "Online prediction") || !contains(pages, "Model Garden") {
-		t.Errorf("Vertex AI's pages are %v; want Online prediction beside Model Garden", pages)
+		t.Errorf("Agent Platform's pages are %v; want Online prediction beside Model Garden", pages)
 	}
 	p.setField("#predict-endpoint", name)
 	var facts string

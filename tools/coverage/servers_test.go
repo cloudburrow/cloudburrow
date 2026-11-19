@@ -24,6 +24,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
@@ -82,7 +83,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	redisadmin.NewClusterServer(redis).Register(srv)
 	redis.EnableValkey(context.Background(), nil, nil, nil)
 	redisadmin.NewMemorystoreServer(redis).Register(srv)
-	vertexai.NewServer(nil).RegisterGRPC(srv)
+	// With Model Garden deployments (#1840), which an empty request never
+	// reaches: no state file is written, no container started.
+	ai := vertexai.NewServer(nil)
+	ai.SetModelGarden(&modelgarden.Manager{})
+	ai.RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before

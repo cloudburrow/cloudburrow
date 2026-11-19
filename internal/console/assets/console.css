@@ -1692,3 +1692,29 @@ tr.is-inspected { background: var(--nav-selected); }
 .lint-results { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
 .lint-result { display: flex; gap: 6px; align-items: baseline; font-size: var(--text-caption-size); }
 .lint-severity { font-weight: 600; }
+
+/* --- Agent Platform: Model Garden and Agent Garden (#1839) ------------ */
+
+.garden { display: grid; grid-template-columns: minmax(180px, 220px) 1fr; gap: 24px; margin-top: 16px; }
+.garden-filters fieldset { border: 0; margin: 0 0 16px; padding: 0; }
+.garden-filters legend { font-weight: 500; padding: 0 0 6px; }
+.garden-filters h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0 0 12px; }
+.garden-filter { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.garden-main { min-width: 0; }
+.garden-main input[type="search"] { width: 100%; max-width: 480px; }
+.garden-cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin-top: 12px; }
+.garden-card { display: flex; flex-direction: column; gap: 4px; }
+.garden-card p { margin: 0 0 8px; }
+.garden-provider { color: var(--text-muted); }
+.garden-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.garden-tag {
+  padding: 2px 8px; border-radius: 999px; font-size: var(--text-caption-size);
+  background: var(--nav-selected); color: var(--nav-selected-text);
+}
+.garden-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: auto; padding-top: 8px; }
+.garden-status { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.garden-status progress { width: 100%; }
+@media (max-width: 720px) {
+  .garden { grid-template-columns: 1fr; }
+}
+

@@ -73,6 +73,13 @@ type endpointAnswer struct {
 // It errs only when the request could not be delivered; a container's own
 // refusal is an answer, which the caller maps.
 func (s *Server) relay(ctx context.Context, project, location, endpoint string, body []byte, contentType string) (*endpointAnswer, error) {
+	if g := s.gardenEndpoint(project, location, endpoint); g != nil {
+		status, ct, out, err := g.RawPredict(ctx, project, location, endpoint, body)
+		if err != nil {
+			return nil, err
+		}
+		return &endpointAnswer{status: status, contentType: ct, body: out}, nil
+	}
 	s.mu.RLock()
 	res, ingress, client := s.endpoints, s.ingress, s.client
 	s.mu.RUnlock()
@@ -199,6 +206,9 @@ func codeForHTTP(status int) codes.Code {
 // contract: one prediction per instance, or the predictions could be matched
 // to the wrong inputs.
 func (s *Server) endpointPredict(ctx context.Context, project, location, endpoint string, body []byte) (json.RawMessage, error) {
+	if g := s.gardenEndpoint(project, location, endpoint); g != nil {
+		return g.Predict(ctx, project, location, endpoint, body)
+	}
 	req, err := prediction.DecodeRequest(body)
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
@@ -265,6 +275,11 @@ func (s *Server) handleEndpoint(w http.ResponseWriter, r *http.Request) {
 		// The container's contract has no streaming route: its one answer (#1285).
 		s.streamRawPredictREST(w, r, target{project: project, location: location, endpoint: endpoint}, body)
 	default:
+		if s.modelGarden() != nil {
+			// :undeployModel and the rest of EndpointService (#1840).
+			s.serveREST(w, r, body)
+			return
+		}
 		apierror.WriteJSON(w, apierror.Unimplemented(
 			"method %q is not implemented for endpoints; only :predict, :rawPredict, :streamRawPredict and :explain are served", verb))
 	}

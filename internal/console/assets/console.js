@@ -23,6 +23,92 @@
 // product a developer is actually pointing their SDK at.
 //
 // The page title is the product; what the table holds is the listing's noun.
+// The Agent Platform pages (#1839), in the order of Google's left
+// navigation. Google does not publish that order; it is reconstructed from
+// the console pages its documentation links to (docs/console-parity.md §6).
+const AP = "/agent-platform";
+const AP_PATHS = {
+  overview: `${AP}/overview`,
+  modelGarden: `${AP}/model-garden`,
+  localModels: `${AP}/model-garden/local-models`,
+  agentGarden: `${AP}/agent-garden`,
+  studio: `${AP}/studio`,
+  embeddings: `${AP}/studio/embeddings`,
+  predict: `${AP}/online-prediction/endpoints`,
+  endpoints: `${AP}/endpoints`,
+};
+const AP_DOCS = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/";
+
+function agentPlatformRoutes() {
+  const base = { section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform", icon: "ai" };
+  const page = (path, title, group, more) => ({ ...base, path, title, group, ...more });
+  // A page Google's console has and CloudBurrow does not serve.
+  const absent = (path, title, group, api, about, docs, instead) =>
+    page(path, title, group, { service: null, screen: "not-served", notServed: true, api, about, docs, instead });
+  return [
+    page(AP_PATHS.overview, "Overview", null, { service: null, screen: "ap-overview" }),
+    page(AP_PATHS.modelGarden, "Model Garden", null, { service: null, screen: "model-garden" }),
+    // Agent Builder.
+    page(AP_PATHS.agentGarden, "Agent Garden", "Agent Builder", { service: null, screen: "agent-garden" }),
+    absent(`${AP}/runtimes`, "Deployments", "Agent Builder", "projects.locations.reasoningEngines (Agent Runtime, formerly Agent Engine)",
+      "Agents deployed to Agent Runtime, with their sessions, memories, traces and evaluation", AP_DOCS + "scale/runtime/manage-deployed-agents",
+      "Run an Agent Development Kit agent on your machine against this instance's local generateContent endpoint instead."),
+    absent(`${AP}/memory-bank`, "Memory Bank", "Agent Builder", "projects.locations.reasoningEngines.memories (v1beta1)",
+      "Long-term memories generated from an agent's sessions", AP_DOCS + "scale"),
+    absent(`${AP}/agent-registry/agents`, "Agent Registry", "Agent Builder", "the Agent Registry API",
+      "A catalogue of the agents, endpoints and MCP servers in an organization", AP_DOCS + "agents"),
+    absent(`${AP}/evaluation`, "Evaluation", "Agent Builder", "the Gen AI evaluation service (Agent Platform Evals)",
+      "Evaluate models and agents against datasets and metrics", AP_DOCS + "optimize/evaluation/evaluate-agents"),
+    absent(`${AP}/rag`, "RAG Engine", "Agent Builder", "projects.locations.ragCorpora",
+      "Corpora of your documents for retrieval-augmented generation", AP_DOCS + "build"),
+    // Agent Studio.
+    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground" }),
+    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings" }),
+    absent(`${AP}/studio/media`, "Media Studio", "Agent Studio", "Imagen, Veo and Lyria generation",
+      "Generate images, video, speech and music (Agent Media Studio)", AP_DOCS + "agent-studio"),
+    absent(`${AP}/studio/prompt-gallery`, "Prompt gallery", "Agent Studio", null,
+      "Sample prompts to open in Studio", AP_DOCS + "agent-studio",
+      "Studio sends your own prompts to the local model."),
+    // Models.
+    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models" }),
+    absent(`${AP}/models`, "Model Registry", "Models", "projects.locations.models",
+      "Models uploaded or trained in a project, with their versions", AP_DOCS + "models"),
+    absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
+      "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
+    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict" }),
+    page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
+    absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
+      "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
+    // Notebooks.
+    absent(`${AP}/colab/notebooks`, "Colab Enterprise", "Notebooks", "the Colab Enterprise API (notebookRuntimes)",
+      "Managed notebooks and their runtimes", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
+    absent(`${AP}/workbench/instances`, "Workbench", "Notebooks", "notebooks.googleapis.com (Workbench instances)",
+      "JupyterLab instances", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
+    // Model development.
+    absent(`${AP}/datasets`, "Datasets", "Model development", "projects.locations.datasets",
+      "Managed datasets for training", AP_DOCS + "machine-learning"),
+    absent(`${AP}/feature-store`, "Feature Store", "Model development", "projects.locations.featureOnlineStores",
+      "Feature groups and online stores", AP_DOCS + "machine-learning"),
+    absent(`${AP}/training`, "Training", "Model development", "projects.locations.customJobs and trainingPipelines",
+      "Managed Training jobs and pipelines", AP_DOCS + "machine-learning"),
+    absent(`${AP}/pipelines`, "Pipelines", "Model development", "projects.locations.pipelineJobs",
+      "Kubeflow and TFX pipeline runs, schedules and templates", AP_DOCS + "machine-learning"),
+    absent(`${AP}/experiments`, "Experiments", "Model development", "projects.locations.metadataStores (experiments)",
+      "Experiment runs and their parameters and metrics", AP_DOCS + "machine-learning"),
+    absent(`${AP}/metadata`, "Metadata", "Model development", "projects.locations.metadataStores",
+      "Artifacts, executions and contexts of ML workflows", AP_DOCS + "machine-learning"),
+    absent(`${AP}/ray`, "Ray on Agent Platform", "Model development", "projects.locations.persistentResources (Ray clusters)",
+      "Ray clusters for distributed training and serving", AP_DOCS + "machine-learning"),
+    // Deploy and use.
+    absent(`${AP}/matching-engine/indexes`, "Vector Search", "Deploy and use", "projects.locations.indexes and indexEndpoints",
+      "Vector indexes and the endpoints that serve them", AP_DOCS + "build"),
+    absent(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", "projects.locations.modelMonitors",
+      "Model monitors for drift and skew", AP_DOCS + "machine-learning"),
+  ];
+}
+
+const AP_ROUTES = agentPlatformRoutes();
+
 const ROUTES = [
   { path: "/", service: null, title: "Dashboard" },
 
@@ -153,25 +239,20 @@ const ROUTES = [
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
 
-  // Vertex AI is likewise one product with three pages. Online prediction
-  // (#869) sends a custom prediction request to a deployed contract
-  // container; it is offered only where Cloud Run runs one.
-  { path: "/ai/models",     service: "ai",         title: "Model Garden",
-    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
-  { path: "/ai/playground", service: "playground", screen: "playground",
-    title: "Studio",
-    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
-  { path: "/ai/embeddings", service: "ai-embed", screen: "embeddings", icon: "ai",
-    title: "Embeddings",
-    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
-  // Local models (#1306): download a pinned model, verified against its
-  // pinned digests, then load, unload or delete it.
-  { path: "/ai/local-models", service: "ai-local", screen: "local-models", icon: "ai",
-    title: "Local models",
-    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
-  { path: "/ai/predict",    service: "ai-predict", screen: "predict", icon: "ai",
-    title: "Online prediction",
-    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
+  // Agent Platform (formerly Vertex AI, #1839). Google renamed Vertex AI to
+  // Gemini Enterprise Agent Platform in April 2026 and moved its console
+  // from /vertex-ai/ to /agent-platform/; the addresses CloudBurrow served
+  // before (/ai/...) and Google's old /vertex-ai/ prefix redirect here
+  // (RenamedAIPath). The product key stays "vertexai", so a pin made before
+  // the rename keeps pointing at it. Pages are grouped as Google's console
+  // groups them; a page CloudBurrow has no backend for is drawn by
+  // renderNotServed, which says so, rather than as an empty list.
+  ...AP_ROUTES.slice(0, AP_ROUTES.findIndex((r) => r.path === AP_PATHS.predict)),
+  // CloudBurrow's own: the local catalogue, each model's provenance, licence,
+  // access and runtime, a row opening its page (#41).
+  { path: "/agent-platform/local-catalogue", service: "ai", title: "Local catalogue", icon: "ai", group: "Models",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform" },
+  ...AP_ROUTES.slice(AP_ROUTES.findIndex((r) => r.path === AP_PATHS.predict)),
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
   { path: "/kms/keyrings", service: "kms", title: "Cloud KMS", section: "Security and identity" },
@@ -336,7 +417,7 @@ const ICONS = {
   // Cluster storage: a stack of disks.
   k8sstorage:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   events:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16h.01"/>',
-  // Vertex AI: a spark.
+  // Agent Platform (formerly Vertex AI): a spark.
   ai:        '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8z"/>',
   playground:'<rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 10.5h.01M12 10.5h.01M16 10.5h.01"/><path d="M8 14h6"/>',
   // Resource Manager: a folder of projects.
@@ -5555,6 +5636,7 @@ function dispatch(view) {
   stopFaultsPoll();
   stopPrediction();
   stopLocalModelsPoll();
+  stopGardenPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
@@ -5562,6 +5644,11 @@ function dispatch(view) {
   if (match.screen === "predict") return renderPredict(view);
   if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "local-models") return renderLocalModels(view);
+  if (match.screen === "model-garden") return renderModelGarden(view);
+  if (match.screen === "ap-endpoints") return renderHFEndpoints(view);
+  if (match.screen === "agent-garden") return renderAgentGarden(view);
+  if (match.screen === "not-served") return renderNotServed(view, match);
+  if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
@@ -8413,9 +8500,9 @@ async function renderActivity(view) {
 // turn that off: there is nothing to turn off.
 
 // The screen's own name matches its route, its navigation entry and the
-// browser tab. "AI Playground" in the heading and "Vertex AI Studio"
+// browser tab. "AI Playground" in the heading and "Vertex AI Studio" (now Agent Studio, #1839)
 // everywhere else meant the tab disagreed with the page.
-const PLAYGROUND_TITLE = "Vertex AI Studio";
+const PLAYGROUND_TITLE = "Agent Studio";
 const PLAYGROUND_SUBTITLE = "Real inference through the same HTTP API the official SDK drives.";
 
 const PLAYGROUND_HISTORY_LIMIT = 20;
@@ -9000,8 +9087,8 @@ async function playgroundModelsCard() {
     others > 0 ? el("p", { class: "unavailable",
       text: `${others} more catalogued model${others === 1 ? " is" : "s are"} not pinned, so never downloaded here.` }) : null,
     el("p", {},
-      el("a", { href: "/ai/local-models", text: "Download, load, unload or delete a model" }),
-      ...(embeddings ? [" · ", el("a", { href: "/ai/embeddings", text: "Test embeddings" })] : [])));
+      el("a", { href: AP_PATHS.localModels, text: "Download, load, unload or delete a model" }),
+      ...(embeddings ? [" · ", el("a", { href: AP_PATHS.embeddings, text: "Test embeddings" })] : [])));
 }
 
 // Local models (#1306) lists the catalogue with each model's download state
@@ -9122,7 +9209,7 @@ async function renderLocalModels(view) {
 
   if (status.models.some((m) => m.state === "downloading")) {
     LOCAL_MODELS_POLL = setTimeout(() => {
-      if (location.pathname === "/ai/local-models") renderLocalModels(view);
+      if (location.pathname === AP_PATHS.localModels) renderLocalModels(view);
     }, 1000);
   }
 }
@@ -9138,6 +9225,518 @@ function embeddingCosine(a, b) {
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
+}
+
+// --- Agent Platform: Model Garden, Agent Garden and the pages with no backend (#1839)
+//
+// Model Garden is a catalogue: every card Google lists, with its filters.
+// Deploy is enabled only where /api/ai/model-garden says the model runs on
+// this machine, and it is the real local download and load, the same calls
+// the Local models page makes. A card with no local runtime keeps its Deploy
+// button, disabled, beside the reason: a button that pretended to create an
+// endpoint would be the one thing this console must never do.
+let GARDEN_POLL = null;
+
+function stopGardenPoll() {
+  if (GARDEN_POLL) { clearTimeout(GARDEN_POLL); GARDEN_POLL = null; }
+  if (HF_POLL) { clearTimeout(HF_POLL); HF_POLL = null; }
+}
+
+const GARDEN_FILTER_KEY = { "Model collections": "collection", Tasks: "tasks", Providers: "provider" };
+
+function gardenMatches(m, chosen, text) {
+  for (const [group, values] of Object.entries(chosen)) {
+    if (!values.size) continue;
+    const key = GARDEN_FILTER_KEY[group];
+    const have = Array.isArray(m[key]) ? m[key] : [m[key]];
+    if (!have.some((v) => values.has(v))) return false;
+  }
+  if (!text) return true;
+  const hay = [m.name, m.id, m.provider, m.collection, m.summary, ...(m.tasks || [])].join(" ").toLowerCase();
+  return hay.includes(text.toLowerCase());
+}
+
+// gardenDeploy runs the next real step for a local model: download it (after
+// its exact size is confirmed), then load it where the runtime can.
+function gardenDeployAction(m, again, fail) {
+  const st = m.localState;
+  if (!m.deployable || !st) return null;
+  if (st.state === "downloading") return null;
+  if (st.state !== "downloaded") {
+    return () => confirmDestructive({
+      title: `Deploy ${m.name} locally?`,
+      detail: `Deploying downloads ${formatBytes(st.bytes)} (${st.bytes.toLocaleString()} bytes) from ` +
+        `huggingface.co/${st.repo} at revision ${(st.revision || "").slice(0, 12)} into this instance's model ` +
+        `cache, then serves it from the local endpoint. ` +
+        (st.official ? "" : "The file is a COMMUNITY conversion, NOT an official Google artifact. ") +
+        `Licence: ${st.license}.`,
+      confirmWord: st.id, confirmLabel: "Deploy",
+      consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
+      onConfirm: async () => { await localModelAction(st.id, "download", { confirmBytes: st.bytes }); again(); },
+    }).catch(fail);
+  }
+  if (st.loadable && !st.loaded) {
+    return async () => {
+      try { await localModelAction(st.id, "load"); announce(`${m.name} deployed locally`); again(); } catch (err) { fail(err); }
+    };
+  }
+  return null;
+}
+
+function gardenStatusOf(m) {
+  const st = m.localState;
+  if (!m.deployable || !st) return null;
+  if (st.state === "downloading") {
+    const pct = st.bytes ? Math.floor((100 * st.downloaded) / st.bytes) : 0;
+    return el("div", { class: "garden-status", "data-state": "downloading" },
+      el("span", { text: `Downloading ${pct}% (${formatBytes(st.downloaded)} of ${formatBytes(st.bytes)})` }),
+      el("progress", { max: String(st.bytes || 1), value: String(st.downloaded || 0),
+        "aria-label": `${m.name} download progress` }));
+  }
+  if (st.state === "downloaded" && (st.loaded || !st.loadable)) {
+    return el("div", { class: "garden-status", "data-state": "deployed" },
+      el("span", { text: st.loaded ? "Deployed locally: served by the local endpoint" :
+        "Downloaded: served when CloudBurrow runs with this model (see Local models)" }));
+  }
+  if (st.state === "downloaded") {
+    return el("div", { class: "garden-status", "data-state": "downloaded" }, el("span", { text: "Downloaded, not loaded" }));
+  }
+  return null;
+}
+
+// The Hugging Face section of Model Garden (#1840): look up a model ID on
+// huggingface.co, see its licence, gated status and size against the free
+// disk, download it with a progress bar, and delete it. A gated model needs
+// HF_TOKEN in CloudBurrow's own environment; there is no token field here.
+let HF_POLL = null;
+
+async function hfAction(action, id) {
+  const resp = await fetch(`/api/ai/hf-models/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+  return JSON.parse(text);
+}
+
+async function drawHFPanel(host) {
+  if (HF_POLL) { clearTimeout(HF_POLL); HF_POLL = null; }
+  let data;
+  try {
+    data = await api("/api/ai/hf-models");
+  } catch (err) {
+    return setChildren(host, el("h2", { text: "Deploy from Hugging Face" }), el("p", { class: "unavailable", text: String(err.message) }));
+  }
+  if (!data.configured) {
+    return setChildren(host, el("h2", { text: "Deploy from Hugging Face" }), el("p", { class: "unavailable", text: data.note }));
+  }
+  const again = () => { if (host.isConnected) drawHFPanel(host); };
+  const message = el("p", { id: "hf-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const input = el("input", { type: "text", id: "hf-model-id", placeholder: "author/model, e.g. Qwen/Qwen2.5-0.5B-Instruct",
+    "aria-label": "Hugging Face model ID", autocomplete: "off" });
+  const details = el("div", { id: "hf-lookup" });
+  const lookup = el("button", { class: "secondary", type: "submit", text: "Check model" });
+  const form = el("form", { class: "garden-actions", onsubmit: async (e) => {
+    e.preventDefault();
+    const id = input.value.trim();
+    if (!id) return;
+    setChildren(details, el("p", { class: "unavailable", text: `Reading ${id} from huggingface.co…` }));
+    try {
+      const r = await api("/api/ai/hf-models/lookup?" + new URLSearchParams({ id }));
+      const m = r.model;
+      const fits = r.free < 0 || r.free - m.bytes >= r.floor;
+      const download = el("button", { class: "primary", text: "Download", "data-action": "download",
+        disabled: fits ? null : true });
+      download.addEventListener("click", () => confirmDestructive({
+        title: `Download ${m.id}?`,
+        detail: `${formatBytes(m.bytes)} in ${m.files.length} files from huggingface.co/${m.id} at revision ` +
+          `${m.revision.slice(0, 12)}. Licence: ${m.license}.`,
+        confirmWord: m.id, confirmLabel: "Download",
+        consequence: "Each LFS file is checked against its SHA-256 before it is kept.",
+        onConfirm: async () => { await hfAction("download", m.id); again(); },
+      }).catch(fail));
+      setChildren(details, el("dl", { id: "hf-facts" },
+        el("dt", { text: "Model" }), el("dd", { text: m.id }),
+        el("dt", { text: "Licence" }), el("dd", { text: m.license }),
+        el("dt", { text: "Access" }), el("dd", { text: m.gated ? `Gated (${m.gated} approval): accept the licence on huggingface.co and set HF_TOKEN in CloudBurrow's environment` : "Public" }),
+        el("dt", { text: "Task" }), el("dd", { text: m.pipelineTag || "not stated" }),
+        el("dt", { text: "Size" }), el("dd", { text: `${formatBytes(m.bytes)} in ${m.files.length} files` }),
+        el("dt", { text: "Free disk" }), el("dd", { text: r.free < 0 ? "unknown" : `${formatBytes(r.free)} (a download must leave ${formatBytes(r.floor)})` })),
+        fits ? null : el("p", { class: "unavailable", text: "Does not fit: downloading it would leave less than the free space a download must leave. Delete a model or free disk space." }),
+        download);
+    } catch (err) {
+      setChildren(details, el("p", { class: "unavailable", text: `[error] ${err.message}` }));
+    }
+  } }, input, lookup);
+
+  const rows = data.models.map((m) => {
+    const pct = m.bytes ? Math.floor((100 * m.downloaded) / m.bytes) : 0;
+    const actions = [];
+    if (m.state === "downloading") {
+      actions.push(el("button", { class: "secondary", text: "Cancel", "data-action": "cancel",
+        onclick: () => hfAction("cancel", m.id).then(again, fail) }));
+    } else {
+      if (m.state === "downloaded") {
+        actions.push(el("button", { class: "primary", text: "Deploy", "data-action": "deploy",
+          onclick: () => hfDeploy(m).catch(fail) }));
+      }
+      actions.push(el("button", { class: "secondary danger", text: "Delete files", "data-action": "delete",
+        onclick: () => confirmDestructive({
+          title: `Delete ${m.id}?`, detail: `${formatBytes(m.bytes)} in this instance's model cache. It can be downloaded again.`,
+          confirmWord: m.id, consequence: "",
+          onConfirm: async () => { await hfAction("delete", m.id); again(); },
+        }).catch(fail) }));
+    }
+    return el("tr", { "data-hf-model": m.id },
+      el("td", { class: "mono", text: m.id }),
+      el("td", { text: m.license }),
+      el("td", { text: m.gated ? "Gated" : "Public" }),
+      el("td", { class: "mono", text: formatBytes(m.bytes) }),
+      el("td", { "data-state": m.state },
+        el("span", { text: m.state === "downloading" ? `Downloading ${pct}%` : m.state === "failed" ? `Failed: ${m.error}` : "Downloaded" }),
+        m.state === "downloading" ? el("progress", { max: String(m.bytes || 1), value: String(m.downloaded),
+          "aria-label": `${m.id} download progress` }) : null),
+      el("td", {}, ...actions));
+  });
+  // A redraw while a download runs keeps what was typed and looked up.
+  const keep = host.querySelector("#hf-keep") || el("div", { id: "hf-keep" }, form, details, message);
+  setChildren(host,
+    el("h2", { text: "Deploy from Hugging Face" }),
+    el("p", { class: "unavailable", text: data.note }),
+    keep,
+    rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-models" },
+      el("thead", {}, el("tr", {}, ...["Model", "Licence", "Access", "Size", "State", "Actions"].map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...rows))) : null);
+  if (data.models.some((m) => m.state === "downloading")) {
+    HF_POLL = setTimeout(again, 1000);
+  }
+}
+
+// Deploy runs ModelGardenService.Deploy on a downloaded Hugging Face model
+// (#1840) and opens its endpoint, which shows the deployment's progress
+// through to Ready. A gated model's licence is accepted here, as the
+// request's model_config.accept_eula.
+async function hfDeploy(m) {
+  const engine = /^(feature-extraction|sentence-similarity)$/.test(m.pipelineTag || "")
+    ? "Text Embeddings Inference" : "vLLM";
+  const go = async () => {
+    const resp = await fetch("/api/ai/hf-deployments/deploy", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: m.id, acceptEula: !!m.gated }),
+    });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+    const r = JSON.parse(text);
+    navigate(`${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(r.endpoint)}`);
+  };
+  if (!m.gated) return go();
+  return confirmDestructive({
+    title: `Deploy ${m.id}?`, detail: `${m.id} is gated on Hugging Face. Deploying accepts its licence (${m.license}).`,
+    confirmWord: m.id, confirmLabel: "Deploy", consequence: `It is served by ${engine} on a local endpoint.`, onConfirm: go,
+  });
+}
+
+let HF_EP_POLL = null;
+
+const HF_STATE_LABEL = { DEPLOYING: "Deploying", READY: "Ready", FAILED: "Failed" };
+
+// The Endpoints page (#1840): Model Garden's deployments with their state,
+// and the selected endpoint's details and test panel.
+async function renderHFEndpoints(view) {
+  if (HF_EP_POLL) { clearTimeout(HF_EP_POLL); HF_EP_POLL = null; }
+  const header = () => pageHeader("Endpoints", "Models deployed from Model Garden, served on this instance.");
+  let data;
+  try {
+    data = await api("/api/ai/hf-deployments");
+  } catch (err) {
+    return setChildren(view, header(), errorState("Endpoints unavailable", String(err.message), () => renderHFEndpoints(view)));
+  }
+  if (!data.configured) return setChildren(view, header(), el("div", { class: "card" }, el("p", { class: "unavailable", text: data.note })));
+  const again = () => { if (view.isConnected && location.pathname === AP_PATHS.endpoints) renderHFEndpoints(view); };
+  const message = el("p", { id: "hf-ep-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const post = async (action, body) => {
+    const resp = await fetch(`/api/ai/hf-deployments/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+    return text;
+  };
+  const selected = new URLSearchParams(location.search).get("endpoint");
+  const stateOf = (e) => (e.deployed ? e.deployed.state : "UNDEPLOYED");
+  const rows = data.endpoints.map((e) => {
+    const st = stateOf(e);
+    const d = e.deployed;
+    return el("tr", { "data-endpoint": e.name, class: e.name === selected ? "selected" : null },
+      el("td", {}, el("a", { href: `${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(e.name)}`, text: e.displayName,
+        onclick: (ev) => { ev.preventDefault(); navigate(ev.currentTarget.getAttribute("href")); } })),
+      el("td", { class: "mono", text: e.id }),
+      el("td", { class: "mono", text: e.model ? e.model.hfModelId : "—" }),
+      el("td", { text: e.model ? (e.model.engine === "tei" ? "Text Embeddings Inference" : "vLLM") : "—" }),
+      el("td", { "data-state": st },
+        el("span", { text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
+        st === "DEPLOYING" ? el("span", { class: "unavailable", text: ` · ${d.message}` }) : null,
+        st === "DEPLOYING" && d.progress > 0 ? el("progress", { max: "100", value: String(d.progress), "aria-label": `${e.displayName} deploy progress` }) : null,
+        st === "FAILED" ? el("p", { class: "unavailable", text: d.message }) : null));
+  });
+  const table = rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-endpoints" },
+    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "State"].map((c) => el("th", { scope: "col", text: c })))),
+    el("tbody", {}, ...rows)))
+    : el("p", { class: "unavailable", text: "No endpoints yet. Download a Hugging Face model in Model Garden, then Deploy it." });
+
+  let detail = null;
+  const ep = data.endpoints.find((e) => e.name === selected);
+  if (ep) {
+    const st = stateOf(ep);
+    const rest = `/v1/${ep.name}`;
+    const actions = el("div", { class: "garden-actions" });
+    if (ep.deployed && st !== "DEPLOYING") {
+      actions.append(el("button", { class: "secondary", text: "Undeploy", "data-action": "undeploy",
+        onclick: () => post("undeploy", { endpoint: ep.name }).then(again, fail) }));
+    }
+    actions.append(el("button", { class: "secondary danger", text: "Delete", "data-action": "delete-endpoint",
+      onclick: () => confirmDestructive({
+        title: `Delete ${ep.displayName}?`, detail: "Undeploys the model, freeing its container, and deletes the endpoint and its model. The downloaded files stay in Model Garden.",
+        confirmWord: ep.displayName, onConfirm: async () => { await post("delete", { endpoint: ep.name }); navigate(AP_PATHS.endpoints); },
+      }).catch(fail) }));
+    const facts = el("dl", { id: "hf-endpoint-facts" },
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: ep.name }),
+      el("dt", { text: "State" }), el("dd", { id: "hf-endpoint-state", text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
+      ep.model ? el("dt", { text: "Model" }) : null, ep.model ? el("dd", { class: "mono", text: `${ep.model.hfModelId} @ ${ep.model.revision.slice(0, 12)} (${ep.model.license})` }) : null,
+      ep.model ? el("dt", { text: "Container" }) : null, ep.model ? el("dd", { class: "mono", text: ep.model.image }) : null,
+      el("dt", { text: "Predict" }), el("dd", { class: "mono", text: `POST ${rest}:predict, :rawPredict, :streamRawPredict` }),
+      ep.model && ep.model.engine === "vllm" ? el("dt", { text: "OpenAI-compatible" }) : null,
+      ep.model && ep.model.engine === "vllm" ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
+    let test = null;
+    if (st === "READY") {
+      const tei = ep.model.engine === "tei";
+      const input = el("textarea", { id: "hf-test-input", rows: "3", "aria-label": "Test input",
+        placeholder: tei ? "Text to embed" : "Prompt" });
+      input.value = tei ? "What is deep learning?" : "What is the capital of France?";
+      const out = el("pre", { id: "hf-test-output", class: "mono", "aria-live": "polite" });
+      const run = (mode) => {
+        const text = input.value;
+        const body = mode === "chat"
+          ? { messages: [{ role: "user", content: text }], max_tokens: 64 }
+          : { instances: [tei ? { inputs: text } : { prompt: text, max_tokens: 64, temperature: 0 }] };
+        out.textContent = "…";
+        post("test", { endpoint: ep.name, mode, body }).then((t) => {
+          const r = JSON.parse(t);
+          if (mode === "chat") out.textContent = (r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : t);
+          else if (tei) {
+            const v = r.predictions[0][0];
+            out.textContent = `${v.length}-dimensional embedding: [${v.slice(0, 6).map((x) => x.toFixed(4)).join(", ")}, …]`;
+          } else out.textContent = r.predictions[0];
+        }, (err) => { out.textContent = `[error] ${err.message}`; });
+      };
+      test = el("section", { class: "card", id: "hf-test", "aria-label": "Test your model" },
+        el("h2", { text: "Test your model" }), input,
+        el("div", { class: "garden-actions" },
+          el("button", { class: "primary", text: "Predict", "data-action": "test-predict", onclick: () => run("predict") }),
+          tei ? null : el("button", { class: "secondary", text: "Chat completion", "data-action": "test-chat", onclick: () => run("chat") })),
+        out);
+    }
+    detail = el("section", { class: "card", id: "hf-endpoint", "aria-label": ep.displayName },
+      el("h2", { text: ep.displayName }), facts, actions, test);
+  }
+  // A redraw while deploying keeps the test panel's input.
+  const keptTest = view.querySelector("#hf-test");
+  setChildren(view, header(), message, el("div", { class: "card" }, table), detail);
+  if (keptTest && detail && detail.querySelector("#hf-test")) detail.querySelector("#hf-test").replaceWith(keptTest);
+  if (data.endpoints.some((e) => stateOf(e) === "DEPLOYING")) HF_EP_POLL = setTimeout(again, 2000);
+}
+
+async function renderModelGarden(view) {
+  stopGardenPoll();
+  const header = () => pageHeader("Model Garden",
+    "Discover, test, customize and deploy models. Deploy is enabled for the models this machine runs.");
+  let data;
+  try {
+    data = await api("/api/ai/model-garden");
+  } catch (err) {
+    return setChildren(view, header(), errorState("Model Garden unavailable", String(err.message), () => renderModelGarden(view)));
+  }
+  const message = el("p", { id: "garden-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const again = () => { if (view.isConnected) renderModelGarden(view); };
+
+  const params = new URLSearchParams(location.search);
+  const chosen = {};
+  for (const f of data.filters) {
+    const key = GARDEN_FILTER_KEY[f.name];
+    chosen[f.name] = new Set(params.getAll(key));
+  }
+  const search = el("input", { type: "search", id: "garden-search", placeholder: "Search models",
+    "aria-label": "Search models", value: params.get("q") || "" });
+  const grid = el("div", { class: "garden-cards", id: "garden-cards" });
+  const count = el("p", { class: "unavailable", id: "garden-count", role: "status" });
+  const hfPanel = el("section", { class: "card", id: "hf-panel", "aria-label": "Deploy from Hugging Face" });
+
+  const card = (m) => {
+    const deploy = gardenDeployAction(m, again, fail);
+    const status = gardenStatusOf(m);
+    const local = m.deployable && m.localState;
+    const button = el("button", {
+      class: "primary", text: "Deploy", "data-action": "deploy",
+      disabled: deploy ? null : true,
+      "aria-describedby": m.unavailable ? `garden-why-${m.id}` : null,
+    });
+    if (deploy) button.addEventListener("click", deploy);
+    return el("article", { class: "card garden-card", "data-model": m.id, "data-deployable": m.deployable ? "true" : "false" },
+      el("h2", { text: m.name }),
+      el("p", { class: "garden-provider", text: `${m.provider} · ${m.collection}` }),
+      el("p", { text: m.summary }),
+      el("p", { class: "garden-tags" },
+        ...(m.tasks || []).map((t) => el("span", { class: "garden-tag", text: t }))),
+      el("dl", {},
+        el("dt", { text: "Licence" }), el("dd", { text: m.licence }),
+        local ? el("dt", { text: "Runs locally as" }) : null,
+        local ? el("dd", { class: "mono", text: m.localState.id }) : null),
+      status,
+      el("div", { class: "garden-actions" }, button,
+        el("a", { href: m.docs, target: "_blank", rel: "noopener noreferrer", text: "Model card on Google Cloud" }),
+        local ? el("a", { href: AP_PATHS.localModels, text: "Local models" }) : null),
+      m.unavailable ? el("p", { class: "unavailable", id: `garden-why-${m.id}`, text: m.unavailable }) : null);
+  };
+
+  const draw = () => {
+    const text = search.value.trim();
+    const shown = data.models.filter((m) => gardenMatches(m, chosen, text));
+    setChildren(grid, ...shown.map(card));
+    count.textContent = `${shown.length} of ${data.models.length} models`;
+    const url = new URL(location.href);
+    for (const f of data.filters) {
+      const key = GARDEN_FILTER_KEY[f.name];
+      url.searchParams.delete(key);
+      for (const v of chosen[f.name]) url.searchParams.append(key, v);
+    }
+    if (text) url.searchParams.set("q", text); else url.searchParams.delete("q");
+    history.replaceState(history.state, "", url);
+  };
+  search.addEventListener("input", draw);
+
+  const filters = el("aside", { class: "garden-filters", "aria-label": "Filters" },
+    el("h2", { text: "Filters" }),
+    ...data.filters.map((f) => el("fieldset", { "data-filter": f.name },
+      el("legend", { text: f.name }),
+      ...f.values.map((v) => {
+        const id = `garden-f-${GARDEN_FILTER_KEY[f.name]}-${v.replace(/[^A-Za-z0-9]+/g, "-")}`;
+        const box = el("input", { type: "checkbox", id, value: v, checked: chosen[f.name].has(v) ? true : null });
+        box.addEventListener("change", () => {
+          if (box.checked) chosen[f.name].add(v); else chosen[f.name].delete(v);
+          draw();
+        });
+        return el("div", { class: "garden-filter" }, box, el("label", { for: id, text: v }));
+      }))));
+
+  setChildren(view, header(),
+    el("div", { class: "card" }, el("p", { class: "unavailable", id: "garden-note", text: data.note })),
+    message,
+    el("div", { class: "garden" }, filters,
+      el("div", { class: "garden-main" }, search, count, grid)),
+    hfPanel);
+  draw();
+  drawHFPanel(hfPanel);
+
+  if (data.models.some((m) => m.localState && m.localState.state === "downloading")) {
+    GARDEN_POLL = setTimeout(() => {
+      if (location.pathname === AP_PATHS.modelGarden) again();
+    }, 1000);
+  }
+}
+
+async function renderAgentGarden(view) {
+  const header = () => pageHeader("Agent Garden",
+    "Agents, samples and tools to start an agent from, built with the Agent Development Kit");
+  let data;
+  try {
+    data = await api("/api/ai/agent-garden");
+  } catch (err) {
+    return setChildren(view, header(), errorState("Agent Garden unavailable", String(err.message), () => renderAgentGarden(view)));
+  }
+  const kinds = ["Agents", "Samples", "Tools"].filter((k) => data.agents.some((a) => a.kind + "s" === k));
+  const params = new URLSearchParams(location.search);
+  let kind = kinds.includes(params.get("tab")) ? params.get("tab") : kinds[0];
+  const grid = el("div", { class: "garden-cards", id: "agent-cards" });
+  const tabs = kinds.map((k) => el("button", { role: "tab", class: "tab", id: `agent-tab-${k}`, text: k,
+    onclick: () => { kind = k; draw(); } }));
+  const card = (a) => el("article", { class: "card garden-card", "data-agent": a.id },
+    el("h2", { text: a.name }),
+    el("p", { class: "garden-provider", text: [a.kind, a.language].filter(Boolean).join(" · ") }),
+    el("p", { text: a.summary }),
+    el("p", { class: "garden-tags" }, ...(a.tags || []).map((t) => el("span", { class: "garden-tag", text: t }))),
+    el("div", { class: "garden-actions" },
+      el("button", { class: "primary", text: "Deploy", "data-action": "deploy", disabled: true,
+        "aria-describedby": `agent-why-${a.id}` }),
+      el("a", { href: a.source, target: "_blank", rel: "noopener noreferrer", text: "View code" })),
+    el("p", { class: "unavailable", id: `agent-why-${a.id}`,
+      text: "Deploy is disabled: it deploys to Agent Runtime (formerly Agent Engine), which CloudBurrow does not serve." }));
+  const draw = () => {
+    for (const t of tabs) {
+      const on = t.textContent === kind;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.classList.toggle("is-selected", on);
+    }
+    setChildren(grid, ...data.agents.filter((a) => a.kind + "s" === kind).map(card));
+    const url = new URL(location.href);
+    url.searchParams.set("tab", kind);
+    history.replaceState(history.state, "", url);
+  };
+  setChildren(view, header(),
+    el("div", { class: "card" }, el("p", { class: "unavailable", id: "agent-garden-note", text: data.note })),
+    el("div", { class: "tab-strip", role: "tablist", "aria-label": "Agent Garden sections" }, ...tabs),
+    grid);
+  draw();
+}
+
+// The Agent Platform overview (#1839): every page of Google's navigation,
+// under its group, saying which ones run on this instance. A page whose
+// backend is off here (local AI not started, no Cloud Run) says that,
+// which is a different thing from a page CloudBurrow does not serve at all.
+function renderAgentPlatformOverview(view) {
+  const available = new Set(SERVICES.map((s) => s.id));
+  const pages = pagesOf("vertexai").filter((p) => p.path !== AP_PATHS.overview);
+  const groups = new Map();
+  for (const p of pages) {
+    const g = p.group || "Agent Platform";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(p);
+  }
+  const stateOfPage = (p) => p.notServed ? ["absent", "Not available locally"]
+    : (!p.service || available.has(p.service)) ? ["served", "Runs on this instance"]
+    : ["off", "Off on this instance: its local backend was not started"];
+  setChildren(view,
+    pageHeader("Agent Platform", "Gemini Enterprise Agent Platform (formerly Vertex AI): what runs on this instance"),
+    el("div", { class: "card" }, el("p", { class: "unavailable",
+      text: "Google renamed Vertex AI to Gemini Enterprise Agent Platform in April 2026. The API is unchanged: " +
+        "clients still call aiplatform.googleapis.com with the same resource names, so they reach this instance " +
+        "through the same endpoint override as before." })),
+    el("div", { class: "cards", id: "ap-overview" }, ...[...groups].map(([g, list]) =>
+      el("section", { class: "card" }, el("h2", { text: g }),
+        el("ul", { class: "ap-pages" }, ...list.map((p) => {
+          const [state, label] = stateOfPage(p);
+          return el("li", { "data-state": state },
+            el("a", { href: p.path + scopeSearch(), text: p.title }),
+            el("span", { class: "unavailable", text: ` — ${label}` }));
+        }))))));
+}
+
+// renderNotServed is every Agent Platform page CloudBurrow has no backend
+// for. It names what the page does on Google Cloud and the API behind it,
+// and says plainly that this instance does not serve it, rather than
+// drawing an empty table that would read as "you have none".
+function renderNotServed(view, match) {
+  setChildren(view, pageHeader(match.title, match.about || ""),
+    el("div", { class: "card", id: "not-served" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: `CloudBurrow does not serve ${match.title}. ` +
+        (match.api ? `Its API, ${match.api}, is not emulated, so there is nothing to list or create here, ` +
+          "and a client calling it gets an error rather than an empty answer." :
+          "There is no local backend for this page.") }),
+      match.instead ? el("p", { text: match.instead }) : null,
+      match.docs ? el("p", {}, el("a", { href: match.docs, target: "_blank", rel: "noopener noreferrer",
+        text: `${match.title} on Google Cloud` })) : null));
 }
 
 async function renderPredict(view) {
@@ -9157,7 +9756,7 @@ async function renderPredict(view) {
   const notServed = el("details", { class: "card", id: "predict-not-served" },
     el("summary", { text: `Not served by CloudBurrow (${(status.notServed || []).length})` }),
     el("p", { text: "Predict calls the container directly, through the cluster ingress; Explain goes through " +
-      "the local AI endpoint's PredictionService. These Vertex AI surfaces are not implemented, so this page " +
+      "the local AI endpoint's PredictionService. These Agent Platform surfaces are not implemented, so this page " +
       "offers none of them:" }),
     el("ul", {}, ...(status.notServed || []).map((n) => el("li", { text: n }))));
 

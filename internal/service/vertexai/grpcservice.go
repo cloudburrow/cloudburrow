@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -47,12 +49,20 @@ func (s *Server) newGRPCServer() *grpc.Server {
 		grpc.MaxSendMsgSize(grpctransport.MaxMessageBytes),
 	}, s.lis.options...)...)
 	s.RegisterGRPC(srv)
+	// The operations Model Garden's Deploy, UndeployModel and deletes
+	// return (#1840): this endpoint's own, so not in RegisterGRPC, which a
+	// server holding another service's Operations may call.
+	longrunningpb.RegisterOperationsServer(srv, &operations{s: s})
 	return srv
 }
 
 // RegisterGRPC registers PredictionService on srv.
 func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	aiplatformpb.RegisterPredictionServiceServer(srv, &predictionService{s: s})
+	// Model Garden's Deploy, Endpoints, Models, operations and v1beta1
+	// ChatCompletions (#1840, modelgarden.go).
+	s.registerModelGarden(srv)
+	betapb.RegisterPredictionServiceServer(srv, &betaPrediction{s: s})
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a

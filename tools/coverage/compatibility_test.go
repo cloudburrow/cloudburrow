@@ -43,6 +43,7 @@ var compatSections = map[string]string{
 	// (`cloudresourcemanager.projects.getOrgPolicy`).
 	"resourcemanagerv1": "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	"vertexai":          "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
+	"vertexaiv1beta1":   "## Vertex AI PredictionService v1beta1 — `google.cloud.aiplatform.v1beta1`",
 	"memorystore":       "## Memorystore for Redis — `google.cloud.redis.v1`",
 	// The opt-in emulators share one section (#717). Its per-service rows
 	// only link their pages, so the section also has a table whose rows name

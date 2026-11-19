@@ -56,7 +56,7 @@ func TestStudioManagesLocalModelsAndTestsEmbeddings(t *testing.T) {
 	})
 	p := open(t)
 	row := fmt.Sprintf(`#pg-local-models tr[data-model=%q]`, embeddingModel)
-	p.navigate("/ai/playground")
+	p.navigate("/agent-platform/studio")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
 	var cells []string
 	p.eval(fmt.Sprintf(`[...document.querySelectorAll(%q)].map((td) => td.textContent.trim())`, row+" td"), &cells)
@@ -65,7 +65,7 @@ func TestStudioManagesLocalModelsAndTestsEmbeddings(t *testing.T) {
 	}
 
 	p.clickText("#pg-local-models a", "Test embeddings")
-	p.waitFor(`location.pathname === "/ai/embeddings" && document.querySelector("#emb-texts") !== null`)
+	p.waitFor(`location.pathname === "/agent-platform/studio/embeddings" && document.querySelector("#emb-texts") !== null`)
 	p.setField("#emb-texts", "A cat sat on the mat.\nA kitten rested on the rug.")
 	p.setField("#emb-method", "embedContent")
 	p.clickText("button", "Embed")
@@ -89,19 +89,19 @@ func TestStudioManagesLocalModelsAndTestsEmbeddings(t *testing.T) {
 		t.Errorf("the cosine similarity matrix reads %v; want 1 on the diagonal and one symmetric value", sim)
 	}
 
-	p.navigate("/ai/local-models")
+	p.navigate("/agent-platform/model-garden/local-models")
 	model := fmt.Sprintf(`#local-models tr[data-model=%q]`, embeddingModel)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, model+` button[data-action="unload"]`))
 	p.clickText(model+" button", "Unload")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, model+` button[data-action="load"]`))
-	p.navigate("/ai/playground")
+	p.navigate("/agent-platform/studio")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q)?.children[3]?.textContent === "Not loaded"`, row))
 
-	p.navigate("/ai/local-models")
+	p.navigate("/agent-platform/model-garden/local-models")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, model+` button[data-action="load"]`))
 	p.clickText(model+" button", "Load")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, model+` button[data-action="unload"]`))
-	p.navigate("/ai/playground")
+	p.navigate("/agent-platform/studio")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q)?.children[3]?.textContent === "Loaded"`, row))
 }
 
@@ -171,7 +171,7 @@ func TestEmbeddingsPageEmbedsAnImage(t *testing.T) {
 	}
 
 	p := open(t)
-	p.navigate("/ai/embeddings")
+	p.navigate("/agent-platform/studio/embeddings")
 	p.waitFor(`document.querySelector("#emb-images") !== null`)
 	var accept string
 	p.eval(`document.querySelector("#emb-images").accept`, &accept)
@@ -296,7 +296,7 @@ func TestEmbeddingsPageEmbedsAudioAndCloudStorage(t *testing.T) {
 	uploadObject(t, project, []string{bucket}, "jfk.wav", string(clip))
 
 	p := open(t)
-	p.navigate("/ai/embeddings")
+	p.navigate("/agent-platform/studio/embeddings")
 	p.waitFor(`document.querySelector("#emb-audio") !== null && document.querySelector("#emb-gcs") !== null`)
 	p.setField("#emb-texts", "a president's speech about serving your country\ncats sleeping on a couch")
 	p.eval(fmt.Sprintf(`(() => {
@@ -375,7 +375,7 @@ func TestEmbeddingsPageReadsAScannedPDFWithOCR(t *testing.T) {
 	}
 	p := open(t)
 	embed := func(ocr bool) ([]string, string) {
-		p.navigate("/ai/embeddings")
+		p.navigate("/agent-platform/studio/embeddings")
 		p.waitFor(`document.querySelector("#emb-document-ocr") !== null`)
 		p.eval(fmt.Sprintf(`(() => {
 			const dt = new DataTransfer();

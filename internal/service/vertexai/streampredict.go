@@ -418,6 +418,9 @@ func sent(err error) error {
 // embedding model and a custom endpoint send their one answer.
 func (s *Server) rawStream(ctx context.Context, t target, body []byte, contentType string, emit func(ct string, data []byte) error) error {
 	if t.endpoint != "" {
+		if g := s.gardenEndpoint(t.project, t.location, t.endpoint); g != nil {
+			return g.Stream(ctx, t.project, t.location, t.endpoint, body, true, emit)
+		}
 		a, err := s.relay(ctx, t.project, t.location, t.endpoint, body, contentType)
 		if err != nil {
 			return err
