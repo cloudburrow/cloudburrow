@@ -82,8 +82,9 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 		{Name: "description", Label: "Description", Type: "text", Default: j.Description},
 		{Name: "schedule", Label: "Frequency", Type: "text", Required: true, Default: j.Schedule,
 			Help: "unix-cron format, e.g. \"0 9 * * 1\" for 09:00 every Monday."},
-		{Name: "timeZone", Label: "Time zone", Type: "text", Required: true, Default: j.TimeZone,
-			Help: "A tz database name such as Etc/UTC or America/New_York."},
+		{Name: "timeZone", Label: "Timezone", Type: "select", Required: true, Default: j.TimeZone,
+			Options: schedulerTimeZonesWith(j.TimeZone),
+			Help:    "The time zone the schedule is read in."},
 	}
 	if j.HTTP != nil {
 		shown := map[string]string{}

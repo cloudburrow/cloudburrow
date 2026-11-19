@@ -207,10 +207,10 @@ func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string)
 		})
 	}
 	return console.Listing{
-		Columns:      columns,
-		Noun:         "queues",
-		Items:        items,
-		Total:        len(items),
+		Columns:       columns,
+		Noun:          "queues",
+		Items:         items,
+		Total:         len(items),
 		AlwaysStatus:  true,
 		ServerFilter:  sf,
 		SelectActions: p.ListActions(ctx, project),
@@ -436,7 +436,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 			{Label: "Last response", Value: last},
 		},
 		Sections: sections,
-		Actions: tasksTaskActions(),
+		Actions:  tasksTaskActions(),
 	}, nil
 }
 
