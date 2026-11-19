@@ -314,8 +314,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "127.0.0.1"
 		}
-		providers = append(providers, cloudSQLInstancesProvider{
-			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions})
+		instances := cloudSQLInstancesProvider{
+			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions}
+		// Cloud SQL's Backups page (#1860), the project's backups.
+		providers = append(providers, instances, cloudSQLBackupsProvider{instances: instances})
 	}
 
 	// The cluster views are read-only and always present: CloudBurrow owns

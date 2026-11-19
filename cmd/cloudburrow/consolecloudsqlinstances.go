@@ -46,7 +46,10 @@ func (p cloudSQLInstancesProvider) api(ctx context.Context) (*sqladminapi.Servic
 
 func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{
-		Columns:    []string{"Connection name", "Version", "Tier", "Address", "Availability", "Deletion protection"},
+		// Google's Instances list (#1860): Instance ID with its status, then
+		// these.
+		Columns: []string{"Cloud SQL edition", "Type", "Public IP address", "Private IP address", "Instance connection name",
+			"High availability", "Location", "Storage used", "Labels"},
 		NameColumn: "Instance ID",
 		Noun:       "instances",
 		Note:       cloudSQLInstancesNote,
@@ -62,64 +65,46 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 		return l, nil
 	}
 	for _, in := range resp.Items {
-		addr := ""
-		if len(in.IpAddresses) > 0 {
-			addr = in.IpAddresses[0].IpAddress
-		}
-		tier, protect, avail := "", "Off", ""
-		if in.Settings != nil {
-			tier, avail = in.Settings.Tier, in.Settings.AvailabilityType
-			if in.Settings.DeletionProtectionEnabled {
-				protect = "On"
+		public, private := "", ""
+		for _, ip := range in.IpAddresses {
+			if ip.Type == "PRIVATE" && private == "" {
+				private = ip.IpAddress
+			} else if ip.Type != "PRIVATE" && ip.Type != "OUTGOING" && public == "" {
+				public = ip.IpAddress
 			}
 		}
+		edition, avail, labels, storage := "", "", "", ""
+		if st := in.Settings; st != nil {
+			edition, avail, labels = sqlEditionLabel(st.Edition), st.AvailabilityType, formatPairs(st.UserLabels)
+			if st.DataDiskSizeGb > 0 {
+				storage = strconv.FormatInt(st.DataDiskSizeGb, 10) + " GB"
+			}
+		}
+		if in.CurrentDiskSize > 0 {
+			storage = fmt.Sprintf("%.1f GB", float64(in.CurrentDiskSize)/(1<<30))
+		}
+		ha := "—"
+		if avail == "REGIONAL" {
+			ha = "ADDED"
+		}
+		location := in.GceZone
+		if location == "" {
+			location = in.Region
+		}
 		l.Items = append(l.Items, console.Resource{Name: in.Name, Status: in.State, Fields: map[string]string{
-			"Connection name": in.ConnectionName, "Version": in.DatabaseVersion, "Tier": tier,
-			"Address": addr, "Deletion protection": protect, "Availability": avail,
+			"Cloud SQL edition": orDash(edition), "Type": sqlVersionLabel(in.DatabaseVersion),
+			"Public IP address": orDash(public), "Private IP address": orDash(private), "Instance connection name": in.ConnectionName,
+			"High availability": ha, "Location": orDash(location), "Storage used": orDash(storage), "Labels": orDash(labels),
 		}})
 	}
 	l.Total = len(l.Items)
 	return l, nil
 }
 
-// CreateForm implements console.Creator: what instances.insert takes here.
+// CreateForm implements console.Creator: Google's create page (#1860),
+// sqlCreateForm.
 func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
-	def := ""
-	for _, v := range p.versions {
-		if (def == "" && v != "MYSQL_5_7" && v != "MYSQL_5_6") || v == "POSTGRES_17" {
-			def = v
-		}
-	}
-	return "Create instance", []console.Field{
-		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
-			Help: "Lowercase letters, digits and hyphens, starting with a letter."},
-		{Name: "databaseVersion", Label: "Database version", Type: "select", Required: true, Options: p.versions, Default: def,
-			Help: "Each version is the official image of that major version, pulled when an instance of it is first created."},
-		{Name: "region", Label: "Region", Type: "text", Default: "us-central1", Pattern: "^[a-z]+(-[a-z]+)+[0-9]+$",
-			Help: "Reported, and part of the connection name; every server runs in this cluster."},
-		{Name: "tier", Label: "Machine type (tier)", Type: "text", Required: true, Default: "db-custom-1-3840",
-			Help: "Recorded and reported; the server is not sized by it."},
-		{Name: "rootPassword", Label: "Root password (MySQL)", Type: "password",
-			Help: "MySQL's root password. Empty leaves root without one, as Cloud SQL does. PostgreSQL's postgres user is trusted locally."},
-		{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
-			Options: []string{"ZONAL", "REGIONAL"}, Default: "ZONAL", Help: availabilityHelp},
-		{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox"},
-		serverCAModeField(internalCAMode),
-		serverCAPoolFields(nil)[0], serverCAPoolFields(nil)[1],
-		{Name: "kmsKeyName", Label: "Customer-managed encryption key (Cloud KMS)", Type: "text",
-			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the instance's region (needs kms in --services). " +
-				"The instance is SUSPENDED while the key's version is disabled or destroyed. The key cannot be changed later, and the server's data volume is not encrypted with it."},
-		{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox",
-			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
-		{Name: "sourceHostPort", Label: "External server host:port (source representation)", Type: "text",
-			Help: "Set to record a MySQL or PostgreSQL server outside Cloud SQL as a source representation instance (ON_PREMISES_INSTANCE) instead: " +
-				"no server runs for it; create a read replica of it, then Start external sync. Another CloudBurrow instance is sqlinst-NAME:3306 (MySQL) or sqlinst-NAME:5432 (PostgreSQL)."},
-		{Name: "sourceUser", Label: "External server replication user", Type: "text",
-			Help: "The user the replica connects to the external server as."},
-		{Name: "sourcePassword", Label: "External server replication password", Type: "password"},
-		{Name: "sourceDatabases", Label: "External server databases (PostgreSQL)", Type: "text",
-			Help: "Comma-separated databases to migrate (selectedObjects); empty migrates every database but the templates."},
-	}
+	return "Create Instance", p.sqlCreateForm()
 }
 
 // availabilityHelp explains the Zonal availability choice (#1408).
@@ -171,6 +156,9 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	if err != nil {
 		return "", err
 	}
+	if v, err = sqlCreateValues(v); err != nil {
+		return "", err
+	}
 	name := strings.TrimSpace(v["name"])
 	if hp := strings.TrimSpace(v["sourceHostPort"]); hp != "" {
 		// A source representation instance (#1501): a record, no server.
@@ -185,9 +173,13 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	}
 	st := &sqladminapi.Settings{Tier: strings.TrimSpace(v["tier"]), DeletionProtectionEnabled: v["deletionProtection"] == "true",
 		AvailabilityType: v["availabilityType"]}
-	if v["pitr"] == "true" {
+	if v["pitr"] == "true" || v["backupsEnabled"] == "true" {
+		// Point-in-time recovery needs automated backups.
 		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true}
-		pitrConfig(st.BackupConfiguration, v["databaseVersion"], true)
+		pitrConfig(st.BackupConfiguration, v["databaseVersion"], v["pitr"] == "true")
+	}
+	if err := sqlCreateSettings(st, v); err != nil {
+		return "", err
 	}
 	in := &sqladminapi.DatabaseInstance{
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
@@ -252,23 +244,41 @@ func upSQLInstance(name string) bool {
 	return name == sqlAdminPostgresInstance || name == sqlAdminMySQLInstance
 }
 
-// Detail implements console.Driller: an instance's settings, its Backups
-// tab, Edit instance on a created one, and the backup actions.
+// Detail implements console.Driller: an instance's page in Google's layout
+// (#1860), googleLayout, over detailAll.
 func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	d, in, svc, err := p.detailAll(ctx, project, path)
+	if err != nil || in == nil || in.InstanceType == "ON_PREMISES_INSTANCE" {
+		return d, err
+	}
+	return googleLayout(ctx, svc, project, in, d), nil
+}
+
+// detailAll is an instance's settings, its tabs, Edit instance on a created
+// one, and every action of its page, in d.Actions.
+func (p cloudSQLInstancesProvider) detailAll(ctx context.Context, project string, path []string) (console.Detail, *sqladminapi.DatabaseInstance, *sqladminapi.Service, error) {
+	d, in, svc, err := p.detailAllOf(ctx, project, path)
+	if err == nil && in != nil && in.InstanceType != "ON_PREMISES_INSTANCE" {
+		d.Actions = append(instanceOps(in), d.Actions...)
+	}
+	return d, in, svc, err
+}
+
+func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project string, path []string) (console.Detail, *sqladminapi.DatabaseInstance, *sqladminapi.Service, error) {
 	if len(path) != 1 {
-		return console.DeeperThan(1, path), nil
+		return console.DeeperThan(1, path), nil, nil, nil
 	}
 	name := path[0]
 	svc, err := p.api(ctx)
 	if err != nil {
-		return console.Detail{}, err
+		return console.Detail{}, nil, nil, err
 	}
 	in, err := svc.Instances.Get(project, name).Context(ctx).Do()
 	if err != nil {
-		return console.Detail{}, sqlAPIError(err)
+		return console.Detail{}, nil, nil, sqlAPIError(err)
 	}
 	if in.InstanceType == "ON_PREMISES_INSTANCE" {
-		return sourceRepDetail(in), nil
+		return sourceRepDetail(in), in, svc, nil
 	}
 	st := in.Settings
 	if st == nil {
@@ -402,7 +412,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 				Help: "Between the earliest recovery time, " + earliest + ", and now, to the microsecond."}}})
 	}
 	if !upSQLInstance(name) {
-		d.Edit = &console.EditForm{Label: "Edit instance", Fields: []console.Field{
+		d.Edit = &console.EditForm{Label: "Edit", Fields: []console.Field{
 			{Name: "tier", Label: "Machine type (tier)", Type: "text", Required: true, Default: st.Tier,
 				Help: "Recorded and reported; the server is not sized by it."},
 			{Name: "labels", Label: "Labels", Type: "text", Default: formatPairs(st.UserLabels),
@@ -426,7 +436,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		}, Note: "The database version and the instance ID cannot be changed."}
 	}
 	d.Actions = append(d.Actions, dbUserActs...)
-	return d, nil
+	return d, in, svc, nil
 }
 
 func formatPairs(m map[string]string) string {
@@ -949,7 +959,7 @@ func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action 
 
 // DetailActions implements console.PathActor.
 func (p cloudSQLInstancesProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
-	d, err := p.Detail(ctx, project, path)
+	d, _, _, err := p.detailAll(ctx, project, path)
 	if err != nil {
 		return nil
 	}
@@ -1056,6 +1066,10 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		}
 	}
 	switch action {
+	case "restart":
+		_, err = svc.Instances.Restart(project, name).Context(ctx).Do()
+	case "delete-instance":
+		_, err = svc.Instances.Delete(project, name).Context(ctx).Do()
 	case "create-backup":
 		_, err = svc.BackupRuns.Insert(project, name, &sqladminapi.BackupRun{Description: strings.TrimSpace(v["description"])}).Context(ctx).Do()
 	case "restore-backup":

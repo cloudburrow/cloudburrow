@@ -57,13 +57,19 @@ func waitSQL(t *testing.T, svc *sqladmin.Service, project string, op *sqladmin.O
 }
 
 // pageAction opens one of a resource page's actions, sets its fields, and
-// submits it. confirm, when not empty, is the name the action's
-// confirmation asks to be typed back. It returns the text of the rows the
-// action answers with, "" when it answers none.
+// submits it. The action is beside the title, or at the top of one of the
+// page's tabs or menu pages, as a Cloud SQL instance's Create database is
+// on its Databases page (#1860). confirm, when not empty, is the name the
+// action's confirmation asks to be typed back. It returns the text of the
+// rows the action answers with, "" when it answers none.
 func (p *tab) pageAction(label string, values map[string]string, confirm string) string {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", label)
+	where := p.findAction(label)
+	if where == "" {
+		p.t.Fatalf("the page offers no %s", label)
+	}
+	p.clickText(where, label)
 	p.waitFor(`document.querySelectorAll(".modal").length === 1 && document.querySelector(".modal.is-open form") !== null`)
 	for id, v := range values {
 		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-%s");
@@ -116,19 +122,52 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 	ctx := context.Background()
 
 	p := open(t)
-	p.navigateByDrawer("Databases", "/cloudsql", "Cloud SQL")
-	p.clickText("#product-nav a", "Instances")
+	// Cloud SQL opens on Instances, and its menu is Google's (#1860).
+	p.navigateByDrawer("Databases", "/cloudsql-instances", "Cloud SQL")
 	p.waitFor(`location.pathname === "/cloudsql-instances"`)
+	var menu []string
+	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &menu)
+	if !contains(menu, "Instances") || !contains(menu, "Backups") {
+		t.Errorf("Cloud SQL's menu is %q; want Instances and Backups", menu)
+	}
+	var columns []string
+	p.waitFor(`document.querySelector("#view thead") !== null`)
+	p.eval(`[...document.querySelectorAll("#view thead th")].map((h) => h.textContent.trim()).filter(Boolean)`, &columns)
+	for _, want := range []string{"Instance ID", "Cloud SQL edition", "Type", "Public IP address", "Instance connection name", "High availability", "Location"} {
+		if !contains(columns, want) {
+			t.Errorf("the Instances list's columns are %q; want %s", columns, want)
+		}
+	}
 
-	// The versions Create instance offers.
-	p.clickText("#view button", "Create instance")
+	// Create Instance is Google's create page: the engine first, SQL Server
+	// shown and not available, then each engine's versions.
+	p.clickText("#view button", "Create Instance")
 	p.waitFor(`document.querySelector("#f-databaseVersion") !== null`)
+	var steps []string
+	p.eval(`[...document.querySelectorAll(".create-step-title")].map((s) => s.textContent)`, &steps)
+	if len(steps) < 6 || steps[0] != "Choose your database engine" || steps[1] != "Choose a Cloud SQL edition" {
+		t.Errorf("the create page's sections are %q", steps)
+	}
+	var sqlServerOff bool
+	p.eval(`[...document.querySelectorAll("input[type=radio]")].some((r) => r.value === "SQL Server" && r.disabled)`, &sqlServerOff)
+	if !sqlServerOff {
+		t.Error("SQL Server is choosable on the create page")
+	}
 	var versions []string
 	p.eval(`[...document.querySelector("#f-databaseVersion").options].map((o) => o.value)`, &versions)
-	for _, want := range []string{"POSTGRES_9_6", "POSTGRES_16", "POSTGRES_18", "MYSQL_8_0", "MYSQL_8_4"} {
+	var mysql []string
+	p.eval(`(() => { const r = [...document.querySelectorAll("input[type=radio]")].find((r) => r.value === "MySQL");
+		r.click(); return [...document.querySelector("#f-mysqlVersion").options].map((o) => o.value + "=" + o.textContent); })()`, &mysql)
+	versions = append(versions, mysql...)
+	for _, want := range []string{"POSTGRES_9_6", "POSTGRES_16", "POSTGRES_18", "MYSQL_8_0=MySQL 8.0", "MYSQL_8_4=MySQL 8.4"} {
 		if !contains(versions, want) {
 			t.Errorf("Create instance offers versions %q; want %s among them", versions, want)
 		}
+	}
+	var pgHidden bool
+	p.eval(`document.querySelector("#f-databaseVersion").closest(".form-row").hidden`, &pgHidden)
+	if !pgHidden {
+		t.Error("with MySQL chosen, the PostgreSQL versions are still shown")
 	}
 
 	name := fmt.Sprintf("browser-pg-%d", time.Now().UnixNano()%1e6)
@@ -152,8 +191,17 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 	if u, err := svc.Users.Get(project, name, "browserapi").Do(); err != nil || u.Name != "browserapi" {
 		t.Fatalf("users.get after Add user account = %+v, %v", u, err)
 	}
+	// The instance's own menu (#1860), drawn at the side.
+	var nav []string
+	p.waitFor(`document.querySelector("#view .tab-strip.is-side-nav") !== null`)
+	p.eval(`[...document.querySelectorAll("#view .tab-strip.is-side-nav [role=tab]")].map((t) => t.textContent)`, &nav)
+	for _, want := range []string{"Overview", "System insights", "Query insights", "Connections", "Users", "Databases", "Backups", "Replicas", "Operations", "Logs"} {
+		if !contains(nav, want) {
+			t.Errorf("the instance's menu is %q; want %s", nav, want)
+		}
+	}
 	p.navigate(page)
-	p.pageAction("Change password", map[string]string{"user": "browserapi", "password": "Browser-pass1"}, "")
+	p.rowAction("Users", "browserapi", "Change password", map[string]string{"password": "Browser-pass1"}, "")
 	// Create database, which the Databases tab lists, and Delete database.
 	p.navigate(page)
 	p.pageAction("Create database", map[string]string{"dbName": "browserdb"}, "")
@@ -161,9 +209,7 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 		t.Fatalf("databases.get after Create database = %+v, %v", db, err)
 	}
 	p.navigate(page)
-	p.clickText(`#view [role="tab"]`, "Databases")
-	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browserdb"))`)
-	p.pageAction("Delete database", map[string]string{"dbName": "browserdb"}, name)
+	p.rowAction("Databases", "browserdb", "Delete", nil, "browserdb")
 	if _, err := svc.Databases.Get(project, name, "browserdb").Do(); err == nil {
 		t.Error("Delete database left the database databases.get reads")
 	}
@@ -259,6 +305,50 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 	if in, err := svc.Instances.Get(project, name).Do(); err != nil || in.DatabaseVersion != "POSTGRES_17" {
 		t.Errorf("after Upgrade, instances.get = %v, %v; want POSTGRES_17", in, err)
 	}
+}
+
+// findAction is the selector of the buttons holding the page's action
+// label, beside the title or over one of its tabs, which it then shows;
+// "" when the page offers none.
+func (p *tab) findAction(label string) string {
+	p.t.Helper()
+	p.waitFor(`document.querySelector("#view .page-actions button, #view [role=tab]") !== null`)
+	var where string
+	p.eval(fmt.Sprintf(`(() => { const want = %q;
+		const vis = (sel) => [...document.querySelectorAll(sel)].some((b) => b.textContent.trim() === want && b.getClientRects().length);
+		if (vis("#view .page-actions button")) return "#view .page-actions button";
+		if (vis("#view .section-actions button")) return "#view .section-actions button";
+		for (const t of document.querySelectorAll("#view [role=tab]")) {
+			t.click();
+			if (vis("#view .section-actions button")) return "#view .section-actions button";
+		}
+		return ""; })()`, label), &where)
+	return where
+}
+
+// rowAction chooses label in the actions menu of the row naming row on the
+// page's menu page tab, sets the form's fields if it opens one, and
+// submits it; confirm, when not empty, is the name typed back.
+func (p *tab) rowAction(tab, row, label string, values map[string]string, confirm string) {
+	p.t.Helper()
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.clickText(`#view [role="tab"]`, tab)
+	find := fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].find((r) => r.querySelector("td, th") && [...r.querySelectorAll("td, th")].some((c) => c.textContent.trim() === %q))`, row)
+	p.waitFor(find + ` !== undefined`)
+	p.eval(find+`.querySelector(".overflow-trigger").click()`, nil)
+	p.clickText("#view .overflow-item, .overflow-item", label)
+	if len(values) > 0 {
+		p.waitFor(`document.querySelector(".modal.is-open form") !== null`)
+		for id, v := range values {
+			p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-%s");
+				f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, id, v), nil)
+		}
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	}
+	if confirm != "" {
+		p.confirmByName(confirm)
+	}
+	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 }
 
 // waitLatestSQLOp waits for the instance's newest operation, which must be

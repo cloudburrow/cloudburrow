@@ -291,6 +291,9 @@ func TestCloudSQLAndBackupDRScreensMeetWCAG(t *testing.T) {
 	}
 	pages = append(pages,
 		screen("postgres database", "/cloudsql/postgres", project),
+		// Google's Backups page and an instance's page with its own menu (#1860).
+		screen("Cloud SQL backups", "/cloudsql-backups", project),
+		screen("postgres instance", "/cloudsql-instances/postgres", project),
 		a11yPage{"delete database dialog", "/cloudsql?project=" + project, rowReady("postgres"), openDeleteDialog},
 	)
 	auditScreens(t, pages)

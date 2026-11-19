@@ -282,6 +282,20 @@ type Field struct {
 	// submit what the API refuses.
 	Requires []string `json:"requires,omitempty"`
 	Excludes []string `json:"excludes,omitempty"`
+	// OptionLabels, on a "select" or "radio" field, are what each of Options
+	// reads as, in the same order, where the value is an API enum: Google's
+	// Cloud SQL form offers "PostgreSQL 17" for POSTGRES_17 (#1860). Missing
+	// or empty entries read as the value.
+	OptionLabels []string `json:"optionLabels,omitempty"`
+	// DisabledOptions, on a "radio" field, are options drawn but not
+	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
+	// does not run (#1860).
+	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// VisibleWhen shows the field only while each named field of the same
+	// form holds the given value ("true"/"false" for a checkbox); a hidden
+	// field is neither checked nor submitted. Cloud SQL's Database version
+	// lists the chosen engine's versions only (#1860).
+	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
@@ -485,6 +499,11 @@ type Detail struct {
 	// page is about: the page then offers Download and Delete beside its
 	// title, through the object routes, as Google's object page does (#1843).
 	Object []string `json:"object,omitempty"`
+	// SideNav draws the sections as a menu on the left of the page rather
+	// than a tab strip, as Google's Cloud SQL instance has Overview,
+	// Connections, Users, Databases and the rest in a menu of its own
+	// (#1860).
+	SideNav bool `json:"sideNav,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
