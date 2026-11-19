@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +74,22 @@ func TestJobRowQueryDialect(t *testing.T) {
 	}
 	if got := jobRow("p", job("g"), nil)[32]; got != "'DEFAULT_LEGACY_SQL'" {
 		t.Errorf("no settings: query_dialect %s", got)
+	}
+}
+
+// TestOptimizationDetailsViews: query_info.optimization_details is in JOBS
+// and JOBS_BY_PROJECT alone, JSON and NULL (#1458).
+func TestOptimizationDetailsViews(t *testing.T) {
+	for view, want := range map[string]bool{"JOBS": true, "JOBS_BY_PROJECT": true, "JOBS_BY_USER": false,
+		"JOBS_BY_FOLDER": false, "JOBS_BY_ORGANIZATION": false} {
+		if optimizationDetailsViews[view] != want {
+			t.Errorf("%s: optimization_details %v, want %v", view, optimizationDetailsViews[view], want)
+		}
+	}
+	got := withOptimizationDetails("(SELECT * FROM t)")
+	for _, s := range []string{"SELECT * REPLACE (", "IF(query_info IS NULL, NULL, STRUCT(", "CAST(NULL AS JSON) AS optimization_details", ") AS query_info) FROM (SELECT * FROM t))"} {
+		if !strings.Contains(got, s) {
+			t.Errorf("withOptimizationDetails: %s lacks %q", got, s)
+		}
 	}
 }
