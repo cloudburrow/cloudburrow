@@ -146,7 +146,8 @@ func TestPubSubGooglePagesCreate(t *testing.T) {
 func TestPubSubSubscriptionPagePullAckAndReplay(t *testing.T) {
 	ctx := context.Background()
 	const project = "pull"
-	addr, c := pubsubEditFixture(t, project)
+	// The snapshot fake, whose time Seek pstest cannot replay safely (#1878).
+	addr, _, c := newSnapshotFake(t, project)
 	topics := pubsubProvider{endpoint: addr}
 	subs := pubsubSubscriptionsProvider{endpoint: addr}
 	topic, err := topics.Create(ctx, project, map[string]string{"name": "t"})

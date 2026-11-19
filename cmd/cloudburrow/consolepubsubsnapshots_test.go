@@ -40,6 +40,7 @@ import (
 // is the emulator's to show, and the compat test reads it.
 type snapshotFake struct {
 	*pstest.GServer
+	ps *pstest.Server
 
 	mu    sync.Mutex
 	snaps map[string]*pubsubpb.Snapshot
@@ -52,7 +53,7 @@ func newSnapshotFake(t *testing.T, project string) (string, *snapshotFake, *pubs
 	t.Helper()
 	ps := pstest.NewServer()
 	t.Cleanup(func() { _ = ps.Close() })
-	f := &snapshotFake{GServer: &ps.GServer, snaps: map[string]*pubsubpb.Snapshot{}}
+	f := &snapshotFake{GServer: &ps.GServer, ps: ps, snaps: map[string]*pubsubpb.Snapshot{}}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +144,18 @@ func (f *snapshotFake) Seek(ctx context.Context, req *pubsubpb.SeekRequest) (*pu
 		f.mu.Lock()
 		f.seeks = append(f.seeks, req)
 		f.mu.Unlock()
+		if f.seekWouldRedeliver(req) {
+			// pstest re-adds each message published at or after the
+			// target without its PubsubMessage ("This was not
+			// preserved!"), and its delivery loop then dereferences the
+			// missing message every 10ms and panics the test binary
+			// (#1878). So that Seek is recorded rather than replayed,
+			// like a Seek to a snapshot, once the subscription is known.
+			if _, err := f.GServer.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: req.GetSubscription()}); err != nil {
+				return nil, err
+			}
+			return &pubsubpb.SeekResponse{}, nil
+		}
 		return f.GServer.Seek(ctx, req)
 	}
 	snap, err := f.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: name})
@@ -161,6 +174,21 @@ func (f *snapshotFake) Seek(ctx context.Context, req *pubsubpb.SeekRequest) (*pu
 	defer f.mu.Unlock()
 	f.seeks = append(f.seeks, req)
 	return &pubsubpb.SeekResponse{}, nil
+}
+
+// seekWouldRedeliver reports whether req is a Seek to a time at or before
+// some message pstest retains: one pstest would put back without its body.
+func (f *snapshotFake) seekWouldRedeliver(req *pubsubpb.SeekRequest) bool {
+	if req.GetTime() == nil {
+		return false
+	}
+	target := req.GetTime().AsTime()
+	for _, m := range f.ps.Messages() {
+		if !m.PublishTime.Before(target) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *snapshotFake) lastSeek() *pubsubpb.SeekRequest {
