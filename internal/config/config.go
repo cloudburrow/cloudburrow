@@ -608,6 +608,10 @@ type Config struct {
 	// on them is bounded polling rather than an injected clock.
 	ReadyTimeout Duration `json:"readyTimeout"`
 	LogLevel     string   `json:"logLevel"`
+	// IAMEnforcement is "on" when served APIs check the caller's IAM
+	// permissions against the stored allow policies (#1879), "off" (the
+	// default) when policies are stored and never enforced (ADR-0006).
+	IAMEnforcement string `json:"iamEnforcement,omitempty"`
 
 	// HooksDir holds ready.d and shutdown.d, scripts run on the host when
 	// the instance becomes ready and before it stops (#285). A missing
@@ -1187,6 +1191,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	switch c.IAMEnforcement {
+	case "", IAMEnforcementOff, IAMEnforcementOn:
+	default:
+		add("iamEnforcement", c.IAMEnforcement, "must be off or on")
+	}
+
 	// Log level.
 	switch c.LogLevel {
 	case "trace", "debug", "info", "warn", "error":
@@ -1224,3 +1234,12 @@ func joinServices(s []Service) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// IAM enforcement modes (#1879).
+const (
+	IAMEnforcementOff = "off"
+	IAMEnforcementOn  = "on"
+)
+
+// IAMEnforced reports whether served APIs check IAM permissions (#1879).
+func (c Config) IAMEnforced() bool { return c.IAMEnforcement == IAMEnforcementOn }

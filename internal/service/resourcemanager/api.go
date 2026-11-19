@@ -550,6 +550,9 @@ type Server struct {
 	requests  func(rest.Request)
 	interpose []grpc.UnaryServerInterceptor
 	options   []grpc.ServerOption
+	// extra are JSON APIs served on this port beside Resource Manager's
+	// (Policy Troubleshooter and Cloud Asset's analyzeIamPolicy, #1879).
+	extra []extraJSON
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -573,6 +576,18 @@ func NewServer(addr string, reg *Registry) *Server {
 // Observe sets who is told about completed calls. It must be set before Start.
 func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
 	s.calls, s.requests = calls, requests
+}
+
+// extraJSON is a JSON API another package serves on this port.
+type extraJSON struct {
+	match func(*http.Request) bool
+	h     http.Handler
+}
+
+// HandleJSON serves the JSON requests match accepts with h, before
+// Resource Manager's own routes. It must be called before Start.
+func (s *Server) HandleJSON(match func(*http.Request) bool, h http.Handler) {
+	s.extra = append(s.extra, extraJSON{match: match, h: h})
 }
 
 // Interpose adds a unary interceptor inside the call observer, such as the
@@ -637,6 +652,12 @@ func (s *Server) Start(ctx context.Context) error {
 	s.tags.restRoutes(router)
 	s.projects.reg.identityRoutes(router)
 	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, x := range s.extra {
+			if x.match(r) {
+				x.h.ServeHTTP(w, r)
+				return
+			}
+		}
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)
 			return

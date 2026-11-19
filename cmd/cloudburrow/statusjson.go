@@ -29,7 +29,8 @@ import (
 //
 // 2 added the services' in-cluster addresses (#575).
 // 3 added cluster.versions and cluster.pinned (#601).
-const statusSchemaVersion = 3
+// 4 added iam_enforcement (#1879).
+const statusSchemaVersion = 4
 
 // Exit statuses of `status --format json`. 2 is a usage error, as for every
 // command.
@@ -44,7 +45,10 @@ type statusReport struct {
 	Instance      string `json:"instance"`
 	Project       string `json:"project"`
 	Mode          string `json:"mode"`
-	Bind          string `json:"bind"`
+	// IAMEnforcement is "off" or "on" (#1879): the running instance's, else
+	// this invocation's configuration.
+	IAMEnforcement string `json:"iam_enforcement"`
+	Bind           string `json:"bind"`
 	// State is not_running, starting, ready or failed.
 	State      string          `json:"state"`
 	ControlURL string          `json:"control_url,omitempty"`
@@ -145,11 +149,12 @@ type liveState struct {
 // can pin its output.
 func buildStatusReport(cfg config.Config, live *liveState, clusterState, kubernetes string) (statusReport, int) {
 	r := statusReport{
-		SchemaVersion: statusSchemaVersion,
-		Instance:      cfg.Name,
-		Project:       cfg.DefaultProject(),
-		Mode:          string(cfg.Mode),
-		Bind:          cfg.BindAddress,
+		SchemaVersion:  statusSchemaVersion,
+		Instance:       cfg.Name,
+		Project:        cfg.DefaultProject(),
+		Mode:           string(cfg.Mode),
+		IAMEnforcement: iamEnforcementMode(cfg),
+		Bind:           cfg.BindAddress,
 		Cluster: statusCluster{Name: cfg.ClusterName(), State: clusterState, Kubernetes: kubernetes,
 			Pinned: statusPinned{NodeImage: cfg.Cluster.NodeImage, Knative: components.KnativeVersion}},
 	}
@@ -167,6 +172,9 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 	var ready map[string]bool
 	code := statusExitNotRunning
 	r.State = "not_running"
+	if live != nil && live.info.IAMEnforcement != "" {
+		r.IAMEnforcement = live.info.IAMEnforcement
+	}
 	if live != nil {
 		if a := live.info.Endpoints["control"]; a != "" {
 			r.ControlURL = "http://" + a

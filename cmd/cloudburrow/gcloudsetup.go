@@ -86,6 +86,10 @@ var gcloudVerified = []struct {
 	// TestGcloudIdentityGroups drives groups create, describe, list,
 	// delete and memberships add, list and delete.
 	{resourceManagerService, "cloudidentity", "/", true, false},
+	// Policy Troubleshooter (#1879): gcloud policy-troubleshoot iam calls
+	// v2alpha1 iam:troubleshoot, served on the Resource Manager port.
+	// TestGcloudPolicyTroubleshoot drives a denied and a granted check.
+	{resourceManagerService, "policytroubleshooter", "/", true, false},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},

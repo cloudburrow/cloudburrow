@@ -236,6 +236,7 @@ type rawFlags struct {
 	shutdownTimeout  time.Duration
 	readyTimeout     time.Duration
 	logLevel         string
+	iamEnforcement   string
 	corsOrigins      listFlag
 }
 
@@ -315,6 +316,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
+	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
 	fs.IntVar(&r.emulatorHeapMiB, "emulator-heap-mib", 0, fmt.Sprintf("maximum Java heap, in MiB, of the Pub/Sub, Firestore and Datastore emulators, which also sizes their containers' memory limit; 0 = unbounded (default %d)", DefaultEmulatorHeapMiB))
@@ -549,6 +551,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 
 	str("LOG_LEVEL", &cfg.LogLevel)
+	str("IAM_ENFORCEMENT", &cfg.IAMEnforcement)
 	str("APPENGINE_URL", &cfg.AppEngineURL)
 	if v := getenv(EnvPrefix + "EMULATOR_HEAP_MIB"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -690,6 +693,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["log-level"] {
 		cfg.LogLevel = raw.logLevel
+	}
+	if set["iam-enforcement"] {
+		cfg.IAMEnforcement = raw.iamEnforcement
 	}
 	if set["cloudbuild-host-steps"] {
 		cfg.CloudBuildHostSteps = raw.cbHostSteps

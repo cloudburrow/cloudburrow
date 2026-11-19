@@ -485,6 +485,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		secretsSvc.interpose = append(secretsSvc.interpose, grpctransport.LogInterceptor(logger, "secretmanager"), faults.Interceptor("secretmanager"))
 		secretsSvc.requests = requestEvents(recorder, requestMetrics, "secretmanager")
 	}
+	// IAM enforcement (#1879), innermost, so the request log and fault
+	// injection see a denied call as the client does. Off by default: the
+	// interceptors pass every call through until --iam-enforcement=on.
+	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc)
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
@@ -592,6 +597,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.ServerOptions(tracing.ServerOptions()...)
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
+	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
+	// over the enforcement's evaluator.
+	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer})
 	coord.Register(rmSrv)
 	// Its folders and organization are Logging parents (#1395).
 	loggingSvc.useHierarchy(projects)
@@ -1112,6 +1120,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	fmt.Fprintf(w, "  namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(w, "  kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(w, "  mode:       %s\n", cfg.Mode)
+	fmt.Fprintf(w, "  iam:        enforcement %s\n", iamEnforcementMode(cfg))
 
 	if !cfg.IsLoopback() {
 		fmt.Fprintf(w, "\n  WARNING: bound to %s, which is not loopback.\n", cfg.BindAddress)
@@ -1213,6 +1222,11 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(stdout, "mode:       %s\n", cfg.Mode)
 	fmt.Fprintf(stdout, "bind:       %s\n", cfg.BindAddress)
+	iam := iamEnforcementMode(cfg)
+	if info, err := readRuntime(cfg); err == nil && info.IAMEnforcement != "" {
+		iam = info.IAMEnforcement
+	}
+	fmt.Fprintf(stdout, "iam:        enforcement %s\n", iam)
 	fmt.Fprintln(stdout, "\nservice persistence:")
 	for _, s := range cfg.EnabledServices() {
 		note := "survives restart in persistent mode"
