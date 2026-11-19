@@ -416,7 +416,7 @@ func TestConsoleCloudSQLVersionsAndUpgrade(t *testing.T) {
 	}
 	want := []string{"POSTGRES_9_6", "POSTGRES_10", "POSTGRES_11", "POSTGRES_12", "POSTGRES_13", "POSTGRES_14", "POSTGRES_15", "POSTGRES_16", "POSTGRES_17", "POSTGRES_18"}
 	if os.Getenv(EnvMySQL) != "" {
-		want = append(want, "MYSQL_8_0", "MYSQL_8_4")
+		want = append(want, "MYSQL_5_6", "MYSQL_5_7", "MYSQL_8_0", "MYSQL_8_4")
 	}
 	if strings.Join(picker, ",") != strings.Join(want, ",") {
 		t.Errorf("the version picker lists %v, want %v", picker, want)
