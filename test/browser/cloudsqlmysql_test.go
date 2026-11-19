@@ -31,18 +31,20 @@ func TestCloudSQLMySQLCreateQueryAndDropThroughThePage(t *testing.T) {
 	t.Cleanup(func() { consoleDo(t, http.MethodDelete, "/api/resources/cloudsql-mysql"+q+"&name="+name, "") })
 
 	p.navigate("/cloudsql-mysql" + q)
-	// One product, Cloud SQL, with a page per engine.
+	// Cloud SQL Studio for MySQL (#1860): a page of Cloud SQL, whose menu is
+	// Google's, Instances and Backups, with no current entry, as the page is
+	// opened from the mysql instance rather than the menu.
 	p.waitFor(`document.querySelectorAll("#product-nav a").length > 0`)
 	var nav struct {
 		Title   string
 		Pages   []string
-		Current string
+		Current bool
 	}
 	p.eval(`({ Title: document.querySelector("#product-nav .product-nav-title").textContent,
 	           Pages: [...document.querySelectorAll("#product-nav a")].map((a) => a.textContent),
-	           Current: document.querySelector("#product-nav a[aria-current=page]").textContent })`, &nav)
-	if nav.Title != "Cloud SQL" || strings.Join(nav.Pages, ",") != "PostgreSQL,MySQL,Instances" || nav.Current != "MySQL" {
-		t.Errorf("the product navigation is %+v, want Cloud SQL with PostgreSQL, MySQL and Instances, on MySQL", nav)
+	           Current: document.querySelector("#product-nav a[aria-current=page]") !== null })`, &nav)
+	if nav.Title != "Cloud SQL" || strings.Join(nav.Pages, ",") != "Instances,Backups" || nav.Current {
+		t.Errorf("the product navigation is %+v, want Cloud SQL with Instances and Backups", nav)
 	}
 	p.clickText("#view button.primary", "Create database")
 	p.waitFor(`document.querySelector(".modal #f-database") !== null`)
