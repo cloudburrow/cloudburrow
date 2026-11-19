@@ -207,6 +207,11 @@ type Listing struct {
 	// each are read.
 	Tabs    []Section `json:"tabs,omitempty"`
 	ListTab string    `json:"listTab,omitempty"`
+	// Text is what an action's answer says before its rows, kept as it
+	// came, line breaks and all: the text Document AI's Upload test
+	// document extracted, the transcript Speech-to-Text's Transcribe
+	// recognised (#1930).
+	Text string `json:"text,omitempty"`
 }
 
 // Provider reads live state for one service.

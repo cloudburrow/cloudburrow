@@ -1751,11 +1751,26 @@ var parityRows = []parityRow{
 			"DocumentProcessorService/GetProcessorType", "DocumentProcessorService/CreateProcessor", "DocumentProcessorService/GetProcessor",
 			"DocumentProcessorService/ListProcessors", "DocumentProcessorService/EnableProcessor", "DocumentProcessorService/DisableProcessor",
 			"DocumentProcessorService/DeleteProcessor", "DocumentProcessorService/ProcessDocument"},
-		Issue: 1930},
+		Provider: "documentai", Offers: "Document AI's menu in Google's order (#1930): Overview (documentai-overview: what runs " +
+			"locally, the processors and how many are enabled); Processor gallery (documentai-gallery: every type of Google's " +
+			"gallery, Enterprise Document OCR and Layout Parser Available (FetchProcessorTypes) with Create processor (name, region), " +
+			"each other type's page saying Not available locally and why); My processors (ListProcessors in us and eu: Processor ID, " +
+			"Name, Region, Type, Status), Create processor (type, name, region), Enable processor and Disable processor on each " +
+			"row and on its page, and Delete; a processor's page with its Overview (Name, ID, Type, Prediction endpoint), Manage " +
+			"versions (its pretrained default version, the one served) and Upload test document, which sends the file to " +
+			"ProcessDocument and shows the extracted text and its blocks, paragraphs and lines (confidence, bounding box), or the " +
+			"layout parser's blocks and chunks",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorsThroughThePage"}},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
-		Issue: 1930},
+		Provider: "speech-recognizers", Offers: "Speech-to-Text's menu (#1930): Transcriptions (speech-transcriptions: New " +
+			"transcription, a recognizer and an audio file sent to Recognize, its transcript and results shown and kept in the " +
+			"console's memory, each with a page) and Recognizers (ListRecognizers with deleted ones: Recognizer ID, Display name, " +
+			"Region, Model, Language, Status), Create recognizer (ID, region, display name, chirp, language, word timestamps, " +
+			"word-level confidence, automatic punctuation), a recognizer's page with its default recognition config, Edit " +
+			"(UpdateRecognizer), Transcribe (an uploaded audio file, its transcript), Delete, and Undelete on a deleted one",
+		Tests: []string{"TestConsoleSpeechRecognizers", "TestSpeechRecognizersThroughThePage"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

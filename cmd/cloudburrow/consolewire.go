@@ -386,6 +386,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// The AI area is always listed and never operational, so its absence is
 	// explained rather than silently missing.
 	providers = append(providers, aiProvider{})
+	// Document AI and Speech-to-Text (#1930), on the local AI endpoint's
+	// DocumentProcessorService and Speech v2 (#1799), when it runs.
+	if d.localAI != nil {
+		docs := docAI{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
+		sp := speechSvc{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
+		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs}, docAIProcessorsProvider{d: docs},
+			speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}, speechRecognizersProvider{s: sp})
+	}
 
 	kubeconfig := d.cfg.KubeconfigPath()
 	providers = append(providers,
@@ -539,6 +547,13 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 		if d.ingress != nil {
 			if addr := d.ingress(); addr != "" {
 				st.Endpoints["ingress"] = addr
+			}
+		}
+		// The local AI endpoint (#1799), which Document AI's and
+		// Speech-to-Text's pages read (#1930).
+		if d.localAI != nil {
+			if addr := d.localAI.Addr(); addr != "" {
+				st.Endpoints["localai"] = addr
 			}
 		}
 
