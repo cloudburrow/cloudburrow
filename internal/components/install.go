@@ -579,3 +579,35 @@ func (i *Installer) Kubectl(ctx context.Context, args ...string) (string, error)
 func (i *Installer) KubectlIn(ctx context.Context, stdin string, args ...string) (string, error) {
 	return i.kubectl(ctx, stdin, args...)
 }
+
+// InvokeAuthzPath is the path prefix Kourier's external authorization asks
+// the host at (#1879): the request's own path follows it.
+const InvokeAuthzPath = "/cloudburrow/v1/run-invoke"
+
+// ConfigureInvokeAuthz points Kourier's external authorization at addr
+// (host:port), so every request the gateway routes to a Cloud Run service
+// is first checked by the host's evaluator for run.routes.invoke
+// (net-kourier's KOURIER_EXTAUTHZ_* settings, HTTP protocol, failing
+// closed); "" removes it. An unchanged setting changes nothing.
+func (i *Installer) ConfigureInvokeAuthz(ctx context.Context, addr string) error {
+	args := []string{"-n", "knative-serving", "set", "env", "deployment/net-kourier-controller"}
+	if addr == "" {
+		args = append(args, "KOURIER_EXTAUTHZ_HOST-", "KOURIER_EXTAUTHZ_PROTOCOL-", "KOURIER_EXTAUTHZ_PATHPREFIX-",
+			"KOURIER_EXTAUTHZ_FAILUREMODEALLOW-", "KOURIER_EXTAUTHZ_TIMEOUT-")
+	} else {
+		args = append(args, "KOURIER_EXTAUTHZ_HOST="+addr, "KOURIER_EXTAUTHZ_PROTOCOL=http",
+			"KOURIER_EXTAUTHZ_PATHPREFIX="+InvokeAuthzPath, "KOURIER_EXTAUTHZ_FAILUREMODEALLOW=false",
+			"KOURIER_EXTAUTHZ_TIMEOUT=5000")
+	}
+	out, err := i.kubectl(ctx, "", args...)
+	if err != nil {
+		return fmt.Errorf("%w: configure Cloud Run invoke authorization: %w", ErrInstallFailed, err)
+	}
+	if strings.Contains(out, "updated") {
+		i.logf("  Cloud Run invoke authorization %s\n", map[bool]string{true: "off", false: "on"}[addr == ""])
+		if _, err := i.kubectl(ctx, "", "-n", "knative-serving", "rollout", "status", "deployment/net-kourier-controller", "--timeout=180s"); err != nil {
+			return fmt.Errorf("%w: net-kourier-controller after the authorization change: %w", ErrInstallFailed, err)
+		}
+	}
+	return nil
+}

@@ -115,6 +115,15 @@ func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStor
 // BigQuery's front (#1392) and the storage server (#1532).
 func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
 
+// invokeAuthz is the address Kourier asks before routing a request to a
+// Cloud Run service (run.routes.invoke, #1879), "" when enforcement is off.
+func (c *LifecycleComponent) invokeAuthz() string {
+	if !c.iamCheck || c.resourceManager == "" {
+		return ""
+	}
+	return c.resourceManager
+}
+
 // SetIAMCheck makes the storage server and Pub/Sub's front check each
 // request with the host's evaluator, at Resource Manager's in-cluster
 // address (#1879).
@@ -462,6 +471,9 @@ func (c *LifecycleComponent) startKnative(ctx context.Context) {
 	go func() {
 		defer close(run.done)
 		run.err = c.ensureKnative(kctx)
+		if run.err == nil {
+			run.err = c.installer.ConfigureInvokeAuthz(kctx, c.invokeAuthz())
+		}
 		if run.err == nil {
 			c.ensureMetricsServer(kctx)
 		}

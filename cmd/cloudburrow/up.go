@@ -609,6 +609,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// internal/iamcheck), through cloudburrow-host, so every decision is
 	// this evaluator's.
 	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == iamcheck.Path }, http.HandlerFunc(iamEnforcer.ServeCheck))
+	// Kourier's gateway asks before routing to a Cloud Run service
+	// (run.routes.invoke, runinvoke.go).
+	rmSrv.HandleJSON(isRunInvokeAuthz, runInvokeAuthz{e: iamEnforcer, creds: creds, run: runSvc})
 	coord.Register(rmSrv)
 	// Its folders and organization are Logging parents (#1395).
 	loggingSvc.useHierarchy(projects)
