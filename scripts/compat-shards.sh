@@ -292,8 +292,11 @@ compat_shard() {
       # MEMORYSTORE_RESOURCEMANAGER, for the principals the IAM auth tests
       # grant the connect roles to (#1614), so the Resource Manager suite
       # stays in storage.
-      SERVICES=memorystore,storage,kms
-      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER
+      # Certificate Authority Service as MEMORYSTORE_PRIVATECA, for a Redis
+      # cluster's customer-managed CA (#1907), so the privateca suite stays
+      # in its own shard.
+      SERVICES=memorystore,storage,kms,privateca
+      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER,MEMORYSTORE_PRIVATECA
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).

@@ -117,6 +117,18 @@ gcloud redis instances create cache --region=us-central1 --size=2 --tier=basic -
 and configs are set on the running server with `CONFIG SET`, so it keeps its keys, and a config
 removed goes back to its default. `DeleteInstance` removes the server, its Service and its volume.
 
+**Network** (#1906). `authorized_network` (default the project's `default` network; a bare name
+is taken as one of the instance's project), `connect_mode` (`DIRECT_PEERING`, the default, or
+`PRIVATE_SERVICE_ACCESS`) and `reserved_ip_range` are kept and returned. With `DIRECT_PEERING` the
+range is an IPv4 CIDR block of internal addresses of at least `/29` (`/28` with read replicas), as
+Google documents; with `PRIVATE_SERVICE_ACCESS` it may also be the name of an allocated range;
+unset, a `/29` (`/28`) in 10.0.0.0/8 is chosen, the same for the same instance. Anything else is
+INVALID_ARGUMENT, and none of the three can be updated. **What they cannot change here:** there
+is no VPC, so they are stored and checked only. Every local client reaches the instance at its
+`host` and `port`, the host's address (not one of the range), whatever network it is authorized
+on; the network is not looked up (Compute Engine is not served), and Google's restricted ranges
+are not checked.
+
 **Modes.** A created instance follows the instance's mode, as the server `up` runs does. In
 persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server has a volume
 of its own, and after `stop` and `up` it is READY again (REPAIRING while its server starts), with
@@ -422,6 +434,52 @@ rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery},
 ```
 
 It cannot be changed after the cluster is created, as Google's cannot.
+
+**Server CA modes** (#1907): `server_ca_mode` and `server_ca_pool`, with in-transit encryption.
+`SERVER_CA_MODE_GOOGLE_MANAGED_PER_INSTANCE_CA` (the default) is the cluster's own CA above.
+`SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA` is one CA per project and region, made with the first
+such cluster and kept: every such cluster's node certificates are its, and
+`GetSharedRegionalCertificateAuthority` (`projects/P/locations/R/sharedRegionalCertificateAuthority`)
+returns it, as each cluster's `GetClusterCertificateAuthority` does, so one bundle trusts every
+cluster of the region. `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` with
+`server_ca_pool=projects/P/locations/R/caPools/POOL` has this instance's Certificate Authority
+Service (`--services ...,privateca`, in process) issue each node's certificate when the node
+starts (a configuration-based request for a fresh P-256 key, the node's names and addresses in the
+SANs), so it is listed among the pool's certificates and chains to the pool's CAs, which the
+nodes trust; `GetClusterCertificateAuthority` is `FAILED_PRECONDITION` ("not supported for
+customer-managed CAs") and clients trust the pool's root, as Google documents. Refused as Google
+documents: a customer-managed mode without a pool ("server_ca_pool must be provided ..."), a pool
+with another mode, a pool outside the cluster's region, a pool that does not exist (`NOT_FOUND`,
+"Resource ... not found."), one with no enabled CA (`FAILED_PRECONDITION`), and either non-default
+mode without in-transit encryption. The mode and pool cannot be changed. Not enforced: the
+service agent `service-PROJECT_NUMBER@cloud-redis.iam.gserviceaccount.com` and its
+`roles/privateca.certificateRequester` on the pool, as no call here is authorized. Not served:
+the weekly rotation and `rotate_server_certificate` (a node's certificate is issued again each
+time it starts); a Memorystore for Valkey instance's server CA modes stay UNIMPLEMENTED.
+Tests: `TestRedisClusterServerCAModes` (official clients and go-redis over TLS), unit
+`TestClusterServerCA`.
+
+**Automatic failover** (#1910). Google: when a shard's primary fails, a replica is promoted
+automatically, and the failed node is replaced. Valkey's own cluster failover needs the votes of
+a majority of the primaries, so a cluster of one or two shards never fails over on its own; so
+CloudBurrow checks every node of a Redis cluster (and of a Valkey instance in `CLUSTER` mode)
+every second, `CLUSTER MYID` and `ROLE` through its tunnel. A primary that has not answered three
+checks in a row, or answers with another node ID (its pod started again, empty: a node's cluster
+configuration is not kept), has failed: unless a replica of its shard already serves as the
+primary, the replica with the greatest replication offset is promoted (`CLUSTER FAILOVER
+TAKEOVER`, which needs no votes), and `discovery_endpoints` moves to it when it is the first
+shard's. A node that started again rejoins: its settings are set again, its old identity is
+forgotten on every other node, it `MEET`s the cluster and replicates its shard's primary (emptied
+first), so the shard keeps its replica count; a shard with no replica takes the node back as its
+primary, with the slots its old identity had and what it loaded from its persistence. The cluster
+stays `ACTIVE`; writes the replica had not received are lost, as with Google's asynchronous
+replication. Roles changed in the cluster itself (Valkey's own failover, a client's `CLUSTER
+FAILOVER`) are taken into the record. Measured: failed over 3 to 4 seconds after the primary's pod
+was deleted, the node back as a replica about 10 seconds later. Tests:
+`TestRedisClusterAutomaticFailover`, `TestValkeyClusterModeAutomaticFailover` (one shard, one
+replica; official clients and go-redis), and for a Standard tier instance
+`TestMemorystoreAutomaticFailoverReadEndpoint` (its read endpoint keeps serving reads at the same
+address after the failover).
 
 **IAM auth** (#1614): with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH
 password, with no username, `default` or the principal's email, as Google documents. The token is

@@ -154,6 +154,11 @@ type clusterRecord struct {
 	// encryption (#1549); "" for none.
 	TransitCA    string `json:"transitCa,omitempty"`
 	TransitCAKey string `json:"transitCaKey,omitempty"`
+	// ServerCAMode is server_ca_mode as asked, "" for the default;
+	// ServerCAPool the customer's CA pool, whose certificates TransitCA
+	// then holds, with no TransitCAKey (clusterca.go, #1907).
+	ServerCAMode string `json:"serverCaMode,omitempty"`
+	ServerCAPool string `json:"serverCaPool,omitempty"`
 	// AdminPassword is the nodes' default user's password with token auth
 	// (clusterauth.go) or IAM auth (iamauth.go): only the admin plane's;
 	// "" for none.
@@ -227,6 +232,11 @@ type clusters struct {
 	// iam is IAM auth's token source and bookkeeping (iamauth.go); nil
 	// until UseIAM.
 	iam *iamState
+	// cas is Certificate Authority Service, for customer-managed CAs, nil
+	// until UseClusterCAS; shared are the shared CAs, by project/region
+	// (clusterca.go).
+	cas    ClusterCAS
+	shared map[string]sharedRecord
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -255,6 +265,7 @@ func (s *Server) EnableClusters(ctx context.Context, rt ClusterRuntime, dial Clu
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.clusters.autoBackups(ctx)
 	go s.clusters.maintenanceLoop(ctx)
+	go s.clusters.watchClusters(ctx, healthEvery)
 }
 
 const clusterPrefix = "clusters/"
@@ -502,8 +513,11 @@ func (s *ClusterServer) GetClusterCertificateAuthority(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	ca := r.TransitCA
+	ca, pool := r.TransitCA, r.ServerCAPool
 	c.mu.Unlock()
+	if pool != "" {
+		return nil, apierror.FailedPrecondition("GetClusterCertificateAuthority not supported for customer-managed CAs")
+	}
 	if ca == "" {
 		return nil, apierror.FailedPrecondition("cluster %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_MODE_DISABLED", name)
 	}
@@ -536,6 +550,9 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 	}
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
+	}
+	if r.Valkey == nil {
+		r.renderServerCA(out)
 	}
 	if r.KmsKey != "" {
 		out.KmsKey = proto.String(r.KmsKey)
@@ -655,6 +672,7 @@ func (r *clusterRecord) spec(server string) Spec {
 	cfg := serverConfigs(r.RedisConfigs)
 	tls := func(s Spec) Spec {
 		s.TransitCA, s.TransitCAKey, s.TransitTrust = r.TransitCA, r.TransitCAKey, r.TransitCA
+		s.ServerCAPool = r.ServerCAPool
 		if s.TransitCA != "" {
 			// Cross-instance replication's members' CAs (crossinstance.go).
 			s.TransitTrust += r.peerCAs()
@@ -813,10 +831,8 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	if err != nil {
 		return nil, err
 	}
-	if tlsOn {
-		if r.TransitCA, r.TransitCAKey, err = newCA(id, c.now()); err != nil {
-			return nil, apierror.Internal(err, "create the CA of cluster %s", name)
-		}
+	if err := c.serverCA(ctx, r, in, m[1], m[2], tlsOn); err != nil {
+		return nil, err
 	}
 	for _, p := range in.GetPscConfigs() {
 		r.PscConfigs = append(r.PscConfigs, p.GetNetwork())
