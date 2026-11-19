@@ -137,7 +137,6 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	s.prov = newMemorystoreProvisioner(s.cfg, bg)
 	s.prov.frontImage = s.frontImage
 	s.api.EnableCreate(bg, s.prov, redisadmin.Dial, db, nil)
-	s.api.PersistentMode(s.cfg.Mode == config.ModePersistent)
 	// Memorystore for Redis Cluster (#1519): a real Redis Cluster per
 	// cluster, its nodes Valkey servers in cluster mode.
 	s.api.EnableClusters(bg, s.prov, redisadmin.DialCluster, db)
@@ -327,7 +326,7 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	}
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
 		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds,
-		ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]}
+		NoPersistence: spec.NoPersistence, ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]}
 	port := components.MemorystorePort
 	if tlsFiles != nil {
 		settings.TLSCert, settings.TLSKey, settings.TLSCA = tlsFiles.Cert, tlsFiles.Key, tlsFiles.CA

@@ -190,8 +190,10 @@ const restartProbeInstance = "restart-probe"
 // CLOUDBURROW_TEST_MEMORYSTORE_EXPECT it creates restart-probe, with AUTH,
 // and writes a key; CI then restarts the instance and runs it again:
 // "present" (persistent mode) wants the instance back, READY, at an address
-// of its own with the same AUTH string and the key; "absent" (ephemeral)
-// wants no such instance.
+// of its own with the same AUTH string, and without the key: the instance
+// has no persistence, so its data is lost when its server restarts, as
+// Memorystore documents (#1911); "absent" (ephemeral) wants no such
+// instance.
 func TestMemorystoreCreatedAcrossRestart(t *testing.T) {
 	createdAcrossRestart(t, restartProbeInstance, nil)
 }
@@ -260,10 +262,16 @@ func createdAcrossRestart(t *testing.T, id string, pc *redispb.PersistenceConfig
 		}
 		return
 	}
+	if pc == nil {
+		if got, err := rc.Get(ctx, "probe").Result(); err != redis.Nil {
+			t.Fatalf("without persistence after stop/up: GET = %q, %v; want no key (redis: nil)", got, err)
+		}
+		return
+	}
 	if got, err := rc.Get(ctx, "probe").Result(); err != nil || got != "written-before-stop" {
 		t.Fatalf("persistent mode after stop/up: GET = %q, %v; want the key written before stop", got, err)
 	}
-	if pc != nil {
+	{
 		if inst.GetPersistenceConfig().GetPersistenceMode() != pc.GetPersistenceMode() {
 			t.Errorf("after stop/up persistence_config = %v", inst.GetPersistenceConfig())
 		}

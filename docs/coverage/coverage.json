@@ -6757,13 +6757,14 @@
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
-          "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
-          "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:208 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
           "test/compat/memorystoreeol1524_test.go:28 TestMemorystoreEndOfLifeVersions",
           "test/compat/memorystoreha_test.go:173 TestGcloudRedisFailover",
           "test/compat/memorystoreha_test.go:63 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
+          "test/compat/memorystorepersistence1911_test.go:28 TestMemorystoreDataAcrossServerRestart",
           "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
@@ -6828,9 +6829,10 @@
           "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
-          "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
-          "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:208 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystoremaintenance_test.go:68 TestMemorystoreRescheduleMaintenance",
+          "test/compat/memorystorepersistence1911_test.go:28 TestMemorystoreDataAcrossServerRestart",
           "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
@@ -6848,7 +6850,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
-          "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
@@ -6876,7 +6878,8 @@
         "tests": [
           "test/compat/memorystoremaintenance_test.go:176 TestMemorystoreStandardTierMaintenanceFailsOver",
           "test/compat/memorystoremaintenance_test.go:68 TestMemorystoreRescheduleMaintenance",
-          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance"
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
+          "test/compat/memorystorepersistence1911_test.go:28 TestMemorystoreDataAcrossServerRestart"
         ]
       },
       {

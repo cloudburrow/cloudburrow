@@ -496,7 +496,7 @@ service.
 | Cloud KMS | **Yes**: a key, its versions' states (enabled, disabled, scheduled for destruction) and a ciphertext it decrypts | `TestKMSAcrossRestart` |
 | Datastore | **Yes**: an entity | `TestDatastoreAcrossRestart` |
 | Firestore | **Yes**: documents in the default database and in a named one, which the Admin API still lists | `TestFirestoreAcrossRestart` |
-| Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string and its key, with append-only or with RDB persistence; Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
+| Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string, with its key with RDB persistence and **empty** without (#1911); Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
 | Cloud SQL for PostgreSQL | **Yes**: a table's row | `TestCloudSQLAcrossRestart` |
 | Cloud SQL for MySQL | **Yes**: a table's row | `TestCloudSQLMySQLAcrossRestart` |
 | **Pub/Sub** | **No**, as `cloudburrow status` says: Google's emulator loses its state on restart even when given `--data-dir`, which we measured | none |

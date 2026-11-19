@@ -45,6 +45,10 @@ type Spec struct {
 	// that many seconds have passed with a change, in place of the
 	// CloudBurrow instance's mode's own.
 	RDBSeconds int
+	// NoPersistence is a Memorystore for Redis instance's persistence
+	// DISABLED (#1911): its server keeps no file, whatever the CloudBurrow
+	// instance's mode, so its data is lost when the server restarts.
+	NoPersistence bool
 	// ReplicaOf, host:port, starts the server as a replica of it: a
 	// Standard tier node (#1412), which a failover or the automatic
 	// failover makes a primary.
@@ -165,7 +169,8 @@ type record struct {
 func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
 		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version(),
-		TransitCA: r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM()}
+		NoPersistence: r.Persistence.seconds() == 0,
+		TransitCA:     r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM()}
 }
 
 // binary is the prefix of the server's programs: valkey-server, ...
@@ -197,17 +202,6 @@ type instances struct {
 	// kms is Cloud KMS, for customer_managed_key; nil when it is not
 	// enabled (#1463).
 	kms KeyService
-	// aof is whether a server keeps an append-only file when it has no
-	// RDB persistence: the CloudBurrow instance's persistent mode.
-	aof bool
-}
-
-// PersistentMode says the CloudBurrow instance is persistent, so a server
-// without RDB persistence keeps an append-only file (#1384).
-func (s *Server) PersistentMode(on bool) {
-	if s.created != nil {
-		s.created.aof = on
-	}
 }
 
 // EnableCreate makes CreateInstance, UpdateInstance and DeleteInstance

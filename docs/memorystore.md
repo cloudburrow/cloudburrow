@@ -118,9 +118,17 @@ and configs are set on the running server with `CONFIG SET`, so it keeps its key
 removed goes back to its default. `DeleteInstance` removes the server, its Service and its volume.
 
 **Modes.** A created instance follows the instance's mode, as the server `up` runs does. In
-persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server keeps an
-append-only file on a volume of its own, and after `stop` and `up` it is READY again (REPAIRING
-while its server starts), with its AUTH string and its keys. In ephemeral mode nothing is kept:
+persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server has a volume
+of its own, and after `stop` and `up` it is READY again (REPAIRING while its server starts), with
+its AUTH string. **Its keys follow its `persistence_config`, as on Memorystore (#1911)**: without
+persistence (`DISABLED`, the default) the server keeps no file (`--save "" --appendonly no`, and
+whatever a previous run left on the volume is removed before it starts), so a Basic tier
+instance's data is lost whenever its server restarts (a maintenance, a failed pod, `stop` and
+`up`), as Google documents of an instance without RDB snapshots; with RDB the data comes back
+from the last snapshot, written at the snapshot period (`save <period> 1`) and, as Valkey and
+Redis do, when the server stops gracefully. A Standard tier instance's node that restarts syncs
+from the current primary (§5), so only a restart of every node at once (`stop` and `up`) loses
+the data of an instance without persistence. In ephemeral mode nothing is kept:
 `up` removes the servers a previous run left, keeping their volumes as the server `up` runs keeps
 its own, so a later persistent run has them back.
 
@@ -129,7 +137,9 @@ The console's Memorystore page lists the instances and has **Create instance**, 
 the instance `up` runs; the API itself has no flush. `ExportInstance` writes a `BGSAVE` snapshot
 to a `gs://` object; `ImportInstance` replaces the instance's data with an RDB file's, loaded by
 the server itself (`--services memorystore,storage`). `persistence_config` RDB sets the server's
-save point to the snapshot period, in place of the append-only file. `UpgradeInstance` moves an instance to a later version (REDIS_3_2 is Redis 3.2, REDIS_4_0 Redis 4.0, REDIS_5_0 Redis 5.0, REDIS_6_X Redis 6.2, REDIS_7_0 Redis
+save point to the snapshot period; `DISABLED` removes it (tests:
+`TestMemorystoreDataAcrossServerRestart`, `TestMemorystoreCreatedAcrossRestart`,
+`TestMemorystoreRDBAcrossRestart`). `UpgradeInstance` moves an instance to a later version (REDIS_3_2 is Redis 3.2, REDIS_4_0 Redis 4.0, REDIS_5_0 Redis 5.0, REDIS_6_X Redis 6.2, REDIS_7_0 Redis
 7.0, REDIS_7_2 Valkey 8.1) with its data, and **Upgrade** on its page does too (#1386).
 `FailoverInstance` promotes a Standard tier instance's replica (§5); `RescheduleMaintenance` moves
 a scheduled maintenance event (§4a). See

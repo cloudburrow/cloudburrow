@@ -109,15 +109,14 @@ func (p *persistence) render(now time.Time) *redispb.PersistenceConfig {
 
 // persist applies p to r's running server: RDB's save point, without the
 // append-only file, and a snapshot now, so the file on disk has the data
-// at once; or, DISABLED, no save point and the mode's own AOF back.
+// at once; or, DISABLED, no save point and no append-only file, so the
+// data is lost when the server restarts, as Memorystore documents (#1911).
 func (c *instances) persist(ctx context.Context, r *record, p *persistence) error {
 	dp := c.dial(r.addr, r.AuthString, r.caPEM())
 	settings := map[string]string{"save": "", "appendonly": "no"}
 	dpAll := func(ctx context.Context, s map[string]string) error { return c.configAll(ctx, r, s) }
 	if s := p.seconds(); s > 0 {
 		settings["save"] = strconv.Itoa(s) + " 1"
-	} else if c.aof {
-		settings["appendonly"] = "yes"
 	}
 	if err := dpAll(ctx, settings); err != nil {
 		return apierror.InvalidArgument("the server refused the change: %v", err)
