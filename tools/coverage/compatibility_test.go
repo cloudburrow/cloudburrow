@@ -30,6 +30,7 @@ var compatSections = map[string]string{
 	// Served on the Run port beside them (#1521).
 	"securesourcemanager": "## Cloud Run — `google.cloud.run.v2`",
 	"developerconnect":    "## Cloud Run — `google.cloud.run.v2`",
+	"eventarc":            "## Cloud Run — `google.cloud.run.v2`",
 	"functions":           "## Functions and source builds",
 	"functionsv1":         "## Functions and source builds",
 	"scheduler":           "## Cloud Scheduler — `google.cloud.scheduler.v1`",

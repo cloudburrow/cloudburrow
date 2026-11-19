@@ -232,6 +232,8 @@ cloud.google.com/go/edgecontainer v1.10.0/go.mod h1:g4xb11IzVWa9peXNTlnNguKP8uJV
 cloud.google.com/go/errorreporting v0.9.0/go.mod h1:V7ojx7z76JITDZNGyDNkIIa9nNEkQzF6Yj+VHl2YF84=
 cloud.google.com/go/essentialcontacts v1.12.0/go.mod h1:W8fTL17jP6vmsPHQaCT5rOjWGohEssuqDUroxnjST0A=
 cloud.google.com/go/eventarc v1.25.0/go.mod h1:ncY2NKHKiX+sUjIfxVozrivvmJQ4HWo2znxms7AxlP8=
+cloud.google.com/go/eventarc v1.27.1 h1:Wfcfv0AmfLT7/dEqiLNZVIaO4/X2m/7y5HgKBz+vkdI=
+cloud.google.com/go/eventarc v1.27.1/go.mod h1:n0sJplVRL28pQLNOswt1hWbb46LBsa7j4muMwXBiryU=
 cloud.google.com/go/filestore v1.16.0/go.mod h1:szr35omqptDEuXgBbJ8PdVdYM3lf/Md96kNufWr1tVs=
 cloud.google.com/go/firestore v1.24.0/go.mod h1:5aojyjN4olKUnBZDCRWwM+NsdrrCX3t1qfyERZGOonM=
 cloud.google.com/go/firestore v1.26.0 h1:7Y6wn4aj5JXl2DAsKSTpLzYKPrfrIbhgQnHDjNOJ3sQ=

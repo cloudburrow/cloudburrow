@@ -66,6 +66,7 @@ func loadEventProbe(ctx context.Context, t *testing.T) {
 type probedEvent struct {
 	Headers map[string]string `json:"headers"`
 	Data    string            `json:"data"`
+	Path    string            `json:"path"`
 }
 
 // probedEvents polls the probe's /events until want reports one matches,

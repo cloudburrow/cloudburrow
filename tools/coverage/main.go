@@ -70,6 +70,7 @@ import (
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
+	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
@@ -123,6 +124,9 @@ var areas = []area{
 	// host whose pushes run Cloud Build triggers.
 	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
 	{Key: "developerconnect", Title: "Developer Connect", Own: true, Services: []string{"google.cloud.developerconnect.v1.DeveloperConnect"}},
+	// Eventarc (#1877), on the Run port: triggers delivering Pub/Sub and
+	// Cloud Storage events to Cloud Run as CloudEvents.
+	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.

@@ -1996,6 +1996,225 @@
     ]
   },
   {
+    "Key": "eventarc",
+    "Title": "Eventarc",
+    "counts": {
+      "Unimplemented": 32,
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreateChannel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreateChannelConnection",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreateEnrollment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreateGoogleApiSource",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreateMessageBus",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreatePipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/CreateTrigger",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeleteChannel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeleteChannelConnection",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeleteEnrollment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeleteGoogleApiSource",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeleteMessageBus",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeletePipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/DeleteTrigger",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetChannel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetChannelConnection",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetEnrollment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetGoogleApiSource",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetGoogleChannelConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetMessageBus",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetPipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetProvider",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/GetTrigger",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListChannelConnections",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListChannels",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListEnrollments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListGoogleApiSources",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListMessageBusEnrollments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListMessageBuses",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListPipelines",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListProviders",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/ListTriggers",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdateChannel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdateEnrollment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdateGoogleApiSource",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdateGoogleChannelConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdateMessageBus",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdatePipeline",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.eventarc.v1.Eventarc/UpdateTrigger",
+        "status": "Verified",
+        "tests": [
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "functions",
     "Title": "Cloud Functions v2",
     "counts": {
@@ -2007,8 +2226,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
@@ -2020,8 +2239,8 @@
         "tests": [
           "test/compat/consolefunctionsv1_test.go:96 TestConsoleFunctionsV1",
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
@@ -2048,8 +2267,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
@@ -2073,8 +2292,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       }

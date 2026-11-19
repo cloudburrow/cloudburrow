@@ -300,6 +300,8 @@ func (r *runService) Start(ctx context.Context) error {
 		ssm.Register(g)
 		devConnect.Register(g)
 		functions.Register(g)
+		// Eventarc (#1877), on the functions' event transport.
+		functions.Eventarc().Register(g)
 	}); err != nil {
 		return err
 	}

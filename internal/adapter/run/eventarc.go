@@ -265,6 +265,13 @@ func (f *FunctionsServer) makeTrigger(ctx context.Context, fnName string, spec *
 	triggerID := fmt.Sprintf("%s-%06d", id, rand.IntN(1000000))
 	spec = proto.Clone(spec).(*functionspb.EventTrigger)
 	spec.Trigger = fmt.Sprintf("projects/%s/locations/%s/triggers/%s", project, spec.GetTriggerRegion(), triggerID)
+	return f.makeTransport(ctx, project, region, triggerID, spec)
+}
+
+// makeTransport makes a trigger's Pub/Sub transport, and for Cloud Storage
+// its topic and the bucket's notification, pushing to this port for the
+// trigger spec.Trigger names.
+func (f *FunctionsServer) makeTransport(ctx context.Context, project, region, triggerID string, spec *functionspb.EventTrigger) (*liveTrigger, error) {
 	base := ""
 	if f.events.PushBase != nil {
 		base = f.events.PushBase()
@@ -413,6 +420,11 @@ func (f *FunctionsServer) push(w http.ResponseWriter, r *http.Request) {
 	trigger := strings.TrimPrefix(r.URL.Path, eventarcPushPrefix)
 	fn, ok := triggerFunction(trigger)
 	if !ok {
+		// A trigger made through Eventarc's own API (#1877).
+		if t, spec, ok := eaTriggerOf(trigger); ok {
+			f.pushEventarc(w, r, t, spec)
+			return
+		}
 		// An unknown trigger's push is acknowledged: its subscription is
 		// being torn down, and nothing would ever take it.
 		w.WriteHeader(http.StatusNoContent)

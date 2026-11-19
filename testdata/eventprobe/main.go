@@ -16,6 +16,9 @@ import (
 type event struct {
 	Headers map[string]string `json:"headers"`
 	Data    string            `json:"data"`
+	// Path is the request's path: an Eventarc trigger's destination can
+	// name one (#1877).
+	Path string `json:"path"`
 }
 
 func main() {
@@ -33,7 +36,7 @@ func main() {
 			return
 		}
 		b, _ := io.ReadAll(r.Body)
-		e := event{Headers: map[string]string{}, Data: string(b)}
+		e := event{Headers: map[string]string{}, Data: string(b), Path: r.URL.Path}
 		for k, v := range r.Header {
 			if lk := strings.ToLower(k); strings.HasPrefix(lk, "ce-") || lk == "authorization" || lk == "content-type" {
 				e.Headers[lk] = strings.Join(v, ",")
