@@ -8854,6 +8854,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
@@ -8968,6 +8969,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
@@ -9008,6 +9010,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
@@ -9016,6 +9019,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/optional_test.go:197 TestBigtableTableAndRows",
           "test/compat/terraform_batch5_test.go:267 TestTerraformBigtableGCPolicy"
         ]
@@ -9089,7 +9093,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance",
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas"
         ]
       },
       {
@@ -9104,6 +9109,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
           "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates",
           "test/compat/bigtablesqlgeo_test.go:32 TestBigtableSQLGeography"
@@ -9171,6 +9177,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
+          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
           "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates",
           "test/compat/bigtablesqlgeo_test.go:32 TestBigtableSQLGeography"

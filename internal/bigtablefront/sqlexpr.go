@@ -255,6 +255,9 @@ func (c *colRef) eval(e *env) (any, error) {
 	if c.local > 0 {
 		return c.evalLocal(e), nil
 	}
+	if ke, bad := e.row[c.idx].(keyDecodeErr); bad {
+		return nil, ke
+	}
 	return e.row[c.idx], nil
 }
 func (c *colRef) String() string { return "col:" + c.name }
