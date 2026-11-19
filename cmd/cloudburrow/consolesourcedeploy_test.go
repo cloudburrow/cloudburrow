@@ -66,8 +66,10 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 		t.Fatal(err)
 	}
 	repos, _ := artifactRegistryProvider{defaultProject: proj}.List(ctx, "")
-	if len(repos.Items) != 1 || repos.Items[0].Name != "console-repo" ||
-		repos.Items[0].Fields["URL"] != "us-central1-docker.pkg.dev/"+proj+"/console-repo" {
+	// Google's columns (#1855); the URL is on the repository's page.
+	if len(repos.Items) != 1 || repos.Items[0].Name != "console-repo" || repos.Items[0].Fields["Format"] != "Docker" ||
+		repos.Items[0].Fields["Mode"] != "Standard" || repos.Items[0].Fields["Location"] != "us-central1" ||
+		repos.Items[0].Fields["Encryption"] != "Google-managed key" {
 		t.Errorf("repositories = %+v", repos.Items)
 	}
 	// UpdateRepository (#1304) changes the description and labels the page

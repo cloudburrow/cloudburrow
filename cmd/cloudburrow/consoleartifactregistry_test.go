@@ -45,7 +45,12 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	digest, _ := img.Digest()
 	p := artifactRegistryProvider{defaultProject: "console-ar"}
 	d, err := p.Detail(ctx, "", []string{"images"})
-	if err != nil || len(d.Sections) != 3 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" {
+	if err != nil || len(d.Sections) != 4 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" ||
+		d.Sections[1].ID != "setup" || !strings.Contains(d.Sections[1].Text, "docker push us-central1-docker.pkg.localhost:") {
+		t.Fatalf("repository page = %+v, %v", d, err)
+	}
+	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 2 ||
+		d.Sections[1].ID != "manifest" || !strings.Contains(d.Sections[1].Text, `"layers"`) {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
 	d, err = p.Detail(ctx, "", []string{"images", "web"})
@@ -70,26 +75,31 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	if d, _ := p.Detail(ctx, "", []string{"images", "web"}); !strings.Contains(fmt.Sprint(d.Summary), "Web front end") {
 		t.Errorf("display name = %v", d.Summary)
 	}
-	for action, v := range map[string]map[string]string{"add-rule": {"id": "deny-all", "action": "DENY"}, "vpcsc": {"policy": "ALLOW"}} {
-		if err := p.ActAt(ctx, "", []string{"images"}, action, v); err != nil {
-			t.Fatalf("%s: %v", action, err)
-		}
+	if err := p.ActAt(ctx, "", []string{"images"}, "add-rule", map[string]string{"id": "deny-all", "action": "DENY"}); err != nil {
+		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[1].Listing.Items) != 1 || !strings.Contains(fmt.Sprint(d.Summary), "ALLOW") {
-		t.Errorf("rules = %+v, summary %v", d.Sections[1].Listing.Items, d.Summary)
+	// The location's VPC-SC policy, its platform logs and the project's
+	// pull percent are on the Settings page (#1855).
+	sp := artifactRegistrySettingsProvider{defaultProject: "console-ar"}
+	if err := sp.ActAt(ctx, "", nil, "vpcsc", map[string]string{"location": "us-central1", "policy": "ALLOW"}); err != nil {
+		t.Fatal(err)
+	}
+	settings := func() string { l, _ := sp.List(ctx, ""); return fmt.Sprint(l.Items) }
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[2].Listing.Items) != 1 || !strings.Contains(settings(), "VPC-SC policy (us-central1)  map[Scope:us-central1 Value:ALLOW]") {
+		t.Errorf("rules = %+v, settings %v", d.Sections[2].Listing.Items, settings())
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete-rule", map[string]string{"id": "deny-all"}); err != nil {
 		t.Fatal(err)
 	}
-	_ = p.ActAt(ctx, "", []string{"images"}, "vpcsc", map[string]string{"policy": "DENY"})
+	_ = sp.ActAt(ctx, "", nil, "vpcsc", map[string]string{"location": "us-central1", "policy": "DENY"})
 	// #1519: the location's projectConfig platform logs.
-	if err := p.ActAt(ctx, "", []string{"images"}, "platform-logs", map[string]string{"state": "ENABLED", "severity": "WARNING"}); err != nil {
+	if err := sp.ActAt(ctx, "", nil, "platform-logs", map[string]string{"location": "us-central1", "state": "ENABLED", "severity": "WARNING"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"images"}); !strings.Contains(fmt.Sprint(d.Summary), "ENABLED, severity WARNING") {
-		t.Errorf("platform logs = %v", d.Summary)
+	if !strings.Contains(settings(), "ENABLED, severity WARNING") {
+		t.Errorf("platform logs = %v", settings())
 	}
-	_ = p.ActAt(ctx, "", []string{"images"}, "platform-logs", map[string]string{"state": "LOGGING_STATE_UNSPECIFIED", "severity": "SEVERITY_LEVEL_UNSPECIFIED"})
+	_ = sp.ActAt(ctx, "", nil, "platform-logs", map[string]string{"location": "us-central1", "state": "LOGGING_STATE_UNSPECIFIED", "severity": "SEVERITY_LEVEL_UNSPECIFIED"})
 	file := d.Sections[0].Listing.Items[0].Name
 	if err := p.ActAt(ctx, "", vpath, "annotate-file", map[string]string{"file": file, "annotations": "scan=ok"}); err != nil {
 		t.Fatal(err)
@@ -100,17 +110,17 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	if err := p.ActAt(ctx, "", vpath, "attach", map[string]string{"id": "sbom", "type": "application/spdx", "file": file}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[2].Listing.Items) != 1 {
-		t.Errorf("attachments = %+v", d.Sections[2].Listing.Items)
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[3].Listing.Items) != 1 {
+		t.Errorf("attachments = %+v", d.Sections[3].Listing.Items)
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete-attachment", map[string]string{"id": "sbom"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.ActAt(ctx, "", []string{"images"}, "pull-percent", map[string]string{"percent": "10"}); err != nil {
+	if err := sp.ActAt(ctx, "", nil, "pull-percent", map[string]string{"percent": "10"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"images"}); !strings.Contains(fmt.Sprint(d.Summary), "pull percent 10") {
-		t.Errorf("project settings = %v", d.Summary)
+	if !strings.Contains(settings(), "Pull percent  map[Scope:console-ar Value:10]") {
+		t.Errorf("project settings = %v", settings())
 	}
 	if err := p.ActAt(ctx, "", vpath, "export", map[string]string{"path": "b"}); err == nil || !strings.Contains(err.Error(), "Cloud Storage") {
 		t.Errorf("export with no Cloud Storage = %v", err)

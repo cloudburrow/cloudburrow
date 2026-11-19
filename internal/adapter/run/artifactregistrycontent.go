@@ -39,8 +39,19 @@ func UseRegistry(st *registry.Store) {
 	registryState.store = st
 	registryState.mu.Unlock()
 	if st != nil {
+		st.Immutable = immutableTags
 		loadRepositories(st)
 	}
+}
+
+// immutableTags reports whether the stored DOCKER repository r has
+// docker_config.immutable_tags on, for the store's enforcement. The store
+// calls it under its own lock; it takes only the repositories' lock.
+func immutableTags(r registry.Repo) bool {
+	name := "projects/" + r.Project + "/locations/" + r.Location + "/repositories/" + r.Repository
+	repositories.mu.Lock()
+	defer repositories.mu.Unlock()
+	return repositories.repos[name].GetDockerConfig().GetImmutableTags()
 }
 
 // RegistryStore is the registry's store, or nil when none is set.
@@ -179,6 +190,8 @@ func storeErr(err error) error {
 		return apierror.NotFound("Requested entity was not found.")
 	case errors.Is(err, registry.ErrTagInvalid):
 		return apierror.InvalidArgument("%v", err)
+	case errors.Is(err, registry.ErrTagImmutable):
+		return apierror.FailedPrecondition("%v", err)
 	}
 	return err
 }

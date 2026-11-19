@@ -194,12 +194,21 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	}
 	// Cleanup policies are stored and read back, as documented; nothing
 	// here runs them, as Artifact Registry runs them only daily.
-	if r.GetKmsKeyName() != "" {
-		return nil, apierror.Unimplemented("kms_key_name is not supported")
+	if err := checkRepositoryKMSKey(req.GetParent(), r.GetKmsKeyName()); err != nil {
+		return nil, err
 	}
 	if fc := r.GetFormatConfig(); fc != nil {
-		if _, maven := fc.(*arpb.Repository_MavenConfig); !maven || r.GetFormat() != arpb.Repository_MAVEN {
-			return nil, apierror.Unimplemented("format config %T is not supported: only a MAVEN repository's maven_config is", fc)
+		switch fc.(type) {
+		case *arpb.Repository_MavenConfig:
+			if r.GetFormat() != arpb.Repository_MAVEN {
+				return nil, apierror.InvalidArgument("maven_config is only for a MAVEN repository")
+			}
+		case *arpb.Repository_DockerConfig:
+			if r.GetFormat() != arpb.Repository_DOCKER {
+				return nil, apierror.InvalidArgument("docker_config is only for a DOCKER repository")
+			}
+		default:
+			return nil, apierror.Unimplemented("format config %T is not supported: a MAVEN repository's maven_config and a DOCKER repository's docker_config are", fc)
 		}
 	}
 	name := req.GetParent() + "/repositories/" + req.GetRepositoryId()
@@ -235,12 +244,15 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 	paths := req.GetUpdateMask().GetPaths()
 	if len(paths) == 0 {
 		paths = []string{"description", "labels", "cleanup_policies", "cleanup_policy_dry_run"}
+		if in.GetDockerConfig() != nil {
+			paths = append(paths, "docker_config")
+		}
 	}
 	for _, p := range paths {
 		switch p {
-		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run":
+		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run", "docker_config", "docker_config.immutable_tags":
 		default:
-			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels and cleanup policies can change", p)
+			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels, cleanup policies and docker_config.immutable_tags can change", p)
 		}
 	}
 	repositories.mu.Lock()
@@ -260,6 +272,12 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 			r.CleanupPolicies = in.GetCleanupPolicies()
 		case "cleanup_policy_dry_run":
 			r.CleanupPolicyDryRun = in.GetCleanupPolicyDryRun()
+		case "docker_config", "docker_config.immutable_tags":
+			if r.GetFormat() != arpb.Repository_DOCKER {
+				return nil, apierror.InvalidArgument("docker_config is only for a DOCKER repository")
+			}
+			r.FormatConfig = &arpb.Repository_DockerConfig{DockerConfig: &arpb.Repository_DockerRepositoryConfig{
+				ImmutableTags: in.GetDockerConfig().GetImmutableTags()}}
 		}
 	}
 	r.UpdateTime = timestamppb.New(time.Now())
@@ -360,6 +378,30 @@ func loadRepositories(st *registry.Store) {
 	loadRepositoryPoliciesLocked(st)
 	loadARConfig(st)
 	loadFormats(st)
+}
+
+// repositoryKMSKeyRE is a kms_key_name: a Cloud KMS CryptoKey.
+var repositoryKMSKeyRE = regexp.MustCompile(`^projects/[^/]+/locations/([^/]+)/keyRings/[^/]+/cryptoKeys/[^/]+$`)
+
+// checkRepositoryKMSKey checks a new repository's kms_key_name: a
+// CryptoKey name in the repository's own location, as Google requires of
+// a customer-managed encryption key. The key is stored and read back; it
+// encrypts nothing here, as the registry's content-addressed blobs are
+// shared across repositories and kept as pushed, and it cannot change
+// after creation (UpdateRepository refuses the path).
+func checkRepositoryKMSKey(parent, key string) error {
+	if key == "" {
+		return nil
+	}
+	m := repositoryKMSKeyRE.FindStringSubmatch(key)
+	if m == nil {
+		return apierror.InvalidArgument("invalid kms_key_name %q: it must be projects/{project}/locations/{location}/keyRings/{key_ring}/cryptoKeys/{key}", key)
+	}
+	_, loc, _ := resource.ParseLocation(parent)
+	if m[1] != loc {
+		return apierror.InvalidArgument("kms_key_name %q is in location %s: a repository's key must be in its own location, %s", key, m[1], loc)
+	}
+	return nil
 }
 
 // checkMode accepts a standard repository; a remote one whose upstream is

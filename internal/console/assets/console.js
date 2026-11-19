@@ -55,6 +55,12 @@ const ROUTES = [
     product: "secure-source-manager", productTitle: "Secure Source Manager" },
   { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", kind: "Repository", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
+  // Artifact Registry's menu (#1855): Repositories, then Settings (the
+  // project's settings and each location's VPC-SC policy and platform logs).
+  // Not under /artifact-registry/, where it would shadow a repository named
+  // "settings".
+  { path: "/artifact-registry-settings", service: "artifact-registry-settings", icon: "artifact-registry", title: "Settings",
+    section: "CI/CD", product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
   { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
     product: "functions", productTitle: "Cloud Functions" },
@@ -5950,12 +5956,16 @@ function groupEntry(f, id, errorId, helpId) {
     const r = { controls: [] };
     const cells = sub.map((s) => {
       const label = `${s.label} ${n}`;
+      // A select cell (#1855: a cleanup policy's Policy type and Tag state).
       const c = s.type === "textarea"
         ? el("textarea", { rows: "2", "aria-label": label, spellcheck: "false" })
-        : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
-                        autocomplete: "off", spellcheck: "false" });
+        : s.type === "select"
+          ? el("select", { "aria-label": label },
+              ...(s.options || []).map((o) => el("option", { value: o, text: (s.optionLabels || {})[o] || o || "None" })))
+          : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
+                          autocomplete: "off", spellcheck: "false" });
       if (s.type === "checkbox") c.checked = value[s.name] === "true";
-      else c.value = value[s.name] || s.default || "";
+      else c.value = value[s.name] || s.default || (s.type === "select" ? (s.options || [""])[0] : "");
       c.addEventListener("input", sync);
       c.addEventListener("change", sync);
       r.controls.push(c);

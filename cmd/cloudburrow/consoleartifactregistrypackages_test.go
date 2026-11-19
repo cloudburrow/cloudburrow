@@ -95,7 +95,9 @@ func TestConsoleArtifactRegistryPackageFormats(t *testing.T) {
 		}
 		// MAVEN, NPM and PYTHON pages also list ListMavenArtifacts',
 		// ListNpmPackages' or ListPythonPackages' view.
-		if wantFormat := repo != "gen"; wantFormat != (len(d.Sections) == 2) || (wantFormat && len(d.Sections[1].Listing.Items) != 1) {
+		// Setup instructions are the last tab (#1855).
+		if wantFormat := repo != "gen"; wantFormat != (len(d.Sections) == 3) || (wantFormat && len(d.Sections[1].Listing.Items) != 1) ||
+			d.Sections[len(d.Sections)-1].ID != "setup" || !strings.Contains(d.Sections[len(d.Sections)-1].Text, "console-pkg") {
 			t.Errorf("%s repository page sections = %+v", repo, d.Sections)
 		}
 		d, err = p.Detail(ctx, "", []string{repo, want[0]})

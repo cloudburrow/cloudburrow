@@ -11,12 +11,15 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	artifactregistry "cloud.google.com/go/artifactregistry/apiv1"
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
@@ -156,4 +159,148 @@ func (p artifactRegistryProvider) editCleanup(ctx context.Context, name string, 
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cleanup_policies", "cleanup_policy_dry_run"}}})
 		return err
 	})
+}
+
+// arCleanupToGroup is a repository's cleanup policies as the Cleanup
+// policy rows of Edit Repository, sorted by name.
+func arCleanupToGroup(r *arpb.Repository) string {
+	ids := make([]string, 0, len(r.GetCleanupPolicies()))
+	for id := range r.GetCleanupPolicies() {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var rows []map[string]string
+	for _, id := range ids {
+		p := r.GetCleanupPolicies()[id]
+		row := map[string]string{"name": id, "type": arPolicyDelete, "tagState": arTagAny}
+		if p.GetAction() == arpb.CleanupPolicy_KEEP {
+			row["type"] = arPolicyKeep
+		}
+		if mr := p.GetMostRecentVersions(); mr != nil {
+			row["type"] = arPolicyMostRecnt
+			row["packagePrefixes"] = strings.Join(mr.GetPackageNamePrefixes(), ",")
+			if mr.KeepCount != nil {
+				row["keepCount"] = strconv.Itoa(int(mr.GetKeepCount()))
+			}
+		}
+		if c := p.GetCondition(); c != nil {
+			switch c.GetTagState() {
+			case arpb.CleanupPolicyCondition_TAGGED:
+				row["tagState"] = arTagTagged
+			case arpb.CleanupPolicyCondition_UNTAGGED:
+				row["tagState"] = arTagUntagged
+			}
+			row["tagPrefixes"] = strings.Join(c.GetTagPrefixes(), ",")
+			row["versionPrefixes"] = strings.Join(c.GetVersionNamePrefixes(), ",")
+			row["packagePrefixes"] = strings.Join(c.GetPackageNamePrefixes(), ",")
+			if d := c.GetOlderThan(); d != nil {
+				row["olderThan"] = arDurationText(d.AsDuration())
+			}
+			if d := c.GetNewerThan(); d != nil {
+				row["newerThan"] = arDurationText(d.AsDuration())
+			}
+		}
+		rows = append(rows, row)
+	}
+	return console.FormatGroup(rows)
+}
+
+// arDurationText is a whole duration as the page's 30d, 12h, 5m or 90s.
+func arDurationText(d time.Duration) string {
+	s := int64(d / time.Second)
+	switch {
+	case s > 0 && s%86400 == 0:
+		return strconv.FormatInt(s/86400, 10) + "d"
+	case s > 0 && s%3600 == 0:
+		return strconv.FormatInt(s/3600, 10) + "h"
+	case s > 0 && s%60 == 0:
+		return strconv.FormatInt(s/60, 10) + "m"
+	}
+	return strconv.FormatInt(s, 10) + "s"
+}
+
+// arParseDuration reads 30d, 12h, 5m or 90s.
+func arParseDuration(field, v string) (*durationpb.Duration, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, nil
+	}
+	unit := map[byte]time.Duration{'s': time.Second, 'm': time.Minute, 'h': time.Hour, 'd': 24 * time.Hour}[v[len(v)-1]]
+	n, err := strconv.ParseInt(v[:len(v)-1], 10, 64)
+	if unit == 0 || err != nil || n < 0 {
+		return nil, fmt.Errorf("%s %q must be a duration such as 30d, 12h, 5m or 90s", field, v)
+	}
+	return durationpb.New(time.Duration(n) * unit), nil
+}
+
+func arPrefixes(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// arCleanupFromGroup reads the Cleanup policy rows into the map
+// UpdateRepository takes, refusing what Google's page refuses: a name used
+// twice, tag prefixes without Tagged, a Keep most recent versions policy
+// without Keep count.
+func arCleanupFromGroup(group string) (map[string]*arpb.CleanupPolicy, error) {
+	rows, err := console.ParseGroup(group)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup policies: %w", err)
+	}
+	out := map[string]*arpb.CleanupPolicy{}
+	for i, row := range rows {
+		id := strings.TrimSpace(row["name"])
+		if id == "" {
+			return nil, fmt.Errorf("cleanup policy %d has no name", i+1)
+		}
+		if _, dup := out[id]; dup {
+			return nil, fmt.Errorf("cleanup policy %q is named twice: names are unique in a repository", id)
+		}
+		p := &arpb.CleanupPolicy{Id: id}
+		switch row["type"] {
+		case arPolicyMostRecnt:
+			n, err := strconv.Atoi(strings.TrimSpace(row["keepCount"]))
+			if err != nil || n < 1 {
+				return nil, fmt.Errorf("cleanup policy %q: Keep most recent versions needs a Keep count of at least 1", id)
+			}
+			kc := int32(n)
+			p.Action = arpb.CleanupPolicy_KEEP
+			p.ConditionType = &arpb.CleanupPolicy_MostRecentVersions{MostRecentVersions: &arpb.CleanupPolicyMostRecentVersions{
+				PackageNamePrefixes: arPrefixes(row["packagePrefixes"]), KeepCount: &kc}}
+		case arPolicyKeep, arPolicyDelete, "":
+			p.Action = arpb.CleanupPolicy_DELETE
+			if row["type"] == arPolicyKeep {
+				p.Action = arpb.CleanupPolicy_KEEP
+			}
+			c := &arpb.CleanupPolicyCondition{TagPrefixes: arPrefixes(row["tagPrefixes"]),
+				VersionNamePrefixes: arPrefixes(row["versionPrefixes"]), PackageNamePrefixes: arPrefixes(row["packagePrefixes"])}
+			ts := arpb.CleanupPolicyCondition_ANY
+			switch row["tagState"] {
+			case arTagTagged:
+				ts = arpb.CleanupPolicyCondition_TAGGED
+			case arTagUntagged:
+				ts = arpb.CleanupPolicyCondition_UNTAGGED
+			}
+			c.TagState = &ts
+			if len(c.TagPrefixes) > 0 && ts != arpb.CleanupPolicyCondition_TAGGED {
+				return nil, fmt.Errorf("cleanup policy %q: Tag prefixes need the Tagged tag state", id)
+			}
+			if c.OlderThan, err = arParseDuration("Older than", row["olderThan"]); err != nil {
+				return nil, fmt.Errorf("cleanup policy %q: %w", id, err)
+			}
+			if c.NewerThan, err = arParseDuration("Newer than", row["newerThan"]); err != nil {
+				return nil, fmt.Errorf("cleanup policy %q: %w", id, err)
+			}
+			p.ConditionType = &arpb.CleanupPolicy_Condition{Condition: c}
+		default:
+			return nil, fmt.Errorf("cleanup policy %q: unknown policy type %q", id, row["type"])
+		}
+		out[id] = p
+	}
+	return out, nil
 }

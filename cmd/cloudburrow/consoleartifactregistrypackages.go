@@ -45,7 +45,7 @@ func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb
 	cs := runadapter.ConfigServer()
 	switch len(path) {
 	case 1:
-		pkgs := console.Listing{Columns: []string{"Versions", "Updated"}, NameColumn: "Package", Noun: "packages", RowsOpenable: true}
+		pkgs := console.Listing{Columns: []string{"Created", "Updated", "Versions"}, NameColumn: "Name", Noun: "packages", RowsOpenable: true}
 		resp, err := cs.ListPackages(ctx, &arpb.ListPackagesRequest{Parent: r.GetName()})
 		if err != nil {
 			return console.Detail{}, err
@@ -53,10 +53,10 @@ func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb
 		for _, x := range resp.GetPackages() {
 			vs, _ := cs.ListVersions(ctx, &arpb.ListVersionsRequest{Parent: x.GetName()})
 			pkgs.Items = append(pkgs.Items, console.Resource{Name: registry.UnescapePackage(x.GetName()[strings.LastIndex(x.GetName(), "/")+1:]),
-				Fields: map[string]string{"Versions": fmt.Sprint(len(vs.GetVersions())), "Updated": stampAge(x.GetUpdateTime())}})
+				Fields: map[string]string{"Versions": fmt.Sprint(len(vs.GetVersions())), "Created": arTime(x.GetCreateTime()), "Updated": arTime(x.GetUpdateTime())}})
 		}
 		pkgs.Total = len(pkgs.Items)
-		mode := r.GetMode().String()
+		mode := arModeWord(r.GetMode())
 		if ups := r.GetVirtualRepositoryConfig().GetUpstreamPolicies(); len(ups) > 0 {
 			var names []string
 			for _, u := range ups {
@@ -71,10 +71,9 @@ func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb
 		if l, label, ok := formatListing(ctx, r); ok {
 			sections = append(sections, console.Section{ID: "artifacts", Label: label, Listing: l})
 		}
+		sections = append(sections, console.Section{ID: "setup", Label: "Setup instructions", Kind: console.KindText, Text: p.setupInstructions(r)})
 		return console.Detail{
-			Summary: []console.Property{{Label: "Format", Value: r.GetFormat().String()}, {Label: "Mode", Value: mode},
-				{Label: "URL", Value: r.GetRegistryUri()}, {Label: "Use", Value: packageUse(r)},
-				{Label: "Description", Value: orDash(r.GetDescription())}},
+			Summary:  append(p.repositorySummary(ctx, r, mode), console.Property{Label: "Use", Value: packageUse(r)}),
 			Sections: sections,
 		}, nil
 	case 2:
@@ -83,14 +82,14 @@ func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb
 		if err != nil {
 			return console.Detail{}, err
 		}
-		versions := console.Listing{Columns: []string{"Tags", "Created"}, NameColumn: "Version", Noun: "versions", RowsOpenable: true}
+		versions := console.Listing{Columns: []string{"Tags", "Created", "Updated"}, NameColumn: "Name", Noun: "versions", RowsOpenable: true}
 		for _, v := range vs.GetVersions() {
 			var tags []string
 			for _, t := range v.GetRelatedTags() {
 				tags = append(tags, registry.UnescapePackage(t.GetName()[strings.LastIndex(t.GetName(), "/")+1:]))
 			}
 			versions.Items = append(versions.Items, console.Resource{Name: registry.UnescapePackage(v.GetName()[strings.LastIndex(v.GetName(), "/")+1:]),
-				Fields: map[string]string{"Tags": orDash(strings.Join(tags, ", ")), "Created": stampAge(v.GetCreateTime())}})
+				Fields: map[string]string{"Tags": orDash(strings.Join(tags, ", ")), "Created": arTime(v.GetCreateTime()), "Updated": arTime(v.GetUpdateTime())}})
 		}
 		versions.Total = len(versions.Items)
 		return console.Detail{
@@ -230,7 +229,7 @@ func packageRepoActions(r *arpb.Repository, path []string) []console.Action {
 	case 3:
 		acts := []console.Action{
 			{ID: "add-tag", Label: "Add tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true}}},
-			{ID: "remove-tag", Label: "Remove tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true}}},
+			{ID: "remove-tag", Label: "Delete tag", Destructive: true, Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true}}},
 			{ID: "delete", Label: "Delete version", Destructive: true, Leaves: true,
 				Confirm: "The version, its files and its tags are deleted, as DeleteVersion with force does."}}
 		if r.GetFormat() == arpb.Repository_GENERIC {
