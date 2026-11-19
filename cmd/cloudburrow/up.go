@@ -618,6 +618,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	orgpolicy.Use(orgPolicySrc)
 	defer orgpolicy.Use(nil)
 	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == orgpolicy.Path }, orgpolicy.Handler(orgPolicySrc))
+	// Custom constraints (#1891), with their effective policies.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == orgpolicy.CustomPath }, orgpolicy.CustomHandler(orgPolicySrc))
 	// Kourier's gateway asks before routing to a Cloud Run service
 	// (run.routes.invoke, runinvoke.go).
 	rmSrv.HandleUnguarded(isRunInvokeAuthz, runInvokeAuthz{e: iamEnforcer, creds: creds, run: runSvc})

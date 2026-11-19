@@ -438,6 +438,11 @@ func (s *Store) CreateSecretEncrypted(project, id string, labels, annotations ma
 	if err := ValidateSecretID(id); err != nil {
 		return Secret{}, err
 	}
+	// Custom constraints on secretmanager.googleapis.com/Secret first
+	// (#1891, custom.go).
+	if err := checkSecretCustom(project, id, orgpolicy.MethodCreate, annotations, expire, topics, sch); err != nil {
+		return Secret{}, err
+	}
 	// gcp.resourceLocations (#1890): a user-managed replica, or a regional
 	// secret's location, that the constraint does not allow is
 	// FAILED_PRECONDITION with the documented message.
@@ -649,6 +654,22 @@ func (s *Store) UpdateSecretFields(project, id string, u SecretUpdate) (Secret, 
 		}
 		sec.NextRotation, sec.RotationPeriod = next, period
 		defer s.wake()
+	}
+	{
+		// Custom constraints (#1891) on the secret as the update leaves it.
+		ann, exp, sch := sec.Annotations, sec.Expire, Schedule{NextRotation: sec.NextRotation, RotationPeriod: sec.RotationPeriod, VersionDestroyTTL: sec.VersionDestroyTTL}
+		if updateAnnotations {
+			ann = annotations
+		}
+		if u.UpdateExpire {
+			exp = u.Expire
+		}
+		if u.UpdateVersionDestroyTTL {
+			sch.VersionDestroyTTL = u.Schedule.VersionDestroyTTL
+		}
+		if err := checkSecretCustom(project, id, orgpolicy.MethodUpdate, ann, exp, sec.Topics, sch); err != nil {
+			return Secret{}, err
+		}
 	}
 	if u.UpdateVersionDestroyTTL {
 		// Versions already scheduled keep their schedule, as Google

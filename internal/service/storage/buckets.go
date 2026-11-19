@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
@@ -459,7 +460,12 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	// Organization policy constraints (orgpolicy.go, #1890).
+	// Organization policy constraints (orgpolicy.go, #1890), custom
+	// ones first (#1891).
+	if err := s.checkBucketCustom(r, b, orgpolicy.MethodCreate); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := checkBucketOrgPolicy(b, true); err != nil {
 		writeError(w, err)
 		return
@@ -775,6 +781,10 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			b.Fields = next
 			beforeACL := append(append([]aclEntry{}, b.ACL...), b.DefaultObjectACL...)
 			if err := bucketBodyACL(r, body, &b); err != nil {
+				return err
+			}
+			// Custom constraints on the bucket as it would be (#1891).
+			if err := s.checkBucketCustom(r, b, orgpolicy.MethodUpdate); err != nil {
 				return err
 			}
 			// Organization policy constraints (orgpolicy.go, #1890):

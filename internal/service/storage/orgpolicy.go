@@ -30,6 +30,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
@@ -37,6 +38,31 @@ import (
 
 func orgPolicyRefusal(err error) error {
 	return errorf(http.StatusPreconditionFailed, "conditionNotMet", "%s", err.Error())
+}
+
+// checkBucketCustom checks the bucket, as method (CREATE or UPDATE) would
+// leave it, against the custom constraints on storage.googleapis.com/Bucket
+// enforced on its project (#1891): 412 conditionNotMet "orgpolicy:
+// projects/_/buckets/B violates customConstraints/custom.x.", with the
+// constraint's description after it (Cloud Storage's custom constraints
+// page shows "Details:" and the description; that it is one message is
+// UNVERIFIED). Docs re-read 2026-11-19:
+// https://docs.cloud.google.com/storage/docs/custom-constraints
+func (s *Server) checkBucketCustom(r *http.Request, b bucketRecord, method string) error {
+	project := bucketProject(b)
+	if project == "" || !orgpolicy.SourceSet() {
+		return nil
+	}
+	err := orgpolicy.CheckCustom(r.Context(), project, orgpolicy.TypeBucket, method, s.bucketJSON(r, b))
+	var v *orgpolicy.CustomViolation
+	if !errors.As(err, &v) {
+		return nil
+	}
+	msg, details := v.Bucket(b.Name)
+	if details != "" {
+		msg += " Details: " + details
+	}
+	return errorf(http.StatusPreconditionFailed, "conditionNotMet", "%s", msg)
 }
 
 func bucketProject(b bucketRecord) string {

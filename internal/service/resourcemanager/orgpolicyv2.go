@@ -19,9 +19,11 @@ package resourcemanager
 //     listAvailableOrgPolicyConstraints lists, with the custom
 //     constraints of the organization;
 //   - custom constraints organizations/N/customConstraints/custom.{name}:
-//     create, get, update, list, delete. They are stored, not evaluated:
-//     a custom constraint's CEL condition over a service's resource is
-//     not enforced (#1890 follow-up).
+//     create, get, update, list, delete; the condition must compile as
+//     CEL. A policy that enforces one makes the services check its
+//     condition on the resource types and methods it names
+//     (internal/orgpolicy/custom.go, #1891); deleting one deletes the
+//     policies set on it.
 //
 // v1 (orgpolicy.go) and v2 are one store, as on Google Cloud: a policy set
 // through either reads back through both. A policy is kept under one key
@@ -631,6 +633,49 @@ func (s OrgPolicySource) Effective(_ context.Context, resource, constraint strin
 	return e, nil
 }
 
+// Customs are the organization's custom constraints of resourceType and
+// method, with their effective policies on resource (#1891).
+func (s OrgPolicySource) Customs(ctx context.Context, resource, resourceType, method string) ([]orgpolicy.CustomConstraint, error) {
+	r := s.Reg()
+	if r == nil {
+		return nil, nil
+	}
+	all, err := r.CustomConstraints(OrganizationName)
+	if err != nil {
+		return nil, err
+	}
+	var out []orgpolicy.CustomConstraint
+	for _, c := range all {
+		if !slicesContains(c.GetResourceTypes(), resourceType) {
+			continue
+		}
+		applies := false
+		for _, m := range c.GetMethodTypes() {
+			applies = applies || m.String() == method
+		}
+		if !applies {
+			continue
+		}
+		short := c.GetName()[strings.LastIndex(c.GetName(), "/")+1:]
+		e, err := s.Effective(ctx, resource, short)
+		if err != nil || (e.Spec == nil && e.DryRun == nil) {
+			continue
+		}
+		out = append(out, orgpolicy.CustomConstraint{Name: short, Condition: c.GetCondition(), ActionType: c.GetActionType().String(),
+			DisplayName: c.GetDisplayName(), Description: c.GetDescription(), Effective: orgpolicy.AsResponse(e)})
+	}
+	return out, nil
+}
+
+func slicesContains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 func hasConditions(s *orgpolicypb.PolicySpec) bool {
 	for _, r := range s.GetRules() {
 		if r.GetCondition().GetExpression() != "" {
@@ -683,12 +728,14 @@ func (r *Registry) ConstraintsV2(parent string) ([]*orgpolicypb.Constraint, erro
 
 // ---- custom constraints ----
 
-var customNameRE = regexp.MustCompile(`^organizations/([0-9]+)/customConstraints/(custom\.[A-Za-z0-9]{1,62})$`)
+// customNameRE: "Constraint ID: up to 70 characters, excluding the
+// custom. prefix" ("Creating and managing custom constraints").
+var customNameRE = regexp.MustCompile(`^organizations/([0-9]+)/customConstraints/(custom\.[A-Za-z0-9]{1,70})$`)
 
 func (r *Registry) customKey(name string) (string, error) {
 	m := customNameRE.FindStringSubmatch(name)
 	if m == nil {
-		return "", apierror.InvalidArgument("custom constraint name %q must be organizations/{organization}/customConstraints/custom.{name}, the name up to 62 letters and digits", name)
+		return "", apierror.InvalidArgument("custom constraint name %q must be organizations/{organization}/customConstraints/custom.{name}, the name up to 70 letters and digits", name)
 	}
 	if err := checkOrg("organizations/" + m[1]); err != nil {
 		return "", apierror.NotFound("organization %s not found", m[1])
@@ -703,8 +750,20 @@ func checkCustom(c *orgpolicypb.CustomConstraint) error {
 	if c.GetCondition() == "" {
 		return apierror.InvalidArgument("custom constraint %s: condition is required", c.GetName())
 	}
-	if len(c.GetCondition()) > 1000 {
-		return apierror.InvalidArgument("custom constraint %s: condition is longer than 1000 characters", c.GetName())
+	if len(c.GetCondition()) > 1500 {
+		return apierror.InvalidArgument("custom constraint %s: condition is longer than 1500 characters", c.GetName())
+	}
+	for _, t := range c.GetResourceTypes() {
+		if !resourceTypeRE.MatchString(t) {
+			return apierror.InvalidArgument("custom constraint %s: resource type %q is not of the form SERVICE.googleapis.com/RESOURCE", c.GetName(), t)
+		}
+	}
+	if err := orgpolicy.CheckCondition(c.GetCondition()); err != nil {
+		// "INVALID_ARGUMENT: Custom constraint condition [...] is
+		// invalid" (UNVERIFIED wording past its first words, the
+		// troubleshooting section's). Docs re-read 2026-11-19:
+		// https://docs.cloud.google.com/resource-manager/docs/organization-policy/creating-managing-custom-constraints
+		return apierror.InvalidArgument("Custom constraint condition [%s] is invalid: %v", c.GetCondition(), err)
 	}
 	if c.GetActionType() == orgpolicypb.CustomConstraint_ACTION_TYPE_UNSPECIFIED {
 		return apierror.InvalidArgument("custom constraint %s: action_type must be ALLOW or DENY", c.GetName())
@@ -717,6 +776,9 @@ func checkCustom(c *orgpolicypb.CustomConstraint) error {
 	}
 	return nil
 }
+
+// resourceTypeRE is a resource type, storage.googleapis.com/Bucket.
+var resourceTypeRE = regexp.MustCompile(`^[a-z0-9-]+\.googleapis\.com/[A-Za-z0-9]+$`)
 
 func (r *Registry) readCustom(key string) (*orgpolicypb.CustomConstraint, error) {
 	raw, err := r.st.Get(key)
@@ -973,6 +1035,16 @@ func (s *OrgPolicyServer) DeleteCustomConstraint(_ context.Context, req *orgpoli
 	}
 	if err := s.reg.st.Delete(key); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, apierror.Internal(err, "deleting the custom constraint")
+	}
+	// "If you delete a custom constraint, any policies that have been
+	// created using that constraint are deleted."
+	short := strings.TrimPrefix(key, customConstraintPrefix)
+	if keys, err := s.reg.st.List(orgPolicyV2Prefix); err == nil {
+		for _, k := range keys {
+			if strings.HasSuffix(k, "/"+short) {
+				_ = s.reg.st.Delete(k)
+			}
+		}
 	}
 	return &emptypb.Empty{}, nil
 }

@@ -767,6 +767,12 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 			return err
 		}
 	}
+	if method == subscriber+"CreateSubscription" {
+		// Custom constraints (#1891, custom.go).
+		if ss, err = checkCreateSubscription(ctx, ss); err != nil {
+			return err
+		}
+	}
 	cs, err := f.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, method,
 		grpc.ForceCodec(rawCodec{}))
 	if err != nil {
@@ -803,6 +809,10 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method string) error {
 	var in frame
 	if err := ss.RecvMsg(&in); err != nil {
+		return err
+	}
+	// Custom constraints first (#1891, custom.go).
+	if err := f.customGRPCUpdate(ctx, method, in); err != nil {
 		return err
 	}
 	if method == publisher+"UpdateTopic" {

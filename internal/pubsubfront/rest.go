@@ -112,6 +112,12 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		// A Protocol Buffer schema is the front's (protobufschemas.go).
 		return
 	}
+	// Custom constraints on a topic or subscription created or updated
+	// (#1891, custom.go).
+	if err := f.customREST(r); err != nil {
+		writeRESTError(w, err)
+		return
+	}
 	if name, verb, ok := topicPath(r.URL.Path); ok {
 		// gcp.resourceLocations on the message storage policy (#1890,
 		// orgpolicy.go).

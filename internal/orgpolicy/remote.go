@@ -69,6 +69,11 @@ func (c Remote) Effective(ctx context.Context, resource, constraint string) (Eff
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return Effective{}, err
 	}
+	return out.effective()
+}
+
+// effective decodes the answer.
+func (out Response) effective() (Effective, error) {
 	e := Effective{Tags: out.Tags}
 	if len(out.Spec) > 0 {
 		e.Spec = &orgpolicypb.PolicySpec{}
@@ -83,6 +88,18 @@ func (c Remote) Effective(ctx context.Context, resource, constraint string) (Eff
 		}
 	}
 	return e, nil
+}
+
+// AsResponse is e encoded as Path answers it.
+func AsResponse(e Effective) Response {
+	out := Response{Tags: e.Tags}
+	if e.Spec != nil {
+		out.Spec, _ = protojson.Marshal(e.Spec)
+	}
+	if e.DryRun != nil {
+		out.DryRun, _ = protojson.Marshal(e.DryRun)
+	}
+	return out
 }
 
 // Handler serves Path from s.
@@ -102,13 +119,7 @@ func Handler(s Source) http.Handler {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		out := Response{Tags: e.Tags}
-		if e.Spec != nil {
-			out.Spec, _ = protojson.Marshal(e.Spec)
-		}
-		if e.DryRun != nil {
-			out.DryRun, _ = protojson.Marshal(e.DryRun)
-		}
+		out := AsResponse(e)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	})

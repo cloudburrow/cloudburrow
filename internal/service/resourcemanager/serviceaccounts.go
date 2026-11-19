@@ -31,6 +31,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -237,6 +238,14 @@ func (r *Registry) CreateServiceAccount(req *adminpb.CreateServiceAccountRequest
 	if len(sa.GetDescription()) > maxSADescription {
 		return nil, apierror.InvalidArgument("The description can be at most %d bytes long; it is %d.", maxSADescription, len(sa.GetDescription()))
 	}
+	// Custom constraints on iam.googleapis.com/ServiceAccount (#1891),
+	// asked before the registry is locked (the registry answers them):
+	// "resource.name" is projects/PROJECT_ID/serviceAccounts/UNIQUE_ID.
+	uid := newUniqueID()
+	if err := checkSACustom("projects/"+p, orgpolicy.MethodCreate, saResource{Name: "projects/" + p + "/serviceAccounts/" + uid,
+		DisplayName: sa.GetDisplayName(), Description: sa.GetDescription()}); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.unlock()
 	project, err := r.saProjectLocked(p)
@@ -264,7 +273,7 @@ func (r *Registry) CreateServiceAccount(req *adminpb.CreateServiceAccountRequest
 		return nil, &apierror.Error{Code: codes.ResourceExhausted, Reason: "rateLimitExceeded",
 			Message: fmt.Sprintf("Maximum number of service accounts on project reached (%d).", maxServiceAccounts)}
 	}
-	a := &serviceAccount{Project: project, AccountID: id, UniqueID: newUniqueID(), DisplayName: sa.GetDisplayName(),
+	a := &serviceAccount{Project: project, AccountID: id, UniqueID: uid, DisplayName: sa.GetDisplayName(),
 		Description: sa.GetDescription(), Etag: newSAEtag(), CreateTime: r.now().UTC()}
 	// A new account under a deleted one's email is a new identity: the
 	// deleted one can no longer be undeleted, and its policy is not the
@@ -343,6 +352,29 @@ func (r *Registry) PatchServiceAccount(sa *adminpb.ServiceAccount, mask []string
 	}
 	if mask == nil {
 		mask = []string{"display_name", "description"}
+	}
+	// Custom constraints (#1891) on the account as the patch would leave
+	// it, asked before the registry is locked for the change.
+	r.mu.Lock()
+	cur, err := r.findSALocked(sa.GetName(), false)
+	var after saResource
+	if err == nil {
+		after = saResource{Name: "projects/" + cur.Project + "/serviceAccounts/" + cur.UniqueID, DisplayName: cur.DisplayName, Description: cur.Description}
+	}
+	r.unlock()
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range mask {
+		switch f {
+		case "display_name", "displayName":
+			after.DisplayName = sa.GetDisplayName()
+		case "description":
+			after.Description = sa.GetDescription()
+		}
+	}
+	if err := checkSACustom("projects/"+cur.Project, orgpolicy.MethodUpdate, after); err != nil {
+		return nil, err
 	}
 	r.mu.Lock()
 	defer r.unlock()
@@ -628,4 +660,39 @@ func empty(err error) (*emptypb.Empty, error) {
 		return nil, apierror.Wrap(err)
 	}
 	return &emptypb.Empty{}, nil
+}
+
+// saResource is iam.googleapis.com/ServiceAccount as custom constraints
+// read it: "resource.description", "resource.displayName",
+// "resource.name" ("Use custom organization policies for service accounts
+// and service account keys", read 2026-11-19).
+type saResource struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
+}
+
+// saKeyResource is iam.googleapis.com/ServiceAccountKey's:
+// "resource.keyOrigin", "resource.keyType", "resource.name".
+type saKeyResource struct {
+	Name      string `json:"name"`
+	KeyOrigin string `json:"keyOrigin"`
+	KeyType   string `json:"keyType"`
+}
+
+// checkSACustom is the custom constraints' refusal of a service account
+// or key (resourceType by its value's type) under project: Google's
+// FAILED_PRECONDITION "Operation denied by custom org policy:
+// ["customConstraints/custom.x": "..."]", the IAM page's example.
+func checkSACustom(project, method string, res any) error {
+	t := orgpolicy.TypeServiceAccount
+	if _, ok := res.(saKeyResource); ok {
+		t = orgpolicy.TypeServiceAccountKey
+	}
+	err := orgpolicy.CheckCustom(context.Background(), project, t, method, res)
+	var v *orgpolicy.CustomViolation
+	if errors.As(err, &v) {
+		return apierror.FailedPrecondition("%s", v.Singular())
+	}
+	return nil
 }

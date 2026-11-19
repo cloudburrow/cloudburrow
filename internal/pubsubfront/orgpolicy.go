@@ -64,7 +64,27 @@ func checkCreateTopic(ctx context.Context, ss grpc.ServerStream) (grpc.ServerStr
 	}
 	var t pubsubpb.Topic
 	if proto.Unmarshal(first, &t) == nil {
+		// Custom constraints first (#1891, custom.go).
+		if err := checkCustom(ctx, t.GetName(), orgpolicy.TypeTopic, orgpolicy.MethodCreate, &t); err != nil {
+			return nil, err
+		}
 		if err := checkTopicRegions(ctx, t.GetName(), &t); err != nil {
+			return nil, err
+		}
+	}
+	return &replayStream{ServerStream: ss, first: first}, nil
+}
+
+// checkCreateSubscription reads a CreateSubscription's first frame and
+// checks it against the custom constraints (#1891).
+func checkCreateSubscription(ctx context.Context, ss grpc.ServerStream) (grpc.ServerStream, error) {
+	var first frame
+	if err := ss.RecvMsg(&first); err != nil {
+		return nil, err
+	}
+	var s pubsubpb.Subscription
+	if proto.Unmarshal(first, &s) == nil {
+		if err := checkCustom(ctx, s.GetName(), orgpolicy.TypeSubscription, orgpolicy.MethodCreate, &s); err != nil {
 			return nil, err
 		}
 	}

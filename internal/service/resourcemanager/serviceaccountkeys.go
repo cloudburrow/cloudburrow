@@ -246,6 +246,22 @@ func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyR
 	default:
 		return nil, apierror.InvalidArgument("Invalid key algorithm %s.", req.GetKeyAlgorithm())
 	}
+	// Custom constraints on iam.googleapis.com/ServiceAccountKey (#1891),
+	// asked before the registry is locked: a key made here is a
+	// GOOGLE_PROVIDED, USER_MANAGED one. Its key ID is not made yet, so
+	// resource.name ends at keys/ (UNVERIFIED: what Google names). Docs
+	// re-read 2026-11-19: https://docs.cloud.google.com/iam/docs/service-accounts-custom-constraints
+	r.mu.Lock()
+	cur, err := r.findSALocked(req.GetName(), false)
+	r.unlock()
+	if err != nil {
+		return nil, err
+	}
+	if err := checkSACustom("projects/"+cur.Project, orgpolicy.MethodCreate, saKeyResource{
+		Name:      "projects/" + cur.Project + "/serviceAccounts/" + cur.UniqueID + "/keys/",
+		KeyOrigin: "GOOGLE_PROVIDED", KeyType: "USER_MANAGED"}); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.unlock()
 	a, err := r.findSALocked(req.GetName(), false)
