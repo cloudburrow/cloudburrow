@@ -292,7 +292,25 @@ const ROUTES = [
   // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
   { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", kind: "Instance", section: "Databases",
     product: "memorystore", productTitle: "Memorystore" },
-  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", kind: "Backup vault", section: "Storage" },
+  // Backup and DR's menu (#1844), Google's pages: Overview, Vaulted backups
+  // (the protected resources, Schedule backup), Backup plans, Backup plan
+  // associations, Backup vaults (at /backupdr, its address before), Jobs and
+  // Reports. The product key stays "backupdr", so a pin keeps pointing here.
+  { path: "/backupdr-overview", service: "backupdr-overview", icon: "storage", title: "Overview", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-vaulted-backups", service: "backupdr-vaulted", icon: "storage", title: "Vaulted backups", kind: "Resource",
+    section: "Storage", product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-plans", service: "backupdr-plans", icon: "storage", title: "Backup plans", kind: "Backup plan", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-associations", service: "backupdr-associations", icon: "storage", title: "Backup plan associations",
+    kind: "Backup plan association", section: "Storage", product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup vaults", kind: "Backup vault", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-jobs", service: "backupdr-jobs", icon: "storage", title: "Jobs", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-reports", title: "Reports", service: null, requires: "backupdr", screen: "unavailable", icon: "storage",
+    section: "Storage", product: "backupdr", productTitle: "Backup and DR",
+    unavailable: "Backup and DR reports are Looker Studio reports over the backup and job logs Google's Cloud Logging routes into a BigQuery dataset. CloudBurrow runs no Looker Studio, and its Backup and DR Service writes no job logs to Cloud Logging (#1924). The Jobs page lists the backup jobs and the system jobs from the service itself, and the Overview counts them." },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,

@@ -20,10 +20,10 @@ func TestConsoleBackupDRListActions(t *testing.T) {
 	p := backupDRProvider{bdr: srv}
 	ctx := context.Background()
 	const project = "bdr-console"
-	if acts := bdrActionIDs(p.ListActions(ctx, project)); acts != "protected,trial,subscribetrial,endtrial,compliance" {
+	if acts := bdrActionIDs(bdrOverviewProvider{api: p}.ListActions(ctx, project)); acts != "protected,trial,subscribetrial,endtrial,compliance" {
 		t.Fatalf("list actions: %s", acts)
 	}
-	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "location": "us-central1", "retention": "86400s"}); err != nil {
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "region": "us-central1", "retentionDays": "1"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range []struct {

@@ -285,7 +285,9 @@ func TestCloudSQLAndBackupDRScreensMeetWCAG(t *testing.T) {
 	var pages []a11yPage
 	for _, l := range []struct{ name, path string }{
 		{"PostgreSQL", "/cloudsql"}, {"MySQL", "/cloudsql-mysql"},
-		{"Cloud SQL instances", "/cloudsql-instances"}, {"Backup and DR", "/backupdr"},
+		{"Cloud SQL instances", "/cloudsql-instances"}, {"Backup vaults", "/backupdr"},
+		// Backup and DR's pages in Google's menu (#1844).
+		{"Vaulted backups", "/backupdr-vaulted-backups"}, {"Backup plans", "/backupdr-plans"},
 	} {
 		pages = append(pages, listAndCreate(l.name, l.path, project)...)
 	}
@@ -294,6 +296,10 @@ func TestCloudSQLAndBackupDRScreensMeetWCAG(t *testing.T) {
 		// Google's Backups page and an instance's page with its own menu (#1860).
 		screen("Cloud SQL backups", "/cloudsql-backups", project),
 		screen("postgres instance", "/cloudsql-instances/postgres", project),
+		screen("Backup and DR overview", "/backupdr-overview", project),
+		screen("Backup plan associations", "/backupdr-associations", project),
+		screen("Backup and DR jobs", "/backupdr-jobs", project),
+		screen("Backup and DR reports", "/backupdr-reports", project),
 		a11yPage{"delete database dialog", "/cloudsql?project=" + project, rowReady("postgres"), openDeleteDialog},
 	)
 	auditScreens(t, pages)

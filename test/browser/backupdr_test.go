@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,12 +14,13 @@ import (
 	"google.golang.org/api/option"
 )
 
-// TestBackupDRVaultAndPlanThroughThePage (#1433), in the sql shard, whose
-// instance serves the Backup and DR Service. The page had a provider but no
-// route until it was given one. Reached from the drawer's Backup and DR row:
-// Create backup vault makes a vault backupVaults.get reads ACTIVE with its
-// minimum enforced retention, and Create backup plan on its page makes a
-// plan backupPlans.get reads with its rule and vault.
+// TestBackupDRVaultAndPlanThroughThePage (#1433, #1844), in the sql shard,
+// whose instance serves the Backup and DR Service. Reached from the drawer's
+// Backup and DR row, which opens the Overview with Google's menu in Google's
+// order. Create a backup vault, Google's page, makes a vault
+// backupVaults.get reads ACTIVE with its minimum enforced retention (days)
+// and description, and Create Backup plan, Google's page with its Backup
+// rules, makes a plan backupPlans.get reads with its rule, window and vault.
 func TestBackupDRVaultAndPlanThroughThePage(t *testing.T) {
 	needService(t, "backupdr")
 	bdr, err := backupdr.NewService(context.Background(), option.WithEndpoint("http://"+endpoint(t, envBackupDR)+"/"),
@@ -36,34 +38,45 @@ func TestBackupDRVaultAndPlanThroughThePage(t *testing.T) {
 	})
 
 	p := open(t)
-	p.navigateByDrawer("Storage", "/backupdr", "Backup and DR")
+	p.navigateByDrawer("Storage", "/backupdr-overview", "Backup and DR")
+	var menu string
+	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim()).join("|")`, &menu)
+	if want := "Overview|Vaulted backups|Backup plans|Backup plan associations|Backup vaults|Jobs|Reports"; !strings.Contains(menu, want) {
+		t.Errorf("Backup and DR's menu reads %q; want %q", menu, want)
+	}
 	p.navigate("/backupdr?project=" + project)
 	p.clickText("#view button", "Create backup vault")
-	p.submitForm(map[string]string{"id": vault, "retention": "172800s", "description": "made in the browser"}, "id")
+	p.waitFor(`location.pathname === "/backupdr/create" && document.querySelector("#view h1").textContent.includes("Create a backup vault")`)
+	p.submitForm(map[string]string{"id": vault, "retentionDays": "2", "description": "made in the browser"}, "id")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/backupdr" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, vault))
 	v, err := bdr.Projects.Locations.BackupVaults.Get(loc + "/backupVaults/" + vault).Do()
-	if err != nil || v.State != "ACTIVE" || v.BackupMinimumEnforcedRetentionDuration != "172800s" || v.Description != "made in the browser" {
-		t.Fatalf("backupVaults.get after Create backup vault = %+v, %v; want it ACTIVE with 172800s and its description", v, err)
+	if err != nil || v.State != "ACTIVE" || v.BackupMinimumEnforcedRetentionDuration != "172800s" || v.Description != "made in the browser" ||
+		v.AccessRestriction != "WITHIN_ORGANIZATION" {
+		t.Fatalf("backupVaults.get after Create a backup vault = %+v, %v; want it ACTIVE with 172800s, its description and Google's default access", v, err)
 	}
 
-	p.navigate("/backupdr/" + vault + "?project=" + project)
-	p.pageAction("Create backup plan", map[string]string{"id": plan, "rule": "nightly", "recurrence": "DAILY", "retention": "3"}, "")
+	p.navigate("/backupdr-plans/create?project=" + project)
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#f-vault option")].some((o) => o.value === %q)`, loc+"/backupVaults/"+vault))
+	p.submitForm(map[string]string{"id": plan, "vault": loc + "/backupVaults/" + vault,
+		"rules": `[{"ruleId":"nightly","recurrence":"DAILY","hourly":"","start":"1","end":"5","retention":"3"}]`}, "id")
+	p.waitFor(fmt.Sprintf(`location.pathname === "/backupdr-plans" &&
+		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, plan))
 	got, err := bdr.Projects.Locations.BackupPlans.Get(loc + "/backupPlans/" + plan).Do()
 	if err != nil {
-		t.Fatalf("backupPlans.get after Create backup plan: %v", err)
+		t.Fatalf("backupPlans.get after Create Backup plan: %v", err)
 	}
 	if len(got.BackupRules) != 1 || got.BackupRules[0].RuleId != "nightly" || got.BackupRules[0].BackupRetentionDays != 3 ||
+		got.BackupRules[0].StandardSchedule.BackupWindow.StartHourOfDay != 1 || got.BackupRules[0].StandardSchedule.BackupWindow.EndHourOfDay != 5 ||
 		got.BackupVault != loc+"/backupVaults/"+vault {
-		t.Errorf("the plan made in the browser is %+v; want rule nightly, 3 days, in %s", got, vault)
+		t.Errorf("the plan made in the browser is %+v; want rule nightly, 01:00 to 05:00, 3 days, in %s", got, vault)
 	}
 }
 
-// TestBackupDRDeletesThroughThePage, in the sql shard: Delete backup plan
-// on a vault's page, confirmed by the vault's name, deletes a plan
-// backupPlans.get then reports gone, and the page stays the vault's. Delete
-// association and Delete backup, which need a Cloud SQL instance and a
-// backup of it, are exercised by TestConsoleBackupDRDeletes.
+// TestBackupDRDeletesThroughThePage, in the sql shard: Delete on a backup
+// plan's page, confirmed by the plan's name, deletes a plan backupPlans.get
+// then reports gone. Remove backup plan and a backup's Delete are exercised
+// by TestBackupDRScheduleAndRestoreThroughThePages.
 func TestBackupDRDeletesThroughThePage(t *testing.T) {
 	needService(t, "backupdr")
 	bdr, err := backupdr.NewService(context.Background(), option.WithEndpoint("http://"+endpoint(t, envBackupDR)+"/"),
@@ -91,11 +104,13 @@ func TestBackupDRDeletesThroughThePage(t *testing.T) {
 		t.Fatalf("backupPlans.create: %v", err)
 	}
 
+	// The plan's own page (#1844): Delete, confirmed by its name, leaves
+	// for Backup plans.
 	p := open(t)
-	p.navigate("/backupdr/" + vault + "?project=" + project)
-	p.pageAction("Delete backup plan", map[string]string{"plan": plan}, vault)
+	p.navigate("/backupdr-plans/" + plan + "?project=" + project)
+	p.pageAction("Delete", nil, plan)
 	if _, err := bdr.Projects.Locations.BackupPlans.Get(loc + "/backupPlans/" + plan).Do(); err == nil {
-		t.Errorf("backupPlans.get after Delete backup plan found %s", plan)
+		t.Errorf("backupPlans.get after Delete found %s", plan)
 	}
-	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/backupdr/"+vault))
+	p.waitFor(`location.pathname === "/backupdr-plans"`)
 }
