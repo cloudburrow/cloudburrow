@@ -1265,6 +1265,8 @@ func TestALongFormHasAnAddress(t *testing.T) {
 	// project picker is the one deliberate exception: it opens the dialog
 	// from the toolbar because it acts on what was created — navigating away
 	// to a page would abandon the selection it exists to make.
+	// An empty list screen is drawn by renderTableInto too (#1868), so the
+	// title line's Create and the empty table's are both there.
 	for _, fn := range []string{"async function renderList(view, route)",
 		"function renderTableInto(view, header, data, noun, reload, route, opts = {})"} {
 		body := functionBody(t, src, fn)
@@ -1272,13 +1274,11 @@ func TestALongFormHasAnAddress(t *testing.T) {
 			t.Errorf("%s calls openCreateForm directly, so it opens a dialog for a "+
 				"form the backend routed to a page", fn)
 		}
-		if !strings.Contains(body, "startCreate(route, caps.create") {
-			t.Errorf("%s has no create button routed through startCreate", fn)
-		}
 	}
-	if n := strings.Count(src, "startCreate(route, caps.create"); n < 3 {
-		t.Errorf("only %d create buttons route through startCreate; the action bar, "+
-			"the screen's empty state and the emptied table all have one", n)
+	body := functionBody(t, src, "function renderTableInto(view, header, data, noun, reload, route, opts = {})")
+	if n := strings.Count(body, "startCreate(route, caps.create"); n < 2 {
+		t.Errorf("only %d create buttons route through startCreate; the title line "+
+			"and the empty table both have one", n)
 	}
 	// The threshold is the server's.
 	if !strings.Contains(consoleSource(t, "console.go"), "createPageThreshold") {
