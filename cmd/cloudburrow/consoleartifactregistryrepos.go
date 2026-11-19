@@ -53,7 +53,7 @@ var (
 	arFormatLabels = map[string]string{"DOCKER": "Docker", "MAVEN": "Maven", "NPM": "npm", "PYTHON": "Python",
 		"APT": "Apt", "YUM": "Yum", "KFP": "Kubeflow Pipelines", "GO": "Go", "GENERIC": "Generic"}
 	arFormatsUnavailable = map[string]string{}
-	arModeLabels = map[string]string{"STANDARD_REPOSITORY": "Standard", "REMOTE_REPOSITORY": "Remote", "VIRTUAL_REPOSITORY": "Virtual"}
+	arModeLabels         = map[string]string{"STANDARD_REPOSITORY": "Standard", "REMOTE_REPOSITORY": "Remote", "VIRTUAL_REPOSITORY": "Virtual"}
 )
 
 // The create page's choices, as Google words them.

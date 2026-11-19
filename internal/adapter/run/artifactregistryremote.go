@@ -75,7 +75,7 @@ func remoteUpstream(r *arpb.Repository) string {
 
 const outsideUpstream = "this instance's remote repositories pull only from another Artifact Registry repository it holds, " +
 	"named by remote_repository_config.common_repository.uri (projects/{project}/locations/{location}/repositories/{repository}), " +
-	"as Google documents; egress is off, and the instance makes no calls off the machine"
+	"as Google documents; a preset or custom upstream is refused by design: egress is off, and the instance makes no calls off the machine"
 
 // checkRemote accepts a remote repository whose upstream is a standard
 // repository of its format on this instance.

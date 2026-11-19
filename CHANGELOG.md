@@ -13,6 +13,16 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- Artifact Registry accuracy (#1897): cleanup policies run in the background about daily
+  (`--artifact-registry-cleanup-interval`), with Delete and Keep conditions, keep most recent
+  versions and dry runs written to Cloud Logging as BatchDeleteVersions Data Access audit
+  entries; a repository's `kms_key_name` encrypts its content through the instance's Cloud KMS,
+  and pulls and pushes fail while the key version is disabled or destroyed; virtual `DOCKER`
+  repositories read their upstreams by priority; `GO` repositories are a Go module proxy with
+  `goModules:create` uploads, and `KFP` repositories serve the Kubeflow Pipelines template
+  protocol. Remote repositories over public or custom upstreams stay refused by design: the
+  instance makes no calls off the machine. Vulnerability scanning waits on Container Analysis
+  (#1912).
 - BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
   most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
   reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and
