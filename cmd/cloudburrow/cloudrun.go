@@ -284,8 +284,11 @@ func (r *runService) Start(ctx context.Context) error {
 	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(runadapter.SourceManagerHandlerOr(ssm, cloudBuild,
 		func(g grpc.ServiceRegistrar) { ssm.Register(g); ops.Register(g) },
 		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
-			functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-				adapter.V1Handler(runadapter.NewRESTHandler(register)))))))
+			// Eventarc (#1877) under /eventarc/v1/: its trigger paths are
+			// Cloud Build's.
+			runadapter.EventarcHandlerOr(func(g grpc.ServiceRegistrar) { functions.Eventarc().Register(g); ops.Register(g) },
+				functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+					adapter.V1Handler(runadapter.NewRESTHandler(register))))))))
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)

@@ -88,8 +88,7 @@ func TestRunWorkerPoolFormsAreGoogles(t *testing.T) {
 }
 
 // TestRunTriggersNeedPubSub (#1852): without Pub/Sub the Triggers tab says
-// so and offers nothing; a trigger pushes to the service's cluster-local
-// address, which the in-cluster Pub/Sub reaches.
+// so and offers nothing.
 func TestRunTriggersNeedPubSub(t *testing.T) {
 	svc := &ksvcStatus{KName: "hello"}
 	svc.Metadata.Labels = map[string]string{"cloudburrow.dev/owned": "true"}
@@ -101,7 +100,33 @@ func TestRunTriggersNeedPubSub(t *testing.T) {
 	if a := p.triggerActions(t.Context(), "demo", svc); a != nil {
 		t.Errorf("trigger actions without Pub/Sub = %v", a)
 	}
-	if got := p.runPushEndpoint(svc); got != "http://hello.default.svc.cluster.local" {
-		t.Errorf("push endpoint = %s", got)
+}
+
+// TestRunAddTriggerIsAnEventarcTrigger (#1877): Add trigger's values are
+// an Eventarc trigger to the service: Pub/Sub on the chosen topic (or one
+// Eventarc makes), Cloud Storage on a bucket, with the path and account.
+func TestRunAddTriggerIsAnEventarcTrigger(t *testing.T) {
+	tr, err := eventarcTrigger("demo", "hello", "us-central1", map[string]string{"eventType": runPubSubEvent, "topic": "orders",
+		"path": "/events", "serviceAccount": "sa@demo.iam.gserviceaccount.com"})
+	if err != nil || tr.GetTransport().GetPubsub().GetTopic() != "projects/demo/topics/orders" ||
+		tr.GetDestination().GetCloudRun().GetService() != "hello" || tr.GetDestination().GetCloudRun().GetPath() != "/events" ||
+		tr.GetServiceAccount() != "sa@demo.iam.gserviceaccount.com" || len(tr.GetEventFilters()) != 1 {
+		t.Errorf("Pub/Sub trigger = %v, %v", tr, err)
+	}
+	if tr, err := eventarcTrigger("demo", "hello", "us-central1", map[string]string{"eventType": runPubSubEvent}); err != nil || tr.GetTransport() != nil {
+		t.Errorf("Pub/Sub trigger with no topic = %v, %v", tr, err)
+	}
+	tr, err = eventarcTrigger("demo", "hello", "us-central1", map[string]string{"eventType": "google.cloud.storage.object.v1.finalized", "bucket": "b1"})
+	if err != nil || len(tr.GetEventFilters()) != 2 || tr.GetEventFilters()[1].GetValue() != "b1" {
+		t.Errorf("Cloud Storage trigger = %v, %v", tr, err)
+	}
+	for _, bad := range []map[string]string{
+		{"eventType": "google.cloud.storage.object.v1.finalized"},
+		{"eventType": runPubSubEvent, "bucket": "b1"},
+		{"eventType": "google.cloud.audit.log.v1.written"},
+	} {
+		if _, err := eventarcTrigger("demo", "hello", "us-central1", bad); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
 	}
 }

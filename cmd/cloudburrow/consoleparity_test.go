@@ -91,6 +91,14 @@ var parityRows = []parityRow{
 	{Resource: "Developer Connect reads the console does not need", Service: "developerconnect",
 		Methods:  []string{"DeveloperConnect/UpdateConnection", "DeveloperConnect/FetchLinkableGitRepositories", "DeveloperConnect/FetchGitRefs"},
 		Excluded: "a connection's labels, annotations and disabled flag, which no CloudBurrow page shows; the linkable repositories, which are the instance page's Repositories, where Link repository is offered; and a link's branches and tags, which are the repository's own (#1546)"},
+	// Eventarc (#1877): on Cloud Run's Triggers tab, as Google's is.
+	{Resource: "Eventarc triggers", Service: "eventarc",
+		Methods:  []string{"Eventarc/CreateTrigger", "Eventarc/ListTriggers", "Eventarc/DeleteTrigger"},
+		Provider: "run", Offers: "a service's Triggers tab lists the Eventarc triggers whose destination is the service (event provider, event type, filters, region, service URL path, transport topic), with Add trigger (Pub/Sub and Cloud Storage event types, topic or Create a topic, bucket, region, service account, service URL path) and Delete trigger (#1852, #1877)",
+		Tests: []string{"TestRunAddTriggerIsAnEventarcTrigger", "TestCloudRunEventarcTriggersThroughTheBrowser"}},
+	{Resource: "Eventarc reads and changes the console does not need", Service: "eventarc",
+		Methods:  []string{"Eventarc/GetTrigger", "Eventarc/UpdateTrigger", "Eventarc/GetProvider", "Eventarc/ListProviders"},
+		Excluded: "one trigger's read, which the Triggers tab's row shows; a trigger's edit, which the tab does not offer yet: Eventarc's own Triggers page, where Google edits one, is not built (#1877); and the providers, whose event types Add trigger lists"},
 	// Backup and DR (#1433).
 	{Resource: "Cloud SQL point-in-time restore from a Backup and DR data source", Service: "sqladmin",
 		Methods:  []string{"sql.instances.pointInTimeRestore"},
@@ -191,7 +199,7 @@ var parityRows = []parityRow{
 	// Cloud Run
 	{Resource: "Cloud Run services", Service: "run",
 		Methods:  []string{"Services/CreateService", "Services/DeleteService", "Services/GetService", "Services/ListServices", "Services/UpdateService"},
-		Provider: "run", Offers: "Services list (Google's Deployment type, Region, Authentication, Ingress, Last deployed and Deployed by columns, #1852), service detail (Google's Metrics, SLOs, Logs, Revisions, Source, Triggers, Networking, Security and YAML tabs, #1852), Deploy container (the Create service page: Configure, Authentication with Allow public access, Billing, Service scaling, Ingress, and the Containers, Volumes, Networking, Security tabs, ending in Create; #1852) and Edit and deploy new revision (with labels and variables from Secret Manager, #852; the service account, files from Secret Manager and in-memory volumes, #1297; execution environment, VPC connector and egress, encryption key and session affinity, stored without effect, #1346; service scaling, Automatic with a service minimum and maximum or Manual with a number of instances, and the revision's CPU and concurrency utilization targets, #1800), Manage traffic (Google's rows of a revision and its percent with Add revision, ending in Save, #1852; splits, LATEST and pinned revisions, #1224; sent as an update_mask of traffic, #1260), Manage revision tags on each revision (#1852), Copy (a new service with the copied configuration, #1852), Write a function (Cloud Functions v2 Create function, its source in Google's inline editor, #1852), Connect repo (a Developer Connect linked repository's Cloud Build trigger that builds and deploys on push, #1852), the Triggers tab (Add trigger: a Pub/Sub push subscription delivering to the service, and Delete trigger, #1852), Delete",
+		Provider: "run", Offers: "Services list (Google's Deployment type, Region, Authentication, Ingress, Last deployed and Deployed by columns, #1852), service detail (Google's Metrics, SLOs, Logs, Revisions, Source, Triggers, Networking, Security and YAML tabs, #1852), Deploy container (the Create service page: Configure, Authentication with Allow public access, Billing, Service scaling, Ingress, and the Containers, Volumes, Networking, Security tabs, ending in Create; #1852) and Edit and deploy new revision (with labels and variables from Secret Manager, #852; the service account, files from Secret Manager and in-memory volumes, #1297; execution environment, VPC connector and egress, encryption key and session affinity, stored without effect, #1346; service scaling, Automatic with a service minimum and maximum or Manual with a number of instances, and the revision's CPU and concurrency utilization targets, #1800), Manage traffic (Google's rows of a revision and its percent with Add revision, ending in Save, #1852; splits, LATEST and pinned revisions, #1224; sent as an update_mask of traffic, #1260), Manage revision tags on each revision (#1852), Copy (a new service with the copied configuration, #1852), Write a function (Cloud Functions v2 Create function, its source in Google's inline editor, #1852), Connect repo (a Developer Connect linked repository's Cloud Build trigger that builds and deploys on push, #1852), the Triggers tab (the service's Eventarc triggers, Add trigger for Pub/Sub and Cloud Storage events, delivered as CloudEvents, and Delete trigger, #1852, #1877), Delete",
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunEditDeploysTheFormThroughUpdateService", "TestCloudRunEditFormIsPrefilledAndGivesFocusBack",
 			"TestRunServiceScalingFieldsRoundTrip", "TestCloudRunServiceScalingThroughTheForms",
 			"TestConsoleRunServiceLabelsAndSecrets", "TestRunEditSetsLabelsAndSecretBackedVariables",
@@ -199,7 +207,8 @@ var parityRows = []parityRow{
 			"TestConsoleRunStoredSettings", "TestRunSettingsFieldsRoundTrip",
 			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestRunManageTrafficSendsATrafficMask", "TestCloudRunManageTrafficThroughTheBrowser",
 			"TestManageTrafficDialogRows", "TestWriteFunctionInlineEditor", "TestConnectRepoBuildIsGooglesTrigger",
-			"TestCloudRunConnectRepoAndInlineEditorThroughTheBrowser", "TestCloudRunContinuousDeployFromRepository", "TestManageRevisionTags", "TestRunTriggersNeedPubSub"}},
+			"TestCloudRunConnectRepoAndInlineEditorThroughTheBrowser", "TestCloudRunContinuousDeployFromRepository", "TestManageRevisionTags", "TestRunTriggersNeedPubSub",
+			"TestRunAddTriggerIsAnEventarcTrigger", "TestCloudRunEventarcTriggersThroughTheBrowser", "TestEventarcTriggersToCloudRun"}},
 	// The v1 (Knative) API (#1293) is the same services and revisions, read
 	// from the same Knative objects through the same mapping: the console's
 	// Cloud Run pages already reach every one, so nothing new is offered.

@@ -290,3 +290,68 @@ func TestEventarcTriggersToCloudRun(t *testing.T) {
 		t.Errorf("the bucket's notifications after delete = %v, %v; want none", ns, err)
 	}
 }
+
+// TestGcloudEventarcTriggers (#1877), gcloud through the harness, as
+// Google's "Route events to Cloud Run" documents it: gcloud eventarc
+// providers list names Pub/Sub and Cloud Storage; triggers create with a
+// messagePublished event filter, a Cloud Run destination and no transport
+// topic makes one Eventarc owns; describe, list, update of the destination
+// path, and delete, read back with the official client.
+func TestGcloudEventarcTriggers(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvRun)
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
+	g := newGcloudSession(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	rc := runClient(t, h)
+	ec, err := eventarc.NewClient(ctx, runClientOptions(h)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ec.Close() })
+	parent := "projects/" + g.project + "/locations/us-central1"
+	service := "gcloud-eventarc"
+	sop, err := rc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parent, ServiceId: service, Service: &runpb.Service{
+		Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "ghcr.io/knative/helloworld-go:latest"}}}}})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	t.Cleanup(func() {
+		dctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_, _ = rc.DeleteService(dctx, &runpb.DeleteServiceRequest{Name: parent + "/services/" + service})
+	})
+	if _, err := sop.Wait(ctx); err != nil {
+		t.Fatalf("the service never became ready: %v", err)
+	}
+
+	if out := g.must("eventarc", "providers", "list", "--location=us-central1", "--format=value(name)"); !strings.Contains(out, "pubsub.googleapis.com") ||
+		!strings.Contains(out, "storage.googleapis.com") {
+		t.Errorf("providers list:\n%s", out)
+	}
+	g.must("eventarc", "triggers", "create", "gcloud-pubsub", "--location=us-central1",
+		"--destination-run-service="+service, "--destination-run-region=us-central1",
+		"--event-filters=type=google.cloud.pubsub.topic.v1.messagePublished")
+	t.Cleanup(func() {
+		if op, err := ec.DeleteTrigger(context.Background(), &eventarcpb.DeleteTriggerRequest{Name: parent + "/triggers/gcloud-pubsub", AllowMissing: true}); err == nil {
+			_, _ = op.Wait(context.Background())
+		}
+	})
+	if out := g.must("eventarc", "triggers", "describe", "gcloud-pubsub", "--location=us-central1",
+		"--format=value(transport.pubsub.topic)"); !strings.Contains(lastLine(out), "/topics/eventarc-us-central1-gcloud-pubsub-") {
+		t.Errorf("triggers describe: topic = %q", out)
+	}
+	if out := g.must("eventarc", "triggers", "list", "--location=us-central1", "--format=value(name)"); !strings.Contains(out, "gcloud-pubsub") {
+		t.Errorf("triggers list does not list the trigger:\n%s", out)
+	}
+	g.must("eventarc", "triggers", "update", "gcloud-pubsub", "--location=us-central1", "--destination-run-path=/events")
+	if tr, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: parent + "/triggers/gcloud-pubsub"}); err != nil ||
+		tr.GetDestination().GetCloudRun().GetPath() != "/events" || tr.GetDestination().GetCloudRun().GetService() != service {
+		t.Errorf("the trigger after update = %v, %v", tr, err)
+	}
+	g.must("eventarc", "triggers", "delete", "gcloud-pubsub", "--location=us-central1", "--quiet")
+	if _, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: parent + "/triggers/gcloud-pubsub"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetTrigger after triggers delete: %v; want NotFound", err)
+	}
+}

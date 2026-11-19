@@ -25,6 +25,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // Eventarc (#1877): google.cloud.eventarc.v1's triggers, for Google
@@ -318,6 +319,23 @@ func (e *EventarcServer) UpdateTrigger(ctx context.Context, req *eventarcpb.Upda
 		switch p {
 		case "destination":
 			next.Destination = in.GetDestination()
+		case "destination.cloud_run", "destination.cloud_run.service", "destination.cloud_run.path", "destination.cloud_run.region":
+			// gcloud eventarc triggers update names the field it changes.
+			run := next.GetDestination().GetCloudRun()
+			if run == nil {
+				return nil, apierror.InvalidArgument("update_mask path %q: the trigger's destination is not Cloud Run", p)
+			}
+			from := in.GetDestination().GetCloudRun()
+			switch p {
+			case "destination.cloud_run":
+				next.Destination = in.GetDestination()
+			case "destination.cloud_run.service":
+				run.Service = from.GetService()
+			case "destination.cloud_run.path":
+				run.Path = from.GetPath()
+			case "destination.cloud_run.region":
+				run.Region = from.GetRegion()
+			}
 		case "service_account":
 			next.ServiceAccount = in.GetServiceAccount()
 		case "labels":
@@ -496,3 +514,26 @@ func (f *FunctionsServer) deliverEventarc(ctx context.Context, t *eventarcpb.Tri
 // projectNumberOf is a project's number, as the default compute account
 // names it.
 func projectNumberOf(project string) string { return fmt.Sprint(resource.ProjectNumber(project)) }
+
+// eaJSONPrefix is where Eventarc's JSON API is served on this port: its
+// v1 trigger paths (/v1/projects/*/locations/*/triggers) are Cloud Build's
+// regional triggers', so gcloud's eventarc override and Terraform's
+// eventarc_custom_endpoint carry it.
+const eaJSONPrefix = "/eventarc"
+
+// EventarcHandlerOr serves Eventarc's JSON API (register adds it and the
+// Operations service it polls) and passes every other request to next.
+func EventarcHandlerOr(register func(grpc.ServiceRegistrar), next http.Handler) http.Handler {
+	t := &rest.Transcoder{Packages: []string{"google.cloud.eventarc.v1"}, Mixins: sourceDeployMixins}
+	register(t)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, eaJSONPrefix+"/v1/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = strings.TrimPrefix(r.URL.Path, eaJSONPrefix)
+		r2.URL.RawPath = ""
+		t.ServeHTTP(w, r2)
+	})
+}

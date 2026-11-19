@@ -80,6 +80,7 @@ func TestTerraformSetsArtifactRegistryAndCloudBuild(t *testing.T) {
 		`cloud_build_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
 		`secure_source_manager_custom_endpoint = "http://127.0.0.1:9004/securesourcemanager/v1/"`,
 		`developer_connect_custom_endpoint = "http://127.0.0.1:9004/developerconnect/v1/"`,
+		`eventarc_custom_endpoint = "http://127.0.0.1:9004/eventarc/v1/"`,
 		`cloudfunctions2_custom_endpoint = "http://127.0.0.1:9004/v2/"`,
 		`cloud_functions_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
 	} {

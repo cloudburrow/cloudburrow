@@ -5151,8 +5151,9 @@ function buildCreateForm(spec) {
       : isSelect
       ? el("select", { id, name: f.name, required: f.required },
           // An empty option (an optional choice left unset) is named, so
-          // it is not read as a blank item (#1604).
-          ...(f.options || []).map((o) => el("option", { value: o, text: o || "None" })))
+          // it is not read as a blank item (#1604); optionLabels name an
+          // option as Google's console does (#1852).
+          ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })))
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
           // `pattern` is only enforced on the text-like inputs. Attaching one
