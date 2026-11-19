@@ -124,6 +124,17 @@ func (r *Registry) Unmeasured() []string {
 	return out
 }
 
+// Measured reports whether service has a call observer counting into this
+// registry, so its calls are seen (and a zero is a zero).
+func (r *Registry) Measured(service string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.measured[service]
+}
+
 func label(v string) string {
 	return strings.NewReplacer(`\`, `\\`, "\n", `\n`, `"`, `\"`).Replace(v)
 }

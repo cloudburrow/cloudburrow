@@ -346,12 +346,34 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/cloud-resource-manager" },
   { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/iam-admin/tags" },
-  // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
-  // provider but no route.
-  { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
+  // APIs & Services (#1352, #1866), Google's menu in Google's order.
+  // Enabled APIs & services (/apis, Google's /apis/dashboard) is the
+  // dashboard's Traffic, Errors and Median latency charts over the table of
+  // enabled APIs (renderAPIsDashboard); an API's page is
+  // /apis/api/<name>/<tab> (Overview, Metrics, Quotas & System Limits,
+  // Credentials) with Disable API. Library is /apis/library, an API's
+  // Library page /apis/library/<name> with Enable or Manage. Credentials
+  // holds Create credentials and the service accounts; the API Keys API and
+  // OAuth clients are not served, which it says. Their calls are the
+  // serviceusage provider's Studio (consoleapis.go).
+  { path: "/apis", service: "serviceusage", screen: "apis-dashboard", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/dashboard", redirect: "/apis", title: "Enabled APIs & services" },
+  { path: "/apis/library", service: "serviceusage", screen: "apis-library", icon: "serviceusage", title: "Library", kind: "API", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/credentials", service: "serviceusage", screen: "apis-credentials", icon: "serviceusage", title: "Credentials", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "The OAuth consent screen is Google Auth Platform's (Branding, Audience, Clients, Data Access, Verification Center), which CloudBurrow does not serve: a local instance signs no user in with OAuth, and its APIs take a service account key or no credentials at all." },
+  { path: "/apis/credentials/agreements", title: "Page usage agreements", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "Page usage agreements are the terms of service a project has accepted for Google's APIs. A local instance has no terms to accept." },
+  { path: "/apis/credentials/domainverification", title: "Domain verification", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "Domain verification proves to Google that a project owns a domain, for push notifications and OAuth redirects. A local instance reaches no outside domain, so there is nothing to verify." },
   // Service Usage operations (#1530): what operations.list answers, with
-  // Delete.
+  // Delete. Google's menu has no such page; it is kept after Google's.
   { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", kind: "Operation", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
@@ -6699,6 +6721,10 @@ function dispatch(view) {
   if (match.screen === "bigquery-studio") return renderBigQueryStudio(view);
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
+  if (match.screen === "apis-dashboard" && !resourcePath.length) return renderAPIsDashboard(view);
+  if (match.screen === "apis-dashboard" && resourcePath[0] === "api" && resourcePath[1]) return renderAPIPage(view, resourcePath[1], resourcePath[2] || "overview");
+  if (match.screen === "apis-library") return renderAPILibrary(view, resourcePath[0] || "");
+  if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
   if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
   // Custom constraints (#1891): the list, Create custom constraint, and
@@ -14039,3 +14065,319 @@ function renderManageResources(view) {
 
 const mrNoteText = "One local organization; a project you shut down is kept 30 days, when Restore brings it back, then purged. " +
   "IAM policies are stored, and enforced only with up --iam-enforcement=on.";
+
+// --- APIs & Services (#1866) -------------------------------------------
+//
+// Google's APIs & Services pages over the local Service Usage API: the
+// Enabled APIs & services dashboard (Traffic, Errors and Median latency
+// charts above the enabled APIs, with Requests, Errors and Latency), the
+// Library (search and categories over every API CloudBurrow serves, the
+// ones this instance does not serve marked so), each API's page (Overview,
+// Metrics, Quotas & System Limits, Credentials, Disable API) and
+// Credentials. Counts are the instance's own request counters, which are
+// kept per API for every project together; an API whose calls are not
+// counted says so rather than showing a zero.
+
+function apisCall(call, body = {}) {
+  const project = currentProject();
+  return send(`/api/studio/serviceusage?call=${encodeURIComponent(call)}&project=${encodeURIComponent(project || "")}`, "POST", body);
+}
+
+function apisNeedProject(view, title) {
+  setChildren(view, pageHeader(title, ""),
+    emptyState("Select a project", "APIs are enabled per project. Choose one in the toolbar."));
+}
+
+const apisNumber = (n) => Number(n || 0).toLocaleString("en-US");
+const apisErrors = (t) => !t.measured ? "Not counted" : t.requests ? `${((t.errors / t.requests) * 100).toFixed(1)}%` : "0%";
+const apisLatency = (v, t) => !t.measured ? "Not counted" : v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`;
+
+// apisSeries adds up the request charts' series of the given services,
+// sample by sample: calls per second, the share that failed, and the
+// call-weighted median latency.
+function apisSeries(data, names) {
+  const byAt = new Map();
+  for (const svc of (data && data.services) || []) {
+    if (!names.has(svc.service)) continue;
+    for (const p of svc.points || []) {
+      const at = p.at;
+      const acc = byAt.get(at) || { at, rate: 0, failed: 0, weighted: 0, weight: 0 };
+      acc.rate += p.rate;
+      if (p.error_rate !== null && p.error_rate !== undefined) acc.failed += p.rate * p.error_rate;
+      if (p.p50_ms !== null && p.p50_ms !== undefined && p.rate > 0) { acc.weighted += p.rate * p.p50_ms; acc.weight += p.rate; }
+      byAt.set(at, acc);
+    }
+  }
+  return [...byAt.values()].sort((a, b) => (a.at < b.at ? -1 : 1)).map((a) => ({
+    at: a.at, rate: a.rate,
+    errorPct: a.rate > 0 ? (a.failed / a.rate) * 100 : null,
+    p50: a.weight > 0 ? a.weighted / a.weight : null,
+  }));
+}
+
+async function apisCharts(names, idPrefix) {
+  let data = null;
+  try { data = await api("/api/metrics/requests"); } catch (err) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: `Request charts unavailable: ${err.message}` });
+  }
+  if (!names.size) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: "Not available locally: this API's calls are not counted by this instance." });
+  }
+  const pts = apisSeries(data, names);
+  const last = pts.length ? pts[pts.length - 1] : null;
+  return el("div", { class: "charts", id: `${idPrefix}-charts` },
+    chartCard("Traffic", pts.map((p) => ({ value: p.rate })), {
+      label: "Requests per second", current: last ? `${last.rate.toFixed(2)}/s` : "",
+      foot: "Requests per second, every project on this instance",
+    }),
+    chartCard("Errors", pts.map((p) => ({ value: p.errorPct })), {
+      label: "Errors as a percentage of requests", max: 100,
+      current: last && last.errorPct !== null ? `${last.errorPct.toFixed(1)}%` : "",
+      foot: "Percent of requests that failed (any code but OK, or HTTP 4xx and 5xx)",
+    }),
+    chartCard("Median latency", pts.map((p) => ({ value: p.p50 })), {
+      label: "Median latency in milliseconds",
+      current: last && last.p50 !== null ? `${last.p50.toFixed(1)} ms` : "",
+      foot: "Median estimated from the latency histogram",
+    }));
+}
+
+function apisDisable(name, title, project, after) {
+  mrForm({
+    id: "api-disable", title: `Disable ${title}?`, label: "Disable", destructive: true, fields: [],
+    note: `${name} is recorded as disabled for project ${project}: Service Usage, gcloud and Terraform report it DISABLED. ` +
+      "Re-enable it from the Library.",
+    submit: async () => {
+      const op = recordOperation(`Disable ${name} on ${project}`);
+      try { await apisCall("disable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+      notify(`Disabled ${title}`);
+      after();
+    },
+  });
+}
+
+async function apisEnable(name, title, project) {
+  const op = recordOperation(`Enable ${name} on ${project}`);
+  try { await apisCall("enable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+  notify(`Enabled ${title}`);
+}
+
+function renderAPIsDashboard(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "APIs & Services");
+  const body = el("div", { id: "apis-dashboard-body" }, loadingState(5, { what: "APIs" }));
+  const filter = el("input", { type: "search", class: "filter", id: "apis-filter", placeholder: "Filter", "aria-label": "Filter enabled APIs and services" });
+  let list = [];
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const rows = list.filter((a) => a.state === "ENABLED" && (!q || a.title.toLowerCase().includes(q) || a.name.includes(q)));
+    setChildren(body, el("div", { class: "table-wrap" },
+      el("table", { class: "table", id: "apis-table" },
+        el("thead", {}, el("tr", {}, ...["Name", "Requests", "Errors", "Latency, median", "Latency, 95%"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...(rows.length ? rows.map((a) => el("tr", { "data-api": a.name },
+          el("td", {}, el("a", { href: `/apis/api/${encodeURIComponent(a.name)}/metrics${scopeSearch()}`, text: a.title })),
+          el("td", { text: a.totals.measured ? apisNumber(a.totals.requests) : "Not counted" }),
+          el("td", { text: apisErrors(a.totals) }),
+          el("td", { text: apisLatency(a.totals.p50Ms, a.totals) }),
+          el("td", { text: apisLatency(a.totals.p95Ms, a.totals) })))
+          : [el("tr", {}, el("td", { colspan: "5", text: q ? "No enabled API matches the filter." : "No API is enabled in this project." }))])))));
+  };
+  filter.addEventListener("input", draw);
+  const charts = el("div", { id: "apis-dashboard-charts-slot" });
+  const reload = async () => {
+    try {
+      const data = await apisCall("apis");
+      list = data.apis || [];
+      draw();
+      const names = new Set(list.filter((a) => a.state === "ENABLED" && a.metricsService).map((a) => a.metricsService));
+      setChildren(charts, await apisCharts(names, "apis-dashboard"));
+    } catch (err) {
+      setChildren(body, errorState("Could not list the project's APIs", err.message, reload));
+    }
+  };
+  const enable = el("a", { class: "header-button primary", id: "apis-enable", href: "/apis/library" + scopeSearch(), html: ICON_ADD },
+    el("span", { text: "Enable APIs and services" }));
+  setChildren(view, pageHeader("APIs & Services", "", { actions: [enable, refreshButton(() => reload())] }),
+    noteBanner(apiCountersNote), charts, el("div", { class: "filter-bar" }, filter), body);
+  reload();
+}
+
+const apiCountersNote = "Requests, errors and latency are this instance's own request counters (/metrics), " +
+  "for every project together: CloudBurrow does not keep them per project.";
+
+const API_TABS = [["overview", "Overview"], ["metrics", "Metrics"], ["quotas", "Quotas & System Limits"], ["credentials", "Credentials"]];
+
+async function renderAPIPage(view, name, tab) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "API/Service details");
+  if (!API_TABS.some(([id]) => id === tab)) tab = "overview";
+  setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), loadingState(4, { what: name }));
+  let data;
+  try { data = await apisCall("api", { service: name }); } catch (err) {
+    setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), errorState(`Could not read ${name}`, err.message));
+    return;
+  }
+  const a = data.api;
+  const redraw = () => renderAPIPage(view, name, tab);
+  const actions = [];
+  if (a.state === "ENABLED") {
+    actions.push(el("button", { type: "button", class: "header-button", id: "api-disable-button", text: "Disable API",
+      onclick: () => apisDisable(a.name, a.title, project, () => navigate("/apis")) }));
+  } else if (a.state === "DISABLED") {
+    actions.push(el("button", { type: "button", class: "header-button primary", id: "api-enable-button", text: "Enable",
+      onclick: async () => { await apisEnable(a.name, a.title, project); redraw(); } }));
+  }
+  const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${a.title} sections` },
+    ...API_TABS.map(([id, label]) => el("a", { role: "tab", id: `api-tab-${id}`, class: "tab" + (id === tab ? " is-selected" : ""),
+      "aria-selected": String(id === tab), href: `/apis/api/${encodeURIComponent(a.name)}/${id}${scopeSearch()}`, text: label })));
+  const panel = el("div", { role: "tabpanel", id: "api-tab-panel", "aria-labelledby": `api-tab-${tab}` });
+  const dl = (pairs) => el("dl", { class: "api-facts" }, ...pairs.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+  if (tab === "overview") {
+    setChildren(panel,
+      el("p", { text: a.summary || "" }),
+      dl([["Service name", a.name], ["Type", "Public API"], ["Status", a.state === "ENABLED" ? "Enabled" : a.state === "DISABLED" ? "Disabled" : "Not available locally"],
+        ["Category", a.category || ""], ["Served by", "This CloudBurrow instance"]]),
+      a.unavailable ? el("p", { class: "unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
+      el("h2", { text: "Traffic" }), await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-overview"));
+  } else if (tab === "metrics") {
+    const methods = data.methods || [];
+    setChildren(panel,
+      a.sharedWith && a.sharedWith.length ? el("p", { class: "form-help", text: `Counted together with ${a.sharedWith.join(", ")}, which the same local server serves.` }) : null,
+      await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-metrics"),
+      el("h2", { text: "Methods" }),
+      !a.totals.measured ? el("p", { class: "unavailable", id: "api-methods", text: "Not available locally: this API's calls are not counted by this instance." })
+        : el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-methods" },
+          el("thead", {}, el("tr", {}, ...["Method", "Requests", "Errors", "Latency, median", "Latency, 95%"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(methods.length ? methods.map((m) => el("tr", {},
+            el("td", { class: "mono", text: m.method }), el("td", { text: apisNumber(m.requests) }), el("td", { text: apisErrors(m) }),
+            el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
+            : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
+  } else if (tab === "quotas") {
+    setChildren(panel, el("div", { class: "state", id: "api-quotas" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: "Quotas are the Cloud Quotas and Service Usage consumer quota APIs', which CloudBurrow does not serve. " +
+        "The per-request limits Google documents for this API, such as sizes and counts, are enforced by the local service itself." })));
+  } else {
+    setChildren(panel, apisCredentialSections("api-credentials"));
+  }
+  setChildren(view, pageHeader(a.title, `${a.name} · project ${project}`, { back: "/apis" + scopeSearch(), actions }), strip, panel);
+  announce(`${a.title}: ${API_TABS.find(([id]) => id === tab)[1]}`);
+}
+
+const API_CATEGORIES = ["Big data", "Compute", "Databases", "Developer tools", "Management tools", "Security", "Storage"];
+
+async function renderAPILibrary(view, name) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, name ? "API Library" : "API Library");
+  let data;
+  setChildren(view, pageHeader("API Library", ""), loadingState(4, { what: "the API Library" }));
+  try { data = await apisCall("apis"); } catch (err) {
+    setChildren(view, pageHeader("API Library", ""), errorState("Could not read the API Library", err.message));
+    return;
+  }
+  const list = data.apis || [];
+  if (name) {
+    const a = list.find((x) => x.name === name);
+    if (!a) {
+      setChildren(view, pageHeader("API Library", "", { back: "/apis/library" + scopeSearch() }),
+        emptyState("Not available locally", `CloudBurrow does not serve ${name}.`));
+      return;
+    }
+    const action = a.unavailable
+      ? el("button", { type: "button", class: "primary", id: "library-enable", disabled: "disabled", text: "Enable" })
+      : a.state === "ENABLED"
+        ? el("a", { class: "button primary", id: "library-manage", href: `/apis/api/${encodeURIComponent(a.name)}/metrics${scopeSearch()}`, text: "Manage" })
+        : el("button", { type: "button", class: "primary", id: "library-enable", text: "Enable",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { await apisEnable(a.name, a.title, project); navigate(`/apis/api/${encodeURIComponent(a.name)}/metrics`); }
+            catch (err) { notify(err.message, "error"); e.currentTarget.disabled = false; }
+          } });
+    setChildren(view, pageHeader(a.title, a.name, { back: "/apis/library" + scopeSearch() }),
+      el("div", { class: "card", id: "library-api" },
+        el("p", { text: a.summary || "" }),
+        el("div", { class: "page-header-actions" }, action,
+          a.state === "ENABLED" ? el("span", { class: "status ok", id: "library-api-enabled", text: "API Enabled" }) : null),
+        a.unavailable ? el("p", { class: "unavailable", id: "library-unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
+        el("dl", { class: "api-facts" }, el("dt", { text: "Category" }), el("dd", { text: a.category || "" }),
+          el("dt", { text: "Service name" }), el("dd", { class: "mono", text: a.name }))));
+    announce(`${a.title} in the API Library`);
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  const search = el("input", { type: "search", id: "library-search", class: "filter", placeholder: "Search for APIs & Services",
+    "aria-label": "Search for APIs & Services", value: params.get("q") || "" });
+  let category = params.get("filter") || "";
+  const cats = el("div", { class: "library-categories", role: "group", "aria-label": "Category" });
+  const grid = el("div", { class: "library-grid", id: "library-results" });
+  const draw = () => {
+    setChildren(cats, ...["", ...API_CATEGORIES].map((c) => el("button", { type: "button",
+      class: "chip" + (c === category ? " is-selected" : ""), "aria-pressed": String(c === category), "data-category": c || "all",
+      text: c || "All", onclick: () => { category = c; draw(); } })));
+    const q = search.value.trim().toLowerCase();
+    const rows = list.filter((a) => (!category || a.category === category) &&
+      (!q || a.title.toLowerCase().includes(q) || a.name.includes(q) || (a.summary || "").toLowerCase().includes(q)));
+    setChildren(grid, ...(rows.length ? rows.map((a) => el("a", { class: "card library-card", "data-api": a.name,
+      href: `/apis/library/${encodeURIComponent(a.name)}${scopeSearch()}` },
+      el("h3", { text: a.title }),
+      el("p", { class: "form-help", text: a.category || "" }),
+      el("p", { text: a.summary || "" }),
+      a.unavailable ? el("p", { class: "unavailable", text: "Not available locally" })
+        : a.state === "ENABLED" ? el("p", { class: "status ok", text: "Enabled" }) : el("p", { class: "status", text: "Disabled" })))
+      : [emptyState("No results", "No API CloudBurrow serves matches the search.")]));
+  };
+  search.addEventListener("input", draw);
+  draw();
+  setChildren(view, pageHeader("Welcome to the API Library", "The APIs CloudBurrow serves, with those this instance was not started with marked not available locally.",
+    { back: "/apis" + scopeSearch() }), el("div", { class: "filter-bar" }, search), cats, grid);
+}
+
+// apisCredentialSections is the Credentials page's lists, also an API's
+// Credentials tab: API keys and OAuth 2.0 client IDs are not served, the
+// service accounts are IAM's.
+function apisCredentialSections(idPrefix) {
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const accounts = el("div", { id: `${idPrefix}-service-accounts` });
+  if (served.has("iam-service-accounts") && currentProject()) {
+    setChildren(accounts, loadingState(2));
+    api(`/api/resources/iam-service-accounts?project=${encodeURIComponent(currentProject())}`).then((data) => {
+      const items = data.items || [];
+      setChildren(accounts, el("div", { class: "table-wrap" }, el("table", { class: "table" },
+        el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Email" }), el("th", { scope: "col", text: "Name" }))),
+        el("tbody", {}, ...(items.length ? items.map((r) => el("tr", {},
+          el("td", {}, el("a", { href: `/iam-admin/serviceaccounts/${encodeURIComponent(r.name)}${scopeSearch()}`, text: r.name })),
+          el("td", { text: (r.fields && (r.fields["Display name"] || r.fields.Name)) || "" })))
+          : [el("tr", {}, el("td", { colspan: "2", text: "No service accounts to display" }))])))),
+        el("p", {}, el("a", { href: "/iam-admin/serviceaccounts" + scopeSearch(), text: "Manage service accounts" })));
+    }).catch((err) => setChildren(accounts, el("p", { class: "unavailable", text: err.message })));
+  } else {
+    setChildren(accounts, el("p", { class: "unavailable", text: "Service accounts are IAM's, which this instance does not serve." }));
+  }
+  return el("div", { class: "api-credentials", id: idPrefix },
+    el("h2", { text: "API Keys" }),
+    el("p", { class: "unavailable", id: `${idPrefix}-api-keys`, text: "Not available locally: CloudBurrow does not serve the API Keys API (apikeys.googleapis.com). Its APIs take no key." }),
+    el("h2", { text: "OAuth 2.0 Client IDs" }),
+    el("p", { class: "unavailable", id: `${idPrefix}-oauth`, text: "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve." }),
+    el("h2", { text: "Service Accounts" }), accounts);
+}
+
+function renderAPICredentials(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Credentials");
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const trigger = el("button", { type: "button", class: "header-button primary", id: "credentials-create", "aria-haspopup": "menu",
+    "aria-expanded": "false", html: ICON_ADD }, el("span", { text: "Create credentials" }));
+  const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
+    el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "API key — not available locally" }),
+    el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "OAuth client ID — not available locally" }),
+    served.has("iam-service-accounts")
+      ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
+      : el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "Service account — not served" }));
+  trigger.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    trigger.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu)] }),
+    el("p", { class: "subtitle", text: "Create credentials to access your enabled APIs." }),
+    apisCredentialSections("credentials"));
+}
