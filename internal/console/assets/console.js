@@ -3159,7 +3159,7 @@ async function renderDetail(view, route, resourcePath) {
             el("dt", { text: prop.label }),
             propertyValue(prop))))
     : null;
-  if (summary) crumb.append(summary);
+  if (summary) { crumb.append(summary); crumb.classList.add("has-summary"); }
 
   const wanted = new URLSearchParams(location.search).get("tab");
   let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
@@ -6603,9 +6603,12 @@ function renderInstanceToken(view, err) {
 // the header, and the header is the thing that moves.
 function syncStickyOffsets() {
   const root = document.documentElement;
+  // A header that scrolls with the page (a resource's, with its details,
+  // #1842) holds nothing over the table, so it offsets nothing.
   const height = (sel) => {
     const node = document.querySelector(sel);
-    return node ? `${Math.round(node.getBoundingClientRect().height)}px` : "0px";
+    if (!node || getComputedStyle(node).position !== "sticky") return "0px";
+    return `${Math.round(node.getBoundingClientRect().height)}px`;
   };
   root.style.setProperty("--page-header-h", height("#view .page-header"));
   root.style.setProperty("--action-bar-h", height("#view .action-bar"));
@@ -6751,6 +6754,9 @@ function rescopeLinks(from, to) {
 // The Select a project dialog's Recent and Starred views (#1842).
 const RECENT_PROJECTS_KEY = "cloudburrow.projects.recent";
 const STARRED_PROJECTS_KEY = "cloudburrow.projects.starred";
+const rememberRecent = (id) => {
+  if (id) writeStored(RECENT_PROJECTS_KEY, [id, ...readStored(RECENT_PROJECTS_KEY, []).filter((x) => x !== id)].slice(0, 10));
+};
 
 async function initProjects() {
   const button = document.getElementById("project-button");
@@ -6778,7 +6784,7 @@ async function initProjects() {
   };
 
   const select = (id) => {
-    if (id) writeStored(RECENT_PROJECTS_KEY, [id, ...readStored(RECENT_PROJECTS_KEY, []).filter((x) => x !== id)].slice(0, 10));
+    rememberRecent(id);
     const url = new URL(location.href);
     if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
@@ -6902,6 +6908,9 @@ async function initProjects() {
   button.addEventListener("click", async () => {
     if (overlayOpen(panel)) return closePicker();
     const mine = ++opening;
+    // The project in use is a recent one however it was chosen (a link, the
+    // address).
+    rememberRecent(selected);
     await load();
     if (mine !== opening) return;
     showOverlay(panel);
@@ -6912,6 +6921,8 @@ async function initProjects() {
     if (e.key === "Escape") { closePicker(); button.focus(); }
   });
   document.addEventListener("click", (e) => {
+    // A control the click redrew away (a row's star) is not outside.
+    if (!e.target.isConnected) return;
     if (overlayOpen(panel) && !panel.contains(e.target) && !button.contains(e.target)) {
       closePicker();
     }

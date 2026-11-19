@@ -379,7 +379,10 @@ button.primary.header-button[disabled], button.primary.header-button.is-busy[dis
 }
 .resource-name { margin: 4px 0 0; font-size: var(--text-heading-size); overflow-wrap: anywhere; }
 /* A resource's details in its page header, above the tabs (#1842): one
-   label over its value per item, wrapping to as many rows as it needs. */
+   label over its value per item, wrapping to as many rows as it needs.
+   Such a header, with its actions, details and tabs, is too tall to stay
+   pinned over the tab's table, so it scrolls with the page. */
+.page-header.has-summary { position: static; }
 .resource-summary {
   display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 12px 0 4px; padding: 0;
   min-width: 0;
@@ -814,6 +817,10 @@ td a { color: var(--accent); }
               transform var(--motion-fast) var(--ease-decelerate);
 }
 .panel.is-open, .picker-panel.is-open { opacity: 1; transform: none; }
+/* A panel on its way out (or not yet in) is see-through and must not take
+   the click meant for the page under it: the New project page's first
+   control sat under the closing project picker for its 200ms exit (#1842). */
+.panel:not(.is-open), .picker-panel:not(.is-open) { pointer-events: none; }
 
 .modal {
   position: fixed; inset: 0; z-index: 40;
