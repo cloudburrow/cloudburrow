@@ -5,7 +5,9 @@ package compat
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -15,8 +17,10 @@ import (
 
 // TestConsoleDatastoreWritesTheChosenDatabase (#1883): the Datastore
 // page's database picker lists the project's Datastore mode databases, and
-// with ?database= its Create entity addresses that database, which the official client opened on it reads
-// back; (default) is untouched.
+// with ?database= its Create entity addresses that database, which the
+// official client opened on it reads back; (default) is untouched. The
+// kind's entity list and the entity's own page in that database show the
+// entity, and (default)'s kind list does not (#1885).
 func TestConsoleDatastoreWritesTheChosenDatabase(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -55,5 +59,55 @@ func TestConsoleDatastoreWritesTheChosenDatabase(t *testing.T) {
 	}
 	if err := def.Get(ctx, key, &props); !errors.Is(err, datastore.ErrNoSuchEntity) {
 		t.Errorf("(default) holds the entity created in %s: %v", id, err)
+	}
+
+	detail := func(database string, path ...string) string {
+		t.Helper()
+		v := url.Values{"project": {project}, "name": path}
+		if database != "" {
+			v.Set("database", database)
+		}
+		code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/datastore?"+v.Encode(), "")
+		if code != http.StatusOK {
+			t.Fatalf("the Datastore page %v in %q = %d: %s", path, database, code, out)
+		}
+		return out
+	}
+	var kindPage struct {
+		Sections []struct {
+			Listing struct {
+				Items []struct {
+					Name  string
+					Opens []string
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(detail(id, "Picked")), &kindPage); err != nil {
+		t.Fatal(err)
+	}
+	var opens []string
+	for _, s := range kindPage.Sections {
+		for _, it := range s.Listing.Items {
+			if it.Name == "name=p1" {
+				opens = it.Opens
+			}
+		}
+	}
+	if opens == nil {
+		t.Fatalf("the kind's entity list in %s does not list name=p1: %+v", id, kindPage)
+	}
+	var entityPage struct {
+		Title, Unavailable string
+		Summary            []struct{ Label, Value string }
+	}
+	if err := json.Unmarshal([]byte(detail(id, opens...)), &entityPage); err != nil {
+		t.Fatal(err)
+	}
+	if entityPage.Unavailable != "" || !strings.Contains(fmt.Sprint(entityPage), "p1") {
+		t.Errorf("the entity's page in %s: %+v", id, entityPage)
+	}
+	if out := detail("", "Picked"); strings.Contains(out, `"name=p1"`) {
+		t.Errorf("(default)'s kind list shows %s's entity: %s", id, out)
 	}
 }

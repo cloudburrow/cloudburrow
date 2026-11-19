@@ -25,6 +25,8 @@ import (
 // lists (default) and the project's Datastore mode databases; chosen, it
 // travels as ?database=, and Create entity writes that database, which the
 // official client opened on it reads back, while (default) is untouched.
+// The kind's entity list in the chosen database lists the entity (#1885),
+// and its row opens the entity's own page, still in that database.
 func TestDatastoreDatabasePickerWritesTheChosenDatabaseThroughTheBrowser(t *testing.T) {
 	needService(t, "datastore")
 	fsAddr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envFirestore)), "http://")
@@ -85,5 +87,18 @@ func TestDatastoreDatabasePickerWritesTheChosenDatabaseThroughTheBrowser(t *test
 	}
 	if err := def.Get(ctx, key, &got); !errors.Is(err, datastore.ErrNoSuchEntity) {
 		t.Errorf("(default) holds the entity created in %s: %v", dbID, err)
+	}
+
+	p.navigate("/datastore/Picked?project=" + project + "&database=" + dbID)
+	p.waitFor(`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent.trim() === "name=p1")`)
+	p.clickText("#view tbody a", "name=p1")
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent.includes("p1")`)
+	p.waitFor(fmt.Sprintf(`new URLSearchParams(location.search).get("database") === %q`, dbID))
+	p.navigate("/datastore/Picked?project=" + project)
+	p.waitFor(`document.querySelector("#view") && !document.querySelector("#view").textContent.includes("Loading")`)
+	var leaked bool
+	p.eval(`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent.trim() === "name=p1")`, &leaked)
+	if leaked {
+		t.Errorf("(default)'s Picked kind lists the entity created in %s", dbID)
 	}
 }
