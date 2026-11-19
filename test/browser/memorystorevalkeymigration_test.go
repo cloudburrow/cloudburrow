@@ -120,7 +120,8 @@ func TestMemorystoreValkeyMigrationThroughThePage(t *testing.T) {
 		}
 	}
 
-	p.navigate("/memorystore-valkey/" + dstID + "?project=" + project)
+	// The migration source is on the Configuration tab (#1862).
+	p.navigate("/memorystore-valkey/" + dstID + "?project=" + project + "&tab=configuration")
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q) &&
 		[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Finish migration")`, srcAddr))
 	p.clickText("#view .page-actions button", "Finish migration")

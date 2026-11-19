@@ -85,7 +85,7 @@ func TestMemorystoreClusterServerCATabsThroughThePage(t *testing.T) {
 		p.navigate("/" + screen + q)
 		p.clickText("#view tbody a", id)
 		p.waitFor(`document.querySelector("#tab-server-ca") !== null`)
-		p.eval(`document.querySelector("#view").textContent`, &page)
+		page = memorystoreTabsText(p)
 		p.clickText("#tab-server-ca", "Server CA")
 		p.eval(`[...document.querySelectorAll("#view [role=tabpanel]")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &tab)
 		return page, tab

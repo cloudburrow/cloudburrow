@@ -81,8 +81,8 @@ func TestMemorystoreMaintenanceThroughThePage(t *testing.T) {
 	if orig.Weekday() != time.Sunday || orig.Hour() != 3 {
 		t.Errorf("scheduled for %s; want a Sunday 03:00 UTC", orig)
 	}
-	p.navigate(page)
-	// The summary shows the event and its deadline.
+	p.navigate(page + "&tab=maintenance")
+	// The summary, on the Maintenance tab (#1862), shows the event and its deadline.
 	p.waitFor(`document.querySelector("#view").textContent.includes("Scheduled maintenance") &&
 		document.querySelector("#view").textContent.includes("Reschedule deadline") &&
 		document.querySelector("#view").textContent.includes("SUNDAY, 03:00")`)

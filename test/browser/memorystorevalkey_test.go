@@ -88,8 +88,7 @@ func TestMemorystoreValkeySecondaryThroughThePage(t *testing.T) {
 	p.navigate("/memorystore-valkey" + q)
 	p.clickText("#view tbody a", sid)
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Detach")`)
-	var page string
-	p.eval(`document.querySelector("#view").textContent`, &page)
+	page := memorystoreTabsText(p)
 	for _, want := range []string{"Cross-instance replication", "SECONDARY", primary.GetName(), "Replication membership", "VALKEY_9_0", "Customer-managed key"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the secondary's page does not show %q", want)

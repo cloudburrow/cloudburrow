@@ -92,3 +92,19 @@ func TestMemorystoreConsoleFollowsGoogle(t *testing.T) {
 		t.Errorf("Create a Redis instance = %+v; want Google's title, Tier, Region, Version, Capacity, and Create", redis)
 	}
 }
+
+// memorystoreTabsText is the text of a Memorystore page over every tab
+// (#1862: Overview, Configuration, Connections, ...), each opened in turn.
+func memorystoreTabsText(p *tab) string {
+	p.t.Helper()
+	var text string
+	p.eval(`(() => {
+		let out = document.querySelector("#view").textContent;
+		for (const t of document.querySelectorAll("#view [role=tab]")) {
+			t.click();
+			out += " " + [...document.querySelectorAll("#view [role=tabpanel]")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ");
+		}
+		return out;
+	})()`, &text)
+	return text
+}
