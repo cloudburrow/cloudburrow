@@ -321,10 +321,14 @@ func TestServiceUsageOperations(t *testing.T) {
 // google.golang.org/api/serviceusage/v1beta1, the client and version
 // gcloud's privateca roots create --kms-key-version and --bucket call:
 // services.generateServiceIdentity answers a done operation whose
-// ServiceIdentity is the Certificate Authority Service agent of the
-// project, service-NUMBER@gcp-sa-privateca.iam.gserviceaccount.com, the
-// same at every call; a served API whose agent CloudBurrow does not know is
-// 501, and an API it does not serve is refused as enable refuses it.
+// ServiceIdentity is the service's primary service agent in the project,
+// as https://cloud.google.com/iam/docs/service-agents lists it
+// (service-NUMBER@gcp-sa-privateca for Certificate Authority Service,
+// gcp-sa-ekms for Cloud KMS, gcp-sa-pubsub, gcp-sa-secretmanager,
+// serverless-robot-prod for Cloud Run, ...), with a 21-digit uniqueId, the
+// same at every call; a service with no primary agent (Cloud Storage,
+// Cloud Logging) answers an empty ServiceIdentity, as gcloud documents; an
+// API CloudBurrow does not serve is refused as enable refuses it.
 func TestServiceUsageGenerateServiceIdentity(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvServiceUsage)
@@ -334,9 +338,6 @@ func TestServiceUsageGenerateServiceIdentity(t *testing.T) {
 	}
 	v1 := serviceUsageClient(t, h)
 	p := "projects/" + h.Project()
-	if _, err := v1.Services.Get(p + "/services/privateca.googleapis.com").Context(h.Context()).Do(); err != nil {
-		t.Skipf("this instance does not serve Certificate Authority Service: %v", err)
-	}
 	gen := func(svc string) (*subeta.Operation, map[string]any, error) {
 		op, err := c.Services.GenerateServiceIdentity(p + "/services/" + svc).Context(h.Context()).Do()
 		if err != nil {
@@ -345,21 +346,63 @@ func TestServiceUsageGenerateServiceIdentity(t *testing.T) {
 		var resp map[string]any
 		return op, resp, json.Unmarshal(op.Response, &resp)
 	}
-	op, a, err := gen("privateca.googleapis.com")
+	agents := []struct{ svc, domain string }{
+		{"privateca.googleapis.com", "gcp-sa-privateca.iam.gserviceaccount.com"},
+		{"cloudkms.googleapis.com", "gcp-sa-ekms.iam.gserviceaccount.com"},
+		{"pubsub.googleapis.com", "gcp-sa-pubsub.iam.gserviceaccount.com"},
+		{"secretmanager.googleapis.com", "gcp-sa-secretmanager.iam.gserviceaccount.com"},
+		{"run.googleapis.com", "serverless-robot-prod.iam.gserviceaccount.com"},
+		{"storage.googleapis.com", ""},
+		{"logging.googleapis.com", ""},
+	}
+	// A fresh project has every API the instance serves ENABLED.
+	list, err := v1.Services.List(p).Filter("state:ENABLED").Context(h.Context()).Do()
 	if err != nil {
 		t.Fatal(err)
 	}
-	email, _ := a["email"].(string)
-	if !op.Done || a["@type"] != "type.googleapis.com/google.api.serviceusage.v1beta1.ServiceIdentity" ||
-		!regexp.MustCompile(`^service-[0-9]+@gcp-sa-privateca\.iam\.gserviceaccount\.com$`).MatchString(email) ||
-		!regexp.MustCompile(`^[0-9]{21}$`).MatchString(fmt.Sprint(a["uniqueId"])) {
-		t.Fatalf("generateServiceIdentity = %+v, %v; want a done operation naming the privateca agent", op, a)
+	served := map[string]bool{}
+	for _, s := range list.Services {
+		served[s.Config.Name] = true
 	}
-	if _, b, err := gen("privateca.googleapis.com"); err != nil || b["email"] != email || b["uniqueId"] != a["uniqueId"] {
-		t.Errorf("a second call = %v, %v; want the same agent %s", b, err, email)
+	tested := 0
+	number := ""
+	for _, a := range agents {
+		if !served[a.svc] {
+			t.Logf("%s: not served by this instance, skipped", a.svc)
+			continue
+		}
+		tested++
+		op, r, err := gen(a.svc)
+		if err != nil {
+			t.Errorf("%s: %v", a.svc, err)
+			continue
+		}
+		if !op.Done || r["@type"] != "type.googleapis.com/google.api.serviceusage.v1beta1.ServiceIdentity" {
+			t.Errorf("%s: %+v, %v; want a done operation with a ServiceIdentity", a.svc, op, r)
+			continue
+		}
+		if a.domain == "" {
+			if len(r) != 1 {
+				t.Errorf("%s: %v; want an empty ServiceIdentity, it has no primary service agent", a.svc, r)
+			}
+			continue
+		}
+		email, _ := r["email"].(string)
+		m := regexp.MustCompile(`^service-([0-9]{12})@` + regexp.QuoteMeta(a.domain) + `$`).FindStringSubmatch(email)
+		if m == nil || !regexp.MustCompile(`^[0-9]{21}$`).MatchString(fmt.Sprint(r["uniqueId"])) {
+			t.Errorf("%s: %v; want service-NUMBER@%s with a 21-digit uniqueId", a.svc, r, a.domain)
+			continue
+		}
+		if number != "" && m[1] != number {
+			t.Errorf("%s: project number %s; another agent has %s", a.svc, m[1], number)
+		}
+		number = m[1]
+		if _, b, err := gen(a.svc); err != nil || b["email"] != email || b["uniqueId"] != r["uniqueId"] {
+			t.Errorf("%s: a second call = %v, %v; want the same agent %s", a.svc, b, err, email)
+		}
 	}
-	if _, _, err := gen("storage.googleapis.com"); httpCode(err) != http.StatusNotImplemented {
-		t.Errorf("an agent CloudBurrow does not know: %v; want 501", err)
+	if tested == 0 {
+		t.Skip("this instance serves none of the services this test asks for")
 	}
 	if _, _, err := gen("nosuch.googleapis.com"); httpCode(err) != http.StatusBadRequest {
 		t.Errorf("an API CloudBurrow does not serve: %v; want 400", err)
