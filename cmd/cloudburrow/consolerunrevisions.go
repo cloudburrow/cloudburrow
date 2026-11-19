@@ -115,6 +115,15 @@ func (p runProvider) ActAt(ctx context.Context, project string, path []string, a
 	if (action == runAddTrigger || action == runDeleteTrigger) && len(path) == 1 {
 		return p.actOnTriggers(ctx, project, serviceIDOf(path[0]), action, values)
 	}
+	if action == runWriteFunction && len(path) == 0 {
+		return p.writeFunctionInline(ctx, project, values)
+	}
+	if action == runConnectRepo && len(path) == 0 {
+		if p.runEndpoint() == "" {
+			return errors.New("the Cloud Run adapter is not running")
+		}
+		return p.connectRepo(ctx, project, values)
+	}
 	if action == runCopyService && len(path) == 1 {
 		return p.copyService(ctx, project, serviceIDOf(path[0]), values)
 	}

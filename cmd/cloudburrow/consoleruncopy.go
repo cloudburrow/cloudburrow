@@ -5,9 +5,9 @@ package main
 //
 // Copy makes a new service with the copied service's configuration, through
 // GetService and CreateService. Write a function is Cloud Functions v2's
-// Create function, which deploys the function as a Cloud Run service; Google's
-// opens an inline editor, and here the source is a .zip, built with Google's
-// buildpacks as Create function builds it.
+// Create function, which deploys the function as a Cloud Run service, its
+// source written in Google's inline editor (consolerunwritefunction.go) and
+// built with Google's buildpacks as Create function builds it.
 
 import (
 	"context"
@@ -91,6 +91,7 @@ func (p runProvider) writeFunctionAction() []console.Action {
 	}
 	a := p.functions.createAction()
 	a.ID, a.Label, a.Submit = runWriteFunction, "Write a function", "Create"
+	a.Fields = inlineSourceFields(a.Fields)
 	return []console.Action{a}
 }
 
