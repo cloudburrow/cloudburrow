@@ -175,3 +175,132 @@ func embeddingLookupSparse(o op, a []*Tensor) (*Tensor, error) {
 	finalize()
 	return r, nil
 }
+
+// opMultinomial is MULTINOMIAL (random_ops.cc): num_samples class indices
+// per row of logits, from TensorFlow's Philox seeded as RANDOM_UNIFORM's
+// is, each sample a double from two consecutive 32-bit draws scaled to the
+// row's unnormalized CDF (non-finite logits never drawn).
+const opMultinomial = 149
+
+func init() { opNames[opMultinomial] = "MULTINOMIAL" }
+
+func multinomial(o op, x, ns *Tensor) (*Tensor, error) {
+	if len(x.Shape) != 2 || !x.Type.IsFloat() || ns == nil || ns.Len() != 1 {
+		return nil, fmt.Errorf("operator MULTINOMIAL takes float logits [batch, classes] and one num_samples")
+	}
+	n := int(ns.f(0))
+	if n < 0 {
+		return nil, fmt.Errorf("operator MULTINOMIAL: num_samples %d", n)
+	}
+	to := o.outType
+	if to != Int32 && to != Int64 {
+		to = Int64
+	}
+	p := seeded(o)
+	var buf []uint32
+	next := func() uint32 {
+		if len(buf) == 0 {
+			s := p.next()
+			buf = s[:]
+		}
+		v := buf[0]
+		buf = buf[1:]
+		return v
+	}
+	batch, classes := x.Shape[0], x.Shape[1]
+	r := &Tensor{Type: to, Shape: []int{batch, n}, I: make([]int64, batch*n)}
+	cdf := make([]float64, classes)
+	for b := range batch {
+		row := x.F[b*classes : (b+1)*classes]
+		mx := float32(-math.MaxFloat32)
+		for _, v := range row {
+			if !math.IsInf(float64(v), 0) && !math.IsNaN(float64(v)) {
+				mx = max(mx, v)
+			}
+		}
+		total := 0.0
+		for j, v := range row {
+			if !math.IsInf(float64(v), 0) && !math.IsNaN(float64(v)) {
+				total += math.Exp(float64(v) - float64(mx))
+			}
+			cdf[j] = total
+		}
+		for j := range n {
+			x0, x1 := next(), next()
+			u := math.Float64frombits(1023<<52|uint64(x0&0xfffff)<<32|uint64(x1)) - 1
+			find := u * total
+			k := 0
+			for k < classes && cdf[k] <= find {
+				k++
+			}
+			r.I[b*n+j] = int64(k)
+		}
+	}
+	return r, nil
+}
+
+// opSkipGram is SKIP_GRAM (skip_gram.cc): the skip-grams of a one-string
+// input's space-separated words (SkipGramOptions ngram_size,
+// max_skip_size, include_all_ngrams), in the kernel's enumeration order.
+const opSkipGram = 30
+
+func init() { opNames[opSkipGram] = "SKIP_GRAM" }
+
+func isSpace(c byte) bool { return c == ' ' || c >= '\t' && c <= '\r' }
+
+func skipGram(o op, x *Tensor) (*Tensor, error) {
+	if x.S == nil || len(x.S) != 1 {
+		return nil, fmt.Errorf("operator SKIP_GRAM takes one STRING")
+	}
+	n, skip, all := int(o.i32(4, 0)), int(o.i32(6, 0)), o.bool(8)
+	if n < 1 {
+		return nil, fmt.Errorf("operator SKIP_GRAM: ngram_size %d", n)
+	}
+	s := x.S[0]
+	var words []string
+	prev := 0
+	for i := 1; i < len(s); i++ {
+		if isSpace(s[i]) {
+			if i > prev && !isSpace(s[prev]) {
+				words = append(words, s[prev:i])
+			}
+			prev = i + 1
+		}
+	}
+	if len(s) > prev {
+		words = append(words, s[prev:])
+	}
+	r := &Tensor{Type: String, S: []string{}}
+	if len(words) < n {
+		r.Shape = []int{0}
+		return r, nil
+	}
+	stack := make([]int, n)
+	idx := 1
+	step := func() bool {
+		if idx < n && stack[idx]+1 < len(words) {
+			return idx == 0 || stack[idx]-stack[idx-1] <= skip
+		}
+		return false
+	}
+	for idx >= 0 {
+		if step() {
+			stack[idx]++
+			idx++
+			if idx < n {
+				stack[idx] = stack[idx-1]
+			}
+			continue
+		}
+		if idx > 0 && (idx == n || all && idx <= n) {
+			g := words[stack[0]]
+			for k := 1; k < idx; k++ {
+				g += " " + words[stack[k]]
+			}
+			r.S = append(r.S, g)
+		}
+		idx--
+	}
+	r.Shape = []int{len(r.S)}
+	return r, nil
+}

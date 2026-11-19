@@ -17,11 +17,12 @@ const (
 	opStablehloScatter      = 190
 	opStablehloReduceWindow = 198
 	opStablehloGather       = 201
+	opReduceWindow          = 205
 )
 
 func init() {
 	for code, name := range map[int32]string{opStablehloScatter: "STABLEHLO_SCATTER", opStablehloReduceWindow: "STABLEHLO_REDUCE_WINDOW",
-		opStablehloGather: "STABLEHLO_GATHER"} {
+		opStablehloGather: "STABLEHLO_GATHER", opReduceWindow: "REDUCE_WINDOW"} {
 		opNames[code] = name
 	}
 }
@@ -226,6 +227,13 @@ func (m *Model) stablehloReduceWindow(o op, a []*Tensor) (*Tensor, error) {
 	if err != nil {
 		return nil, err
 	}
+	return reduceWindow(o, x, init, win, strides, bdil, wdil, pad, fn)
+}
+
+// reduceWindow reduces x's windows (win, strides, base and window
+// dilations, padding low and high per axis) by fn from init.
+func reduceWindow(o op, x, init *Tensor, win, strides, bdil, wdil, pad []int, fn func(a, b float64) float64) (*Tensor, error) {
+	rank := len(x.Shape)
 	shape := make([]int, rank)
 	padded := make([]int, rank)
 	for d := range rank {
@@ -331,4 +339,48 @@ func (m *Model) stablehloScatter(o op, a []*Tensor) (*Tensor, error) {
 		set(r, j, fn(get(r, j), get(upd, i)))
 	}
 	return r, nil
+}
+
+// tflReduceWindow is REDUCE_WINDOW: input, init_value, window_shape,
+// window_strides and window_dilations, reduced by ReduceWindowOptions'
+// reduce_function (ADD, MUL, MINIMUM, MAXIMUM, ALL, ANY), unpadded.
+func tflReduceWindow(o op, a []*Tensor) (*Tensor, error) {
+	for i := range 5 {
+		if i >= len(a) || a[i] == nil {
+			return nil, fmt.Errorf("operator %s takes 5 inputs", o.name)
+		}
+	}
+	x, init := a[0], a[1]
+	if x.S != nil || init.Len() != 1 {
+		return nil, &UnsupportedError{"operator " + o.name + " with these inputs is not supported"}
+	}
+	win, strides, dil := axes(a[2]), axes(a[3]), axes(a[4])
+	rank := len(x.Shape)
+	if len(win) != rank || len(strides) != rank || len(dil) != rank {
+		return nil, fmt.Errorf("operator %s: window options for rank %d", o.name, rank)
+	}
+	fns := map[int32]func(a, b float64) float64{
+		1: func(a, b float64) float64 { return a + b },
+		2: func(a, b float64) float64 { return a * b },
+		3: func(a, b float64) float64 { return min(a, b) },
+		4: func(a, b float64) float64 { return max(a, b) },
+		5: func(a, b float64) float64 { return b2f(a != 0 && b != 0) },
+		6: func(a, b float64) float64 { return b2f(a != 0 || b != 0) },
+	}
+	fn := fns[o.i32(4, 0)]
+	if fn == nil {
+		return nil, &UnsupportedError{fmt.Sprintf("operator %s with reduce_function %d is not supported", o.name, o.i32(4, 0))}
+	}
+	ones := make([]int, rank)
+	for i := range ones {
+		ones[i] = 1
+	}
+	return reduceWindow(o, x, init, win, strides, ones, dil, make([]int, 2*rank), fn)
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }

@@ -441,7 +441,7 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 	if x.Type == String {
 		switch o.code {
 		case opReshape, opSqueeze, opExpandDims, opTranspose, opConcatenation, opPack, opStridedSlice, opGather,
-			opEqual, opNotEqual, opLess, opLessEqual, opGreater, opGreaterEqual:
+			opEqual, opNotEqual, opLess, opLessEqual, opGreater, opGreaterEqual, opSkipGram:
 		default:
 			return nil, &UnsupportedError{fmt.Sprintf("operator %s on STRING tensors is not supported", o.name)}
 		}

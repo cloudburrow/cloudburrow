@@ -235,6 +235,17 @@ def random_model():
         y = b.tensor(name, [3, 5])
         b.op(OP.ADD, [x, r], [y], BO.AddOptions, S.AddOptionsT())
         b.output(y)
+    # MULTINOMIAL of the logits x + bias, 9 samples a row (one -inf class).
+    bias = b.tensor("mn_bias", [3, 5], data=np.array([[0, 1, 2, 0.5, -1], [3, 0, 0, 0, 0], [0.1, 0.2, -np.inf, 0.4, 0.5]], np.float32))
+    lg = b.tensor("mn_logits", [3, 5])
+    b.op(OP.ADD, [x, bias], [lg], BO.AddOptions, S.AddOptionsT())
+    ns = b.tensor("mn_n", [], I32, data=np.array(9, np.int32))
+    for name, s1, s2, typ in [("multinomial", 7, 11, I64), ("multinomial_i32", 99, 5, I32)]:
+        o = S.RandomOptionsT()
+        o.seed, o.seed2 = s1, s2
+        t = b.tensor(name, [3, 9], typ)
+        b.op(OP.MULTINOMIAL, [lg, ns], [t], BO.RandomOptions, o)
+        b.output(t)
     return b.bytes(), {"x": np.zeros((3, 5), np.float32)}
 
 
@@ -577,4 +588,63 @@ def hlo_model():
 
 blob, feed = hlo_model()
 cases["hlo4"] = case("hlo4", blob, feed)
+
+
+def text_model():
+    """SKIP_GRAM and REDUCE_WINDOW (ops6.go, hlo.go)."""
+    b = Builder()
+    s = b.input("sentence", [1], S.TensorType.STRING)
+    x = b.input("x", [4, 6])
+    for name, n, skip, every in [("skipgram_2_1", 2, 1, False), ("skipgram_3_2_all", 3, 2, True), ("skipgram_4_0", 4, 0, False)]:
+        o = S.SkipGramOptionsT()
+        o.ngramSize, o.maxSkipSize, o.includeAllNgrams = n, skip, every
+        t = b.tensor(name, [1], S.TensorType.STRING)
+        b.op(OP.SKIP_GRAM, [s], [t], BO.SkipGramOptions, o)
+        b.output(t)
+
+    def ci(name, v):  # LiteRT takes the window parameters as INT64
+        v = np.asarray(v, np.int64)
+        return b.tensor(name, v.shape, I64, data=v)
+
+    for name, fn, win, strides, dil, init, shape in [("rw_add", 1, [2, 3], [1, 2], [1, 1], 0.0, [3, 2]),
+                                                     ("rw_max", 4, [2, 2], [2, 1], [1, 2], -1e30, [2, 4]),
+                                                     ("rw_mul", 2, [1, 2], [1, 1], [1, 1], 1.0, [4, 5])]:
+        o = S.ReduceWindowOptionsT()
+        o.reduceFunction = fn
+        t = b.tensor(name, shape)
+        b.op(OP.REDUCE_WINDOW, [x, b.tensor(name + "_init", [], data=np.array(init, np.float32)), ci(name + "_w", win), ci(name + "_s", strides),
+                                ci(name + "_d", dil)], [t], S.BuiltinOptions2.ReduceWindowOptions, o, v2=True)
+        b.output(t)
+    return b.bytes(), {"sentence": np.array(["the quick  brown fox jumps"], object), "x": rng.standard_normal((4, 6)).astype(np.float32)}
+
+
+blob, feed = text_model()
+cases["text4"] = case("text4", blob, feed)
+
+
+class Sparse4(tf.Module):
+    """Pruned weights, which TFLiteConverter's EXPERIMENTAL_SPARSITY stores
+    sparse (random CSR, and 1x4 blocks) with DENSIFY (sparse.go)."""
+
+    def __init__(self):
+        w = rng.standard_normal((16, 24)).astype(np.float32)
+        w[rng.random((16, 24)) < 0.8] = 0
+        blocks = rng.standard_normal((16, 6, 4)).astype(np.float32)
+        blocks[rng.random((16, 6)) < 0.75] = 0
+        self.w, self.wb = tf.constant(w), tf.constant(blocks.reshape(16, 24))
+
+    @tf.function(input_signature=[tf.TensorSpec([2, 16], tf.float32, name="x")])
+    def __call__(self, x):
+        return {"y": tf.matmul(x, self.w), "yb": tf.nn.relu(tf.matmul(x, self.wb))}
+
+
+def convert_sparse(mod):
+    d = tempfile.mkdtemp()
+    tf.saved_model.save(mod, d, signatures={"serving_default": mod.__call__})
+    c = tf.lite.TFLiteConverter.from_saved_model(d)
+    c.optimizations = [tf.lite.Optimize.EXPERIMENTAL_SPARSITY]
+    return c.convert()
+
+
+cases["sparse4"] = case("sparse4", convert_sparse(Sparse4()), {"x": rng.standard_normal((2, 16)).astype(np.float32)})
 json.dump(cases, open(os.path.join(out, "litert_ops4.json"), "w"), indent=1)

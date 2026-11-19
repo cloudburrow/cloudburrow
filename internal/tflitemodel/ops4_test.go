@@ -21,7 +21,10 @@ import (
 // HASHTABLE operators under CALL_ONCE, var4.tflite the resource
 // variables, ops5.tflite and ops6.tflite the operators of ops5.go and
 // ops6.go with TFLite_Detection_PostProcess, audio4.tflite AudioSpectrogram
-// and Mfcc, and hlo4.tflite STABLEHLO_GATHER, _SCATTER and _REDUCE_WINDOW.
+// and Mfcc, hlo4.tflite STABLEHLO_GATHER, _SCATTER and _REDUCE_WINDOW,
+// text4.tflite SKIP_GRAM and REDUCE_WINDOW, and sparse4.tflite (the
+// converter's EXPERIMENTAL_SPARSITY) sparse constants and DENSIFY;
+// random4.tflite has MULTINOMIAL too.
 func TestOps4MatchLiteRT(t *testing.T) {
 	raw, err := os.ReadFile("testdata/litert_ops4.json")
 	if err != nil {
@@ -36,7 +39,7 @@ func TestOps4MatchLiteRT(t *testing.T) {
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 9 {
+	if len(cases) != 11 {
 		t.Fatalf("%d cases", len(cases))
 	}
 	for name, c := range cases {

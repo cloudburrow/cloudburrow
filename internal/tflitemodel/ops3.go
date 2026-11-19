@@ -207,7 +207,7 @@ func (o op) arity() int {
 		opWhere, opDynamicUpdateSlice, opMatrixSetDiag, opReverseSequence, opSparseToDense, opBroadcastArgs, opL2Pool2D, opBitwiseXor,
 		opRightShift, opStablehloAdd, opStablehloMultiply, opStablehloMaximum, opStablehloMinimum, opStablehloAnd, opStablehloShiftLeft,
 		opStablehloPad, opDilate, opFakeQuant, opSVDF, opBitcast, opEmbeddingLookupSparse,
-		opAudioSpectrogram:
+		opAudioSpectrogram, opSkipGram, opDensify:
 		return 1 // ops4.go and rnn.go check the rest
 	case opConv3DTranspose, opStablehloScatter:
 		return 3

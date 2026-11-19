@@ -468,6 +468,22 @@ func (p *philox) next() [4]uint32 {
 	return c
 }
 
+// seeded is a random operator's generator from RandomOptions' seed and
+// seed2. LiteRT's TfLiteRandomParams holds them as int (the low 32 bits,
+// sign-extended); both zero draws fresh seeds, as LiteRT does.
+func seeded(o op) *philox {
+	var seed, seed2 int64
+	if o.opts != nil {
+		seed = o.opts.GetInt64Slot(flatbuffers.VOffsetT(4), 0)
+		seed2 = o.opts.GetInt64Slot(flatbuffers.VOffsetT(6), 0)
+	}
+	seed, seed2 = int64(int32(seed)), int64(int32(seed2))
+	if seed == 0 && seed2 == 0 {
+		seed, seed2 = rand.Int64(), rand.Int64()
+	}
+	return newPhilox(uint64(seed), uint64(seed2))
+}
+
 // uint32ToFloat is random::Uint32ToFloat: a float in [0, 1).
 func uint32ToFloat(x uint32) float32 {
 	return math.Float32frombits(127<<23|x&0x7fffff) - 1
@@ -482,17 +498,7 @@ func random(o op, shape []int) (*Tensor, error) {
 			return nil, fmt.Errorf("operator %s: negative dimension in shape %v", o.name, shape)
 		}
 	}
-	var seed, seed2 int64
-	if o.opts != nil {
-		seed = o.opts.GetInt64Slot(flatbuffers.VOffsetT(4), 0)
-		seed2 = o.opts.GetInt64Slot(flatbuffers.VOffsetT(6), 0)
-	}
-	// LiteRT's TfLiteRandomParams holds them as int: the low 32 bits, sign-extended.
-	seed, seed2 = int64(int32(seed)), int64(int32(seed2))
-	if seed == 0 && seed2 == 0 {
-		seed, seed2 = rand.Int64(), rand.Int64()
-	}
-	p := newPhilox(uint64(seed), uint64(seed2))
+	p := seeded(o)
 	n := prod(shape)
 	r := &Tensor{Type: Float32, Shape: append([]int{}, shape...), F: make([]float32, n)}
 	for i := 0; i < n; i += 4 {

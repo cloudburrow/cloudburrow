@@ -29,7 +29,11 @@ import (
 //   - table4.tflite: a vocabulary's HASHTABLE, HASHTABLE_FIND,
 //     HASHTABLE_SIZE, initialized by CALL_ONCE and HASHTABLE_IMPORT;
 //   - var4.tflite: VAR_HANDLE, READ_VARIABLE, ASSIGN_VARIABLE;
-//   - random4.tflite: seeded RANDOM_UNIFORM and RANDOM_STANDARD_NORMAL;
+//   - random4.tflite: seeded RANDOM_UNIFORM, RANDOM_STANDARD_NORMAL and
+//     MULTINOMIAL;
+//   - text4.tflite: REDUCE_WINDOW (SKIP_GRAM's run-sized output is the
+//     unit test's);
+//   - sparse4.tflite: TFLiteConverter's sparse weights and DENSIFY;
 //   - ops5.tflite: WHERE, UNIQUE, DYNAMIC_UPDATE_SLICE, MATRIX_SET_DIAG,
 //     REVERSE_SEQUENCE, SPARSE_TO_DENSE, BROADCAST_ARGS, L2_POOL_2D,
 //     BITWISE_XOR, RIGHT_SHIFT, FAKE_QUANT, SVDF, HASHTABLE_LOOKUP, DILATE
@@ -62,7 +66,7 @@ func TestBigQueryMLImportedTFLiteOps4(t *testing.T) {
 		}
 		return data
 	}
-	models := []string{"rnn4", "ops4", "ops5", "ops6", "audio4", "hlo4", "table4", "var4", "random4"}
+	models := []string{"rnn4", "ops4", "ops5", "ops6", "audio4", "hlo4", "text4", "sparse4", "table4", "var4", "random4"}
 	for _, m := range models {
 		w := bh.Object("tflo4/" + m + ".tflite").NewWriter(ctx)
 		if _, err := w.Write(read(m + ".tflite")); err != nil {
@@ -93,7 +97,7 @@ func TestBigQueryMLImportedTFLiteOps4(t *testing.T) {
 	}
 	// The ports that are not FLOAT32: table4's tokens (STRING), and the
 	// integer ones (INT64).
-	types := map[string]string{"tokens": "STRING", "codes": "INT64", "u": "INT64", "look": "INT64", "q": "INT64", "ind": "INT64"}
+	types := map[string]string{"tokens": "STRING", "sentence": "STRING", "codes": "INT64", "u": "INT64", "look": "INT64", "q": "INT64", "ind": "INT64"}
 	var cols []string
 	inputs := map[string][]string{}
 	for _, m := range models {
@@ -112,7 +116,11 @@ func TestBigQueryMLImportedTFLiteOps4(t *testing.T) {
 				}
 			}
 			col := m + "_" + name
-			cols = append(cols, fmt.Sprintf("ARRAY<%s>[%s] AS %s", typ, strings.Join(s, ", "), col))
+			if len(s) == 1 { // a one-value port (text4's sentence, [1]) is a scalar
+				cols = append(cols, fmt.Sprintf("CAST(%s AS %s) AS %s", s[0], typ, col))
+			} else {
+				cols = append(cols, fmt.Sprintf("ARRAY<%s>[%s] AS %s", typ, strings.Join(s, ", "), col))
+			}
 			inputs[m] = append(inputs[m], col+" AS "+name)
 		}
 	}
@@ -128,10 +136,10 @@ func TestBigQueryMLImportedTFLiteOps4(t *testing.T) {
 		}
 		var outs []string
 		for col := range ref[m].Outputs {
-			// WHERE's and UNIQUE's outputs have a size only the run knows;
+			// WHERE's, UNIQUE's and SKIP_GRAM's outputs have a size only the run knows;
 			// the model declares a placeholder shape, which the port mapping
 			// follows, so the unit test checks them, not this one.
-			if m == "ops5" && (col == "where" || col == "unique_y") {
+			if m == "ops5" && (col == "where" || col == "unique_y") || m == "text4" && strings.HasPrefix(col, "skipgram") {
 				continue
 			}
 			outs = append(outs, col)

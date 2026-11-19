@@ -164,12 +164,20 @@ func (m *Model) eval5(o op, a []*Tensor) (*Tensor, error) {
 		return audioSpectrogram(o, x)
 	case opMfcc:
 		return mfcc(o, x, arg(1))
+	case opDensify: // sparse.go: the constant is dense already
+		return x, nil
+	case opMultinomial: // ops6.go
+		return multinomial(o, x, arg(1))
 	case opStablehloGather: // hlo.go
 		return stablehloGather(o, x, arg(1))
 	case opStablehloScatter:
 		return m.stablehloScatter(o, a)
 	case opStablehloReduceWindow:
 		return m.stablehloReduceWindow(o, a)
+	case opReduceWindow:
+		return tflReduceWindow(o, a)
+	case opSkipGram: // ops6.go
+		return skipGram(o, x)
 	}
 	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
 }

@@ -434,14 +434,18 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			}
 			d.q = q
 		}
-		if field(t, 16) != 0 {
-			return nil, &UnsupportedError{"tensor " + d.name + " is sparse: sparse tensors are not supported"}
-		}
+		sp := sub(t, 16) // a sparse constant's SparsityParameters (sparse.go)
 		if b := int(t.GetUint32Slot(8, 0)); b > 0 && b < len(bufs) {
 			bp := field(bufs[b], 4)
 			if bp != 0 {
 				raw := bufs[b].ByteVector(bufs[b].Pos + bp)
-				c, err := constant(d.typ, ints(t, 4), raw)
+				var c *Tensor
+				var err error
+				if sp != nil {
+					c, err = sparseConstant(d.typ, ints(t, 4), raw, sp)
+				} else {
+					c, err = constant(d.typ, ints(t, 4), raw)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("tensor %s: %w", d.name, err)
 				}
@@ -452,6 +456,9 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			} else if bufs[b].GetUint64Slot(6, 0) > 1 {
 				return nil, &UnsupportedError{"tensor " + d.name + " keeps its data outside the FlatBuffer: CloudBurrow reads models under 2 GB"}
 			}
+		}
+		if sp != nil && d.data == nil {
+			return nil, &UnsupportedError{"tensor " + d.name + " is sparse and not a constant: only sparse constants are supported"}
 		}
 		if d.q != nil {
 			d.stored, d.typ = d.typ, Float32
