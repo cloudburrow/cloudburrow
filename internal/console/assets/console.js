@@ -3123,7 +3123,12 @@ function detailHref(route, path) {
 // It draws the provider's listing with the same renderer as the list screen:
 // one table implementation, so the two cannot drift apart, and sorting and
 // filtering work here for free.
+// SELECT_SECTION selects a tab of the detail page on screen, for a grouped
+// section's own strip (#1845).
+let SELECT_SECTION = null;
+
 async function renderDetail(view, route, resourcePath) {
+  SELECT_SECTION = null;
   const segments = Array.isArray(resourcePath) ? resourcePath : [resourcePath];
   const name = segments[segments.length - 1];
   const project = new URLSearchParams(location.search).get("project") || "";
@@ -3327,6 +3332,18 @@ async function renderDetail(view, route, resourcePath) {
           onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
         })));
       note = note ? el("div", {}, bar, note) : bar;
+    }
+
+    // A grouped section's own strip, its siblings' labels (#1845).
+    if (section.group) {
+      const members = sections.map((s, i) => [s, i]).filter(([s]) => s.group === section.group);
+      const sub = el("div", { class: "tab-strip sub-tabs", role: "tablist", "aria-label": `${section.group} tabs` },
+        ...members.map(([s, i]) => el("button", {
+          class: "tab" + (i === current ? " is-selected" : ""), role: "tab", id: `subtab-${s.id}`,
+          "aria-selected": i === current ? "true" : "false", tabindex: i === current ? "0" : "-1",
+          text: s.label, onclick: () => SELECT_SECTION && SELECT_SECTION(i),
+        })));
+      note = note ? el("div", {}, sub, note) : sub;
     }
 
     // The provider says what the section holds. Inferring it from whichever
@@ -3641,23 +3658,33 @@ async function renderDetail(view, route, resourcePath) {
   // nothing, and the real console does not draw one either.
   let strip = null;
   if (sections.length > 1) {
+    // Sections sharing a `group` are one tab under the group's name, with
+    // their own labels on a strip inside it (#1845): Google's Indexes page
+    // holds its Manual and Automatic tabs. The group's tab is its first
+    // member's; selecting it opens that member.
+    const leadOf = (i) => {
+      const g = sections[i].group;
+      return g ? sections.findIndex((s) => s.group === g) : i;
+    };
     const tabs = sections.map((section, i) =>
       el("button", {
-        class: "tab" + (i === current ? " is-selected" : ""),
+        class: "tab" + (leadOf(current) === i ? " is-selected" : ""),
         role: "tab", id: `tab-${section.id}`,
-        "aria-selected": i === current ? "true" : "false",
+        "aria-selected": leadOf(current) === i ? "true" : "false",
         "aria-controls": "detail-panel",
-        tabindex: i === current ? "0" : "-1",
-        text: section.label,
+        tabindex: leadOf(current) === i ? "0" : "-1",
+        hidden: leadOf(i) !== i,
+        text: section.group && leadOf(i) === i ? section.group : section.label,
         onclick: () => select(i),
       }));
 
     const select = (i) => {
       current = i;
       tabs.forEach((tab, j) => {
-        tab.classList.toggle("is-selected", j === i);
-        tab.setAttribute("aria-selected", j === i ? "true" : "false");
-        tab.setAttribute("tabindex", j === i ? "0" : "-1");
+        const on = j === leadOf(i);
+        tab.classList.toggle("is-selected", on);
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.setAttribute("tabindex", on ? "0" : "-1");
       });
       // The tab is part of the address, so a colleague can be sent the tab
       // rather than the resource.
@@ -3671,20 +3698,24 @@ async function renderDetail(view, route, resourcePath) {
       }
       panel.setAttribute("aria-labelledby", `tab-${sections[i].id}`);
       drawPanel();
-      tabs[i].focus();
+      if (!tabs[i].hidden) tabs[i].focus();
       announce(`${sections[i].label} selected`);
     };
+    SELECT_SECTION = select;
 
     strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${name} sections` },
       ...tabs);
     // Arrow keys move between tabs, which is what makes a tablist a tablist
     // rather than a row of buttons.
     strip.addEventListener("keydown", (e) => {
+      // Over the tabs drawn: a group's members after its first are not.
+      const shown = sections.map((_, i) => i).filter((i) => leadOf(i) === i);
+      const at = Math.max(0, shown.indexOf(leadOf(current)));
       const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1
-        : e.key === "Home" ? -current : e.key === "End" ? sections.length - 1 - current : 0;
+        : e.key === "Home" ? -at : e.key === "End" ? shown.length - 1 - at : 0;
       if (!step && e.key !== "Home" && e.key !== "End") return;
       e.preventDefault();
-      select((current + step + sections.length) % sections.length);
+      select(shown[(at + step + shown.length) % shown.length]);
     });
     crumb.append(strip);
   }

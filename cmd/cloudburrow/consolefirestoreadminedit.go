@@ -81,6 +81,50 @@ func createIndexFields() []console.Field {
 	}
 }
 
+// createVectorIndexFields are Create vector index's inputs, as Google's
+// (https://docs.cloud.google.com/firestore/native/docs/vector-search, read
+// 2026-11-19): the collection, the vector field and its dimensions.
+func createVectorIndexFields() []console.Field {
+	return []console.Field{
+		{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
+		{Name: "prefix", Label: "Fields (optional)", Type: "textarea",
+			Help: "Fields before the vector field, one per line with ascending or descending, for a pre-filtered vector search."},
+		{Name: "field", Label: "Vector field path", Type: "text", Required: true},
+		{Name: "dimension", Label: "Dimensions", Type: "text", Required: true, Pattern: `^[0-9]{1,4}$`,
+			Help: "The number of dimensions of the vector embeddings, at most 2048."},
+		{Name: "queryScope", Label: "Query scope", Type: "select", Default: "COLLECTION",
+			Options: []string{"COLLECTION", "COLLECTION_GROUP"}},
+	}
+}
+
+// vectorIndex is the index Create vector index's values describe: the
+// prefix fields, then the vector field with a flat index of its dimensions.
+func vectorIndex(values map[string]string) (*adminpb.Index, string, error) {
+	cg := strings.TrimSpace(values["collectionGroup"])
+	if cg == "" || strings.Contains(cg, "/") {
+		return nil, "", fmt.Errorf("collection ID %q is not a collection ID", cg)
+	}
+	field := strings.TrimSpace(values["field"])
+	if field == "" {
+		return nil, "", errors.New("a vector field path is required")
+	}
+	dim, err := strconv.Atoi(strings.TrimSpace(values["dimension"]))
+	if err != nil || dim < 1 || dim > 2048 {
+		return nil, "", fmt.Errorf("dimensions %q is not a whole number from 1 to 2048", values["dimension"])
+	}
+	var fields []*adminpb.Index_IndexField
+	if strings.TrimSpace(values["prefix"]) != "" {
+		if fields, err = parseIndexFields(values["prefix"]); err != nil {
+			return nil, "", err
+		}
+	}
+	fields = append(fields, &adminpb.Index_IndexField{FieldPath: field, ValueMode: &adminpb.Index_IndexField_VectorConfig_{
+		VectorConfig: &adminpb.Index_IndexField_VectorConfig{Dimension: int32(dim),
+			Type: &adminpb.Index_IndexField_VectorConfig_Flat{Flat: &adminpb.Index_IndexField_VectorConfig_FlatIndex{}}}}})
+	scope := adminpb.Index_QueryScope(adminpb.Index_QueryScope_value[values["queryScope"]])
+	return &adminpb.Index{QueryScope: scope, Fields: fields}, cg, nil
+}
+
 // parseIndexFields reads Create index's Fields lines.
 func parseIndexFields(raw string) ([]*adminpb.Index_IndexField, error) {
 	var out []*adminpb.Index_IndexField
@@ -225,7 +269,10 @@ func firestoreTabActions() map[string][]console.Action {
 	}, add...)
 	transfer := firestoreTransferActions()
 	return map[string][]console.Action{
-		"indexes":      {{ID: "createindex", Label: "Create Index", Fields: createIndexFields()}},
+		"indexes": {{ID: "createindex", Label: "Create Index", Fields: createIndexFields()},
+			// Google's Create Index offers Create vector index (#1845); the local
+			// Firestore answers FindNearest, so the index is offered here too.
+			{ID: "createvectorindex", Label: "Create vector index", Fields: createVectorIndexFields()}},
 		"fields":       {{ID: "addfield", Label: "Add Exemption", Fields: add}},
 		"importexport": transfer[:2],
 		"schedules":    {{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()}},
@@ -394,6 +441,16 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 				in.SearchIndexOptions = &adminpb.Index_SearchIndexOptions{TextLanguage: strings.TrimSpace(values["textLanguage"])}
 				break
 			}
+		}
+		op, err := c.CreateIndex(ctx, &adminpb.CreateIndexRequest{Parent: db + "/collectionGroups/" + cg, Index: in})
+		if err == nil {
+			_, err = op.Wait(ctx)
+		}
+		return err
+	case action == "createvectorindex" && len(path) == 1:
+		in, cg, err := vectorIndex(values)
+		if err != nil {
+			return err
 		}
 		op, err := c.CreateIndex(ctx, &adminpb.CreateIndexRequest{Parent: db + "/collectionGroups/" + cg, Index: in})
 		if err == nil {

@@ -694,6 +694,10 @@ type Section struct {
 	// backward compatible by construction.
 	Kind SectionKind `json:"kind,omitempty"`
 	// Listing is the section's content when Kind is KindListing, drawn by the
+	// Group, when set, draws this section and the others with the same Group
+	// as one tab named Group, with their labels on a strip inside it, as
+	// Google's Firestore Indexes page holds Manual and Automatic (#1845).
+	Group string `json:"group,omitempty"`
 	// same table renderer as every other listing.
 	Listing Listing `json:"listing,omitempty"`
 	// Groups are the content when Kind is KindProperties. Headed groups

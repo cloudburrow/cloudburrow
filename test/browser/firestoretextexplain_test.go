@@ -84,7 +84,7 @@ func TestFirestoreTextIndexAndExplainThroughThePage(t *testing.T) {
 	}
 	p.navigate("/firestore-databases/" + dbID + q)
 	p.waitFor(`document.querySelector("#tab-indexes") !== null`)
-	p.clickText("#tab-indexes", "Composite indexes")
+	p.clickText("#tab-indexes", "Indexes")
 	p.waitFor(`[...document.querySelectorAll("td")].some((td) => td.textContent.includes("title Text"))`)
 	p.waitFor(`[...document.querySelectorAll("td")].some((td) => td.textContent.includes("MongoDB compatible API, text language en"))`)
 
