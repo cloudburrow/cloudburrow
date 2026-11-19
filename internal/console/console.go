@@ -1096,6 +1096,11 @@ type Actor interface {
 type Action struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// Unavailable, when set, is why the action cannot be performed on this
+	// instance: the page draws it disabled in Google's place with the reason
+	// (#1857: a GKE cluster's Edit, Upgrade and Delete), and the provider
+	// refuses it.
+	Unavailable string `json:"unavailable,omitempty"`
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`

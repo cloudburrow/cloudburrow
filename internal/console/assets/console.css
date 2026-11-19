@@ -1726,6 +1726,9 @@ tr.is-inspected { background: var(--nav-selected); }
 .tab.is-selected { color: var(--accent); border-bottom-color: var(--accent); }
 
 .tab-panel { min-width: 0; }
+/* A page's tabs that are pages of their own (#1857). */
+.tab-strip.page-tabs { margin: 0 0 12px; border-bottom: 1px solid var(--border); }
+.page-tabs a.tab { text-decoration: none; }
 
 /* Outcomes appear here rather than in a window.alert. */
 .snackbars {

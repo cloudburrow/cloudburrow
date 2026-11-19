@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	urlpkg "net/url"
 	"slices"
 	"sort"
@@ -4864,6 +4865,9 @@ func (p kubeProvider) selectedPods(ctx context.Context, namespace, selector stri
 		}
 		out.Items = append(out.Items, console.Resource{
 			Name: str(m, "name"), Status: podStatus(item),
+			// A managed pod opens its own page (#1857): Google reaches
+			// pods through their workload, not a Pods page of their own.
+			Link: "/kubernetes/pods/" + url.PathEscape(str(m, "name")),
 			Fields: map[string]string{
 				"Ready":    fmt.Sprintf("%d/%d", ready, len(statuses)),
 				"Restarts": fmt.Sprint(restarts),

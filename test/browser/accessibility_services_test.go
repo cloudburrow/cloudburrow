@@ -365,6 +365,8 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 	for _, l := range []struct{ name, path string }{
 		{"Service Usage operations", "/apis/operations"}, {"nodes", "/kubernetes/nodes"},
 		{"Kubernetes storage", "/kubernetes/storage"}, {"events", "/kubernetes/events"},
+		{"Kubernetes clusters", "/kubernetes/clusters"}, {"Secrets & ConfigMaps", "/kubernetes/config"},
+		{"Object Browser", "/kubernetes/object-browser"}, {"Storage classes", "/kubernetes/storage-classes"},
 		{"Storage Intelligence", "/storage/intelligence"},
 		{"Model Garden", "/agent-platform/model-garden"}, {"Studio", "/agent-platform/studio"}, {"Embeddings", "/agent-platform/studio/embeddings"},
 		{"Local models", "/agent-platform/model-garden/local-models"}, {"Online prediction", "/agent-platform/online-prediction/endpoints"},
