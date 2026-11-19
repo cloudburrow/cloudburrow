@@ -141,12 +141,19 @@ func (p *tab) keyboardFailures() []string {
 // subtest outlives one browser's deadline.
 func auditScreens(t *testing.T, pages []a11yPage) {
 	t.Helper()
+	auditScreensAt(t, open, pages)
+}
+
+// auditScreensAt is auditScreens on the tabs opener opens: a console the
+// test serves in process (openAt), as the Studio's (#1962).
+func auditScreensAt(t *testing.T, opener func(*testing.T) *tab, pages []a11yPage) {
+	t.Helper()
 	each := func(t *testing.T, setup func(p *tab), fn func(p *tab, pg a11yPage)) {
 		t.Helper()
 		var p *tab
 		for i, pg := range pages {
 			if i%10 == 0 {
-				p = open(t)
+				p = opener(t)
 				setup(p)
 			}
 			p.showAsked(pg)
@@ -214,16 +221,18 @@ func (p *tab) showAsked(pg a11yPage) {
 	before := len(p.errors)
 	p.mu.Unlock()
 	p.show(pg)
-	if !strings.HasPrefix(pg.path, "/instance") && !strings.HasPrefix(pg.path, "/faults") {
+	asks := strings.HasPrefix(pg.path, "/instance") || strings.HasPrefix(pg.path, "/faults")
+	if !asks && len(p.expected) == 0 {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	kept := p.errors[:before]
 	for _, e := range p.errors[before:] {
-		if !strings.Contains(e, "401 (Unauthorized)") {
-			kept = append(kept, e)
+		if asks && strings.Contains(e, "401 (Unauthorized)") || p.expectedError(e) {
+			continue
 		}
+		kept = append(kept, e)
 	}
 	p.errors = kept
 }

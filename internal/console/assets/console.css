@@ -1177,6 +1177,38 @@ td.mono { word-break: break-word; }
   border-radius: var(--radius);
 }
 
+/* Agent Studio's prompt page (#1962): the conversation and prompt, with
+   the Model settings panel beside them on a wide screen and below them on
+   a narrow one. */
+.pg-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1100px) { .pg-layout { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; } }
+.pg-main { display: grid; gap: 16px; min-width: 0; }
+.pg-main > .card, .pg-layout > .card { margin: 0; }
+.pg-stack { display: grid; gap: 8px; margin: 8px 0; }
+.pg-field { display: grid; gap: 4px; margin: 8px 0; }
+.pg-field > span:first-child { color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
+.pg-field input, .pg-field select, .pg-field textarea { max-width: 100%; box-sizing: border-box; }
+.pg-check { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.pg-settings h2, .pg-main h2 { margin-top: 0; font-size: var(--text-heading-size); line-height: var(--text-heading-line); }
+.pg-chat { display: grid; gap: 8px; max-height: 480px; overflow: auto; }
+.pg-turn { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.pg-turn[data-role="model"] { background: var(--surface-alt, var(--surface)); }
+.pg-turn p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pg-turn .pg-turn-role { font-weight: 600; color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
+.pg-attachments { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pg-attachments li { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: var(--radius); max-width: 100%; overflow-wrap: anywhere; }
+.pg-section { margin: 8px 0; }
+.pg-disclosure[aria-expanded="true"]::after { content: " \25B4"; }
+.pg-disclosure[aria-expanded="false"]::after { content: " \25BE"; }
+.pg-file { max-width: 100%; }
+.pg-tokens { display: flex; flex-wrap: wrap; gap: 2px; font-family: var(--mono); }
+.pg-token { padding: 0 2px; border-radius: 2px; color: var(--text); white-space: pre; border-bottom: 2px solid var(--border); }
+.pg-token[data-n="0"] { border-bottom-color: var(--accent); }
+.pg-token[data-n="1"] { border-bottom-color: var(--ok); }
+.pg-token[data-n="2"] { border-bottom-color: var(--warn); }
+.pg-token[data-n="3"] { border-bottom-color: var(--error); }
+#pg-code-text { max-height: 360px; }
+
 /* --- project picker and account ------------------------------------- */
 
 .picker-button {

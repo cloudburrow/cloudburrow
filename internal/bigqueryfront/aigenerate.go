@@ -113,6 +113,9 @@ var aiScalars = map[string]aiSpec{
 		"optimization_mode", "max_error_ratio"}, []string{"input"}},
 	"EMBED":      {[]string{"content"}, []string{"endpoint", "model", "task_type", "title", "model_params", "connection_id"}, []string{"content"}},
 	"SIMILARITY": {nil, []string{"content1", "content2", "endpoint", "model", "model_params", "connection_id"}, []string{"content1", "content2"}},
+	// AI.COUNT_TOKENS(INPUT [, endpoint => ENDPOINT]) (#1962): the local
+	// endpoint's :countTokens, the model's own tokenizer (#1937).
+	"COUNT_TOKENS": {[]string{"input"}, []string{"endpoint"}, []string{"input"}},
 }
 
 // aiCall is one scalar AI function call: its tokens' span and its
@@ -414,6 +417,8 @@ func (c aiCall) output(a aiResolved) ([]string, bool) {
 		return []string{"v STRING"}, true
 	case "EMBED":
 		return []string{"result ARRAY<FLOAT64>", "status STRING"}, false
+	case "COUNT_TOKENS":
+		return []string{"result INT64", "full_response JSON"}, false
 	}
 	return nil, false
 }
@@ -806,9 +811,15 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 		}
 		return []string{"CAST(NULL AS FLOAT64)"}, status, true, 0, ""
 	}
+	if c.fn == "COUNT_TOKENS" && strings.HasPrefix(strings.TrimSpace(key), "{") {
+		return nil, "", false, 400, "AI.COUNT_TOKENS's input must be a STRING"
+	}
 	prompt, ok, code, msg := promptText(key)
 	if code != 0 || !ok {
 		return nil, "", false, code, strings.ReplaceAll(msg, "AI.GENERATE", c.name())
+	}
+	if c.fn == "COUNT_TOKENS" {
+		return f.countTokensRow(r.Context(), project, a, prompt)
 	}
 	if c.fn == "EMBED" {
 		if strings.HasPrefix(strings.TrimSpace(key), "{") {
@@ -1030,6 +1041,28 @@ func (f front) aiGenerateText(r *http.Request, project string, rm *remoteModel, 
 		b.WriteString(p.Text)
 	}
 	return b.String(), raw, ""
+}
+
+// countTokensRow is AI.COUNT_TOKENS' result and full_response for one
+// input: the local endpoint's :countTokens of a user turn of the text,
+// whose answer is the full_response as BigQuery's reference shows it
+// ({"promptTokensDetails":[{"modality":"TEXT","tokenCount":N}],
+// "totalTokens":N}) and whose totalTokens is the result. A failed call is
+// NULL in both, as the page documents ("NULL if the input is NULL or an
+// API error occurred"); its status is kept only for the error count.
+func (f front) countTokensRow(ctx context.Context, project string, a aiResolved, input string) ([]string, string, bool, int, string) {
+	null := []string{"CAST(NULL AS INT64)", "CAST(NULL AS JSON)"}
+	raw, status := f.vertexCall(ctx, project, a.rm, "countTokens", generateBody(input, nil))
+	if status != "" {
+		return null, status, true, 0, ""
+	}
+	var resp struct {
+		TotalTokens *int64 `json:"totalTokens"`
+	}
+	if json.Unmarshal(raw, &resp) != nil || resp.TotalTokens == nil {
+		return null, "The response had no totalTokens", true, 0, ""
+	}
+	return []string{strconv.FormatInt(*resp.TotalTokens, 10), jsonLiteral(raw)}, "", true, 0, ""
 }
 
 // cosine is two vectors' cosine similarity.

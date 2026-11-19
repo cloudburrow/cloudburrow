@@ -64,8 +64,9 @@ func TestRawPredictOnTheEmbeddingModel(t *testing.T) {
 // TestRawPredictOnTheGenerationModel (#1284) sends RawPredict to the local
 // generation publisher model: its native body is the generateContent body,
 // and the answer is a GenerateContentResponse naming the model that ran, with
-// STOP. What the runtime cannot honour (a temperature) is the same
-// INVALID_ARGUMENT generateContent gives, and another model is NOT_FOUND.
+// STOP. Its generationConfig is applied as generateContent's (#1797: a
+// temperature of 0 with top-k 1 answers the same words twice), a temperature
+// out of range is the same INVALID_ARGUMENT, and another model is NOT_FOUND.
 // What the model says is not asserted.
 func TestRawPredictOnTheGenerationModel(t *testing.T) {
 	h := New(t)
@@ -106,9 +107,35 @@ func TestRawPredictOnTheGenerationModel(t *testing.T) {
 		t.Errorf("no text in %s", resp.GetData())
 	}
 
-	_, err = raw(name, `{"contents":[{"parts":[{"text":"x"}]}],"generationConfig":{"temperature":0.2}}`)
+	// The temperature is applied (#1797): at 0, with top-k 1, two runs
+	// answer the same bytes' text; out of Gemini's [0, 2] it is refused.
+	greedy := `{"contents":[{"role":"user","parts":[{"text":"Name one colour. Answer with one word."}]}],` +
+		`"generationConfig":{"temperature":0,"topK":1,"maxOutputTokens":8}}`
+	text := func() string {
+		resp, err := raw(name, greedy)
+		if err != nil {
+			t.Fatalf("RawPredict at temperature 0: %v", err)
+		}
+		var g struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+		if json.Unmarshal(resp.GetData(), &g) != nil || len(g.Candidates) != 1 || len(g.Candidates[0].Content.Parts) == 0 {
+			t.Fatalf("RawPredict at temperature 0: %s", resp.GetData())
+		}
+		return g.Candidates[0].Content.Parts[0].Text
+	}
+	if a, b := text(), text(); a == "" || a != b {
+		t.Errorf("temperature 0 answered %q, then %q; want the same words", a, b)
+	}
+	_, err = raw(name, `{"contents":[{"parts":[{"text":"x"}]}],"generationConfig":{"temperature":2.5}}`)
 	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "temperature") {
-		t.Errorf("temperature: %v, want INVALID_ARGUMENT naming it", err)
+		t.Errorf("temperature 2.5: %v, want INVALID_ARGUMENT naming it", err)
 	}
 	_, err = raw("projects/"+h.Project()+"/locations/us-central1/publishers/google/models/gemini-2.0-flash",
 		`{"contents":[{"parts":[{"text":"x"}]}]}`)

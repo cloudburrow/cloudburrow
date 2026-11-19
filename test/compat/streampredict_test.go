@@ -44,7 +44,9 @@ func compatContent(t *testing.T, outs []*aiplatformpb.Tensor) string {
 // one per request. StreamRawPredict streams GenerateContentResponse chunks
 // with STOP on the last. A generation option is refused naming its field,
 // and DirectRawPredict, which calls a gRPC model server, is UNIMPLEMENTED
-// naming method_name. What the model says is not asserted.
+// saying publisher models have none (#1477: Google documents its endpoint
+// as projects/{p}/locations/{l}/endpoints/{e} only, a deployed model whose
+// container serves gRPC). What the model says is not asserted.
 func TestStreamingPredictOnTheGenerationModel(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvLocalAI)
@@ -166,8 +168,8 @@ func TestStreamingPredictOnTheGenerationModel(t *testing.T) {
 		t.Errorf("max_tokens: %v, want INVALID_ARGUMENT naming it", err)
 	}
 	_, err = pc.DirectRawPredict(ctx, &aiplatformpb.DirectRawPredictRequest{Endpoint: name, MethodName: "/x.Y/Predict"})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "method_name") {
-		t.Errorf("DirectRawPredict: %v, want UNIMPLEMENTED naming method_name", err)
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "publisher models") {
+		t.Errorf("DirectRawPredict: %v, want UNIMPLEMENTED naming publisher models", err)
 	}
 }
 

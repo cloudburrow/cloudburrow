@@ -296,14 +296,8 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		return true
 	}
 	if fn := aiFunction(text); fn != "" {
-		why := map[string]string{
-			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +
-				"and a count made any other way would not be the model's",
-		}[fn]
-		if why == "" {
-			why = "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
-				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY, AI.AGG and AI.SEARCH run on the instance's local Vertex AI (#1765, #1771, #1772, #1777, #1778)"
-		}
+		why := "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
+			"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY, AI.AGG, AI.SEARCH and AI.COUNT_TOKENS run on the instance's local Vertex AI (#1765, #1771, #1772, #1777, #1778, #1962)"
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": "+why+". Nothing was run.")
 		return true
 	}

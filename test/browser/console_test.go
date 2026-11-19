@@ -348,6 +348,19 @@ type tab struct {
 	errors    []string // exceptions, console.error and error log entries
 	mainNavs  int      // main-frame navigations
 	sinkholed []string // requests the sinkhole proxy received
+	// expected are substrings of errors a test expects and showAsked
+	// drops: an in-process console's 404 for the projects it has none of.
+	expected []string
+}
+
+// expectedError reports whether e is one of the errors the test expects.
+func (p *tab) expectedError(e string) bool {
+	for _, x := range p.expected {
+		if strings.Contains(e, x) {
+			return true
+		}
+	}
+	return false
 }
 
 // open starts a headless Chrome for one test, behind the sinkhole proxy, with
@@ -467,7 +480,9 @@ func openAt(t *testing.T, consoleAddr string) *tab {
 				len(sunk), strings.Join(sunk, "; "))
 		}
 		for _, e := range errs {
-			t.Errorf("the page reported an error: %s", e)
+			if !p.expectedError(e) {
+				t.Errorf("the page reported an error: %s", e)
+			}
 		}
 		if t.Failed() {
 			p.screenshot()

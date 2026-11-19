@@ -1693,8 +1693,15 @@ var parityRows = []parityRow{
 			"TestEmbedContentAudioAndFileDataOnEmbeddingGemma2", "TestEmbedContentWebPAndBMPOnEmbeddingGemma2"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/GenerateContent"},
-		Screen:  "/agent-platform/studio", Offers: "Playground: Stream off sends the generateContent subset GenerateContent serves, through the same API path, and shows the one answer (#1257)",
-		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestStreamGenerateContentThroughThePredictionClient", "TestGRPCGenerateContentMatchesTheJSONRoute"}},
+		Screen:  "/agent-platform/studio", Offers: "Studio: Stream model responses off sends generateContent, through the same API path, and shows the one answer (#1257); " +
+			"the chat sends every earlier turn as contents with the System instructions, Function calling's declarations and mode (AUTO, ANY, NONE, VALIDATED) as tools and toolConfig, " +
+			"shows a returned functionCall and sends the user's functionResponse turn, sends Insert Media's uploaded image as inlineData or a gs:// object as fileData, " +
+			"applies Model settings (Temperature, Output token limit, Add stop sequence; Advanced: Top-K, Top-P, Seed, frequency and presence penalty; Output format), " +
+			"shows the response's usageMetadata, and Get code writes the request as Python or curl (#1962)",
+		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestPlaygroundRelaysTheConversation", "TestAgentStudioChatToolsImagesTokensAndCode",
+			"TestPlaygroundSupportedOptionsAreHonoured", "TestStreamGenerateContentThroughThePredictionClient", "TestGRPCGenerateContentMatchesTheJSONRoute",
+			"TestGenerateContentMultiTurnChatThroughTheOfficialSDK", "TestGenerateContentFunctionCallingRoundTripThroughTheOfficialSDK",
+			"TestGenerateContentImagePartThroughTheOfficialSDK"}},
 	{Resource: "Vertex AI PredictionService: StreamGenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/StreamGenerateContent"},
 		Screen:  "/agent-platform/studio", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
@@ -1739,10 +1746,12 @@ var parityRows = []parityRow{
 			"endpoint and its model, keeping the downloaded files, which Model Garden's Delete files removes; the details show the " +
 			"model's container image (the Model's containerSpec)",
 		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
-	// countTokens and computeTokens (#1937); Studio's surface is #1962.
+	// countTokens and computeTokens (#1937), on Studio's prompt (#1962).
 	{Resource: "Vertex AI LlmUtilityService: token counts", Service: "vertexai",
 		Methods: []string{"LlmUtilityService/CountTokens", "LlmUtilityService/ComputeTokens"},
-		Issue:   1962},
+		Screen:  "/agent-platform/studio", Offers: "Studio: the \"<count> tokens\" indicator is countTokens of the conversation, System instructions, declarations and prompt as it is typed; " +
+			"clicking it opens the prompt tokenizer, computeTokens' tokens (Token ID to text) and IDs (Token ID) of the prompt (#1962)",
+		Tests: []string{"TestPlaygroundRelaysTokenCounts", "TestAgentStudioChatToolsImagesTokensAndCode", "TestCountTokensAndComputeTokensThroughTheOfficialSDK"}},
 	// v1beta1 serves v1's methods by converting to them (#1937): the console
 	// reaches the same handlers through the v1 rows above.
 	{Resource: "Vertex AI PredictionService v1beta1: v1's methods", Service: "vertexaiv1beta1",
