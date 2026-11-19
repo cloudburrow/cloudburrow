@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,17 +13,30 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 )
 
-type consoleGKEBackend struct{ deleted []string }
+// consoleGKEBackend's Delete runs on the API's operation goroutine, so
+// deleted is guarded and read through deletedKinds.
+type consoleGKEBackend struct {
+	mu      sync.Mutex
+	deleted []string
+}
 
-func (consoleGKEBackend) Create(context.Context, string, string, bool) (gke.Access, error) {
+func (b *consoleGKEBackend) deletedKinds() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.deleted...)
+}
+
+func (*consoleGKEBackend) Create(context.Context, string, string, bool) (gke.Access, error) {
 	return gke.Access{Endpoint: "127.0.0.1:1", CACert: "Q0E="}, nil
 }
-func (consoleGKEBackend) Resize(context.Context, string, string, string, int) error { return nil }
+func (*consoleGKEBackend) Resize(context.Context, string, string, string, int) error { return nil }
 func (b *consoleGKEBackend) Delete(_ context.Context, kind string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.deleted = append(b.deleted, kind)
 	return nil
 }
-func (consoleGKEBackend) FreeBytes() (uint64, error) { return 100 << 30, nil }
+func (*consoleGKEBackend) FreeBytes() (uint64, error) { return 100 << 30, nil }
 
 // TestGKEServedClustersOnTheConsole (#1913): with the Kubernetes Engine API
 // served, Create cluster makes an Autopilot or a Standard cluster through
@@ -96,11 +110,11 @@ func TestGKEServedClustersOnTheConsole(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 	deadline = time.Now().Add(5 * time.Second)
-	for len(be.deleted) == 0 && time.Now().Before(deadline) {
+	for len(be.deletedKinds()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(be.deleted) != 1 {
-		t.Errorf("deleted kind clusters = %v", be.deleted)
+	if got := be.deletedKinds(); len(got) != 1 {
+		t.Errorf("deleted kind clusters = %v", got)
 	}
 }
 
