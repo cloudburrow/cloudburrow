@@ -12289,6 +12289,86 @@
     ]
   },
   {
+    "Key": "apikeys",
+    "Title": "API Keys API (v2)",
+    "counts": {
+      "Verified": 9
+    },
+    "rows": [
+      {
+        "method": "apikeys.keys.lookupKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.getKeyString",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {

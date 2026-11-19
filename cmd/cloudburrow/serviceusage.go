@@ -21,6 +21,7 @@ var serviceUsageAPIs = []struct {
 }{
 	{"", serviceusage.API{Name: "cloudresourcemanager.googleapis.com", Title: "Cloud Resource Manager API"}},
 	{"", serviceusage.API{Name: "serviceusage.googleapis.com", Title: "Service Usage API"}},
+	{"", serviceusage.API{Name: "apikeys.googleapis.com", Title: "API Keys API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
 	{config.ServicePubSub, serviceusage.API{Name: "pubsub.googleapis.com", Title: "Cloud Pub/Sub API"}},
 	{config.ServiceTasks, serviceusage.API{Name: "cloudtasks.googleapis.com", Title: "Cloud Tasks API"}},

@@ -56,6 +56,8 @@ Flags:
     	namespace for CloudBurrow-managed workloads
   -node-image string
     	pinned kind node image, which fixes the Kubernetes version
+  -port-apikeys int
+    	API Keys API (apikeys.googleapis.com) host port (0 = OS-assigned; default 9028)
   -port-backupdr int
     	Backup and DR Service API host port (0 = OS-assigned; default 9024)
   -port-base int

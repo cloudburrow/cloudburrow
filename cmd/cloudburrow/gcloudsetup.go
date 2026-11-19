@@ -98,6 +98,10 @@ var gcloudVerified = []struct {
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},
+	// The API Keys API (#1915): gcloud services api-keys calls v2, which
+	// gcloud appends. TestGcloudServicesAPIKeys drives create, list,
+	// describe, get-key-string, update, lookup, delete and undelete.
+	{apiKeysService, "apikeys", "/", true, false},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
 	// the Run port beside v2. A command given --region calls
 	// {region}-{host}, which gcloud derives from this override, so on
@@ -209,6 +213,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
+		apiKeysService:         cfg.Endpoints.APIKeys,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore}
 	var b strings.Builder

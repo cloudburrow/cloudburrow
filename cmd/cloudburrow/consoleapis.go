@@ -30,6 +30,7 @@ type apiLibraryInfo struct {
 var apiLibrary = map[string]apiLibraryInfo{
 	"cloudresourcemanager.googleapis.com": {"Management tools", "Creates, reads and updates projects, folders and the organization.", "resourcemanager"},
 	"serviceusage.googleapis.com":         {"Management tools", "Lists, enables and disables the APIs a project uses.", ""},
+	"apikeys.googleapis.com":              {"Security", "Manages the API keys of a project and their restrictions.", ""},
 	"storage.googleapis.com":              {"Storage", "Stores and retrieves objects in buckets.", "storage"},
 	"pubsub.googleapis.com":               {"Big data", "Sends and receives messages between independent applications.", "pubsub"},
 	"cloudtasks.googleapis.com":           {"Developer tools", "Manages the execution of large numbers of distributed requests.", "tasks"},
@@ -239,6 +240,9 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 		if err := json.Unmarshal(body, &req); err != nil {
 			return nil, fmt.Errorf("bad request: %v", err)
 		}
+	}
+	if strings.HasPrefix(call, "key") {
+		return p.keysCall(project, call, body)
 	}
 	switch call {
 	case "apis":

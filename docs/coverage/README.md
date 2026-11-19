@@ -39,6 +39,7 @@ Do not edit these files by hand.
 | [BigQuery (REST API v2)](bigquery.md) | 55 | 55 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 74 | 0 | 6 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 18 | 0 | 52 | 0 | 0 | 0 | 0 |
 

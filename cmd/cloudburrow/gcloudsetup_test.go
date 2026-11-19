@@ -93,6 +93,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"secretmanager":        "http://127.0.0.1:9006/",
 		"cloudresourcemanager": "http://cloudresourcemanager.localhost:9007/",
 		"serviceusage":         "http://127.0.0.1:9023/",
+		"apikeys":              "http://127.0.0.1:9028/",
 		"iam":                  "http://127.0.0.1:9007/",
 		"cloudidentity":        "http://127.0.0.1:9007/",
 		"policytroubleshooter": "http://127.0.0.1:9007/",

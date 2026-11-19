@@ -10,6 +10,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -365,6 +366,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server
+	// And the API Keys API (#1915).
+	var apiKeysRef *apikeys.Server
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -391,6 +394,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects:     func() []string { return registered() },
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
+		apiKeys:      func() *apikeys.Server { return apiKeysRef },
 		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
 		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
@@ -636,6 +640,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		serviceUsageRef = serviceUsageSrv
 		coord.Register(serviceUsageSrv)
 	}
+	// The API Keys API (#1915), each project's keys, in the same store.
+	apiKeysSrv := newAPIKeysServer(cfg, projects, projects.Backing())
+	if apiKeysSrv != nil {
+		apiKeysRef = apiKeysSrv
+		coord.Register(apiKeysSrv)
+	}
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
@@ -723,6 +733,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		ingress:        ingressAddr,
 		mysql:          mysqlCreds,
 		serviceUsage:   serviceUsageSrv,
+		apiKeys:        apiKeysSrv,
 		requestMetrics: requestMetrics,
 		backupdr:       backupDRSrv,
 		sqlAdmin:       sqlAdminSrv,
@@ -805,6 +816,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := serviceUsageSrv.Addr(); a != "" {
 			live["serviceusage"] = a
 		}
+		if a := apiKeysSrv.Addr(); a != "" {
+			live["apikeys"] = a
+		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}
@@ -853,7 +867,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
-			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
+			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}

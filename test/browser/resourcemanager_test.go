@@ -389,11 +389,12 @@ func TestAPIsCredentialsAndUnservedPages(t *testing.T) {
 	p.clickExpr(`document.querySelector("#credentials-create")`)
 	var items []string
 	p.eval(`[...document.querySelectorAll("#credentials-create-menu [role=menuitem]")].map((n) => n.textContent + (n.disabled ? " (disabled)" : ""))`, &items)
-	if len(items) != 3 || !strings.HasPrefix(items[0], "API key") || !strings.HasSuffix(items[0], "(disabled)") ||
+	// API key is served since #1915 (TestAPIKeysThroughTheCredentialsPage).
+	if len(items) != 3 || items[0] != "API key" ||
 		!strings.HasPrefix(items[1], "OAuth client ID") || !strings.HasPrefix(items[2], "Service account") {
 		t.Errorf("Create credentials = %q", items)
 	}
-	for _, id := range []string{"#credentials-api-keys", "#credentials-oauth"} {
+	for _, id := range []string{"#credentials-oauth"} {
 		var text string
 		p.eval(fmt.Sprintf(`document.querySelector(%q).textContent`, id), &text)
 		if !strings.Contains(text, "Not available locally") {

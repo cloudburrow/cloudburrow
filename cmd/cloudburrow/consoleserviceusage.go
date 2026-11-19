@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
+
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +22,9 @@ type serviceUsageProvider struct {
 	// metrics are the request counters the APIs & Services pages count
 	// calls from (#1866); nil shows no counts.
 	metrics *metrics.Registry
+	// apiKeys is the API Keys API (#1915), whose keys the Credentials page
+	// lists and edits; nil says it is not served.
+	apiKeys *apikeys.Server
 }
 
 func (serviceUsageProvider) ID() string    { return "serviceusage" }

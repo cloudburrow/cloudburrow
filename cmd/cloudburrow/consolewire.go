@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -69,6 +70,8 @@ type consoleDeps struct {
 	// serviceUsage is the Service Usage API (#1352), whose APIs & Services
 	// page reads and changes the same server.
 	serviceUsage *serviceusage.Server
+	// apiKeys is the API Keys API (#1915), whose keys Credentials lists.
+	apiKeys *apikeys.Server
 	// requestMetrics are the request counters, which APIs & Services
 	// counts each API's calls from (#1866).
 	requestMetrics *metrics.Registry
@@ -236,7 +239,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, apiKeys: d.apiKeys}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
