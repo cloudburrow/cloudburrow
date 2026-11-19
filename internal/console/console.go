@@ -672,6 +672,11 @@ const (
 	// where the provider lists it, as Google's service page has Metrics,
 	// SLOs, Logs, Revisions (#1852); otherwise it is appended last.
 	KindLogs SectionKind = "logs"
+	// KindQuery is a placeholder for the query tab, drawn where the
+	// provider lists it and under its Label, as Firestore's database page
+	// has its Query builder first (#1845). The form is the provider's
+	// QueryForm for the page; a page with none drops it.
+	KindQuery SectionKind = "query"
 )
 
 // Section is one aspect of a resource, rendered as a tab.

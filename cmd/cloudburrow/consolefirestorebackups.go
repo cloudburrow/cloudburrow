@@ -34,12 +34,12 @@ func collectionIDsField(help string) console.Field {
 // clone actions.
 func firestoreTransferActions() []console.Action {
 	return []console.Action{
-		{ID: "exportdocuments", Label: "Export documents", Fields: []console.Field{
+		{ID: "exportdocuments", Label: "Export", Fields: []console.Field{
 			{Name: "outputUriPrefix", Label: "Destination", Type: "text", Required: true, Pattern: `^gs://.+`,
 				Help: "gs://BUCKET[/PATH] in this instance's Cloud Storage; a bucket alone gets a folder named after the time."},
 			collectionIDsField("The collections to export."),
 		}},
-		{ID: "importdocuments", Label: "Import documents", Fields: []console.Field{
+		{ID: "importdocuments", Label: "Import", Fields: []console.Field{
 			{Name: "inputUriPrefix", Label: "Export location", Type: "text", Required: true, Pattern: `^gs://.+/.+`,
 				Help: "The gs:// folder of an export (its output URI prefix)."},
 			collectionIDsField("The collections to import."),
@@ -47,7 +47,7 @@ func firestoreTransferActions() []console.Action {
 		{ID: "bulkdelete", Label: "Bulk delete documents", Destructive: true, Fields: []console.Field{
 			collectionIDsField("The collections to delete."),
 		}, Confirm: "Every document of the named collection groups, or of the whole database, is deleted."},
-		{ID: "clonedatabase", Label: "Clone database", Fields: []console.Field{
+		{ID: "clonedatabase", Label: "Clone", Fields: []console.Field{
 			{Name: "databaseId", Label: "New database ID", Type: "text", Required: true, Pattern: databaseIDPattern},
 		}},
 	}

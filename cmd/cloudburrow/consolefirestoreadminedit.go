@@ -214,6 +214,25 @@ func hasOverride(f *adminpb.Field) bool {
 	return f.GetTtlConfig() != nil || (f.GetIndexConfig() != nil && !f.GetIndexConfig().GetUsesAncestorConfig())
 }
 
+// firestoreTabActions are the actions drawn at the top of each tab of a
+// database's page, in Google's words (#1845): Create Index, Add Exemption,
+// Export and Import, Create backup schedule and Create Policy.
+func firestoreTabActions() map[string][]console.Action {
+	add, _ := fieldOverrideFields(nil)
+	add = append([]console.Field{
+		{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
+		{Name: "field", Label: "Field path", Type: "text", Required: true},
+	}, add...)
+	transfer := firestoreTransferActions()
+	return map[string][]console.Action{
+		"indexes":      {{ID: "createindex", Label: "Create Index", Fields: createIndexFields()}},
+		"fields":       {{ID: "addfield", Label: "Add Exemption", Fields: add}},
+		"importexport": transfer[:2],
+		"schedules":    {{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()}},
+		"ttl":          {createTTLAction()},
+	}
+}
+
 // indexActions are an index row's actions.
 func indexActions() []console.Action {
 	return []console.Action{{ID: "deleteindex", Label: "Delete index", Destructive: true}}
@@ -223,9 +242,9 @@ func indexActions() []console.Action {
 func fieldActions(f *adminpb.Field) []console.Action {
 	var out []console.Action
 	if fields, ok := fieldOverrideFields(f); ok {
-		out = append(out, console.Action{ID: "editfield", Label: "Edit field override", Fields: fields})
+		out = append(out, console.Action{ID: "editfield", Label: "Edit exemption", Fields: fields})
 	}
-	return append(out, console.Action{ID: "deletefield", Label: "Delete field override", Destructive: true,
+	return append(out, console.Action{ID: "deletefield", Label: "Delete exemption", Destructive: true,
 		Confirm: "The field's TTL policy and index settings are removed, and it takes the database's automatic index settings again."})
 }
 
@@ -251,17 +270,13 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 		if err != nil {
 			return nil
 		}
-		add, _ := fieldOverrideFields(nil)
-		add = append([]console.Field{
-			{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
-			{Name: "field", Label: "Field path", Type: "text", Required: true},
-		}, add...)
-		acts := append([]console.Action{
-			{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)},
-			{ID: "createindex", Label: "Create index", Fields: createIndexFields()},
-			{ID: "addfield", Label: "Add field override", Fields: add},
-			{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()},
-		}, firestoreTransferActions()...)
+		tabs := firestoreTabActions()
+		acts := []console.Action{{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)}}
+		for _, tab := range []string{"indexes", "fields", "importexport", "schedules", "ttl"} {
+			acts = append(acts, tabs[tab]...)
+		}
+		// Bulk delete and Clone stay beside the title.
+		acts = append(acts, firestoreTransferActions()[2:]...)
 		if d.DatabaseEdition == adminpb.Database_ENTERPRISE {
 			acts = append(acts,
 				console.Action{ID: "runpipeline", Label: "Run pipeline", Fields: runPipelineFields()},
@@ -299,6 +314,12 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 			return nil
 		}
 		return indexActions()
+	case firestoreTTLSegment:
+		f, err := c.GetField(ctx, &adminpb.GetFieldRequest{Name: db + "/collectionGroups/" + path[2] + "/fields/" + path[3]})
+		if err != nil || f.GetTtlConfig() == nil {
+			return nil
+		}
+		return ttlActions()
 	case firestoreFieldsSegment:
 		f, err := c.GetField(ctx, &adminpb.GetFieldRequest{Name: db + "/collectionGroups/" + path[2] + "/fields/" + path[3]})
 		if err != nil || !hasOverride(f) {
@@ -326,6 +347,9 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 		return err
 	}
 	if ok, err := actTransfer(ctx, c, db, path, action, values); ok {
+		return err
+	}
+	if ok, err := actTTL(ctx, c, db, path, action, values); ok {
 		return err
 	}
 	switch {
@@ -387,7 +411,7 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 			return err
 		}
 		if hasOverride(cur) {
-			return fmt.Errorf("%s in %s already has an override: edit it on its row in Field overrides", field, cg)
+			return fmt.Errorf("%s in %s already has an override: edit it on its row in Single field", field, cg)
 		}
 		return updateField(ctx, c, fieldOverrideUpdate(name, values))
 	case len(path) == 4 && path[1] == firestoreIndexesSegment && action == "deleteindex":

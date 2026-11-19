@@ -840,7 +840,13 @@ func (a *Admin) UpdateField(_ context.Context, req *adminpb.UpdateFieldRequest) 
 				if override.TtlConfig == nil {
 					meta.TtlConfigDelta = &adminpb.FieldOperationMetadata_TtlConfigDelta{ChangeType: adminpb.FieldOperationMetadata_TtlConfigDelta_ADD}
 				}
-				override.TtlConfig = &adminpb.Field_TtlConfig{State: adminpb.Field_TtlConfig_ACTIVE}
+				// The expiration offset is kept as given (#1845): Google's
+				// Create Policy sets it, and GetField returns it.
+				off := in.GetTtlConfig().GetExpirationOffset()
+				if off != nil && (off.CheckValid() != nil || off.AsDuration() < 0) {
+					return nil, status.Error(codes.InvalidArgument, "ttl_config.expiration_offset must be a non-negative duration")
+				}
+				override.TtlConfig = &adminpb.Field_TtlConfig{State: adminpb.Field_TtlConfig_ACTIVE, ExpirationOffset: off}
 			}
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "update_mask path %q cannot be updated: only index_config and ttl_config can", p)

@@ -72,7 +72,7 @@ func enumWord(v fmt.Stringer, prefix string) string {
 }
 
 func (p firestoreDatabasesProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	base := console.Listing{Columns: []string{"Type", "Location", "Concurrency", "Delete protection"},
+	base := console.Listing{Columns: []string{"Mode", "Edition", "Location", "Scheduled backups", "Concurrency", "Delete protection"},
 		Noun: "databases", NameColumn: "Database", RowsOpenable: true}
 	if project == "" {
 		base.Prompt = "Firestore holds databases per project. Choose one in the toolbar."
@@ -93,14 +93,16 @@ func (p firestoreDatabasesProvider) List(ctx context.Context, project string) (c
 	}
 	for _, db := range resp.Databases {
 		base.Items = append(base.Items, console.Resource{Name: dbID(db.Name), Fields: map[string]string{
-			"Type":              databaseType(db.Type),
+			"Mode":              databaseType(db.Type),
+			"Edition":           enumWord(db.DatabaseEdition, ""),
 			"Location":          db.LocationId,
+			"Scheduled backups": scheduledBackups(ctx, c, db.Name),
 			"Concurrency":       enumWord(db.ConcurrencyMode, ""),
 			"Delete protection": enumWord(db.DeleteProtectionState, "DELETE_PROTECTION_"),
 		}})
 	}
 	base.Total = len(base.Items)
-	base.Note = "The Firestore screen browses (default)'s collections. Every database is served by the one emulator, " +
+	base.Note = "Data browses (default)'s collections; each database's Query builder runs against its own documents. Every database is served by the one emulator, " +
 		"each with its own documents; deleting a database deletes its documents."
 	return base, nil
 }
@@ -148,11 +150,20 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		{Label: "UID", Value: db.Uid},
 		{Label: "Created", Value: db.CreateTime.AsTime().Format("2006-01-02 15:04:05 MST")},
 	}
+	// Google's database menu, in its order (#1845): Query builder (of
+	// Firestore Studio), Indexes (Composite, then Single field with its
+	// exemptions), Import/Export, Disaster recovery, Time-to-live.
+	acts := firestoreTabActions()
 	sections := []console.Section{
-		{ID: "indexes", Label: "Indexes", Listing: p.indexes(ctx, c, name, path[0])},
-		{ID: "fields", Label: "Field overrides", Listing: p.fields(ctx, c, name, path[0])},
-		{ID: "schedules", Label: "Backup schedules", Listing: p.schedules(ctx, c, name, path[0])},
+		{ID: "query", Label: "Query builder", Kind: console.KindQuery},
+		{ID: "indexes", Label: "Composite indexes", Listing: p.indexes(ctx, c, name, path[0]), Actions: acts["indexes"]},
+		{ID: "fields", Label: "Single field", Listing: p.fields(ctx, c, name, path[0]), Actions: acts["fields"]},
+		{ID: "importexport", Label: "Import/Export", Kind: console.KindText, Actions: acts["importexport"],
+			Text: "Export copies the database's documents, every collection group or the ones named, to a gs:// folder of this " +
+				"instance's Cloud Storage; Import reads such a folder back. Each runs as a long-running operation."},
+		{ID: "schedules", Label: "Disaster recovery", Listing: p.schedules(ctx, c, name, path[0]), Actions: acts["schedules"]},
 		{ID: "backups", Label: "Backups", Listing: p.backups(ctx, c, name, path[0])},
+		{ID: "ttl", Label: "Time-to-live", Listing: p.ttlPolicies(ctx, c, name, path[0]), Actions: acts["ttl"]},
 	}
 	// User credentials and pipelines are Enterprise edition features
 	// (#1500, consolefirestorepipeline.go).
@@ -233,7 +244,7 @@ func apiScopeWord(x *adminpb.Index) string {
 // fields is a database's Field overrides tab: the fields with index
 // settings or a TTL policy of their own.
 func (p firestoreDatabasesProvider) fields(ctx context.Context, c *admin.FirestoreAdminClient, db, id string) console.Listing {
-	list := console.Listing{Columns: []string{"Collection group", "Indexes", "TTL"}, NameColumn: "Field", Noun: "field overrides"}
+	list := console.Listing{Columns: []string{"Collection group", "Indexes", "TTL"}, NameColumn: "Field", Noun: "exemptions"}
 	seen := map[string]*adminpb.Field{}
 	for _, filter := range []string{"indexConfig.usesAncestorConfig:false", "ttlConfig:*"} {
 		it := c.ListFields(ctx, &adminpb.ListFieldsRequest{Parent: db + "/collectionGroups/-", Filter: filter})
@@ -286,21 +297,6 @@ func (p firestoreDatabasesProvider) fields(ctx context.Context, c *admin.Firesto
 	return list
 }
 
-// CreateForm implements console.Creator: Create database.
-func (firestoreDatabasesProvider) CreateForm() (string, []console.Field) {
-	return "Create database", []console.Field{
-		{Name: "database", Label: "Database ID", Type: "text", Required: true,
-			Help:    "4 to 63 lowercase letters, numbers and hyphens, starting with a letter and ending with a letter or number.",
-			Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`},
-		{Name: "location", Label: "Location", Type: "text", Required: true, Default: "nam5",
-			Help: "A Firestore location, such as nam5, eur3 or us-east1."},
-		{Name: "concurrency", Label: "Concurrency mode", Type: "select", Default: "PESSIMISTIC",
-			Options: []string{"PESSIMISTIC", "OPTIMISTIC"}},
-		{Name: "edition", Label: "Edition", Type: "select", Default: "STANDARD", Options: []string{"STANDARD", "ENTERPRISE"},
-			Help: "Enterprise runs pipelines (Run pipeline) and keeps user credentials; it cannot be changed later."},
-	}
-}
-
 // Create implements console.Creator: a Native mode database.
 func (p firestoreDatabasesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
@@ -313,19 +309,11 @@ func (p firestoreDatabasesProvider) Create(ctx context.Context, project string, 
 		return "", err
 	}
 	defer c.Close()
-	mode := adminpb.Database_ConcurrencyMode(adminpb.Database_ConcurrencyMode_value[values["concurrency"]])
-	edition := adminpb.Database_STANDARD
-	switch values["edition"] {
-	case "", "STANDARD":
-	case "ENTERPRISE":
-		edition = adminpb.Database_ENTERPRISE
-	default:
-		return "", fmt.Errorf("edition %q is not STANDARD or ENTERPRISE", values["edition"])
+	req, err := createDatabaseRequest(project, values)
+	if err != nil {
+		return "", err
 	}
-	op, err := c.CreateDatabase(ctx, &adminpb.CreateDatabaseRequest{Parent: "projects/" + project,
-		DatabaseId: strings.TrimSpace(values["database"]),
-		Database: &adminpb.Database{LocationId: strings.TrimSpace(values["location"]),
-			Type: adminpb.Database_FIRESTORE_NATIVE, ConcurrencyMode: mode, DatabaseEdition: edition}})
+	op, err := c.CreateDatabase(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("creating the database: %w", err)
 	}

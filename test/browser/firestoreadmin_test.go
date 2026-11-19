@@ -61,7 +61,7 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 	}
 
 	p.navigate("/firestore-databases/(default)" + q)
-	p.clickText("#view .page-actions button", "Create index")
+	p.clickText("#view .page-actions button", "Create Index")
 	p.waitFor(`document.querySelector(".modal #f-fields") !== null`)
 	p.setField(".modal #f-collectionGroup", "orders")
 	p.setField(".modal #f-fields", "city ascending\ntotal descending")

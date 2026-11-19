@@ -57,7 +57,7 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	if err != nil || list.Unavailable != "" || len(list.Items) != 2 {
 		t.Fatalf("List = %+v, %v", list, err)
 	}
-	if got := list.Items[1]; got.Name != "orders" || got.Fields["Location"] != "eur3" || got.Fields["Concurrency"] != "Optimistic" || got.Fields["Type"] != "Native" {
+	if got := list.Items[1]; got.Name != "orders" || got.Fields["Location"] != "eur3" || got.Fields["Concurrency"] != "Optimistic" || got.Fields["Mode"] != "Native" {
 		t.Errorf("the orders row = %+v", got)
 	}
 
@@ -81,7 +81,7 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	}
 
 	d, err := p.Detail(ctx, "p", []string{"orders"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 4 {
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 7 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	props := map[string]string{}
@@ -91,12 +91,12 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	if props["Location"] != "eur3" || props["Concurrency mode"] != "Optimistic" || props["Delete protection"] != "Disabled" {
 		t.Errorf("the summary = %v", props)
 	}
-	idx := d.Sections[0].Listing
+	idx := fsSection(d, "indexes").Listing
 	if len(idx.Items) != 1 || idx.Items[0].Fields["Collection group"] != "lines" ||
 		idx.Items[0].Fields["Fields"] != "sku Ascending, qty Descending, __name__ Descending" || idx.Items[0].Fields["State"] != "Ready" {
 		t.Errorf("the Indexes tab = %+v", idx.Items)
 	}
-	fields := d.Sections[1].Listing
+	fields := fsSection(d, "fields").Listing
 	if len(fields.Items) != 1 || fields.Items[0].Name != "expireAt" || fields.Items[0].Fields["TTL"] != "Active" ||
 		fields.Items[0].Fields["Indexes"] != "Inherited" {
 		t.Errorf("the Field overrides tab = %+v", fields.Items)
@@ -193,10 +193,10 @@ func TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides(t *testing.T) {
 		t.Errorf("the created index = %v", resp)
 	}
 	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 4 || len(d.Sections[0].Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 7 || len(fsSection(d, "indexes").Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
-	row := d.Sections[0].Listing.Items[0]
+	row := fsSection(d, "indexes").Listing.Items[0]
 	if _, ok := fsAdminAction(row.Actions, "deleteindex"); !ok || len(row.ActsOn) != 4 {
 		t.Fatalf("the index row offers %+v at %v", row.Actions, row.ActsOn)
 	}
@@ -308,10 +308,10 @@ func TestConsoleFirestoreBackupSchedules(t *testing.T) {
 		t.Errorf("a daily schedule keeping 8 days: %v, want the API's INVALID_ARGUMENT", err)
 	}
 	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 4 || len(d.Sections[2].Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 7 || len(fsSection(d, "schedules").Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
-	row := d.Sections[2].Listing.Items[0]
+	row := fsSection(d, "schedules").Listing.Items[0]
 	if row.Fields["Recurrence"] != "Weekly, Sunday" || row.Fields["Retention"] != "336h0m0s" {
 		t.Errorf("the schedule row = %+v", row.Fields)
 	}

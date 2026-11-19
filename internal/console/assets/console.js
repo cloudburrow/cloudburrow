@@ -111,15 +111,41 @@ const ROUTES = [
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
 
+  // Firestore's menu is Google's (#1845): Databases first, then a
+  // database's own pages. `tabOf` makes a menu entry a tab of the database
+  // being looked at ((default) elsewhere), so Indexes, Import/Export,
+  // Disaster recovery and Time-to-live open that database's tab; each
+  // entry's own address leads to (default)'s. Security rules, Usage,
+  // Insights and Key Visualizer are in Google's place and say why they are
+  // not available. Databases is not under /firestore/, where it would
+  // shadow a collection named "databases".
+  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
+    product: "firestore", productTitle: "Firestore" },
   // `crumb` names the breadcrumb's first link where the page's menu title
   // ("Data") would not say which product a document is in (#1842).
   { path: "/firestore", service: "firestore", title: "Data", crumb: "Firestore", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
-  // The project's Firestore databases, each with its settings, indexes and
-  // field overrides (#1331, #1343). Not under /firestore/, where it would
-  // shadow a collection named "databases".
-  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
-    product: "firestore", productTitle: "Firestore" },
+  ...[["query", "Query builder"], ["indexes", "Indexes"], ["importexport", "Import/Export"],
+    ["schedules", "Disaster recovery"], ["ttl", "Time-to-live"]].map(([tab, title]) => ({
+    path: "/firestore-" + tab, service: "firestore-databases", icon: "firestore", title, section: "Databases",
+    product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
+    redirect: "/firestore-databases/(default)?tab=" + tab })),
+  { path: "/firestore-rules", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Security rules", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Firestore Security Rules are kept by the Firebase Rules API, which CloudBurrow does not serve. " +
+      "Server client libraries, which reach the local Firestore, ignore rules, as they do on Google's." },
+  { path: "/firestore-usage", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Usage", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Usage charts read Cloud Monitoring metrics, which CloudBurrow does not emulate. Each call to " +
+      "Firestore is in the console's Requests page." },
+  { path: "/firestore-insights", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Insights", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Query insights are gathered by Google's Firestore query statistics, which the local Firestore " +
+      "does not record. Query Explain is on an Enterprise database's page." },
+  { path: "/firestore-key-visualizer", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
+    title: "Key Visualizer", section: "Databases", product: "firestore", productTitle: "Firestore",
+    unavailable: "Key Visualizer draws Google's access-pattern heatmaps from its storage servers; the local " +
+      "Firestore keeps none." },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Tables", kind: "Table",  section: "Databases",
     product: "bigtable", productTitle: "Bigtable" },
@@ -3213,7 +3239,14 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   const queryable = capabilityOf(route.service).query;
-  if (queryable) {
+  // A placeholder (console.KindQuery) puts the query tab in the
+  // provider's order under its own label, as Firestore's database page
+  // has its Query builder (#1845); with no form for the page it is dropped.
+  const ownQuery = sections.find((s) => s.id === "query" && s.kind === "query");
+  if (ownQuery) {
+    ownQuery.query = ownQuery.query || data.query || queryable;
+    if (!ownQuery.query) sections.splice(sections.indexOf(ownQuery), 1);
+  } else if (queryable) {
     // The provider may narrow the form to the resource being looked at — a
     // Bigtable table's column families are not a Firestore collection's fields —
     // so the resource's own query spec wins over the service-wide one.
@@ -5801,8 +5834,13 @@ function groupEntry(f, id, errorId, helpId) {
     const r = { controls: [] };
     const cells = sub.map((s) => {
       const label = `${s.label} ${n}`;
+      // A select subfield is a dropdown of its options (#1845: a Query
+      // builder WHERE clause's operator).
       const c = s.type === "textarea"
         ? el("textarea", { rows: "2", "aria-label": label, spellcheck: "false" })
+        : s.type === "select"
+        ? el("select", { "aria-label": label },
+            ...(s.options || []).map((o) => el("option", { value: o, text: (s.optionLabels || {})[o] || o || "None" })))
         : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
                         autocomplete: "off", spellcheck: "false" });
       if (s.type === "checkbox") c.checked = value[s.name] === "true";
@@ -7386,7 +7424,21 @@ function drawProductNav() {
   });
   // The page this screen is on: the list itself, or the list a resource or
   // a create form belongs to.
-  const current = pages.find((page) => page.path === here.path);
+  // A `tabOf` entry (#1845) is current on its page's tab, and links to
+  // the tab of the resource being looked at.
+  const tabHere = new URLSearchParams(location.search).get("tab");
+  const ownerPath = (page) => page.tabOf ? page.tabOf.route : null;
+  const resourceHere = (page) => {
+    const prefix = ownerPath(page) + "/";
+    if (!location.pathname.startsWith(prefix)) return "(default)";
+    return decodeURIComponent(location.pathname.slice(prefix.length).split("/")[0]) || "(default)";
+  };
+  const current = pages.find((page) => page.tabOf && here.path === page.tabOf.route &&
+      location.pathname.startsWith(page.tabOf.route + "/") && tabHere === page.tabOf.tab) ||
+    pages.find((page) => page.path === here.path && !page.tabOf);
+  const hrefOf = (page) => page.tabOf
+    ? `${page.tabOf.route}/${encodeURIComponent(resourceHere(page))}${scopeSearch()}${scopeSearch() ? "&" : "?"}tab=${page.tabOf.tab}`
+    : page.path + scopeSearch();
   setChildren(host,
     el("div", { class: "product-nav-head" },
       el("span", { class: "nav-icon", "aria-hidden": "true" }, markFor(here)),
@@ -7395,7 +7447,7 @@ function drawProductNav() {
     el("ul", { id: "product-nav-pages", hidden: collapsed ? true : null }, ...pages.map((page) =>
       el("li", {},
         el("a", {
-          href: page.path + scopeSearch(),
+          href: hrefOf(page),
           class: page === current ? "is-current" : null,
           "aria-current": page === current ? "page" : null,
           text: page.navTitle || page.title,

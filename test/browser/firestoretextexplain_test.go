@@ -63,7 +63,7 @@ func TestFirestoreTextIndexAndExplainThroughThePage(t *testing.T) {
 	p := open(t)
 	q := "?project=" + project
 	p.navigate("/firestore-databases/" + dbID + q)
-	p.pageAction("Create index", map[string]string{"collectionGroup": "books", "fields": "title text\nsummary text",
+	p.pageAction("Create Index", map[string]string{"collectionGroup": "books", "fields": "title text\nsummary text",
 		"queryScope": "COLLECTION_GROUP", "apiScope": "MONGODB_COMPATIBLE_API", "textLanguage": "en"}, "")
 	var text *adminpb.Index
 	it := ac.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: db + "/collectionGroups/books"})
@@ -84,7 +84,7 @@ func TestFirestoreTextIndexAndExplainThroughThePage(t *testing.T) {
 	}
 	p.navigate("/firestore-databases/" + dbID + q)
 	p.waitFor(`document.querySelector("#tab-indexes") !== null`)
-	p.clickText("#tab-indexes", "Indexes")
+	p.clickText("#tab-indexes", "Composite indexes")
 	p.waitFor(`[...document.querySelectorAll("td")].some((td) => td.textContent.includes("title Text"))`)
 	p.waitFor(`[...document.querySelectorAll("td")].some((td) => td.textContent.includes("MongoDB compatible API, text language en"))`)
 
