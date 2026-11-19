@@ -219,9 +219,8 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 // TestGcloudSQLOldPostgresVersion (#1462): `gcloud sql instances create
 // --database-version=POSTGRES_12` creates an instance whose
 // databaseInstalledVersion is POSTGRES_12_22; `gcloud sql databases patch
-// --charset` of its database is refused (400), and
-// `--database-version=SQLSERVER_2022_STANDARD`, served on no node, is 501
-// naming why (MYSQL_5_6 is served where the node runs linux/amd64, #1524), through the configuration `cloudburrow gcloud-setup`
+// --charset` of its database is refused (400), and SQLSERVER_2022_STANDARD,
+// served on no node (MYSQL_5_6 is where it runs linux/amd64), is 501 naming why, through the configuration `cloudburrow gcloud-setup`
 // writes, with egress to Google blocked.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.databases.patch, sql.operations.get
 func TestGcloudSQLOldPostgresVersion(t *testing.T) {
