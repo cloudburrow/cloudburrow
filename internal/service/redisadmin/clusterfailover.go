@@ -43,14 +43,19 @@ import (
 //     replica keeps the node as its primary, which takes the slots its old
 //     identity had, with what it loaded from its persistence.
 //
+// A node's own ID is the one it gave when CloudBurrow started it
+// (startNodes asks CLUSTER MYID, and the checks begin only once every node
+// has one), so a primary lost before the first check of its cluster, as
+// a pod deleted the moment the cluster is ACTIVE, is found failed as any
+// other: the checks do not wait for it to answer as itself first, which
+// it never would again.
+//
 // Roles that changed without CloudBurrow (Valkey's own failover, a
 // CLUSTER FAILOVER sent by a client) are taken into the record as found.
 
 // nodeHealth is what the checks learned of one node.
 type nodeHealth struct {
-	// seen is whether the node has answered as itself since the checks
-	// began: only such a node can be found failed.
-	seen   bool
+	// failed is how many checks in a row the node has not answered.
 	failed int
 	// reborn is the node's new ID, when it answered with one.
 	reborn string
@@ -189,17 +194,16 @@ func (c *clusters) checkCluster(ctx context.Context, name string, hs map[string]
 			hs[n.Server] = h
 		}
 		id, primary, _, err := c.probe(ctx, &snap, n, timeout)
-		if (err != nil || id != n.id) && h.seen && h.failed == 0 && h.reborn == "" {
+		if (err != nil || id != n.id) && h.failed == 0 && h.reborn == "" {
 			log.Printf("memorystore: %s: node %s: check: id %q (kept %q), %v", name, n.Server, id, n.id, err)
 		}
 		switch {
-		case !h.seen && (err != nil || id != n.id):
 		case err != nil:
 			h.failed++
 		case id != n.id:
 			h.failed, h.reborn = failAfter, id
 		default:
-			h.seen, h.failed, h.reborn = true, 0, ""
+			h.failed, h.reborn = 0, ""
 			roles[n.Server] = primary
 		}
 		if h.reborn != "" || (n.Primary && h.failed >= failAfter) {
