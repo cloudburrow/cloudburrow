@@ -13,12 +13,13 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestCloudRunManageTrafficThroughTheBrowser (#1224): a service's page has
-// Manage traffic, whose form is prefilled with the traffic as it is (all to
-// the latest revision); a sum other than 100 is refused on the form with
-// UpdateService's own message; tagging the latest revision is sent as one
-// action, and the page's Traffic section then shows the tag and the URL
-// Knative gave it.
+// TestCloudRunManageTrafficThroughTheBrowser (#1224, #1852): a service's
+// Revisions tab has Google's Manage traffic dialog, one percent per revision
+// and the latest healthy revision, ending in Save, prefilled with the traffic
+// as it is (all to the latest revision); a sum other than 100 is refused on
+// the form. A revision's page has Manage revision tags: a tag is sent as one
+// action, the Revisions tab then shows the tag and the URL Knative gave it,
+// and the dialog opens again prefilled with it.
 func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 	needService(t, "run")
 	project := uniqueProject(t)
@@ -41,35 +42,41 @@ func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 
 	// Manage traffic is on the Revisions tab, as Google's is (#1852).
 	p.navigate("/run/" + id + "?project=" + project + "&tab=revisions")
-	openForm := func() {
-		p.waitFor(`document.querySelector(".modal") === null`)
-		p.clickText("#view .section-actions button", "Manage traffic")
-		p.waitFor(`document.querySelector(".modal.is-open #f-traffic") !== null`)
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.clickText("#view .section-actions button", "Manage traffic")
+	p.waitFor(`document.querySelector(".modal.is-open #f-traffic-latest") !== null`)
+	var dialog struct {
+		Latest, Submit string
+		Revisions      []string
 	}
-	openForm()
-	var prefilled string
-	p.eval(`document.querySelector(".modal.is-open #f-traffic").value`, &prefilled)
-	if prefilled != "LATEST 100" {
-		t.Errorf("Manage traffic is prefilled with %q, want LATEST 100", prefilled)
+	p.eval(`(() => ({ Latest: document.querySelector(".modal.is-open #f-traffic-latest").value,
+		Submit: document.querySelector('.modal.is-open button[type="submit"]').textContent,
+		Revisions: [...document.querySelectorAll('.modal.is-open input[id^="f-traffic-revision-"]')].map((f) => f.id.slice("f-traffic-revision-".length)) }))()`, &dialog)
+	if dialog.Latest != "100" || dialog.Submit != "Save" || len(dialog.Revisions) != 1 {
+		t.Fatalf("Manage traffic = %+v, want the latest at 100, one revision and Save", dialog)
 	}
+	revision := dialog.Revisions[0]
 
-	setTraffic := func(v string) {
-		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-traffic"); f.value = %q;
+	setLatest := func(v string) {
+		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-traffic-latest"); f.value = %q;
 			f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, v), nil)
 		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}
-	setTraffic("LATEST 60")
+	setLatest("60")
 	p.waitFor(`(() => { const e = document.querySelector(".modal.is-open .form-error"); return e && !e.hidden && e.textContent.includes("sum to 100"); })()`)
 	if sent := p.sent(http.MethodPost, actions); len(sent) != 1 {
 		t.Errorf("the refused split sent %d actions, want one: %v", len(sent), sent)
 	}
-	// The refusal is the API's 400, provoked on purpose.
+	// The refusal is a 400, provoked on purpose.
 	p.forgive()
-
-	setTraffic("LATEST 100 browser")
+	setLatest("100")
 	p.waitFor(`document.querySelector(".modal") === null`)
-	if sent := p.sent(http.MethodPost, actions); len(sent) != 2 {
-		t.Errorf("the refusal and the tag sent %d actions, want two: %v", len(sent), sent)
+
+	// Manage revision tags, on the revision's page.
+	p.navigate("/run/" + id + "/" + revision + "?project=" + project)
+	p.pageAction("Manage revision tags", map[string]string{"tags": "browser"}, "")
+	if sent := p.sent(http.MethodPost, actions); len(sent) != 3 {
+		t.Errorf("the refusal, the save and the tag sent %d actions, want three: %v", len(sent), sent)
 	}
 	// Knative publishes the tag's URL once the route is reconciled.
 	tagHost := "browser-" + id
@@ -84,9 +91,13 @@ func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(detail, tagHost) {
 		t.Errorf("the service's detail through the console API = %d, without the tag URL %s…: %.400s", code, tagHost, detail)
 	}
-	openForm()
-	p.eval(`document.querySelector(".modal.is-open #f-traffic").value`, &prefilled)
-	if prefilled != "LATEST 100 browser" {
-		t.Errorf("after tagging, Manage traffic is prefilled with %q, want LATEST 100 browser", prefilled)
+	p.navigate("/run/" + id + "/" + revision + "?project=" + project)
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.clickText("#view .page-actions button", "Manage revision tags")
+	p.waitFor(`document.querySelector(".modal.is-open #f-tags") !== null`)
+	var prefilled string
+	p.eval(`document.querySelector(".modal.is-open #f-tags").value`, &prefilled)
+	if prefilled != "browser" {
+		t.Errorf("after tagging, Manage revision tags is prefilled with %q, want browser", prefilled)
 	}
 }

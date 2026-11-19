@@ -3154,7 +3154,7 @@ async function renderDetail(view, route, resourcePath) {
       id: "logs", label: "Logs", kind: "logs",
       resource: name,
     });
-  } else if (ownLogs.kind === "logs" && !ownLogs.resource) {
+  } else if (ownLogs && ownLogs.kind === "logs" && !ownLogs.resource) {
     // A placeholder (console.KindLogs) puts the Logs tab in the provider's
     // order, as Google's service page has Metrics, SLOs, Logs (#1852).
     ownLogs.resource = name;
@@ -3712,7 +3712,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
   const primary = el("button", {
     type: "submit",
     class: action.destructive ? "primary danger" : "primary",
-    text: action.label,
+    text: action.submit || action.label,
   });
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => close() });
@@ -4399,7 +4399,7 @@ function openEditForm(route, segments, spec, onDone) {
     canClose: () => !submitting,
   });
 
-  const primary = el("button", { type: "submit", class: "primary", text: spec.label || "Save" });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || spec.label || "Save" });
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => close() });
 
@@ -4431,7 +4431,7 @@ function openEditForm(route, segments, spec, onDone) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "edit-title", text: `${spec.label || "Edit"} ${name}` }),
+    el("h2", { id: "edit-title", text: `${spec.title || spec.label || "Edit"} ${name}` }),
     spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
     error,
     ...fields.nodes,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -256,8 +257,13 @@ func runNotLocal(id, label, why string) console.Section {
 // Logs, Revisions, Source, Triggers, Networking, Security, YAML; then
 // CloudBurrow's Configuration and Domain mappings tabs.
 func (p runProvider) runServiceSections(ctx context.Context, project, name string, svc *ksvcStatus) []console.Section {
-	revisions := console.Section{ID: "revisions", Label: "Revisions", Listing: p.revisions(ctx, name, svc),
-		Actions: p.trafficAction(svc)}
+	listing := p.revisions(ctx, name, svc)
+	var ids []string
+	for _, r := range listing.Items {
+		ids = append(ids, r.Name)
+	}
+	revisions := console.Section{ID: "revisions", Label: "Revisions", Listing: listing,
+		Actions: p.trafficAction(svc, ids)}
 	runRevisionTraffic(&revisions.Listing, svc)
 	domains := p.domainsSection(ctx, project, serviceIDOf(name))
 	domains.Actions = p.domainActions(svc)
@@ -270,8 +276,7 @@ func (p runProvider) runServiceSections(ctx context.Context, project, name strin
 		{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		revisions,
 		p.runSourceSection(svc),
-		runNotLocal("triggers", "Triggers", "Add trigger is not offered here yet: a Pub/Sub push "+
-			"subscription to the service's URL, made on the Pub/Sub Subscriptions page, delivers to it."),
+		p.triggersSection(ctx, project, svc),
 		p.runNetworkingSection(svc),
 		p.runSecuritySection(ctx, project, svc),
 		p.runYAMLSection(ctx, project, svc),
@@ -415,9 +420,10 @@ func runYAMLText(sec console.Section, got json.Marshaler) console.Section {
 const runJobEditLabel = "View and edit job configuration"
 
 // runJobLayout orders Create job's fields as Google's page does: Container
-// image URL, then Job name and Region, then the rest in their sections.
-func runJobLayout(fields []console.Field) []console.Field {
-	var image, name console.Field
+// image URL, Job name, Region and Number of tasks, then the container, Task
+// capacity and Parallelism, ending in Execute job immediately (#1852).
+func runJobLayout(region string, fields []console.Field) []console.Field {
+	var image, name, tasks console.Field
 	rest := make([]console.Field, 0, len(fields))
 	for _, f := range fields {
 		switch f.Name {
@@ -425,17 +431,62 @@ func runJobLayout(fields []console.Field) []console.Field {
 			image = f
 		case "name":
 			name = f
+		case "taskCount":
+			tasks = f
 		default:
 			rest = append(rest, f)
 		}
 	}
-	image.Section, name.Section = "Configure", "Configure"
+	image.Section, name.Section, tasks.Section = "Configure", "Configure", "Configure"
 	for i := range rest {
 		if rest[i].Section == "Job settings" {
 			rest[i].Section = "Configure"
 		}
 	}
-	return append([]console.Field{image, name}, rest...)
+	regionField := console.Field{Name: "region", Label: "Region", Type: "select", Options: []string{region}, Default: region,
+		Section: "Configure", Help: "This instance serves one region, " + region + ", as its Cloud Run location."}
+	out := append([]console.Field{image, name, regionField, tasks}, rest...)
+	return append(out, console.Field{Name: "executeNow", Label: "Execute job immediately", Type: "checkbox",
+		Help: "Start an execution as soon as the job is created."})
+}
+
+// runJobCreateOnly are Create job's fields that View and edit job
+// configuration does not have.
+var runJobCreateOnly = []string{"region", "executeNow"}
+
+// Google's Parallelism choices and Task timeout units.
+const (
+	runParallelAll   = "Run as many tasks concurrently as possible"
+	runParallelLimit = "Limit the number of concurrent tasks"
+
+	runMaxTaskTimeout = 168 * time.Hour
+)
+
+var runTimeUnits = []string{"seconds", "minutes", "hours"}
+
+// runTimeUnit is a Time unit's length; none is seconds, as the API's.
+func runTimeUnit(unit string) (time.Duration, error) {
+	switch strings.TrimSpace(unit) {
+	case "", "seconds":
+		return time.Second, nil
+	case "minutes":
+		return time.Minute, nil
+	case "hours":
+		return time.Hour, nil
+	}
+	return 0, fmt.Errorf("time unit %q is not seconds, minutes or hours", unit)
+}
+
+// runTimeoutText is a task timeout in the largest unit it is a whole
+// number of.
+func runTimeoutText(d time.Duration) (value, unit string) {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		return fmt.Sprint(int64(d / time.Hour)), "hours"
+	case d >= time.Minute && d%time.Minute == 0:
+		return fmt.Sprint(int64(d / time.Minute)), "minutes"
+	}
+	return fmt.Sprint(int64(d / time.Second)), "seconds"
 }
 
 // CreateSubmit implements console.CreateSubmitter: Create job ends in Create.

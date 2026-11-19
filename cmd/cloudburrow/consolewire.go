@@ -179,16 +179,23 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// executions (#785).
 		// The storage tunnel's bound address, not the configured port, which
 		// is 0 when the OS assigns it (--port-storage 0).
-		var runStorage string
+		var runStorage, runPubSub string
 		if enabled[config.ServiceStorage] && storageAddr != "" {
 			runStorage = hostURL(storageAddr)
 		}
+		if enabled[config.ServicePubSub] {
+			runPubSub = pubsubAddr
+		}
+		functions := &functionsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run),
+			storage: enabled[config.ServiceStorage]}
 		providers = append(providers, runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			storageAddr:    runStorage,
+			pubsubAddr:     runPubSub,
+			functions:      functions,
 		}, runDomainsProvider{run: runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
@@ -216,8 +223,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Cloud Functions v2 is served on the Run port too (#1377).
-			functionsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run),
-				storage: enabled[config.ServiceStorage]})
+			*functions)
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})

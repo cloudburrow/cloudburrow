@@ -73,10 +73,14 @@ func (p runProvider) runCreateFromSourceAction() console.Action {
 // ListActions implements console.ListActor: Create service from source,
 // offered only when both the adapter and Cloud Storage are running here.
 func (p runProvider) ListActions(context.Context, string) []console.Action {
-	if p.runEndpoint() == "" || p.storageAddr == "" {
+	if p.runEndpoint() == "" {
 		return nil
 	}
-	return []console.Action{p.runCreateFromSourceAction()}
+	var out []console.Action
+	if p.storageAddr != "" {
+		out = append(out, p.runCreateFromSourceAction())
+	}
+	return append(out, p.writeFunctionAction()...)
 }
 
 // sourceActions is the service's Deploy from source, offered only when both
@@ -91,6 +95,9 @@ func (p runProvider) sourceActions() []console.Action {
 // ActAtFile implements console.FileActor: Deploy from source on a service's
 // page, and Create service from source on the list page (no path).
 func (p runProvider) ActAtFile(ctx context.Context, project string, path []string, action string, values map[string]string, file console.UploadedFile) (*console.Listing, error) {
+	if action == runWriteFunction && len(path) == 0 {
+		return p.writeFunction(ctx, project, values, file)
+	}
 	deploy := action == runDeploySource && len(path) == 1
 	create := action == runCreateFromSource && len(path) == 0
 	if !deploy && !create {

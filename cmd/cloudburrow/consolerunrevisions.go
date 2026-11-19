@@ -22,7 +22,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
-	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 const runDeleteRevision = "delete-revision"
@@ -45,12 +44,23 @@ func (s ksvcStatus) servingRevisions() map[string]bool {
 }
 
 // revisionActions is what a revision of svc offers.
+// Manage revision tags on every revision of a service CloudBurrow created
+// (#1852), and Delete revision on one that serves no traffic.
 func (p runProvider) revisionActions(svc *ksvcStatus, revision string) []console.Action {
-	if p.runEndpoint() == "" || svc == nil || svc.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue ||
-		svc.servingRevisions()[revision] {
-		return nil
+	actions := p.tagsAction(svc, revision)
+	if actions == nil || svc.servingRevisions()[revision] {
+		return actions
 	}
-	return []console.Action{{ID: runDeleteRevision, Label: "Delete revision", Destructive: true}}
+	return append(actions, console.Action{ID: runDeleteRevision, Label: "Delete revision", Destructive: true})
+}
+
+// revisionIDs are the names of a service's revisions, newest first.
+func (p runProvider) revisionIDs(ctx context.Context, name string, svc *ksvcStatus) []string {
+	var out []string
+	for _, r := range p.revisions(ctx, name, svc).Items {
+		out = append(out, r.Name)
+	}
+	return out
 }
 
 // service reads one of project's services by its ID: nil, and no error,
@@ -84,7 +94,9 @@ func (p runProvider) DetailActions(ctx context.Context, project string, path []s
 		return nil
 	}
 	if len(path) == 1 {
-		return append(append(p.trafficAction(svc), p.sourceActions()...), p.domainActions(svc)...)
+		out := append(p.trafficAction(svc, p.revisionIDs(ctx, path[0], svc)), p.sourceActions()...)
+		out = append(append(out, p.domainActions(svc)...), p.triggerActions(ctx, project, svc)...)
+		return append(out, p.copyAction(svc)...)
 	}
 	return p.revisionActions(svc, path[1])
 }
@@ -100,11 +112,23 @@ func (p runProvider) ActAt(ctx context.Context, project string, path []string, a
 	if (action == runMapDomain || action == runUnmapDomain) && len(path) == 1 {
 		return p.actOnDomains(ctx, project, serviceIDOf(path[0]), action, values)
 	}
+	if (action == runAddTrigger || action == runDeleteTrigger) && len(path) == 1 {
+		return p.actOnTriggers(ctx, project, serviceIDOf(path[0]), action, values)
+	}
+	if action == runCopyService && len(path) == 1 {
+		return p.copyService(ctx, project, serviceIDOf(path[0]), values)
+	}
 	if action == runManageTraffic && len(path) == 1 {
 		if p.runEndpoint() == "" {
 			return errors.New("the Cloud Run adapter is not running")
 		}
 		return p.manageTraffic(ctx, project, path[0], values)
+	}
+	if action == runManageTags && len(path) == 2 {
+		if p.runEndpoint() == "" {
+			return errors.New("the Cloud Run adapter is not running")
+		}
+		return p.manageTags(ctx, project, path[0], path[1], values)
 	}
 	if action != runDeleteRevision || len(path) != 2 {
 		return fmt.Errorf("unknown action %q", action)

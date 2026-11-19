@@ -394,8 +394,8 @@ func (p runJobsProvider) Delete(ctx context.Context, project, name string) error
 // batch Job, and nothing it refuses (a port, a probe, a service account,
 // VPC access, volumes): those are named in the last field's help rather
 // than drawn as controls that fail.
-func (runJobsProvider) CreateForm() (string, []console.Field) {
-	return "Create job", runJobLayout([]console.Field{
+func (p runJobsProvider) CreateForm() (string, []console.Field) {
+	return "Create job", runJobLayout(p.location(), []console.Field{
 		{
 			Name: "name", Label: "Job name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens, starting with a letter; at most 63 characters.",
@@ -436,21 +436,30 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 			Section: "Tasks",
 		},
 		{
-			Name: "parallelism", Label: "Parallelism", Type: "text",
-			Help:    "Optional. How many tasks run at once; blank runs as many as there are.",
-			Pattern: `^[0-9]{1,5}$`,
-			Section: "Tasks",
-		},
-		{
-			Name: "maxRetries", Label: "Maximum retries per failed task", Type: "text", Default: "3",
-			Pattern: `^[0-9]{1,2}$`,
-			Section: "Tasks",
-		},
-		{
-			Name: "timeout", Label: "Task timeout (seconds)", Type: "text", Default: "600",
-			Help:    "How long one attempt of a task may run before it is stopped.",
+			Name: "timeout", Label: "Task timeout", Type: "text", Default: "10",
+			Help:    "How long one attempt of a task may run before it is stopped, a whole number of the time unit; at most 168 hours.",
 			Pattern: `^[0-9]{1,6}$`,
-			Section: "Tasks",
+			Section: "Task capacity",
+		},
+		{
+			Name: "timeoutUnit", Label: "Time unit", Type: "select", Options: runTimeUnits, Default: "minutes",
+			Section: "Task capacity",
+		},
+		{
+			Name: "maxRetries", Label: "Number of retries per failed task", Type: "text", Default: "3",
+			Pattern: `^[0-9]{1,2}$`,
+			Section: "Task capacity",
+		},
+		{
+			Name: "parallelismMode", Label: "Parallelism", Type: "radio",
+			Options: []string{runParallelAll, runParallelLimit}, Default: runParallelAll,
+			Section: "Parallelism",
+		},
+		{
+			Name: "parallelism", Label: "Custom parallelism limit", Type: "text",
+			Help:    "With Limit the number of concurrent tasks: how many tasks run at once, at most the number of tasks.",
+			Pattern: `^[0-9]{0,5}$`,
+			Section: "Parallelism",
 		},
 		{
 			Name: "cpu", Label: "CPU limit", Type: "text",
@@ -490,6 +499,9 @@ func (p runJobsProvider) Create(ctx context.Context, project string, values map[
 	if err != nil {
 		return "", err
 	}
+	if r := strings.TrimSpace(values["region"]); r != "" && r != p.location() {
+		return "", fmt.Errorf("region %q is not served: this instance's Cloud Run location is %s", r, p.location())
+	}
 	var name string
 	err = p.withClients(ctx, func(jc *runclient.JobsClient, _ *runclient.ExecutionsClient) error {
 		op, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{
@@ -505,6 +517,13 @@ func (p runJobsProvider) Create(ctx context.Context, project string, values map[
 		name = job.GetName()
 		return nil
 	})
+	if err == nil && values["executeNow"] == "true" {
+		// Execute job immediately: the job is created, then run, as
+		// gcloud run jobs create --execute-now does.
+		if _, xerr := p.execute(ctx, project, id); xerr != nil {
+			return name, fmt.Errorf("the job was created, but did not start: %w", xerr)
+		}
+	}
 	return name, err
 }
 
@@ -551,9 +570,20 @@ func runJobFormTemplate(values map[string]string) (*runpb.ExecutionTemplate, err
 	if tasks == 0 {
 		tasks = 1
 	}
-	parallelism, err := optionalInt(values["parallelism"], "parallelism")
+	parallelism, err := optionalInt(values["parallelism"], "custom parallelism limit")
 	if err != nil {
 		return nil, err
+	}
+	switch strings.TrimSpace(values["parallelismMode"]) {
+	case "":
+	case runParallelAll:
+		parallelism = 0
+	case runParallelLimit:
+		if parallelism == 0 {
+			return nil, errors.New("limit the number of concurrent tasks needs a custom parallelism limit")
+		}
+	default:
+		return nil, fmt.Errorf("parallelism %q is neither %q nor %q", values["parallelismMode"], runParallelAll, runParallelLimit)
 	}
 	tt := &runpb.TaskTemplate{Containers: []*runpb.Container{c}}
 	if err := applyRunVolumes(podFields{&tt.ServiceAccount, &tt.Volumes}, c, values); err != nil {
@@ -573,8 +603,16 @@ func runJobFormTemplate(values map[string]string) (*runpb.ExecutionTemplate, err
 	if err != nil {
 		return nil, err
 	}
+	unit, err := runTimeUnit(values["timeoutUnit"])
+	if err != nil {
+		return nil, err
+	}
 	if timeout > 0 {
-		tt.Timeout = durationpb.New(time.Duration(timeout) * time.Second)
+		d := time.Duration(timeout) * unit
+		if d > runMaxTaskTimeout {
+			return nil, fmt.Errorf("task timeout %s is more than the maximum, 168 hours", d)
+		}
+		tt.Timeout = durationpb.New(d)
 	}
 	return &runpb.ExecutionTemplate{TaskCount: int32(tasks), Parallelism: int32(parallelism), Template: tt}, nil
 }
@@ -699,16 +737,18 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 		"cpu":        c.GetResources().GetLimits()["cpu"],
 		"memory":     c.GetResources().GetLimits()["memory"],
 	}
+	prefill["parallelismMode"] = runParallelAll
 	if n := job.GetTemplate().GetParallelism(); n > 0 {
-		prefill["parallelism"] = fmt.Sprint(n)
+		prefill["parallelism"], prefill["parallelismMode"] = fmt.Sprint(n), runParallelLimit
 	}
 	if t := tt.GetTimeout(); t != nil {
-		prefill["timeout"] = fmt.Sprint(int64(t.AsDuration().Seconds()))
+		prefill["timeout"], prefill["timeoutUnit"] = runTimeoutText(t.AsDuration())
 	}
 	for k, v := range runSettingsDefaults(tt.GetExecutionEnvironment(), tt.GetVpcAccess(), tt.GetEncryptionKey(), false) {
 		prefill[k] = v
 	}
 	_, fields := runJobsProvider{}.CreateForm()
+	fields = slices.DeleteFunc(fields, func(f console.Field) bool { return slices.Contains(runJobCreateOnly, f.Name) })
 	for i := range fields {
 		fields[i].Default = prefill[fields[i].Name]
 		if fields[i].Name == "name" {

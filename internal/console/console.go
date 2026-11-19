@@ -516,6 +516,11 @@ type EditForm struct {
 	// omits the immutable half reads as though everything absent from it does
 	// not exist.
 	Note string `json:"note,omitempty"`
+	// Title and Submit are the form's heading and submit label when they are
+	// not Label: Google's worker pool has Edit and deploy new revision, which
+	// opens Deploy worker pool revision, ending in Deploy (#1852).
+	Title  string `json:"title,omitempty"`
+	Submit string `json:"submit,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -832,6 +837,9 @@ type Action struct {
 	// SelectionField names the field a selection action's selected rows are
 	// written into (Listing.SelectActions).
 	SelectionField string `json:"selectionField,omitempty"`
+	// Submit is the dialog's submit label when it is not the action's own:
+	// Google's Manage traffic dialog ends in Save (#1852).
+	Submit string `json:"submit,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

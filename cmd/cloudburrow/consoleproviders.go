@@ -617,6 +617,12 @@ type runProvider struct {
 	// storageAddr is this instance's Cloud Storage base URL, or "" when it
 	// is not served; Deploy from source uploads its archive there (#1268).
 	storageAddr string
+	// pubsubAddr is this instance's Pub/Sub, or "" when it is not served: a
+	// service's Pub/Sub triggers are push subscriptions on it (#1852).
+	pubsubAddr string
+	// functions is this instance's Cloud Functions screen, nil when it is
+	// not served: Write a function creates through it (#1852).
+	functions *functionsProvider
 }
 
 func (runProvider) ID() string    { return "run" }
@@ -757,7 +763,8 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		Summary: summary, Sections: sections,
 		// Each action is on its tab: Manage traffic on Revisions, Deploy
 		// from source on Source, Map a domain on Domain mappings.
-		Actions: []console.Action{},
+		// Copy is beside the title, as Google's is.
+		Actions: append([]console.Action{}, p.copyAction(svc)...),
 		Edit:    p.editForm(ctx, name, svc),
 	}, nil
 }

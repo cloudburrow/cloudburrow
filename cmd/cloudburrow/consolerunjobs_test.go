@@ -464,7 +464,7 @@ func TestRunJobEditKeepsWhatTheFormDoesNotShow(t *testing.T) {
 		values[fld.Name] = fld.Default
 	}
 	if values["args"] != "--since 'one day'" || values["taskCount"] != "2" || values["maxRetries"] != "1" ||
-		values["timeout"] != "300" || values["env"] != `{"MODE":"full"}` {
+		values["timeout"] != "5" || values["timeoutUnit"] != "minutes" || values["env"] != `{"MODE":"full"}` {
 		t.Errorf("prefilled = %v", values)
 	}
 	// Since #852 the form holds the labels and the secret-backed variable,
@@ -673,12 +673,14 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 		path []string
 		want []string
 	}{
-		{[]string{"api", "api-00001"}, []string{runDeleteRevision}},
-		{[]string{"api", "api-00002"}, nil},
+		{[]string{"api", "api-00001"}, []string{runManageTags, runDeleteRevision}},
+		// Manage revision tags on every revision (#1852); no delete on the
+		// serving one.
+		{[]string{"api", "api-00002"}, []string{runManageTags}},
 		{[]string{"foreign", "foreign-00001"}, nil},
-		// A service's page offers Manage traffic (#1224) and its domain
-		// mappings (#1450), on one CloudBurrow owns.
-		{[]string{"api"}, []string{runManageTraffic, runMapDomain, runUnmapDomain}},
+		// A service's page offers Manage traffic (#1224), its domain
+		// mappings (#1450) and Copy (#1852), on one CloudBurrow owns.
+		{[]string{"api"}, []string{runManageTraffic, runMapDomain, runUnmapDomain, runCopyService}},
 		{[]string{"foreign"}, nil},
 	} {
 		if got := actionIDs(p.DetailActions(ctx, "demo", c.path)); !reflect.DeepEqual(got, c.want) {
@@ -689,7 +691,7 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a := p.revisionActions(svc, "api-00001"); len(a) != 1 || !a[0].Destructive || a[0].Label != "Delete revision" {
+	if a := p.revisionActions(svc, "api-00001"); len(a) != 2 || !a[1].Destructive || a[1].Label != "Delete revision" {
 		t.Errorf("the row action = %+v, want a destructive Delete revision", a)
 	}
 
