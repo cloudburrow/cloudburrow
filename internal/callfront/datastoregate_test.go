@@ -93,4 +93,15 @@ func TestDatastoreGateAsksTheAdminAPI(t *testing.T) {
 	if b, _ := io.ReadAll(r.Body); string(b) != `{"databaseId":"ds-db"}` {
 		t.Errorf("the body passed on = %q", b)
 	}
+
+	// With the Admin API gone, the last answer stands and a database it
+	// never answered for is served.
+	admin.Close()
+	now = now.Add(2 * gateTTL)
+	if !g.Claims(grpcCall("project_id=p&database_id=native-db")) {
+		t.Error("with the Admin API gone, the last refusal no longer stands")
+	}
+	if g.Claims(grpcCall("project_id=p&database_id=never-asked")) {
+		t.Error("with the Admin API gone, a database never answered for is refused")
+	}
 }

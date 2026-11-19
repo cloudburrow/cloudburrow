@@ -89,8 +89,10 @@ const (
 		"written. Server client libraries ignore rules, as on Google's, and that is what reaches this database."
 )
 
-// kmsKeyPattern is a Cloud KMS key's resource name, as cmek_config takes it.
-const kmsKeyPattern = `projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+`
+// kmsKeyPattern is a Cloud KMS key's resource name, as cmek_config takes it;
+// the slash is escaped in its classes, as the browser compiles it with the v
+// flag.
+const kmsKeyPattern = `projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+`
 
 // CreateForm implements console.Creator: Google's Create a Firestore
 // database, in its order.

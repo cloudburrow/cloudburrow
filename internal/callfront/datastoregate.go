@@ -9,8 +9,10 @@ package callfront
 // database the call names (frontstate.FirestoreAccessPath, over the
 // cluster), and answers Google's refusal itself when it does not: a Native
 // mode database, or one whose key is not accessible. The answer is kept for
-// gateTTL. With Firestore not served there is no Admin API, no Datastore
-// mode database and no key, and every call passes, as before.
+// gateTTL; while the Firestore front does not answer, the last answer
+// stands, and a database it never answered for is served. With Firestore
+// not served there is no Admin API, no Datastore mode database and no key,
+// and every call passes, as before.
 //
 // It also clears a database the Admin API deletes
 // (frontstate.DatastoreClearPath): every entity, in every namespace,
@@ -117,8 +119,16 @@ func (g *datastoreGate) access(ctx context.Context, db string) error {
 	g.mu.Unlock()
 	err := g.ask(ctx, db)
 	if status.Code(err) == codes.Unavailable {
-		// The Admin API did not answer: not kept, so the next call asks.
-		return err
+		// The Admin API did not answer (the Firestore pod restarting):
+		// its last answer stands, and a database it never answered for
+		// is served, so Datastore does not go down with Firestore. Not
+		// kept, so the next call asks.
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if a, ok := g.answers[db]; ok {
+			return a.err
+		}
+		return nil
 	}
 	g.mu.Lock()
 	g.answers[db] = gateAnswer{at: now, err: err}
