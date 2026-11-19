@@ -193,8 +193,13 @@ func (c *connector) ca(instance string) *serverCA {
 }
 
 // addInstance gives a created instance its own CA, kept beside the others.
+// The CA is the instance's, not the listener's: Cloud SQL has a server CA
+// for every instance from its creation, so one is made (or, for an instance
+// kept across up, read back) even when the listener could not bind, and
+// listServerCas, sslCerts and the console's Security tab answer as Google's
+// do; only the connector methods say the listener is not serving.
 func (c *connector) addInstance(instance string) error {
-	if c.unavailable != "" || c.cas == nil {
+	if c.cas == nil {
 		return nil
 	}
 	ca, err := loadInstanceCA(c.dir, instance)

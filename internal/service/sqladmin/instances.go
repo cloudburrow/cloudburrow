@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -234,7 +235,7 @@ func (s *Server) restore() {
 			_ = json.Unmarshal(b, &specs)
 		}
 	}
-	var keep []string
+	var keep, names []string
 	s.emu.Lock()
 	s.restoreSourcesLocked()
 	for _, sp := range specs {
@@ -244,8 +245,19 @@ func (s *Server) restore() {
 		s.writes.byName[sp.Name] = &created{spec: sp, engine: w.prov.Engine(sp), state: "PENDING_CREATE"}
 		s.noteServer(sp)
 		keep = append(keep, sp.ServerName())
+		names = append(names, sp.Name)
 	}
 	s.emu.Unlock()
+	// Each restored instance's server CA, kept in the connector's directory
+	// when it was created: EnableConnector read only the configured
+	// instances', and Cloud SQL's instance keeps its CA across restarts.
+	if s.conn != nil {
+		for _, name := range names {
+			if err := s.conn.addInstance(name); err != nil {
+				log.Printf("%v", err)
+			}
+		}
+	}
 	go func() {
 		ctx := context.Background()
 		_ = w.prov.Prune(ctx, keep)
