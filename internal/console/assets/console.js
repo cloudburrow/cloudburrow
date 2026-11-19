@@ -3141,6 +3141,14 @@ async function renderDetail(view, route, resourcePath) {
       query: data.query || queryable,
     });
   }
+  // A resource whose page is all details (a build trigger, a worker pool)
+  // shows them on a Details tab, the first tab Google's pages put them on
+  // (#1842), rather than in the header above no tabs at all.
+  const detailsTab = !sections.length && (data.summary || []).length > 0;
+  if (detailsTab) {
+    sections.push({ id: "details", label: "Details", kind: "properties",
+      groups: [{ properties: data.summary }] });
+  }
   if (!sections.length) {
     return setChildren(view, ...header,
       emptyState(`Nothing to show for ${name}`,
@@ -3156,7 +3164,7 @@ async function renderDetail(view, route, resourcePath) {
   // "Details" card of their own between the header and the tabs (#1842,
   // audit item 9), so they are a row of the header here, above the tab
   // strip. A provider that holds none draws none.
-  const summary = (data.summary || []).length
+  const summary = (data.summary || []).length && !detailsTab
     ? el("dl", { class: "resource-summary", "aria-label": "Details" },
         ...(data.summary).map((prop) =>
           el("div", { class: "resource-summary-item" },
