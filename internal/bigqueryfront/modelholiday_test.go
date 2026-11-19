@@ -14,7 +14,7 @@ func TestHolidayAsClause(t *testing.T) {
 		"CREATE MODEL d.m " + opts + ") AS (training_data AS (SELECT d, v FROM t), " + hol + ")":                          0,
 		"CREATE MODEL d.m " + opts + ", data_frequency='DAILY') AS (training_data AS (SELECT d, v FROM t), " + hol + ")":  0,
 		"CREATE MODEL d.m " + opts + ", data_frequency='WEEKLY') AS (training_data AS (SELECT d, v FROM t), " + hol + ")": 400,
-		"CREATE MODEL d.m " + opts + ", holiday_region='US') AS (training_data AS (SELECT d, v FROM t), " + hol + ")":     501,
+		"CREATE MODEL d.m " + opts + ", holiday_region='US') AS (training_data AS (SELECT d, v FROM t), " + hol + ")":     0,
 		"CREATE MODEL d.m " + opts + ") AS (training_data AS (SELECT d, v FROM t))":                                       400,
 		"CREATE MODEL d.m " + opts + ") AS (training_data AS (SELECT d, v FROM t), " + hol + ") x":                        400,
 		"CREATE MODEL d.m OPTIONS(model_type='LINEAR_REG') AS (training_data AS (SELECT 1 AS label), " + hol + ")":        400,

@@ -589,7 +589,8 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 			l.Total = len(l.Items)
 			out = append(out, console.Section{ID: "candidates", Label: "Candidate models", Listing: l})
 		}
-		// The custom holidays it was trained with (ML.HOLIDAY_INFO, #1776).
+		// The holidays it was trained with, custom and holiday_region's
+		// (ML.HOLIDAY_INFO, #1776).
 		_, hol := read("SELECT holiday_name, region, CAST(primary_date AS STRING), preholiday_days, postholiday_days FROM ML.HOLIDAY_INFO(" + model +
 			") ORDER BY holiday_name, primary_date LIMIT 500")
 		if len(hol) > 0 {
@@ -599,7 +600,7 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 					"Primary date": fmt.Sprint(r[2]), "Days before": fmt.Sprint(r[3]), "Days after": fmt.Sprint(r[4])}})
 			}
 			l.Total = len(l.Items)
-			out = append(out, console.Section{ID: "holidays", Label: "Custom holidays", Listing: l})
+			out = append(out, console.Section{ID: "holidays", Label: "Holidays", Listing: l})
 		}
 		return out
 	case "MATRIX_FACTORIZATION":

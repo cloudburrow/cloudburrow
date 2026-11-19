@@ -37,8 +37,7 @@ import (
 // includes holiday_effect; ML.ARIMA_EVALUATE's has_holiday_effect and the
 // model's hasHolidayEffect say whether one was found; the effect is part
 // of every forecast (ML.FORECAST, ML.EVALUATE, ML.DETECT_ANOMALIES). A
-// holiday_region (Google's built-in calendar) stays 501, alone or with a
-// custom holiday (#1776).
+// holiday_region's built-in holidays are modelholidayregion.go's.
 //
 // UNVERIFIED, chosen here (docs re-read 2026-11-18: Google documents that
 // the algorithm "automatically detects the significance of the holiday
@@ -251,7 +250,10 @@ func (h arimaHoliday) at(k int) float64 {
 
 // seriesHolidays are hs on the daily grid starting at start (Unix
 // microseconds), one per holiday name, in name order, with no effect yet.
-func seriesHolidays(hs []customHoliday, start int64) []arimaHoliday {
+//
+// On a WEEKLY series (holiday_region, modelholidayregion.go) a holiday is
+// the week nearest its primary date, with no days before or after.
+func seriesHolidays(hs []customHoliday, start int64, fq string) []arimaHoliday {
 	var out []arimaHoliday
 	at := map[string]int{}
 	for _, name := range holidayNames(hs) {
@@ -262,6 +264,11 @@ func seriesHolidays(hs []customHoliday, start int64) []arimaHoliday {
 		t, _ := time.Parse("2006-01-02", h.Date)
 		ah := &out[at[h.Name]]
 		ah.Pre, ah.Post = h.Pre, h.Post
+		if fq == "WEEKLY" {
+			ah.Pre, ah.Post = 0, 0
+			ah.Days = append(ah.Days, gridIndex(start, "WEEKLY", t.UnixMicro()))
+			continue
+		}
 		ah.Days = append(ah.Days, gridIndex(start, "DAILY", t.UnixMicro()))
 	}
 	for i := range out {
@@ -400,6 +407,15 @@ func joinLead(v []string) string {
 	return ", " + strings.Join(v, ", ")
 }
 
+// holidays are the holidays a time series model was trained with: its
+// custom holidays, and with holiday_region its built-in ones (#1776).
+func (md bqModel) holidays() []customHoliday {
+	if md.Trained.Arima != nil && len(md.Trained.Arima.Holidays) > 0 {
+		return md.Trained.Arima.Holidays
+	}
+	return md.Options.TS.Holidays
+}
+
 // holidayInfo is ML.HOLIDAY_INFO of a time series model: the holidays it
 // was trained with.
 func holidayInfo(md bqModel, c mlCall) (string, int, string) {
@@ -407,7 +423,7 @@ func holidayInfo(md bqModel, c mlCall) (string, int, string) {
 		return "", 400, "ML.HOLIDAY_INFO takes only a model"
 	}
 	var rows []string
-	for _, h := range md.Options.TS.Holidays {
+	for _, h := range md.holidays() {
 		rows = append(rows, fmt.Sprintf("(%s, %s, DATE %s, %d, %d)", sqlString(h.Region), sqlString(h.Name), sqlString(h.Date), h.Pre, h.Post))
 	}
 	return mlRowsSubquery("STRUCT<region STRING, holiday_name STRING, primary_date DATE, preholiday_days INT64, postholiday_days INT64>", rows), 0, ""
