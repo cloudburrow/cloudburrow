@@ -28,8 +28,9 @@ package logging
 // not modelled (the gaps row), so nothing is exempt.
 //
 // The field's last sentence, that the sink is listed from a child resource
-// when ListSinks' filter is in_scope("ALL") or in_scope("ANCESTOR"), is not
-// served: ListSinksRequest has no filter in loggingpb either.
+// when ListSinks' filter is in_scope("ALL") or in_scope("ANCESTOR"), is
+// served on the JSON API (sinkscope.go, #1577): loggingpb's ListSinksRequest
+// has no filter, so a gRPC ListSinks lists the parent's own sinks.
 
 import (
 	"bytes"
@@ -170,6 +171,24 @@ func serveSinkJSON(a *Admin, next http.Handler, w http.ResponseWriter, r *http.R
 	p, _, err := cutParent("parent", m[1])
 	if err != nil {
 		return false // the transcoder reports it
+	}
+	if q := r.URL.Query(); m[2] == "" && r.Method == http.MethodGet && q.Has("filter") {
+		scope, err := parseSinkScope(q.Get("filter"))
+		if err != nil {
+			apierror.WriteJSON(w, err)
+			return true
+		}
+		if scope != scopeDefault {
+			serveScopedSinks(a, w, r, m[1], scope)
+			return true
+		}
+		// in_scope("DEFAULT") is the parent's own sinks, ListSinks'
+		// answer; the transcoder knows no filter field.
+		q.Del("filter")
+		u := *r.URL
+		u.RawQuery = q.Encode()
+		r = r.Clone(r.Context())
+		r.URL = &u
 	}
 	if q := r.URL.Query(); q.Has("updateMask") {
 		// gcloud logging sinks update sends snake_case paths

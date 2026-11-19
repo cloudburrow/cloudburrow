@@ -538,6 +538,12 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if in.GetKeyAccessJustificationsPolicy() == nil {
+		// The effective default policy, if any (kajconfig.go, #1577).
+		if kaj, err = s.defaultKAJPolicy(req.GetParent()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	period, err := rotationPeriodOf(in)
 	if err != nil {
 		return nil, apierror.Wrap(err)
