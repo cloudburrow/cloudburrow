@@ -81,11 +81,13 @@ func parseFLACStreamInfo(b []byte) (flacStreamInfo, error) {
 	return flacStreamInfo{rate: int(rate), channels: int(ch) + 1, bits: int(bps) + 1}, nil
 }
 
-// flacFrame is one decoded frame: per-channel samples of bits bits.
+// flacFrame is one decoded frame: per-channel samples of bits bits, and
+// its size in bytes, through its CRC-16.
 type flacFrame struct {
 	ch   [][]int64
 	bits int
 	rate int
+	size int
 }
 
 // decodeFLACFrame decodes one FLAC frame.
@@ -211,7 +213,70 @@ func decodeFLACFrame(b []byte, si flacStreamInfo) (flacFrame, error) {
 			a[i], s[i] = (m+s[i])>>1, (m-s[i])>>1
 		}
 	}
+	// Zero padding to a byte, then the frame's CRC-16.
+	out.size = (r.pos+7)/8 + 2
 	return out, nil
+}
+
+// DecodeFLACFile decodes a FLAC file (RFC 9639: "fLaC", its metadata
+// blocks, then its frames back to back) to mono samples, its channels
+// averaged, at the stream's rate, for Speech-to-Text's FLAC (#1799,
+// internal/speech). maxSeconds bounds it: longer audio is a tooLongError,
+// which IsTooLong reports. Frame CRCs are not checked; a stream that does
+// not parse is an error, never partial audio.
+func DecodeFLACFile(data []byte, maxSeconds int) (mono []float32, rate int, err error) {
+	if len(data) < 4 || string(data[:4]) != "fLaC" {
+		return nil, 0, errors.New("the data is not a FLAC stream")
+	}
+	pos := 4
+	var si *flacStreamInfo
+	for last := false; !last; {
+		if pos+4 > len(data) {
+			return nil, 0, fmt.Errorf("the FLAC metadata: %w", errShort)
+		}
+		last = data[pos]&0x80 != 0
+		typ, n := data[pos]&0x7f, int(data[pos+1])<<16|int(data[pos+2])<<8|int(data[pos+3])
+		pos += 4
+		if pos+n > len(data) {
+			return nil, 0, fmt.Errorf("the FLAC metadata: %w", errShort)
+		}
+		if typ == 0 {
+			v, err := parseFLACStreamInfo(data[pos : pos+n])
+			if err != nil {
+				return nil, 0, err
+			}
+			si = &v
+		}
+		pos += n
+	}
+	if si == nil || si.rate == 0 {
+		return nil, 0, errors.New("the FLAC stream has no STREAMINFO")
+	}
+	for i := 0; pos < len(data); i++ {
+		f, err := decodeFLACFrame(data[pos:], *si)
+		if err != nil {
+			return nil, 0, fmt.Errorf("the FLAC stream's frame %d: %v", i, err)
+		}
+		if f.rate != si.rate {
+			return nil, 0, notDecodedf("its FLAC frames change from %d Hz to %d Hz, which is not decoded", si.rate, f.rate)
+		}
+		scale := float32(int64(1)<<(f.bits-1)) * float32(len(f.ch))
+		for j := range f.ch[0] {
+			var sum int64
+			for c := range f.ch {
+				sum += f.ch[c][j]
+			}
+			mono = append(mono, float32(sum)/scale)
+		}
+		if len(mono) > maxSeconds*si.rate {
+			return nil, 0, &tooLongError{float64(len(mono)) / float64(si.rate)}
+		}
+		pos += f.size
+	}
+	if len(mono) == 0 {
+		return nil, 0, errors.New("the FLAC stream has no audio frames")
+	}
+	return mono, si.rate, nil
 }
 
 func decodeFLACSubframe(r *bitReader, n, bps int) ([]int64, error) {

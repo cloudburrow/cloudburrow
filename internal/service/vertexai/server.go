@@ -49,6 +49,13 @@ type Server struct {
 	ops      *lro.Store
 	restOnce sync.Once
 	rest     *rest.Transcoder
+
+	// docai is Document AI's processors (documentai.go, #1799); nil until
+	// first used or SetDocumentAIState. Guarded by mu.
+	docai *docAIStore
+	// speech is Speech-to-Text's recognizers (speechrecognizers.go,
+	// #1799); nil until first used or SetSpeechState. Guarded by mu.
+	speech *speechStore
 }
 
 // NewServer returns a server. A nil generator is valid and makes every

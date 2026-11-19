@@ -39,7 +39,7 @@ func TestDecode(t *testing.T) {
 	if _, err := Decode(speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: 4000, Channels: 1}, pcm); err == nil {
 		t.Error("4 kHz LINEAR16 accepted")
 	}
-	for name, data := range map[string][]byte{"FLAC": []byte("fLaC\x00\x00\x00\x22"), "OGG_OPUS": []byte("OggS\x00\x02"),
+	for name, data := range map[string][]byte{"OGG_OPUS": []byte("OggS\x00\x02"),
 		"WEBM_OPUS": {0x1a, 0x45, 0xdf, 0xa3, 0x01}, "AMR": []byte("#!AMR\n\x3c")} {
 		if _, err := Decode(speechconfig.Decoding{Auto: true}, data); !errors.Is(err, ErrUnsupported) {
 			t.Errorf("%s: %v", name, err)

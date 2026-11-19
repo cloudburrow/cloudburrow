@@ -33,9 +33,9 @@ type Options struct {
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
 // those decoded locally (internal/speech's Decode).
 var Encodings = map[string]bool{
-	"LINEAR16": true, "MULAW": true, "ALAW": true, "MP3": true,
+	"LINEAR16": true, "MULAW": true, "ALAW": true, "MP3": true, "FLAC": true,
 	"MP4_AAC": true, "M4A_AAC": true, "MOV_AAC": true,
-	"AMR": false, "AMR_WB": false, "FLAC": false, "OGG_OPUS": false, "WEBM_OPUS": false,
+	"AMR": false, "AMR_WB": false, "OGG_OPUS": false, "WEBM_OPUS": false,
 }
 
 // Config is a checked RecognitionConfig.
@@ -94,6 +94,10 @@ func whisperLanguage(code string) string {
 
 // camelKeys rewrites a JSON value's snake_case keys as lowerCamelCase, as
 // protobuf's JSON parser accepts both.
+// CamelKeys rewrites a decoded JSON value's snake_case keys as protojson's
+// lowerCamelCase, so configs written either way compare and merge.
+func CamelKeys(v any) any { return camelKeys(v) }
+
 func camelKeys(v any) any {
 	switch x := v.(type) {
 	case map[string]any:

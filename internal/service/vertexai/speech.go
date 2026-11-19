@@ -19,11 +19,12 @@ import (
 
 // Speech-to-Text v2's recognize (#1799), for BigQuery ML's ML.TRANSCRIBE
 // over a CLOUD_AI_SPEECH_TO_TEXT_V2 remote model, which the BigQuery front
-// sends here, through cloudburrow-host, instead of to speech.googleapis.com.
-// It is BigQuery's internal path, not a served Speech-to-Text API: the
-// request is v2's RecognizeRequest (config and content) on the default
-// recognizer, projects/{project}/locations/{location}/recognizers/_, and the
-// answer its RecognizeResponse
+// sends here, through cloudburrow-host, instead of to speech.googleapis.com,
+// and the official client's Recognize (speechrecognizers.go): the request
+// is v2's RecognizeRequest (config and content) on the default recognizer,
+// projects/{project}/locations/{location}/recognizers/_, or on a created
+// recognizer, whose default_recognition_config the config is merged over,
+// and the answer its RecognizeResponse
 // (https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/projects.locations.recognizers/recognize,
 // read 2026-11-18), for what a local model can answer:
 //
@@ -43,7 +44,8 @@ import (
 //     are UNIMPLEMENTED, as are adaptation, transcriptNormalization,
 //     translationConfig and denoiserConfig.
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
-//     MP3, and AAC in MP4, M4A or MOV; FLAC, Opus and AMR are UNIMPLEMENTED.
+//     MP3, AAC in MP4, M4A or MOV, and FLAC (internal/speech/flac.go, #1799);
+//     Opus and AMR are UNIMPLEMENTED.
 //   - each whisper segment is one result, its resultEndOffset the segment's
 //     end; metadata.totalBilledDuration is the audio's length rounded up to
 //     a second.
@@ -58,22 +60,20 @@ func protoDuration(d time.Duration) string {
 	return s + "s"
 }
 
-// recognize serves POST /v2/projects/{p}/locations/{l}/recognizers/{r}:recognize.
+// recognize serves POST /v2/projects/{p}/locations/{l}/recognizers/{r}:recognize;
+// the recognizers' other JSON methods go to the REST transcoder
+// (speechrecognizers.go).
 func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 	rec, verb, _ := strings.Cut(r.PathValue("recognizer"), ":")
 	if verb != "recognize" {
-		apierror.WriteJSON(w, apierror.NotFound("%s %s is not served", r.Method, r.URL.Path))
-		return
-	}
-	if rec != "_" {
-		apierror.WriteJSON(w, apierror.NotFound("Recognizer projects/%s/locations/%s/recognizers/%s not found: CloudBurrow serves "+
-			"the default recognizer _ alone", r.PathValue("project"), r.PathValue("location"), rec))
+		s.serveREST(w, r, nil)
 		return
 	}
 	var req struct {
 		Config  json.RawMessage `json:"config"`
 		Content string          `json:"content"`
 		URI     string          `json:"uri"`
+		Mask    json.RawMessage `json:"configMask"`
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<30))
 	if err != nil || json.Unmarshal(body, &req) != nil {
@@ -84,16 +84,8 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 		apierror.WriteJSON(w, apierror.Unimplemented("RecognizeRequest.uri: send the audio as content"))
 		return
 	}
-	if len(req.Config) == 0 {
-		apierror.WriteJSON(w, apierror.InvalidArgument("RecognizeRequest.config is required for the default recognizer"))
-		return
-	}
-	cfg, code, err := speechconfig.Parse(req.Config)
-	if code == 501 {
-		apierror.WriteJSON(w, apierror.Unimplemented("%v", err))
-		return
-	} else if code != 0 {
-		apierror.WriteJSON(w, apierror.InvalidArgument("%v", err))
+	if len(req.Mask) > 0 && string(req.Mask) != "null" && string(req.Mask) != `""` {
+		apierror.WriteJSON(w, apierror.Unimplemented("RecognizeRequest.configMask: the request's config overrides each field it sets"))
 		return
 	}
 	data, err := base64.StdEncoding.DecodeString(req.Content)
@@ -101,47 +93,69 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 		apierror.WriteJSON(w, apierror.InvalidArgument("RecognizeRequest.content is not valid base64"))
 		return
 	}
-	samples, err := speech.Decode(cfg.Decoding, data)
-	switch {
-	case errors.Is(err, speech.ErrUnsupported):
-		apierror.WriteJSON(w, apierror.Unimplemented("Not implemented here: %v", err))
-		return
-	case errors.Is(err, speech.ErrTooLong):
-		apierror.WriteJSON(w, apierror.InvalidArgument("%v", err))
-		return
-	case err != nil:
-		apierror.WriteJSON(w, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err))
-		return
-	}
-	if lang := cfg.Language; lang != "" {
-		known, err := speech.LanguageKnown(r.Context(), lang)
-		if err != nil {
-			s.speechError(w, err)
-			return
-		}
-		if !known {
-			apierror.WriteJSON(w, apierror.Unimplemented("Not implemented here: the language %s: CloudBurrow's local Whisper model "+
-				"does not recognise it, and CloudBurrow never calls Google", lang))
-			return
-		}
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Hour)
-	defer cancel()
-	res, err := speech.Transcribe(ctx, samples, speech.Options{Language: cfg.Language, Words: cfg.Words})
+	name := "projects/" + r.PathValue("project") + "/locations/" + r.PathValue("location") + "/recognizers/" + rec
+	out, err := s.recognizeAudio(r.Context(), name, req.Config, data)
 	if err != nil {
-		s.speechError(w, err)
+		apierror.WriteJSON(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(recognizeResponse(res, samples, cfg))
+	_ = json.NewEncoder(w).Encode(out)
 }
 
-func (s *Server) speechError(w http.ResponseWriter, err error) {
-	if errors.Is(err, speech.ErrNoModel) {
-		apierror.WriteJSON(w, apierror.Unimplemented("Not implemented here: %v", err))
-		return
+// recognizeAudio recognises data with a recognizer, named in full: the
+// default recognizer _ takes config whole, another merges config over its
+// default_recognition_config. The answer is a RecognizeResponse's JSON.
+func (s *Server) recognizeAudio(ctx context.Context, name string, config json.RawMessage, data []byte) (map[string]any, error) {
+	if !strings.HasSuffix(name, "/recognizers/_") {
+		merged, err := s.recognizerConfig(name, config)
+		if err != nil {
+			return nil, err
+		}
+		config = merged
 	}
-	apierror.WriteJSON(w, apierror.Internal(err, "speech recognition failed: %v", err))
+	if len(config) == 0 || string(config) == "null" {
+		return nil, apierror.InvalidArgument("RecognizeRequest.config is required for the default recognizer")
+	}
+	cfg, code, err := speechconfig.Parse(config)
+	if code == 501 {
+		return nil, apierror.Unimplemented("%v", err)
+	} else if code != 0 {
+		return nil, apierror.InvalidArgument("%v", err)
+	}
+	samples, err := speech.Decode(cfg.Decoding, data)
+	switch {
+	case errors.Is(err, speech.ErrUnsupported):
+		return nil, apierror.Unimplemented("Not implemented here: %v", err)
+	case errors.Is(err, speech.ErrTooLong):
+		return nil, apierror.InvalidArgument("%v", err)
+	case err != nil:
+		return nil, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
+	}
+	if lang := cfg.Language; lang != "" {
+		known, err := speech.LanguageKnown(ctx, lang)
+		if err != nil {
+			return nil, speechError(err)
+		}
+		if !known {
+			return nil, apierror.Unimplemented("Not implemented here: the language %s: CloudBurrow's local Whisper model "+
+				"does not recognise it, and CloudBurrow never calls Google", lang)
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer cancel()
+	res, err := speech.Transcribe(ctx, samples, speech.Options{Language: cfg.Language, Words: cfg.Words})
+	if err != nil {
+		return nil, speechError(err)
+	}
+	return recognizeResponse(res, samples, cfg), nil
+}
+
+func speechError(err error) error {
+	if errors.Is(err, speech.ErrNoModel) {
+		return apierror.Unimplemented("Not implemented here: %v", err)
+	}
+	return apierror.Internal(err, "speech recognition failed: %v", err)
 }
 
 // recognizeResponse is res as a RecognizeResponse.

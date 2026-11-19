@@ -43,9 +43,8 @@ import (
 //     CLOUD_AI_TRANSLATE_V3 (ML.TRANSLATE, modeltranslate.go) and
 //     CLOUD_AI_NATURAL_LANGUAGE_V1 (ML.UNDERSTAND_TEXT, modelunderstand.go)
 //     are served since #1799.
-//   - CLOUD_AI_DOCUMENT_V1 (ML.PROCESS_DOCUMENT): 501 at CREATE MODEL,
-//     naming why (serviceTypeRefusals): no local model answers it as the
-//     service does.
+//   - CLOUD_AI_DOCUMENT_V1 (ML.PROCESS_DOCUMENT, modelprocessdocument.go)
+//     is served since #1799, on the local Document AI API's processors.
 //
 // The connection rules are a remote LLM's (modelremote.go): a Cloud
 // resource connection in the dataset's location, bigquery.connections.use
@@ -68,10 +67,7 @@ var serviceTypeFunctions = map[string]string{
 
 // serviceTypeRefusals are the service types CloudBurrow cannot serve, and
 // why.
-var serviceTypeRefusals = map[string]string{
-	"CLOUD_AI_DOCUMENT_V1": "a remote model over the Document AI API (ML.PROCESS_DOCUMENT): CloudBurrow serves no Document AI API, " +
-		"so no processor can exist for DOCUMENT_PROCESSOR to name, and never calls Google (#1773).",
-}
+var serviceTypeRefusals = map[string]string{}
 
 // checkServiceType checks a REMOTE_SERVICE_TYPE: 0, or the refusal.
 func checkServiceType(v string) (int, string) {
@@ -145,6 +141,9 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 	if c.fn == "UNDERSTAND_TEXT" {
 		return f.understandSubquery(r, q, md, c, fname) // modelunderstand.go, #1799
 	}
+	if c.fn == "PROCESS_DOCUMENT" {
+		return f.processDocumentSubquery(r, q, md, c, fname) // modelprocessdocument.go, #1799
+	}
 	if c.table == nil {
 		return "", 400, fname + " requires an object table: TABLE name"
 	}
@@ -202,9 +201,10 @@ func (f front) serviceSubquery(r *http.Request, q queryOptions, md bqModel, c ml
 // serviceObject is one object of a service function's object table: its
 // data, or the row's status when it could not be read.
 type serviceObject struct {
-	uri    string
-	data   []byte
-	status string
+	uri         string
+	contentType string
+	data        []byte
+	status      string
 }
 
 // serviceObjects checks a service function's object table, the model's
@@ -244,15 +244,28 @@ func (f front) serviceObjects(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 	}
 	src = quotePath([]string{project, ds, table})
-	_, rows, code, msg := f.queryAllRows(r, q, "SELECT uri, generation FROM "+src)
+	read := "SELECT uri, generation, content_type FROM " + src
+	if c.objectQuery != "" {
+		// ML.PROCESS_DOCUMENT's query over the object table
+		// (modelprocessdocument.go): its rows' objects, joined back on uri.
+		if _, _, code, _ := f.queryAllRows(r, q, "SELECT uri, content_type FROM ("+c.objectQuery+") LIMIT 0"); code != 0 {
+			return "", nil, 400, fname + "'s query must select the uri and content_type columns of the object table"
+		}
+		read += " WHERE uri IN (SELECT uri FROM (" + c.objectQuery + "))"
+		src = "(" + c.objectQuery + ")"
+	}
+	_, rows, code, msg := f.queryAllRows(r, q, read)
 	if code != 0 {
 		return "", nil, code, msg
 	}
 	for _, row := range rows {
-		if len(row) != 2 || row[0] == nil || row[1] == nil {
+		if len(row) != 3 || row[0] == nil || row[1] == nil {
 			continue
 		}
 		o := serviceObject{uri: *row[0]}
+		if row[2] != nil {
+			o.contentType = *row[2]
+		}
 		gen, _ := strconv.ParseInt(*row[1], 10, 64)
 		data, code, msg := f.objectData(r, ot, o.uri, gen)
 		switch {

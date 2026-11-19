@@ -9,7 +9,9 @@ import (
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -63,6 +65,10 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	// ChatCompletions (#1840, modelgarden.go).
 	s.registerModelGarden(srv)
 	betapb.RegisterPredictionServiceServer(srv, &betaPrediction{s: s})
+	// Document AI's processors (documentai.go, #1799).
+	documentaipb.RegisterDocumentProcessorServiceServer(srv, &documentAIService{s: s})
+	// Speech-to-Text's recognizers (speechrecognizers.go, #1799).
+	speechpb.RegisterSpeechServer(srv, &speechService{s: s})
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a
