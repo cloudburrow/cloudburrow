@@ -907,6 +907,34 @@ td a { color: var(--accent); }
   .schema-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .schema-row .schema-name { grid-column: 1 / -1; }
 }
+/* Manage traffic's rows (#1852): a revision and its percent per row, with
+   its own Remove, Add revision under them and the total. */
+.traffic-field, .sourcefiles-field { border: 0; padding: 0; min-width: 0; }
+.traffic-field legend, .sourcefiles-field legend { padding: 0; margin-bottom: 4px; color: var(--text-muted); }
+.traffic-head,
+.traffic-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: 8px; }
+.traffic-head { font-size: var(--text-caption-size); color: var(--text-muted); margin-bottom: 4px; }
+.traffic-row { margin-bottom: 8px; align-items: center; }
+.traffic-row select { width: 100%; }
+.traffic-percent-box { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.traffic-percent-box input { width: 100%; min-width: 0; }
+.traffic-total { margin: 8px 0 0; color: var(--text-muted); }
+.form-row.is-invalid .traffic-percent { border-color: var(--error); }
+/* The inline source editor (#1852): the file list beside a code editor;
+   the list goes above the editor on a phone. */
+.sourcefiles-body { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); gap: 8px; }
+.sourcefiles-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sourcefiles-list { display: flex; flex-direction: column; gap: 2px; }
+.sourcefiles-file { text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: var(--radius);
+  font-family: var(--mono); color: var(--text); cursor: pointer; overflow-wrap: anywhere; }
+.sourcefiles-file.is-selected { background: var(--selected, rgba(26, 115, 232, 0.12)); font-weight: 600; }
+.sourcefiles-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.sourcefiles-actions input { flex: 1 1 100%; min-width: 0; }
+.sourcefiles-editor { font-family: var(--mono); width: 100%; min-height: 280px; white-space: pre; tab-size: 2; }
+@media (max-width: 600px) {
+  .traffic-head { display: none; }
+  .sourcefiles-body { grid-template-columns: minmax(0, 1fr); }
+}
 .form-row.is-invalid input,
 .form-row.is-invalid textarea { border-color: var(--error); }
 .form-row.is-invalid input:focus,

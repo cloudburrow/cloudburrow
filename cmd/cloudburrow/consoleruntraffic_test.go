@@ -88,10 +88,12 @@ func TestRunManageTrafficSendsATrafficMask(t *testing.T) {
 	}
 }
 
-// TestManageTrafficDialogPerRevision (#1852): Google's Manage traffic is one
-// percent per revision and the latest healthy revision, ending in Save; the
-// service's tags are kept, and a split that does not sum to 100 is refused.
-func TestManageTrafficDialogPerRevision(t *testing.T) {
+// TestManageTrafficDialogRows (#1852): Google's Manage traffic is rows of
+// a revision (the latest healthy revision among the choices) and a
+// percent, ending in Save, prefilled with the rows that have traffic; the
+// service's tags are kept, and a split that does not sum to 100 is
+// refused.
+func TestManageTrafficDialogRows(t *testing.T) {
 	var svc ksvcStatus
 	if err := json.Unmarshal([]byte(`{"metadata":{"labels":{"cloudburrow.dev/owned":"true"}},"spec":{"traffic":[
 	  {"latestRevision":true,"percent":30,"tag":"next"},
@@ -101,24 +103,18 @@ func TestManageTrafficDialogPerRevision(t *testing.T) {
 	}
 	p := runProvider{runAddr: fixedAddr("127.0.0.1:1")}
 	a := p.trafficAction(&svc, []string{"hello-00003", "hello-00002", "hello-00001"})
-	if len(a) != 1 || a[0].Submit != "Save" {
+	if len(a) != 1 || a[0].Submit != "Save" || len(a[0].Fields) != 1 {
 		t.Fatalf("trafficAction = %+v", a)
 	}
-	got := map[string]string{}
-	var labels []string
-	for _, f := range a[0].Fields {
-		got[f.Name] = f.Default
-		labels = append(labels, f.Label)
+	f := a[0].Fields[0]
+	if f.Type != "traffic" || f.Default != `[{"revision":"LATEST","percent":30},{"revision":"hello-00001","percent":70}]` {
+		t.Errorf("rows field = %+v", f)
 	}
-	if got[runTrafficLatestField] != "30" || got[runTrafficRevisionPrefix+"hello-00001"] != "70" ||
-		got[runTrafficRevisionPrefix+"hello-00002"] != "0" || got[runTrafficRevisionPrefix+"hello-00003"] != "0" {
-		t.Errorf("prefilled %v", got)
+	if strings.Join(f.Options, ",") != "LATEST,hello-00003,hello-00002,hello-00001" || f.OptionLabels["LATEST"] != "Latest healthy revision" {
+		t.Errorf("choices %v %v", f.Options, f.OptionLabels)
 	}
-	if labels[0] != "Latest healthy revision" || labels[1] != "hello-00003" {
-		t.Errorf("labels %v", labels)
-	}
-	got[runTrafficLatestField], got[runTrafficRevisionPrefix+"hello-00001"], got[runTrafficRevisionPrefix+"hello-00003"] = "0", "50", "50"
-	tr, err := trafficFromDialog(&svc, got)
+	rows := map[string]string{runTrafficRowsField: `[{"revision":"hello-00003","percent":50},{"revision":"hello-00001","percent":50}]`}
+	tr, err := trafficFromDialog(&svc, rows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +122,14 @@ func TestManageTrafficDialogPerRevision(t *testing.T) {
 	for _, x := range tr {
 		lines = append(lines, trafficKey(x)+" "+fmt.Sprint(x.GetPercent())+" "+x.GetTag())
 	}
-	if want := "LATEST 0 next|hello-00003 50 |hello-00002 0 old|hello-00001 50 "; strings.Join(lines, "|") != want {
+	if want := "LATEST 0 next|hello-00003 50 |hello-00001 50 |hello-00002 0 old"; strings.Join(lines, "|") != want {
 		t.Errorf("traffic = %q, want %q", strings.Join(lines, "|"), want)
 	}
-	got[runTrafficLatestField] = "10"
-	if _, err := trafficFromDialog(&svc, got); err == nil || !strings.Contains(err.Error(), "sum to 100") {
-		t.Errorf("110%% = %v, want refused", err)
+	for _, bad := range []string{`[{"revision":"LATEST","percent":60},{"revision":"hello-00001","percent":50}]`,
+		`[{"revision":"","percent":100}]`, `[{"revision":"LATEST","percent":101}]`, `nope`} {
+		if _, err := trafficFromDialog(&svc, map[string]string{runTrafficRowsField: bad}); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
 	}
 }
 

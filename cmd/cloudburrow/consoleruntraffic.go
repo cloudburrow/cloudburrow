@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -90,37 +91,44 @@ func parseTrafficLines(text string) ([]*runpb.TrafficTarget, error) {
 }
 
 // trafficAction is a service's Manage traffic, offered on a service
-// CloudBurrow created: the API updates no other. It is Google's per-revision
-// dialog (#1852): the latest healthy revision and each of the service's
-// revisions, with the percent of requests each receives, ending in Save.
-// Tags are kept as they are: Manage revision tags changes them.
+// CloudBurrow created: the API updates no other. It is Google's dialog
+// (#1852): rows of a revision (the latest healthy revision, or one of the
+// service's) and the percent of requests it receives, Add revision for
+// another row, ending in Save. Tags are kept as they are: Manage revision
+// tags changes them.
 func (p runProvider) trafficAction(svc *ksvcStatus, revisions []string) []console.Action {
 	if p.runEndpoint() == "" || svc == nil || svc.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return nil
 	}
 	share := trafficShares(svc)
-	pct := func(key string) string { return strconv.Itoa(share[key]) }
-	fields := []console.Field{{
-		Name: runTrafficLatestField, Label: "Latest healthy revision", Type: "text", Default: pct(runTrafficLatest),
-		Pattern: `^[0-9]{1,3}$`, Section: "Traffic",
-		Help: "Percent of requests the latest ready revision receives, whichever revision that is after a deploy.",
-	}}
-	for _, rev := range trafficRevisions(svc, revisions) {
-		fields = append(fields, console.Field{
-			Name: runTrafficRevisionPrefix + rev, Label: rev, Type: "text", Default: pct(rev),
-			Pattern: `^[0-9]{1,3}$`, Section: "Traffic",
-			Help: "Percent of requests this revision receives, pinned to it.",
-		})
+	options := append([]string{runTrafficLatest}, trafficRevisions(svc, revisions)...)
+	var rows []trafficRow
+	for _, key := range options {
+		if share[key] > 0 {
+			rows = append(rows, trafficRow{Revision: key, Percent: share[key]})
+		}
 	}
-	return []console.Action{{ID: runManageTraffic, Label: "Manage traffic", Submit: "Save", Fields: fields}}
+	if len(rows) == 0 {
+		rows = []trafficRow{{Revision: runTrafficLatest, Percent: 100}}
+	}
+	def, _ := json.Marshal(rows)
+	return []console.Action{{ID: runManageTraffic, Label: "Manage traffic", Submit: "Save", Fields: []console.Field{{
+		Name: runTrafficRowsField, Label: "Traffic", Type: "traffic", Options: options, Default: string(def),
+		OptionLabels: map[string]string{runTrafficLatest: "Latest healthy revision"},
+		Help: "Each revision's percent of requests; the percents must sum to 100. The latest healthy revision " +
+			"follows each deploy; any other is pinned.",
+	}}}}
 }
 
-// runTrafficLatestField and runTrafficRevisionPrefix name Manage traffic's
-// fields: the latest healthy revision's percent, and each revision's.
-const (
-	runTrafficLatestField    = "traffic-latest"
-	runTrafficRevisionPrefix = "traffic-revision-"
-)
+// runTrafficRowsField names Manage traffic's rows field: a JSON array of
+// trafficRow.
+const runTrafficRowsField = "traffic-rows"
+
+// trafficRow is one of Manage traffic's rows.
+type trafficRow struct {
+	Revision string `json:"revision"`
+	Percent  int    `json:"percent"`
+}
 
 // trafficRevisions are the revisions the dialog lists: the service's, then
 // any its traffic names that the listing did not (so none is dropped).
@@ -197,37 +205,27 @@ func trafficTarget(key string, pct int, tag string) *runpb.TrafficTarget {
 	return t
 }
 
-// trafficFromDialog is the targets Manage traffic's fields describe, with
-// the service's tags kept.
+// trafficFromDialog is the targets Manage traffic's rows describe, with
+// the service's tags kept. A revision named twice has the sum of its rows.
 func trafficFromDialog(svc *ksvcStatus, values map[string]string) ([]*runpb.TrafficTarget, error) {
+	var rows []trafficRow
+	if err := json.Unmarshal([]byte(values[runTrafficRowsField]), &rows); err != nil {
+		return nil, fmt.Errorf("traffic: expected rows of a revision and a percent: %v", err)
+	}
 	share := map[string]int{}
 	order := []string{runTrafficLatest}
-	read := func(key, field, label string) error {
-		v := strings.TrimSuffix(strings.TrimSpace(values[field]), "%")
-		if v == "" {
-			return nil
+	for i, r := range rows {
+		key := strings.TrimSpace(r.Revision)
+		if key == "" {
+			return nil, fmt.Errorf("row %d: choose a revision", i+1)
 		}
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 || n > 100 {
-			return fmt.Errorf("%s: %q is not a whole percent from 0 to 100", label, values[field])
+		if r.Percent < 0 || r.Percent > 100 {
+			return nil, fmt.Errorf("row %d: %d is not a whole percent from 0 to 100", i+1, r.Percent)
 		}
-		share[key] = n
-		return nil
-	}
-	if err := read(runTrafficLatest, runTrafficLatestField, "Latest healthy revision"); err != nil {
-		return nil, err
-	}
-	for field := range values {
-		if rev, ok := strings.CutPrefix(field, runTrafficRevisionPrefix); ok && rev != "" {
-			order = append(order, rev)
+		if !slices.Contains(order, key) {
+			order = append(order, key)
 		}
-	}
-	slices.Sort(order[1:])
-	slices.Reverse(order[1:])
-	for _, rev := range order[1:] {
-		if err := read(rev, runTrafficRevisionPrefix+rev, rev); err != nil {
-			return nil, err
-		}
+		share[key] += r.Percent
 	}
 	tags := trafficTags(svc)
 	for key := range tags {

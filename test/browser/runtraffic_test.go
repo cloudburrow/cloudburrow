@@ -14,10 +14,11 @@ import (
 )
 
 // TestCloudRunManageTrafficThroughTheBrowser (#1224, #1852): a service's
-// Revisions tab has Google's Manage traffic dialog, one percent per revision
-// and the latest healthy revision, ending in Save, prefilled with the traffic
-// as it is (all to the latest revision); a sum other than 100 is refused on
-// the form. A revision's page has Manage revision tags: a tag is sent as one
+// Revisions tab has Google's Manage traffic dialog, rows of a revision and
+// its percent with Add revision, ending in Save, prefilled with the traffic
+// as it is (all to the latest healthy revision); a sum other than 100 is
+// refused on the form and nothing is sent; all to the pinned revision is
+// saved. A revision's page has Manage revision tags: a tag is sent as one
 // action, the Revisions tab then shows the tag and the URL Knative gave it,
 // and the dialog opens again prefilled with it.
 func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
@@ -44,39 +45,51 @@ func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 	p.navigate("/run/" + id + "?project=" + project + "&tab=revisions")
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.clickText("#view .section-actions button", "Manage traffic")
-	p.waitFor(`document.querySelector(".modal.is-open #f-traffic-latest") !== null`)
+	p.waitFor(`document.querySelector(".modal.is-open .traffic-row") !== null`)
 	var dialog struct {
-		Latest, Submit string
-		Revisions      []string
+		Rows, Choices []string
+		Submit, Add   string
 	}
-	p.eval(`(() => ({ Latest: document.querySelector(".modal.is-open #f-traffic-latest").value,
-		Submit: document.querySelector('.modal.is-open button[type="submit"]').textContent,
-		Revisions: [...document.querySelectorAll('.modal.is-open input[id^="f-traffic-revision-"]')].map((f) => f.id.slice("f-traffic-revision-".length)) }))()`, &dialog)
-	if dialog.Latest != "100" || dialog.Submit != "Save" || len(dialog.Revisions) != 1 {
-		t.Fatalf("Manage traffic = %+v, want the latest at 100, one revision and Save", dialog)
+	p.eval(`(() => { const m = document.querySelector(".modal.is-open"); return {
+		Rows: [...m.querySelectorAll(".traffic-row")].map((r) => r.querySelector("select").selectedOptions[0].textContent + "=" + r.querySelector("input").value),
+		Choices: [...m.querySelectorAll(".traffic-row select option")].map((o) => o.value),
+		Submit: m.querySelector('button[type="submit"]').textContent,
+		Add: m.querySelector(".traffic-add").textContent }; })()`, &dialog)
+	if strings.Join(dialog.Rows, "|") != "Latest healthy revision=100" || dialog.Submit != "Save" || dialog.Add != "Add revision" ||
+		len(dialog.Choices) != 2 || dialog.Choices[0] != "LATEST" {
+		t.Fatalf("Manage traffic = %+v, want one row, the latest at 100, a revision to choose, Add revision and Save", dialog)
 	}
-	revision := dialog.Revisions[0]
+	revision := dialog.Choices[1]
 
-	setLatest := func(v string) {
-		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-traffic-latest"); f.value = %q;
-			f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, v), nil)
-		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	// Add revision adds a row for the revision not yet in one; a split
+	// that does not sum to 100 is refused on the form.
+	p.clickText(".modal.is-open button", "Add revision")
+	setRow := func(i int, v string) {
+		p.eval(fmt.Sprintf(`(() => { const f = document.querySelectorAll(".modal.is-open .traffic-percent")[%d]; f.value = %q;
+			f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, i, v), nil)
 	}
-	setLatest("60")
-	p.waitFor(`(() => { const e = document.querySelector(".modal.is-open .form-error"); return e && !e.hidden && e.textContent.includes("sum to 100"); })()`)
-	if sent := p.sent(http.MethodPost, actions); len(sent) != 1 {
-		t.Errorf("the refused split sent %d actions, want one: %v", len(sent), sent)
+	setRow(1, "10")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`(() => { const e = document.querySelector(".modal.is-open #e-traffic-rows"); return e && !e.hidden && e.textContent.includes("sum to 100"); })()`)
+	if sent := p.sent(http.MethodPost, actions); len(sent) != 0 {
+		t.Errorf("the refused split sent %d actions, want none: %v", len(sent), sent)
 	}
-	// The refusal is a 400, provoked on purpose.
-	p.forgive()
-	setLatest("100")
+	var second string
+	p.eval(`document.querySelectorAll(".modal.is-open .traffic-row select")[1].value`, &second)
+	if second != revision {
+		t.Errorf("Add revision chose %q, want %q", second, revision)
+	}
+	// All to the pinned revision: Remove the latest's row and Save.
+	setRow(1, "100")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open .traffic-row .traffic-remove`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	// Manage revision tags, on the revision's page.
 	p.navigate("/run/" + id + "/" + revision + "?project=" + project)
 	p.pageAction("Manage revision tags", map[string]string{"tags": "browser"}, "")
-	if sent := p.sent(http.MethodPost, actions); len(sent) != 3 {
-		t.Errorf("the refusal, the save and the tag sent %d actions, want three: %v", len(sent), sent)
+	if sent := p.sent(http.MethodPost, actions); len(sent) != 2 {
+		t.Errorf("the save and the tag sent %d actions, want two: %v", len(sent), sent)
 	}
 	// Knative publishes the tag's URL once the route is reconciled.
 	tagHost := "browser-" + id

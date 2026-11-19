@@ -5136,6 +5136,12 @@ function buildCreateForm(spec) {
     // hidden input, so dirtiness, validation and submission are the same
     // code as every other field's.
     if (f.type === "radio") return radioEntry(f, id, errorId, helpId);
+    // Google's Manage traffic rows (#1852): a revision and its percent per
+    // row, with Add revision, submitted as a JSON array.
+    if (f.type === "traffic") return trafficEntry(f, id, errorId, helpId);
+    // Google's inline source editor (#1852): files, one open at a time in a
+    // code editor, submitted as a JSON object of file name to contents.
+    if (f.type === "sourcefiles") return sourceFilesEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -5278,6 +5284,15 @@ function buildCreateForm(spec) {
     };
     entry.control.addEventListener("change", hold);
     hold();
+  }
+
+  // An editor that follows a choice: the inline source editor's files are
+  // the chosen runtime's template until they are edited (#1852).
+  for (const entry of entries) {
+    const other = entry.field.follows && byName.get(entry.field.follows);
+    if (!other || !entry.follow) continue;
+    other.control.addEventListener("change", () => entry.follow(other.control.value));
+    entry.follow(other.control.value);
   }
 
   // Fields group under their section heading, in the order the backend gave
@@ -5439,6 +5454,181 @@ function radioEntry(f, id, errorId, helpId) {
   return { field: f, control, node, error, helpId, errorId, isCheck: false, isRadio: true,
            choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable; },
            focus: () => (radios.find((r) => r.checked) || radios[0] || control).focus() };
+}
+
+// trafficEntry is a "traffic" field, Google's Manage traffic (#1852): one
+// row per target, a revision chosen among the field's options (named by its
+// optionLabels) and a percent, a Remove on each row and Add revision under
+// them, with the total. The rows are written into a hidden textarea as
+// [{revision, percent}], which is invalid unless every percent is a whole
+// number from 0 to 100 and they sum to 100, so the form's one validation
+// path reports it before anything is sent.
+function trafficEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, hidden: true, class: "traffic-value" });
+  const labels = f.optionLabels || {};
+  const options = f.options || [];
+  const list = el("div", { class: "traffic-rows", role: "list" });
+  const total = el("p", { class: "traffic-total", "aria-live": "polite" });
+  const rows = [];
+  const sync = () => {
+    const value = rows.map((r) => ({ revision: r.revision.value, percent: Number(r.percent.value || "0") }));
+    control.value = JSON.stringify(value);
+    const sum = value.reduce((n, v) => n + v.percent, 0);
+    total.textContent = `Total: ${sum}%`;
+    const bad = rows.find((r) => !/^[0-9]{1,3}$/.test(r.percent.value.trim()) || Number(r.percent.value) > 100);
+    control.setCustomValidity(bad ? "Each revision's traffic is a whole percent from 0 to 100."
+      : sum !== 100 ? `The revisions' percentages sum to ${sum}; they must sum to 100.` : "");
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const addRow = (revision, percent) => {
+    const n = rows.length + 1;
+    const row = {
+      revision: el("select", { class: "traffic-revision", "aria-label": `Revision ${n}` },
+        ...options.map((o) => el("option", { value: o, text: labels[o] || o }))),
+      percent: el("input", { type: "text", inputmode: "numeric", class: "traffic-percent",
+                             "aria-label": `Revision ${n} traffic percent`, autocomplete: "off" }),
+    };
+    row.revision.value = revision || options[0] || "";
+    row.percent.value = String(percent === undefined ? 0 : percent);
+    row.remove = el("button", { type: "button", class: "secondary traffic-remove", text: "Remove",
+      "aria-label": `Remove revision ${n}`,
+      onclick: () => {
+        rows.splice(rows.indexOf(row), 1);
+        row.node.remove();
+        if (!rows.length) addRow(options[0], 100);
+        sync();
+      } });
+    row.node = el("div", { class: "traffic-row", role: "listitem" }, row.revision,
+      el("span", { class: "traffic-percent-box" }, row.percent, el("span", { "aria-hidden": "true", text: "%" })),
+      row.remove);
+    for (const c of [row.revision, row.percent]) {
+      c.addEventListener("input", sync);
+      c.addEventListener("change", sync);
+    }
+    rows.push(row);
+    list.append(row.node);
+    return row;
+  };
+  let initial = [];
+  try { initial = JSON.parse(f.default || "[]"); } catch (_) { initial = []; }
+  for (const r of initial) addRow(r.revision, r.percent);
+  if (!rows.length) addRow(options[0], 100);
+  sync();
+  // The value the form was drawn with is its default, so an untouched
+  // dialog is not dirty.
+  f = Object.assign({}, f, { default: control.value });
+  const add = el("button", { type: "button", class: "secondary traffic-add", text: "Add revision",
+    onclick: () => {
+      const used = new Set(rows.map((r) => r.revision.value));
+      addRow(options.find((o) => !used.has(o)) || options[0], 0).revision.focus();
+      sync();
+    } });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row traffic-field" },
+    el("legend", { text: f.label }),
+    el("div", { class: "traffic-head", "aria-hidden": "true" },
+      el("span", { text: "Revision" }), el("span", { text: "Traffic" })),
+    list, add, total, control, help, error);
+  return { field: f, control, node, error, helpId, errorId, isCheck: false,
+           focus: () => rows[0].revision.focus() };
+}
+
+// sourceFilesEntry is a "sourcefiles" field, Google's inline source editor
+// (#1852): the files of a function's source, one open at a time in a code
+// editor, chosen from the file list beside it, with Add file. A field that
+// follows another (Field.Follows, the runtime) starts from that choice's
+// template (Field.Templates) and takes the next choice's template until a
+// file is edited. The files are written into a hidden textarea as a JSON
+// object of name to contents, which must hold at least one file.
+function sourceFilesEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, hidden: true, class: "sourcefiles-value" });
+  let files = {};
+  try { files = JSON.parse(f.default || "{}") || {}; } catch (_) { files = {}; }
+  let current = Object.keys(files)[0] || "";
+  let edited = false;
+  const tabs = el("div", { class: "sourcefiles-list", role: "tablist", "aria-label": `${f.label} files` });
+  const editor = el("textarea", { class: "sourcefiles-editor code", id: `${id}-editor`, spellcheck: "false",
+                                  autocomplete: "off", rows: "16", "aria-label": "File contents" });
+  const newName = el("input", { type: "text", class: "sourcefiles-new", "aria-label": "New file name",
+                                placeholder: "file name", autocomplete: "off", spellcheck: "false" });
+  const sync = () => {
+    control.value = JSON.stringify(files);
+    control.setCustomValidity(Object.keys(files).length ? "" : "The source needs at least one file.");
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const draw = () => {
+    setChildren(tabs, ...Object.keys(files).map((name) => el("button", { type: "button", role: "tab",
+      class: "sourcefiles-file" + (name === current ? " is-selected" : ""), text: name,
+      "aria-selected": name === current ? "true" : "false",
+      onclick: () => { current = name; draw(); editor.focus(); } })));
+    editor.value = current ? files[current] : "";
+    editor.disabled = !current;
+    editor.setAttribute("aria-label", current ? `Contents of ${current}` : "File contents");
+  };
+  editor.addEventListener("input", () => {
+    if (!current) return;
+    files[current] = editor.value;
+    edited = true;
+    sync();
+  });
+  // Tab indents, as a code editor's does; Escape leaves the editor first.
+  editor.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    const { selectionStart: a, selectionEnd: b } = editor;
+    editor.value = editor.value.slice(0, a) + "  " + editor.value.slice(b);
+    editor.selectionStart = editor.selectionEnd = a + 2;
+    editor.dispatchEvent(new Event("input"));
+  });
+  const add = el("button", { type: "button", class: "secondary sourcefiles-add", text: "Add file",
+    onclick: () => {
+      const name = newName.value.trim();
+      if (!name || files[name] !== undefined || name.startsWith("/") || name.split("/").includes("..")) {
+        newName.focus();
+        return;
+      }
+      files[name] = "";
+      current = name;
+      newName.value = "";
+      edited = true;
+      draw();
+      sync();
+      editor.focus();
+    } });
+  const remove = el("button", { type: "button", class: "secondary sourcefiles-remove", text: "Delete file",
+    onclick: () => {
+      if (!current) return;
+      delete files[current];
+      current = Object.keys(files)[0] || "";
+      edited = true;
+      draw();
+      sync();
+    } });
+  const follow = (choice) => {
+    const t = (f.templates || {})[choice];
+    if (edited || !t) return;
+    files = Object.assign({}, t);
+    current = Object.keys(files)[0] || "";
+    draw();
+    sync();
+    // A template the form chose is not an edit.
+    entry.field = Object.assign({}, entry.field, { default: control.value });
+  };
+  draw();
+  sync();
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row sourcefiles-field" },
+    el("legend", { text: f.label }),
+    el("div", { class: "sourcefiles-body" },
+      el("div", { class: "sourcefiles-side" }, tabs,
+        el("div", { class: "sourcefiles-actions" }, newName, add, remove)),
+      editor),
+    control, help, error);
+  const entry = { field: Object.assign({}, f, { default: control.value }), control, node, error, helpId, errorId,
+                  isCheck: false, follow, focus: () => editor.focus() };
+  return entry;
 }
 
 // schemaEntry is a "schema" field: one row per column, each a name, a type

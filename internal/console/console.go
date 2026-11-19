@@ -270,6 +270,17 @@ type Field struct {
 	// project's topics this way (#791), so the form cannot name one that
 	// does not exist.
 	Options []string `json:"options,omitempty"`
+	// OptionLabels names an option where its value is not what the
+	// console shows: Manage traffic's LATEST is "Latest healthy revision"
+	// (#1852).
+	OptionLabels map[string]string `json:"optionLabels,omitempty"`
+	// Follows and Templates, on a "sourcefiles" field (Google's inline
+	// source editor, #1852), name the select field whose choice picks the
+	// files the editor starts with, and those files by choice: a function's
+	// runtime and its sample source. A "sourcefiles" field's value is a JSON
+	// object of file name to contents.
+	Follows   string                       `json:"follows,omitempty"`
+	Templates map[string]map[string]string `json:"templates,omitempty"`
 	// KeyPattern and ValuePattern, on a "map" field, are what the API
 	// accepts as each entry's key and value, and MaxEntries how many entries
 	// it takes (0: any number). The browser checks every line against them
