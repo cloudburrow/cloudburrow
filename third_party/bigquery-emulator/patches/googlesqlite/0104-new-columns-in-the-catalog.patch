@@ -1,7 +1,5 @@
 CloudBurrow patch 104 to github.com/goccy/googlesqlite v0.3.1
-(cloudburrow/cloudburrow#1827). Applies after patch 0099. Numbered 0104:
-the unmerged branch fix/1823-finish takes googlesqlite 0103 and
-bigquery-emulator 0102.
+(cloudburrow/cloudburrow#1827). Applies after patch 0103.
 
 A column CREATE OR REPLACE TABLE or ALTER TABLE ADD COLUMN added was
 "Unrecognized name" in the next statement. The catalog's addTableSpec put
@@ -40,122 +38,6 @@ License, Copyright (c) 2022 Masaaki Goshima
 offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
 Authors.
 
---- a/internal/analyzer.go
-+++ b/internal/analyzer.go
-@@ -2191,8 +2191,11 @@
- 		return a.newAssignmentStmtAction(ctx, query, args, node.(*googlesql.ResolvedAssignmentStmt))
- 	case googlesql.ResolvedNodeKindResolvedCreatePropertyGraphStmt:
- 		return a.newCreatePropertyGraphStmtAction(ctx, node.(*googlesql.ResolvedCreatePropertyGraphStmt))
-+	case googlesql.ResolvedNodeKindResolvedAlterTableStmt:
-+		// CloudBurrow patch (cloudburrow/cloudburrow#1827): ADD COLUMN
-+		// (alter_table.go); the other actions stay no-ops.
-+		return a.newAlterTableStmtAction(ctx, node.(*googlesql.ResolvedAlterTableStmt))
- 	case
--		googlesql.ResolvedNodeKindResolvedAlterTableStmt,
- 		googlesql.ResolvedNodeKindResolvedCreateSchemaStmt,
- 		googlesql.ResolvedNodeKindResolvedGrantStmt,
- 		googlesql.ResolvedNodeKindResolvedRevokeStmt,
---- a/internal/catalog.go
-+++ b/internal/catalog.go
-@@ -1,6 +1,7 @@
- package internal
- 
- import (
-+	"bytes"
- 	"context"
- 	"database/sql"
- 	"encoding/binary"
-@@ -2018,6 +2019,14 @@
- 	c.mu.Lock()
- 	defer c.mu.Unlock()
- 
-+	// CloudBurrow patch (cloudburrow/cloudburrow#1827): CREATE TABLE IF
-+	// NOT EXISTS of a table the catalog has leaves the table as it is,
-+	// its spec too, now that a spec of another shape rebuilds the
-+	// catalog (addTableSpec).
-+	if old, ok := c.tableMap[spec.TableName()]; ok && old != spec &&
-+		spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists {
-+		return nil
-+	}
- 	if err := c.addTableSpec(spec); err != nil {
- 		return err
- 	}
-@@ -2446,7 +2455,7 @@
- 
- func (c *Catalog) addTableSpec(spec *TableSpec) error {
- 	tableName := spec.TableName()
--	if _, exists := c.tableMap[tableName]; exists {
-+	if old, exists := c.tableMap[tableName]; exists {
- 		// Refresh the entry in-place: CREATE OR REPLACE TABLE has to
- 		// update INFORMATION_SCHEMA's view of columns and options as
- 		// well as the resolver-side handle. Replace the existing
-@@ -2460,7 +2469,25 @@
- 				break
- 			}
- 		}
--		return nil
-+		// CloudBurrow patch (cloudburrow/cloudburrow#1827): the
-+		// analyzer's catalog held the old spec's handle under every
-+		// name of the table, and a SimpleCatalog cannot take a table
-+		// out, so a column the new spec adds (CREATE OR REPLACE
-+		// TABLE, ALTER TABLE ADD COLUMN) was "Unrecognized name" until
-+		// something else rebuilt the catalog. A spec of the same shape
-+		// (the same spec synced back) keeps the handle; another one
-+		// rebuilds the catalog, which builds the new spec's handle.
-+		if old == spec {
-+			return nil
-+		}
-+		if sameTableShape(old, spec) {
-+			if h, ok := c.tableHandles[old]; ok {
-+				c.tableHandles[spec] = h
-+				delete(c.tableHandles, old)
-+			}
-+			return nil
-+		}
-+		return c.resetCatalog(c.tables, c.functions, c.tvfs)
- 	}
- 	c.tables = append(c.tables, spec)
- 	c.tableMap[tableName] = spec
-@@ -2991,5 +3018,20 @@
- 		Return:   spec.Return,
- 		Code:     spec.Code,
- 		Body:     spec.Body,
-+	}
-+}
-+
-+// sameTableShape reports whether the analyzer's handle of a's table is
-+// b's too: the same columns (names, types, collations, defaults), primary
-+// key and options. CloudBurrow patch (cloudburrow/cloudburrow#1827).
-+func sameTableShape(a, b *TableSpec) bool {
-+	type shape struct {
-+		IsView     bool
-+		Columns    []*ColumnSpec
-+		PrimaryKey []string
-+		Options    []*tableOptionSpec
- 	}
-+	x, errA := json.Marshal(shape{a.IsView, a.Columns, a.PrimaryKey, a.Options})
-+	y, errB := json.Marshal(shape{b.IsView, b.Columns, b.PrimaryKey, b.Options})
-+	return errA == nil && errB == nil && bytes.Equal(x, y)
- }
---- a/internal/stmt_action.go
-+++ b/internal/stmt_action.go
-@@ -152,6 +152,16 @@
- 		fmt.Sprintf("DROP TABLE IF EXISTS `%s`", a.spec.TableName()),
- 	); err != nil {
- 		return fmt.Errorf("failed to cleanup table %s: %w", a.spec.TableName(), err)
-+	}
-+	// CloudBurrow patch (cloudburrow/cloudburrow#1827): a script's CREATE
-+	// OR REPLACE TEMP TABLE of a temp table the script made is cleaned up
-+	// after it, and the one cleanup took out of the catalog the spec they
-+	// share the name of.
-+	a.catalog.mu.Lock()
-+	_, kept := a.catalog.tableMap[a.spec.TableName()]
-+	a.catalog.mu.Unlock()
-+	if !kept {
-+		return nil
- 	}
- 	if err := a.catalog.DeleteTableSpec(ctx, conn, a.spec.TableName()); err != nil {
- 		return fmt.Errorf("failed to delete table spec: %w", err)
 --- /dev/null
 +++ b/internal/alter_table.go
 @@ -0,0 +1,132 @@
@@ -291,6 +173,120 @@ Authors.
 +func (a *AlterTableStmtAction) Args() []any { return nil }
 +
 +func (a *AlterTableStmtAction) Cleanup(ctx context.Context, conn *Conn) error { return nil }
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -2191,8 +2191,11 @@
+ 		return a.newAssignmentStmtAction(ctx, query, args, node.(*googlesql.ResolvedAssignmentStmt))
+ 	case googlesql.ResolvedNodeKindResolvedCreatePropertyGraphStmt:
+ 		return a.newCreatePropertyGraphStmtAction(ctx, node.(*googlesql.ResolvedCreatePropertyGraphStmt))
++	case googlesql.ResolvedNodeKindResolvedAlterTableStmt:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1827): ADD COLUMN
++		// (alter_table.go); the other actions stay no-ops.
++		return a.newAlterTableStmtAction(ctx, node.(*googlesql.ResolvedAlterTableStmt))
+ 	case
+-		googlesql.ResolvedNodeKindResolvedAlterTableStmt,
+ 		googlesql.ResolvedNodeKindResolvedCreateSchemaStmt,
+ 		googlesql.ResolvedNodeKindResolvedGrantStmt,
+ 		googlesql.ResolvedNodeKindResolvedRevokeStmt,
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -1,6 +1,7 @@
+ package internal
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"database/sql"
+ 	"encoding/binary"
+@@ -2028,6 +2029,14 @@
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+ 
++	// CloudBurrow patch (cloudburrow/cloudburrow#1827): CREATE TABLE IF
++	// NOT EXISTS of a table the catalog has leaves the table as it is,
++	// its spec too, now that a spec of another shape rebuilds the
++	// catalog (addTableSpec).
++	if old, ok := c.tableMap[spec.TableName()]; ok && old != spec &&
++		spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists {
++		return nil
++	}
+ 	if err := c.addTableSpec(spec); err != nil {
+ 		return err
+ 	}
+@@ -2465,7 +2474,7 @@
+ 
+ func (c *Catalog) addTableSpec(spec *TableSpec) error {
+ 	tableName := spec.TableName()
+-	if _, exists := c.tableMap[tableName]; exists {
++	if old, exists := c.tableMap[tableName]; exists {
+ 		// Refresh the entry in-place: CREATE OR REPLACE TABLE has to
+ 		// update INFORMATION_SCHEMA's view of columns and options as
+ 		// well as the resolver-side handle. Replace the existing
+@@ -2479,7 +2488,25 @@
+ 				break
+ 			}
+ 		}
+-		return nil
++		// CloudBurrow patch (cloudburrow/cloudburrow#1827): the
++		// analyzer's catalog held the old spec's handle under every
++		// name of the table, and a SimpleCatalog cannot take a table
++		// out, so a column the new spec adds (CREATE OR REPLACE
++		// TABLE, ALTER TABLE ADD COLUMN) was "Unrecognized name" until
++		// something else rebuilt the catalog. A spec of the same shape
++		// (the same spec synced back) keeps the handle; another one
++		// rebuilds the catalog, which builds the new spec's handle.
++		if old == spec {
++			return nil
++		}
++		if sameTableShape(old, spec) {
++			if h, ok := c.tableHandles[old]; ok {
++				c.tableHandles[spec] = h
++				delete(c.tableHandles, old)
++			}
++			return nil
++		}
++		return c.resetCatalog(c.tables, c.functions, c.tvfs)
+ 	}
+ 	c.tables = append(c.tables, spec)
+ 	c.tableMap[tableName] = spec
+@@ -3012,3 +3039,18 @@
+ 		Body:     spec.Body,
+ 	}
+ }
++
++// sameTableShape reports whether the analyzer's handle of a's table is
++// b's too: the same columns (names, types, collations, defaults), primary
++// key and options. CloudBurrow patch (cloudburrow/cloudburrow#1827).
++func sameTableShape(a, b *TableSpec) bool {
++	type shape struct {
++		IsView     bool
++		Columns    []*ColumnSpec
++		PrimaryKey []string
++		Options    []*tableOptionSpec
++	}
++	x, errA := json.Marshal(shape{a.IsView, a.Columns, a.PrimaryKey, a.Options})
++	y, errB := json.Marshal(shape{b.IsView, b.Columns, b.PrimaryKey, b.Options})
++	return errA == nil && errB == nil && bytes.Equal(x, y)
++}
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -153,6 +153,16 @@
+ 	); err != nil {
+ 		return fmt.Errorf("failed to cleanup table %s: %w", a.spec.TableName(), err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1827): a script's CREATE
++	// OR REPLACE TEMP TABLE of a temp table the script made is cleaned up
++	// after it, and the one cleanup took out of the catalog the spec they
++	// share the name of.
++	a.catalog.mu.Lock()
++	_, kept := a.catalog.tableMap[a.spec.TableName()]
++	a.catalog.mu.Unlock()
++	if !kept {
++		return nil
++	}
+ 	if err := a.catalog.DeleteTableSpec(ctx, conn, a.spec.TableName()); err != nil {
+ 		return fmt.Errorf("failed to delete table spec: %w", err)
+ 	}
 --- /dev/null
 +++ b/new_column_test.go
 @@ -0,0 +1,129 @@
