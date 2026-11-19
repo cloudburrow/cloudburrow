@@ -142,22 +142,29 @@ func TestConsolePubSubActions(t *testing.T) {
 	}
 	_ = ps.SubscriptionAdminClient.Acknowledge(ctx, &pubsubpb.AcknowledgeRequest{Subscription: sub, AckIds: []string{ms[0].GetAckId()}})
 
-	// The copy for "Pull without ack" says what it does to the message.
+	// The copy for "Pull without ack" says what it does to the message. It
+	// is on the topic page's Messages tab, beside Google's Pull (#1847).
 	code, out := consoleDo(t, addr, http.MethodGet,
 		"/api/detail/pubsub?project="+project+"&name="+url.QueryEscape(tp), "")
 	if code != http.StatusOK {
 		t.Fatalf("detail = %d: %s", code, out)
 	}
+	type action struct {
+		ID     string
+		Label  string
+		Fields []struct{ Help string }
+	}
 	var detail struct {
-		Actions []struct {
-			ID     string
-			Label  string
-			Fields []struct{ Help string }
-		}
+		Actions  []action
+		Sections []struct{ Actions []action }
 	}
 	_ = json.Unmarshal([]byte(out), &detail)
+	all := detail.Actions
+	for _, sec := range detail.Sections {
+		all = append(all, sec.Actions...)
+	}
 	copyOK := false
-	for _, a := range detail.Actions {
+	for _, a := range all {
 		if a.ID == "pull-no-ack" {
 			for _, f := range a.Fields {
 				copyOK = copyOK || strings.Contains(f.Help, "delivery attempts")
@@ -347,8 +354,9 @@ func TestConsolePubSubSubscriptionsScreen(t *testing.T) {
 			continue
 		}
 		found = true
-		if it.Fields["Topic"] != tp || it.Fields["Delivery type"] != "Push" || it.Fields["Ack deadline"] != "25s" {
-			t.Errorf("row for %s = %v, want topic %s, Push, 25s", sub, it.Fields, tp)
+		// Google's columns (#1847): Topic name, and the deadline in words.
+		if it.Fields["Topic name"] != tp || it.Fields["Delivery type"] != "Push" || it.Fields["Ack deadline"] != "25 seconds" {
+			t.Errorf("row for %s = %v, want topic name %s, Push, 25 seconds", sub, it.Fields, tp)
 		}
 	}
 	if !found {
@@ -387,11 +395,11 @@ func TestConsolePubSubSubscriptionsScreen(t *testing.T) {
 		}
 	}
 	for k, v := range map[string]string{
-		"Topic":                            tp,
-		"Delivery type":                    "Push",
-		"delivery.Endpoint":                endpoint,
-		"dead-lettering.Dead-letter topic": dead,
-		"dead-lettering.Maximum delivery attempts": "6",
+		"Topic":                             tp,
+		"Delivery type":                     "Push",
+		"details.Endpoint":                  endpoint,
+		"details.Dead-letter topic":         dead,
+		"details.Maximum delivery attempts": "6",
 	} {
 		if props[k] != v {
 			t.Errorf("page %s = %q, want %q (page: %s)", k, props[k], v, out)

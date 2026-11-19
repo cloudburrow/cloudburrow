@@ -952,6 +952,19 @@ td a { color: var(--accent); }
    but not full-bleed: a text field the width of a monitor is unreadable. */
 .create-page { max-width: 720px; }
 .create-page .form-error { max-width: none; }
+/* One page under headings, as Google's Pub/Sub create pages are (#1847):
+   each section's heading a little larger than a step's title would be. */
+.create-page.is-single-page .form-section-title { font-size: var(--text-title-size, 16px); }
+/* A create page's checks (#1847): Validate definition and Test message. */
+.create-checks { margin-top: 8px; }
+.create-check-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.create-check-result { margin: 8px 0 0; color: var(--text); overflow-wrap: anywhere; }
+.create-check-result.is-error { color: var(--error); }
+/* A choice this instance cannot make, drawn disabled with its reason. */
+.form-unavailable { font-style: italic; }
+.check-line.is-unavailable { flex-wrap: wrap; }
+.check-line.is-unavailable .form-unavailable { flex-basis: 100%; margin-left: 24px; }
+.is-unavailable label { color: var(--text-muted); }
 .form-actions {
   display: flex; gap: 8px; margin-top: 24px;
   padding-top: 16px; border-top: 1px solid var(--border);
@@ -1086,7 +1099,7 @@ tr.is-operating td:first-child {
 /* A control row inside a card is a plain row. It used to reuse .toolbar —
    the application bar — so a content card contained a second elevated 64px
    bar that stuck to the top of the viewport. */
-.card-actions { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 /* Show versions on an object list (#853), after the upload control. */
 .versions-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; cursor: pointer; }
 
@@ -1832,6 +1845,15 @@ tr.is-inspected { background: var(--nav-selected); }
 .lint-results { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
 .lint-result { display: flex; gap: 6px; align-items: baseline; font-size: var(--text-caption-size); }
 .lint-severity { font-weight: 600; }
+/* A "radio" field (#1843): Google's radio choices, such as a bucket's access control. */
+.form-row.is-radio { border: 0; margin: 0 0 16px; padding: 0; min-width: 0; }
+.form-row.is-radio legend { font-weight: 500; margin-bottom: 6px; padding: 0; }
+.form-row.is-radio .check-line { margin: 4px 0; }
+/* A property with a Copy button of its own (#1843). */
+dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
+dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
+.objects-show { display: inline-flex; align-items: center; gap: 6px; }
 
 /* Help (#1842): the toolbar's question-mark menu. */
 .help-panel { min-width: 260px; }

@@ -82,7 +82,18 @@ type bucketMeta struct {
 		UniformBucketLevelAccess struct {
 			Enabled bool `json:"enabled"`
 		} `json:"uniformBucketLevelAccess"`
+		// PublicAccessPrevention is "enforced" or "inherited" (#1843).
+		PublicAccessPrevention string `json:"publicAccessPrevention"`
 	} `json:"iamConfiguration"`
+	// Autoclass, the turbo replication setting and the default key are
+	// stored and shown, as Google's bucket list and Configuration do (#1843).
+	Autoclass *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"autoclass"`
+	RPO        string `json:"rpo"`
+	Encryption *struct {
+		DefaultKmsKeyName string `json:"defaultKmsKeyName"`
+	} `json:"encryption"`
 	RetentionPolicy *struct {
 		RetentionPeriod string `json:"retentionPeriod"`
 		EffectiveTime   string `json:"effectiveTime"`

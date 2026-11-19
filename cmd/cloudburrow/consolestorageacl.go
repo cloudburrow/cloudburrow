@@ -171,7 +171,10 @@ func (p storageProvider) objectACLActions(ctx context.Context, bucket string) []
 	if err != nil || b.IAMConfiguration.UniformBucketLevelAccess.Enabled {
 		return nil
 	}
-	return []console.Action{aclAddAction([]string{aclScopeObject})}
+	// Google's object page calls it Edit access (#1843).
+	a := aclAddAction([]string{aclScopeObject})
+	a.Label = "Edit access"
+	return []console.Action{a}
 }
 
 // aclEntryPath reads a row's address.

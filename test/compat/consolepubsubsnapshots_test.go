@@ -133,11 +133,17 @@ func TestConsolePubSubSnapshotsAndSeek(t *testing.T) {
 	if !ok || len(create.Fields) != 1 || !strings.Contains(create.Fields[0].Help, "does not keep them") {
 		t.Fatalf("the subscription page's Create snapshot = %+v; want only an ID, saying labels are not kept", acts)
 	}
-	if _, ok := acts["seek-snapshot"]; ok {
-		t.Error("Seek to snapshot is offered before the topic has a snapshot")
+	// The page draws Google's Replay messages (#1847), a Seek to a time
+	// point or, once the topic has one, to a snapshot; the action route
+	// still serves Seek to time and Seek to snapshot, which act() sends.
+	replay := acts["replay-messages"]
+	if replay.Confirm == "" {
+		t.Errorf("Replay messages = %+v; want a confirmation", replay)
 	}
-	if a := acts["seek-time"]; a.Confirm == "" {
-		t.Errorf("Seek to time = %+v; want a confirmation", a)
+	for _, f := range replay.Fields {
+		if f.Name == "snapshot" {
+			t.Error("Replay messages offers a snapshot before the topic has one")
+		}
 	}
 
 	// m1 is waiting when the snapshot is taken.
@@ -189,9 +195,15 @@ func TestConsolePubSubSnapshotsAndSeek(t *testing.T) {
 
 	// Seek to the snapshot, from the console: what it held unacknowledged
 	// (m1) and what was published after it (m2) are redelivered.
-	a, ok := consoleSubscriptionActions(t, addr, project, sub)["seek-snapshot"]
-	if !ok || a.Confirm == "" || a.Fields[0].Default != "console-snap" {
-		t.Fatalf("with a snapshot the page offers Seek to snapshot = %+v; want it prefilled and confirmed", a)
+	a, ok := consoleSubscriptionActions(t, addr, project, sub)["replay-messages"]
+	snapDefault := ""
+	for _, f := range a.Fields {
+		if f.Name == "snapshot" {
+			snapDefault = f.Default
+		}
+	}
+	if !ok || a.Confirm == "" || snapDefault != "console-snap" {
+		t.Fatalf("with a snapshot the page's Replay messages = %+v; want To a snapshot prefilled and confirmed", a)
 	}
 	if code, body := act("seek-snapshot", map[string]string{"snapshot": "console-snap"}); code != http.StatusOK {
 		t.Fatalf("console Seek to snapshot = %d: %s", code, body)

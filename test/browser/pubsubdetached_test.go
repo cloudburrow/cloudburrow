@@ -67,8 +67,8 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/pubsub/subscriptions?project=" + project)
 	p.clickText("#view tbody a", sub)
-	p.waitFor(pageButton("Detach from topic"))
-	p.clickText("#view .page-actions button", "Detach from topic")
+	p.waitFor(pageButton("Detach"))
+	p.clickText("#view .page-actions button", "Detach")
 	p.waitFor(`document.querySelector("#confirm-input") !== null`)
 	var warning string
 	p.eval(`document.querySelector("#confirm-input").closest("form").textContent`, &warning)
@@ -81,7 +81,7 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 		t.Errorf("the detach confirmation says %d times that it cannot be undone: %q", n, warning)
 	}
 	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), sub))
-	p.clickText(`form:has(#confirm-input) .modal-actions button`, "Detach from topic")
+	p.clickText(`form:has(#confirm-input) .modal-actions button`, "Detach")
 	p.waitFor(`document.querySelector(".modal") === null`)
 
 	got, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub})
@@ -98,7 +98,7 @@ func TestPubSubDetachedSubscriptionEditThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("it receives no messages")`)
 	p.waitFor(pageButton("Edit subscription"))
 	var offers bool
-	p.eval(pageButton("Create snapshot")+` || `+pageButton("Detach from topic"), &offers)
+	p.eval(pageButton("Create snapshot")+` || `+pageButton("Detach"), &offers)
 	if offers {
 		t.Error("a detached subscription's page still offers Create snapshot or Detach from topic")
 	}

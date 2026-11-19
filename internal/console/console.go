@@ -177,6 +177,13 @@ type Listing struct {
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
+	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
+	// Storage Settings page has Project access and Interoperability (#1843):
+	// the tab whose ID is ListTab holds the rows, with the screen's create
+	// and actions, and any other shows Summary. Only ID, Label and Note of
+	// each are read.
+	Tabs    []Section `json:"tabs,omitempty"`
+	ListTab string    `json:"listTab,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -275,6 +282,23 @@ type Field struct {
 	// submit what the API refuses.
 	Requires []string `json:"requires,omitempty"`
 	Excludes []string `json:"excludes,omitempty"`
+	// ShowWhen shows the field only while another field of the form holds
+	// a value: "name" for a checkbox that is checked, "name=value" for a
+	// radio or select choice, as Google's Create topic reveals the retention
+	// period under Enable message retention (#1847). A hidden field is not
+	// validated; it is still sent, so the provider reads it only when its
+	// condition holds.
+	ShowWhen string `json:"showWhen,omitempty"`
+	// Unavailable, on a checkbox, is why the choice cannot be made on this
+	// instance: the box is drawn as Google's page has it, unchecked and
+	// disabled, with the reason beside it, so the option stays visible and
+	// says why rather than vanishing (#1847: Create topic's Export data to
+	// BigQuery). The form sends it unchecked.
+	Unavailable string `json:"unavailable,omitempty"`
+	// UnavailableOptions, on a radio, are the choices that cannot be made on
+	// this instance, each with its reason: drawn disabled where Google's page
+	// has them, as Create subscription's Write to BigQuery (#1847).
+	UnavailableOptions map[string]string `json:"unavailableOptions,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
@@ -360,6 +384,50 @@ type PageCreator interface {
 	Creator
 	// CreateOnPage reports whether the form gets its own page.
 	CreateOnPage() bool
+}
+
+// CreateTitler is a Creator whose create page has a title of its own,
+// apart from the label of its buttons: Google's "Create a bucket" page and
+// its Create button (#1843).
+type CreateTitler interface {
+	Creator
+	CreateTitle() string
+}
+
+// CreateLayouter is a Creator whose create page is laid out other than as
+// numbered steps. CreateLayout returns "page" for one page with the
+// sections under headings, as Google's Pub/Sub Create topic, Create
+// subscription and Create schema are (#1847); "steps" (or a provider that
+// does not implement this) keeps the numbered sections with Continue that
+// Google's Cloud Storage and Cloud SQL create pages use.
+type CreateLayouter interface {
+	Creator
+	CreateLayout() string
+}
+
+// CreateLayoutPage is CreateLayout's single-page layout.
+const CreateLayoutPage = "page"
+
+// CreateCheck is a button on a create page that checks what the form holds
+// without creating anything: Google's Validate definition and Test message
+// on Create schema (#1847). A check with fields asks for them in a dialog
+// first, as Test message asks for the message encoding and body.
+type CreateCheck struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Fields []Field `json:"fields,omitempty"`
+	// Submit is the dialog's button, "Test" for Test message.
+	Submit string `json:"submit,omitempty"`
+}
+
+// CreateChecker is a Creator whose create page has CreateChecks. CheckCreate
+// gets the form's values with the check's own fields merged over them, and
+// returns what the page says when the check passes; an error is the
+// refusal, shown as the API gave it.
+type CreateChecker interface {
+	Creator
+	CreateChecks() []CreateCheck
+	CheckCreate(ctx context.Context, project, check string, values map[string]string) (string, error)
 }
 
 // Pager is a provider whose listings can be continued past their first page.
@@ -456,6 +524,11 @@ type Detail struct {
 	// what it holds now. Nil means it cannot be edited, which is why the
 	// button is absent rather than present and refusing.
 	Edit *EditForm `json:"edit,omitempty"`
+	// OpenTab is the ID of the section the page opens on when the address
+	// names none, for a resource whose Google page does not open on its
+	// first tab: a Pub/Sub subscription's opens on Details, Metrics being a
+	// tab clicked to (#1847). Empty opens the first.
+	OpenTab string `json:"openTab,omitempty"`
 	// Trail is the breadcrumb, for a resource whose path is not its
 	// hierarchy. An object's page is addressed apart from its bucket's
 	// folders, which share the path space with it (#790), so the provider
@@ -466,6 +539,10 @@ type Detail struct {
 	// is addressed by its encoded key and headed by its key path (#875).
 	// Empty means the last segment.
 	Title string `json:"title,omitempty"`
+	// Object, on an object's page, is the bucket and the object name the
+	// page is about: the page then offers Download and Delete beside its
+	// title, through the object routes, as Google's object page does (#1843).
+	Object []string `json:"object,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -492,6 +569,10 @@ type Property struct {
 	// Link, when set, is a console route the value opens: the Resource
 	// hierarchy list's organization opens the organization's page (#1554).
 	Link string `json:"link,omitempty"`
+	// Copy, when set, is the label of a button beside the value that
+	// copies it: Google's object page has Copy URL and Copy gsutil URI
+	// (#1843).
+	Copy string `json:"copy,omitempty"`
 }
 
 // SectionKind says what a section actually holds.
@@ -554,6 +635,10 @@ type Section struct {
 	// Permissions is the content when Kind is KindPermissions, set by the
 	// server from the provider's PolicyEditor (#793).
 	Permissions *PermissionsView `json:"permissions,omitempty"`
+	// Actions are drawn at the top of this tab rather than beside the page
+	// title, as Google's Lifecycle tab has Add a rule (#1843). The provider's
+	// DetailActions must offer them too, as for the page's own actions.
+	Actions []Action `json:"actions,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -786,6 +871,11 @@ type Action struct {
 	// SelectionField names the field a selection action's selected rows are
 	// written into (Listing.SelectActions).
 	SelectionField string `json:"selectionField,omitempty"`
+	// Href, when set, makes the action a link: it opens this console
+	// route instead of being performed, as a topic row's Create
+	// subscription opens the Create subscription page with the topic filled
+	// in (#1847). The action route never receives it.
+	Href string `json:"href,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1058,6 +1148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/resources/{service}", s.handleResources)
 	mux.HandleFunc("GET /api/detail/{service}", s.handleDetail)
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
+	mux.HandleFunc("POST /api/resources/{service}/check", s.handleCreateCheck)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("POST /api/actions/{service}/upload", s.handleActionUpload)
@@ -1464,10 +1555,17 @@ type queryCapability = QuerySpec
 type createForm struct {
 	Label  string  `json:"label"`
 	Fields []Field `json:"fields"`
+	// Title is the create page's heading when it differs from the button,
+	// as Google's "Create a bucket" page ends in Create (CreateTitler).
+	Title string `json:"title,omitempty"`
 	// Page means the form is rendered at its own address instead of in a
 	// dialog. Decided here rather than in the client so that "long enough to
 	// deserve a page" has one definition.
 	Page bool `json:"page,omitempty"`
+	// Layout is CreateLayouter's: "page", or empty for numbered steps.
+	Layout string `json:"layout,omitempty"`
+	// Checks are CreateChecker's buttons.
+	Checks []CreateCheck `json:"checks,omitempty"`
 }
 
 // createPageThreshold is the number of fields past which a create form stops
@@ -1483,6 +1581,15 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		c.Create.Page = len(fields) > createPageThreshold
 		if pc, ok := p.(PageCreator); ok && pc.CreateOnPage() {
 			c.Create.Page = true
+		}
+		if ct, ok := p.(CreateTitler); ok {
+			c.Create.Title = ct.CreateTitle()
+		}
+		if cl, ok := p.(CreateLayouter); ok && cl.CreateLayout() == CreateLayoutPage {
+			c.Create.Layout = CreateLayoutPage
+		}
+		if cc, ok := p.(CreateChecker); ok {
+			c.Create.Checks = cc.CreateChecks()
 		}
 	}
 	if e, ok := p.(Executor); ok {
@@ -1587,6 +1694,50 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "operation": opID})
+}
+
+// handleCreateCheck runs one of a create page's checks (CreateChecker): it
+// creates nothing, so it is not an operation, and answers with the check's
+// verdict, or its refusal as a 400 with the API's message.
+func (s *Server) handleCreateCheck(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	checker, ok := p.(CreateChecker)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " offers no checks on its create page",
+		})
+		return
+	}
+	var req struct {
+		Check  string            `json:"check"`
+		Values map[string]string `json:"values"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
+		return
+	}
+	known := false
+	for _, c := range checker.CreateChecks() {
+		known = known || c.ID == req.Check
+	}
+	if !known {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("no check %q on this create page", req.Check)})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+	defer cancel()
+	msg, err := checker.CheckCreate(ctx, r.URL.Query().Get("project"), req.Check, req.Values)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": msg})
 }
 
 // handleDelete removes a resource.
@@ -2310,11 +2461,34 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	// The IAM policy's tab, read here so that every one carries the note
 	// that nothing is enforced, whichever provider serves it (#793).
+	// A provider can place the tab among its own with a placeholder
+	// section (ID "permissions", Kind KindPermissions, no content), as
+	// Google's bucket page puts Permissions third (#1843); otherwise it is
+	// appended. A placeholder with no policy behind it is dropped.
+	slot := -1
+	for i, sec := range detail.Sections {
+		if sec.ID == "permissions" && sec.Kind == KindPermissions && sec.Permissions == nil {
+			slot = i
+			break
+		}
+	}
+	placed := false
 	if pe, ok := p.(PolicyEditor); ok && detail.Unavailable == "" && detail.Prompt == "" {
 		if target := pe.PolicyOn(ctx, path); target != nil {
-			detail.Sections = append(detail.Sections,
-				permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
+			sec := permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target)
+			if slot >= 0 {
+				// The placeholder's own actions and note stay with the
+				// tab: a bucket's access control and Switch to (#1843).
+				sec.Actions, sec.Note = detail.Sections[slot].Actions, detail.Sections[slot].Note
+				detail.Sections[slot] = sec
+			} else {
+				detail.Sections = append(detail.Sections, sec)
+			}
+			placed = true
 		}
+	}
+	if slot >= 0 && !placed {
+		detail.Sections = append(detail.Sections[:slot], detail.Sections[slot+1:]...)
 	}
 	// Collections are arrays rather than null, so a client that iterates
 	// before checking does not fall over on top of the failure it was about

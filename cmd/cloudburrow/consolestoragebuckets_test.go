@@ -121,10 +121,11 @@ func TestStorageBucketSettingsThroughTheAPI(t *testing.T) {
 
 	// Lock retention policy.
 	d, _ = p.Detail(ctx, "p", []string{"ops"})
-	if !hasAction(d.Actions, "lockretention") {
-		t.Fatalf("a bucket with an unlocked policy offers %v", d.Actions)
+	// On the Protection tab, as Google's console has it (#1843).
+	if !hasAction(tabActions(d, "protection"), "lockretention") {
+		t.Fatalf("a bucket with an unlocked policy offers %v", pageAndTabActions(d))
 	}
-	for _, act := range d.Actions {
+	for _, act := range tabActions(d, "protection") {
 		if act.ID == "lockretention" && (!act.Destructive || !strings.Contains(act.Confirm, "never be removed")) {
 			t.Errorf("Lock retention policy is %+v; want it destructive and saying it is permanent", act)
 		}
@@ -294,8 +295,11 @@ func TestStorageBrowserListsManagedFoldersFromTheServer(t *testing.T) {
 	if n := d.Sections[0].Listing.Note; n != "" {
 		t.Errorf("the folder listing carries %q", n)
 	}
-	if d.Edit != nil || len(d.Actions) != 1 || d.Actions[0].ID != "createmanagedfolder" {
-		t.Errorf("a folder offers %+v and %v; a folder has no settings", d.Edit, d.Actions)
+	// A folder's only actions are its Objects tab's Create folder and
+	// Create managed folder (#828, #1843).
+	if a := tabActions(d, "objects"); d.Edit != nil || len(d.Actions) != 0 || len(a) != 2 ||
+		a[0].ID != "createsimplefolder" || a[1].ID != "createmanagedfolder" {
+		t.Errorf("a folder offers %+v, %v and %v; a folder has no settings", d.Edit, d.Actions, a)
 	}
 	if err := p.Edit(ctx, "p", []string{"ops", "logs"}, nil); err == nil {
 		t.Error("a folder was accepted for editing")

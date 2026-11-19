@@ -42,11 +42,13 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 	read := func() boxes {
 		var b boxes
 		p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
-			return { Uniform: q("#f-uniformAccess").checked, UniformHeld: q("#f-uniformAccess").disabled,
+			return { Uniform: q("#f-uniformAccess").value === "Uniform" && q("#f-uniformAccess-0").checked,
+			         UniformHeld: q("#f-uniformAccess-0").disabled && q("#f-uniformAccess-1").disabled,
 			         Versioning: q("#f-versioning").checked, VersioningHeld: q("#f-versioning").disabled }; })()`, &b)
 		return b
 	}
-	setField(p, "#view", "f-uniformAccess", "false")
+	// Access control is Google's radio choice (#1843): Fine-grained first.
+	p.eval(`document.querySelector("#view #f-uniformAccess-1").click(), true`, nil)
 	setField(p, "#view", "f-versioning", "true")
 	setField(p, "#view", "f-hierarchicalNamespace", "true")
 	if b := read(); !b.Uniform || !b.UniformHeld || b.Versioning || !b.VersioningHeld {
@@ -76,8 +78,8 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 
 	// Create folder.
 	p.navigate("/storage/browser/" + bucket + "?project=" + project)
-	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create folder")`)
-	p.clickText("#view .page-actions button", "Create folder")
+	p.waitFor(sectionButton("Create folder"))
+	p.clickText("#view .section-actions button", "Create folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

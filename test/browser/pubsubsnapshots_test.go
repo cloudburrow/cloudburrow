@@ -17,7 +17,7 @@ import (
 // shard, whose instance serves Pub/Sub. On a subscription's page, Create
 // snapshot asks for an ID and no labels; Cancel after typing one closes it at
 // once with nothing sent (#783). The snapshot created through the form makes
-// Seek to snapshot appear, prefilled with it. Submitting the seek asks for
+// Replay messages offer To a snapshot, prefilled with it (#1847). Submitting the seek asks for
 // the subscription's name back, saying what the seek changes and not that it
 // cannot be undone: the short name is refused with nothing sent, Cancel on
 // the confirmation leaves the form open with nothing sent, and the full name
@@ -76,12 +76,20 @@ func TestPubSubSnapshotSeekAndDeleteThroughTheForms(t *testing.T) {
 		t.Fatalf("the console API does not list the snapshot created in the browser: %d %s", code, body)
 	}
 
-	// Seek to snapshot, offered now that the topic has one, prefilled.
-	openAction("Seek to snapshot", "snapshot")
+	// Replay messages (#1847): To a snapshot, offered now that the topic has
+	// one, reveals the snapshot, prefilled.
+	openAction("Replay messages", "seek")
+	var hiddenFirst bool
+	p.eval(`document.querySelector(".modal.is-open #f-snapshot").closest(".form-row").hidden`, &hiddenFirst)
+	if !hiddenFirst {
+		t.Error("the snapshot is shown before To a snapshot is chosen")
+	}
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-seek-1`)))
+	p.waitFor(`!document.querySelector(".modal.is-open #f-snapshot").closest(".form-row").hidden`)
 	var prefilled string
 	p.eval(`document.querySelector(".modal.is-open #f-snapshot").value`, &prefilled)
 	if prefilled != "browser-snap-1" {
-		t.Errorf("Seek to snapshot is prefilled with %q, want browser-snap-1", prefilled)
+		t.Errorf("Replay messages' snapshot is prefilled with %q, want browser-snap-1", prefilled)
 	}
 	submitSeek := func() {
 		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
