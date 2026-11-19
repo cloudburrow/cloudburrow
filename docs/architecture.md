@@ -120,6 +120,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
+| `internal/apienable/` | Refuses calls to an API disabled in their project with Google's `SERVICE_DISABLED` (#1914): the gRPC interceptors and HTTP gate the in-process services and the in-cluster servers wrap, the Service Usage server's decision, and the host endpoint the in-cluster servers ask, with a one-second cache. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
 | `internal/archtest/` | Tests only (#672): enforces rules 1–3 below against the module, each with an explicit list of today's exceptions. |
 | `internal/bigqueryfront/` | The checks in front of the BigQuery emulator (#861), run in its pod by `cloudburrow-storage bigquery-front` (#902): IDs, schemas, DDL, jobs and `insertAll` rows are refused as BigQuery refuses them, with 400 or 409 and per-row `insertErrors`, and what the emulator would report done without doing is 501. |
@@ -197,8 +198,9 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
+| `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/privateca/` | Certificate Authority Service v1 (CA pools, CAs, certificates, real X.509 signed in process), built by us (#1834). |
-| `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, disabling is stored, not enforced (#1352). |
+| `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, and a disabled API's calls are refused SERVICE_DISABLED, through `internal/apienable` (#1352, #1914). |
 | `internal/service/sqladmin/` | The Cloud SQL Admin API (sqladmin v1 and v1beta4) over the PostgreSQL and MySQL servers, built by us (#1301). |
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |
 | `internal/service/tasks/` | Cloud Tasks queues, tasks and HTTP dispatch, built by us. |

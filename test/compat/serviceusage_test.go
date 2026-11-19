@@ -95,7 +95,7 @@ func TestServiceUsageServices(t *testing.T) {
 		t.Errorf("list state:DISABLED = %v, %v; want containerscanning and storage", off, err)
 	}
 
-	// Not enforced, and per project: another project still has it.
+	// Per project: another project still has it.
 	if st := serviceState(t, h, c, h.Project()+"-b", "storage.googleapis.com"); st != "ENABLED" {
 		t.Errorf("another project's storage is %s", st)
 	}

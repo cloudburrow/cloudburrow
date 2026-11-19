@@ -177,6 +177,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_project_service (#1352): the Service Usage API v1 on its own
 	// port, in TestTerraformProjectService.
 	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// google_apikeys_key (#1915): the API Keys API v2 on its own port.
+	// TestTerraformAPIKeysKey applies one with restrictions, plans clean,
+	// updates it in place and destroys it.
+	{apiKeysService, "apikeys_custom_endpoint", "GOOGLE_APIKEYS_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_project_iam_custom_role and google_organization_iam_custom_role
 	// (#1743): the IAM API's roles, on the Resource Manager port, in
@@ -248,6 +252,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceTasks: cfg.Endpoints.Tasks, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceRun: cfg.Endpoints.Run,
 		config.ServiceKMS: cfg.Endpoints.KMS, resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
 		serviceUsageService:     cfg.Endpoints.ServiceUsage,
+		apiKeysService:          cfg.Endpoints.APIKeys,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		config.ServiceBigQuery: cfg.Endpoints.BigQuery, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin,
 		config.ServiceFirestore: cfg.Endpoints.Firestore,
@@ -261,7 +266,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 	}
-	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
+	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true

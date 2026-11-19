@@ -72,6 +72,7 @@ var targetEndpoints = []targetEndpoint{
 	{"LOGGING", envKey("CLOUDBURROW_LOGGING_ENDPOINT")},
 	{"RESOURCEMANAGER", envKey("CLOUDBURROW_RESOURCEMANAGER_ENDPOINT")},
 	{"SERVICEUSAGE", envKey("CLOUDBURROW_SERVICEUSAGE_ENDPOINT")},
+	{"APIKEYS", envKey("CLOUDBURROW_APIKEYS_ENDPOINT")},
 	{"SPANNER", envKey("SPANNER_EMULATOR_HOST")},
 	{"SPANNER_REST", envKey("CLOUDBURROW_SPANNER_REST_ENDPOINT")},
 	{"DATASTORE", envKey("DATASTORE_EMULATOR_HOST")},
@@ -211,6 +212,7 @@ var gcloudOverrides = []struct {
 	// The Organization Policy API v2 (#1890), on the Resource Manager port.
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
+	{"apikeys", []string{"APIKEYS"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},

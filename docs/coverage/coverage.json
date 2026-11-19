@@ -13082,6 +13082,12 @@
         "method": "serviceusage.services.disable",
         "status": "Verified",
         "tests": [
+          "test/compat/apienable_test.go:129 TestServiceDisabledStorage",
+          "test/compat/apienable_test.go:156 TestServiceDisabledPubSub",
+          "test/compat/apienable_test.go:178 TestServiceDisabledSecretManager",
+          "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
+          "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
+          "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
           "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:229 TestGcloudServices",
           "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
@@ -13091,6 +13097,12 @@
         "method": "serviceusage.services.enable",
         "status": "Verified",
         "tests": [
+          "test/compat/apienable_test.go:129 TestServiceDisabledStorage",
+          "test/compat/apienable_test.go:156 TestServiceDisabledPubSub",
+          "test/compat/apienable_test.go:178 TestServiceDisabledSecretManager",
+          "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
+          "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
+          "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
           "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:229 TestGcloudServices",
           "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
@@ -13113,6 +13125,88 @@
           "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:229 TestGcloudServices",
           "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "apikeys",
+    "Title": "API Keys API (v2)",
+    "counts": {
+      "Verified": 9
+    },
+    "rows": [
+      {
+        "method": "apikeys.keys.lookupKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeyenforce_test.go:79 TestAPIKeysEnforced",
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.getKeyString",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeyenforce_test.go:79 TestAPIKeysEnforced",
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
+        ]
+      },
+      {
+        "method": "apikeys.projects.locations.keys.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/apikeys_test.go:156 TestGcloudServicesAPIKeys",
+          "test/compat/apikeys_test.go:42 TestAPIKeysLifecycle"
         ]
       }
     ]

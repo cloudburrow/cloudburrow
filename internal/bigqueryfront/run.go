@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/onnxrunner"
@@ -90,6 +91,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *resourceManager != "" {
 		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
 		defer orgpolicy.Use(nil)
+		// Disabled APIs (#1914) are the host's too.
+		apienable.Use(&apienable.Remote{Base: *resourceManager})
+		defer apienable.Use(nil)
 	}
 	handler := Wrap(results, WithStorage(*storage), WithStoragePublic(*storagePublic), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
@@ -114,7 +118,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// way, comes here directly. Pods name the Service (ServiceName), and
 	// a kubelet probe the pod's address, which the Host check passes.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(handler, ready...), ServiceName),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigquery.googleapis.com", handler), ready...), ServiceName),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}

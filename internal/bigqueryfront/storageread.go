@@ -20,6 +20,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 )
 
 // The Storage Read API (#1032, #1046, #1095, #1098).
@@ -205,6 +207,8 @@ func (s *storageRead) server() *grpc.Server {
 	return grpc.NewServer(
 		grpc.ForceServerCodec(frameCodec{}),
 		grpc.UnknownServiceHandler(s.handle),
+		// Disabled APIs (#1914), by the call's routing headers.
+		grpc.StreamInterceptor(apienable.StreamInterceptor(nil, "bigquerystorage.googleapis.com")),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 	)
 }

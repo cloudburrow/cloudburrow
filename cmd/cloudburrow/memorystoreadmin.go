@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -46,7 +47,10 @@ type memorystoreAdminService struct {
 	storage   func() *netfwd.Forwarder
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate  apienable.Decider
+	requests func(rest.Request)
 	// events records what the service does on its own (an automatic
 	// failover, #1657) in /admin/events; nil records nothing.
 	events redisadmin.EventRecorder
@@ -185,6 +189,7 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	}()
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.MemorystoreAdmin))
 	s.server = grpctransport.New(addr)
+	s.server.Gate(s.apiGate, "redis.googleapis.com")
 	s.server.Observe(s.calls)
 	for _, i := range s.interpose {
 		s.server.Interpose(i)

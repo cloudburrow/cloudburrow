@@ -21,6 +21,7 @@ var serviceUsageAPIs = []struct {
 }{
 	{"", serviceusage.API{Name: "cloudresourcemanager.googleapis.com", Title: "Cloud Resource Manager API"}},
 	{"", serviceusage.API{Name: "serviceusage.googleapis.com", Title: "Service Usage API"}},
+	{"", serviceusage.API{Name: "apikeys.googleapis.com", Title: "API Keys API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
 	{config.ServicePubSub, serviceusage.API{Name: "pubsub.googleapis.com", Title: "Cloud Pub/Sub API"}},
 	{config.ServiceTasks, serviceusage.API{Name: "cloudtasks.googleapis.com", Title: "Cloud Tasks API"}},
@@ -110,6 +111,18 @@ func newServiceUsageServer(cfg config.Config, reg *resourcemanager.Registry, st 
 		return nil
 	}
 	served, unserved := serviceUsageCatalog(cfg)
-	return serviceusage.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ServiceUsage)),
+	srv := serviceusage.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ServiceUsage)),
 		served, unserved, st, serviceUsageProjects{reg: reg})
+	srv.Dependents = serviceUsageDependents
+	return srv
 }
+
+// serviceUsageDependents are the dependencies Google documents among the
+// APIs CloudBurrow serves (#1914), by the API depended on. Google's
+// documented dependents of the BigQuery API (Binary Authorization, Google
+// Kubernetes Engine, Google Cloud APIs, Dataprep, Open Service Broker,
+// Telecom Data Fabric: https://docs.cloud.google.com/bigquery/docs/enable-assets)
+// are none of them served, and no other dependency among the served APIs
+// is documented, so the table is empty; services.disable's
+// disableDependentServices rules apply to whatever is added here.
+var serviceUsageDependents = map[string][]string{}

@@ -213,6 +213,7 @@ type rawFlags struct {
 	memorystore      int
 	memorystoreAdmin int
 	serviceUsage     int
+	apiKeys          int
 	cloudsqlMySQL    int
 	cloudsql         int
 	metadata         int
@@ -293,6 +294,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
 	fs.IntVar(&r.memorystore, "port-memorystore", 0, "Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)")
 	fs.IntVar(&r.serviceUsage, "port-serviceusage", 0, "Service Usage API (serviceusage.googleapis.com) host port (0 = OS-assigned; default 9023)")
+	fs.IntVar(&r.apiKeys, "port-apikeys", 0, "API Keys API (apikeys.googleapis.com) host port (0 = OS-assigned; default 9029)")
 	fs.IntVar(&r.memorystoreAdmin, "port-memorystore-admin", 0, "Memorystore admin API (redis.googleapis.com) host port (0 = OS-assigned; default 9021)")
 	fs.IntVar(&r.cloudsqlMySQL, "port-cloudsql-mysql", 0, "Cloud SQL for MySQL host port (0 = OS-assigned; default 9017)")
 	fs.IntVar(&r.cloudsql, "port-cloudsql", 0, "Cloud SQL for PostgreSQL host port (0 = OS-assigned; default 9019)")
@@ -500,6 +502,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_MEMORYSTORE", &cfg.Endpoints.Memorystore},
 		{"PORT_MEMORYSTORE_ADMIN", &cfg.Endpoints.MemorystoreAdmin},
 		{"PORT_SERVICEUSAGE", &cfg.Endpoints.ServiceUsage},
+		{"PORT_APIKEYS", &cfg.Endpoints.APIKeys},
 		{"PORT_CLOUDSQL_MYSQL", &cfg.Endpoints.CloudSQLMySQL},
 		{"PORT_CLOUDSQL", &cfg.Endpoints.CloudSQL},
 		{"PORT_INGRESS", &cfg.Endpoints.Ingress},
@@ -639,6 +642,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-memorystore", raw.memorystore, &cfg.Endpoints.Memorystore},
 		{"port-memorystore-admin", raw.memorystoreAdmin, &cfg.Endpoints.MemorystoreAdmin},
 		{"port-serviceusage", raw.serviceUsage, &cfg.Endpoints.ServiceUsage},
+		{"port-apikeys", raw.apiKeys, &cfg.Endpoints.APIKeys},
 		{"port-cloudsql-mysql", raw.cloudsqlMySQL, &cfg.Endpoints.CloudSQLMySQL},
 		{"port-cloudsql", raw.cloudsql, &cfg.Endpoints.CloudSQL},
 		{"port-ingress", raw.ingress, &cfg.Endpoints.Ingress},

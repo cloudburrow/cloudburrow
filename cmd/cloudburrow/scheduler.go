@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -49,6 +50,9 @@ type schedulerService struct {
 	// (#314), which is what `cloudburrow logs --service scheduler` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// requests reports each JSON request to the admin event log (#591).
 	requests func(rest.Request)
 	pubsub   func() *netfwd.Forwarder
@@ -143,6 +147,7 @@ func (s *schedulerService) Start(ctx context.Context) error {
 
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Scheduler))
 	s.server = grpctransport.New(addr)
+	s.server.Gate(s.apiGate, "cloudscheduler.googleapis.com")
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
 		s.server.ServerOptions(s.tracing.ServerOptions()...)
