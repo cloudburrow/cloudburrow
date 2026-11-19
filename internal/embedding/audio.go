@@ -255,8 +255,9 @@ func g711(b byte, alaw bool) int {
 	return t - 0x84
 }
 
-// decodeWAV reads a RIFF WAVE file of integer PCM (8, 16, 24 or 32 bits),
-// IEEE float (32 or 64 bits) or (#1651) G.711 A-law or µ-law, plain or
+// decodeWAV reads a RIFF WAVE file of integer PCM (1 to 32 bits), IEEE
+// float (32 or 64 bits) or (#1651) G.711 A-law or µ-law or IMA or Microsoft
+// ADPCM (adpcm.go), plain or
 // WAVE_FORMAT_EXTENSIBLE, of up to 8 channels (or as many as its channel
 // mask names).
 func decodeWAV(b []byte) (wav, error) {
@@ -264,10 +265,10 @@ func decodeWAV(b []byte) (wav, error) {
 		return wav{}, fmt.Errorf("no RIFF WAVE header")
 	}
 	var (
-		format, channels, bits uint16
-		rate, mask             uint32
-		haveFmt                bool
-		data                   []byte
+		format, channels, bits, align uint16
+		rate, mask                    uint32
+		haveFmt                       bool
+		data                          []byte
 	)
 	for p := 12; p+8 <= len(b); {
 		id, size := string(b[p:p+4]), int(binary.LittleEndian.Uint32(b[p+4:p+8]))
@@ -287,6 +288,7 @@ func decodeWAV(b []byte) (wav, error) {
 			format = binary.LittleEndian.Uint16(body[0:2])
 			channels = binary.LittleEndian.Uint16(body[2:4])
 			rate = binary.LittleEndian.Uint32(body[4:8])
+			align = binary.LittleEndian.Uint16(body[12:14])
 			bits = binary.LittleEndian.Uint16(body[14:16])
 			if format == 0xFFFE {
 				if size < 26 {
@@ -320,13 +322,34 @@ func decodeWAV(b []byte) (wav, error) {
 	if rate < 8000 || rate > 192000 {
 		return wav{}, notDecodedf("a sample rate of %d Hz is not decoded; 8000 to 192000 Hz are", rate)
 	}
-	width := int(bits) / 8
+	if format == waveIMAADPCM || format == waveMSADPCM {
+		dec := decodeIMAADPCM
+		if format == waveMSADPCM {
+			dec = decodeMSADPCM
+		}
+		pcm, err := dec(data, int(channels), int(align), int(bits))
+		if err != nil {
+			return wav{}, err
+		}
+		out := make([]float32, len(pcm))
+		for i, v := range pcm {
+			out[i] = float32(v) / 32768
+		}
+		return wav{samples: out, channels: int(channels), rate: int(rate), layout: layout}, nil
+	}
+	// Integer PCM of a width that is not a whole number of bytes (12 or 20
+	// bits) is its container's width, as ffmpeg reads it: the samples are
+	// left-justified, so 12-bit PCM is read as 16-bit.
+	width := (int(bits) + 7) / 8
+	if format == wavePCM {
+		bits = uint16(8 * width)
+	}
 	switch {
 	case format == wavePCM && (bits == 8 || bits == 16 || bits == 24 || bits == 32):
 	case format == waveFloat && (bits == 32 || bits == 64):
 	case (format == waveALaw || format == waveMuLaw) && bits == 8:
 	default:
-		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 8, 16, 24 or 32 bits, float of 32 or 64 bits and 8-bit A-law and µ-law are", format, bits)
+		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 1 to 32 bits, float of 32 or 64 bits, 8-bit A-law and µ-law and 4-bit IMA and Microsoft ADPCM are", format, bits)
 	}
 	frame := width * int(channels)
 	n := len(data) / frame * int(channels)

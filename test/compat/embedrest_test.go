@@ -38,8 +38,8 @@ import (
 //     (va-pcm51.mov), which was taken as pairs of channels before.
 //
 // And valid input this build does not serve is UNIMPLEMENTED, not
-// INVALID_ARGUMENT: an HTTP file_uri (an instance fetches nothing), an
-// ADPCM WAV and a video's ALAC audio track.
+// INVALID_ARGUMENT: an HTTP file_uri (an instance fetches nothing), a 3-bit
+// IMA ADPCM WAV and a QuickTime µ-law audio track.
 func TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -137,8 +137,8 @@ func TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient
 	}{
 		{"an HTTP file_uri", false, &aiplatformpb.Part{Data: &aiplatformpb.Part_FileData{FileData: &aiplatformpb.FileData{
 			MimeType: "audio/wav", FileUri: "https://storage.googleapis.com/b/jfk.wav"}}}, "HTTP URLs are not fetched"},
-		{"an ADPCM WAV", false, inline("audio/wav", adpcmWAVFile()), "WAVE format 2"},
-		{"an ALAC audio track", true, inline("video/mp4", embeddingTestdata(t, "va-alac.mp4")), "alac"},
+		{"a 3-bit IMA ADPCM WAV", false, inline("audio/wav", adpcmWAVFile()), "3-bit IMA ADPCM"},
+		{"a µ-law QuickTime audio track", true, inline("video/quicktime", embeddingTestdata(t, "va-ulaw.mov")), "ulaw"},
 	} {
 		_, err := embed(c.track, c.part)
 		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), c.want) {
@@ -192,12 +192,99 @@ func stereoAs51(t *testing.T, b []byte) []byte {
 	return append(append([]byte("RIFF"), binary.LittleEndian.AppendUint32(nil, uint32(len(w)))...), w...)
 }
 
-// adpcmWAVFile is a mono Microsoft ADPCM WAV (format 2), valid and not
-// decoded here.
+// adpcmWAVFile is a mono 3-bit IMA ADPCM WAV (format 0x11), valid and not
+// decoded here (4-bit IMA and Microsoft ADPCM are, #1651).
 func adpcmWAVFile() []byte {
-	f := []byte{2, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x7d, 0, 0, 0, 1, 4, 0}
+	f := []byte{0x11, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x5e, 0, 0, 0, 1, 3, 0}
 	w := append([]byte("WAVEfmt "), byte(len(f)), 0, 0, 0)
 	w = append(append(w, f...), 'd', 'a', 't', 'a', 64, 0, 0, 0)
 	w = append(w, make([]byte, 64)...)
 	return append(append([]byte("RIFF"), binary.LittleEndian.AppendUint32(nil, uint32(len(w)))...), w...)
+}
+
+// covers: google.cloud.aiplatform.v1.PredictionService/EmbedContent
+//
+// TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient
+// (#1651) embeds, through the official aiplatform PredictionClient's
+// EmbedContent, media that was UNIMPLEMENTED before, all made with ffmpeg 9
+// from the first 6 seconds of testdata/jfk-alaw.wav:
+//
+//   - IMA and Microsoft ADPCM WAVs (jfk-ima.wav, jfk-ms.wav: `-c:a
+//     adpcm_ima_wav`, `-c:a adpcm_ms`): as many tokens as the A-law clip
+//     cut to 6 seconds would have, within cosine 0.99 of each other;
+//   - a 64x36 clip at 1 fps with a FLAC and with an ALAC audio track
+//     (va-jfk-flac.mp4, va-jfk-alac.mp4, 16-bit mono), under
+//     audio_track_extraction: lossless, so the same vector;
+//   - the clip with a 5.1 AAC-LC track (va-jfk-aac51.mp4, the speech in FL
+//     and FR, `-filter:a pan=5.1|FL=c0|FR=c0 -c:a aac -b:a 96k`): the FLAC
+//     track's token count, within cosine 0.98 of its vector.
+func TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient(t *testing.T) {
+	h := New(t)
+	pc := predictionClientAt(t, h, EnvEmbeddings)
+	addr := consoleAddr(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	read := func(f string) []byte {
+		b, err := os.ReadFile("testdata/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	loadEmbeddingModel2(t, ctx, addr)
+	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel2
+	must := func(what string, track bool, mt string, data []byte) *aiplatformpb.EmbedContentResponse {
+		t.Helper()
+		r, err := pc.EmbedContent(ctx, &aiplatformpb.EmbedContentRequest{
+			Model: proto.String(name),
+			Content: &aiplatformpb.Content{Role: "user", Parts: []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{
+				InlineData: &aiplatformpb.Blob{MimeType: mt, Data: data}}}}},
+			EmbedContentConfig: &aiplatformpb.EmbedContentRequest_EmbedContentConfig{AudioTrackExtraction: proto.Bool(track)},
+		})
+		if err != nil {
+			t.Fatalf("%s: EmbedContent: %v", what, err)
+		}
+		if v := r.GetEmbedding().GetValues(); len(v) != 768 || math.Abs(norm(v)-1) > 1e-3 {
+			t.Fatalf("%s: %d values, norm %.6f", what, len(v), norm(v))
+		}
+		return r
+	}
+
+	ima := must("IMA ADPCM WAV", false, "audio/wav", read("jfk-ima.wav"))
+	ms := must("Microsoft ADPCM WAV", false, "audio/wav", read("jfk-ms.wav"))
+	// About 6.1 seconds (each codec pads its last block): 25 soft tokens a
+	// second and the two markers.
+	for _, r := range []*aiplatformpb.EmbedContentResponse{ima, ms} {
+		if n := r.GetUsageMetadata().GetPromptTokenCount(); n < 150 || n > 160 {
+			t.Errorf("ADPCM WAV: %d tokens, want 150 to 160", n)
+		}
+	}
+	if c := cosine(ima.GetEmbedding().GetValues(), ms.GetEmbedding().GetValues()); c < 0.99 {
+		t.Errorf("IMA against Microsoft ADPCM: cosine %.4f, want at least 0.99", c)
+	}
+
+	flac := must("FLAC track", true, "video/mp4", read("va-jfk-flac.mp4"))
+	alac := must("ALAC track", true, "video/mp4", read("va-jfk-alac.mp4"))
+	frames := must("the clip's frames", false, "video/mp4", read("va-jfk-flac.mp4"))
+	// 6 seconds of audio: 150 soft tokens and the two markers.
+	if d := flac.GetUsageMetadata().GetPromptTokenCount() - frames.GetUsageMetadata().GetPromptTokenCount(); d < 150 || d > 154 {
+		t.Errorf("FLAC track: %d tokens more than the frames, want 150 to 154", d)
+	}
+	if a, f := alac.GetUsageMetadata().GetPromptTokenCount(), flac.GetUsageMetadata().GetPromptTokenCount(); a != f {
+		t.Errorf("ALAC track: %d tokens, the FLAC track's %d", a, f)
+	}
+	if c := cosine(alac.GetEmbedding().GetValues(), flac.GetEmbedding().GetValues()); c < 0.99999 {
+		t.Errorf("ALAC against FLAC: cosine %.6f, want the same vector", c)
+	}
+	aac := must("5.1 AAC track", true, "video/mp4", read("va-jfk-aac51.mp4"))
+	if a, f := aac.GetUsageMetadata().GetPromptTokenCount(), flac.GetUsageMetadata().GetPromptTokenCount(); a != f {
+		t.Errorf("5.1 AAC track: %d tokens, the FLAC track's %d", a, f)
+	}
+	ca := cosine(aac.GetEmbedding().GetValues(), flac.GetEmbedding().GetValues())
+	if ca < 0.98 {
+		t.Errorf("5.1 AAC against FLAC: cosine %.4f, want at least 0.98", ca)
+	}
+	t.Logf("ADPCM: %d and %d tokens; FLAC %d tokens (frames %d), ALAC the same vector, 5.1 AAC at cosine %.4f",
+		ima.GetUsageMetadata().GetPromptTokenCount(), ms.GetUsageMetadata().GetPromptTokenCount(),
+		flac.GetUsageMetadata().GetPromptTokenCount(), frames.GetUsageMetadata().GetPromptTokenCount(), ca)
 }

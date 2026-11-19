@@ -28,6 +28,7 @@ type heState struct {
 type frameElement struct {
 	first  int // its first channel
 	stereo bool
+	lfe    bool
 }
 
 // ASC is the part of an MPEG-4 AudioSpecificConfig (ISO/IEC 14496-3
@@ -132,6 +133,9 @@ func NewDecoderASC(asc []byte) (*Decoder, error) {
 	if err := d.configureCore(a.SamplingFrequencyIndex, a.ChannelConfiguration); err != nil {
 		return nil, err
 	}
+	if a.SBR == 1 && a.ChannelConfiguration > 2 {
+		return nil, unsupportedf("SBR over channel_configuration %d", a.ChannelConfiguration)
+	}
 	switch a.SBR {
 	case 1:
 		d.sbrOn = true
@@ -188,6 +192,9 @@ func (d *Decoder) OutputChannels() int {
 
 // readSBR decodes an SBR extension payload for the last element.
 func (d *Decoder) readSBR(r *bits.BitReader, elems []frameElement, crc bool, payloadBits int) error {
+	if d.channels > 2 {
+		return unsupportedf("SBR over %d channels", d.channels)
+	}
 	if !d.sbrOn {
 		// Implicit signalling: SBR found in the stream doubles the rate.
 		d.sbrOn = true

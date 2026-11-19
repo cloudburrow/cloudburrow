@@ -92,8 +92,8 @@ func TestDecodeAudioFormats(t *testing.T) {
 	for mt, data := range map[string][]byte{
 		"audio/mpeg":  {0xff, 0xfb},
 		"audio/wav":   []byte("RIFF\x04\x00\x00\x00WAVE"),
-		"audio/wav ":  wavFile(t, tone(10, 16000, 1, 1), 9, 16000, 1, 16), // nine channels, no mask (three decode since #1651)
-		"audio/wave":  wavFile(t, tone(10, 16000, 1, 1), 1, 16000, 1, 12),
+		"audio/wav ":  wavFile(t, tone(10, 16000, 1, 1), 9, 16000, 1, 16),    // nine channels, no mask (three decode since #1651)
+		"audio/wave":  wavFile(t, tone(10, 16000, 1, 1), 1, 16000, 0x55, 16), // MP3 in WAV (12-bit PCM decodes since #1651)
 		"audio/vnd.x": {1},
 	} {
 		if _, err := DecodeAudio(mt, data); err == nil {
