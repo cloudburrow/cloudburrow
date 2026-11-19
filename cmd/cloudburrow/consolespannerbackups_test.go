@@ -263,8 +263,13 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 	// sixth (Create custom configuration) wrapped it, which pushed the
 	// partitions tab's row under the "applied" snackbar, so a click on the
 	// partition's link landed on the snackbar (TestSpannerSchemaAndPartitionsThroughThePage).
-	if len(acts) > 5 {
-		t.Errorf("an instance's page offers %d actions %v, want at most 5 so they fit one row", len(acts), actionIDs(acts))
+	// Since #1859 Create backup and Create instance partition are drawn at
+	// the top of their tabs, not beside the title.
+	if len(d.Actions) > 5 {
+		t.Errorf("an instance's page draws %d actions %v, want at most 5 so they fit one row", len(d.Actions), actionIDs(d.Actions))
+	}
+	if b := spannerSection(d, "backups"); b == nil || len(b.Actions) != 1 || b.Actions[0].ID != "createbackup" {
+		t.Errorf("the Backup/Restore tab's actions = %+v, want Create backup", b)
 	}
 	var create, move console.Action
 	for _, a := range acts {

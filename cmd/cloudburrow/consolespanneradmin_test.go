@@ -59,10 +59,10 @@ func TestSpannerAdminActionsAreOfferedWhereTheyBelong(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createpartition", "createbackup", "moveinstance", "dropinstance"}) {
+	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createdatabase", "createpartition", "createbackup", "moveinstance", "dropinstance"}) {
 		t.Errorf("an instance's actions = %v", got)
 	}
-	if got := ids("inst", "db"); !slices.Equal(got, []string{"updateddl", "createschedule", "dropdatabase", "dropprotection"}) {
+	if got := ids("inst", "db"); !slices.Equal(got, []string{"updateddl", "createschedule", "createdbbackup", "dropdatabase", "dropprotection"}) {
 		t.Errorf("a database's actions = %v", got)
 	}
 	if got := ids("inst", spannerPartitions); len(got) != 0 {

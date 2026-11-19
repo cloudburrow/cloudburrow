@@ -620,6 +620,10 @@ type Detail struct {
 	// page is about: the page then offers Download and Delete beside its
 	// title, through the object routes, as Google's object page does (#1843).
 	Object []string `json:"object,omitempty"`
+	// SideNav draws the page's sections as a menu down its left side rather
+	// than a tab strip, as Google's Spanner instance and database pages have
+	// Overview, Spanner Studio, Backup/Restore and the rest (#1859).
+	SideNav bool `json:"sideNav,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -676,6 +680,11 @@ const (
 	// where the provider lists it, as Google's service page has Metrics,
 	// SLOs, Logs, Revisions (#1852); otherwise it is appended last.
 	KindLogs SectionKind = "logs"
+	// KindStudio is a provider's workspace drawn in the tab by console.js's
+	// renderer for the service (STUDIO_SECTIONS), whose calls go to the
+	// provider's Studio: Spanner Studio on a database's page (#1859). The
+	// page then has no separate Query tab, the Studio's editor being it.
+	KindStudio SectionKind = "studio"
 )
 
 // Section is one aspect of a resource, rendered as a tab.

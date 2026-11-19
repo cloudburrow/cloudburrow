@@ -80,8 +80,10 @@ func TestSpannerSchemaAndPartitionsThroughThePage(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`#tab-instance-configs`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("emulator-config") && r.textContent.includes("Yes"))`)
 
+	// At the top of the Instance partitions tab (#1859).
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", "Create instance partition")
+	p.run(chromedp.Click(chromedp.CSS(`#tab-partitions`)))
+	p.clickText("#view #section-actions-partitions button", "Create instance partition")
 	p.waitFor(`document.querySelector(".modal.is-open #f-partition") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-partition`), "browser-part"))
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

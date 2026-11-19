@@ -2088,3 +2088,30 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .iam-condition { display: grid; gap: 4px; margin-top: 8px; }
 .iam-condition[hidden], .iam-role-pop[hidden] { display: none; }
 .iam-condition input, .iam-condition textarea, #iam-new-principals { width: 100%; box-sizing: border-box; }
+
+/* A resource page whose sections are a left-hand menu (#1859): Google's
+   Spanner instance and database pages. */
+.side-nav-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; margin-top: 16px; }
+.tab-strip.side-nav { flex-direction: column; margin: 0; gap: 0; overflow: visible; border-right: 1px solid var(--border, #dadce0); }
+.tab-strip.side-nav .tab { text-align: left; border-bottom: 0; border-left: 3px solid transparent; padding: 8px 12px; white-space: normal; }
+.tab-strip.side-nav .tab.is-selected { border-left-color: var(--accent); background: var(--state-hover); }
+@media (max-width: 720px) {
+  .side-nav-layout { grid-template-columns: minmax(0, 1fr); }
+  .tab-strip.side-nav { flex-direction: row; overflow-x: auto; border-right: 0; }
+}
+/* Spanner Studio: the Explorer beside the editor and its results. */
+.spanner-studio { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+.spanner-explorer { border-right: 1px solid var(--border, #dadce0); padding-right: 12px; font-size: var(--text-body-size); }
+.spanner-explorer h3 { margin: 0 0 8px; font-size: inherit; }
+.spanner-explorer ul { list-style: none; margin: 4px 0; padding-left: 12px; }
+.spanner-explorer summary { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.spanner-explorer .bq-menu { position: absolute; }
+.spanner-explorer-table summary { justify-content: space-between; }
+.spanner-editor { width: 100%; box-sizing: border-box; min-height: 160px; }
+.spanner-editor-tab { display: inline-flex; align-items: center; }
+.spanner-editor-actions { margin: 8px 0; }
+.spanner-plan { font-family: var(--font-mono, monospace); }
+.form-templates { margin: 6px 0; }
+.form-template { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.form-template pre { margin: 0; flex: 1; overflow-x: auto; }
+@media (max-width: 720px) { .spanner-studio { grid-template-columns: minmax(0, 1fr); } .spanner-explorer { border-right: 0; } }

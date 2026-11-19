@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -39,13 +40,34 @@ func TestConsoleSpannerCreateInstance(t *testing.T) {
 	t.Cleanup(g.Stop)
 	p := spannerProvider{endpoint: ln.Addr().String()}
 	ctx := context.Background()
-	acts := p.ListActions(ctx, "proj")
-	if len(acts) != 1 || acts[0].ID != spannerCreateInstanceAction || acts[0].Label != "Create instance" {
-		t.Fatalf("the list screen's actions = %+v", acts)
+	// Since #1859 Create instance is the list's Create, Google's page of
+	// steps, ending in Create.
+	if label, fields := p.CreateForm(); label != "Create instance" || p.CreateSubmit() != "Create" || len(fields) == 0 || fields[0].Section != "Select an edition" {
+		t.Fatalf("the list screen's Create = %q, %+v", label, fields)
 	}
-	if len(p.ListActions(ctx, "")) != 0 {
-		t.Error("Create instance is offered with no project")
+	if len(p.ListActions(ctx, "proj")) != 0 {
+		t.Error("the list screen offers a second Create instance beside its Create")
 	}
+	if _, err := p.Create(ctx, "proj", map[string]string{"edition": "Standard", "displayName": "Paged one", "instance": "paged",
+		"configType": "Multi-region", "multiConfig": "nam3", "unit": "Nodes", "nodes": "2", "scaling": "Manual allocation",
+		"labels": `{"env":"dev"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.got; r.GetInstanceId() != "paged" || r.GetInstance().GetConfig() != "projects/proj/instanceConfigs/nam3" ||
+		r.GetInstance().GetProcessingUnits() != 2000 || r.GetInstance().GetLabels()["env"] != "dev" {
+		t.Errorf("Create instance's page sent CreateInstance = %v", r)
+	}
+	for _, refused := range []map[string]string{{"edition": "Enterprise"}, {"scaling": "Autoscaling"}, {"configType": "Dual-region"}} {
+		f.got = nil
+		v := map[string]string{"displayName": "Refused", "instance": "refused", "unit": "Nodes", "nodes": "1"}
+		for k, val := range refused {
+			v[k] = val
+		}
+		if _, err := p.Create(ctx, "proj", v); err == nil || !strings.Contains(err.Error(), "Not available locally") || f.got != nil {
+			t.Errorf("Create instance with %v = %v, sent %v", refused, err, f.got)
+		}
+	}
+	f.got = nil
 	if err := p.ActAt(ctx, "proj", nil, spannerCreateInstanceAction, map[string]string{"instance": "orders", "displayName": "Orders",
 		"config": "emulator-config", "processingUnits": "300"}); err != nil {
 		t.Fatal(err)

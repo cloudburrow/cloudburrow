@@ -367,8 +367,10 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 	// every instance for a database with that name and took whichever it found
 	// first — so with a duplicate, the console opened an arbitrary one.
 	base := console.Listing{
-		Columns: []string{"Databases", "Nodes", "Configuration"},
-		Noun:    "instances", NameColumn: "Instance",
+		// Google's Instances list (#1859): the ID links, then the name,
+		// edition, configuration, compute capacity, databases and labels.
+		Columns: []string{"Instance name", "Edition", "Configuration", "Compute capacity", "Databases", "Labels"},
+		Noun:    "instances", NameColumn: "Instance ID",
 		AlwaysStatus: true,
 		RowsOpenable: true,
 	}
@@ -416,9 +418,12 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 			Name:   lastSegment(inst.GetName()),
 			Status: inst.GetState().String(),
 			Fields: map[string]string{
-				"Databases":     count,
-				"Nodes":         fmt.Sprint(inst.GetNodeCount()),
-				"Configuration": lastSegment(inst.GetConfig()),
+				"Instance name":    inst.GetDisplayName(),
+				"Edition":          spannerEdition(inst.GetEdition()),
+				"Configuration":    lastSegment(inst.GetConfig()),
+				"Compute capacity": spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits()),
+				"Databases":        count,
+				"Labels":           orDash(spannerLabels(inst.GetLabels())),
 			},
 		})
 	}
@@ -1152,7 +1157,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 	defer dbAdmin.Close()
 
 	databases := console.Listing{
-		Columns: []string{"Dialect", "Created"}, NameColumn: "Database", Noun: "databases",
+		Columns: []string{"Dialect", "Created"}, NameColumn: "Database name", Noun: "databases",
 		AlwaysStatus: true,
 		RowsOpenable: true,
 	}
@@ -1174,7 +1179,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 			Name:   lastSegment(db.GetName()),
 			Status: db.GetState().String(),
 			Fields: map[string]string{
-				"Dialect": db.GetDatabaseDialect().String(),
+				"Dialect": spannerDialectOf(db),
 				"Created": created,
 			},
 		})
@@ -1201,26 +1206,52 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 		groups = append(groups, *configGroup)
 	}
 
+	// Google's instance page (#1859): a left-hand menu of Overview (the
+	// databases, with Create database), Backup/Restore, Import/Export,
+	// Monitoring and System insights, then CloudBurrow's own pages.
+	backupSections[0].Label = "Backup/Restore"
+	// The title line has Google's Edit instance, Create database and Delete
+	// instance (with Move instance); Create backup is at the top of the
+	// Backup/Restore tab and Create instance partition at the top of the
+	// Instance partitions tab, where Google's pages put such actions. The
+	// action route still checks every one against DetailActions.
+	var header []console.Action
+	for _, a := range p.DetailActions(ctx, project, []string{instanceID}) {
+		switch a.ID {
+		case "createbackup":
+			backupSections[0].Actions = append(backupSections[0].Actions, a)
+		case "createpartition":
+			partitions.Actions = append(partitions.Actions, a)
+		default:
+			header = append(header, a)
+		}
+	}
 	return console.Detail{
+		SideNav: true,
+		Actions: header,
 		Summary: []console.Property{
-			{Label: "State", Value: inst.GetState().String()},
-			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
-			{Label: "Nodes", Value: fmt.Sprint(inst.GetNodeCount())},
+			{Label: "Instance name", Value: inst.GetDisplayName()},
+			{Label: "Edition", Value: spannerEdition(inst.GetEdition())},
 			{Label: "Configuration", Value: lastSegment(inst.GetConfig())},
+			{Label: "Compute capacity", Value: spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits())},
+			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
+			{Label: "Labels", Value: orDash(spannerLabels(inst.GetLabels()))},
 		},
 		Sections: []console.Section{
-			{ID: "databases", Label: "Databases", Listing: databases},
+			{ID: "databases", Label: "Overview", Listing: databases},
+			backupSections[0],
+			spannerNotLocal("import-export", "Import/Export", "Spanner's imports and exports are Dataflow jobs that read and write Avro or CSV files in Cloud Storage, and CloudBurrow runs no Dataflow. Copy data with Spanner Studio's DML, or a backup's restore."),
+			spannerNotLocal("monitoring", "Monitoring", "an instance's charts (CPU utilization, latency, throughput, storage) are Cloud Monitoring metrics, which the Spanner emulator does not report. The console's Monitoring page charts the requests this instance served."),
+			spannerNotLocal("system-insights", "System insights", "system insights are Cloud Monitoring dashboards over Spanner's metrics, which the emulator does not report."),
 			partitions,
 			operations,
-			backupSections[0],
 			backupSections[1],
 			backupSections[2],
 			{
 				ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 				Groups: groups,
-				Note: "Read-only. The emulator accepts an instance's node count and " +
-					"does nothing with it: there is one process serving everything, " +
-					"so capacity is not a setting that has an effect here.",
+				Note: "The emulator accepts an instance's compute capacity and does nothing with it: there is one process serving everything, " +
+					"so capacity is not a setting that has an effect here. Edit instance changes it.",
 			},
 			configs,
 			spannerConfigOperationsSection(ctx, instAdmin, project),
@@ -1228,12 +1259,17 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 	}, nil
 }
 
-// databaseDetail is a database's tables, its DDL and its query editor.
+// databaseDetail is a database's page, with Google's left-hand menu
+// (#1859): Overview (its tables), Spanner Studio, Indexes, Views, Change
+// streams, Sequences, Roles, Backup/Restore, Import/Export, Query insights,
+// Lock insights and Key Visualizer, then CloudBurrow's Backup schedules,
+// DDL and Properties.
 func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID, dbID string) (console.Detail, error) {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)
+	instName := fmt.Sprintf("projects/%s/instances/%s", project, instanceID)
 
 	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
@@ -1247,60 +1283,42 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 	}
 
 	tables := console.Listing{
-		Columns: []string{"Columns", "Indexes", "Parent"}, NameColumn: "Table", Noun: "tables",
+		Columns: []string{"Columns", "Indexes", "Interleaved in"}, NameColumn: "Table name", Noun: "tables",
 		RowsOpenable: true,
 	}
+	var cat spannerCatalog
+	catFailed := ""
 	c, err := newConsoleSpannerClient(ctx, p.endpoint, dbName)
 	if err != nil {
-		tables.Unavailable = "cannot open the database: " + err.Error()
+		catFailed = "cannot open the database: " + err.Error()
+		tables.Unavailable = catFailed
 	} else {
 		defer c.Close()
 		// INFORMATION_SCHEMA is Spanner's own catalogue, so this asks the
-		// database what it holds rather than keeping a second record of it.
-		// PARENT_TABLE_NAME is here because an interleaved table's parent is
-		// part of its identity, not a detail.
-		stmt := spanner.Statement{SQL: `
-			SELECT t.TABLE_NAME,
-			       (SELECT COUNT(1) FROM INFORMATION_SCHEMA.COLUMNS c
-			          WHERE c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA),
-			       (SELECT COUNT(1) FROM INFORMATION_SCHEMA.INDEXES i
-			          WHERE i.TABLE_NAME = t.TABLE_NAME AND i.TABLE_SCHEMA = t.TABLE_SCHEMA),
-			       IFNULL(t.PARENT_TABLE_NAME, '')
-			FROM INFORMATION_SCHEMA.TABLES t
-			WHERE t.TABLE_SCHEMA = ''
-			ORDER BY t.TABLE_NAME`}
-		iter := c.Single().Query(ctx, stmt)
-		defer iter.Stop()
-		for {
-			row, err := iter.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				tables.Unavailable = "reading the schema: " + err.Error()
-				break
-			}
-			var table, parent string
-			var columns, indexes int64
-			if err := row.Columns(&table, &columns, &indexes, &parent); err != nil {
-				tables.Unavailable = "decoding the schema: " + err.Error()
-				break
-			}
+		// database what it holds rather than keeping a second record of it,
+		// in the database's own dialect.
+		cat = readSpannerCatalog(ctx, c, db.GetDatabaseDialect().String())
+		if e := cat.Errors["tables"]; e != "" {
+			tables.Unavailable = "reading the schema: " + e
+		}
+		perTable := map[string]int{}
+		for _, ix := range cat.Indexes {
+			perTable[ix[0]]++
+		}
+		for _, t := range cat.Tables {
 			tables.Items = append(tables.Items, console.Resource{
-				Name: table,
+				Name: t.Name,
 				Fields: map[string]string{
-					"Columns": fmt.Sprint(columns),
-					"Indexes": fmt.Sprint(indexes),
-					"Parent":  orDash(parent),
+					"Columns":        fmt.Sprint(len(t.Columns)),
+					"Indexes":        fmt.Sprint(perTable[t.Name]),
+					"Interleaved in": orDash(t.Parent),
 				},
 			})
 		}
 		tables.Total = len(tables.Items)
 	}
 
-	// The whole schema as Spanner states it. A table list says what exists; the
-	// DDL says how it was defined — the constraints, the interleaving and the
-	// key order that a per-table view has to reassemble from the catalogue.
+	// The whole schema as Spanner states it.
 	ddl := console.Section{ID: "ddl", Label: "DDL", Kind: console.KindText}
 	if statements, err := dbAdmin.GetDatabaseDdl(ctx,
 		&databasepb.GetDatabaseDdlRequest{Database: dbName}); err != nil {
@@ -1316,17 +1334,45 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 		created = t.AsTime().Format(time.RFC3339)
 	}
 	dbSections := spannerDatabaseBackupSections(ctx, dbAdmin, instanceID, dbID, dbName)
+	dbSections[1].Label = "Roles"
 
+	// Backup/Restore: this database's backups, each restorable from its
+	// row, with Create backup at the top of the tab.
+	backups := spannerBackupListing(ctx, dbAdmin, instanceID, instName)
+	mine := backups.Items[:0:0]
+	for _, b := range backups.Items {
+		if b.Fields["Database"] == dbID {
+			b.Actions = append([]console.Action{spannerRestoreAction()}, b.Actions...)
+			mine = append(mine, b)
+		}
+	}
+	backups.Items, backups.Total = mine, len(mine)
+	if len(mine) == 0 {
+		backups.Note = "No backups of " + dbID + " yet: Create backup takes one of its schema and rows."
+	}
+
+	catalog := spannerCatalogSections(cat, catFailed)
 	return console.Detail{
+		SideNav: true,
 		Summary: []console.Property{
-			{Label: "State", Value: db.GetState().String()},
+			{Label: "Dialect", Value: spannerDialectOf(db)},
 			{Label: "Instance", Value: instanceID},
 			{Label: "Tables", Value: fmt.Sprint(tables.Total)},
-			{Label: "Dialect", Value: db.GetDatabaseDialect().String()},
 			{Label: "Created", Value: created},
+			{Label: "State", Value: db.GetState().String()},
 		},
 		Sections: []console.Section{
-			{ID: "tables", Label: "Tables", Listing: tables},
+			{ID: "tables", Label: "Overview", Listing: tables},
+			{ID: "studio", Label: "Spanner Studio", Kind: console.KindStudio},
+			catalog[0], catalog[1], catalog[2], catalog[3],
+			dbSections[1],
+			{ID: "backup-restore", Label: "Backup/Restore", Listing: backups,
+				Actions: []console.Action{spannerCreateDatabaseBackupAction()}},
+			dbSections[0],
+			spannerNotLocal("import-export", "Import/Export", "Spanner's imports and exports are Dataflow jobs that read and write Avro or CSV files in Cloud Storage, and CloudBurrow runs no Dataflow."),
+			spannerNotLocal("query-insights", "Query insights", "query insights read SPANNER_SYS query statistics, which the Spanner emulator does not keep."),
+			spannerNotLocal("lock-insights", "Lock insights", "lock insights read SPANNER_SYS lock statistics, which the Spanner emulator does not keep: it runs one transaction at a time."),
+			spannerNotLocal("key-visualizer", "Key Visualizer", "Key Visualizer draws Spanner's key-access heatmaps, which the emulator does not record."),
 			ddl,
 			{
 				ID: "properties", Label: "Properties", Kind: console.KindProperties,
@@ -1335,14 +1381,14 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 					Properties: []console.Property{
 						{Label: "Resource name", Value: db.GetName()},
 						{Label: "State", Value: db.GetState().String()},
-						{Label: "Dialect", Value: db.GetDatabaseDialect().String()},
+						{Label: "Dialect", Value: spannerDialectOf(db)},
 						{Label: "Version retention", Value: orDash(db.GetVersionRetentionPeriod())},
+						{Label: "Encryption", Value: "Google-managed"},
+						{Label: "Deletion protection", Value: yesNo(db.GetEnableDropProtection())},
 						{Label: "Created", Value: created},
 					},
 				}},
 			},
-			dbSections[0],
-			dbSections[1],
 		},
 	}, nil
 }
@@ -1464,11 +1510,23 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 			{Label: "Columns", Value: fmt.Sprint(columns.Total)},
 			{Label: "Indexes", Value: fmt.Sprint(indexes.Total)},
 		},
+		// Google's table page (#1859): Schema, Indexes and Data, whose rows
+		// are inserted, edited and deleted there.
 		Sections: []console.Section{
-			{ID: "columns", Label: "Columns", Listing: columns},
+			{ID: "columns", Label: "Schema", Listing: columns},
 			{ID: "indexes", Label: "Indexes", Listing: indexes},
+			p.spannerTableData(ctx, c, instanceID, dbID, table),
 		},
 	}, nil
+}
+
+// spannerTableData is the Data tab, or why it cannot be drawn.
+func (p spannerProvider) spannerTableData(ctx context.Context, c *spanner.Client, instanceID, dbID, table string) console.Section {
+	cols, err := spannerTableColumns(ctx, c, table)
+	if err != nil {
+		return console.Section{ID: "data", Label: "Data", Unavailable: "reading columns: " + err.Error()}
+	}
+	return spannerDataSection(ctx, c, instanceID, dbID, table, cols)
 }
 
 // QueryHint is the Spanner Studio's contract with the user.
@@ -1676,36 +1734,17 @@ func (p bigtableProvider) Delete(ctx context.Context, project, name string) erro
 	return admin.DeleteTable(ctx, name)
 }
 
-// CreateForm implements console.Creator for Spanner.
+// CreateForm implements console.Creator for Spanner: Google's Instances
+// page creates an instance (#1859); a database is created on its instance's
+// Overview (spannerCreateDatabaseForm).
 func (spannerProvider) CreateForm() (string, []console.Field) {
-	return "Create database", []console.Field{
-		{
-			Name: "instance", Label: "Instance ID", Type: "text", Required: true,
-			Help: "An existing instance, or a new one — it is created when absent, " +
-				"because a database cannot exist without one. The Spanner screen " +
-				"lists the instances this project already has.",
-			Default: "main",
-			Pattern: `^[a-z][a-z0-9\-]{1,62}[a-z0-9]$`,
-		},
-		{
-			Name: "database", Label: "Database ID", Type: "text", Required: true,
-			Help:    "Lowercase letters, digits and hyphens.",
-			Pattern: `^[a-z][a-z0-9\-_]{1,28}[a-z0-9]$`,
-		},
-		{
-			// A textarea, not an input: a CREATE TABLE statement past one
-			// narrow table does not fit on one line, and a single-line box
-			// makes the user edit what they cannot see.
-			Name: "ddl", Label: "First table (DDL)", Type: "textarea",
-			Help: "Optional. One CREATE TABLE statement; the database is created empty without it.",
-		},
-	}
+	return "Create instance", spannerCreateInstanceFields()
 }
 
+// CreateSubmit implements console.CreateSubmitter: the page ends in Create.
+func (spannerProvider) CreateSubmit() string { return "Create" }
+
 // CreateOnPage implements console.PageCreator.
-//
-// Three fields would otherwise be a dialog, but one of them is a DDL
-// statement: the dialog gives it 440px and no room to grow.
 func (spannerProvider) CreateOnPage() bool { return true }
 
 // Create implements console.Creator for Spanner.
@@ -1715,11 +1754,20 @@ func (p spannerProvider) Create(ctx context.Context, project string, values map[
 	}
 	instanceID := strings.TrimSpace(values["instance"])
 	dbID := strings.TrimSpace(values["database"])
+	ctx, cancel := context.WithTimeout(ctx, 2*dbTimeout)
+	defer cancel()
+	// The page's Create instance (#1859). A request naming a database is
+	// the earlier Create database, kept for its callers: it makes the
+	// database, and the instance when absent.
+	if _, ok := values["database"]; !ok {
+		if err := p.createInstance(ctx, project, values); err != nil {
+			return "", err
+		}
+		return instanceID, nil
+	}
 	if instanceID == "" || dbID == "" {
 		return "", fmt.Errorf("an instance ID and a database ID are required")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*dbTimeout)
-	defer cancel()
 
 	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
@@ -1803,7 +1851,7 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 	}
 	switch len(path) {
 	case 1:
-		acts := []console.Action{spannerCreatePartitionAction()}
+		acts := []console.Action{spannerCreateDatabaseForm(), spannerCreatePartitionAction()}
 		acts = append(acts, p.spannerInstanceExtraActions(ctx, project, path[0])...)
 		acts = append(acts, console.Action{ID: "dropinstance", Label: "Delete instance", Destructive: true})
 		if edit, ok := p.spannerEditInstanceAction(ctx, project, path[0]); ok {
@@ -1811,15 +1859,43 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 		}
 		return acts
 	case 2:
-		acts := []console.Action{spannerDDLAction(path[0], path[1]), spannerCreateScheduleAction(), {
-			ID: "dropdatabase", Label: "Drop database", Destructive: true,
-		}}
+		acts := []console.Action{spannerDDLAction(path[0], path[1]), spannerCreateScheduleAction(),
+			spannerCreateDatabaseBackupAction(), {
+				ID: "dropdatabase", Label: "Delete database", Destructive: true,
+			}}
 		if edit, ok := p.spannerDropProtectionAction(ctx, project, path[0], path[1]); ok {
 			acts = append(acts, edit)
 		}
 		return acts
+	case 3:
+		// A table's page: Insert row, with a field per column it can write.
+		return p.spannerInsertRowActions(ctx, project, path)
+	case 4:
+		if path[3] == "rows" {
+			return []console.Action{{ID: "editrow", Label: "Edit row"}, {ID: "deleterow", Label: "Delete row", Destructive: true}}
+		}
 	}
 	return nil
+}
+
+// spannerInsertRowActions are a table page's actions: Insert row.
+func (p spannerProvider) spannerInsertRowActions(ctx context.Context, project string, path []string) []console.Action {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := newConsoleSpannerClient(ctx, p.endpoint, fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, path[0], path[1]))
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	cols, err := spannerTableColumns(ctx, c, path[2])
+	if err != nil || len(cols) == 0 {
+		return nil
+	}
+	fields := spannerRowFields(cols, nil)
+	if len(fields) == 0 {
+		return nil
+	}
+	return []console.Action{{ID: "insertrow", Label: "Insert row", Fields: fields}}
 }
 
 func (p spannerProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
@@ -1831,6 +1907,24 @@ func (p spannerProvider) ActAt(ctx context.Context, project string, path []strin
 
 	if len(path) == 0 && action == spannerCreateInstanceAction {
 		return p.createInstance(ctx, project, values)
+	}
+	switch {
+	case len(path) == 1 && action == spannerCreateDatabaseAction:
+		return p.spannerCreateDatabase(ctx, project, path[0], values)
+	case len(path) == 2 && action == "createdbbackup" && !isSpannerChildPath(path):
+		// The database page's Create backup: the instance's, of this database.
+		v := map[string]string{"database": path[1]}
+		for k, val := range values {
+			if k != "database" {
+				v[k] = val
+			}
+		}
+		return p.ActAt(ctx, project, path[:1], "createbackup", v)
+	case (len(path) == 3 && action == "insertrow") || (len(path) == 4 && path[3] == "rows" && (action == "editrow" || action == "deleterow")):
+		if isSpannerChildPath(path) {
+			return fmt.Errorf("%s is a table's action", action)
+		}
+		return p.spannerRowAct(ctx, project, path, action, values)
 	}
 	if handled, err := p.spannerAdminAct(ctx, project, path, action, values); handled {
 		return err

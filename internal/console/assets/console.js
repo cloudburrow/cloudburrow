@@ -3277,7 +3277,9 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   const queryable = capabilityOf(route.service).query;
-  if (queryable) {
+  // A page with a provider's Studio (Spanner Studio, #1859) has its editor
+  // there, so it has no Query tab of its own.
+  if (queryable && !sections.some((s) => s.kind === "studio")) {
     // The provider may narrow the form to the resource being looked at — a
     // Bigtable table's column families are not a Firestore collection's fields —
     // so the resource's own query spec wins over the service-wide one.
@@ -3381,6 +3383,13 @@ async function renderDetail(view, route, resourcePath) {
       case "query":
         return setChildren(panel,
           queryPane(route, segments, section.query, () => {}));
+      case "studio": {
+        // A provider's workspace in the tab (#1859): Spanner Studio.
+        const draw = STUDIO_SECTIONS[route.service];
+        if (draw) return draw(panel, route, segments, project);
+        return setChildren(panel, emptyState("No studio",
+          "This console has no workspace for this service's Studio section."));
+      }
       case undefined:
       case "":
       case "listing":
@@ -3706,18 +3715,25 @@ async function renderDetail(view, route, resourcePath) {
       announce(`${sections[i].label} selected`);
     };
 
-    strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${name} sections` },
+    // A page whose sections are a left-hand menu (Detail.SideNav, #1859),
+    // as Google's Spanner instance and database pages have them: the same
+    // tablist, drawn down the side, moved through with the up and down
+    // arrows.
+    const side = Boolean(data.sideNav);
+    strip = el("div", { class: "tab-strip" + (side ? " side-nav" : ""), role: "tablist",
+      "aria-label": `${name} sections`, "aria-orientation": side ? "vertical" : null },
       ...tabs);
     // Arrow keys move between tabs, which is what makes a tablist a tablist
     // rather than a row of buttons.
     strip.addEventListener("keydown", (e) => {
-      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1
+      const next = side ? "ArrowDown" : "ArrowRight", prev = side ? "ArrowUp" : "ArrowLeft";
+      const step = e.key === next ? 1 : e.key === prev ? -1
         : e.key === "Home" ? -current : e.key === "End" ? sections.length - 1 - current : 0;
       if (!step && e.key !== "Home" && e.key !== "End") return;
       e.preventDefault();
       select((current + step + sections.length) % sections.length);
     });
-    crumb.append(strip);
+    if (!side) crumb.append(strip);
   }
 
   // What can be done to this resource, on the resource's own page.
@@ -3817,7 +3833,11 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
-  setChildren(view, ...header, panel);
+  if (strip && data.sideNav) {
+    setChildren(view, ...header, el("div", { class: "side-nav-layout" }, strip, panel));
+  } else {
+    setChildren(view, ...header, panel);
+  }
   drawPanel();
   announce(`${data.title || name} opened`);
 }
@@ -5355,10 +5375,24 @@ function buildCreateForm(spec) {
     const unavailable = unavailableId
       ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;
 
+    // A textarea's options are templates (#1859): Google's Create database
+    // has Show DDL templates, each inserted into the schema box.
+    const templates = f.type === "textarea" && (f.options || []).length
+      ? el("details", { class: "form-templates" },
+          el("summary", { text: "Show DDL templates" }),
+          ...f.options.map((t, i) => el("div", { class: "form-template" },
+            el("pre", { class: "mono", text: t }),
+            el("button", { type: "button", class: "secondary", id: `${id}-template-${i}`, text: "Insert",
+              onclick: () => {
+                control.value = control.value.trim() ? `${control.value.trim()}\n\n${t}` : t;
+                control.dispatchEvent(new Event("input", { bubbles: true }));
+                control.focus();
+              } }))))
+      : null;
     const node = isCheck
       ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
           el("div", { class: "check-line" }, control, label), help, unavailable, error)
-      : el("div", { class: "form-row" }, label, control, help, error);
+      : el("div", { class: "form-row" }, label, control, templates, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
@@ -13869,4 +13903,183 @@ async function openIAMEditPanel(data, row, rolesNow, onDone) {
       onDone();
     },
   });
+}
+
+// --- Spanner Studio (#1859) -------------------------------------------------
+//
+// A database's Spanner Studio, as Google's console draws it
+// (https://docs.cloud.google.com/spanner/docs/create-query-database-console):
+// the Explorer pane (Tables, each with its columns and View actions: Preview
+// data and Insert data; Views, Indexes, Change streams, Sequences), editor
+// tabs ("Untitled query", New tab), Run, Explain and Clear, and the
+// Results and Explanation tabs under the editor. Its calls are the
+// provider's Studio (POST /api/studio/spanner). A statement that changes
+// data or schema runs after a confirmation that names the database.
+
+const STUDIO_SECTIONS = { spanner: renderSpannerStudio };
+
+function renderSpannerStudio(panel, route, segments, project) {
+  const [instance, database] = segments;
+  const call = (name, body = {}) => send(
+    `/api/studio/spanner?project=${encodeURIComponent(project)}&call=${name}`, "POST",
+    { instance, database, ...body });
+  const key = `cb.spanner.studio.${project}.${instance}.${database}`;
+  let tabs;
+  try { tabs = JSON.parse(sessionStorage.getItem(key) || "null"); } catch { tabs = null; }
+  if (!Array.isArray(tabs) || !tabs.length) tabs = [{ title: "Untitled query", sql: "" }];
+  let current = 0;
+  const save = () => { try { sessionStorage.setItem(key, JSON.stringify(tabs)); } catch { /* per-tab only */ } };
+
+  const explorer = el("nav", { class: "spanner-explorer", id: "spanner-explorer", "aria-label": "Explorer" },
+    el("h3", { text: "Explorer" }), loadingState(3, { what: "explorer" }));
+  const strip = el("div", { class: "tab-strip spanner-editor-tabs", role: "tablist", "aria-label": "Editor tabs" });
+  const editor = el("textarea", { class: "mono spanner-editor", id: "spanner-editor", rows: "10", spellcheck: "false",
+    "aria-label": "Query editor", placeholder: "SELECT * FROM ..." });
+  const run = el("button", { class: "primary", id: "spanner-run", type: "button", text: "Run" });
+  const explain = el("button", { class: "secondary", id: "spanner-explain", type: "button", text: "Explain" });
+  const clear = el("button", { class: "secondary", id: "spanner-clear", type: "button", text: "Clear" });
+  const resultTabs = el("div", { class: "tab-strip spanner-result-tabs", role: "tablist", "aria-label": "Query results" });
+  const results = el("div", { class: "spanner-results", id: "spanner-results", role: "tabpanel" });
+  const last = { results: null, explanation: null };
+  let resultTab = "results";
+
+  const drawResultTabs = () => {
+    setChildren(resultTabs, ...[["results", "Results"], ["explanation", "Explanation"]].map(([id, label]) =>
+      el("button", { class: "tab" + (resultTab === id ? " is-selected" : ""), role: "tab", id: `spanner-tab-${id}`,
+        "aria-selected": resultTab === id ? "true" : "false", text: label,
+        onclick: () => { resultTab = id; drawResultTabs(); drawResults(); } })));
+  };
+  const drawResults = () => {
+    const r = last[resultTab];
+    if (!r) {
+      return setChildren(results, el("p", { class: "unavailable",
+        text: resultTab === "results" ? "Run a statement to see its results." : "Explain a query to see its query plan." }));
+    }
+    if (r.error) return setChildren(results, el("p", { class: "form-error", role: "alert", text: r.error }));
+    if (resultTab === "explanation") {
+      if (!(r.plan || []).length) return setChildren(results, el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." }));
+      return setChildren(results, el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
+        el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") }))));
+    }
+    if (r.kind !== "query") {
+      return setChildren(results, el("p", { class: "spanner-message", id: "spanner-message", text: `${r.message || "Done."} ${r.elapsed ? `(${r.elapsed})` : ""}` }));
+    }
+    const cols = r.columns || [];
+    setChildren(results,
+      el("p", { class: "spanner-message", id: "spanner-message", text: `${(r.rows || []).length} rows in ${r.elapsed || "—"}. ${r.message || ""}` }),
+      el("div", { class: "table-wrap" }, el("table", { id: "spanner-results-table" },
+        el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { text: c })))),
+        el("tbody", {}, ...(r.rows || []).map((row) => el("tr", {}, ...row.map((v) => el("td", { class: "mono", text: v }))))))));
+  };
+
+  const drawTabs = () => {
+    const buttons = tabs.map((t, i) => el("span", { class: "spanner-editor-tab" },
+      el("button", { class: "tab" + (i === current ? " is-selected" : ""), role: "tab", type: "button",
+        "aria-selected": i === current ? "true" : "false", text: t.title,
+        onclick: () => { current = i; editor.value = tabs[i].sql; drawTabs(); } }),
+      tabs.length > 1 ? el("button", { class: "icon-button", type: "button", "aria-label": `Close ${t.title}`, text: "×",
+        onclick: () => { tabs.splice(i, 1); current = Math.min(current, tabs.length - 1); editor.value = tabs[current].sql; save(); drawTabs(); } }) : null));
+    setChildren(strip, ...buttons, el("button", { class: "secondary", id: "spanner-new-tab", type: "button", text: "New tab",
+      onclick: () => openTab("") }));
+  };
+  const openTab = (sql, title = "Untitled query") => {
+    tabs.push({ title, sql });
+    current = tabs.length - 1;
+    editor.value = sql;
+    save();
+    drawTabs();
+    editor.focus();
+  };
+  editor.addEventListener("input", () => { tabs[current].sql = editor.value; save(); });
+
+  const execute = async (write = false) => {
+    const sql = editor.value.trim();
+    if (!sql) return;
+    setBusy(run, true);
+    resultTab = "results"; drawResultTabs();
+    setChildren(results, el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
+    try {
+      const res = await call("run", { sql, write });
+      if (res.confirm) {
+        setBusy(run, false);
+        setChildren(results);
+        if (await bqConfirmWrite(sql, res.confirm)) return execute(true);
+        last.results = null; drawResults();
+        return;
+      }
+      last.results = res;
+      if (res.kind !== "query") loadExplorer();
+      announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
+    } catch (err) {
+      last.results = { error: err.message };
+    } finally {
+      setBusy(run, false);
+    }
+    drawResults();
+  };
+  run.addEventListener("click", () => execute());
+  explain.addEventListener("click", async () => {
+    const sql = editor.value.trim();
+    if (!sql) return;
+    setBusy(explain, true);
+    try {
+      last.explanation = await call("explain", { sql });
+    } catch (err) {
+      last.explanation = { error: err.message };
+    } finally {
+      setBusy(explain, false);
+    }
+    resultTab = "explanation"; drawResultTabs(); drawResults();
+  });
+  clear.addEventListener("click", () => { editor.value = ""; tabs[current].sql = ""; save(); editor.focus(); });
+
+  const quote = (dialect, n) => (dialect === "POSTGRESQL" ? `"${n.replaceAll('"', '""')}"` : `\`${n.replaceAll("`", "\\`")}\``);
+  const group = (title, items, row) => el("details", { class: "spanner-explorer-group", open: true },
+    el("summary", { text: `${title} (${items.length})` }),
+    items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${title.toLowerCase()}` }));
+  const loadExplorer = async () => {
+    try {
+      const cat = await call("explorer");
+      const tableRow = (t) => el("li", { class: "spanner-explorer-table" },
+        el("details", {},
+          el("summary", {}, el("span", { class: "mono", text: t.name }),
+            bqMenu(`View actions for ${t.name}`, [
+              { label: "Preview data", run: () => {
+                openTab(`SELECT * FROM ${quote(cat.dialect, t.name)} LIMIT 100;`, t.name);
+                execute();
+              } },
+              { label: "Insert data", run: () => {
+                const cols = t.columns.map((c) => quote(cat.dialect, c[0]));
+                openTab(`INSERT INTO ${quote(cat.dialect, t.name)} (${cols.join(", ")})\nVALUES (${t.columns.map((c) => `/* ${c[1]} */`).join(", ")});`, `Insert into ${t.name}`);
+              } },
+              { label: "Open table page", run: () => navigate(detailHref(route, [instance, database, t.name])) },
+            ])),
+          el("ul", { class: "spanner-columns" }, ...t.columns.map((c) =>
+            el("li", {}, el("span", { class: "mono", text: c[0] }), el("span", { class: "unavailable", text: ` ${c[1]}` }))))));
+      setChildren(explorer, el("h3", { text: "Explorer" }),
+        el("p", { class: "spanner-explorer-db mono", text: `${database} (${cat.dialect === "POSTGRESQL" ? "PostgreSQL" : "GoogleSQL"})` }),
+        group("Tables", cat.tables || [], tableRow),
+        group("Views", cat.views || [], (v) => el("li", { class: "mono", text: v[0] })),
+        group("Indexes", cat.indexes || [], (i) => el("li", { class: "mono", text: `${i[1]} (${i[0]})` })),
+        group("Change streams", cat.changeStreams || [], (c) => el("li", { class: "mono", text: c[0] })),
+        group("Sequences", cat.sequences || [], (q) => el("li", { class: "mono", text: q[0] })),
+        ...Object.entries(cat.errors || {}).map(([k, v]) => el("p", { class: "unavailable", text: `${k}: ${v}` })));
+    } catch (err) {
+      setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+
+  editor.value = tabs[current].sql;
+  drawTabs();
+  drawResultTabs();
+  drawResults();
+  setChildren(panel, el("div", { class: "spanner-studio" },
+    explorer,
+    el("div", { class: "spanner-workspace" },
+      strip,
+      editor,
+      el("div", { class: "action-bar spanner-editor-actions" }, run, explain, clear),
+      resultTabs,
+      results)));
+  loadExplorer();
 }
