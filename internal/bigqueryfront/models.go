@@ -285,7 +285,8 @@ func (md bqModel) resource(full bool) map[string]any {
 			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
 			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER",
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
-			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW"}[md.Options.ModelType],
+			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW",
+			"CONTRIBUTION_ANALYSIS": "CONTRIBUTION_ANALYSIS"}[md.Options.ModelType],
 	}
 	if md.Options.AutoML != nil {
 		res["modelType"] = md.Options.AutoML.Type // modelautoml.go, #1776
@@ -393,6 +394,8 @@ func (md bqModel) resource(full bool) map[string]any {
 		metrics = map[string]any{"arimaForecastingMetrics": map[string]any{"arimaSingleModelForecastingMetrics": single}}
 	case "MATRIX_FACTORIZATION":
 		opts, metrics = md.mfResource(res)
+	case "CONTRIBUTION_ANALYSIS":
+		opts = md.contribResource() // modelcontrib.go, #1929
 	case "AUTOENCODER":
 		opts, metrics = md.autoencoderResource(res)
 	case "KMEANS":
@@ -748,13 +751,12 @@ var unsupportedModelTypes = map[string]string{
 	// TensorFlow runtime. An ONNX model runs on the ONNX Runtime of the
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
-	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
 }
 
 // refusedModelType is the 501 of a model type CloudBurrow refuses.
 func refusedModelType(typ, why string) string {
 	return "Not implemented here: model_type " + typ + ": " + why +
-		". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, DNN_LINEAR_COMBINED_REGRESSOR / DNN_LINEAR_COMBINED_CLASSIFIER, AUTOENCODER, AUTOML_REGRESSOR / AUTOML_CLASSIFIER and ARIMA_PLUS models. Nothing was run."
+		". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, DNN_LINEAR_COMBINED_REGRESSOR / DNN_LINEAR_COMBINED_CLASSIFIER, AUTOENCODER, AUTOML_REGRESSOR / AUTOML_CLASSIFIER, ARIMA_PLUS, ARIMA_PLUS_XREG, CONTRIBUTION_ANALYSIS and TRANSFORM_ONLY models. Nothing was run."
 }
 
 // parseModelDDL reads stmt as CREATE MODEL or DROP MODEL. isModel is
@@ -1069,6 +1071,12 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 		}
 		bad := func() (int, string) { return 400, "Invalid value for option " + name }
 		o.Set = append(o.Set, name)
+		if c, m, ok := parseContribOption(name, val, o); ok { // modelcontrib.go, #1929
+			if c != 0 {
+				return c, m
+			}
+			continue
+		}
 		if c, m, ok := parseDNNOption(name, val, o); ok { // modeldnn.go, #1548
 			if c != 0 {
 				return c, m
@@ -1605,6 +1613,7 @@ var modelTypeOptions = map[string][]string{
 		"batch_size", "dropout", "warm_start"},
 	"AUTOENCODER": {"optimizer", "learn_rate", "activation_fn", "batch_size", "dropout", "hidden_units", "early_stop", "min_rel_progress",
 		"max_iterations", "warm_start", "l1_reg_activation"},
+	"CONTRIBUTION_ANALYSIS": contribOptionNames, // modelcontrib.go, #1929
 	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "wals_alpha", "max_iterations", "early_stop",
 		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
@@ -1663,6 +1672,8 @@ func checkModelOptions(o mlOptions) (int, string) {
 		return 400, "category_encoding_method " + o.CategoryEncoding + " is not supported for model type " + o.ModelType
 	}
 	switch o.ModelType {
+	case "CONTRIBUTION_ANALYSIS":
+		return checkContribOptions(o) // modelcontrib.go, #1929
 	case "KMEANS":
 		if (o.KMeansInit == "CUSTOM") != (o.KMeansInitCol != "") {
 			return 400, "kmeans_init_col must be set exactly when kmeans_init_method is CUSTOM"

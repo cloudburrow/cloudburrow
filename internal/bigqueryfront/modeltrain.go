@@ -127,6 +127,9 @@ type mlOptions struct {
 	AutoML      *automlOptions `json:"automl,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
 	TS tsOptions `json:"timeSeries"`
+	// Contrib are a CONTRIBUTION_ANALYSIS model's options
+	// (modelcontrib.go, #1929).
+	Contrib *contribOptions `json:"contribution,omitempty"`
 	// Set are the options CREATE MODEL gave, lower case.
 	Set []string `json:"set,omitempty"`
 }
@@ -277,6 +280,9 @@ type mlTrained struct {
 	// Anomaly is a KMEANS, PCA or AUTOENCODER model's training rows' metrics
 	// for ML.DETECT_ANOMALIES (modelanomaly.go, #1929).
 	Anomaly *anomalyBaseline `json:"anomaly,omitempty"`
+	// Contrib is a CONTRIBUTION_ANALYSIS model's insights
+	// (modelcontrib.go, #1929).
+	Contrib *contribTrained `json:"contrib,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -351,6 +357,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 		return trainXreg(opts, cols, rows)
 	case "TRANSFORM_ONLY":
 		return trainTransformOnly(cols, rows) // modeltransformonly.go, #1929
+	case "CONTRIBUTION_ANALYSIS":
+		return trainContrib(opts, cols, rows) // modelcontrib.go, #1929
 	case "AUTOML_REGRESSOR", "AUTOML_CLASSIFIER":
 		return trainAutoML(opts, cols, rows, fp) // modelautoml.go, #1776
 	}
