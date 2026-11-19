@@ -129,7 +129,8 @@ func firestoreValueFields(requireField bool, typ, value string) []console.Field 
 		if fields[i].Name == "type" {
 			fields[i].Type = "select"
 			fields[i].Options = firestoreTypes
-			fields[i].Help = ""
+			fields[i].Pattern = ""
+			fields[i].Help = "The value's type, as Google's Add field offers them."
 		}
 	}
 	return fields
