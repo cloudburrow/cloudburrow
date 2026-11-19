@@ -139,7 +139,7 @@ func (c *clusters) serverCA(ctx context.Context, r *clusterRecord, in *clusterpb
 		r.TransitCA, r.TransitCAKey = strings.Join(certs, ""), ""
 	default:
 		var err error
-		if r.TransitCA, r.TransitCAKey, err = newCA(r.Name[strings.LastIndex(r.Name, "/")+1:], c.now()); err != nil {
+		if r.TransitCA, r.TransitCAKey, err = newCA(r.Name[strings.LastIndex(r.Name, "/")+1:]); err != nil {
 			return apierror.Internal(err, "create the CA of cluster %s", r.Name)
 		}
 	}
@@ -171,7 +171,7 @@ func (c *clusters) sharedCA(project, region string) (string, string, error) {
 			}
 		}
 	}
-	ca, key, err := newCA("shared-"+region, c.now())
+	ca, key, err := newCA("shared-" + region)
 	if err != nil {
 		return "", "", apierror.Internal(err, "create the shared CA of %s", region)
 	}

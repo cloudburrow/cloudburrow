@@ -702,7 +702,7 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		return nil, err
 	}
 	if tlsOn {
-		if r.TransitCA, r.TransitCAKey, err = newCA(id, now); err != nil {
+		if r.TransitCA, r.TransitCAKey, err = newCA(id); err != nil {
 			return nil, apierror.Internal(err, "create the CA of instance %s", name)
 		}
 	}

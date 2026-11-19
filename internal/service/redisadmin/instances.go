@@ -155,6 +155,10 @@ type record struct {
 	// PreviousCAs are the CAs a server CA rotation replaced, PEM, still
 	// listed in server_ca_certs until they expire (#1463).
 	PreviousCAs string `json:"previousCas,omitempty"`
+	// CACreated is when TransitCA was made, by the Memorystore clock: its
+	// rotation is due five years on by that clock, while the certificate's
+	// own validity follows the wall clock (newCA).
+	CACreated time.Time `json:"caCreated,omitzero"`
 
 	// CMEK (#1463): CustomerManagedKey is customer_managed_key, WrappedKey
 	// the data key it wrapped, and Sealed the secrets above sealed with
@@ -556,11 +560,11 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 		r.Persistence = pc
 	}
 	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
-		cert, key, err := newCA(name, c.now())
+		cert, key, err := newCA(name)
 		if err != nil {
 			return nil, apierror.Internal(err, "generate the instance's CA")
 		}
-		r.TransitCA, r.TransitCAKey = cert, key
+		r.TransitCA, r.TransitCAKey, r.CACreated = cert, key, c.now()
 	}
 	if key := in.GetCustomerManagedKey(); key != "" {
 		if err := checkKey(key, m[2]); err != nil {

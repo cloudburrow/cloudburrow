@@ -100,7 +100,12 @@ func encodeKey(k *ecdsa.PrivateKey) (string, error) {
 }
 
 // newCA is a fresh CA for the instance name: certificate and key, as PEM.
-func newCA(name string, now time.Time) (cert, key string, err error) {
+// Its validity starts at the wall clock, not the Memorystore clock
+// (clock:advance, #1909): the TLS clients and servers that check it read
+// the wall clock, and a CA issued a week ahead of it is "not yet valid"
+// to every one of them.
+func newCA(name string) (cert, key string, err error) {
+	now := time.Now()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return "", "", err
