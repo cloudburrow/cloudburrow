@@ -1,9 +1,11 @@
 package embedding
 
 import (
+	"errors"
 	"image"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -195,5 +197,87 @@ func TestVideoFramesAndPrompt(t *testing.T) {
 	ip, err := PatchVideoFrame(image.NewRGBA(image.Rect(0, 0, 1280, 720)))
 	if err != nil || ip.SoftTokens > videoSoftTokens || ip.SoftTokens < videoSoftTokens-20 {
 		t.Errorf("a 720p frame is %d soft tokens (%v), want at most %d", ip.SoftTokens, err, videoSoftTokens)
+	}
+}
+
+// TestVideoOver8KIsDecoded (#1651): a frame over 8K UHD, up to Google's
+// 16384 x 16384 image limit, is decoded and patched in every codec. One
+// blue 8704x4352 frame each, made with ffmpeg 9 (libx264, libx265,
+// libvpx-vp9, libsvtav1 -preset 12): testdata/over8k-*.mp4.
+func TestVideoOver8KIsDecoded(t *testing.T) {
+	for _, c := range []string{"h264", "h265", "vp9", "av1"} {
+		frames, err := DecodeVideoPatched("video/mp4", readTestdata(t, "over8k-"+c+".mp4"), VideoOptions{})
+		if err != nil || len(frames) != 1 {
+			t.Fatalf("%s: %d frames, %v", c, len(frames), err)
+		}
+		if b := frames[0].Bounds(); b.Dx() != 8704 || b.Dy() != 4352 {
+			t.Errorf("%s: %v, want 8704x4352", c, b)
+		}
+		ip, err := PatchVideoFrame(frames[0])
+		if err != nil || ip.SoftTokens == 0 || ip.SoftTokens > videoSoftTokens {
+			t.Fatalf("%s: %d soft tokens, %v", c, ip.SoftTokens, err)
+		}
+		// Blue: the first patch's first pixel.
+		if r, g, b := ip.Pixels[0], ip.Pixels[1], ip.Pixels[2]; b < 0.8 || r > 0.2 || g > 0.2 {
+			t.Errorf("%s: first pixel %.2f %.2f %.2f, want blue", c, r, g, b)
+		}
+	}
+	if err := frameTooLarge(16385, 16); !errors.Is(err, ErrNotDecoded) || !strings.Contains(err.Error(), "16385x16") {
+		t.Errorf("a 16385-wide frame: %v, want ErrNotDecoded naming it", err)
+	}
+	if err := frameTooLarge(16384, 16384); err != nil {
+		t.Errorf("a 16384x16384 frame: %v", err)
+	}
+}
+
+// TestPatchedVideoMatchesFullFrames (#1651): DecodeVideoPatched's patches
+// are exactly PatchVideoFrame of DecodeVideo's full-size frames, as
+// VideoFrames picks them (72 frames at 24 fps keep 32), in every codec.
+func TestPatchedVideoMatchesFullFrames(t *testing.T) {
+	for _, c := range []struct {
+		file, mt string
+		opt      VideoOptions
+	}{
+		{"turtle-h264.mp4", "video/mp4", VideoOptions{FPS: 24}},
+		{"turtle-h265.mov", "video/quicktime", VideoOptions{FPS: 24}},
+		{"turtle-vp9.mp4", "video/mp4", VideoOptions{}},
+		{"turtle-av1.mp4", "video/mp4", VideoOptions{}},
+		{"turtle-vp9-422-12bit.mp4", "video/mp4", VideoOptions{}},
+		{"turtle-h265-gray10.mp4", "video/mp4", VideoOptions{}},
+		{"turtle-av1-10bit.mp4", "video/mp4", VideoOptions{}},
+		{"turtle-vp9-gbrp.mp4", "video/mp4", VideoOptions{}},
+	} {
+		t.Run(c.file, func(t *testing.T) {
+			t.Parallel()
+			data := readTestdata(t, c.file)
+			full, err := DecodeVideo(c.mt, data, c.opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			patched, err := DecodeVideoPatched(c.mt, data, c.opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(patched) != len(full) {
+				t.Fatalf("%d patched frames, %d full", len(patched), len(full))
+			}
+			want, got := VideoFrames(full), VideoFrames(patched)
+			for i := range want {
+				a, err := PatchVideoFrame(want[i])
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := PatchVideoFrame(got[i])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(a.Pixels, b.Pixels) || !slices.Equal(a.Positions, b.Positions) || a.NumPatches != b.NumPatches || a.SoftTokens != b.SoftTokens {
+					t.Fatalf("frame %d: the patched frame differs from the full frame's patches", i)
+				}
+				if got[i].Bounds() != want[i].Bounds() {
+					t.Errorf("frame %d: %v, want %v", i, got[i].Bounds(), want[i].Bounds())
+				}
+			}
+		})
 	}
 }

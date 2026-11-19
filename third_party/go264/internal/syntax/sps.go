@@ -593,6 +593,11 @@ func (s *SPS) MaxDpbFrames() int {
 		return 1
 	}
 	n := s.maxDpbMbs() / frameMbs
+	// A frame larger than level 6.2's MaxFS (CloudBurrow, #1651): no level
+	// sizes its DPB, so it holds max_num_ref_frames, as ffmpeg's does.
+	if frameMbs > 139264 && n < int(s.MaxNumRefFrames) {
+		n = int(s.MaxNumRefFrames)
+	}
 	if n > maxBufferedFrames {
 		n = maxBufferedFrames
 	}

@@ -801,6 +801,14 @@
         "verification": "commit-sha",
         "notes": "Vertex AI EmbedContent's MP3 audio (#1721, internal/embedding/mp3.go), approved by the maintainer 2026-11-17: a pure Go MPEG-1/2 Layer III decoder, no cgo. Copied into third_party/go-mp3 (import path github.com/cloudburrow/cloudburrow/third_party/go-mp3; the module's non-test sources, fetched through the go command at this sum, imports rewritten) and extended there to MPEG-2.5, 8 to 12 kHz (#1734: its sample rates, scalefactor bands and short-block regions, checked against ffmpeg), which upstream refuses and has not released since 2022 (third_party/go-mp3/PROVENANCE.md). No longer required in go.mod (docs/upstream-evaluation.md)."
       },
+      "goJPEG": {
+        "module": "image/jpeg",
+        "version": "go1.27.4",
+        "source": "https://go.googlesource.com/go/+/refs/tags/go1.27.4/src/image/jpeg",
+        "license": "BSD-3-Clause",
+        "verification": "go-toolchain",
+        "notes": "Vertex AI EmbedContent's arithmetic-coded and 12-bit JPEG images (#1651). Go's own (Google-authored) image/jpeg decoder, reader.go, scan.go, huffman.go and dct.go copied from the go1.27.4 toolchain's GOROOT into third_party/gojpeg (import path github.com/cloudburrow/cloudburrow/third_party/gojpeg) and extended there (ext.go, written from ITU-T T.81): arithmetic coding (SOF9, SOF10, DAC) and 12-bit sample precision (SOF1, SOF2, SOF9, SOF10). Pure Go, no cgo. Fixtures written by libjpeg-turbo 3.2.1's cjpeg and jpegtran, checked against its djpeg (third_party/gojpeg/PROVENANCE.md)."
+      },
       "goAAC": {
         "module": "github.com/arabian9ts/aac-go",
         "version": "v0.1.0",

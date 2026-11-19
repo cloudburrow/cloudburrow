@@ -34,5 +34,9 @@ stereo, with start and short blocks, decode to ffmpeg's samples within one 16-bi
 two a channel (stereo, upstream's float32 mid/side), `internal/embedding`'s
 `TestDecodeMPEG25MP3`; the MPEG-1 and MPEG-2 tests are unchanged.
 
+`polyphase/polyphase.go` (#1651) is `internal/frame`'s polyphase synthesis (the matrixing and the
+`synthDtbl` window, unchanged) exported for `internal/embedding/mp2.go`'s MPEG Layer II decoder,
+returning float samples instead of 16-bit ones.
+
 To update: copy the new version's sources the same way, reapply the changes above, record the
 version, sum and commit in `dependencies.json`, and run `go test ./internal/embedding/`.

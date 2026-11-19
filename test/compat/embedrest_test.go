@@ -38,10 +38,10 @@ import (
 //     (va-pcm51.mov), which was taken as pairs of channels before.
 //
 // And valid input this build does not serve is UNIMPLEMENTED, not
-// INVALID_ARGUMENT: an HTTP file_uri (an instance fetches nothing), a 5-bit
-// IMA ADPCM WAV and a QuickTime IMA ADPCM (ima4) audio track (3-bit IMA
-// ADPCM and µ-law tracks, which stood here, decode since #1651's second
-// round).
+// INVALID_ARGUMENT: an HTTP file_uri (an instance fetches nothing), a
+// 3-channel Microsoft ADPCM WAV and a QuickTime IMA ADPCM (ima4) audio track
+// (3- and 5-bit IMA ADPCM and µ-law tracks, which stood here, decode since
+// #1651's later rounds).
 func TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -139,7 +139,7 @@ func TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient
 	}{
 		{"an HTTP file_uri", false, &aiplatformpb.Part{Data: &aiplatformpb.Part_FileData{FileData: &aiplatformpb.FileData{
 			MimeType: "audio/wav", FileUri: "https://storage.googleapis.com/b/jfk.wav"}}}, "HTTP URLs are not fetched"},
-		{"a 5-bit IMA ADPCM WAV", false, inline("audio/wav", adpcmWAVFile()), "5-bit IMA ADPCM"},
+		{"a 3-channel Microsoft ADPCM WAV", false, inline("audio/wav", adpcmWAVFile()), "Microsoft ADPCM of 3 channels"},
 		{"an ima4 QuickTime audio track", true, inline("video/quicktime", embeddingTestdata(t, "va-ima4.mov")), "ima4"},
 	} {
 		_, err := embed(c.track, c.part)
@@ -194,10 +194,11 @@ func stereoAs51(t *testing.T, b []byte) []byte {
 	return append(append([]byte("RIFF"), binary.LittleEndian.AppendUint32(nil, uint32(len(w)))...), w...)
 }
 
-// adpcmWAVFile is a mono 5-bit IMA ADPCM WAV (format 0x11), valid and not
-// decoded here (3- and 4-bit IMA and Microsoft ADPCM are, #1651).
+// adpcmWAVFile is a 3-channel Microsoft ADPCM WAV (format 2), valid and not
+// decoded here (2- to 5-bit IMA and mono and stereo Microsoft ADPCM are,
+// #1651).
 func adpcmWAVFile() []byte {
-	f := []byte{0x11, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x5e, 0, 0, 0, 1, 5, 0}
+	f := []byte{2, 0, 3, 0, 0x80, 0x3e, 0, 0, 0, 0x5e, 0, 0, 0, 1, 4, 0}
 	w := append([]byte("WAVEfmt "), byte(len(f)), 0, 0, 0)
 	w = append(append(w, f...), 'd', 'a', 't', 'a', 64, 0, 0, 0)
 	w = append(w, make([]byte, 64)...)
@@ -380,4 +381,77 @@ func TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredict
 		t.Errorf("3-bit IMA ADPCM against A-law: cosine %.4f, want at least 0.97", c3)
 	}
 	t.Logf("3-bit IMA ADPCM: %d tokens, cosine %.6f to the A-law clip", ima3.GetUsageMetadata().GetPromptTokenCount(), c3)
+}
+
+// covers: google.cloud.aiplatform.v1.PredictionService/EmbedContent
+//
+// TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient
+// (#1651) embeds, through the official aiplatform PredictionClient's
+// EmbedContent, WAVs that were UNIMPLEMENTED before, each of
+// testdata/jfk-alaw.wav's clip:
+//
+//   - 2- and 5-bit IMA ADPCM (jfk-ima2.wav, jfk-ima5.wav, 256-byte blocks),
+//     written by a scratch encoder, since ffmpeg writes neither; ffmpeg 9
+//     decodes each as this build does (internal/embedding's
+//     TestDecodeADPCMWAV);
+//   - MP3 in a WAV, WAVE_FORMAT_MPEGLAYER3 (jfk-mp3.wav, `ffmpeg -i
+//     jfk-alaw.wav -c:a libmp3lame -b:a 64k -f wav`), decoded whole as
+//     ffmpeg's wav demuxer does (TestDecodeMP3WAV);
+//
+// each the A-law clip's token count (up to 1 more for the last ADPCM
+// block's padding, 2 more for the MP3 frames' delay) and within cosine
+// 0.97 of its vector. (An 8704x4352 video, UNIMPLEMENTED here before, is
+// embedded since by TestEmbedContentEmbeds16KVideoThroughThePredictionClient.)
+func TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient(t *testing.T) {
+	h := New(t)
+	pc := predictionClientAt(t, h, EnvEmbeddings)
+	addr := consoleAddr(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	read := func(f string) []byte {
+		b, err := os.ReadFile("testdata/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	loadEmbeddingModel2(t, ctx, addr)
+	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel2
+	embed := func(what string, data []byte) *aiplatformpb.EmbedContentResponse {
+		t.Helper()
+		r, err := pc.EmbedContent(ctx, &aiplatformpb.EmbedContentRequest{
+			Model: proto.String(name),
+			Content: &aiplatformpb.Content{Role: "user", Parts: []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{
+				InlineData: &aiplatformpb.Blob{MimeType: "audio/wav", Data: data}}}}},
+		})
+		if err != nil {
+			t.Fatalf("%s: EmbedContent: %v", what, err)
+		}
+		if v := r.GetEmbedding().GetValues(); len(v) != 768 || math.Abs(norm(v)-1) > 1e-3 {
+			t.Fatalf("%s: %d values, norm %.6f", what, len(v), norm(v))
+		}
+		return r
+	}
+	alaw := embed("A-law WAV", read("jfk-alaw.wav"))
+	want := alaw.GetUsageMetadata().GetPromptTokenCount()
+	for _, c := range []struct {
+		file   string
+		slack  int32
+		cosine float64
+	}{
+		{"jfk-ima5.wav", 1, 0.97},
+		{"jfk-ima2.wav", 1, 0.97},
+		{"jfk-mp3.wav", 2, 0.97},
+	} {
+		r := embed(c.file, read(c.file))
+		n := r.GetUsageMetadata().GetPromptTokenCount()
+		if n < want || n > want+c.slack {
+			t.Errorf("%s: %d tokens, the A-law clip's %d (up to %d more)", c.file, n, want, c.slack)
+		}
+		cs := cosine(r.GetEmbedding().GetValues(), alaw.GetEmbedding().GetValues())
+		if cs < c.cosine {
+			t.Errorf("%s against the A-law clip: cosine %.4f, want at least %.2f", c.file, cs, c.cosine)
+		}
+		t.Logf("%s: %d tokens (A-law %d), cosine %.6f to the A-law clip", c.file, n, want, cs)
+	}
 }

@@ -6,7 +6,7 @@ import (
 )
 
 // ADPCM WAV (#1651): IMA ADPCM (WAVE format 0x11, the DVI/Intel layout),
-// 4 or 3 bits a sample, and Microsoft ADPCM (WAVE format 2), 4 bits a
+// 2 to 5 bits a sample, and Microsoft ADPCM (WAVE format 2), 4 bits a
 // sample, mono or stereo, decoded as ffmpeg's
 // adpcm_ima_wav and adpcm_ms decoders decode them (checked sample for
 // sample against ffmpeg 9's decodes in adpcm_test.go). Each block of
@@ -60,23 +60,34 @@ func (s *imaState) nibble(n int) int {
 	return s.predictor
 }
 
-// ima3Index is the 3-bit step index adjustment (IMA's Recommended
-// Practices), by the code's two magnitude bits.
-var ima3Index = [4]int{-1, -1, 1, 2}
+// imaIndexTables are the step index adjustments of 2-, 3- and 5-bit IMA
+// ADPCM (IMA's Recommended Practices), by the code's magnitude bits.
+var imaIndexTables = map[int][]int{
+	2: {-1, 2},
+	3: {-1, -1, 1, 2},
+	5: {-1, -1, -1, -1, -1, -1, -1, -1, 1, 2, 4, 6, 8, 10, 13, 16},
+}
 
-// nibble3 expands one 3-bit code (a sign bit and two magnitude bits) with
-// the same shift-and-add (checked against ffmpeg 9's decodes).
-func (s *imaState) nibble3(n int) int {
+// imaGroup is, for 2-, 3- and 5-bit IMA ADPCM, the bytes of one channel's
+// group and the samples it holds (ffmpeg's ff_adpcm_ima_block_sizes and
+// ff_adpcm_ima_block_samples).
+var imaGroup = map[int][2]int{2: {4, 16}, 3: {12, 32}, 5: {20, 32}}
+
+// code expands one code of bits bits (a sign bit, then bits-1 magnitude
+// bits) with the shift-and-add the 4-bit nibble uses: step >> (bits-1),
+// plus step for the top magnitude bit, step >> 1 for the next... (checked
+// against ffmpeg 9's decodes of 2-, 3- and 5-bit WAVs).
+func (s *imaState) code(n, bits int) int {
+	m := bits - 1
 	step := imaStepTable[s.index]
-	s.index = max(0, min(88, s.index+ima3Index[n&3]))
-	diff := step >> 2
-	if n&2 != 0 {
-		diff += step
+	s.index = max(0, min(88, s.index+imaIndexTables[bits][n&(1<<m-1)]))
+	diff := step >> m
+	for i := range m {
+		if n&(1<<(m-1-i)) != 0 {
+			diff += step >> i
+		}
 	}
-	if n&1 != 0 {
-		diff += step >> 1
-	}
-	if n&4 != 0 {
+	if n&(1<<m) != 0 {
 		s.predictor -= diff
 	} else {
 		s.predictor += diff
@@ -92,11 +103,11 @@ func (s *imaState) nibble3(n int) int {
 // bytes, a little-endian bit stream, its three 4-byte words interleaved
 // with the other channels' as the 4-bit words are.
 func decodeIMAADPCM(data []byte, channels, blockAlign, bits int) ([]int16, error) {
-	if bits == 3 {
-		return decodeIMA3(data, channels, blockAlign)
+	if _, ok := imaGroup[bits]; ok {
+		return decodeIMAPacked(data, channels, blockAlign, bits)
 	}
 	if bits != 4 {
-		return nil, notDecodedf("%d-bit IMA ADPCM is not decoded; 3- and 4-bit IMA ADPCM are", bits)
+		return nil, fmt.Errorf("IMA ADPCM of %d bits a sample; it has 2 to 5", bits)
 	}
 	if blockAlign < 4*channels || blockAlign > 1<<16 {
 		return nil, fmt.Errorf("an IMA ADPCM block_align of %d for %d channels", blockAlign, channels)
@@ -134,18 +145,23 @@ func decodeIMAADPCM(data []byte, channels, blockAlign, bits int) ([]int16, error
 	return out, nil
 }
 
-// decodeIMA3 decodes 3-bit IMA ADPCM blocks (decodeIMAADPCM).
-func decodeIMA3(data []byte, channels, blockAlign int) ([]int16, error) {
+// decodeIMAPacked decodes 2-, 3- and 5-bit IMA ADPCM blocks
+// (decodeIMAADPCM): after the channels' headers, groups of each channel's
+// bytes in turn, their 4-byte words interleaved with the other channels'
+// as the 4-bit words are, each group a little-endian bit stream.
+func decodeIMAPacked(data []byte, channels, blockAlign, bits int) ([]int16, error) {
 	if blockAlign < 4*channels || blockAlign > 1<<16 {
 		return nil, fmt.Errorf("an IMA ADPCM block_align of %d for %d channels", blockAlign, channels)
 	}
+	size, per := imaGroup[bits][0], imaGroup[bits][1]
 	var out []int16
 	st := make([]imaState, channels)
+	grp := make([]byte, size)
 	for len(data) >= 4*channels {
 		blk := data[:min(len(data), blockAlign)]
 		data = data[len(blk):]
-		groups := (len(blk) - 4*channels) / (12 * channels)
-		frames := 1 + groups*32
+		groups := (len(blk) - 4*channels) / (size * channels)
+		frames := 1 + groups*per
 		base := len(out)
 		out = append(out, make([]int16, frames*channels)...)
 		for c := range channels {
@@ -158,48 +174,23 @@ func decodeIMA3(data []byte, channels, blockAlign int) ([]int16, error) {
 			out[base+c] = int16(st[c].predictor)
 		}
 		for g := range groups {
-			p := 4*channels + g*12*channels
+			p := 4*channels + g*size*channels
 			for c := range channels {
-				var v uint128le
-				for w := range 3 {
-					o := p + (w*channels+c)*4
-					v.set(w, binary.LittleEndian.Uint32(blk[o:]))
+				for j := range size {
+					grp[j] = blk[p+j%4+j/4*channels*4+c*4]
 				}
-				for k := range 32 {
-					f := 1 + g*32 + k
-					out[base+f*channels+c] = int16(st[c].nibble3(v.bits(3*k, 3)))
+				for k := range per {
+					at, v := k*bits, 0
+					for b := range bits {
+						v |= int(grp[(at+b)/8]>>((at+b)%8)&1) << b
+					}
+					f := 1 + g*per + k
+					out[base+f*channels+c] = int16(st[c].code(v, bits))
 				}
 			}
 		}
 	}
 	return out, nil
-}
-
-// uint128le is three little-endian 32-bit words read as one bit stream.
-type uint128le struct{ lo, hi uint64 }
-
-func (v *uint128le) set(w int, x uint32) {
-	switch w {
-	case 0:
-		v.lo |= uint64(x)
-	case 1:
-		v.lo |= uint64(x) << 32
-	default:
-		v.hi = uint64(x)
-	}
-}
-
-func (v *uint128le) bits(at, n int) int {
-	var x uint64
-	switch {
-	case at >= 64:
-		x = v.hi >> (at - 64)
-	case at+n <= 64:
-		x = v.lo >> at
-	default:
-		x = v.lo>>at | v.hi<<(64-at)
-	}
-	return int(x & (1<<n - 1))
 }
 
 // msAdaptation and the coefficient pairs are Microsoft ADPCM's standard

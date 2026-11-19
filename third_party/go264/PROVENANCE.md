@@ -18,6 +18,11 @@ to that path and these are left out:
   (`ForceSoftware`), so nothing it runs changes.
 - `cmd/`, `internal/testutil/`, the tests and their test data.
 
+Changed for CloudBurrow (#1651): `internal/decoder/decoder.go` gains a `Limits.AboveTable` flag
+that, with `MaxFrameMBs` set, skips the Table A-1 ceiling (level 6.2's 139264 macroblocks) as
+ffmpeg does, so a 16384 x 8704 frame decodes; and `internal/syntax/sps.go`'s `MaxDpbFrames`, for
+such a frame (no level sizes its DPB), holds at least `max_num_ref_frames`.
+
 To update: copy the new version's sources the same way, leave out the same files, rewrite the
 imports, record the version, sum and commit in `dependencies.json`, and run
 `go test ./internal/embedding/ ./test/repo/`.

@@ -472,3 +472,60 @@ docker run --rm -v "$PWD:/models" \
 > `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM (no layout to verify: ffmpeg 9 decodes a
 > packet of several such blocks as one block), AAC Main and SSR, 960-sample frames, and
 > HE-AACv2's full parametric stereo (#1754).
+
+> **Update 2026-11-18 (#1651): 2- and 5-bit IMA ADPCM, and MP3 in a WAV.** 2- and 5-bit IMA
+> ADPCM WAVs (format 0x11, 16 samples in 4 bytes and 32 in 20 a channel) are decoded as ffmpeg 9's
+> `adpcm_ima_wav` decodes them, sample for sample (`internal/embedding/adpcm.go`; the fixtures were
+> written by a scratch encoder, since ffmpeg writes neither). A WAV of MP3 frames
+> (`WAVE_FORMAT_MPEGLAYER3`, as `ffmpeg -c:a libmp3lame -f wav` writes) is decoded whole, as
+> ffmpeg's wav demuxer passes every frame to its decoder (nothing trimmed: only the mp3 demuxer
+> reads an Info tag), within one or two 16-bit steps of ffmpeg 9 as the MP3 path is. Embedded
+> through the official client by
+> `TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient`. Still
+> `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM, other non-PCM WAV formats (GSM 6.10,
+> G.726, MPEG Layer I or II), AAC Main and SSR, 960-sample frames, HE-AACv2's full parametric
+> stereo (#1754) and video frames over 8K UHD.
+
+> **Update 2026-11-18 (#1651): video frames over 8K UHD.** Each sampled frame is now patched for
+> the vision encoder as soon as it is decoded and its full-size RGB released, and only the frames
+> the video processor keeps (32 of up to 120) are converted at all, so a video's frames are
+> decoded up to 16384 × 16384, Google's image limit (Google documents no video frame size; a
+> larger frame stays `UNIMPLEMENTED`). The patches are bit for bit those of the full-size frames
+> (unit `TestPatchedVideoMatchesFullFrames`, every codec and bit depth of the test clips). An
+> H.264 frame above level 6.2's 139264 macroblocks, which go.264 refused, is decoded as ffmpeg
+> decodes it (`third_party/go264`'s `AboveTable` limit). Measured on an M4 Max, natively: a
+> 16384 × 8704 clip, 3 sampled frames, decodes and patches at a peak RSS of 4.1 GB (H.264),
+> 4.3 GB (H.265), 4.4 GB (VP9) and 3.8 GB (AV1) in 10 to 12 s, and 12 sampled H.264 frames at
+> 5.5 GB (holding every frame at full size was 570 MB of RGB a frame, 68 GB for 120); each frame's
+> patches are within a mean 0.06 of 255 of ffmpeg 9's BT.709 RGB conversion's. Embedded through
+> the official client by `TestEmbedContentEmbeds16KVideoThroughThePredictionClient`.
+
+> **Update 2026-11-18 (#1651): GSM 6.10 WAV.** A WAV of GSM 6.10 full-rate speech
+> (`WAVE_FORMAT_GSM610`, Microsoft's 65-byte blocks) is decoded as ETSI GSM 06.10 specifies
+> (`internal/embedding/gsm.go`), sample for sample as ffmpeg 9 decodes it, an out-of-range lag
+> clamped as ffmpeg does (where the synthesis overflows, this decoder saturates as the
+> specification says and ffmpeg wraps). Embedded through the official client by
+> `TestEmbedContentEmbedsGSM610WAVThroughThePredictionClient`. So is a WAV of MPEG-1 or MPEG-2
+> Layer II frames (`internal/embedding/mp2.go`, from ISO/IEC 11172-3 and 13818-3), within 1.1
+> 16-bit steps of ffmpeg 9 in every allocation table
+> (`TestEmbedContentEmbedsMPEGLayerIIWAVThroughThePredictionClient`). G.726, Layer I and Layer II
+> joint stereo WAVs stay `UNIMPLEMENTED` (no reference decode for the last two; the G.726 decoder
+> written is not bit-exact against ffmpeg).
+
+> **Update 2026-11-18 (#1651): G.726 WAV.** A mono WAV of G.726 ADPCM at 16, 24, 32 or 40 kbit/s
+> (`WAVE_FORMAT_G726_ADPCM`, 0x45 or 0x64) is decoded (`internal/embedding/g726.go`, the ITU-T
+> recommendation's fixed-point arithmetic after Sun's public-domain G.72x reference), sample for
+> sample as ffmpeg 9 decodes it: the step size keeps the slow scale factor's fraction bits and the
+> reconstructed signal wraps to 16 bits, as ffmpeg's decoder does. Embedded through the official
+> client by `TestEmbedContentEmbedsG726WAVThroughThePredictionClient`. So are MPEG Layer I and
+> Layer I and II joint stereo WAVs (`internal/embedding/mp2.go`), within 1.1 16-bit steps of
+> ffmpeg 9's decode of frames of random parameters written to the standard's syntax (ffmpeg
+> encodes neither): `TestEmbedContentEmbedsMPEGLayerIAndJointStereoWAVThroughThePredictionClient`.
+
+> **Update 2026-11-18 (#1651): arithmetic-coded and 12-bit JPEG.** JPEG images are decoded by a
+> copy of Go's `image/jpeg` (`third_party/gojpeg`) extended from ITU-T T.81 to arithmetic coding
+> (SOF9, SOF10) and 12-bit samples (SOF1, SOF2, SOF9, SOF10): arithmetic-coded files decode to
+> exactly their Huffman twins' pixels, 12-bit ones within 2 twelve-bit steps of libjpeg-turbo's
+> `djpeg -dct float`. Embedded through the official client by
+> `TestEmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient`. Lossless and
+> hierarchical JPEG stay `UNIMPLEMENTED`.
