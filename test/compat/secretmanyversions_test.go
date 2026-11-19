@@ -25,6 +25,7 @@ import (
 // covers: google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion
 func TestSecretTwoThousandVersions(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleSecrets, EnvSecrets) // the scale shard only (#1821)
 	c := secretsClient(t, h)
 	id := fmt.Sprintf("compat-many-versions-%d", time.Now().UnixNano())
 	name := secretsParent(h) + "/secrets/" + id

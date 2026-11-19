@@ -61,6 +61,12 @@ ISO/IEC software copyright notice (Copyright (c) ISO/IEC 2002, 2003);
 third_party/aac-go holds the licence, the NOTICE texts of both, and
 PROVENANCE.md records what was copied and changed.
 
+internal/embedding/alac.go is a Go port of the algorithms of Apple's Apple
+Lossless Audio Codec reference decoder (https://github.com/macosforge/alac:
+ALACDecoder.cpp, ag_dec.c, dp_dec.c, matrix_dec.c), Copyright (c) 2011 Apple
+Inc., under the Apache License, Version 2.0; changed from C++ and C to Go and
+cut down to decoding (#1651).
+
 The binary embeds builds of goccy/bigquery-emulator v0.8.1
 (https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki
 Goshima, under the MIT License, linked with goccy/googlesqlite v0.3.1 and

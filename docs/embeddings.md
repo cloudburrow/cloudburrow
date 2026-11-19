@@ -433,3 +433,42 @@ docker run --rm -v "$PWD:/models" \
 > client (`TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient`: the scanned invoice gains 195
 > tokens of OCR text). The console's Embeddings page has a **PDFs' text (OCR)** box that sends
 > `document_ocr` with each PDF (`TestEmbeddingsPageReadsAScannedPDFWithOCR`).
+
+> **Update 2026-11-18 (#1651): multichannel and G.711 WAV, monochrome H.265, and 501 for the
+> rest.** A WAV of 3 to 8 channels (or of as many as its `WAVE_FORMAT_EXTENSIBLE` channel mask
+> names) is downmixed to mono as ffmpeg's resampler downmixes it (`-ac 1`, its weights measured
+> with ffmpeg 9 one channel at a time), and 8-bit A-law and µ-law WAV are decoded as ffmpeg's
+> G.711 decoders decode them; a video's 3- to 8-channel PCM track is downmixed the same way (it
+> was taken as pairs of channels before). Monochrome (4:0:0) H.265 video is converted as ffmpeg
+> converts gray. Valid media of a type Google takes that this build does not decode (an ALAC or
+> FLAC audio track, a multichannel AAC track, HE-AACv2's 34-band or IPD/OPD parametric stereo, an
+> ADPCM WAV, a 12-bit JPEG, a frame over 8K...) is now `UNIMPLEMENTED` (501) naming it, not
+> `INVALID_ARGUMENT`, as is an `http(s)://` `file_uri`: an instance fetches nothing from outside
+> the machine. See [compatibility.md](compatibility.md).
+
+> **Update 2026-11-18 (#1651): ADPCM WAV and FLAC, ALAC and 5.1 AAC audio tracks.** IMA ADPCM
+> (4-bit) and Microsoft ADPCM (mono and stereo) WAVs are decoded as ffmpeg's `adpcm_ima_wav` and
+> `adpcm_ms` decoders decode them, and 12- or 20-bit PCM as its 16- or 24-bit container, as
+> ffmpeg reads it. A video's FLAC track (`internal/embedding/flac.go`, written from RFC 9639),
+> ALAC track (`alac.go`, a Go port of Apple's Apache-2.0 reference decoder) and AAC-LC track of
+> channel configurations 3 to 6 (mono to 5.1, with the LFE; `third_party/aac-go`) are decoded and
+> downmixed as ffmpeg downmixes each codec's channel layout. Each is checked sample for sample
+> against ffmpeg 9 (`internal/embedding/decoders_test.go`) and embedded through the official
+> client (`TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient`).
+> Still `UNIMPLEMENTED` (501): 3-bit IMA ADPCM, multichannel Microsoft ADPCM, AAC with a
+> `program_config_element` (ffmpeg's 7.1) or channel configuration 7, SBR over more than two
+> channels, AAC Main and SSR, 960-sample frames, HE-AACv2's full parametric stereo (#1754) and
+> QuickTime A-law and µ-law tracks.
+
+> **Update 2026-11-18 (#1651): surround AAC, multichannel HE-AAC, QuickTime G.711 and 3-bit IMA
+> ADPCM.** A video's AAC track of channel configuration 0 (a `program_config_element`, as ffmpeg
+> writes 7.1(wide) and 6.1), 7, 11 or 12 (AudioToolbox's and ffmpeg's 7.1 and 6.1), and HE-AAC
+> over more than two channels, are decoded (`third_party/aac-go/pce.go`) and downmixed as ffmpeg 9
+> does, within 2.4e-7 of its downmix (1.3e-5 for HE-AAC); so are QuickTime `ulaw` and `alaw`
+> tracks and 3-bit IMA ADPCM WAV, sample for sample (the 3-bit fixtures were written by a scratch
+> encoder, since ffmpeg writes none, and checked against ffmpeg's decode). Embedded through the
+> official client by
+> `TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient`. Still
+> `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM (no layout to verify: ffmpeg 9 decodes a
+> packet of several such blocks as one block), AAC Main and SSR, 960-sample frames, and
+> HE-AACv2's full parametric stereo (#1754).

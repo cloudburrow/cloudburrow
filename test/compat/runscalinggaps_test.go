@@ -120,6 +120,7 @@ func unavailable(code int, body string) bool {
 // impacted"). MANUAL 1 serves the URL again.
 func TestRunServiceDisabledAnswersUnavailable(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -184,6 +185,7 @@ func TestRunServiceDisabledAnswersUnavailable(t *testing.T) {
 // MANUAL 2 serves both again.
 func TestRunServiceManualSplitLeavesOneAtZero(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -255,6 +257,7 @@ func TestRunServiceManualSplitLeavesOneAtZero(t *testing.T) {
 // one. Through the official run/v2 client.
 func TestRunServiceCPUOnlyScaling(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -348,7 +351,8 @@ var scalingControlsProviderLock []byte
 // and plans clean too.
 func TestTerraformRunServiceScalingControls(t *testing.T) {
 	h := New(t)
-	c := runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
+	c := runClient(t, h)
 	m := newTFModule(t)
 	if err := os.WriteFile(filepath.Join(m.dir, ".terraform.lock.hcl"), scalingControlsProviderLock, 0o644); err != nil {
 		t.Fatal(err)
@@ -421,6 +425,7 @@ resource "google_cloud_run_v2_service" "s" {
 // them in beta as well as GA.
 func TestGcloudRunServiceScalingControls(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	g := newGcloudSession(t, h)
 	id := "gc-svcctl"

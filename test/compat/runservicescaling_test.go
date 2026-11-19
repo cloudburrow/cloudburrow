@@ -53,6 +53,7 @@ func waitRevisionPods(ctx context.Context, t *testing.T, kubeconfig, id string, 
 // target reads back; the documented limits are refused.
 func TestRunServiceLevelScaling(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -125,7 +126,8 @@ func TestRunServiceLevelScaling(t *testing.T) {
 // plans clean.
 func TestTerraformRunServiceLevelScaling(t *testing.T) {
 	h := New(t)
-	c := runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
+	c := runClient(t, h)
 	m := newTFModule(t)
 	id := "tfsvcscale-" + strings.TrimPrefix(h.Project(), "cb-test-")
 	name := runParent(h) + "/services/" + id
@@ -175,6 +177,7 @@ resource "google_cloud_run_v2_service" "s" {
 // annotations.
 func TestGcloudRunServiceLevelScaling(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	g := newGcloudSession(t, h)
 	id := "gc-svcscale"

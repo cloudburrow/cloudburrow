@@ -1,0 +1,421 @@
+CloudBurrow patch 104 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1827). Applies after patch 0103.
+
+A column CREATE OR REPLACE TABLE or ALTER TABLE ADD COLUMN added was
+"Unrecognized name" in the next statement. The catalog's addTableSpec put
+the new spec in its Go maps but left the analyzer's SimpleCatalog with the
+old spec's table handle under every name of the table (a SimpleCatalog
+cannot take a table out), so the old columns stayed until something else
+rebuilt the catalog: a table of a project, dataset and name has a change
+table, whose replacement does, but a table named by dataset and name, one
+in a CloudBurrow dataset (`_cloudburrow...`) and a TEMP table have none.
+ALTER TABLE was answered as a no-op. In BigQuery "CREATE OR REPLACE TABLE"
+replaces the table and "ALTER TABLE ADD COLUMN" adds the column to it
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language).
+
+addTableSpec now rebuilds the catalog when the new spec's shape (columns,
+primary key, options) is not the old one's, and keeps the handle when it
+is (a spec synced back). CREATE TABLE IF NOT EXISTS of a table the catalog
+has leaves its spec as it is. ALTER TABLE ... ADD COLUMN [IF NOT EXISTS],
+one or several, adds the column to the SQLite table and to the table's spec
+(alter_table.go); the statement's other actions stay no-ops, and the
+table's change history records the columns it had (CloudBurrow's front
+carries out ALTER TABLE itself and makes the table again with its
+history). A script's CREATE OR REPLACE TEMP TABLE of its own temp table no
+longer fails its cleanup ("failed to find table spec from map").
+
+Through CloudBurrow's front none of this was reached (measured with the Go
+client before the patch, test/compat TestBigQueryNewColumn1827): the front
+sends every table by project, dataset and name, so a replaced table's
+change table rebuilt the catalog, it carries out ALTER TABLE itself, and a
+script's TEMP table replaced with a new column was selected.
+
+new_column_test.go (TestNewColumnSelected).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/internal/alter_table.go
+@@ -0,0 +1,132 @@
++package internal
++
++import (
++	"context"
++	"database/sql/driver"
++	"fmt"
++	"strings"
++
++	googlesql "github.com/goccy/go-googlesql"
++
++	"github.com/goccy/googlesqlite/internal/clock"
++)
++
++// ALTER TABLE ... ADD COLUMN. CloudBurrow patch
++// (cloudburrow/cloudburrow#1827).
++//
++// The analyzer resolved ALTER TABLE and the driver answered it as a no-op,
++// so a column it added was "Unrecognized name" in the next statement. ADD
++// COLUMN [IF NOT EXISTS] now adds the column to the SQLite table and to the
++// table's spec, which rebuilds the catalog with the new column
++// (addTableSpec). The statement's other actions stay no-ops, as before.
++// The table's change history (change_history.go) goes on recording the
++// columns it had; CloudBurrow's front carries out ALTER TABLE itself and
++// makes the table again with its history.
++
++type alterAddColumn struct {
++	column      *ColumnSpec
++	ifNotExists bool
++}
++
++// AlterTableStmtAction is an ALTER TABLE with ADD COLUMN actions.
++type AlterTableStmtAction struct {
++	namePath []string
++	ifExists bool
++	adds     []alterAddColumn
++	catalog  *Catalog
++}
++
++func (a *Analyzer) newAlterTableStmtAction(ctx context.Context, node *googlesql.ResolvedAlterTableStmt) (StmtAction, error) {
++	actions, err := node.AlterActionList()
++	if err != nil {
++		return nil, err
++	}
++	var adds []alterAddColumn
++	for _, action := range actions {
++		add, ok := action.(*googlesql.ResolvedAddColumnAction)
++		if !ok {
++			continue
++		}
++		def, err := add.ColumnDefinition()
++		if err != nil || def == nil {
++			return nil, fmt.Errorf("ALTER TABLE ADD COLUMN: no column definition: %v", err)
++		}
++		cols := newColumnsFromDef(ctx, []*googlesql.ResolvedColumnDefinition{def}, "")
++		if len(cols) != 1 {
++			return nil, fmt.Errorf("ALTER TABLE ADD COLUMN: %d columns from one definition", len(cols))
++		}
++		adds = append(adds, alterAddColumn{column: cols[0], ifNotExists: m1(add.IsIfNotExists())})
++	}
++	if len(adds) == 0 {
++		return &NoopStmtAction{}, nil
++	}
++	return &AlterTableStmtAction{
++		namePath: a.namePath.mergePath(m1(node.NamePath())),
++		ifExists: m1(node.IsIfExists()),
++		adds:     adds,
++		catalog:  a.catalog,
++	}, nil
++}
++
++func (a *AlterTableStmtAction) exec(ctx context.Context, conn *Conn) error {
++	name := formatPath(a.namePath)
++	a.catalog.mu.Lock()
++	spec, ok := a.catalog.tableMap[name]
++	a.catalog.mu.Unlock()
++	if !ok || spec.IsView {
++		if a.ifExists {
++			return nil
++		}
++		return fmt.Errorf("Table not found: %s", strings.Join(a.namePath, "."))
++	}
++	columns := append([]*ColumnSpec{}, spec.Columns...)
++	for _, add := range a.adds {
++		exists := false
++		for _, c := range columns {
++			if strings.EqualFold(c.Name, add.column.Name) {
++				exists = true
++				break
++			}
++		}
++		if exists {
++			if add.ifNotExists {
++				continue
++			}
++			return fmt.Errorf("Column already exists: %s", add.column.Name)
++		}
++		if _, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN %s", spec.TableName(), add.column.SQLiteSchema())); err != nil {
++			return fmt.Errorf("ALTER TABLE %s ADD COLUMN %s: %w", name, add.column.Name, err)
++		}
++		columns = append(columns, add.column)
++	}
++	if len(columns) == len(spec.Columns) {
++		return nil
++	}
++	next := *spec
++	next.Columns = columns
++	next.CreateMode = googlesql.ResolvedCreateStatementEnums_CreateModeCreateDefault
++	next.UpdatedAt = clock.Now()
++	return a.catalog.AddNewTableSpec(ctx, conn, &next)
++}
++
++func (a *AlterTableStmtAction) Prepare(ctx context.Context, conn *Conn) (driver.Stmt, error) {
++	return nil, nil
++}
++
++func (a *AlterTableStmtAction) ExecContext(ctx context.Context, conn *Conn) (driver.Result, error) {
++	if err := a.exec(ctx, conn); err != nil {
++		return nil, err
++	}
++	return &Result{conn: conn}, nil
++}
++
++func (a *AlterTableStmtAction) QueryContext(ctx context.Context, conn *Conn) (*Rows, error) {
++	if err := a.exec(ctx, conn); err != nil {
++		return nil, err
++	}
++	return &Rows{conn: conn}, nil
++}
++
++func (a *AlterTableStmtAction) Args() []any { return nil }
++
++func (a *AlterTableStmtAction) Cleanup(ctx context.Context, conn *Conn) error { return nil }
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -2191,8 +2191,11 @@
+ 		return a.newAssignmentStmtAction(ctx, query, args, node.(*googlesql.ResolvedAssignmentStmt))
+ 	case googlesql.ResolvedNodeKindResolvedCreatePropertyGraphStmt:
+ 		return a.newCreatePropertyGraphStmtAction(ctx, node.(*googlesql.ResolvedCreatePropertyGraphStmt))
++	case googlesql.ResolvedNodeKindResolvedAlterTableStmt:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1827): ADD COLUMN
++		// (alter_table.go); the other actions stay no-ops.
++		return a.newAlterTableStmtAction(ctx, node.(*googlesql.ResolvedAlterTableStmt))
+ 	case
+-		googlesql.ResolvedNodeKindResolvedAlterTableStmt,
+ 		googlesql.ResolvedNodeKindResolvedCreateSchemaStmt,
+ 		googlesql.ResolvedNodeKindResolvedGrantStmt,
+ 		googlesql.ResolvedNodeKindResolvedRevokeStmt,
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -1,6 +1,7 @@
+ package internal
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"database/sql"
+ 	"encoding/binary"
+@@ -2028,6 +2029,14 @@
+ 	c.mu.Lock()
+ 	defer c.mu.Unlock()
+ 
++	// CloudBurrow patch (cloudburrow/cloudburrow#1827): CREATE TABLE IF
++	// NOT EXISTS of a table the catalog has leaves the table as it is,
++	// its spec too, now that a spec of another shape rebuilds the
++	// catalog (addTableSpec).
++	if old, ok := c.tableMap[spec.TableName()]; ok && old != spec &&
++		spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists {
++		return nil
++	}
+ 	if err := c.addTableSpec(spec); err != nil {
+ 		return err
+ 	}
+@@ -2465,7 +2474,7 @@
+ 
+ func (c *Catalog) addTableSpec(spec *TableSpec) error {
+ 	tableName := spec.TableName()
+-	if _, exists := c.tableMap[tableName]; exists {
++	if old, exists := c.tableMap[tableName]; exists {
+ 		// Refresh the entry in-place: CREATE OR REPLACE TABLE has to
+ 		// update INFORMATION_SCHEMA's view of columns and options as
+ 		// well as the resolver-side handle. Replace the existing
+@@ -2479,7 +2488,25 @@
+ 				break
+ 			}
+ 		}
+-		return nil
++		// CloudBurrow patch (cloudburrow/cloudburrow#1827): the
++		// analyzer's catalog held the old spec's handle under every
++		// name of the table, and a SimpleCatalog cannot take a table
++		// out, so a column the new spec adds (CREATE OR REPLACE
++		// TABLE, ALTER TABLE ADD COLUMN) was "Unrecognized name" until
++		// something else rebuilt the catalog. A spec of the same shape
++		// (the same spec synced back) keeps the handle; another one
++		// rebuilds the catalog, which builds the new spec's handle.
++		if old == spec {
++			return nil
++		}
++		if sameTableShape(old, spec) {
++			if h, ok := c.tableHandles[old]; ok {
++				c.tableHandles[spec] = h
++				delete(c.tableHandles, old)
++			}
++			return nil
++		}
++		return c.resetCatalog(c.tables, c.functions, c.tvfs)
+ 	}
+ 	c.tables = append(c.tables, spec)
+ 	c.tableMap[tableName] = spec
+@@ -3012,3 +3039,18 @@
+ 		Body:     spec.Body,
+ 	}
+ }
++
++// sameTableShape reports whether the analyzer's handle of a's table is
++// b's too: the same columns (names, types, collations, defaults), primary
++// key and options. CloudBurrow patch (cloudburrow/cloudburrow#1827).
++func sameTableShape(a, b *TableSpec) bool {
++	type shape struct {
++		IsView     bool
++		Columns    []*ColumnSpec
++		PrimaryKey []string
++		Options    []*tableOptionSpec
++	}
++	x, errA := json.Marshal(shape{a.IsView, a.Columns, a.PrimaryKey, a.Options})
++	y, errB := json.Marshal(shape{b.IsView, b.Columns, b.PrimaryKey, b.Options})
++	return errA == nil && errB == nil && bytes.Equal(x, y)
++}
+--- a/internal/stmt_action.go
++++ b/internal/stmt_action.go
+@@ -153,6 +153,16 @@
+ 	); err != nil {
+ 		return fmt.Errorf("failed to cleanup table %s: %w", a.spec.TableName(), err)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1827): a script's CREATE
++	// OR REPLACE TEMP TABLE of a temp table the script made is cleaned up
++	// after it, and the one cleanup took out of the catalog the spec they
++	// share the name of.
++	a.catalog.mu.Lock()
++	_, kept := a.catalog.tableMap[a.spec.TableName()]
++	a.catalog.mu.Unlock()
++	if !kept {
++		return nil
++	}
+ 	if err := a.catalog.DeleteTableSpec(ctx, conn, a.spec.TableName()); err != nil {
+ 		return fmt.Errorf("failed to delete table spec: %w", err)
+ 	}
+--- /dev/null
++++ b/new_column_test.go
+@@ -0,0 +1,129 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestNewColumnSelected is CloudBurrow's regression test of its patch 0104
++// (cloudburrow/cloudburrow#1827): a column CREATE OR REPLACE TABLE or ALTER
++// TABLE ADD COLUMN adds is there for the next statement to select. The
++// catalog kept the replaced table's analyzer handle, with its old columns,
++// unless a change table's rebuild happened to follow (a table of a
++// project, dataset and name), and ALTER TABLE was a no-op.
++func TestNewColumnSelected(t *testing.T) {
++	ctx := context.Background()
++	open := func(t *testing.T) (*sql.DB, func(string), func(string) string, func(string) error) {
++		t.Helper()
++		db, err := sql.Open("googlesqlite", ":memory:")
++		if err != nil {
++			t.Fatal(err)
++		}
++		t.Cleanup(func() { db.Close() })
++		db.SetMaxOpenConns(1)
++		exec := func(q string) {
++			t.Helper()
++			if _, err := db.ExecContext(ctx, q); err != nil {
++				t.Fatalf("%s: %v", q, err)
++			}
++		}
++		scalar := func(q string) string {
++			t.Helper()
++			var s sql.NullString
++			if err := db.QueryRowContext(ctx, q).Scan(&s); err != nil {
++				t.Fatalf("%s: %v", q, err)
++			}
++			if !s.Valid {
++				return "NULL"
++			}
++			return s.String
++		}
++		fails := func(q string) error {
++			_, err := db.ExecContext(ctx, q)
++			return err
++		}
++		return db, exec, scalar, fails
++	}
++
++	// Each name form: a table with no project (no change table), one in
++	// a CloudBurrow dataset (none either) and one of a project, dataset
++	// and name (with a change table).
++	for _, table := range []string{"d.t", "`p._cloudburrow_d.t`", "`p.d.t`"} {
++		t.Run("replace "+table, func(t *testing.T) {
++			_, exec, scalar, fails := open(t)
++			exec("CREATE TABLE " + table + " (a INT64)")
++			exec("INSERT INTO " + table + " (a) VALUES (1)")
++			if got := scalar("SELECT CAST(a AS STRING) FROM " + table); got != "1" {
++				t.Errorf("a = %s, want 1", got)
++			}
++			exec("CREATE OR REPLACE TABLE " + table + " (a INT64, b STRING)")
++			exec("INSERT INTO " + table + " (a, b) VALUES (2, 'x')")
++			if got := scalar("SELECT CONCAT(CAST(a AS STRING), b) FROM " + table); got != "2x" {
++				t.Errorf("a, b = %s, want 2x", got)
++			}
++			exec("CREATE OR REPLACE TABLE " + table + " AS SELECT 'y' AS b, 3 AS c")
++			if got := scalar("SELECT CONCAT(b, CAST(c AS STRING)) FROM " + table); got != "y3" {
++				t.Errorf("b, c = %s, want y3", got)
++			}
++			if err := fails("SELECT a FROM " + table); err == nil || !strings.Contains(err.Error(), "Unrecognized name: a") {
++				t.Errorf("SELECT a of the replaced table: %v, want Unrecognized name: a", err)
++			}
++			// IF NOT EXISTS of the table there leaves it, and its columns,
++			// as they are.
++			exec("CREATE TABLE IF NOT EXISTS " + table + " (z INT64)")
++			if got := scalar("SELECT CONCAT(b, CAST(c AS STRING)) FROM " + table); got != "y3" {
++				t.Errorf("after CREATE TABLE IF NOT EXISTS: b, c = %s, want y3", got)
++			}
++		})
++		t.Run("add column "+table, func(t *testing.T) {
++			_, exec, scalar, fails := open(t)
++			exec("CREATE TABLE " + table + " (a INT64)")
++			exec("INSERT INTO " + table + " (a) VALUES (1)")
++			exec("ALTER TABLE " + table + " ADD COLUMN b STRING")
++			if got := scalar("SELECT IFNULL(b, '-') FROM " + table); got != "-" {
++				t.Errorf("b of the row there = %s, want NULL", got)
++			}
++			exec("INSERT INTO " + table + " (a, b) VALUES (2, 'x')")
++			if got := scalar("SELECT STRING_AGG(CONCAT(CAST(a AS STRING), IFNULL(b, '-')), ',' ORDER BY a) FROM " + table); got != "1-,2x" {
++				t.Errorf("rows = %s, want 1-,2x", got)
++			}
++			exec("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS b STRING, ADD COLUMN c ARRAY<INT64>, ADD COLUMN d STRUCT<x INT64, y STRING>")
++			exec("UPDATE " + table + " SET c = [1, 2], d = STRUCT(5, 'q') WHERE a = 2")
++			if got := scalar("SELECT CONCAT(CAST(ARRAY_LENGTH(c) AS STRING), d.y, CAST(d.x AS STRING)) FROM " + table + " WHERE a = 2"); got != "2q5" {
++				t.Errorf("c, d = %s, want 2q5", got)
++			}
++			if err := fails("ALTER TABLE " + table + " ADD COLUMN b INT64"); err == nil {
++				t.Errorf("ADD COLUMN b again: no error")
++			}
++			if got := scalar("SELECT STRING_AGG(column_name, ',' ORDER BY ordinal_position) FROM " + infoSchema(table) + " WHERE table_name = 't'"); got != "a,b,c,d" {
++				t.Errorf("INFORMATION_SCHEMA.COLUMNS = %s, want a,b,c,d", got)
++			}
++		})
++	}
++
++	t.Run("alter if exists of no table", func(t *testing.T) {
++		_, exec, _, _ := open(t)
++		exec("CREATE TABLE `p.d.other` (a INT64)")
++		exec("ALTER TABLE IF EXISTS `p.d.missing` ADD COLUMN b STRING")
++	})
++
++	t.Run("temp table replaced in one script", func(t *testing.T) {
++		_, _, scalar, _ := open(t)
++		q := "CREATE TEMP TABLE tt AS SELECT 1 AS a; " +
++			"CREATE OR REPLACE TEMP TABLE tt AS SELECT 2 AS a, 'w' AS b; " +
++			"SELECT CONCAT(CAST(a AS STRING), b) FROM tt"
++		if got := scalar(q); got != "2w" {
++			t.Errorf("got %s, want 2w", got)
++		}
++	})
++}
++
++// infoSchema is the INFORMATION_SCHEMA.COLUMNS of table's dataset.
++func infoSchema(table string) string {
++	path := strings.Split(strings.Trim(table, "`"), ".")
++	return "`" + strings.Join(path[:len(path)-1], ".") + ".INFORMATION_SCHEMA.COLUMNS`"
++}

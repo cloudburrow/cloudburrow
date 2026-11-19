@@ -7,6 +7,9 @@ import (
 	"sort"
 
 	"cloud.google.com/go/bigtable"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -157,9 +160,41 @@ var consoleBigtableConfig = bigtable.ClientConfig{
 }
 
 // newConsoleBigtableClient is a data client on instance at endpoint, made
-// with consoleBigtableConfig.
+// with consoleBigtableConfig, on a connection the console dials itself
+// (#1828).
+//
+// DisableDirectAccess alone is not enough: CBT_ENABLE_DIRECTPATH in the
+// environment overrides it (cloud.google.com/go/bigtable v1.58.0, client.go
+// isDirectAccessEnabled, and internal/transport/channel_pool_factory.go), and
+// the channel pool's Direct Access check then asks the metadata server
+// whether it runs on GCE. Given its connection (option.WithGRPCConn) the
+// client builds no channel pool, so runs no Direct Access check, whatever the
+// environment says, and closes the connection on Close. The same holds for
+// BIGTABLE_EMULATOR_HOST, which would otherwise send the console's reads to
+// the address the user's shell names instead of endpoint.
 func newConsoleBigtableClient(ctx context.Context, endpoint, project, instance string) (*bigtable.Client, error) {
-	return bigtable.NewClientWithConfig(ctx, project, instance, consoleBigtableConfig, localOpts(endpoint)...)
+	conn, err := dialConsoleBigtable(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	c, err := bigtable.NewClientWithConfig(ctx, project, instance, consoleBigtableConfig,
+		option.WithGRPCConn(conn), option.WithoutAuthentication())
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
+// dialConsoleBigtable is a plaintext connection to endpoint, with the
+// message size limits the Bigtable client sets on the connections it dials.
+func dialConsoleBigtable(endpoint string) (*grpc.ClientConn, error) {
+	if endpoint == "" {
+		return nil, fmt.Errorf("bigtable: no endpoint")
+	}
+	return grpc.NewClient("passthrough:///"+endpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(1<<28), grpc.MaxCallRecvMsgSize(1<<28)))
 }
 
 // scope is the list screen's picker, with the instance in force selected.

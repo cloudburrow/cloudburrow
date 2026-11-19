@@ -99,6 +99,7 @@ func podsOver(t *testing.T, d time.Duration, down bool, want int, count func() i
 // run/v2 gRPC client.
 func TestRunServiceCPUUtilizationScaling(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -178,6 +179,7 @@ func TestRunServiceCPUUtilizationScaling(t *testing.T) {
 // scaling fields are REST-only, workerpoolscaling.go).
 func TestRunWorkerPoolCPUScaling(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	s := runV2REST(t, h)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {

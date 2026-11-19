@@ -29,7 +29,8 @@
 #                    each value a shell would split or expand)
 #   --list           print every variable this script can set, and exit
 #   --cli PATH       the cloudburrow binary; default bin/cloudburrow in this
-#                    checkout, else cloudburrow on PATH
+#                    checkout, else bin/cloudburrow-onnx (what `make
+#                    build-onnx` writes), else cloudburrow on PATH
 #   --gcloud PATH    CLOUDBURROW_TEST_GCLOUD; default gcloud on PATH
 #   --tofu PATH      CLOUDBURROW_TEST_TOFU; default tofu on PATH
 #   --env-json F     `cloudburrow env --format json` already written to F
@@ -56,8 +57,8 @@ ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
   STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER SERVICEUSAGE
   RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY RUN_SQLADMIN TASKS_LOGGING BIGQUERY_RESOURCEMANAGER LOGGING_RESOURCEMANAGER RUN_RESOURCEMANAGER SQL_RESOURCEMANAGER MEMORYSTORE_RESOURCEMANAGER FIRESTORE_RESOURCEMANAGER RUN_SERVICEUSAGE RUN_MYSQL SINK_LOGGING SINK_STORAGE SINK_PUBSUB FIRESTORE_STORAGE BQML_STORAGE
-  CMEK_KMS CLOUDSQL_SECRETS NOPUBSUB_STORAGE APPENGINE_URL
-  SPANNER SPANNER_REST DATASTORE FIRESTORE FIRESTORE_MONGODB FIRESTORE_MONGODB_CA BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN CLOUDSQL_CONNECTOR BACKUPDR
+  CMEK_KMS CLOUDSQL_SECRETS NOPUBSUB_STORAGE APPENGINE_URL SCALE_RUN SCALE_SECRETS SQL_PRIVATECA
+  SPANNER SPANNER_REST DATASTORE FIRESTORE FIRESTORE_MONGODB FIRESTORE_MONGODB_CA BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN CLOUDSQL_CONNECTOR BACKUPDR PRIVATECA
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
   LOCALAI PREDICTION EMBEDDINGS GCLOUD TOFU
 )
@@ -91,7 +92,9 @@ command -v jq >/dev/null || { echo "compat-env: jq is required" >&2; exit 1; }
 
 if [ -z "$cli" ]; then
   here=$(cd "$(dirname "$0")/.." && pwd)
-  if [ -x "$here/bin/cloudburrow" ]; then cli="$here/bin/cloudburrow"; else cli=$(command -v cloudburrow || true); fi
+  if [ -x "$here/bin/cloudburrow" ]; then cli="$here/bin/cloudburrow"
+  elif [ -x "$here/bin/cloudburrow-onnx" ]; then cli="$here/bin/cloudburrow-onnx"
+  else cli=$(command -v cloudburrow || true); fi
 fi
 # CLOUDBURROW_TEST_CLI is run from the test's own directory, so absolute.
 case "$cli" in
@@ -292,8 +295,11 @@ value() {
     PUBSUB|RUN_PUBSUB|SINK_PUBSUB) from_env '.PUBSUB_EMULATOR_HOST // empty' ;;
     # Cloud Tasks, Secret Manager and Cloud Run have no emulator variable.
     TASKS) from_runtime '.endpoints.tasks // empty' ;;
-    SECRETS|CLOUDSQL_SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
-    RUN) from_runtime '.endpoints.run // empty' ;;
+    # SCALE_RUN and SCALE_SECRETS: the scale shard's names for Cloud Run and
+    # Secret Manager (#1821), which only its minutes-long tests read, so
+    # they run there and not a second time in the run and storage shards.
+    SECRETS|CLOUDSQL_SECRETS|SCALE_SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
+    RUN|SCALE_RUN) from_runtime '.endpoints.run // empty' ;;
     SCHEDULER|RUN_SCHEDULER) from_env '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' ;;
     KMS|RUN_KMS|CMEK_KMS) from_env '.CLOUDBURROW_KMS_ENDPOINT // empty' ;;
     LOGGING|RUN_LOGGING|TASKS_LOGGING|SINK_LOGGING) from_env '.CLOUDBURROW_LOGGING_ENDPOINT // empty' ;;
@@ -333,6 +339,10 @@ value() {
     SQLADMIN|RUN_SQLADMIN) from_env '.CLOUDBURROW_SQLADMIN_ENDPOINT // empty' ;;
     # The Backup and DR Service over the Admin API's backups (#1433).
     BACKUPDR) from_env '.CLOUDBURROW_BACKUPDR_ENDPOINT // empty' ;;
+    # Certificate Authority Service (#1834), gRPC and JSON on one port.
+    # SQL_PRIVATECA: the sql shard's name for it, for CUSTOMER_MANAGED_CAS_CA
+    # (#1834), so the Certificate Authority Service suite stays in its shard.
+    PRIVATECA|SQL_PRIVATECA) from_env '.CLOUDBURROW_PRIVATECA_ENDPOINT // empty' ;;
     CLOUDSQL_CONNECTOR) from_env '.CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT // empty' ;;
     # BigQuery has no emulator variable in any client library; the project
     # is the instance's, the one project the emulator serves (#277).

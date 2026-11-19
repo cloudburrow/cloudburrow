@@ -62,6 +62,7 @@ func predictionClientAt(t *testing.T, h *Harness, envVar string) *aiplatform.Pre
 // on a model with no grpcPorts is FAILED_PRECONDITION (#1477).
 func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	pc := predictionClientAt(t, h, EnvPrediction)
 	c := runClient(t, h)
 	buildPredictor(t, h.Context())
@@ -212,6 +213,7 @@ type consoleExplainResult struct {
 // gradients, XRAI and example-based explanations as not served.
 func TestConsoleExplainMatchesThePredictionClient(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	pc := predictionClientAt(t, h, EnvPrediction)
 	addr := consoleAddr(t, h)
 	c := runClient(t, h)

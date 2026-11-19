@@ -54,7 +54,8 @@ const MaxVideoFrames = 120
 // DefaultVideoFPS is Google's default sampling rate.
 const DefaultVideoFPS = 1.0
 
-// maxVideoPixels bounds a video's frame size: 8K UHD.
+// maxVideoPixels bounds a video's frame size: 8K UHD. Google documents no
+// frame size, so a larger one is ErrNotDecoded (UNIMPLEMENTED), not invalid.
 const maxVideoPixels = 8192 * 4320
 
 // VideoOptions are a part's video_metadata.
@@ -426,7 +427,7 @@ func decodeH264(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 	if len(tr.avcC.SPSnalus) > 0 {
 		if sps, err := avc.ParseSPSNALUnit(tr.avcC.SPSnalus[0], true); err == nil {
 			if sps.Width*sps.Height > maxVideoPixels {
-				return nil, fmt.Errorf("the video is %dx%d; at most %d pixels a frame are decoded", sps.Width, sps.Height, maxVideoPixels)
+				return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", sps.Width, sps.Height, maxVideoPixels)
 			}
 			matrix = colourMatrix(sps.VUI != nil, vuiMatrix(sps), int(sps.Height))
 			full = sps.VUI != nil && sps.VUI.VideoFullRangeFlag
@@ -550,8 +551,6 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 			ssX, ssY = 1, 1
 		case 2:
 			ssX = 1
-		case 0:
-			return nil, fmt.Errorf("monochrome H.265 video is not supported")
 		}
 		planes := yuvPlanes{w: p.Width, h: p.Height, strideY: p.StrideY, strideC: p.StrideC,
 			ssX: ssX, ssY: ssY, depth: max(p.BitDepth, p.BitDepthC),
@@ -560,6 +559,12 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 			planes.y16, planes.cb16, planes.cr16 = p.Y16, p.Cb16, p.Cr16
 		} else {
 			planes.y, planes.cb, planes.cr = p.Y, p.Cb, p.Cr
+		}
+		if p.ChromaFormat == 0 {
+			// Monochrome (4:0:0, #1651): gray, as ffmpeg converts it.
+			planes.depth = max(p.BitDepth, 8)
+			pics[int(p.Tag)] = grayToNRGBA(planes)
+			continue
 		}
 		pics[int(p.Tag)] = yuvToNRGBA(planes, colourMatrix(p.ColorMatrix != 2, int(p.ColorMatrix), p.CropH), p.FullRange)
 	}
@@ -605,7 +610,7 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			continue
 		}
 		if img.Width*img.Height > maxVideoPixels {
-			return nil, fmt.Errorf("the video is %dx%d; at most %d pixels a frame are decoded", img.Width, img.Height, maxVideoPixels)
+			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", img.Width, img.Height, maxVideoPixels)
 		}
 		// The planes are the decoder's until the next Decode, which
 		// yuvToNRGBA's copy precedes.
@@ -633,7 +638,7 @@ func decodeVP9Profiles(tr *videoTrack, from, stop int, declared bool, mc int, fu
 		}
 		f := frames[len(frames)-1]
 		if f.Width*f.Height > maxVideoPixels {
-			return nil, fmt.Errorf("the video is %dx%d; at most %d pixels a frame are decoded", f.Width, f.Height, maxVideoPixels)
+			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", f.Width, f.Height, maxVideoPixels)
 		}
 		if f.ColorSpace == 7 { // CS_RGB: 4:4:4 planes of G, B and R
 			pics[s] = vp9RGB(f)
@@ -792,6 +797,30 @@ type yuvPlanes struct {
 	ssX, ssY                   int // chroma subsampling shifts
 	depth                      int
 	cropX, cropY, cropW, cropH int // zero cropW: no cropping
+}
+
+// grayToNRGBA converts a monochrome picture's luma plane to RGB as ffmpeg's
+// swscale converts gray to rgb24 (measured with ffmpeg 9): each sample is
+// its own grey level, whatever the stream's range, a deeper one rounded to
+// 8 bits (Y / 4, to nearest, for 10 bits).
+func grayToNRGBA(p yuvPlanes) *image.NRGBA {
+	x0, y0, w, h := 0, 0, p.w, p.h
+	if p.cropW > 0 && p.cropH > 0 {
+		x0, y0, w, h = p.cropX, p.cropY, p.cropW, p.cropH
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	shift := p.depth - 8
+	for yy := 0; yy < h; yy++ {
+		row := img.Pix[yy*img.Stride:]
+		for xx := 0; xx < w; xx++ {
+			v := int(p.luma(x0+xx, y0+yy))
+			if shift > 0 {
+				v = min((v+1<<(shift-1))>>shift, 255)
+			}
+			row[4*xx], row[4*xx+1], row[4*xx+2], row[4*xx+3] = uint8(v), uint8(v), uint8(v), 255
+		}
+	}
+	return img
 }
 
 func (p yuvPlanes) luma(x, y int) float64 {

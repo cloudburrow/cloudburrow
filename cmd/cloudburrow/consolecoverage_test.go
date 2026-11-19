@@ -50,6 +50,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances"}},
 	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
+	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -142,6 +143,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		tasks:     &tasksService{},
 		secrets:   &secretsService{},
 		kms:       &kmsService{},
+		privateCA: &privateCAService{},
 		scheduler: &schedulerService{},
 		logging:   &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.

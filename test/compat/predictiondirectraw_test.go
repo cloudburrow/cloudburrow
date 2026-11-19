@@ -63,6 +63,7 @@ func deployGRPCModel(t *testing.T, ctx context.Context, c *run.ServicesClient, h
 // method_name is INVALID_ARGUMENT.
 func TestPredictionClientReachesAModelsGRPCServer(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	pc := predictionClientAt(t, h, EnvPrediction)
 	c := runClient(t, h)
 	// Pulling agnhost and the rollout outlast h.Context().

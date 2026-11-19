@@ -134,6 +134,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// _backup_plan and _backup_plan_association apply, plan clean and
 	// destroy in TestTerraformBackupDR.
 	{config.ServiceBackupDR, "backup_dr_custom_endpoint", "GOOGLE_BACKUP_DR_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Certificate Authority Service (#1834): google_privateca_ca_pool,
+	// _certificate_authority (root and subordinate), _certificate_template
+	// and _certificate apply, plan clean and destroy in
+	// TestTerraformPrivateCA.
+	{config.ServicePrivateCA, "privateca_custom_endpoint", "GOOGLE_PRIVATECA_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -252,6 +257,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		// The admin API's port, not the RESP one.
 		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
+		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -259,6 +265,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		enabled[s] = true
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
+	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {
@@ -352,12 +359,24 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// https://storage.googleapis.com/storage/v1/b, google_projects at
 	// https://cloudresourcemanager.googleapis.com/v1/projects and
 	// google_folders at https://cloudresourcemanager.googleapis.com/v3/folders,
-	// so no setting points them here.
+	// so no setting points them here. Three more do the same (#1578, read
+	// in 8.4.0's source and unchanged on the provider's main branch,
+	// 2026-11-18): google_cloud_run_locations lists at
+	// https://run.googleapis.com/v1/projects/{{project}}/locations,
+	// google_artifact_registry_locations at
+	// https://artifactregistry.googleapis.com/v1/projects/{{project}}/locations
+	// and google_iam_testable_permissions posts to
+	// https://iam.googleapis.com/v1/permissions:queryTestablePermissions.
+	// Before #1578 the wrapper let them through, to real Google, whenever the
+	// Run port or Resource Manager was served.
 	out = append(out,
 		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"},
 		unpointedPrefix{"google_storage_buckets", "the provider lists buckets at storage.googleapis.com, ignoring storage_custom_endpoint"},
 		unpointedPrefix{"google_projects", "the provider lists projects at cloudresourcemanager.googleapis.com, ignoring resource_manager_custom_endpoint"},
-		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"})
+		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"},
+		unpointedPrefix{"google_cloud_run_locations", "the provider lists Cloud Run locations at run.googleapis.com, ignoring cloud_run_custom_endpoint"},
+		unpointedPrefix{"google_artifact_registry_locations", "the provider lists Artifact Registry locations at artifactregistry.googleapis.com, ignoring artifact_registry_custom_endpoint"},
+		unpointedPrefix{"google_iam_testable_permissions", "the provider posts to iam.googleapis.com, ignoring iam_custom_endpoint"})
 	return out
 }
 

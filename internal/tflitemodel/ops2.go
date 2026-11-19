@@ -51,7 +51,9 @@ func init() {
 }
 
 // multiOutput reports whether code is an operator of several outputs.
-func multiOutput(code int32) bool { return code == opSplit || code == opSplitV || code == opUnpack }
+func multiOutput(code int32) bool {
+	return code == opSplit || code == opSplitV || code == opUnpack || code == opTopKV2
+}
 
 // eval2 runs the operators of this file that have one output.
 func (m *Model) eval2(o op, a []*Tensor) (*Tensor, error) {
@@ -150,16 +152,19 @@ func (m *Model) eval2(o op, a []*Tensor) (*Tensor, error) {
 	case opResizeNearestNeighbor, opResizeBilinear:
 		return resizeOp(o, x, arg(1)) // resize.go, #1799
 	}
-	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
+	return m.eval3(o, a) // ops3.go
 }
 
-// evalMulti runs SPLIT, SPLIT_V and UNPACK.
+// evalMulti runs SPLIT, SPLIT_V and UNPACK, and TOPK_V2 (ops3.go).
 func (m *Model) evalMulti(o op, a []*Tensor, n int) ([]*Tensor, error) {
 	get := func(i int) *Tensor {
 		if i < len(a) {
 			return a[i]
 		}
 		return nil
+	}
+	if o.code == opTopKV2 {
+		return topK(o, get(0), get(1))
 	}
 	var x *Tensor
 	var axis int

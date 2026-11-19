@@ -71,10 +71,12 @@ func (j importJob) protectionLevel() kmspb.ProtectionLevel  { return levelOf(j.P
 // allowed_access_reasons lacks it refuses the call. The reasons Google's
 // staff and systems carry (GOOGLE_INITIATED_*, THIRD_PARTY_DATA_REQUEST,
 // ...) never reach a local key. The refusal's code and message are
-// UNVERIFIED: FAILED_PRECONDITION, naming the policy. A key with no policy,
-// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
-// and the project and organization default policies, which this instance
-// does not serve, allow every call.
+// UNVERIFIED: FAILED_PRECONDITION, naming the policy.
+// Docs re-read 2026-11-18, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
+// A key with no policy allows every call; one created without a policy
+// where a default policy is active (an organization's, folder's or
+// project's KeyAccessJustificationsPolicyConfig) gets that policy
+// (kajconfig.go, #1577).
 
 // kajPolicy is a stored key_access_justifications_policy.
 type kajPolicy struct {

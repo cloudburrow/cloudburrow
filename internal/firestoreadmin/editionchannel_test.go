@@ -2,6 +2,7 @@ package firestoreadmin
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -192,5 +193,30 @@ func TestEditionGuardWriteChannel(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusTeapot {
 		t.Errorf("an Enterprise database's channel was claimed: %d", res.StatusCode)
+	}
+}
+
+// TestChannelRefusalCountedOnceSent (#1831): a refusal's array id counts as
+// sent only once the backchannel has written it, so a forward answer never
+// names an id that has not gone down; a second refusal taken meanwhile gets
+// the next id, not the same one.
+func TestChannelRefusalCountedOnceSent(t *testing.T) {
+	var c channels
+	s := c.session("S")
+	c.saw(s, 1)
+	c.refuse("S", errors.New("first"))
+	if _, id := c.takeRefusal(s); id != 2 {
+		t.Fatalf("first refusal's id %d, want 2", id)
+	}
+	if s.lastID != 1 {
+		t.Fatalf("a taken refusal not yet written counted as sent: last id %d, want 1", s.lastID)
+	}
+	c.refuse("S", errors.New("second"))
+	if _, id := c.takeRefusal(s); id != 3 {
+		t.Fatalf("second refusal's id %d, want 3", id)
+	}
+	c.saw(s, 3)
+	if s.lastID != 3 {
+		t.Fatalf("last id %d once written, want 3", s.lastID)
 	}
 }

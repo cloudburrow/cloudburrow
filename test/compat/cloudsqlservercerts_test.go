@@ -74,9 +74,9 @@ func presentedServerCert(t *testing.T, svc *sqladmin.Service, project, instance 
 // upcoming one, rotateServerCertificate makes it the presented one (and the
 // connector still reaches the server), and a rotation to the previous
 // version by nextVersion rolls back. gcloud sql ssl server-certs create,
-// list, rotate and rollback do the same. CUSTOMER_MANAGED_CAS_CA is 501
-// (Certificate Authority Service is not served), and an internal-CA
-// instance's server certificates and a CAS instance's addServerCa are 400.
+// list, rotate and rollback do the same. An internal-CA instance's server
+// certificates and a CAS instance's addServerCa are 400.
+// CUSTOMER_MANAGED_CAS_CA is TestCloudSQLCustomerManagedCA's (#1834).
 // covers: sql.instances.ListServerCertificates, sql.instances.addServerCertificate, sql.instances.RotateServerCertificate, sql.connect.resolve, sql.connect.get, sql.connect.generateEphemeral, sql.instances.insert, sql.instances.get, sql.instances.delete, sql.instances.addServerCa
 func TestCloudSQLServerCertificates(t *testing.T) {
 	h := New(t)
@@ -87,11 +87,6 @@ func TestCloudSQLServerCertificates(t *testing.T) {
 	project := h.Project()
 	n := time.Now().UnixNano() % 1e6
 	name := fmt.Sprintf("cas-%d", n)
-
-	_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name + "-cust", DatabaseVersion: "POSTGRES_17",
-		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", IpConfiguration: &sqladmin.IpConfiguration{
-			ServerCaMode: "CUSTOMER_MANAGED_CAS_CA", ServerCaPool: "projects/p/locations/us-central1/caPools/pool"}}}).Do()
-	wantCode(t, "a CUSTOMER_MANAGED_CAS_CA instance", err, 501, "Certificate Authority Service")
 
 	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840",

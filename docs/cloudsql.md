@@ -105,10 +105,10 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (no Cloud SQL sign-in here checks a Google identity, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a physical
-(`PHYSICAL`) external sync on an instance not started with `--mode persistent` (#1570; see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
-and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
-and upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions); read
+What answers 501, saying why: IAM database authentication (no Cloud SQL sign-in here checks a Google identity, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), SQL Server
+versions (their images are linux/amd64 only), `MYSQL_5_7` and `MYSQL_5_6` on a node that cannot run linux/amd64 images, and
+their replicas, high availability, point-in-time recovery and upgrades anywhere (see [Database versions](#database-versions-and-major-version-upgrades-1381)), BAK and TDE imports and exports (SQL Server's files),
+and promoting or switching over to a PostgreSQL read replica upgraded on its own before its primary is upgraded (#1524); read
 replicas, high availability and point-in-time recovery on PostgreSQL 9.6 to 11 are served since #1524, with
 `recovery.conf` and `pg_ctl promote`. A legacy failover replica
 (`failoverReplica`, `failoverTarget`) is 400, as Cloud SQL refuses one since 2025, and so is changing a PostgreSQL
@@ -152,9 +152,8 @@ Refused with 501, each naming what is missing:
 
 | Methods | Why |
 |---|---|
-| `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
+| `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled: an instance's server is its version's pinned image, replaced when CloudBurrow itself is upgraded, so `scheduledMaintenance` is never set. The request is checked first (#1524): no `reschedule`, no `rescheduleType`, or `SPECIFIC_TIME` without an RFC 3339 `scheduleTime` is 400 |
 
 ### Imports and exports (#1380)
 
@@ -231,6 +230,35 @@ messages). The console has Server CA mode on Create instance and Edit instance, 
 instance's page its server certificates, Add server certificate, Rotate server certificate and
 Resolve DNS name. Client certificates are still signed by the instance's own CA.
 
+**Customer-managed CAs (#1834).** `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool`
+`projects/PROJECT/locations/REGION/caPools/POOL` (`gcloud sql instances create|patch
+--server-ca-mode=CUSTOMER_MANAGED_CAS_CA --server-ca-pool=...`, the console's Server CA pool) has a
+CA of a pool of this instance's Certificate Authority Service ([privateca.md](privateca.md)) issue
+the server certificate, so it needs `privateca` in `--services` (412 otherwise). As
+[Google documents](https://docs.cloud.google.com/sql/docs/postgres/customer-managed-ca), Cloud SQL
+requests it as a configuration-based certificate with an EC P-384 key and the instance's DNS name in
+the subject alternative names: it is a `certificates.create` on the pool, listed among the pool's
+certificates (`cloudsql-INSTANCE-...`, Enterprise tier), signed by the pool's first enabled CA. The
+listener presents it with the CAs between it and the root, so it verifies to the pool's root
+(a subordinate CA under a root of another pool works). `connect.get` answers the mode and the issuing
+CA chains as `serverCaCert`, `listServerCertificates` each version's issuing CA in `caCerts`, and
+`listServerCas` those chains; `addServerCertificate` has the pool issue an upcoming certificate and
+`rotateServerCertificate` (gcloud's `server-certs rotate` and `rollback`) makes it the presented one.
+The pool is checked as Google documents, each with its words: the format ("Invalid format for server
+CA pool"), its region ("The instance's server CA pool must be in the same region as the instance."),
+that it exists (404, "parent resource ... not found") and has an enabled CA ("There are no enabled
+CAs in the CaPool"), and the pool's own issuance policy (configuration-based requests and DNS names in
+SANs allowed, the key type) through the issuance itself. MySQL 5.7 is 400 ("supported only on MySQL
+8.0.30 and later"). Such an instance cannot be patched back to `GOOGLE_MANAGED_INTERNAL_CA` (400);
+it moves to `GOOGLE_MANAGED_CAS_CA` with `serverCaPool` `""`, and a pool left set with another mode is
+400. Changing the pool issues a certificate from the new one. Not enforced: the service agent
+(`service-PROJECT@gcp-sa-cloud-sql.iam.gserviceaccount.com`) and its
+`roles/privateca.certificateRequester` on the pool, as no call here is authorized (ADR-0004) and the
+pool's IAM policy is stored, not enforced (ADR-0006). `serverCertificateRotationMode`
+`AUTOMATIC_ROTATION_DURING_MAINTENANCE` is recorded and never acts, as no maintenance event is
+scheduled here; rotate with `addServerCertificate`. Disabling the pool's CA later does not revoke the
+certificate the server already presents.
+
 The servers are reached through the connector path, so the certificates
 are records the servers do not check on a direct connection. `tiers.list` and `flags.list`
 answer the lists Google documents for each version served (`POSTGRES_13` to `POSTGRES_18`,
@@ -249,7 +277,7 @@ and an address the connectors reach through 3307.
 
 | Field | What happens |
 |---|---|
-| `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins, `SQLSERVER_*` and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. |
+| `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_5_6` and `MYSQL_5_7` (#1524, where the node runs linux/amd64), `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins, `SQLSERVER_*` and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. |
 | `region` | Recorded and answered, and in the connection name (`us-central1` when left out). Every server runs in the one cluster. |
 | `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
@@ -283,7 +311,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.finalBackupConfig` | `enabled` makes a `delete` without `enableFinalBackup` take a `FINAL` backup, kept `retentionDays` (30 when not given). |
 | `settings.databaseReplicationEnabled` | A read replica's replication state, set by `stopReplica` and `startReplica`; a different value in a patch is 400 naming those methods, and `true` on a primary is 400. |
 | `settings.dataApiAccess`, `edition`, `dataDiskSizeGb`, `backupConfiguration`, `activationPolicy`, `availabilityType` | Applied: see the sections on the Data API, point-in-time recovery, storage shrink, backups and high availability. |
-| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614); `CUSTOMER_MANAGED_CAS_CA` and `serverCaPool` are 501: the customer's CA pool is Certificate Authority Service's. |
+| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614), and `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool` (#1834, below); `serverCertificateRotationMode` is checked and recorded. A patch whose `ipConfiguration` names none of the three keeps them. |
 | `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
 | `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
@@ -668,6 +696,8 @@ of its version is created, so that create takes longer.
 | `POSTGRES_16` | `postgres:16-alpine` | `POSTGRES_16_15` |
 | `POSTGRES_17` | `postgres:17-alpine` (the server `up` runs) | `POSTGRES_17_11` |
 | `POSTGRES_18` | `postgres:18-alpine` | `POSTGRES_18_6` |
+| `MYSQL_5_6` | `mysql:5.6`, its linux/amd64 manifest (see below) | `MYSQL_5_6_51` |
+| `MYSQL_5_7` | `mysql:5.7`, its linux/amd64 manifest (see below) | `MYSQL_5_7_44` |
 | `MYSQL_8_0` | `mysql:8.0` | `MYSQL_8_0_46` |
 | `MYSQL_8_4` | `mysql:8.4` (the server `up` runs) | `MYSQL_8_4_11` |
 
@@ -682,6 +712,28 @@ upgrades) is served, and an upgrade to 12 or later gives the instance the rest. 
 9.6 to 12 is 501: the flag table here is Cloud SQL's for 13 to 18; `databaseFlags` are passed to
 the server, which checks them.
 
+**MySQL 5.7 (#1524)** is in extended support on Cloud SQL. Its official image, `mysql:5.7`, was last
+built in 2023-12 (5.7.44), and only for linux/amd64. CloudBurrow pins that platform's manifest by
+digest, so a linux/arm64 node can pull it too. A `MYSQL_5_7` instance is created where the
+cluster's node runs linux/amd64 binaries: natively, or through an x86-64 `binfmt_misc` handler
+registered with the `F` flag. Docker Desktop on Apple silicon registers Rosetta and
+`qemu-x86_64` that way (measured 2026-11-18). The node is asked once. On a node that cannot run
+the image, `instances.insert` is 501 and names why. The server starts with `ulimit -n 1048576`,
+because mysqld 5.7 sizes its tables from the open-files limit, and containerd's default made it
+OOMKilled.
+
+A MySQL 5.7 instance serves its server, databases, users, database flags, restarts and
+connections. These are 501 on it: read replicas, `REGIONAL`, `binaryLogEnabled`, clones, a major
+version upgrade, `demote`/`demoteMaster` and blue-green deployments. CloudBurrow builds them on
+MySQL 8.0's statements (`CHANGE REPLICATION SOURCE`, `START REPLICA`, `SET PERSIST`), which 5.7
+does not have. `flags.list` answers no flags for it. The console's version picker offers it.
+
+**MySQL 5.6 (#1524)** is served the same way. Its official image, `mysql:5.6`, was last built in
+2021-12 (5.6.51), only for linux/amd64, and is pinned by that manifest's digest
+(`docker buildx imagetools inspect mysql:5.6`, 2026-11-18). It starts under the same open-files
+limit, and serves and refuses what a MySQL 5.7 instance does. `users.update` changes a password
+with `SET PASSWORD FOR ... = PASSWORD(...)`, because MySQL 5.6's `ALTER USER` only expires one.
+
 `databaseInstalledVersion` is read from the server. `maintenanceVersion` and
 `availableMaintenanceVersions` are not answered: they name Cloud SQL's own releases
 (`POSTGRES_17_11.R20250727.00_00`), which no server here is.
@@ -690,12 +742,11 @@ What is 501, each checked with `docker buildx imagetools inspect` on 2026-10-16 
 
 | `databaseVersion` | Why |
 |---|---|
-| `MYSQL_5_7` | `mysql:5.7` is linux/amd64 only, last built 2023-12 (5.7.44), and no longer built |
-| `MYSQL_5_6` | `mysql:5.6` is linux/amd64 only, last built 2021-12 (5.6.51) |
+| `MYSQL_5_7`, `MYSQL_5_6` | Only on a node that runs no linux/amd64 binaries (see above): `mysql:5.7` and `mysql:5.6` are linux/amd64 only |
 | `MYSQL_8_0_18` to `MYSQL_8_0_4x` | one 8.0 minor runs, `MYSQL_8_0` (8.0.46, the official image's); the 501 says to use it |
 | `SQLSERVER_2017_*`, `SQLSERVER_2019_*`, `SQLSERVER_2022_*` | SQL Server has no Docker Hub official image; Microsoft's `mcr.microsoft.com/mssql/server` (2017, 2019, 2022) is linux/amd64 only |
 
-A created primary answers `upgradableDatabaseVersions`, every newer served version of its
+A created primary or read replica answers `upgradableDatabaseVersions`, every newer served version of its
 engine, and **`instances.patch` with a newer `databaseVersion` is a major version upgrade**, as
 Cloud SQL's in-place upgrade (`gcloud sql instances patch --database-version`, Terraform's
 `database_version`): a `MAJOR_VERSION_UPGRADE` operation, the instance `MAINTENANCE` meanwhile.
@@ -724,9 +775,19 @@ documents: `instances.patch` of the replica with the newer version is a `MAJOR_V
 that rebuilds it on that version from its primary, which goes on replicating to it (MySQL
 replicates from a source to a replica of the next version). The primary is then upgraded
 without `includeReplicasForMajorVersionUpgrade`, and each of its replicas is rebuilt from the
-new server. **Upgrading a PostgreSQL replica on its own is 501**: it is a physical standby
-streaming its primary's WAL, which PostgreSQL does not replicate across major versions; upgrade
-the primary with its replicas instead. The console's instance page
+new server. **A PostgreSQL replica is upgraded on its own too (#1524)**, as Cloud SQL documents:
+"you must upgrade the read replicas before you upgrade the primary instance", and "The
+replicated databases of an upgraded replica are available only after you upgrade the primary
+instance." A PostgreSQL replica is a physical standby streaming its primary's WAL, which does not
+cross major versions, so its `MAJOR_VERSION_UPGRADE` replaces its server with an empty one of the
+newer version. The replica stays the primary's, `RUNNABLE`, at the new version, and replicates
+nothing until the primary is upgraded to that version. The primary's upgrade, with or without
+`includeReplicasForMajorVersionUpgrade`, then rebuilds it from the upgraded primary with
+`pg_basebackup`, and it replicates again. `includeReplicasForMajorVersionUpgrade` on the replica
+does the same to its own cascading replicas. In between, `promoteReplica`, `stopReplica`,
+`startReplica` and a `switchover` to it are 501: Google does not document what they do then.
+An external replica (of a source representation instance) cannot be upgraded in place, as Cloud
+SQL documents; that is 400 (the message is CloudBurrow's own). The console's instance page
 offers **Upgrade** with the versions the instance can go to and **Include replicas**, and the
 Create instance form's version picker lists every served version.
 

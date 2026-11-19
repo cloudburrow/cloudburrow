@@ -67,6 +67,8 @@ var compatSections = map[string]string{
 	"backupdr": "## Backup and DR Service — `backupdr.googleapis.com` v1",
 	// Cloud Identity's groups (#1812), named by whole discovery ID.
 	"cloudidentity": "## Cloud Identity groups — `cloudidentity.googleapis.com` v1",
+	// Certificate Authority Service (#1834), named by gRPC method.
+	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the

@@ -102,6 +102,11 @@ const (
 	// #1433) for Cloud SQL, served in the CLI process over the Cloud SQL
 	// Admin API's backups: opt-in, beside cloudsql or cloudsql-mysql.
 	ServiceBackupDR Service = "backupdr"
+	// ServicePrivateCA is Certificate Authority Service
+	// (privateca.googleapis.com, #1834), served in the CLI process: CA
+	// pools, CAs whose keys are generated locally, and the certificates
+	// they sign. Google publishes no emulator.
+	ServicePrivateCA Service = "privateca"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -114,7 +119,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA}
 }
 
 // KnownServices lists every selectable service.
@@ -175,7 +180,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -320,6 +325,9 @@ type Endpoints struct {
 	// BackupDR is the host port of the Backup and DR Service API
 	// (backupdr.googleapis.com, #1433), served in process.
 	BackupDR int `json:"backupdr"`
+	// PrivateCA is the host port of Certificate Authority Service
+	// (privateca.googleapis.com, #1834): gRPC and JSON on one port.
+	PrivateCA int `json:"privateca"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -390,6 +398,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"sqladmin", &e.SQLAdmin},
 		{"serviceusage", &e.ServiceUsage},
 		{"backupdr", &e.BackupDR},
+		{"privateca", &e.PrivateCA},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -457,6 +466,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.KMS
 	case ServiceBackupDR:
 		return e.BackupDR
+	case ServicePrivateCA:
+		return e.PrivateCA
 	default:
 		return 0
 	}
@@ -753,6 +764,8 @@ func Default() Config {
 			// The TensorFlow SavedModel converter (#1775): the next free
 			// port.
 			TFConvert: 9027,
+			// Certificate Authority Service (#1834): the next free port.
+			PrivateCA: 9028,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

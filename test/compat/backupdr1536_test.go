@@ -36,8 +36,7 @@ func TestBackupDRFetchTrialCompliance(t *testing.T) {
 	vaultName := loc + "/backupVaults/" + vaultID
 	defer l.BackupVaults.Delete(vaultName).Force(true).Do()
 	wait(l.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName, ResourceType: "sqladmin.googleapis.com/Instance", LogRetentionDays: 7,
-		BackupRules: []*backupdr.BackupRule{{RuleId: "daily", BackupRetentionDays: 7, StandardSchedule: &backupdr.StandardSchedule{
-			RecurrenceType: "DAILY", TimeZone: "UTC", BackupWindow: &backupdr.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 5}}}}}).BackupPlanId(planID).Do())
+		BackupRules: dailyRule()}).BackupPlanId(planID).Do())
 	planName := loc + "/backupPlans/" + planID
 	defer l.BackupPlans.Delete(planName).Do()
 	wait(l.BackupPlanAssociations.Create(loc, &backupdr.BackupPlanAssociation{BackupPlan: planName,
