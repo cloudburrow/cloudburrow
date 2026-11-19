@@ -249,6 +249,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
+		// Log Analytics (#1863), over the buckets' linked datasets in the
+		// instance's BigQuery; without BigQuery the page says it is not
+		// available.
+		if addr := forwardedAddr(d.forwarders, string(config.ServiceBigQuery)); enabled[config.ServiceBigQuery] && addr != "" {
+			providers = append(providers, loggingAnalyticsProvider{screen,
+				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}})
+		}
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

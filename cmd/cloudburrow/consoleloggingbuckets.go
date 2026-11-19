@@ -123,7 +123,7 @@ func (loggingBucketsProvider) CreateForm() (string, []console.Field) {
 			Help: "Query the bucket's entries with SQL in BigQuery. Only a project's bucket can be upgraded."},
 		{Name: "link", Label: "Create a new BigQuery dataset that links to this bucket", Type: "checkbox", Default: "false", Section: details,
 			ShowWhen: "analytics"},
-		{Name: "linkId", Label: "BigQuery dataset name", Type: "text", Required: true, Section: details, ShowWhen: "link",
+		{Name: "linkId", Label: "BigQuery dataset name", Type: "text", Required: true, Section: details, ShowWhen: "analytics&link",
 			Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}$`, Help: "The link's name, which names the dataset too, with hyphens as underscores."},
 		{Name: "location", Label: "Select log bucket region", Type: "select", Required: true, Default: "global", Options: bucketRegions(), Section: details},
 		{Name: "retention", Label: "Retention period", Type: "number", Default: "30", Section: retention, Help: "1 to 3650 days."},
@@ -499,4 +499,25 @@ var (
 	_ console.Editor      = loggingBucketsProvider{}
 	_ console.Deleter     = loggingBucketsProvider{}
 	_ console.Actor       = loggingBucketsProvider{}
+)
+
+// Google's Logs Storage names the bucket in each row's menu: Edit bucket,
+// Delete bucket (#1863).
+func (loggingBucketsProvider) DeleteLabel() string  { return "Delete bucket" }
+func (loggingBucketsProvider) RowEditLabel() string { return "Edit bucket" }
+
+var (
+	_ console.DeleteLabeler = loggingBucketsProvider{}
+	_ console.RowEditor     = loggingBucketsProvider{}
+)
+
+// Google's Create log bucket opens from a button of that name, moves
+// between its steps with Next, and ends in Create bucket
+// (docs.cloud.google.com/logging/docs/buckets, re-read 2026-11-19; #1863).
+func (loggingBucketsProvider) CreateLayout() string { return console.CreateLayoutNext }
+func (loggingBucketsProvider) CreateSubmit() string { return "Create bucket" }
+
+var (
+	_ console.CreateLayouter  = loggingBucketsProvider{}
+	_ console.CreateSubmitter = loggingBucketsProvider{}
 )

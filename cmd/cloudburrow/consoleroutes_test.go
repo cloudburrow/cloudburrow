@@ -31,7 +31,9 @@ func TestEveryProviderHasAConsoleRoute(t *testing.T) {
 		if !strings.Contains(entry, "section:") {
 			continue // a route the navigation does not list
 		}
-		if m := regexp.MustCompile(`service: "([a-z0-9-]+)"`).FindStringSubmatch(entry); m != nil {
+		// provider: names the screen's provider on an entry kept in the
+		// navigation when it is not served, as Log Analytics is (#1863).
+		if m := regexp.MustCompile(`(?:service|provider): "([a-z0-9-]+)"`).FindStringSubmatch(entry); m != nil {
 			routed[m[1]] = true
 		}
 	}

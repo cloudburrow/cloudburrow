@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -275,9 +274,10 @@ func sinkFields(s *loggingpb.LogSink) []console.Field {
 			help = append(help, sv.label+": "+sv.rest)
 		}
 	}
-	exclusions := map[string]string{}
+	var exclusions []map[string]string
 	for _, e := range s.GetExclusions() {
-		exclusions[e.GetName()] = e.GetFilter()
+		exclusions = append(exclusions, map[string]string{"name": e.GetName(), "filter": e.GetFilter(),
+			"disabled": strconv.FormatBool(e.GetDisabled())})
 	}
 	const (
 		details = "Sink details"
@@ -303,9 +303,17 @@ func sinkFields(s *loggingpb.LogSink) []console.Field {
 		{Name: "intercept_children", Label: "Intercept logs ingested by child resources", Type: "checkbox",
 			Default: strconv.FormatBool(logging.SinkIntercepts(s)), Section: include,
 			Help: "Folder and organization sinks only (intercept_children). It requires include children and a Google Cloud project destination; the entries it matches are kept out of the sinks under it."},
-		{Name: "exclusions", Label: "Exclusion filters", Type: "map", Default: console.FormatMap(exclusions), Section: exclude,
-			KeyPattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}$`, KeyHelp: "an exclusion filter name: up to 100 letters, digits, _, - and ., starting with a letter or digit",
-			Help: "One row per exclusion filter: its Exclusion filter name, then Build an exclusion filter. An entry an exclusion filter matches is not routed by this sink. An exclusion keeps its Disable state on edit."},
+		// A row per exclusion filter, as Google's: its name, its filter,
+		// and Disable, which keeps it on the sink without applying it
+		// (#1863).
+		{Name: "exclusions", Label: "Exclusion filter", Type: console.GroupFieldType, Default: console.FormatGroup(exclusions), Section: exclude,
+			AddLabel: "Add exclusion", Group: []console.Field{
+				{Name: "name", Label: "Exclusion filter name", Type: "text", Required: true, Pattern: `[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}`,
+					Help: "up to 100 letters, digits, _, - and ., starting with a letter or digit"},
+				{Name: "filter", Label: "Build an exclusion filter", Type: "textarea", Required: true},
+				{Name: "disabled", Label: "Disable", Type: "checkbox"},
+			},
+			Help: "An entry an enabled exclusion filter matches is not routed by this sink."},
 	}
 	// Disabled is the edit form's; Google's Create sink has none, and a
 	// row's Disable sink and Enable sink change it too.
@@ -388,26 +396,27 @@ func sinkFromForm(id string, v map[string]string, old *loggingpb.LogSink) (*logg
 	if err != nil {
 		return nil, err
 	}
-	ex, err := console.ParseMap(v["exclusions"])
+	rows, err := console.ParseGroup(v["exclusions"])
 	if err != nil {
 		return nil, fmt.Errorf("exclusion filters: %w", err)
 	}
 	sk := &loggingpb.LogSink{Name: id, Destination: dest, Filter: v["filter"],
 		Description: v["description"], Disabled: v["disabled"] == "true", IncludeChildren: v["include_children"] == "true"}
+	// In the form's order; an exclusion the stored sink has keeps its
+	// description, which the form does not show.
+	described := map[string]string{}
 	for _, e := range old.GetExclusions() {
-		if f, ok := ex[e.GetName()]; ok {
-			sk.Exclusions = append(sk.Exclusions, &loggingpb.LogExclusion{Name: e.GetName(), Filter: f,
-				Description: e.GetDescription(), Disabled: e.GetDisabled()})
-			delete(ex, e.GetName())
+		described[e.GetName()] = e.GetDescription()
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		n := strings.TrimSpace(r["name"])
+		if seen[n] {
+			return nil, fmt.Errorf("exclusion filters: %q is named twice", n)
 		}
-	}
-	names := make([]string, 0, len(ex))
-	for n := range ex {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		sk.Exclusions = append(sk.Exclusions, &loggingpb.LogExclusion{Name: n, Filter: ex[n]})
+		seen[n] = true
+		sk.Exclusions = append(sk.Exclusions, &loggingpb.LogExclusion{Name: n, Filter: r["filter"],
+			Description: described[n], Disabled: r["disabled"] == "true"})
 	}
 	logging.SetSinkIntercept(sk, v["intercept_children"] == "true")
 	return sk, nil
@@ -583,3 +592,13 @@ var _ console.PathActor = loggingSinksProvider{}
 var _ console.Editor = loggingSinksProvider{}
 var _ console.Deleter = loggingSinksProvider{}
 var _ console.Driller = loggingSinksProvider{}
+
+// Google's Log Router names the sink in each row's menu: Edit sink,
+// Delete sink (#1863).
+func (loggingSinksProvider) DeleteLabel() string  { return "Delete sink" }
+func (loggingSinksProvider) RowEditLabel() string { return "Edit sink" }
+
+var (
+	_ console.DeleteLabeler = loggingSinksProvider{}
+	_ console.RowEditor     = loggingSinksProvider{}
+)

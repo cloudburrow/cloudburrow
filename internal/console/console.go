@@ -293,7 +293,8 @@ type Field struct {
 	// radio or select choice, as Google's Create topic reveals the retention
 	// period under Enable message retention (#1847). A hidden field is not
 	// validated; it is still sent, so the provider reads it only when its
-	// condition holds.
+	// condition holds. Conditions joined by "&" must all hold:
+	// "type=Distribution&bucket_type=Linear" (#1863).
 	ShowWhen string `json:"showWhen,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
@@ -305,6 +306,52 @@ type Field struct {
 	// this instance, each with its reason: drawn disabled where Google's page
 	// has them, as Create subscription's Write to BigQuery (#1847).
 	UnavailableOptions map[string]string `json:"unavailableOptions,omitempty"`
+	// Group, on a "group" field (GroupFieldType), is the fields of one row
+	// of a repeatable group, as Google's Create sink has a row per
+	// exclusion filter, each with its name, filter and Disable (#1863).
+	// AddLabel is the button that adds a row ("Add exclusion"). The value
+	// is a JSON array of one object per row, each subfield's name to its
+	// value ("true" or "false" for a checkbox); ParseGroup reads it.
+	Group    []Field `json:"group,omitempty"`
+	AddLabel string  `json:"addLabel,omitempty"`
+}
+
+// GroupFieldType is the Type of a repeatable group of fields (Field.Group).
+const GroupFieldType = "group"
+
+// ParseGroup decodes a "group" field's value: one map per row, rows with
+// every subfield empty or "false" left out. An empty value is no rows.
+func ParseGroup(value string) ([]map[string]string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var rows []map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
+		return nil, fmt.Errorf("expected a JSON array of objects of string keys and values: %w", err)
+	}
+	out := rows[:0]
+	for _, r := range rows {
+		for _, v := range r {
+			if v != "" && v != "false" {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// FormatGroup encodes rows for a "group" field's prefilled value.
+func FormatGroup(rows []map[string]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 // ParseMap decodes a "map" field's value.
@@ -413,6 +460,10 @@ type CreateLayouter interface {
 
 // CreateLayoutPage is CreateLayout's single-page layout.
 const CreateLayoutPage = "page"
+
+// CreateLayoutNext is the numbered steps with Next where Continue would be,
+// as Google's Create log bucket has (#1863).
+const CreateLayoutNext = "next"
 
 // CreateCheck is a button on a create page that checks what the form holds
 // without creating anything: Google's Validate definition and Test message
@@ -845,6 +896,22 @@ type OptionalDriller interface {
 type Deleter interface {
 	// Delete removes one resource by the name List reported.
 	Delete(ctx context.Context, project, name string) error
+}
+
+// DeleteLabeler is a Deleter whose rows' menus and pages name the resource
+// in Delete, as Google's Log Router has Delete sink and Logs Storage Delete
+// bucket (#1863).
+type DeleteLabeler interface {
+	Deleter
+	DeleteLabel() string
+}
+
+// RowEditor is an Editor whose list rows' menus open the edit form too,
+// under this label, as Google's Log Router has Edit sink in each sink's
+// menu (#1863). The form is the one the resource's page offers.
+type RowEditor interface {
+	Editor
+	RowEditLabel() string
 }
 
 // Actor is a provider with named per-resource actions, such as pausing a
@@ -1531,6 +1598,11 @@ type capabilities struct {
 	// Query means a statement can be run against this service's resources.
 	Query  *queryCapability `json:"query,omitempty"`
 	Delete bool             `json:"delete,omitempty"`
+	// DeleteLabel is the Delete item's label where the provider names it
+	// (DeleteLabeler), and EditRow the label of the rows' Edit item
+	// (RowEditor), empty for none.
+	DeleteLabel string `json:"deleteLabel,omitempty"`
+	EditRow     string `json:"editRow,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -1607,8 +1679,8 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		if ct, ok := p.(CreateTitler); ok {
 			c.Create.Title = ct.CreateTitle()
 		}
-		if cl, ok := p.(CreateLayouter); ok && cl.CreateLayout() == CreateLayoutPage {
-			c.Create.Layout = CreateLayoutPage
+		if cl, ok := p.(CreateLayouter); ok && (cl.CreateLayout() == CreateLayoutPage || cl.CreateLayout() == CreateLayoutNext) {
+			c.Create.Layout = cl.CreateLayout()
 		}
 		if cc, ok := p.(CreateChecker); ok {
 			c.Create.Checks = cc.CreateChecks()
@@ -1632,6 +1704,12 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
+	}
+	if dl, ok := p.(DeleteLabeler); ok {
+		c.DeleteLabel = dl.DeleteLabel()
+	}
+	if re, ok := p.(RowEditor); ok {
+		c.EditRow = re.RowEditLabel()
 	}
 	// Asked of the instance when it can answer, because the interface alone
 	// speaks for the type.

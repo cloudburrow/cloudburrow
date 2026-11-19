@@ -247,11 +247,15 @@ const ROUTES = [
   // Settings Google's Observability settings, exclusions part of a sink).
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations",
     product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/analytics", service: null, screen: "unavailable", icon: "logs", title: "Log Analytics", section: "Operations",
+  // Log Analytics (#1863): SQL over the log views of buckets upgraded to
+  // use it, run in the instance's BigQuery over each bucket's linked
+  // dataset; without BigQuery served the page says why it is unavailable,
+  // so the entry has no service (which would hide it) but names its
+  // provider.
+  { path: "/logs/analytics", service: null, provider: "logging-analytics", screen: "log-analytics", icon: "logs", title: "Log Analytics", section: "Operations",
     product: "logging", productTitle: "Cloud Logging",
-    unavailable: "Log Analytics runs SQL over a log bucket upgraded to use Log Analytics, through BigQuery's engine, " +
-      "which this page does not hold. A bucket's linked dataset (Logs Storage, the bucket's Linked dataset) opens in " +
-      "the local BigQuery's query editor, where its _AllLogs view can be queried." },
+    unavailable: "Log Analytics runs SQL over a bucket's linked BigQuery dataset, in this instance's BigQuery, " +
+      "which this instance does not serve: start it with bigquery among its --services." },
   { path: "/logs/dashboard", service: null, screen: "logs-dashboard", icon: "logs", title: "Logs Dashboard", section: "Operations",
     product: "logging", productTitle: "Cloud Logging" },
   // Cloud Logging's admin resources (#1226), beside the Explorer: they are
@@ -2630,8 +2634,13 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         run: () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name),
           (item.actsOn || []).length ? item.name : null),
       })),
+      // Edit sink in a sink's menu (#1863): the form its page offers.
+      ...(caps.editRow ? [{
+        label: caps.editRow,
+        run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
+      }] : []),
       ...(caps.delete ? [{
-        label: "Delete", destructive: true,
+        label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
@@ -4412,6 +4421,20 @@ function showOneTime(once) {
   dialog.querySelector(".modal-actions button").focus();
 }
 
+// editFromRow opens a row's edit form from its menu (#1863): the form is
+// the one the resource's page offers, read from its detail.
+async function editFromRow(route, segments, onDone) {
+  const project = currentProject();
+  try {
+    const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
+      segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
+    if (!data.edit) throw new Error("This resource has nothing that can be edited.");
+    openEditForm(route, segments, data.edit, onDone);
+  } catch (err) {
+    notify(String(err.message), "error");
+  }
+}
+
 // openEditForm changes a resource in place.
 //
 // It reuses the create form wholesale — the same validation, the same grouping,
@@ -5168,6 +5191,9 @@ function buildCreateForm(spec) {
     // hidden input, so dirtiness, validation and submission are the same
     // code as every other field's.
     if (f.type === "radio") return radioEntry(f, id, errorId, helpId);
+    // A repeatable group of fields (#1863): Google's exclusion filters,
+    // a row each with its name, filter and Disable.
+    if (f.type === "group") return groupEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -5326,21 +5352,29 @@ function buildCreateForm(spec) {
   // A field shown only while another holds a value (#1847): "name" for a
   // checked checkbox, "name=value" for a radio or select choice, as Google's
   // Create topic reveals the retention period under Enable message retention.
+  // Conditions joined by "&" must all hold (#1863): a distribution
+  // metric's linear bounds show for "type=Distribution&bucket_type=Linear",
+  // a bucket's dataset name for "analytics&link".
+  const radioValue = (other) => other.control.value;
   for (const entry of entries) {
     const cond = entry.field.showWhen;
     if (!cond) continue;
-    const [name, choice] = cond.split("=");
-    const other = byName.get(name);
-    if (!other) continue;
+    const terms = cond.split("&").map((t) => {
+      const [name, choice] = t.split("=");
+      return { other: byName.get(name), choice };
+    }).filter((t) => t.other);
+    if (!terms.length) continue;
     const show = () => {
-      const on = choice === undefined
+      const on = terms.every(({ other, choice }) => choice === undefined
         ? (other.isCheck ? other.control.checked : !!other.control.value)
-        : other.control.value === choice;
+        : radioValue(other) === choice);
       entry.node.hidden = !on;
       if (!on) markValid(entry);
     };
-    other.control.addEventListener("change", show);
-    other.control.addEventListener("input", show);
+    for (const { other } of terms) {
+      other.control.addEventListener("change", show);
+      other.control.addEventListener("input", show);
+    }
     show();
   }
 
@@ -5630,6 +5664,82 @@ function schemaEntry(f, id, errorId, helpId) {
   if (helpId) top.rows[0].name.setAttribute("aria-describedby", helpId);
   return { field: f, control, node, error, helpId, errorId, isCheck: false,
            focus: () => top.rows[0].name.focus() };
+}
+
+// groupEntry is a repeatable group of fields (Field.Group, #1863): a row
+// of controls per item, Add (its addLabel) for another and Remove on each,
+// as Google's Create sink has a row per exclusion filter with its name,
+// filter and Disable. The value is a hidden textarea holding the JSON
+// array of rows, so validation, dirtiness and submission are every other
+// field's; a row's own text fields are checked against their patterns.
+function groupEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, hidden: true, class: "group-value" });
+  const sub = f.group || [];
+  const rows = [];
+  let initial = [];
+  try { initial = f.default ? JSON.parse(f.default) : []; } catch { initial = []; }
+  if (!Array.isArray(initial)) initial = [];
+  const list = el("div", { class: "group-rows", role: "list" });
+  const rowValue = (r) => Object.fromEntries(sub.map((s, i) =>
+    [s.name, s.type === "checkbox" ? String(r.controls[i].checked) : r.controls[i].value.trim()]));
+  const blank = (v) => Object.values(v).every((x) => x === "" || x === "false");
+  const sync = () => {
+    const values = rows.map(rowValue).filter((v) => !blank(v));
+    control.value = values.length ? JSON.stringify(values) : "";
+    let problem = "";
+    rows.forEach((r, n) => {
+      if (problem || blank(rowValue(r))) return;
+      sub.forEach((s, i) => {
+        const c = r.controls[i];
+        if (problem || s.type === "checkbox") return;
+        if (s.required && !c.value.trim()) problem = `${f.label} ${n + 1}: ${s.label} is required.`;
+        else if (s.pattern && c.value && !new RegExp(`^(?:${s.pattern})$`, "v").test(c.value)) {
+          problem = `${f.label} ${n + 1}: ${s.label} ${s.help ? `must be ${s.help}` : "is not valid"}.`;
+        }
+      });
+    });
+    control.setCustomValidity(problem);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const addRow = (value = {}) => {
+    const n = rows.length + 1;
+    const r = { controls: [] };
+    const cells = sub.map((s) => {
+      const label = `${s.label} ${n}`;
+      const c = s.type === "textarea"
+        ? el("textarea", { rows: "2", "aria-label": label, spellcheck: "false" })
+        : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
+                        autocomplete: "off", spellcheck: "false" });
+      if (s.type === "checkbox") c.checked = value[s.name] === "true";
+      else c.value = value[s.name] || s.default || "";
+      c.addEventListener("input", sync);
+      c.addEventListener("change", sync);
+      r.controls.push(c);
+      return s.type === "checkbox"
+        ? el("label", { class: "group-check" }, c, el("span", { text: s.label }))
+        : el("label", { class: "group-cell" }, el("span", { class: "group-cell-label", text: s.label }), c);
+    });
+    const remove = el("button", { type: "button", class: "secondary group-remove", text: "Remove",
+      "aria-label": `Remove ${f.label.toLowerCase()} ${n}`,
+      onclick: () => { rows.splice(rows.indexOf(r), 1); r.node.remove(); sync(); } });
+    r.node = el("div", { class: "group-row", role: "listitem" }, ...cells, remove);
+    rows.push(r);
+    list.append(r.node);
+    return r;
+  };
+  for (const v of initial) addRow(v);
+  const add = el("button", { type: "button", class: "secondary group-add", text: f.addLabel || "Add",
+    onclick: () => { const r = addRow(); r.controls[0].focus(); sync(); } });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row group-field" },
+    el("legend", {}, el("span", { text: f.label })), list, add, control, help, error);
+  control.value = f.default || "";
+  sync();
+  // The value as drawn is the default, so an untouched group is not dirty.
+  f.default = control.value;
+  return { field: f, control, node, error, helpId, errorId, isCheck: false,
+           focus: () => (rows[0] ? rows[0].controls[0] : add).focus() };
 }
 
 // mapToLines renders a map field's JSON value as one "key=value" per line.
@@ -5954,7 +6064,7 @@ async function renderCreatePage(view, route) {
   // are, or one page under headings, as Pub/Sub's are (#1847).
   const steps = caps.create.layout === "page"
     ? { nodes: fields.nodes, revealInvalid() {} }
-    : createSteps(fields.nodes);
+    : createSteps(fields.nodes, caps.create.layout === "next" ? "Next" : "Continue");
   const checks = createChecks(target, caps.create, fields);
 
   const submit = async (e) => {
@@ -6060,7 +6170,9 @@ function createChecks(target, spec, fields) {
 //   const steps = createSteps(fields.nodes);
 //   form.append(...steps.nodes);
 //   if (!fields.validate()) steps.revealInvalid();
-function createSteps(nodes) {
+// The button is Continue, or Next where Google's page says Next, as
+// Create log bucket does (CreateLayoutNext, #1863).
+function createSteps(nodes, continueLabel = "Continue") {
   const sections = nodes.filter((n) => n.classList && n.classList.contains("form-section"));
   if (!sections.length) return { nodes, revealInvalid() {} };
   const lead = [];
@@ -6096,7 +6208,7 @@ function createSteps(nodes) {
     s.head.addEventListener("click", () => setOpen(s, s.body.hidden));
     if (i < steps.length - 1) {
       s.body.append(el("div", { class: "create-step-continue" },
-        el("button", { type: "button", class: "secondary", text: "Continue",
+        el("button", { type: "button", class: "secondary", text: continueLabel,
           onclick: () => {
             setOpen(s, false);
             s.step.classList.add("is-done");
@@ -6239,7 +6351,13 @@ function overflowMenu(actions, name) {
       el("button", {
         class: "overflow-item" + (a.destructive ? " is-destructive" : ""),
         role: "menuitem", text: a.label,
-        onclick: () => { menu.hidden = true; a.run(); },
+        // An item Google's menu has that this instance cannot perform is
+        // drawn disabled with its reason, rather than left out (#1863:
+        // Create log alert without Cloud Monitoring).
+        disabled: a.unavailable ? "disabled" : null,
+        title: a.unavailable || null,
+        "aria-description": a.unavailable || null,
+        onclick: () => { menu.hidden = true; if (!a.unavailable) a.run(); },
       })));
 
   const button = el("button", {
@@ -6513,6 +6631,52 @@ function route() {
 
 // renderUnavailable is a page Google's console has whose service
 // CloudBurrow does not run (#1843): its place in the menu, and why.
+// Log Analytics (#1863), as Google's page: the Log views panel beside a
+// SQL editor whose FROM names a view as PROJECT_ID.LOCATION.BUCKET_ID.
+// LOG_VIEW_ID. The logging-analytics provider runs it over the bucket's
+// linked dataset in this instance's BigQuery; a view's name in the panel
+// puts Google's default query on it in the editor.
+async function renderLogAnalytics(view, match) {
+  const caps = capabilityOf("logging-analytics");
+  if (!caps.id) return renderUnavailable(view, match);
+  const project = currentProject();
+  const route = { service: "logging-analytics", title: "Log Analytics" };
+  const header = pageHeader("Log Analytics", project ? `Project ${project}` : "All projects");
+  setChildren(view, header, loadingState(3, { what: "log views" }));
+  let data;
+  try {
+    data = await api(`/api/resources/logging-analytics?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header, errorState("Log views unavailable", String(err.message),
+      () => renderLogAnalytics(view, match)));
+  }
+  const views = data.items || [];
+  const pane = queryPane(route, [], caps.query, () => {});
+  const editor = pane.querySelector("textarea.query-editor");
+  editor.setAttribute("aria-label", "Query");
+  const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");
+  if (run) run.textContent = "Run query";
+  const defaultQuery = (name) => "SELECT\n  timestamp, severity, log_name, resource.type, text_payload, json_payload\n" +
+    `FROM\n  \`${name}\`\nORDER BY timestamp DESC\nLIMIT 1000`;
+  if (!editor.value && views.length) {
+    const first = views.find((v) => v.name.endsWith("._Default._AllLogs")) || views[0];
+    editor.value = defaultQuery(first.name);
+  }
+  const panel = el("aside", { class: "card log-views", "aria-label": "Log views" },
+    el("h2", { text: "Log views" }),
+    data.note ? el("p", { class: "unavailable", text: data.note }) : null,
+    views.length
+      ? el("ul", { class: "log-view-list" }, ...views.map((v) => el("li", {},
+          el("button", { type: "button", class: "link-button mono", text: v.name,
+            title: `Query ${v.name}`,
+            onclick: () => { editor.value = defaultQuery(v.name); editor.dispatchEvent(new Event("input")); editor.focus(); } }),
+          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "—"}` }))))
+      : el("p", { class: "unavailable", text: data.prompt ||
+          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage, and Create link to query it here." }));
+  setChildren(view, header, el("div", { class: "log-analytics" }, panel, pane));
+  announce("Log Analytics");
+}
+
 function renderUnavailable(view, route) {
   setChildren(view, pageHeader(route.title, "Not available locally"),
     el("div", { class: "state" },
@@ -6580,6 +6744,7 @@ function dispatch(view) {
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
+  if (match.screen === "log-analytics") return renderLogAnalytics(view, match);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "requests") return renderRequests(view);
   if (match.screen === "faults") return renderFaults(view);
@@ -9550,6 +9715,10 @@ async function renderLogs(view) {
   const queryActions = overflowMenu([
     { label: "Create metric", run: () => navigate(`/logs/metrics/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
     { label: "Create sink", run: () => navigate(`/logs/sinks/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
+    // Google's Create log alert makes a Cloud Monitoring alerting policy,
+    // which this instance does not serve (#1863).
+    { label: "Create log alert", run: () => {},
+      unavailable: "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
     { label: "Download", run: async () => {
       const query = filterQuery();
       query.set("limit", "1000");

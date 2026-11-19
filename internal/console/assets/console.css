@@ -1928,3 +1928,18 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .logs-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 @media (max-width: 700px) { .log-panes { grid-template-columns: minmax(0, 1fr); } }
 .log-toolbar > *, .log-query .actions > *, .log-view-controls > * { max-width: 100%; min-width: 0; }
+
+/* Log Analytics (#1863): the Log views panel beside the editor. */
+.log-analytics { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.log-analytics .log-views h2 { font-size: 14px; margin: 0 0 8px; }
+.log-view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.log-view-list .link-button { word-break: break-all; text-align: left; }
+@media (max-width: 720px) { .log-analytics { grid-template-columns: minmax(0, 1fr); } }
+
+/* A repeatable group of fields (Field.Group, #1863): a row per exclusion filter. */
+.group-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.group-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 8px; border: 1px solid var(--border, var(--text-muted)); border-radius: var(--radius-control); }
+.group-cell { display: grid; gap: 4px; flex: 1 1 200px; min-width: 0; }
+.group-cell textarea, .group-cell input { width: 100%; box-sizing: border-box; }
+.group-cell-label { font-size: var(--text-caption-size); color: var(--text-muted); }
+.group-check { display: inline-flex; align-items: center; gap: 6px; }
