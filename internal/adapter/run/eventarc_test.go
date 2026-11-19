@@ -83,7 +83,10 @@ func TestEventTriggersAreChecked(t *testing.T) {
 		{&functionspb.EventTrigger{EventType: storageEventPrefix + "deleted", EventFilters: []*functionspb.EventFilter{{Attribute: "bucket", Value: "b"}}}, codes.OK},
 		{&functionspb.EventTrigger{EventType: storageEventPrefix + "finalized"}, codes.InvalidArgument},
 		{&functionspb.EventTrigger{EventType: storageEventPrefix + "finalized", EventFilters: []*functionspb.EventFilter{{Attribute: "bucket", Value: "b"}, {Attribute: "name", Value: "x"}}}, codes.Unimplemented},
-		{&functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}, codes.Unimplemented},
+		// Audit logs are served (#1853), published by an instance that can
+		// publish; this transport cannot.
+		{&functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}, codes.FailedPrecondition},
+		{&functionspb.EventTrigger{EventType: "google.cloud.datastore.entity.v1.written"}, codes.Unimplemented},
 		{&functionspb.EventTrigger{EventType: pubsubPublished, PubsubTopic: "projects/p/topics/t", Channel: "c"}, codes.Unimplemented},
 	} {
 		err := on.checkEventTrigger(c.trig)

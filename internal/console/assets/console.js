@@ -165,8 +165,10 @@ const ROUTES = [
   { path: "/artifact-registry-settings", service: "artifact-registry-settings", icon: "artifact-registry", title: "Settings",
     section: "CI/CD", product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
-  { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
-    product: "functions", productTitle: "Cloud Functions" },
+  // Google merged Cloud Functions into Cloud Run: the page is Cloud Run
+  // functions, listing both generations (#1853).
+  { path: "/functions", service: "functions", title: "Cloud Run functions", navTitle: "Functions", kind: "Function", logs: true,
+    section: "Serverless computing", product: "functions", productTitle: "Cloud Run functions" },
 
   // Kubernetes Engine is one product with five pages, not five products.
   //
@@ -3351,6 +3353,20 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     el("div", { class: "table-wrap" },
       el("table", {}, el("thead", {}, headRow), body)),
     footer);
+  if (opts.rowControls) openAskedListAction(route, data, refresh);
+}
+
+// openAskedListAction opens, once, the list action the address names, as
+// a resource page's does (#1853): the functions list's Create function
+// opens Cloud Run's Write a function. The action is taken off the address.
+function openAskedListAction(route, data, onDone) {
+  const asked = new URLSearchParams(location.search).get("action");
+  if (!asked) return;
+  const here = new URL(location.href);
+  here.searchParams.delete("action");
+  history.replaceState(history.state, "", here.pathname + here.search);
+  const opened = (data.actions || []).find((a) => a.id === asked && !a.href);
+  if (opened) openActionForm(route, [], opened, onDone, data.noun || route.title);
 }
 
 // detailHref is the address of one row's contents.
@@ -5072,6 +5088,7 @@ async function renderList(view, route) {
       refreshButton(() => renderList(view, route)));
     setChildren(view, ...header, noteBanner(data.note), empty);
     announce(`No ${noun}`);
+    openAskedListAction(route, data, () => renderList(view, route));
     return;
   }
 

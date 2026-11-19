@@ -648,16 +648,36 @@ func EventarcHandlerOr(register func(grpc.ServiceRegistrar), next http.Handler) 
 // eaMatching are the topics of a project's triggers of one of types whose
 // filters (other than type) the event's attributes, read by value, match.
 func eaMatching(project string, types []string, value func(attribute string) (string, bool)) []string {
-	eaState.mu.Lock()
-	defer eaState.mu.Unlock()
 	var out []string
-	for _, n := range sortedKeys(eaState.triggers) {
-		x := eaState.triggers[n]
-		if !strings.HasPrefix(n, "projects/"+project+"/") || !slices.Contains(types, x.live.spec.GetEventType()) {
-			continue
+	match := func(name string, live *liveTrigger) {
+		if live == nil || !strings.HasPrefix(name, "projects/"+project+"/") || !slices.Contains(types, live.spec.GetEventType()) {
+			return
 		}
-		if eaFiltersMatch(x.live.spec.GetEventFilters(), value) && x.live.topic != "" {
-			out = append(out, x.live.topic)
+		if eaFiltersMatch(live.spec.GetEventFilters(), value) && live.topic != "" {
+			out = append(out, live.topic)
+		}
+	}
+	eaState.mu.Lock()
+	for _, n := range sortedKeys(eaState.triggers) {
+		match(n, eaState.triggers[n].live)
+	}
+	eaState.mu.Unlock()
+	// And 2nd-gen functions' own audit-log and Firestore triggers (#1853).
+	for _, live := range functionTriggers() {
+		match(live.spec.GetTrigger(), live)
+	}
+	return out
+}
+
+// functionTriggers are the live triggers of the functions' event_trigger,
+// ordered by function name.
+func functionTriggers() []*liveTrigger {
+	functions.mu.Lock()
+	defer functions.mu.Unlock()
+	var out []*liveTrigger
+	for _, n := range sortedKeys(functions.fns) {
+		if t := functions.fns[n].trigger; t != nil {
+			out = append(out, t)
 		}
 	}
 	return out

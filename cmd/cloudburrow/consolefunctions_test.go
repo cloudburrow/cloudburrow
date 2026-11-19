@@ -76,8 +76,9 @@ func TestConsoleFunctionsPage(t *testing.T) {
 		!strings.Contains(props["Status detail"], "no runtime detected") || props["Memory"] != "256M" {
 		t.Errorf("the function's page = %v", props)
 	}
-	if a := p.ListActions(ctx, ""); len(a) != 1 || a[0].ID != functionsCreateAction {
-		t.Errorf("with Cloud Storage, ListActions = %+v; want Create function", a)
+	if a := p.ListActions(ctx, ""); len(a) != 2 || a[0].Label != "Create function" || a[0].Href != "/run?action="+runWriteFunction ||
+		a[1].ID != functionsCreateAction {
+		t.Errorf("with Cloud Storage, ListActions = %+v; want Create function (Cloud Run's Write a function) and the ZIP upload", a)
 	}
 	if a := (functionsProvider{}).ListActions(ctx, ""); len(a) != 0 {
 		t.Errorf("without Cloud Storage, ListActions = %+v; want none", a)
@@ -129,7 +130,7 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 	if f := fields["environment"]; f.Default != "2nd gen" || strings.Join(f.Options, ",") != "2nd gen,1st gen" {
 		t.Errorf("the Environment field = %+v", f)
 	}
-	if f := fields["trigger"]; strings.Join(f.Options, ",") != "HTTP,Cloud Pub/Sub,Cloud Storage" {
+	if f := fields["trigger"]; strings.Join(f.Options, ",") != "HTTP,Cloud Pub/Sub,Cloud Storage,Cloud Firestore,Cloud Audit Logs" {
 		t.Errorf("the Trigger type field = %+v", f)
 	}
 
@@ -200,15 +201,15 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		}
 		acts := p.DetailActions(ctx, "", []string{cs.id})
 		if cs.id == "gen1-http" {
-			if len(acts) != 3 || acts[2].ID != functionsTestAction {
-				t.Errorf("a 1st-gen HTTP function's actions = %+v; want Edit function, Download source and Test function", acts)
+			if ids := strings.Join(actionIDs(acts), ","); ids != "edit-function,copy-function,download-source,delete-function,test-function,edit-source" {
+				t.Errorf("a 1st-gen HTTP function's actions = %s; want Edit function, Copy function, Download source, Test the function and Edit source", ids)
 			}
 			_, err := p.ActAtResult(ctx, "", []string{cs.id}, functionsTestAction, map[string]string{"data": `{"name":"x"}`})
 			if err == nil || !strings.Contains(err.Error(), "not ACTIVE") {
 				t.Errorf("Test function of an OFFLINE function = %v; want the v1 API's refusal", err)
 			}
-		} else if len(acts) != 2 || acts[0].ID != functionsEditAction || acts[1].ID != functionsDownloadAction {
-			t.Errorf("an event function's actions = %+v; want Edit function and Download source", acts)
+		} else if ids := strings.Join(actionIDs(acts), ","); ids != "edit-function,copy-function,download-source,delete-function,test-function,edit-source" {
+			t.Errorf("a 1st-gen event function's actions = %s", ids)
 		}
 	}
 
@@ -223,8 +224,9 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		len(fn.GetEventTrigger().GetEventFilters()) != 1 || fn.GetEventTrigger().GetEventFilters()[0].GetValue() != "uploads" {
 		t.Errorf("the 2nd-gen function = %v, %v", fn, err)
 	}
-	if acts := p.DetailActions(ctx, "", []string{"gen2-bucket"}); len(acts) != 2 || acts[0].ID != functionsEditAction {
-		t.Errorf("a 2nd-gen function's actions = %+v; want Edit function and Download source", acts)
+	if ids := strings.Join(actionIDs(p.DetailActions(ctx, "", []string{"gen2-bucket"})), ","); ids !=
+		"edit-function,copy-function,download-source,delete-function,edit-trigger,add-trigger,delete-trigger,test-function,edit-source" {
+		t.Errorf("a 2nd-gen event function's actions = %s", ids)
 	}
 
 	for _, bad := range []map[string]string{
@@ -312,8 +314,10 @@ func TestConsoleFunctionsCreateFields(t *testing.T) {
 		}
 		var secrets console.Listing
 		for _, sec := range d.Sections {
-			if sec.ID == "secrets" {
-				secrets = sec.Listing
+			for _, tab := range sec.Tabs {
+				if sec.ID == "variables" && tab.ID == "secrets" {
+					secrets = tab.Listing
+				}
 			}
 		}
 		if secrets.Total != 2 || secrets.Items[0].Name != "API_KEY" || secrets.Items[0].Fields["Version"] != "2" ||
