@@ -88,8 +88,10 @@ func TestMemorystoreConsoleFollowsGoogle(t *testing.T) {
 			.filter((l) => ["Tier", "Region", "Version", "Capacity"].includes(l)).join(","),
 		Submit: document.querySelector("form.create-page button[type=submit]").textContent,
 	}))()`, &redis)
-	if redis.Title != "Create a Redis instance" || redis.Order != "Tier,Region,Version,Capacity" || redis.Submit != "Create" {
-		t.Errorf("Create a Redis instance = %+v; want Google's title, Tier, Region, Version, Capacity, and Create", redis)
+	// The page ends in Create instance, as its docs' last step, "Click Create
+	// instance" (docs.cloud.google.com/memorystore/docs/redis/create-instance-console, #1933).
+	if redis.Title != "Create a Redis instance" || redis.Order != "Tier,Region,Version,Capacity" || redis.Submit != "Create instance" {
+		t.Errorf("Create a Redis instance = %+v; want Google's title, Tier, Region, Version, Capacity, and Create instance", redis)
 	}
 }
 
