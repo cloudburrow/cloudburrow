@@ -158,7 +158,10 @@ func countDocuments(ctx context.Context, col *firestore.CollectionRef) string {
 
 // --- Datastore ------------------------------------------------------------
 
-type datastoreProvider struct{ endpoint string }
+// datastoreProvider is the Datastore page; firestore, when Firestore is
+// served, is the Firestore Admin API, which lists the project's Datastore
+// mode databases (#1883).
+type datastoreProvider struct{ endpoint, firestore string }
 
 func (datastoreProvider) ID() string    { return "datastore" }
 func (datastoreProvider) Title() string { return "Datastore" }
@@ -173,10 +176,11 @@ func (p datastoreProvider) List(ctx context.Context, project string) (console.Li
 		base.Prompt = "Datastore holds entities per project. Choose one in the toolbar."
 		return base, nil
 	}
+	base.Scope = p.databaseScope(ctx, project)
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	c, err := p.client(ctx, project)
 	if err != nil {
 		base.Unavailable = "cannot reach Datastore: " + err.Error()
 		return base, nil
@@ -864,7 +868,7 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		// An entity's page is addressed by its encoded key, which tells
 		// every entity from every other (#875); its row names it by Name/ID
 		// and its parent, which tell the rows apart too (#882, #885).
-		k, props := datastoreEntityProperties(e, project)
+		k, props := datastoreEntityProperties(e, homeOf(ctx, project))
 		items = append(items, datastoreEntityRow(scope, name, k, datastorePropertiesCell(props)))
 	}
 	out.Items, out.Total = items, len(items)
@@ -2270,7 +2274,7 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	c, err := p.client(ctx, project)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot reach Datastore: " + err.Error()}, nil
 	}
@@ -2554,7 +2558,7 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		return console.Listing{}, err
 	}
 	for _, e := range res.Entities {
-		k, props := datastoreEntityProperties(e, project)
+		k, props := datastoreEntityProperties(e, homeOf(ctx, project))
 		out.Items = append(out.Items, datastoreEntityRow(scope, kind, k, datastorePropertiesCell(props)))
 	}
 	out.Total = len(out.Items)

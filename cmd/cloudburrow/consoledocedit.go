@@ -1493,9 +1493,10 @@ func datastoreChildFields() []console.Field {
 		datastoreEntityFields()...)
 }
 
-// client is the Datastore client every screen uses.
+// client is the Datastore client every screen uses, for the database the
+// request names (#1883).
 func (p datastoreProvider) client(ctx context.Context, project string) (*datastore.Client, error) {
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	c, err := datastore.NewClientWithDatabase(ctx, project, datastoreDatabaseID(ctx), localOpts(p.endpoint)...)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach Datastore: %w", err)
 	}
@@ -1631,7 +1632,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the entity: " + err.Error()}, nil
 	}
-	props := datastorePropertiesGo(e.GetProperties(), project)
+	props := datastorePropertiesGo(e.GetProperties(), homeOf(ctx, project))
 	i := propertyIndex(props, name)
 	if i < 0 {
 		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", datastoreEntityHeading(key), name)}, nil
@@ -1662,7 +1663,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	// The values inside an array or embedded entity, each edited on its own
 	// (#905).
-	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, nil, e.GetProperties()[name], e.GetProperties()[name]); ok {
+	if sec, ok := datastoreElementsSection(homeOf(ctx, project), scope, key, kind, name, nil, e.GetProperties()[name], e.GetProperties()[name]); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
