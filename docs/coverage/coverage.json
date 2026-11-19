@@ -6791,8 +6791,8 @@
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
-          "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
-          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
+          "test/compat/terraform_redis_test.go:174 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:229 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -6805,8 +6805,8 @@
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
-          "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
-          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
+          "test/compat/terraform_redis_test.go:174 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:229 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
@@ -6861,8 +6861,8 @@
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
-          "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
-          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
+          "test/compat/terraform_redis_test.go:174 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:229 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
