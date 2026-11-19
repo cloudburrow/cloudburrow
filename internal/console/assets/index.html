@@ -247,6 +247,18 @@
   </div>
   <div class="terminal-body">
     <div id="terminal-screen" class="terminal-screen"></div>
+    <!-- The starting panel (#1838): one spinner, bar and line while the pod
+         is made ready, as Cloud Shell's first start shows. -->
+    <div id="terminal-starting" class="terminal-starting" hidden>
+      <div class="terminal-starting-card">
+        <p class="terminal-starting-title"><span class="spinner" aria-hidden="true"></span>
+          <strong id="terminal-starting-title">Preparing the terminal…</strong></p>
+        <div id="terminal-starting-bar" class="terminal-starting-bar is-indeterminate" role="progressbar"
+             aria-labelledby="terminal-starting-title" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+        <p id="terminal-starting-line" class="terminal-starting-line"></p>
+        <p id="terminal-starting-note" class="unavailable" hidden>First start only — this takes a few minutes.</p>
+      </div>
+    </div>
     <div id="terminal-notice" class="terminal-notice" hidden>
       <p id="terminal-notice-text" class="unavailable"></p>
       <button id="terminal-retry" class="secondary" type="button" hidden>Try again</button>

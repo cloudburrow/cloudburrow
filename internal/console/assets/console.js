@@ -6797,8 +6797,10 @@ const TERMINAL_MIN_HEIGHT = 120;
 
 const TERMINAL = {
   // Each tab: { key, id, name, term, fit, pane, tab, label, socket,
-  //             project, stateText, notice, closing }.
+  //             project, stateText, notice, starting, closing }.
   tabs: [], active: null, next: 1, max: 8, loading: null, state: "closed", ready: false,
+  // The once-a-second redraw of the starting panel's elapsed time.
+  startTimer: null,
 };
 
 function loadTerminalTabs() {
@@ -6870,6 +6872,127 @@ function terminalNotice(tab, text, retry) {
   if (!tab || tab === TERMINAL.active) drawTerminalNotice(n);
 }
 
+// --- The starting panel (#1838) ---
+//
+// While a tab's pod is made ready the drawer shows one panel, as Cloud Shell
+// shows "Provisioning your Cloud Shell machine" on its first start: a
+// spinner, a progress bar, and one short line. During the image pull the bar
+// is the bytes the node reports, and the line says how many of how many,
+// the time the pull has taken, and the time left when the rate gives an
+// honest estimate. Each status message replaces the panel's contents; none
+// is written anywhere else, so nothing is said twice.
+//
+// tab.starting: { message, step, fetched, total, elapsed, at, since, samples }
+// — the latest report, the server's elapsed seconds and when it arrived,
+// when this connection began, and the (elapsed, fetched) pairs the rate is
+// read from.
+
+// The steps of a first start: these take minutes, the rest seconds.
+const TERMINAL_FIRST_START = new Set(["import", "pull", "unpack"]);
+
+// pullBytes is a byte count in the decimal units the node's numbers are
+// read in, rounded down, so it never says more has arrived than has.
+function pullBytes(b) {
+  if (b >= 1e9) return `${(Math.floor(b / 1e8) / 10).toFixed(1)} GB`;
+  return `${Math.floor(b / 1e6)} MB`;
+}
+
+function elapsedText(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+}
+
+// remainingText is the time left at the rate of the last minute of the pull,
+// or "" when that rate is not yet a fair guess: under 15 seconds of samples,
+// or no bytes in them.
+function remainingText(st) {
+  if (st.step !== "pull" || !(st.total > 0) || st.samples.length < 2) return "";
+  const first = st.samples[0];
+  const last = st.samples[st.samples.length - 1];
+  const span = last.elapsed - first.elapsed;
+  const got = last.fetched - first.fetched;
+  if (span < 15 || got <= 0) return "";
+  const since = (performance.now() - st.at) / 1000;
+  const left = (st.total - last.fetched) / (got / span) - since;
+  if (left < 60) return "less than a minute left";
+  return `about ${Math.round(left / 60)} min left`;
+}
+
+function startingElapsed(st) {
+  const now = performance.now();
+  return st.elapsed > 0 ? st.elapsed + (now - st.at) / 1000 : (now - st.since) / 1000;
+}
+
+function drawTerminalStarting(tab) {
+  const panel = document.getElementById("terminal-starting");
+  const st = tab && tab.starting;
+  panel.hidden = !st;
+  if (!st) {
+    if (TERMINAL.startTimer) { clearInterval(TERMINAL.startTimer); TERMINAL.startTimer = null; }
+    return;
+  }
+  if (!TERMINAL.startTimer) {
+    TERMINAL.startTimer = setInterval(() => {
+      if (TERMINAL.state === "closed" || !TERMINAL.active || !TERMINAL.active.starting) {
+        drawTerminalStarting(null);
+        return;
+      }
+      drawTerminalStarting(TERMINAL.active);
+    }, 1000);
+  }
+  const bar = document.getElementById("terminal-starting-bar");
+  const known = (st.step === "pull" || st.step === "unpack") && st.total > 0;
+  const elapsed = `${elapsedText(startingElapsed(st))} elapsed`;
+  let line;
+  if (st.step === "pull" && st.total > 0) {
+    const of = `${pullBytes(st.fetched)} of ${pullBytes(st.total)}`;
+    bar.setAttribute("aria-valuetext", of);
+    line = [of, elapsed, remainingText(st)];
+  } else if (st.step === "unpack") {
+    line = ["Unpacking the image", elapsed];
+  } else if (st.step === "pull") {
+    line = ["Downloading the image, about 1 GB", elapsed];
+  } else if (st.step === "import") {
+    line = ["Copying the image from the offline cache", elapsed];
+  } else {
+    line = [st.message || "Connecting…"];
+  }
+  document.getElementById("terminal-starting-line").textContent = line.filter(Boolean).join(" · ");
+  document.getElementById("terminal-starting-note").hidden = !TERMINAL_FIRST_START.has(st.step);
+  // Determinate only while bytes are arriving; unpacking has no count.
+  const determinate = known && st.step === "pull";
+  bar.classList.toggle("is-indeterminate", !determinate);
+  if (determinate) {
+    const pct = Math.min(100, Math.floor((st.fetched / st.total) * 100));
+    bar.setAttribute("aria-valuenow", String(pct));
+    bar.firstElementChild.style.width = `${pct}%`;
+  } else {
+    bar.removeAttribute("aria-valuenow");
+    bar.removeAttribute("aria-valuetext");
+    bar.firstElementChild.style.width = "";
+  }
+}
+
+// terminalStarting records a status message for tab, or clears the panel
+// when m is null.
+function terminalStarting(tab, m) {
+  if (!m) {
+    tab.starting = null;
+  } else {
+    const prev = tab.starting;
+    const st = { message: m.message || "", step: m.step || "", fetched: m.fetched || 0, total: m.total || 0,
+      elapsed: m.elapsed || 0, at: performance.now(), since: prev ? prev.since : performance.now(),
+      samples: prev && prev.step === "pull" ? prev.samples : [] };
+    if (st.step === "pull" && st.total > 0) {
+      st.samples = st.samples.concat({ elapsed: st.elapsed, fetched: st.fetched })
+        .filter((x) => st.elapsed - x.elapsed <= 60);
+    }
+    tab.starting = st;
+  }
+  if (tab === TERMINAL.active) drawTerminalStarting(tab);
+}
+
 function terminalState(tab, text) {
   if (tab) tab.stateText = text;
   if (!tab || tab === TERMINAL.active) document.getElementById("terminal-state").textContent = text;
@@ -6904,7 +7027,9 @@ function terminalSay(tab, text) {
 
 function connectTerminal(tab) {
   if (tab.socket || tab.closing) return;
-  terminalNotice(tab, "Connecting to the terminal…");
+  terminalNotice(tab, "");
+  tab.starting = null;
+  terminalStarting(tab, { message: "Connecting to the terminal…" });
   terminalState(tab, "Connecting…");
   const { cols, rows } = terminalSize(tab);
   const q = new URLSearchParams({ project: currentProject(), cols, rows });
@@ -6926,8 +7051,11 @@ function connectTerminal(tab) {
     if (tab.closing) return;
     switch (m.type) {
       case "status":
-        terminalState(tab, m.message);
-        terminalNotice(tab, m.message);
+        // The message goes to the starting panel only. It used to be written
+        // to the header's state line and to the notice both, so the drawer
+        // showed every status twice (#1838).
+        terminalState(tab, "Starting…");
+        terminalStarting(tab, m);
         break;
       case "session":
         attached = true;
@@ -6935,6 +7063,7 @@ function connectTerminal(tab) {
         saveTerminalTabs();
         tab.project = m.project || "";
         if (tab === TERMINAL.active) drawTerminalProject();
+        terminalStarting(tab, null);
         terminalNotice(tab, "");
         terminalState(tab, m.resumed ? "Reattached" : "Connected");
         // A reattach replays the recent output onto a clean screen, so it is
@@ -6951,12 +7080,14 @@ function connectTerminal(tab) {
         break;
       case "unavailable":
         ended = true;
+        terminalStarting(tab, null);
         terminalState(tab, "Unavailable");
         terminalNotice(tab, `The terminal is unavailable: ${m.message}`,
-          { label: "Try again", run: () => connectTerminal(tab) });
+          { label: "Retry", run: () => connectTerminal(tab) });
         break;
       case "exit":
         ended = true;
+        terminalStarting(tab, null);
         tab.id = "";
         saveTerminalTabs();
         terminalState(tab, "Ended");
@@ -6967,6 +7098,7 @@ function connectTerminal(tab) {
         break;
       case "detached":
         ended = true;
+        terminalStarting(tab, null);
         terminalState(tab, "Detached");
         terminalNotice(tab, `${m.message}.`, { label: "Use it here", run: () => connectTerminal(tab) });
         break;
@@ -6975,6 +7107,7 @@ function connectTerminal(tab) {
   ws.onclose = () => {
     if (tab.socket === ws) tab.socket = null;
     if (!ended && !tab.closing && TERMINAL.state !== "closed") {
+      terminalStarting(tab, null);
       terminalState(tab, "Disconnected");
       // Before a shell was attached the pod was still starting, which the
       // cluster carries on with: an image pull goes on without the drawer
@@ -7031,6 +7164,7 @@ function selectTerminalTab(tab, focus = true) {
   TERMINAL.active = tab;
   drawTerminalTabs();
   drawTerminalNotice(tab.notice);
+  drawTerminalStarting(tab);
   document.getElementById("terminal-state").textContent = tab.stateText || "";
   drawTerminalProject();
   saveTerminalTabs();
@@ -7083,7 +7217,7 @@ function renameTerminalTab(tab) {
 function createTerminalTab(saved = {}) {
   const key = TERMINAL.next++;
   const tab = { key, id: saved.id || "", name: saved.name || defaultTerminalTabName(), socket: null, project: null,
-    stateText: "", notice: null, closing: false };
+    stateText: "", notice: null, starting: null, closing: false };
   tab.pane = el("div", { class: "terminal-pane", role: "tabpanel", id: `terminal-pane-${key}`,
     "aria-labelledby": `terminal-tab-${key}`, hidden: true });
   tab.label = el("span", { class: "terminal-tab-label", text: terminalTabName(tab) });

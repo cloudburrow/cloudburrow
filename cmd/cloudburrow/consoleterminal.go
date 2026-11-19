@@ -94,8 +94,11 @@ func terminalPullProgress(m *images.PullMeter) func(context.Context, string) (in
 // consoleTerminal adapts terminal.Manager to console.Terminal.
 type consoleTerminal struct{ m *terminal.Manager }
 
-func (c consoleTerminal) Prepare(ctx context.Context, progress func(string)) error {
-	return c.m.Prepare(ctx, progress)
+func (c consoleTerminal) Prepare(ctx context.Context, progress func(console.TerminalProgress)) error {
+	return c.m.Prepare(ctx, func(p terminal.Progress) {
+		progress(console.TerminalProgress{Message: p.Message, Step: p.Step,
+			Fetched: p.Fetched, Total: p.Total, Elapsed: p.Elapsed})
+	})
 }
 
 func (c consoleTerminal) Open(project string, cols, rows uint16) (console.TerminalSession, error) {

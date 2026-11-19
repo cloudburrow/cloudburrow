@@ -1611,6 +1611,28 @@ tr.is-inspected { background: var(--nav-selected); }
 }
 .terminal-notice[hidden] { display: none; }
 .terminal-notice .unavailable { margin: 0; max-width: 72ch; }
+/* The starting panel (#1838), over the screen while the pod is made ready:
+   the console's own surface, so it follows the theme, centred as Cloud
+   Shell's provisioning panel is. */
+.terminal-starting {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 16px 24px; overflow: auto; background: var(--surface); color: var(--text);
+}
+.terminal-starting[hidden] { display: none; }
+.terminal-starting-card { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 10px; }
+.terminal-starting-card p { margin: 0; }
+.terminal-starting-title { display: flex; align-items: center; gap: 10px; }
+.terminal-starting-title .spinner { color: var(--accent); }
+.terminal-starting-bar {
+  position: relative; height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.terminal-starting-bar span {
+  display: block; height: 100%; width: 0; background: var(--accent);
+  transition: width var(--motion-standard) var(--ease-standard);
+}
+.terminal-starting-bar.is-indeterminate span { width: 40%; animation: cb-sweep 1.4s ease-in-out infinite; }
+.terminal-starting-line { font-variant-numeric: tabular-nums; font-size: var(--text-caption-size); }
 
 @media (prefers-reduced-motion: reduce) {
   #nav,
@@ -1624,6 +1646,8 @@ tr.is-inspected { background: var(--nav-selected); }
   .skeleton div { animation: none; }
   .spinner { animation: none; border-top-color: var(--accent); }
   .busy-bar span { animation: none; width: 100%; }
+  .terminal-starting-bar span { transition: none; }
+  .terminal-starting-bar.is-indeterminate span { animation: none; width: 100%; opacity: .5; }
   tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
 }
 
