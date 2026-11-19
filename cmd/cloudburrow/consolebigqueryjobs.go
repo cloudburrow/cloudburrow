@@ -760,7 +760,7 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 			return nil, errors.New("a table loaded from Cloud Storage is a native table: choose TABLE")
 		}
 		load := map[string]string{}
-		for _, k := range []string{"uris", "format", "autodetect", "schema", "partitionType", "partitionField", "clusteringFields"} {
+		for _, k := range []string{"uris", "format", "autodetect", "schema", "partitionType", "partitionField", "clusteringFields", "skipLeadingRows"} {
 			if v, ok := values[k]; ok {
 				load[k] = v
 			}

@@ -1955,3 +1955,45 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .form-row.is-radio .check-line input[type="radio"] { width: auto; flex: none; margin: 0; }
 .form-row.is-radio .check-line label { margin: 0; color: var(--text); }
 .bq-history-table td.mono { white-space: nowrap; }
+/* Studio round 2 (#1861). Create dataset and Create table open as a panel
+   on the right, as BigQuery Studio's do. */
+.modal.is-side { justify-content: flex-end; align-items: stretch; padding: 0; }
+.modal.is-side .modal-body { max-width: min(640px, 100vw); height: 100%; max-height: none;
+  border-radius: 0; transform: translateX(24px); }
+.modal.is-side.is-open .modal-body { transform: none; }
+/* A preview tab's name is italic until it is kept (double-click). */
+.bq-tabs .tab.is-preview { font-style: italic; }
+.bq-explorer-home { display: block; width: 100%; text-align: left; margin: 8px 0 0; padding: 6px 8px;
+  background: none; border: 0; border-radius: var(--radius); font: inherit; color: var(--text); cursor: pointer; }
+.bq-explorer-home:hover { background: var(--state-hover); }
+.bq-node-empty { padding: 4px 0 4px 60px; font-size: var(--text-caption-size); }
+.bq-menu-button { white-space: nowrap; }
+.bq-resource-tab { min-width: 0; }
+/* The workspace never widens the page: its tab strips scroll, and the
+   panels shrink to the column (#1861: six result tabs did). */
+.bq-workspace > *, .bq-tab-panel > *, .bq-results, .bq-viz-chart { min-width: 0; }
+.bq-tabs, .bq-results-tabs { overflow-x: auto; flex-wrap: nowrap; }
+.bq-resource-tab .page-header h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0; }
+.bq-home { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.bq-home-title { grid-column: 1 / -1; margin: 4px 0; font-weight: 400; }
+.bq-home-card { padding: 12px 16px; min-width: 0; }
+.bq-home-card h3 { margin: 0 0 8px; font-size: var(--text-body-size, 14px); }
+.bq-home-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bq-home-recent, .bq-home-templates { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.bq-home-dataset-label { display: block; margin-top: 8px; font-size: var(--text-caption-size); color: var(--text-muted); }
+/* The chart beside its configuration pane, or above it when the column is
+   narrow. */
+.bq-viz { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.bq-viz-chart { flex: 1 1 360px; }
+.bq-viz-config { flex: 1 0 200px; max-width: 320px; }
+.bq-viz-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.bq-chart-scroll { overflow-x: auto; max-width: 100%; }
+/* The chart's marks carry their own fill and stroke: the console's icon
+   rule for svg (fill none, stroke currentColor) is not inherited by them. */
+svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: var(--radius);
+  fill: #202124; stroke: none; stroke-width: 1; }
+.bq-chart-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; padding: 0; margin: 8px 0 0; }
+.bq-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; }
+.bq-viz-config { display: grid; gap: 4px; }
+.bq-viz-config h3 { margin: 0 0 4px; font-size: var(--text-body-size, 14px); }
+.bq-viz-measures { border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0 0; padding: 4px 12px; }

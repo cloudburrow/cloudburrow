@@ -47,7 +47,7 @@ type studioQuery struct {
 	DryRun bool   `json:"dryRun"`
 	// Write is set once the user confirmed a statement that changes data.
 	Write bool `json:"write"`
-	// The More menu's Query settings.
+	// The Edit menu's Query settings.
 	LegacySQL          bool   `json:"legacySql"`
 	Priority           string `json:"priority"`
 	Location           string `json:"location"`
@@ -106,6 +106,8 @@ func (p bigqueryProvider) StudioCall(ctx context.Context, project, call string, 
 			return map[string]any{"error": err.Error()}, nil
 		}
 		return res, err
+	case "savedqueries", "savequery", "deletequery":
+		return p.studioSaved(call, body)
 	case "jobs":
 		var req struct {
 			All bool `json:"all"`
@@ -114,6 +116,36 @@ func (p bigqueryProvider) StudioCall(ctx context.Context, project, call string, 
 		return p.studioJobs(ctx, svc, req.All)
 	}
 	return nil, fmt.Errorf("unknown studio call %q", call)
+}
+
+// studioSaved answers the saved-query calls: the project's list, Save
+// query (a new one, or a new version of the one named by id) and Delete.
+func (p bigqueryProvider) studioSaved(call string, body json.RawMessage) (any, error) {
+	store := bqSavedQueryStore{path: p.savedQueries}
+	var in bqSavedQuery
+	if err := json.Unmarshal(body, &in); err != nil {
+		return nil, fmt.Errorf("a saved query: %w", err)
+	}
+	switch call {
+	case "savequery":
+		if err := p.writable(p.project); err != nil {
+			return nil, err
+		}
+		return store.save(p.project, in, time.Now())
+	case "deletequery":
+		if err := p.writable(p.project); err != nil {
+			return nil, err
+		}
+		if err := store.remove(p.project, in.ID); err != nil {
+			return nil, err
+		}
+		return map[string]string{"deleted": in.ID}, nil
+	}
+	all, err := store.list(p.project)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"queries": all}, nil
 }
 
 func (p bigqueryProvider) studioExplorer(ctx context.Context, svc *bqv2.Service) (any, error) {

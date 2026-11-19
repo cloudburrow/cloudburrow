@@ -252,7 +252,6 @@ const (
 var bqTableSources = []string{bqSourceEmpty, bqSourceGCS, bqSourceUpload, "Drive", "Google Bigtable", "Amazon S3", "Azure Blob Storage"}
 
 var bqUnservedSources = map[string]string{
-	bqSourceUpload:       "Upload a file with the dataset's Load from a file, which sends the file with these options.",
 	"Drive":              "Not available locally: Google Drive is not reachable from a local instance.",
 	"Google Bigtable":    "Not available locally: CloudBurrow's BigQuery does not read external Bigtable tables.",
 	"Amazon S3":          "Not available locally: BigQuery Omni is not run.",
@@ -272,6 +271,8 @@ func bigqueryTableFields() []console.Field {
 		part   = "Partition and cluster settings"
 		adv    = "Advanced options"
 		fromGS = "source=" + bqSourceGCS
+		upload = "source=" + bqSourceUpload
+		loaded = "source=" + bqSourceGCS + "|" + bqSourceUpload
 	)
 	return []console.Field{
 		{Name: "source", Label: "Create table from", Type: "radio", Section: source, Options: bqTableSources,
@@ -279,7 +280,10 @@ func bigqueryTableFields() []console.Field {
 		{Name: "uris", Label: "Select file from GCS bucket or use a URI pattern", Type: "textarea", Section: source,
 			ShowWhen: fromGS, Required: true,
 			Help: "gs://bucket/path, one per line; an object name may hold one * wildcard."},
-		{Name: "format", Label: "File format", Type: "select", Options: bigqueryLoadFormats, Section: source, ShowWhen: fromGS},
+		{Name: "file", Label: "Select file", Type: console.FileFieldType, Section: source, ShowWhen: upload, Required: true,
+			Help: "A CSV, newline-delimited JSON, Parquet, Avro or ORC file on this computer, sent as the dataset's " +
+				"Load from a file sends it, at most the upload limit set in Settings and utilities."},
+		{Name: "format", Label: "File format", Type: "select", Options: bigqueryLoadFormats, Section: source, ShowWhen: loaded},
 		{Name: "tableId", Label: "Table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern, Section: dest,
 			Help: "Letters, numbers, underscores, dashes and spaces, at most 1,024."},
 		{Name: "tableType", Label: "Table type", Type: "select", Options: bigqueryTableTypes, Section: dest,
@@ -289,7 +293,7 @@ func bigqueryTableFields() []console.Field {
 		{Name: "viewQuery", Label: "View query", Type: "textarea", Section: dest,
 			Help: "A view's GoogleSQL query, such as SELECT region, SUM(amount) AS total FROM mydataset.orders " +
 				"GROUP BY region. Name each table with its dataset: a view has no default dataset."},
-		{Name: "autodetect", Label: "Auto detect", Type: "checkbox", Section: schema, ShowWhen: fromGS,
+		{Name: "autodetect", Label: "Auto detect", Type: "checkbox", Section: schema, ShowWhen: loaded,
 			Help: "BigQuery reads the columns from the data: a CSV's header and values, or a JSON file's fields."},
 		{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes, Section: schema,
 			Pattern: bigqueryFieldNamePattern,
@@ -303,6 +307,8 @@ func bigqueryTableFields() []console.Field {
 			Help: "Optional: a DATE, TIMESTAMP or DATETIME column of the schema; empty partitions by ingestion time."},
 		{Name: "clusteringFields", Label: "Clustering order", Type: "text", Section: part,
 			Help: "Optional: up to four column names, separated by commas."},
+		{Name: "skipLeadingRows", Label: "Header rows to skip", Type: "number", Section: adv, ShowWhen: loaded,
+			Help: "CSV only: rows at the top of the file that are not data. Empty is 0."},
 		{Name: "description", Label: "Description", Type: "textarea", Section: adv},
 	}
 }
@@ -529,6 +535,11 @@ func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, val
 	id := strings.TrimSpace(values["tableId"])
 	if err := refuseUnavailable(values, bigqueryTableFields()); err != nil {
 		return err
+	}
+	if values["source"] == bqSourceUpload {
+		// The form sends the file to the upload route (ActAtFile); a
+		// request here has none.
+		return errors.New("Create table from Upload needs a file: choose one under Select file")
 	}
 	md := &bigquery.TableMetadata{Description: values["description"]}
 	tp, cl, err := loadTableOptions(values)

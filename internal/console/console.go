@@ -299,6 +299,10 @@ type Field struct {
 	// this instance, each with its reason: drawn disabled where Google's page
 	// has them, as Create subscription's Write to BigQuery (#1847).
 	UnavailableOptions map[string]string `json:"unavailableOptions,omitempty"`
+	// OptionLabels, on a select or a radio, are the words an option is
+	// shown as when they are not its value: BigQuery's Region list shows
+	// "us-central1 (Iowa)" and submits us-central1 (#1861).
+	OptionLabels map[string]string `json:"optionLabels,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.

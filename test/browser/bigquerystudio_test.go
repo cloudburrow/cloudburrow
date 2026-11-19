@@ -22,9 +22,9 @@ import (
 // narrows the tree and a star survives a redraw; the table's View actions
 // Query opens a new SQL query tab; the validator's dry run says how much
 // the query will process; Run shows Query results with Job information,
-// Results, JSON, Execution details and Execution graph; Query settings'
-// destination table writes the results to a table; Save and Schedule are
-// drawn disabled with their reasons; Personal and Project history list the
+// Results, Visualization, JSON, Execution details and Execution graph; Edit >
+// Query settings' destination table writes the results to a table; Schedule is
+// drawn disabled with its reason; Personal and Project history list the
 // job, with Open as new query. A page CloudBurrow does not serve says
 // "Not available locally", and the table's page has Google's tabs in
 // Google's order.
@@ -55,10 +55,13 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		t.Errorf("Studio's menu marks %q", current)
 	}
 
-	// The Explorer: the project, then the dataset.
+	// The Explorer: the project, then the dataset. Studio opens on Home,
+	// whose Create new has SQL query.
 	node := func(key string) string { return fmt.Sprintf(`document.querySelector('[data-node=%q]')`, key) }
 	p.waitFor(node(project) + ` !== null`)
 	p.waitFor(node(project+"."+ds) + ` !== null`)
+	p.clickText(".bq-home-action", "SQL query")
+	p.waitFor(`document.querySelector(".bq-editor") !== null`)
 
 	// A statement that changes data is confirmed first.
 	create := fmt.Sprintf("CREATE TABLE `%s.%s.people` AS SELECT 1 AS id, 'ann' AS name UNION ALL SELECT 2, 'bob'", project, ds)
@@ -97,7 +100,7 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	p.clickExpr(node(tableKey) + `.querySelector(".bq-node-menu")`)
 	var items []string
 	p.eval(node(tableKey)+`.querySelectorAll(".bq-menu-item").length ? [...`+node(tableKey)+`.querySelectorAll(".bq-menu-item")].map((b) => b.textContent) : []`, &items)
-	if strings.Join(items, "|") != "Open|Query|Copy ID|Delete" {
+	if strings.Join(items, "|") != "Open|Open in new tab|Query|Copy ID|Delete" {
 		t.Errorf("a table's View actions are %q", items)
 	}
 	p.clickText(".bq-menu-item", "Query")
@@ -117,8 +120,8 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		t.Errorf("the validator says %q", validator)
 	}
 
-	// Save and Schedule are Google's, disabled with their reasons.
-	for _, label := range []string{"Save", "Schedule"} {
+	// Schedule is Google's, disabled with its reason.
+	for _, label := range []string{"Schedule"} {
 		var why string
 		p.eval(fmt.Sprintf(`(() => { const b = [...document.querySelectorAll(".bq-toolbar button")].find((n) => n.textContent === %q);
 			return b && b.disabled ? b.title : ""; })()`, label), &why)
@@ -132,7 +135,7 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll(".bq-results-table td")].some((c) => c.textContent === "ann")`)
 	var tabs []string
 	p.eval(`[...document.querySelectorAll(".bq-results-tabs .tab")].map((b) => b.textContent)`, &tabs)
-	if strings.Join(tabs, "|") != "Job information|Results|JSON|Execution details|Execution graph" {
+	if strings.Join(tabs, "|") != "Job information|Results|Visualization|JSON|Execution details|Execution graph" {
 		t.Errorf("Query results' tabs are %q", tabs)
 	}
 	p.clickText(".bq-results-tabs .tab", "JSON")
@@ -149,8 +152,8 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	p.clickText(".bq-results-tabs .tab", "Execution details")
 	p.waitFor(`document.querySelector(".bq-results-body").textContent.length > 0`)
 
-	// More > Query settings: a destination table.
-	p.clickExpr(`document.querySelector(".bq-toolbar .bq-node-menu[aria-label=More]")`)
+	// Edit > Query settings, where Google's docs put it: a destination table.
+	p.clickExpr(`document.querySelector(".bq-toolbar .bq-menu-button[aria-label=Edit]")`)
 	p.clickText(".bq-menu-item", "Query settings")
 	p.waitFor(`document.querySelector(".modal.is-open #bq-settings-title") !== null`)
 	p.clickExpr(`document.querySelector(".modal.is-open input[name=bq-dest][value=table]")`)

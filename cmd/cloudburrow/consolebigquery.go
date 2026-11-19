@@ -51,6 +51,9 @@ type bigqueryProvider struct {
 	// registry is Resource Manager's, for a dataset's and a table's tags
 	// (consolebigquerytags.go, #1780); nil leaves them out.
 	registry *resourcemanager.Registry
+	// savedQueries is the record of Studio's saved queries in the
+	// instance's state directory (consolebigquerysavedqueries.go, #1861).
+	savedQueries string
 }
 
 func (bigqueryProvider) ID() string    { return "bigquery" }
