@@ -98,6 +98,7 @@ import (
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
+	_ "cloud.google.com/go/speech/apiv1/speechpb"
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
 	_ "google.golang.org/genproto/googleapis/devtools/containeranalysis/v1"
@@ -202,6 +203,9 @@ var areas = []area{
 		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840): a page of its own, since its method names repeat v1's.
+	// Speech-to-Text v1 on the same port (#1930): a page of its own, since
+	// its method names repeat v2's.
+	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis

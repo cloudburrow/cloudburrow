@@ -11,6 +11,7 @@ import (
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	speechv1pb "cloud.google.com/go/speech/apiv1/speechpb"
 	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc"
@@ -69,6 +70,9 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	documentaipb.RegisterDocumentProcessorServiceServer(srv, &documentAIService{s: s})
 	// Speech-to-Text's recognizers (speechrecognizers.go, #1799).
 	speechpb.RegisterSpeechServer(srv, &speechService{s: s})
+	// Speech-to-Text v1's Recognize, LongRunningRecognize and
+	// StreamingRecognize (speechv1.go, #1930).
+	speechv1pb.RegisterSpeechServer(srv, &speechV1Service{s: s})
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a

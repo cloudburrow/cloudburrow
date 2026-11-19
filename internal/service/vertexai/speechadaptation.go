@@ -43,7 +43,8 @@ import (
 // UNIMPLEMENTED in Recognize and BatchRecognize: local whisper.cpp has no
 // phrase boosting, and a prompt would only approximate it.
 //
-// UNVERIFIED (the reference defines the fields, not these): the ID rule's
+// UNVERIFIED (re-read 2026-11-19: the customClasses and phraseSets references above, which define
+// the fields, not these): the ID rule's
 // leading letter, uid and etag formats, the 30-day expire_time, the texts
 // of the errors.
 

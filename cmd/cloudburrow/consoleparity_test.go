@@ -1881,6 +1881,14 @@ var parityRows = []parityRow{
 			"Status), Create (ID, region, display name, items one a line; phrases one a line with an optional | boost, the " +
 			"set's boost), its page (summary, Items or Phrases with their boosts), Edit, Delete, and Undelete on a deleted one",
 		Tests: []string{"TestConsoleSpeechAdaptation", "TestSpeechAdaptationThroughThePage"}},
+	{Resource: "Speech-to-Text: streaming recognition", Service: "vertexai",
+		Methods: []string{"Speech/StreamingRecognize"},
+		Excluded: "a bidirectional gRPC stream an application feeds live audio into (#1930); Google's Speech-to-Text console " +
+			"offers no streaming transcription, only Transcriptions of uploaded or Cloud Storage audio, which the console offers"},
+	{Resource: "Speech-to-Text v1", Service: "speechv1",
+		Methods: []string{"Speech/Recognize", "Speech/LongRunningRecognize", "Speech/StreamingRecognize"},
+		Excluded: "v1's API for existing clients (#1930): the same local recognition the console's Transcriptions offer through " +
+			"v2 (Recognize and BatchRecognize), as Google's console offers it only through v2's recognizers"},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

@@ -82,9 +82,18 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 		apierror.WriteJSON(w, apierror.InvalidArgument("malformed request body: expected a RecognizeRequest"))
 		return
 	}
-	if len(req.Mask) > 0 && string(req.Mask) != "null" && string(req.Mask) != `""` {
-		apierror.WriteJSON(w, apierror.Unimplemented("RecognizeRequest.configMask: the request's config overrides each field it sets"))
-		return
+	var mask []string
+	if len(req.Mask) > 0 && string(req.Mask) != "null" {
+		var m string
+		if json.Unmarshal(req.Mask, &m) != nil {
+			apierror.WriteJSON(w, apierror.InvalidArgument("RecognizeRequest.configMask is not a field mask"))
+			return
+		}
+		for _, p := range strings.Split(m, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				mask = append(mask, p)
+			}
+		}
 	}
 	data, err := base64.StdEncoding.DecodeString(req.Content)
 	if err != nil {
@@ -98,7 +107,15 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	name := "projects/" + r.PathValue("project") + "/locations/" + r.PathValue("location") + "/recognizers/" + rec
-	out, err := s.recognizeAudio(r.Context(), name, req.Config, data)
+	config := req.Config
+	if len(mask) > 0 {
+		if config, err = s.effectiveConfig(name, config, mask); err != nil {
+			apierror.WriteJSON(w, err)
+			return
+		}
+		name = defaultRecognizer(name)
+	}
+	out, err := s.recognizeAudio(r.Context(), name, config, data)
 	if err != nil {
 		apierror.WriteJSON(w, err)
 		return
@@ -137,25 +154,28 @@ func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfi
 	} else if code != 0 {
 		return cfg, apierror.InvalidArgument("%v", err)
 	}
+	if _, _, err := s.adaptationOptions(cfg.Adaptation); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
 
 // transcribeAudio is recognizeAudio's transcription, before it is written
 // as a response.
 func (s *Server) transcribeAudio(ctx context.Context, name string, config json.RawMessage, data []byte) (speech.Result, []float32, speechconfig.Config, error) {
+	return s.transcribeAudioMax(ctx, name, config, data, speech.MaxSeconds)
+}
+
+// transcribeAudioMax is transcribeAudio for audio of at most maxSeconds.
+func (s *Server) transcribeAudioMax(ctx context.Context, name string, config json.RawMessage, data []byte, maxSeconds int) (speech.Result, []float32, speechconfig.Config, error) {
 	var none speech.Result
 	cfg, err := s.checkedConfig(name, config)
 	if err != nil {
 		return none, nil, cfg, err
 	}
-	samples, err := speech.Decode(cfg.Decoding, data)
-	switch {
-	case errors.Is(err, speech.ErrUnsupported):
-		return none, nil, cfg, apierror.Unimplemented("Not implemented here: %v", err)
-	case errors.Is(err, speech.ErrTooLong):
-		return none, nil, cfg, apierror.InvalidArgument("%v", err)
-	case err != nil:
-		return none, nil, cfg, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
+	samples, err := speech.DecodeMax(cfg.Decoding, data, maxSeconds)
+	if err != nil {
+		return none, nil, cfg, decodeError(err)
 	}
 	if lang := cfg.Language; lang != "" {
 		known, err := speech.LanguageKnown(ctx, lang)
@@ -167,13 +187,38 @@ func (s *Server) transcribeAudio(ctx context.Context, name string, config json.R
 				"does not recognise it, and CloudBurrow never calls Google", lang)
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	opt, err := s.transcribeOptions(cfg)
+	if err != nil {
+		return none, nil, cfg, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Hour)
 	defer cancel()
-	res, err := speech.Transcribe(ctx, samples, speech.Options{Language: cfg.Language, Words: cfg.Words})
+	res, err := speech.Transcribe(ctx, samples, opt)
 	if err != nil {
 		return none, nil, cfg, speechError(err)
 	}
 	return res, samples, cfg, nil
+}
+
+// transcribeOptions are whisper's options for a checked config, its
+// adaptation resolved (speechbias.go).
+func (s *Server) transcribeOptions(cfg speechconfig.Config) (speech.Options, error) {
+	phrases, prompt, err := s.adaptationOptions(cfg.Adaptation)
+	if err != nil {
+		return speech.Options{}, err
+	}
+	return speech.Options{Language: cfg.Language, Words: cfg.Words, Phrases: phrases, Prompt: prompt}, nil
+}
+
+// decodeError is a speech.Decode error as the API answers it.
+func decodeError(err error) error {
+	switch {
+	case errors.Is(err, speech.ErrUnsupported):
+		return apierror.Unimplemented("Not implemented here: %v", err)
+	case errors.Is(err, speech.ErrTooLong):
+		return apierror.InvalidArgument("%v", err)
+	}
+	return apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
 }
 
 func speechError(err error) error {

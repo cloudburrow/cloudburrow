@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <vector>
 
 #include "whisper.h"
 
@@ -31,10 +33,46 @@ CB_EXPORT(cb_free_ctx) void cb_free_ctx(whisper_context *ctx) { whisper_free(ctx
 // whisper does not know it.
 CB_EXPORT(cb_lang_id) int cb_lang_id(const char *code) { return whisper_lang_id(code); }
 
-// cb_full transcribes n mono 16 kHz samples. lang is a whisper language code
-// or "auto" (detect), translate is 0, offsets 1 computes token timestamps.
-// It returns 0 on success.
-CB_EXPORT(cb_full) int cb_full(whisper_context *ctx, const float *samples, int n, const char *lang, int offsets) {
+// A phrase the decoder is biased towards (speech adaptation, #1930): its
+// tokens, as whisper tokenizes it after a space, and the amount added to
+// the logit of the token that starts or continues it.
+struct bias_phrase {
+	std::vector<whisper_token> tokens;
+	float bias;
+};
+
+// biasFilter is whisper's logits filter: for each phrase, the longest
+// prefix of it that ends the text decoded so far (none counts) gives the
+// next token of the phrase, whose logit is raised by the phrase's bias.
+static void biasFilter(whisper_context *ctx, whisper_state *, const whisper_token_data *tokens, int n_tokens,
+                       float *logits, void *user) {
+	auto *phrases = static_cast<std::vector<bias_phrase> *>(user);
+	const whisper_token eot = whisper_token_eot(ctx);
+	std::vector<whisper_token> text;
+	for (int i = 0; i < n_tokens; i++) {
+		if (tokens[i].id < eot) text.push_back(tokens[i].id);
+	}
+	for (const bias_phrase &ph : *phrases) {
+		const int n = (int)ph.tokens.size();
+		int best = 0;
+		for (int k = n - 1; k > 0; k--) {
+			if (k > (int)text.size()) continue;
+			if (std::equal(ph.tokens.begin(), ph.tokens.begin() + k, text.end() - k)) {
+				best = k;
+				break;
+			}
+		}
+		logits[ph.tokens[best]] += ph.bias;
+	}
+}
+
+// cb_full_adapt transcribes n mono 16 kHz samples. lang is a whisper
+// language code or "auto" (detect), offsets 1 computes token timestamps.
+// prompt, when not null, is whisper's initial prompt; bias, when not null,
+// is lines of "<bias>\t<phrase>\n" for the logits filter. It returns 0 on
+// success.
+CB_EXPORT(cb_full_adapt) int cb_full_adapt(whisper_context *ctx, const float *samples, int n, const char *lang, int offsets,
+                                           const char *prompt, const char *bias) {
 	whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
 	p.n_threads = 1;
 	p.language = lang;
@@ -47,7 +85,38 @@ CB_EXPORT(cb_full) int cb_full(whisper_context *ctx, const float *samples, int n
 	p.no_context = true;
 	p.token_timestamps = offsets != 0;
 	p.suppress_nst = true;
+	if (prompt && *prompt) {
+		p.initial_prompt = prompt;
+		p.carry_initial_prompt = true;
+	}
+	std::vector<bias_phrase> phrases;
+	for (const char *line = bias; line && *line;) {
+		const char *end = strchr(line, '\n');
+		if (!end) end = line + strlen(line);
+		const char *tab = static_cast<const char *>(memchr(line, '\t', end - line));
+		if (tab) {
+			std::vector<char> text(tab + 1, end);
+			text.insert(text.begin(), ' ');
+			text.push_back(0);
+			std::vector<whisper_token> toks(text.size() + 8);
+			int got = whisper_tokenize(ctx, text.data(), toks.data(), (int)toks.size());
+			if (got > 0) {
+				toks.resize(got);
+				phrases.push_back({toks, strtof(line, nullptr)});
+			}
+		}
+		line = *end ? end + 1 : end;
+	}
+	if (!phrases.empty()) {
+		p.logits_filter_callback = biasFilter;
+		p.logits_filter_callback_user_data = &phrases;
+	}
 	return whisper_full(ctx, p, samples, n);
+}
+
+// cb_full is cb_full_adapt without a prompt or bias.
+CB_EXPORT(cb_full) int cb_full(whisper_context *ctx, const float *samples, int n, const char *lang, int offsets) {
+	return cb_full_adapt(ctx, samples, n, lang, offsets, nullptr, nullptr);
 }
 
 CB_EXPORT(cb_lang) const char *cb_lang(whisper_context *ctx) { return whisper_lang_str(whisper_full_lang_id(ctx)); }
