@@ -24,7 +24,8 @@ import (
 // SDK's Models.CountTokens of the same text; a NULL input, and an API error
 // (the default endpoint with no alias is the local endpoint's NOT_FOUND),
 // are NULL in both fields; the caller needs the Vertex AI User role
-// (UNVERIFIED: the page names no permission; AI.GENERATE's is applied).
+// (UNVERIFIED, docs re-read 2026-11-19, still unanswered: the page above
+// names no permission; AI.GENERATE's is applied).
 //
 // covers: bigquery.jobs.query
 func TestBigQueryAICountTokens(t *testing.T) {
@@ -99,8 +100,10 @@ func TestBigQueryAICountTokens(t *testing.T) {
 // TestBigQueryAICountTokensArguments (#1962): AI.COUNT_TOKENS' arguments,
 // checked by the BigQuery front before any model is asked, so this needs
 // no local model: INPUT is required and positional, endpoint is named, and
-// the page documents no other argument (UNVERIFIED: the errors' wording,
-// which the page does not quote).
+// the page documents no other argument
+// (UNVERIFIED, docs re-read 2026-11-19, still unanswered:
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-ai-count-tokens:
+// the errors' wording, which the page does not quote).
 //
 // covers: bigquery.jobs.query
 func TestBigQueryAICountTokensArguments(t *testing.T) {

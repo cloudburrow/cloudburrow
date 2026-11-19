@@ -135,8 +135,9 @@ type RunnerToolChoice struct {
 var functionNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.\-]{0,63}$`)
 
 // validRoles is Vertex AI's error for a role other than user or model.
-// UNVERIFIED: the wording is Gemini's as commonly reported; Google's
-// reference documents the two roles, not the message.
+// UNVERIFIED (docs re-read 2026-11-19, still unanswered: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference):
+// the wording is Gemini's as commonly reported; the reference documents
+// the two roles, user and model, not the message.
 const validRoles = "Please use a valid role: user, model."
 
 // validateTools checks tools and toolConfig against the documented shapes
@@ -167,7 +168,9 @@ func validateTools(tools []Tool, tc *ToolConfig) error {
 						"underscores, dots and dashes, with a maximum length of 64", at, fd.Name)
 			}
 			if declared[fd.Name] {
-				// UNVERIFIED: Google's reference does not say duplicates are refused.
+				// UNVERIFIED (docs re-read 2026-11-19, still unanswered:
+				// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling):
+				// the reference does not say duplicates are refused.
 				return apierror.InvalidArgument("%s.name %q is declared more than once", at, fd.Name)
 			}
 			declared[fd.Name] = true
@@ -200,8 +203,10 @@ func validateTools(tools []Tool, tc *ToolConfig) error {
 	}
 	if len(fc.AllowedFunctionNames) > 0 {
 		if fc.Mode != "ANY" && fc.Mode != "VALIDATED" {
-			// The reference: "Only set when the Mode is ANY" (VALIDATED
-			// documents the same limiting). UNVERIFIED: the error wording.
+			// The reference: "Only set when the mode is ANY" (VALIDATED
+			// documents the same limiting).
+			// UNVERIFIED (docs re-read 2026-11-19, still unanswered: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/function-calling):
+			// the error wording.
 			return apierror.InvalidArgument(
 				"toolConfig.functionCallingConfig.allowedFunctionNames should only be set when the mode is ANY or VALIDATED")
 		}
@@ -322,7 +327,7 @@ func validateConversation(req *GenerateContentRequest, generate bool) error {
 	if len(req.Contents) == 0 {
 		return apierror.InvalidArgument("contents is required and must contain at least one user turn")
 	}
-	pendingCalls := 0 // calls of the previous model turn awaiting responses
+	var pendingCalls []*FunctionCall // calls of the previous model turn awaiting responses
 	for i, c := range req.Contents {
 		role := c.Role
 		if role == "" && len(req.Contents) == 1 {
@@ -334,12 +339,16 @@ func validateConversation(req *GenerateContentRequest, generate bool) error {
 		if len(c.Parts) == 0 {
 			return apierror.InvalidArgument("contents[%d].parts is required", i)
 		}
-		calls, responses := 0, 0
+		var calls []*FunctionCall
+		var responses []*FunctionResponse
 		for j, p := range c.Parts {
 			at := fmt.Sprintf("contents[%d].parts[%d]", i, j)
 			switch k := p.kind(); k {
 			case "":
-				// UNVERIFIED: Gemini's wording for an empty part.
+				// UNVERIFIED (docs re-read 2026-11-19, still unanswered:
+				// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference):
+				// Gemini's wording for an empty part; the reference does not
+				// say how a part with no data is refused.
 				return apierror.InvalidArgument("Unable to submit request because it has an empty text parameter. Add a value to the parameter and try again. (%s)", at)
 			case "several":
 				return apierror.InvalidArgument("%s: a part holds exactly one of text, inlineData, fileData, functionCall or functionResponse", at)
@@ -352,7 +361,7 @@ func validateConversation(req *GenerateContentRequest, generate bool) error {
 				if p.FunctionCall.Name == "" {
 					return apierror.InvalidArgument("%s.functionCall.name is required", at)
 				}
-				calls++
+				calls = append(calls, p.FunctionCall)
 			case "functionResponse":
 				if role == "model" {
 					return apierror.InvalidArgument("%s: functionResponse parts belong to user turns", at)
@@ -360,7 +369,7 @@ func validateConversation(req *GenerateContentRequest, generate bool) error {
 				if p.FunctionResponse.Name == "" {
 					return apierror.InvalidArgument("%s.functionResponse.name is required", at)
 				}
-				responses++
+				responses = append(responses, p.FunctionResponse)
 			case "inlineData", "fileData":
 				if role == "model" {
 					return apierror.InvalidArgument("%s.%s: media parts belong to user turns", at, k)
@@ -380,25 +389,77 @@ func validateConversation(req *GenerateContentRequest, generate bool) error {
 				return apierror.InvalidArgument("%s: thought parts are not accepted; this model returns none", at)
 			}
 		}
-		// Gemini's ordering rules for function calling. UNVERIFIED: the
-		// wording is Gemini's as commonly reported, not documented.
-		if responses > 0 {
-			if pendingCalls == 0 {
+		// The function-calling guide: "you must return all corresponding
+		// functionResponse parts together in a single Content object in the
+		// next turn", "Don't interleave functionCall and functionResponse
+		// parts across separate turns", and "The functionResponse.name must
+		// still match the corresponding functionCall.name, or the request
+		// fails with a 400 error"; a response pairs with its call by id when
+		// both carry one, otherwise with an unmatched call of the same name.
+		// UNVERIFIED (docs re-read 2026-11-19, still unanswered:
+		// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/function-calling):
+		// the wording is Gemini's as commonly reported, not documented.
+		if len(responses) > 0 {
+			if len(pendingCalls) == 0 {
 				return apierror.InvalidArgument("Please ensure that function response turn comes immediately after a function call turn. (contents[%d])", i)
 			}
-			if responses != pendingCalls {
-				return apierror.InvalidArgument("Please ensure that the number of function response parts is equal to the number of function call parts of the function call turn. (contents[%d]: %d responses, %d calls)", i, responses, pendingCalls)
+			if len(responses) != len(pendingCalls) {
+				return apierror.InvalidArgument("Please ensure that the number of function response parts is equal to the number of function call parts of the function call turn. (contents[%d]: %d responses, %d calls)", i, len(responses), len(pendingCalls))
 			}
-		} else if pendingCalls > 0 && role != "model" {
+			if err := matchFunctionResponses(i, pendingCalls, responses); err != nil {
+				return err
+			}
+		} else if len(pendingCalls) > 0 && role != "model" {
 			return apierror.InvalidArgument("Please ensure that function response turn comes immediately after a function call turn. (contents[%d])", i)
 		}
 		pendingCalls = calls
 	}
 	last := req.Contents[len(req.Contents)-1]
 	if generate && last.Role == "model" {
-		// UNVERIFIED: the model answers the last user turn; a conversation
-		// ending on the model's own turn has nothing to answer.
+		// UNVERIFIED (docs re-read 2026-11-19, still unanswered:
+		// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference):
+		// contents "contains conversation history and the latest request",
+		// and no rule says how it must end; the model answers the last user
+		// turn, so a conversation ending on the model's own turn has nothing
+		// to answer.
 		return apierror.InvalidArgument("contents[%d]: the last turn must be a user turn (or function responses), not a model turn", len(req.Contents)-1)
+	}
+	return nil
+}
+
+// matchFunctionResponses pairs each function response of contents[i] with
+// a call of the previous model turn, by id when both carry one, otherwise
+// with the first unmatched call of the same name, and refuses a response
+// whose name matches no call (the function-calling guide's 400).
+func matchFunctionResponses(i int, calls []*FunctionCall, responses []*FunctionResponse) error {
+	used := make([]bool, len(calls))
+	for _, r := range responses {
+		k := -1
+		if r.ID != "" {
+			for j, c := range calls {
+				if !used[j] && c.ID == r.ID {
+					k = j
+					break
+				}
+			}
+			if k >= 0 && calls[k].Name != r.Name {
+				return apierror.InvalidArgument(
+					"contents[%d]: functionResponse %q (id %q) must match the name of its functionCall, %q", i, r.Name, r.ID, calls[k].Name)
+			}
+		}
+		if k < 0 {
+			for j, c := range calls {
+				if !used[j] && c.Name == r.Name {
+					k = j
+					break
+				}
+			}
+		}
+		if k < 0 {
+			return apierror.InvalidArgument(
+				"contents[%d]: functionResponse %q matches no functionCall of the function call turn", i, r.Name)
+		}
+		used[k] = true
 	}
 	return nil
 }
