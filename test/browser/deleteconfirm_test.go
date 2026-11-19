@@ -29,6 +29,14 @@ func (p *tab) openRowDelete(name, item string) {
 // and focus on Cancel, so one reflexive Enter does not delete.
 func (p *tab) confirmOnlyDialog() {
 	p.t.Helper()
+	p.confirmOnlyDialogLabelled("Delete")
+}
+
+// confirmOnlyDialogLabelled is confirmOnlyDialog for a dialog whose button
+// is its own verb: Model Garden's Download and Deploy (#1931).
+func (p *tab) confirmOnlyDialogLabelled(button string) {
+	p.t.Helper()
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm]") !== null`)
 	var got struct {
 		Style, Focus, Button string
 		Input                bool
@@ -37,9 +45,17 @@ func (p *tab) confirmOnlyDialog() {
 		return { Style: f.dataset.confirm, Input: f.querySelector("#confirm-input") !== null,
 		         Focus: document.activeElement ? document.activeElement.textContent : "",
 		         Button: (f.querySelector(".modal-actions button.danger") || {}).textContent || "" }; })()`, &got)
-	if got.Style != "confirm" || got.Input || got.Focus != "Cancel" || got.Button != "Delete" {
+	if got.Style != "confirm" || got.Input || got.Focus != "Cancel" || got.Button != button {
 		p.t.Fatalf("the delete dialog is %+v; want Google's confirm-only dialog, nothing typed and focus on Cancel", got)
 	}
+}
+
+// pressConfirm checks the open dialog is confirm-only with the button
+// given, and presses it.
+func (p *tab) pressConfirm(button string) {
+	p.t.Helper()
+	p.confirmOnlyDialogLabelled(button)
+	p.pressDelete()
 }
 
 // pressDelete presses the open confirm-only dialog's Delete.
