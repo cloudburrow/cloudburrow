@@ -42,6 +42,8 @@ type kmsService struct {
 	interpose []grpc.UnaryServerInterceptor
 	// requests reports each JSON request to the admin event log (#414).
 	requests func(rest.Request)
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	server   *grpctransport.Server
 	db       store.Store
 	kube     *kms.KubeStore
@@ -200,6 +202,9 @@ func (s *kmsService) Start(ctx context.Context) error {
 	_, _ = s.api.Sweep()
 	// One port for gRPC and JSON, as cloudkms.googleapis.com (#414).
 	var jsonAPI http.Handler = kms.NewRESTHandler(s.api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

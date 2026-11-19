@@ -4,7 +4,9 @@ package compat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -19,6 +21,8 @@ import (
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/googleapis/gax-go/v2/apierror"
+	"golang.org/x/oauth2"
 	asset "google.golang.org/api/cloudasset/v1"
 	"google.golang.org/api/option"
 	pt "google.golang.org/api/policytroubleshooter/v3"
@@ -100,7 +104,7 @@ func waitGranted(t *testing.T, what string, call func() error) {
 	t.Fatalf("%s after the grant: %v", what, err)
 }
 
-// covers: google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/GetSecret, google.cloud.secretmanager.v1.SecretManagerService/ListSecrets
+// covers: google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/GetSecret, google.cloud.secretmanager.v1.SecretManagerService/ListSecrets, google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions
 //
 // TestIAMEnforcementSecretManager (#1879), with the official Secret
 // Manager client over gRPC and an access token minted through IAM
@@ -110,7 +114,7 @@ func waitGranted(t *testing.T, what string, call func() error) {
 // call through, and taking it back refuses it again; the role on the
 // secret's own policy grants it too; a condition on request.time grants
 // while it holds and not after; roles/secretmanager.viewer reads metadata
-// but not the payload; a token the instance did not mint is
+// but not the payload, and TestIamPermissions answers only what it holds; a token the instance did not mint is
 // UNAUTHENTICATED; the instance's own account is the owner.
 func TestIAMEnforcementSecretManager(t *testing.T) {
 	h := New(t)
@@ -189,6 +193,11 @@ func TestIAMEnforcementSecretManager(t *testing.T) {
 		t.Errorf("ListSecrets as a viewer: %v", err)
 	}
 	wantDenied(t, "AccessSecretVersion as a viewer", access(), deniedMsg, "secretmanager.versions.access", true)
+	held, err := as.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: secret,
+		Permissions: []string{"secretmanager.secrets.get", "secretmanager.versions.access"}})
+	if err != nil || len(held.GetPermissions()) != 1 || held.GetPermissions()[0] != "secretmanager.secrets.get" {
+		t.Errorf("TestIamPermissions as a viewer = %v, %v; want only secretmanager.secrets.get", held.GetPermissions(), err)
+	}
 	p.revoke("roles/secretmanager.viewer")
 
 	forged, err := secretmanager.NewClient(ctx, grpcAs(endpoint, "cbl_not-minted-here")...)
@@ -477,4 +486,123 @@ func TestGcloudPolicyTroubleshoot(t *testing.T) {
 	if strings.TrimSpace(out) != "NOT_GRANTED" {
 		t.Errorf("policy-troubleshoot iam secretmanager.secrets.delete = %q; want NOT_GRANTED", out)
 	}
+}
+
+// covers: google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion, google.cloud.kms.v1.KeyManagementService/Encrypt, google.cloud.tasks.v2.CloudTasks/GetQueue
+//
+// TestIAMEnforcementJSON (#1879): the same checks over the JSON APIs,
+// through the official clients' REST transports with a minted token:
+// Secret Manager's AccessSecretVersion, Cloud KMS's Encrypt and Cloud
+// Tasks's GetQueue are 403 PERMISSION_DENIED with Google's messages (and
+// ErrorInfo IAM_PERMISSION_DENIED for Secret Manager and KMS), and the
+// grant lets each through.
+func TestIAMEnforcementJSON(t *testing.T) {
+	h := New(t)
+	smEndpoint := h.Endpoint(EnvSecrets)
+	kmsEndpoint := h.Endpoint(EnvKMS)
+	tasksEndpoint := h.Endpoint(EnvTasks)
+	h.Endpoint(EnvResourceManager)
+	h.Endpoint(EnvMetadata)
+	requireIAMEnforcement(t)
+	ctx := h.Context()
+	project := iamProject(t, h, "iejs-")
+	p := newIAMPrincipal(t, h, project, "iejs")
+	restAs := func(endpoint string) []option.ClientOption {
+		return []option.ClientOption{option.WithEndpoint("http://" + strings.TrimPrefix(endpoint, "http://")),
+			option.WithHTTPClient(&http.Client{Transport: &oauth2.Transport{Source: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: p.token})}})}
+	}
+	wantREST := func(what string, err error, msg string, withInfo bool) {
+		t.Helper()
+		var ae *apierror.APIError
+		if !errors.As(err, &ae) || ae.HTTPCode() != http.StatusForbidden || !strings.Contains(err.Error(), msg) {
+			t.Fatalf("%s over JSON = %v; want 403 %q", what, err, msg)
+		}
+		if withInfo && ae.Reason() != "IAM_PERMISSION_DENIED" {
+			t.Fatalf("%s over JSON: ErrorInfo reason %q; want IAM_PERMISSION_DENIED", what, ae.Reason())
+		}
+	}
+
+	// Secret Manager.
+	owner, err := secretmanager.NewClient(ctx, grpcAs(smEndpoint, "")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = owner.Close() })
+	secret := "projects/" + project + "/secrets/json"
+	if _, err := owner.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: "projects/" + project, SecretId: "json",
+		Secret: &secretmanagerpb.Secret{Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{
+			Automatic: &secretmanagerpb.Replication_Automatic{}}}}}); err != nil {
+		t.Fatalf("CreateSecret: %v", err)
+	}
+	if _, err := owner.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{Parent: secret,
+		Payload: &secretmanagerpb.SecretPayload{Data: []byte("j")}}); err != nil {
+		t.Fatalf("AddSecretVersion: %v", err)
+	}
+	sm, err := secretmanager.NewRESTClient(ctx, restAs(smEndpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sm.Close() })
+	access := func() error {
+		_, err := sm.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{Name: secret + "/versions/1"})
+		return err
+	}
+	wantREST("AccessSecretVersion", access(), "Permission 'secretmanager.versions.access' denied for resource '"+secret+"/versions/1' (or it may not exist).", true)
+	p.grant("roles/secretmanager.secretAccessor")
+	waitGranted(t, "AccessSecretVersion over JSON", access)
+
+	// Cloud KMS.
+	kowner, err := kms.NewKeyManagementClient(ctx, grpcAs(kmsEndpoint, "")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = kowner.Close() })
+	ring, err := kowner.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + project + "/locations/global", KeyRingId: "json"})
+	if err != nil {
+		t.Fatalf("CreateKeyRing: %v", err)
+	}
+	key, err := kowner.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
+	if err != nil {
+		t.Fatalf("CreateCryptoKey: %v", err)
+	}
+	kc, err := kms.NewKeyManagementRESTClient(ctx, restAs(kmsEndpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = kc.Close() })
+	encrypt := func() error {
+		_, err := kc.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: []byte("x")})
+		return err
+	}
+	wantREST("Encrypt", encrypt(), "Permission 'cloudkms.cryptoKeyVersions.useToEncrypt' denied on resource '"+key.GetName()+"' (or it may not exist).", true)
+	p.grant("roles/cloudkms.cryptoKeyEncrypter")
+	waitGranted(t, "Encrypt over JSON", encrypt)
+
+	// Cloud Tasks.
+	towner, err := cloudtasks.NewClient(ctx, grpcAs(tasksEndpoint, "")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = towner.Close() })
+	q, err := towner.CreateQueue(ctx, &cloudtaskspb.CreateQueueRequest{Parent: "projects/" + project + "/locations/us-central1",
+		Queue: &cloudtaskspb.Queue{Name: "projects/" + project + "/locations/us-central1/queues/json"}})
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = towner.DeleteQueue(context.Background(), &cloudtaskspb.DeleteQueueRequest{Name: q.GetName()})
+	})
+	tc, err := cloudtasks.NewRESTClient(ctx, restAs(tasksEndpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tc.Close() })
+	get := func() error {
+		_, err := tc.GetQueue(ctx, &cloudtaskspb.GetQueueRequest{Name: q.GetName()})
+		return err
+	}
+	wantREST("GetQueue", get(), `The principal (user or service account) lacks IAM permission "cloudtasks.queues.get" for the resource "`+q.GetName()+`" (or the resource may not exist).`, false)
+	p.grant("roles/cloudtasks.viewer")
+	waitGranted(t, "GetQueue over JSON", get)
 }

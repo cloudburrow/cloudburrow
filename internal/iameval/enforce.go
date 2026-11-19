@@ -2,6 +2,8 @@ package iameval
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"strings"
 	"time"
 
@@ -10,10 +12,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // Caller is who sent a request.
@@ -65,6 +69,9 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if e == nil || e.On == nil || !e.On() {
 			return handler(ctx, req)
 		}
+		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") {
+			return e.testPermissions(ctx, svc, req, handler)
+		}
 		_, m := ForMethod(svc, info.FullMethod)
 		if m == nil {
 			return handler(ctx, req)
@@ -79,6 +86,38 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		}
 		return handler(ctx, req)
 	}
+}
+
+// testPermissions answers TestIamPermissions as Google does: the
+// requested permissions the caller holds on the resource. The instance's
+// own account holds every one.
+func (e *Enforcer) testPermissions(ctx context.Context, svc *Service, req any, handler grpc.UnaryHandler) (any, error) {
+	in, ok := req.(*iampb.TestIamPermissionsRequest)
+	if !ok {
+		return handler(ctx, req)
+	}
+	c := Caller{Owner: true}
+	if b := bearer(ctx); b != "" && e.CallerOf != nil {
+		c = e.CallerOf(b)
+	}
+	if c.Invalid {
+		return nil, Unauthenticated()
+	}
+	resp, err := handler(ctx, req)
+	if err != nil || c.Owner {
+		return resp, err
+	}
+	out, ok := resp.(*iampb.TestIamPermissionsResponse)
+	if !ok {
+		return resp, err
+	}
+	var held []string
+	for _, p := range out.GetPermissions() {
+		if e.Eval.Check(e.Request(ctx, svc, c.Email, p, in.GetResource())).Granted {
+			held = append(held, p)
+		}
+	}
+	return &iampb.TestIamPermissionsResponse{Permissions: held}, nil
 }
 
 // Authorize checks that the caller of bearer has permission on resource
@@ -192,4 +231,66 @@ func field(m protoreflect.Message, path string) string {
 		m = m.Get(fd).Message()
 	}
 	return ""
+}
+
+// HTTP checks svc's JSON requests as Interceptor checks its gRPC calls:
+// m names the method a request is bound to and the resource its path
+// names. A denial is the same status, as Google's JSON error envelope.
+func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if e == nil || e.On == nil || !e.On() || m == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		full, fields, ok := m.Match(r)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		_, row := ForMethod(svc, full)
+		if row == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		resource := fields[row.Field]
+		if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.PermissionOf(resource), resource); err != nil {
+			WriteJSONStatus(w, err)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// WriteJSONStatus writes a gRPC status as Google's JSON error envelope,
+// details included ({"error": {"code", "message", "status", "details"}}).
+func WriteJSONStatus(w http.ResponseWriter, err error) {
+	st := status.Convert(err)
+	code := runtimeHTTPStatus(st.Code())
+	details := []json.RawMessage{}
+	for _, d := range st.Proto().GetDetails() {
+		if b, err := protojson.Marshal(d); err == nil {
+			details = append(details, b)
+		}
+	}
+	body := map[string]any{"error": map[string]any{"code": code, "message": st.Message(), "status": st.Code().String(), "details": details}}
+	if st.Code() == codes.PermissionDenied {
+		body["error"].(map[string]any)["status"] = "PERMISSION_DENIED"
+	}
+	if st.Code() == codes.Unauthenticated {
+		body["error"].(map[string]any)["status"] = "UNAUTHENTICATED"
+	}
+	b, _ := json.Marshal(body)
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.WriteHeader(code)
+	_, _ = w.Write(b)
+}
+
+func runtimeHTTPStatus(c codes.Code) int {
+	switch c {
+	case codes.PermissionDenied:
+		return http.StatusForbidden
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized
+	}
+	return http.StatusInternalServerError
 }

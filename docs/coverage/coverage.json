@@ -42,7 +42,7 @@
           "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/consoletasksattempts_test.go:23 TestConsoleTasksAttemptHistory",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/iamenforcement1879_test.go:273 TestIAMEnforcementTasks",
+          "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
@@ -91,7 +91,8 @@
           "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/iamenforcement1879_test.go:273 TestIAMEnforcementTasks",
+          "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
+          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
@@ -212,8 +213,9 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcement1879_test.go:115 TestIAMEnforcementSecretManager",
-          "test/compat/iamenforcement1879_test.go:333 TestIAMEnforcementInherited",
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
+          "test/compat/iamenforcement1879_test.go:342 TestIAMEnforcementInherited",
+          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
@@ -340,7 +342,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcement1879_test.go:115 TestIAMEnforcementSecretManager",
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
@@ -385,7 +387,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcement1879_test.go:115 TestIAMEnforcementSecretManager",
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/secretexpiryfilter_test.go:118 TestSecretManagerListFilters",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
@@ -422,6 +424,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:237 TestConsolePermissionsOnASecret",
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
@@ -3125,7 +3128,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcement1879_test.go:215 TestIAMEnforcementKMS",
+          "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:630 TestKMSDecrypt",
@@ -3232,7 +3235,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcement1879_test.go:215 TestIAMEnforcementKMS",
+          "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
+          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:509 TestKMSEncrypt",
@@ -3296,7 +3300,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcement1879_test.go:215 TestIAMEnforcementKMS",
+          "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:202 TestKMSNamesAreValidatedBeforeLookup",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",

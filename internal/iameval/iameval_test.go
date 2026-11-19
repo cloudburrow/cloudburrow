@@ -2,9 +2,13 @@ package iameval
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -13,6 +17,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 type fakeSource struct {
@@ -159,5 +164,57 @@ func TestPolicyResources(t *testing.T) {
 	}
 	if p := KMS.Methods["/google.iam.v1.IAMPolicy/SetIamPolicy"]; p.PermissionOf("projects/p/locations/l/keyRings/r/cryptoKeys/k") != "cloudkms.cryptoKeys.setIamPolicy" {
 		t.Fatal("kms iam permission")
+	}
+}
+
+func TestHTTPDenies(t *testing.T) {
+	e := &Enforcer{Eval: &Evaluator{Source: fakeSource{}}, On: func() bool { return true },
+		CallerOf: func(string) Caller { return Caller{Email: sa} }}
+	m := rest.NewMatcher([]string{"google.cloud.secretmanager.v1.SecretManagerService"}, nil)
+	ran := false
+	h := e.HTTP(SecretManager, m, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { ran = true }))
+	r := httptest.NewRequest(http.MethodGet, "/v1/projects/p/secrets/s/versions/1:access", nil)
+	r.Header.Set("Authorization", "Bearer x")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	var body struct {
+		Error struct {
+			Code    int
+			Message string
+			Status  string
+			Details []map[string]any
+		}
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || ran || w.Code != 403 || body.Error.Status != "PERMISSION_DENIED" ||
+		body.Error.Message != "Permission 'secretmanager.versions.access' denied for resource 'projects/p/secrets/s/versions/1' (or it may not exist)." ||
+		len(body.Error.Details) != 1 || body.Error.Details[0]["reason"] != "IAM_PERMISSION_DENIED" {
+		t.Fatalf("%d %s ran=%v", w.Code, w.Body, ran)
+	}
+	// An unmapped path passes.
+	ran = false
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/projects/p/locations", nil))
+	if !ran {
+		t.Fatal("unmapped request was not served")
+	}
+}
+
+func TestTestIamPermissionsAnswersWhatIsHeld(t *testing.T) {
+	viewer := iampolicy.Binding{Role: "roles/secretmanager.viewer", Members: []string{"serviceAccount:" + sa}}
+	e := &Enforcer{Eval: &Evaluator{Source: fakeSource{policies: map[string]*iampolicy.Stored{"projects/p": pol(viewer)}}},
+		On: func() bool { return true }, CallerOf: func(string) Caller { return Caller{Email: sa} }}
+	ic := e.Interceptor(SecretManager)
+	info := &grpc.UnaryServerInfo{FullMethod: "/google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions"}
+	req := &iampb.TestIamPermissionsRequest{Resource: "projects/p/secrets/s",
+		Permissions: []string{"secretmanager.secrets.get", "secretmanager.versions.access"}}
+	h := func(_ context.Context, r any) (any, error) {
+		return &iampb.TestIamPermissionsResponse{Permissions: r.(*iampb.TestIamPermissionsRequest).GetPermissions()}, nil
+	}
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer sa"))
+	resp, err := ic(ctx, req, info, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.(*iampb.TestIamPermissionsResponse).GetPermissions(); len(got) != 1 || got[0] != "secretmanager.secrets.get" {
+		t.Fatalf("held = %v", got)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -44,8 +45,10 @@ type secretsService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
-	db        store.Store
-	store     *secrets.Store
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	db       store.Store
+	store    *secrets.Store
 	// stopSweep ends the expiry sweep (#1225); swept closes when it has.
 	stopSweep context.CancelFunc
 	swept     chan struct{}
@@ -197,6 +200,9 @@ func (s *secretsService) Start(ctx context.Context) error {
 	}
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
+	}
+	if s.wrapJSON != nil {
+		s.server.WrapJSON(s.wrapJSON)
 	}
 	if err := s.server.Start(ctx); err != nil {
 		_ = db.Close()

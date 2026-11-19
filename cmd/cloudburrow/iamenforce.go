@@ -2,19 +2,23 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"google.golang.org/genproto/googleapis/api/annotations"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // IAM enforcement (#1879): with `up --iam-enforcement=on`, the methods
@@ -132,6 +136,7 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService) {
 	if secretsSvc != nil {
 		secretsSvc.interpose = append(secretsSvc.interpose, e.Interceptor(iameval.SecretManager))
+		secretsSvc.wrapJSON = jsonEnforcer(e, iameval.SecretManager, nil)
 		e.Policies[iameval.SecretManager.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 			st := secretsSvc.Store()
 			if st == nil {
@@ -142,6 +147,7 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 	}
 	if kmsSvc != nil {
 		kmsSvc.interpose = append(kmsSvc.interpose, e.Interceptor(iameval.KMS))
+		kmsSvc.wrapJSON = jsonEnforcer(e, iameval.KMS, kms.Mixins())
 		e.Policies[iameval.KMS.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 			api := kmsSvc.API()
 			if api == nil {
@@ -152,6 +158,7 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 	}
 	if tasksSvc != nil {
 		tasksSvc.interpose = append(tasksSvc.interpose, e.Interceptor(iameval.Tasks))
+		tasksSvc.wrapJSON = jsonEnforcer(e, iameval.Tasks, nil)
 		e.Policies[iameval.Tasks.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 			st := tasksSvc.Store()
 			if st == nil {
@@ -160,6 +167,19 @@ func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *
 			return tasks.NewGRPCServer(st).GetIamPolicy
 		})
 	}
+}
+
+// jsonEnforcer checks svc's JSON requests, bound to their methods by the
+// protos' HTTP rules and mixins, as its gRPC calls are checked.
+func jsonEnforcer(e *iameval.Enforcer, svc *iameval.Service, mixins []*annotations.HttpRule) func(http.Handler) http.Handler {
+	var services []string
+	for name, s := range iameval.Services {
+		if s == svc {
+			services = append(services, name)
+		}
+	}
+	m := rest.NewMatcher(services, mixins)
+	return func(next http.Handler) http.Handler { return e.HTTP(svc, m, next) }
 }
 
 // iamEnforcementMode is cfg's --iam-enforcement, "off" when unset.

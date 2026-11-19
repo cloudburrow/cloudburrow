@@ -2270,9 +2270,13 @@ principal access boundaries and organization policies are not evaluated (none is
 | Cloud KMS | `ListKeyRings`, `GetKeyRing`, `CreateKeyRing`, `ListCryptoKeys`, `GetCryptoKey`, `CreateCryptoKey`, `UpdateCryptoKey`, `UpdateCryptoKeyPrimaryVersion`, `ListCryptoKeyVersions`, `GetCryptoKeyVersion`, `CreateCryptoKeyVersion`, `UpdateCryptoKeyVersion`, `DestroyCryptoKeyVersion`, `RestoreCryptoKeyVersion`, `GetPublicKey`, `Encrypt`, `Decrypt`, `AsymmetricSign`, `AsymmetricDecrypt`, `MacSign`, `MacVerify`, `RawEncrypt`, `RawDecrypt`, `ListImportJobs`, `GetImportJob`, `CreateImportJob`, and the IAMPolicy mixin's `GetIamPolicy` and `SetIamPolicy` | `PERMISSION_DENIED` `Permission 'P' denied on resource 'R' (or it may not exist).`, ErrorInfo as above | **Enforced**, `TestIAMEnforcementKMS` (a key ring grant its keys inherit; `cloudkms.cryptoKeys.get` still denied to an encrypter) |
 | Cloud Tasks | `ListQueues`, `GetQueue`, `CreateQueue`, `UpdateQueue`, `DeleteQueue`, `PurgeQueue`, `PauseQueue`, `ResumeQueue`, `GetIamPolicy`, `SetIamPolicy`, `ListTasks`, `GetTask`, `CreateTask`, `DeleteTask`, `RunTask` | `PERMISSION_DENIED` `The principal (user or service account) lacks IAM permission "P" for the resource "R" (or the resource may not exist).`, no ErrorInfo | **Enforced**, `TestIAMEnforcementTasks` (Enqueuer granted to a Cloud Identity group the account is in) |
 
-Not enforced yet, and served as before whatever the mode: these services' JSON (REST)
-transports, which gcloud and Terraform use (the gRPC methods above are what the official
-clients call); Cloud Storage, Pub/Sub, Cloud Run invoke and every other service. BigQuery,
+The JSON (REST) transports of the same methods are checked the same way, matched to their
+method by the protos' HTTP rules (and cloudkms_v1.yaml's IAMPolicy bindings), with the same
+status in Google's JSON error envelope (403 `PERMISSION_DENIED`, the ErrorInfo in `details`):
+`TestIAMEnforcementJSON`, through the official clients' REST transports. Not enforced yet, and
+served as before whatever the mode: Cloud Storage, Pub/Sub, Cloud Run invoke and every other
+service. `TestIamPermissions` over gRPC answers the requested permissions the caller holds, as
+Google does (`TestIAMEnforcementSecretManager`); over JSON it still answers every one. BigQuery,
 Memorystore's IAM auth, Firestore with MongoDB compatibility and IAM Credentials keep their own
 checks, which run whatever the mode (ADR-0006).
 
