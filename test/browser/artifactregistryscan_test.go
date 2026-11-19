@@ -24,7 +24,8 @@ import (
 // Docker repository; its version's page has Google's Vulnerabilities tab,
 // listing the CVE as CRITICAL, CVSS 9.8, fix available, with the package
 // and its installed and fixed versions. It skips when the instance's
-// scanner is not prefetched.
+// scanner is not prefetched, or fails then with CLOUDBURROW_TEST_OSV_REQUIRED
+// set, as CI's run shard sets it after prefetching the scanner (#1917).
 func TestCloudRunArtifactRegistryVulnerabilitiesTabThroughThePage(t *testing.T) {
 	c := arClient(t)
 	su := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_RUN_SERVICEUSAGE"))
@@ -102,6 +103,9 @@ func TestCloudRunArtifactRegistryVulnerabilitiesTabThroughThePage(t *testing.T) 
 			break
 		}
 		if strings.Contains(text, "not prefetched") {
+			if os.Getenv("CLOUDBURROW_TEST_OSV_REQUIRED") != "" {
+				t.Fatalf("the instance's scanner is not prefetched, and CLOUDBURROW_TEST_OSV_REQUIRED is set:\n%s", text)
+			}
 			t.Skip("the instance's scanner is not prefetched (cloudburrow prefetch --vulnerability-scanning)")
 		}
 		if time.Now().After(deadline) {
