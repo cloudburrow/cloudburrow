@@ -143,6 +143,9 @@ service's. The email is `service-PROJECT_NUMBER@DOMAIN` (the project's 12-digit 
 | `spanner.googleapis.com` | `gcp-sa-spanner` |
 | `redis.googleapis.com` | `cloud-redis` |
 | `backupdr.googleapis.com` | `gcp-sa-backupdr` |
+| `apikeys.googleapis.com` | `gcp-sa-apikeys` |
+| `containeranalysis.googleapis.com` | `container-analysis` |
+| `containerscanning.googleapis.com` | `gcp-sa-containerscanning` |
 
 The other served APIs have no primary service agent in Google's list: `logging` (its agents,
 `gcp-sa-logging` among them, are not primary; Logging names its CMEK account through
