@@ -55,6 +55,9 @@ const ROUTES = [
     product: "secure-source-manager", productTitle: "Secure Source Manager" },
   { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", kind: "Repository", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
+  // Eventarc's Triggers page (#1877), served on the Run port over Pub/Sub.
+  { path: "/eventarc/triggers", service: "eventarc", title: "Triggers", kind: "Trigger", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
   // Cloud Functions v2, served on the Run port (#1377).
   { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
     product: "functions", productTitle: "Cloud Functions" },
@@ -341,6 +344,8 @@ const ICONS = {
   "run-worker-pools": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-domains": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  // Eventarc: an event routed from a source to a destination.
+  eventarc: '<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/>',
   "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
   // Secure Source Manager: a branch.

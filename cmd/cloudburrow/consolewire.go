@@ -224,6 +224,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Cloud Functions v2 is served on the Run port too (#1377).
 			*functions)
+		if runPubSub != "" {
+			// Eventarc's own Triggers page (#1877), on the Run port, over
+			// Pub/Sub, its transport.
+			providers = append(providers, eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
+				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}})
+		}
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})
