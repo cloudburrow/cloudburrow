@@ -224,7 +224,7 @@
   "google.cloud.memorystore.v1.Memorystore/GetBackupCollection": "implemented",
   "google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority": "implemented",
   "google.cloud.memorystore.v1.Memorystore/GetInstance": "implemented",
-  "google.cloud.memorystore.v1.Memorystore/GetSharedRegionalCertificateAuthority": "unimplemented",
+  "google.cloud.memorystore.v1.Memorystore/GetSharedRegionalCertificateAuthority": "implemented",
   "google.cloud.memorystore.v1.Memorystore/GetTokenAuthUser": "implemented",
   "google.cloud.memorystore.v1.Memorystore/ListAclPolicies": "implemented",
   "google.cloud.memorystore.v1.Memorystore/ListAclPolicyRevisions": "implemented",

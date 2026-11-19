@@ -73,9 +73,10 @@ func memorystoreZonalFields() []console.Field {
 }
 
 // memorystoreSecurityFields are Security, the TLS box it holds, and
-// Certificate authority management. The CA modes other than Per-instance
-// CA are drawn where Google's page has them and say why they cannot be
-// chosen: the API refuses server_ca_mode here.
+// Certificate authority management with its CA pool: server_ca_mode and
+// server_ca_pool, each mode served (Redis clusters #1907, Valkey
+// instances #1918; a customer-managed CA is this instance's Certificate
+// Authority Service).
 func memorystoreSecurityFields(what string) []console.Field {
 	return []console.Field{
 		{Name: "security", Label: "Security", Type: "radio", Default: "DISABLED", Section: msSectionSecurity,
@@ -89,11 +90,28 @@ func memorystoreSecurityFields(what string) []console.Field {
 		{Name: "caMode", Label: "Certificate authority management", Type: "radio", Default: "PER_INSTANCE", Section: msSectionCA,
 			ShowWhen: "transitEncryption", Options: []string{"PER_INSTANCE", "CUSTOMER_MANAGED", "SHARED"},
 			OptionLabels: map[string]string{"PER_INSTANCE": "Per-instance CA", "CUSTOMER_MANAGED": "Customer-managed CA", "SHARED": "Shared CA"},
-			UnavailableOptions: map[string]string{
-				"CUSTOMER_MANAGED": "Not available locally: a customer-managed CA is a Certificate Authority Service CA pool, which CloudBurrow does not serve.",
-				"SHARED":           "Not available locally: the shared CA is Google's regional CA; each " + what + " here has a CA of its own.",
-			}},
+			Help: "Per-instance CA: the " + what + "'s own CA, which its page shows. Shared CA: the region's CA, valid for every " + what +
+				" of the region that uses it. Customer-managed CA: a Certificate Authority Service CA pool of the " + what + "'s region issues each node's certificate. It cannot be changed later."},
+		{Name: "caPool", Label: "CA pool", Type: "text", Section: msSectionCA, ShowWhen: "caMode=CUSTOMER_MANAGED",
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/caPools/[^\/]+)?$`,
+			Help:    "projects/{project}/locations/{region}/caPools/{pool}, with an enabled CA, in the " + what + "'s region. Clients trust the pool's CA certificates."},
 	}
+}
+
+// memorystoreCAMode is the form's server_ca_mode, as the number both
+// APIs' enums share (1 per-instance, 2 shared, 3 customer-managed), and
+// server_ca_pool; 0 without in-transit encryption or a choice.
+func memorystoreCAMode(values map[string]string) (int32, string) {
+	if !memorystoreTLS(values) {
+		return 0, ""
+	}
+	switch values["caMode"] {
+	case "SHARED":
+		return 2, ""
+	case "CUSTOMER_MANAGED":
+		return 3, strings.TrimSpace(values["caPool"])
+	}
+	return 0, ""
 }
 
 // memorystoreAuthMode is the Security choice, with the legacy iamAuth and
@@ -228,4 +246,13 @@ func memorystoreAutoBackupText(on bool, hour int32, retention time.Duration) str
 		retention = 35 * 24 * time.Hour
 	}
 	return fmt.Sprintf("Daily at %s, kept %d days", memorystoreHourLabels[strconv.Itoa(int(hour))], int(retention.Hours()/24))
+}
+
+// memorystoreCAModeText is a server_ca_mode as the pages show it, empty
+// when unset.
+func memorystoreCAModeText(mode string, set bool) string {
+	if !set {
+		return ""
+	}
+	return mode
 }

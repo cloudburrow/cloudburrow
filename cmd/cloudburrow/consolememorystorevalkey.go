@@ -213,6 +213,12 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 	if memorystoreTLS(values) {
 		in.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
 	}
+	if mode, pool := memorystoreCAMode(values); mode != 0 {
+		in.ServerCaMode = memorystorepb.Instance_ServerCaMode(mode).Enum()
+		if pool != "" {
+			in.ServerCaPool = proto.String(pool)
+		}
+	}
 	switch memorystoreAuthMode(values) {
 	case "IAM_AUTH":
 		in.AuthorizationMode = memorystorepb.Instance_IAM_AUTH
@@ -352,6 +358,8 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		// project's IAM policy, granted on the IAM page.
 		{Label: "IAM connect role", Value: valkeyIAMRole(i)},
 		{Label: "In-transit encryption", Value: i.GetTransitEncryptionMode().String()},
+		{Label: "Server CA mode", Value: orDash(memorystoreCAModeText(i.GetServerCaMode().String(), i.ServerCaMode != nil))},
+		{Label: "Server CA pool", Value: orDash(i.GetServerCaPool())},
 		{Label: "Engine configs", Value: orDash(memorystorePairs(i.GetEngineConfigs()))},
 	}
 	config = append(config, valkeyReplicationProps(i)...)

@@ -837,7 +837,7 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	if err != nil {
 		return nil, err
 	}
-	if err := c.serverCA(ctx, r, in, m[1], m[2], tlsOn); err != nil {
+	if err := c.serverCA(ctx, r, in, m[1], m[2], tlsOn, "cluster"); err != nil {
 		return nil, err
 	}
 	for _, p := range in.GetPscConfigs() {
