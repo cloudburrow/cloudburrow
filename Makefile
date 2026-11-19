@@ -220,9 +220,24 @@ test:
 # decoder is pure Go without unsafe, so no exemption is needed (#1808 had
 # turned checkptr off for the transpiled github.com/kazzmir/opus-go).
 RACE_PKGS ?= ./...
+# internal/speech gets SPEECH_TEST_TIMEOUT instead (#1841): TestTranscribe
+# runs whisper.cpp's encoder three times (English with word offsets, then
+# language detection, which encodes the window again before transcribing
+# it), single-threaded wasm on wazero. That is 70 s on an M-series Mac with
+# or without -race (97% of it in compiled wasm, which -race does not
+# instrument), and 165 to over 300 s on CI's macos-latest runner beside
+# the other packages' tests. Every check stays; the package runs on its
+# own, after the rest, with twice its worst measured time.
+SPEECH_PKG          := ./internal/speech/
+SPEECH_TEST_TIMEOUT ?= 10m
 .PHONY: test-race
 test-race:
+ifeq ($(RACE_PKGS),./...)
+	go test -race -timeout $(TEST_TIMEOUT) $$(go list ./... | grep -vx 'github.com/cloudburrow/cloudburrow/internal/speech')
+	go test -race -timeout $(SPEECH_TEST_TIMEOUT) $(SPEECH_PKG)
+else
 	go test -race -timeout $(TEST_TIMEOUT) $(RACE_PKGS)
+endif
 
 ## test-cover: Run unit tests and report coverage
 .PHONY: test-cover
