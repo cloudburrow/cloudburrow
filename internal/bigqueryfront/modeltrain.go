@@ -127,6 +127,9 @@ type mlOptions struct {
 	AutoML      *automlOptions `json:"automl,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
 	TS tsOptions `json:"timeSeries"`
+	// Contrib are a CONTRIBUTION_ANALYSIS model's options
+	// (modelcontrib.go, #1929).
+	Contrib *contribOptions `json:"contribution,omitempty"`
 	// Set are the options CREATE MODEL gave, lower case.
 	Set []string `json:"set,omitempty"`
 }
@@ -264,6 +267,9 @@ type mlTrained struct {
 	// Xreg is an ARIMA_PLUS_XREG model's regression on its features
 	// (modelxreg.go, #1766); its ARIMA is Arima.
 	Xreg *xregTrained `json:"xreg,omitempty"`
+	// Contrib is a CONTRIBUTION_ANALYSIS model's insights
+	// (modelcontrib.go, #1929).
+	Contrib *contribTrained `json:"contrib,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -325,6 +331,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 		return trainXreg(opts, cols, rows)
 	case "AUTOENCODER":
 		return trainAutoencoder(opts, cols, rows)
+	case "CONTRIBUTION_ANALYSIS":
+		return trainContrib(opts, cols, rows) // modelcontrib.go, #1929
 	case "AUTOML_REGRESSOR", "AUTOML_CLASSIFIER":
 		return trainAutoML(opts, cols, rows, fp) // modelautoml.go, #1776
 	}

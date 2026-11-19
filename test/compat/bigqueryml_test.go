@@ -271,9 +271,10 @@ func TestBigQueryMLLinearAndLogisticModels(t *testing.T) {
 	_ = project
 }
 
-// TestBigQueryMLRefusals: the model types (CONTRIBUTION_ANALYSIS; AutoML is
-// trained since #1776) and clauses CloudBurrow does not train are 501 naming
-// them, and nothing is made. A remote model on the DEFAULT connection is
+// TestBigQueryMLRefusals: the options CloudBurrow does not train
+// (pca_solver RANDOMIZED; AutoML is trained since #1776 and
+// CONTRIBUTION_ANALYSIS since #1929) are 501 naming them, and nothing is
+// made. A remote model on the DEFAULT connection is
 // served since #1765: with no default connection and no bigquery.connections.
 // create it is 403, as Google documents (wantDefaultConnectionRefused).
 //
@@ -284,7 +285,6 @@ func TestBigQueryMLRefusals(t *testing.T) {
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
 	for _, sql := range []string{
-		"CREATE MODEL `%s.km` OPTIONS(model_type='contribution_analysis', contribution_metric='SUM(amount)', is_test_col='t') AS SELECT id, amount, id > 2 AS t FROM `%s.orders`",
 		"CREATE MODEL `%s.km` OPTIONS(model_type='pca', num_principal_components=1, pca_solver='randomized') AS SELECT id, amount FROM `%s.orders`",
 	} {
 		q := fmt.Sprintf(sql, ds.DatasetID, ds.DatasetID)

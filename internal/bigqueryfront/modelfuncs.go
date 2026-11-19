@@ -33,7 +33,8 @@ var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIG
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
 	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
-	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true} // modelservice.go, #1773, #1799
+	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true, // modelservice.go, #1773, #1799
+	"GET_INSIGHTS": true} // modelcontrib.go, #1929
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -323,7 +324,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
 				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.HOLIDAY_INFO, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
-				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE, ML.TRANSLATE and ML.UNDERSTAND_TEXT. Nothing was run.")
+				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE, ML.TRANSLATE, ML.UNDERSTAND_TEXT and ML.GET_INSIGHTS. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, q)
@@ -648,6 +649,9 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			fname = "AI." + c.fn
 		}
 		return "", 400, "Function " + fname + " is only supported for remote models"
+	}
+	if typ == "CONTRIBUTION_ANALYSIS" || c.fn == "GET_INSIGHTS" {
+		return f.contribSubquery(r, q, md, c) // modelcontrib.go, #1929
 	}
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711
