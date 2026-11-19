@@ -158,6 +158,11 @@ func cleanupVersions(r *arpb.Repository) []cleanupVersion {
 		return nil
 	}
 	repo := repoOf(repoName)
+	// A repository whose key cannot be used is left alone: which manifests
+	// an index lists cannot be read.
+	if _, err := repositoryCipher(repo); err != nil {
+		return nil
+	}
 	for _, image := range st.Images(repo) {
 		ms, err := st.Manifests(repo, image)
 		if err != nil {

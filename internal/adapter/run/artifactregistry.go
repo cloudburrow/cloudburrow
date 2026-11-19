@@ -227,6 +227,7 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	}
 	repositories.repos[name] = r
 	saveRepositoriesLocked()
+	setRepositoryKey(name, r.GetKmsKeyName())
 	repositories.mu.Unlock()
 	op := a.s.ops.Create(req.GetParent(), name)
 	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
@@ -318,6 +319,7 @@ func RemoveRepository(name string) bool {
 	}
 	delete(repositories.repos, name)
 	saveRepositoriesLocked()
+	setRepositoryKey(name, "")
 	if _, ok := repositories.policies[name]; ok {
 		delete(repositories.policies, name)
 		saveRepositoryPoliciesLocked()
@@ -377,9 +379,12 @@ func loadRepositories(st *registry.Store) {
 	}
 	repositories.mu.Lock()
 	defer repositories.mu.Unlock()
+	keys := map[string]string{}
 	for _, r := range list.GetRepositories() {
 		repositories.repos[r.GetName()] = r
+		keys[r.GetName()] = r.GetKmsKeyName()
 	}
+	loadCMEK(st, keys)
 	loadRepositoryPoliciesLocked(st)
 	loadARConfig(st)
 	loadFormats(st)
@@ -390,10 +395,9 @@ var repositoryKMSKeyRE = regexp.MustCompile(`^projects/[^/]+/locations/([^/]+)/k
 
 // checkRepositoryKMSKey checks a new repository's kms_key_name: a
 // CryptoKey name in the repository's own location, as Google requires of
-// a customer-managed encryption key. The key is stored and read back; it
-// encrypts nothing here, as the registry's content-addressed blobs are
-// shared across repositories and kept as pushed, and it cannot change
-// after creation (UpdateRepository refuses the path).
+// a customer-managed encryption key. The repository's content is then
+// encrypted with it (artifactregistrycmek.go); it cannot change after
+// creation (UpdateRepository refuses the path).
 func checkRepositoryKMSKey(parent, key string) error {
 	if key == "" {
 		return nil
@@ -407,6 +411,17 @@ func checkRepositoryKMSKey(parent, key string) error {
 		return apierror.InvalidArgument("kms_key_name %q is in location %s: a repository's key must be in its own location, %s", key, m[1], loc)
 	}
 	return nil
+}
+
+// maxUpstreamPolicies is Google's limit of a virtual repository's upstreams.
+const maxUpstreamPolicies = 30
+
+// repoParent is a repository name's projects/*/locations/* part.
+func repoParent(name string) string {
+	if i := strings.LastIndex(name, "/repositories/"); i >= 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // checkMode accepts a standard repository; a remote one whose upstream is
@@ -427,23 +442,36 @@ func checkMode(parent string, r *arpb.Repository) error {
 		return apierror.Unimplemented("repository mode %v is not supported", r.GetMode())
 	}
 	switch r.GetFormat() {
-	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN:
+	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN, arpb.Repository_DOCKER:
 	default:
-		return apierror.Unimplemented("virtual %v repositories are not supported: PYTHON, NPM and MAVEN ones are", r.GetFormat())
+		return apierror.Unimplemented("virtual %v repositories are not supported: DOCKER, PYTHON, NPM and MAVEN ones are", r.GetFormat())
 	}
 	ups := r.GetVirtualRepositoryConfig().GetUpstreamPolicies()
 	if len(ups) == 0 {
 		return apierror.InvalidArgument("a virtual repository needs virtual_repository_config.upstream_policies")
 	}
+	// https://docs.cloud.google.com/artifact-registry/quotas: "Max upstream
+	// policies for virtual repositories" is 30.
+	if len(ups) > maxUpstreamPolicies {
+		return apierror.InvalidArgument("a virtual repository can have at most %d upstream policies; got %d", maxUpstreamPolicies, len(ups))
+	}
+	_, loc, _ := resource.ParseLocation(parent)
 	repositories.mu.Lock()
 	defer repositories.mu.Unlock()
 	for _, u := range ups {
+		// An upstream is in the virtual repository's location, in any
+		// project, as Google documents.
 		up, ok := repositories.repos[u.GetRepository()]
-		if !ok || !strings.HasPrefix(u.GetRepository(), parent+"/repositories/") {
-			return apierror.InvalidArgument("upstream %q is not a repository in %s", u.GetRepository(), parent)
+		if _, uloc, err := resource.ParseLocation(repoParent(u.GetRepository())); !ok || err != nil || uloc != loc {
+			return apierror.InvalidArgument("upstream %q is not a repository in location %s", u.GetRepository(), loc)
 		}
-		if up.GetFormat() != r.GetFormat() || (up.GetMode() != arpb.Repository_STANDARD_REPOSITORY && up.GetMode() != arpb.Repository_REMOTE_REPOSITORY) {
-			return apierror.InvalidArgument("upstream %q must be a standard or remote %v repository", u.GetRepository(), r.GetFormat())
+		if up.GetFormat() != r.GetFormat() {
+			return apierror.InvalidArgument("upstream %q must be a %v repository", u.GetRepository(), r.GetFormat())
+		}
+		// Python, npm and Maven virtual repositories read standard and
+		// remote upstreams; Docker's take virtual ones too.
+		if up.GetMode() == arpb.Repository_VIRTUAL_REPOSITORY && r.GetFormat() != arpb.Repository_DOCKER {
+			return apierror.Unimplemented("upstream %q is a virtual repository: only a virtual DOCKER repository reads virtual upstreams here", u.GetRepository())
 		}
 	}
 	return nil

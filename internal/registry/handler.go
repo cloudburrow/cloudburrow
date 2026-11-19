@@ -35,6 +35,57 @@ type Handler struct {
 	// the blobs, and kept, so the remote repository answers from its cache
 	// once the upstream no longer has it; pushes to it are refused.
 	Remote func(Repo) (upstream Repo, ok bool)
+	// Virtual, when set, reports whether a repository is a virtual one,
+	// and its upstreams, highest priority first (#1897). A virtual
+	// repository holds nothing: a manifest, blob or tag list is read from
+	// the first upstream that has it, and pushes are refused.
+	Virtual func(Repo) (upstreams []Repo, ok bool)
+}
+
+// virtual is a virtual repository's upstreams; ok is false for any other.
+func (h *Handler) virtual(repo Repo) ([]Repo, bool) {
+	if h.Virtual == nil {
+		return nil, false
+	}
+	return h.Virtual(repo)
+}
+
+// getManifest reads a manifest as a pull of repo does: through a remote
+// repository's upstream, and from a virtual one's upstreams by priority.
+func (h *Handler) getManifest(repo Repo, image, ref string) (b []byte, d, mt string, err error) {
+	if ups, ok := h.virtual(repo); ok {
+		err = ErrManifestUnknown
+		for _, up := range ups {
+			if b, d, mt, err = h.getManifest(up, image, ref); err == nil || errors.Is(err, ErrKeyUnavailable) {
+				return b, d, mt, err
+			}
+		}
+		return nil, "", "", err
+	}
+	if up, ok := h.remote(repo); ok && up.Repository != "" {
+		// What the upstream holds now wins, so a moved tag is
+		// followed; what it no longer holds is served from the cache.
+		_ = h.Store.CopyManifest(up, repo, image, ref)
+	}
+	return h.Store.GetManifest(repo, image, ref)
+}
+
+// readRepo is the repository a blob of repo is read from: a virtual
+// repository's first upstream holding it.
+func (h *Handler) readRepo(repo Repo, digest string) Repo {
+	ups, ok := h.virtual(repo)
+	if !ok {
+		return repo
+	}
+	for _, up := range ups {
+		if _, err := h.Store.RepoBlobSize(h.readRepo(up, digest), digest); err == nil {
+			return h.readRepo(up, digest)
+		}
+	}
+	if len(ups) > 0 {
+		return h.readRepo(ups[0], digest)
+	}
+	return repo
 }
 
 // remote is the upstream of a remote repository; ok is false for any other.
@@ -46,6 +97,11 @@ func (h *Handler) remote(repo Repo) (Repo, bool) {
 }
 
 func (h *Handler) readOnly(w http.ResponseWriter, repo Repo) bool {
+	if _, ok := h.virtual(repo); ok {
+		h.fail(w, http.StatusMethodNotAllowed, "UNSUPPORTED", fmt.Sprintf("%s/%s is a virtual repository, which is read-only: "+
+			"push to one of its upstream repositories", repo.Project, repo.Repository))
+		return true
+	}
 	up, ok := h.remote(repo)
 	if !ok {
 		return false
@@ -106,6 +162,10 @@ func (h *Handler) failErr(w http.ResponseWriter, err error) {
 		h.fail(w, http.StatusNotFound, "BLOB_UPLOAD_UNKNOWN", err.Error())
 	case errors.Is(err, ErrDigestInvalid):
 		h.fail(w, http.StatusBadRequest, "DIGEST_INVALID", err.Error())
+	case errors.Is(err, ErrKeyUnavailable):
+		// A repository whose customer-managed key is disabled or
+		// destroyed can be neither pushed to nor pulled from.
+		h.fail(w, http.StatusForbidden, "DENIED", err.Error())
 	case errors.Is(err, ErrTagImmutable):
 		// A repository with immutable tags refuses the change as a
 		// policy, the distribution spec's DENIED.
@@ -180,13 +240,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if m := uploadPath.FindStringSubmatch(p); m != nil {
 		h.withRepo(w, r, m[1], func(repo Repo, image string) {
 			if !h.readOnly(w, repo) {
-				h.upload(w, r, m[1], m[2])
+				h.upload(w, r, repo, m[1], m[2])
 			}
 		})
 		return
 	}
 	if m := blobPath.FindStringSubmatch(p); m != nil {
-		h.withRepo(w, r, m[1], func(repo Repo, image string) { h.blob(w, r, m[2]) })
+		h.withRepo(w, r, m[1], func(repo Repo, image string) { h.blob(w, r, repo, m[2]) })
 		return
 	}
 	h.fail(w, http.StatusNotFound, "NAME_UNKNOWN", "repository name not known to registry")
@@ -245,6 +305,15 @@ func (h *Handler) tags(w http.ResponseWriter, r *http.Request, repo Repo, image,
 		return
 	}
 	tags, err := h.Store.Tags(repo, image)
+	if ups, ok := h.virtual(repo); ok {
+		// A virtual repository lists the tags of the highest-priority
+		// upstream that holds the image.
+		for _, up := range ups {
+			if tags, err = h.Store.Tags(up, image); err == nil {
+				break
+			}
+		}
+	}
 	if err != nil {
 		h.failErr(w, err)
 		return
@@ -261,12 +330,7 @@ func (h *Handler) tags(w http.ResponseWriter, r *http.Request, repo Repo, image,
 func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, repo Repo, image, name, ref string) {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		if up, ok := h.remote(repo); ok && up.Repository != "" {
-			// What the upstream holds now wins, so a moved tag is
-			// followed; what it no longer holds is served from the cache.
-			_ = h.Store.CopyManifest(up, repo, image, ref)
-		}
-		b, d, mt, err := h.Store.GetManifest(repo, image, ref)
+		b, d, mt, err := h.getManifest(repo, image, ref)
 		if err != nil {
 			h.failErr(w, err)
 			return
@@ -315,10 +379,10 @@ func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, repo Repo, im
 	}
 }
 
-func (h *Handler) blob(w http.ResponseWriter, r *http.Request, digest string) {
+func (h *Handler) blob(w http.ResponseWriter, r *http.Request, repo Repo, digest string) {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		f, err := h.Store.OpenBlob(digest)
+		f, err := h.Store.OpenRepoBlob(h.readRepo(repo, digest), digest)
 		if err != nil {
 			h.failErr(w, err)
 			return
@@ -357,14 +421,20 @@ func (h *Handler) blobCreated(w http.ResponseWriter, name, digest string) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (h *Handler) upload(w http.ResponseWriter, r *http.Request, name, id string) {
+func (h *Handler) upload(w http.ResponseWriter, r *http.Request, repo Repo, name, id string) {
 	q := r.URL.Query()
 	switch {
 	case r.Method == http.MethodPost && id == "":
 		// A cross-repository mount succeeds whenever the blob is stored:
 		// blobs are shared by digest.
 		if mount := q.Get("mount"); mount != "" {
-			if _, err := h.Store.BlobSize(mount); err == nil {
+			if _, err := h.Store.RepoBlobSize(repo, mount); err == nil {
+				h.blobCreated(w, name, mount)
+				return
+			}
+			// An encrypted repository takes its own copy of a blob the
+			// shared store holds.
+			if h.Store.MountBlob(Repo{}, repo, mount) == nil {
 				h.blobCreated(w, name, mount)
 				return
 			}
@@ -379,7 +449,7 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request, name, id string
 				h.failErr(w, ErrDigestInvalid)
 				return
 			}
-			if _, err := h.Store.PutBlob(b); err != nil {
+			if _, err := h.Store.PutRepoBlob(repo, b); err != nil {
 				h.failErr(w, err)
 				return
 			}
@@ -428,7 +498,7 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request, name, id string
 			return
 		}
 		d := q.Get("digest")
-		if err := h.Store.FinishUpload(id, d); err != nil {
+		if err := h.Store.FinishRepoUpload(repo, id, d); err != nil {
 			h.failErr(w, err)
 			return
 		}

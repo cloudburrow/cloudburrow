@@ -13,6 +13,8 @@ Flags:
     	permit binding a non-loopback address (unsafe)
   -appengine-url string
     	base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)
+  -artifact-registry-cleanup-interval duration
+    	how often Artifact Registry's cleanup policies run (default 24h, about daily as Google's)
   -bigquery-heap-mib int
     	GOMEMLIMIT, in MiB, of the BigQuery emulator, which also sizes its container's memory request; a soft limit, past which it collects more often; 0 = none (default 512)
   -bind-address string

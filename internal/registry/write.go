@@ -21,14 +21,14 @@ func (s *Store) WriteImage(r Repo, image, tag string, img v1.Image) (string, err
 		if err != nil {
 			return "", err
 		}
-		if _, err := s.BlobSize(d.String()); err == nil {
+		if _, err := s.RepoBlobSize(r, d.String()); err == nil {
 			continue
 		}
 		rc, err := l.Compressed()
 		if err != nil {
 			return "", err
 		}
-		err = s.putStream(d.String(), rc)
+		err = s.putStream(r, d.String(), rc)
 		rc.Close()
 		if err != nil {
 			return "", fmt.Errorf("store layer %s: %w", d, err)
@@ -38,7 +38,7 @@ func (s *Store) WriteImage(r Repo, image, tag string, img v1.Image) (string, err
 	if err != nil {
 		return "", err
 	}
-	if _, err := s.PutBlob(cfg); err != nil {
+	if _, err := s.PutRepoBlob(r, cfg); err != nil {
 		return "", err
 	}
 	m, err := img.RawManifest()
@@ -52,7 +52,7 @@ func (s *Store) WriteImage(r Repo, image, tag string, img v1.Image) (string, err
 	return s.PutManifest(r, image, tag, string(mt), m)
 }
 
-func (s *Store) putStream(digest string, rc io.Reader) error {
+func (s *Store) putStream(r Repo, digest string, rc io.Reader) error {
 	id, err := s.StartUpload()
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func (s *Store) putStream(digest string, rc io.Reader) error {
 		_ = s.CancelUpload(id)
 		return err
 	}
-	if err := s.FinishUpload(id, digest); err != nil {
+	if err := s.FinishRepoUpload(r, id, digest); err != nil {
 		_ = s.CancelUpload(id)
 		return err
 	}

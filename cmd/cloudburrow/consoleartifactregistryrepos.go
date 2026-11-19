@@ -167,7 +167,7 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 			UnavailableOptions: arFormatsUnavailable},
 		{Name: "mode", Label: "Mode", Type: "radio", Options: []string{"STANDARD_REPOSITORY", "REMOTE_REPOSITORY", "VIRTUAL_REPOSITORY"},
 			OptionLabels: arModeLabels, Default: "STANDARD_REPOSITORY",
-			Help: "Remote: Docker, Maven, npm and Python, caching another repository of this instance. Virtual: Maven, npm and Python."},
+			Help: "Remote: Docker, Maven, npm and Python, caching another repository of this instance. Virtual: Docker, Maven, npm and Python."},
 		// Maven's version policy (maven_config).
 		{Name: "versionPolicy", Label: "Version policy", Type: "radio", ShowWhen: "format=MAVEN&mode=STANDARD_REPOSITORY",
 			Options:      []string{"VERSION_POLICY_UNSPECIFIED", "RELEASE", "SNAPSHOT"},
@@ -204,7 +204,7 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 		{Name: "kmsKey", Label: "Select a customer-managed key", Type: "text", Section: "Encryption", Required: true,
 			ShowWhen: "encryption=" + arEncCMEK,
 			Help: "A Cloud KMS key of this instance in the repository's location, projects/P/locations/L/keyRings/R/cryptoKeys/K. " +
-				"It cannot be changed later. The key is stored on the repository; nothing is encrypted with it locally (#1897)."},
+				"It cannot be changed later. The repository's content is encrypted with it through this instance's Cloud KMS; while its key version is disabled or destroyed, nothing can be pushed or pulled (#1897)."},
 		withSection(arImmutableField(false, "format=DOCKER"), "Immutable image tags"),
 		arCleanupModeField(true),
 		arCleanupGroup(""),

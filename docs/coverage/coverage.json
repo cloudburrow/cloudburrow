@@ -939,6 +939,8 @@
           "test/compat/artifactregistry_remote_test.go:212 TestGcloudArtifactsRemoteRepository",
           "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
           "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
+          "test/compat/artifactregistrycmek_test.go:30 TestArtifactRegistryCMEK",
+          "test/compat/artifactregistryvirtualdocker_test.go:24 TestArtifactRegistryVirtualDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
@@ -1105,6 +1107,7 @@
           "test/compat/artifactregistry_remote_test.go:212 TestGcloudArtifactsRemoteRepository",
           "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
           "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
+          "test/compat/artifactregistryvirtualdocker_test.go:24 TestArtifactRegistryVirtualDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1254,6 +1257,7 @@
           "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistrycleanup_test.go:46 TestArtifactRegistryCleanupPolicies",
+          "test/compat/artifactregistrycmek_test.go:30 TestArtifactRegistryCMEK",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
