@@ -13,6 +13,13 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ### Added
 
+- Model Garden deploys Hugging Face models locally (#1840): `ModelGardenService.Deploy` (gRPC and
+  REST) creates an Endpoint and a Model and serves the model with the engine Model Garden picks,
+  vLLM's CPU build for text generation and Text Embeddings Inference's for embeddings; the
+  endpoint answers `:predict`, `:rawPredict`, `:streamRawPredict` and v1beta1 `chat/completions`
+  in the shapes Google documents, and `UndeployModel`, `DeleteEndpoint` and `DeleteModel` free it.
+  The console's Deploy on a downloaded model opens the new Endpoints page, with progress through
+  to Ready and a test panel.
 - BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
   most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
   reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and

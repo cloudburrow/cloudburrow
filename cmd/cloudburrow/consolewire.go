@@ -19,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -38,13 +39,18 @@ type consoleDeps struct {
 	// localModels manages the local AI models, shared with the admin API
 	// (#1396); nil makes one for the console alone.
 	localModels *localai.Manager
-	projects    *resourcemanager.Registry
-	coord       *lifecycle.Coordinator
-	cluster     interface{ ServerVersion() string }
-	tasks       *tasksService
-	secrets     *secretsService
-	kms         *kmsService
-	scheduler   *schedulerService
+	// hfModels and garden are Model Garden's Hugging Face downloads and
+	// deployments (#1840), shared with ModelGardenService; nil hfModels
+	// makes a download manager for the console alone.
+	hfModels  *hfmodels.Manager
+	garden    *modelgarden.Manager
+	projects  *resourcemanager.Registry
+	coord     *lifecycle.Coordinator
+	cluster   interface{ ServerVersion() string }
+	tasks     *tasksService
+	secrets   *secretsService
+	kms       *kmsService
+	scheduler *schedulerService
 	// memorystore is the Memorystore admin API (#1302), whose instances the
 	// Memorystore page creates, edits and deletes.
 	memorystore *memorystoreAdminService
@@ -112,7 +118,11 @@ func buildConsole(d consoleDeps) *console.Server {
 	srv.SetLocalModels(d.localModels)
 	// Model Garden's Hugging Face downloads (#1840), into the state dir's
 	// model cache beside the pinned local models.
-	srv.SetHFModels(&hfmodels.Manager{Dir: filepath.Join(d.cfg.StateDir, "models", "huggingface")})
+	if d.hfModels == nil {
+		d.hfModels = &hfmodels.Manager{Dir: filepath.Join(d.cfg.StateDir, "models", "huggingface")}
+	}
+	srv.SetHFModels(d.hfModels)
+	srv.SetModelGarden(d.garden, d.localAI, d.cfg.DefaultProject())
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how

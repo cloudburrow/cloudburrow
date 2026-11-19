@@ -450,3 +450,31 @@ func (m *Manager) Free() (free, floor int64) {
 	}
 	return f, m.minFree()
 }
+
+// Downloaded returns the directory a downloaded model's files are in, and
+// its recorded details; ok is false when it is not (fully) downloaded.
+func (m *Manager) Downloaded(id string) (dir string, info Info, ok bool) {
+	if CheckID(id) != nil {
+		return "", Info{}, false
+	}
+	dir = m.dirOf(id)
+	b, err := os.ReadFile(filepath.Join(dir, ".cloudburrow-model.json"))
+	if err != nil || json.Unmarshal(b, &info) != nil || info.ID != id {
+		return "", Info{}, false
+	}
+	return dir, info, true
+}
+
+// StateOf returns one model's state: downloading, failed or downloaded.
+func (m *Manager) StateOf(id string) (State, bool) {
+	m.mu.Lock()
+	st, ok := m.active[id]
+	m.mu.Unlock()
+	if ok {
+		return *st, true
+	}
+	if _, info, ok := m.Downloaded(id); ok {
+		return State{Info: info, State: "downloaded", Downloaded: info.Bytes}, true
+	}
+	return State{}, false
+}

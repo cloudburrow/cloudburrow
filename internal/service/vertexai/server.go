@@ -12,6 +12,9 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/lro"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
 // Server serves the supported generateContent subset.
@@ -39,6 +42,13 @@ type Server struct {
 	// objects reads file_data's gs:// objects (#1651); nil without Cloud
 	// Storage.
 	objects Objects
+
+	// garden serves Model Garden's Hugging Face deployments (#1840,
+	// modelgarden.go), with their operations and REST transcoder.
+	garden   *modelgarden.Manager
+	ops      *lro.Store
+	restOnce sync.Once
+	rest     *rest.Transcoder
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -93,7 +103,11 @@ func (s *Server) Handler() http.Handler {
 	for _, v := range []string{"analyzeEntities", "analyzeEntitySentiment", "analyzeSentiment", "analyzeSyntax", "classifyText", "annotateText", "moderateText"} {
 		mux.HandleFunc("POST /v1/documents:"+v, s.language)
 	}
-	mux.HandleFunc("/", s.notFound)
+	// Model Garden's OpenAI-compatible path on its endpoints (#1840).
+	mux.HandleFunc("POST /v1beta1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions", s.chatCompletionsREST)
+	// Everything else: Model Garden's Deploy, Endpoints, Models and
+	// operations through the REST transcoder when served (modelgarden.go).
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { s.serveREST(w, r, nil) })
 	// The playground page and any browser tab can reach this port (#676).
 	return hostguard.Wrap(mux)
 }

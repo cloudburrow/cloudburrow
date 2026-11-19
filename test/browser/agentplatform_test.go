@@ -19,6 +19,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 // gardenModels is a local model manager for an in-process console: one
@@ -257,10 +259,144 @@ func TestModelGardenDownloadsAHuggingFaceModel(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(hf.Dir, "org--tiny", "model.safetensors")); err != nil {
 		t.Fatalf("the download is not on disk: %v", err)
 	}
-	p.clickText(`#hf-models tr[data-hf-model="org/tiny"] button`, "Delete")
+	p.clickText(`#hf-models tr[data-hf-model="org/tiny"] button`, "Delete files")
 	p.confirmByName("org/tiny")
 	p.waitFor(`document.querySelector('#hf-models') === null`)
 	if _, err := os.Stat(filepath.Join(hf.Dir, "org--tiny")); err == nil {
 		t.Error("Delete left the model on disk")
+	}
+}
+
+// engineDocker stands in for Docker: each "container" is an httptest server
+// answering vLLM's health, completions and chat routes.
+type engineDocker struct {
+	mu      sync.Mutex
+	servers map[string]*httptest.Server
+}
+
+func (d *engineDocker) Run(_ context.Context, s modelgarden.RunSpec) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(http.ResponseWriter, *http.Request) {})
+	mux.HandleFunc("POST /v1/completions", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"choices":[{"text":" Paris."}]}`)
+	})
+	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"Bonjour!"}}]}`)
+	})
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.servers == nil {
+		d.servers = map[string]*httptest.Server{}
+	}
+	d.servers[s.Name] = httptest.NewServer(mux)
+	return nil
+}
+
+func (d *engineDocker) HostPort(_ context.Context, name string, _ int) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	s, ok := d.servers[name]
+	if !ok {
+		return 0, fmt.Errorf("no container %s", name)
+	}
+	var port int
+	_, err := fmt.Sscanf(s.URL[strings.LastIndex(s.URL, ":")+1:], "%d", &port)
+	return port, err
+}
+
+func (d *engineDocker) Running(_ context.Context, name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, ok := d.servers[name]
+	return ok
+}
+func (d *engineDocker) Start(context.Context, string) error         { return fmt.Errorf("no") }
+func (d *engineDocker) Stop(ctx context.Context, name string) error { return d.Remove(ctx, name) }
+func (d *engineDocker) Logs(context.Context, string, int) string    { return "" }
+func (d *engineDocker) Remove(_ context.Context, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if s, ok := d.servers[name]; ok {
+		s.Close()
+		delete(d.servers, name)
+	}
+	return nil
+}
+
+func (d *engineDocker) count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.servers)
+}
+
+// TestModelGardenDeploysADownloadedHuggingFaceModel (#1840): Deploy on a
+// downloaded Hugging Face model runs ModelGardenService.Deploy and opens the
+// Endpoints page, which shows the deployment through to Ready; its test
+// panel answers Predict (Model Garden's Prompt:/Output: string) and a chat
+// completion; Delete frees the container and removes the endpoint, and the
+// downloaded files stay.
+func TestModelGardenDeploysADownloadedHuggingFaceModel(t *testing.T) {
+	const rev = "0123456789abcdef0123456789abcdef01234567"
+	cfg := []byte(`{"max_position_embeddings": 2048}`)
+	sum := sha256.Sum256(cfg)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/models/org/tiny", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"id":"org/tiny","sha":%q,"gated":false,"pipeline_tag":"text-generation","cardData":{"license":"apache-2.0"},
+			"siblings":[{"rfilename":"config.json","size":%d,"lfs":{"sha256":%q,"size":%d}}]}`, rev, len(cfg), hex.EncodeToString(sum[:]), len(cfg))
+	})
+	mux.HandleFunc("GET /org/tiny/resolve/"+rev+"/config.json", func(w http.ResponseWriter, r *http.Request) { w.Write(cfg) })
+	hub := httptest.NewServer(mux)
+	t.Cleanup(hub.Close)
+
+	dir := t.TempDir()
+	hf := &hfmodels.Manager{Dir: filepath.Join(dir, "hf"), Base: hub.URL, Token: func() string { return "" },
+		FreeBytes: func(string) (int64, error) { return 100 << 30, nil }}
+	if _, err := hf.Start(context.Background(), "org/tiny"); err != nil {
+		t.Fatal(err)
+	}
+	docker := &engineDocker{}
+	garden := &modelgarden.Manager{Instance: "b", StateFile: filepath.Join(dir, "deployments.json"), Models: hf, Docker: docker}
+	ai := vertexai.NewServer(nil)
+	ai.SetModelGarden(garden)
+	s := console.New("", func(context.Context) console.Status { return console.Status{} })
+	s.SetHFModels(hf)
+	s.SetModelGarden(garden, ai, "browser-project")
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	p := openAt(t, strings.TrimPrefix(srv.URL, "http://"))
+	t.Cleanup(p.forgive)
+
+	p.navigate("/agent-platform/model-garden")
+	p.waitFor(`document.querySelector('#hf-models tr[data-hf-model="org/tiny"] td[data-state="downloaded"]') !== null`)
+	p.clickText(`#hf-models tr[data-hf-model="org/tiny"] button`, "Deploy")
+	p.waitFor(`location.pathname === "/agent-platform/endpoints" && document.querySelector("#hf-endpoint") !== null`)
+	p.waitFor(`document.querySelector("#hf-endpoint-state") && document.querySelector("#hf-endpoint-state").textContent === "Ready"`)
+	p.waitFor(`document.querySelector("#hf-test") !== null`)
+	var facts string
+	p.eval(`document.querySelector("#hf-endpoint-facts").textContent`, &facts)
+	if !strings.Contains(facts, modelgarden.VLLMImage) || !strings.Contains(facts, "/chat/completions") {
+		t.Errorf("the endpoint's facts read %q; want the vLLM image and the chat completions path", facts)
+	}
+	p.clickText("#hf-test button", "Predict")
+	p.waitFor(`document.querySelector("#hf-test-output").textContent.includes("Output:")`)
+	var out string
+	p.eval(`document.querySelector("#hf-test-output").textContent`, &out)
+	if !strings.HasPrefix(out, "Prompt:\n") || !strings.Contains(out, "Paris") {
+		t.Errorf("Predict printed %q", out)
+	}
+	p.clickText("#hf-test button", "Chat completion")
+	p.waitFor(`document.querySelector("#hf-test-output").textContent === "Bonjour!"`)
+
+	p.clickText("#hf-endpoint button", "Delete")
+	var name string
+	p.eval(`document.querySelector("#hf-endpoint h2").textContent`, &name)
+	p.confirmByName(name)
+	p.waitFor(`document.querySelector("#hf-endpoints") === null`)
+	if n := docker.count(); n != 0 {
+		t.Errorf("%d engine containers left after Delete", n)
+	}
+	if _, _, ok := hf.Downloaded("org/tiny"); !ok {
+		t.Error("Delete removed the downloaded files")
 	}
 }

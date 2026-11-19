@@ -63,6 +63,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
@@ -174,7 +175,13 @@ var areas = []area{
 	// Async bucket calls, links and settings since #1292, and CopyLogEntries since #1394.
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
-	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
+	// Model Garden's Hugging Face deployments on the same port (#1840):
+	// Deploy, and the Endpoint and Model it creates.
+	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService",
+		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService"}},
+	// v1beta1's PredictionService, for ChatCompletions on those endpoints
+	// (#1840): a page of its own, since its method names repeat v1's.
+	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.

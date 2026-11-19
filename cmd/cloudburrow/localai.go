@@ -19,9 +19,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
 	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/speech"
@@ -124,6 +126,22 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 		defaultProject: cfg.DefaultProject(),
 	}}}, ingress, nil)
 	return srv
+}
+
+// modelGardenFor returns the Hugging Face model cache and, when the local
+// AI endpoint serves custom prediction (Cloud Run is enabled, so Docker
+// runs the cluster), the Model Garden deployments it serves (#1840), their
+// engines restarted from the deployments file.
+func modelGardenFor(cfg config.Config, srv *vertexai.Server) (*hfmodels.Manager, *modelgarden.Manager) {
+	hf := &hfmodels.Manager{Dir: filepath.Join(cfg.StateDir, "models", "huggingface")}
+	if srv == nil || !srv.ServesEndpoints() {
+		return hf, nil
+	}
+	g := &modelgarden.Manager{Instance: cfg.Name, StateFile: filepath.Join(cfg.StateDir, "modelgarden", "deployments.json"),
+		Models: hf, Docker: modelgarden.DockerCLI{}}
+	srv.SetModelGarden(g)
+	g.Restore()
+	return hf, g
 }
 
 // embeddingCache is where pinned embedding models are kept.

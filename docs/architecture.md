@@ -158,6 +158,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
 | `internal/hfmodels/` | Hugging Face model downloads for Model Garden's Hugging Face section (#1840): model info (licence, gated status, revision, files), a free-disk floor, SHA-256-checked download with progress, delete. |
+| `internal/modelgarden/` | ModelGardenService.Deploy's Hugging Face deployments (#1840): the Endpoint, Model and DeployedModel records (`<state-dir>/modelgarden/deployments.json`), the engine Model Garden picks per task (vLLM CPU, Text Embeddings Inference CPU) run with `docker run` beside the cluster, and the translation of Vertex's predict bodies to the engines' routes. Served by `internal/service/vertexai/modelgarden.go`. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
 | `internal/locations/` | The `google.cloud.location.Locations` mixin Cloud KMS and Cloud Scheduler serve (#1237, #1291). |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |

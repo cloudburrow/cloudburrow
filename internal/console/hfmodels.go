@@ -20,8 +20,8 @@ import (
 const HFNote = "Downloads come from huggingface.co at the model's current commit, each LFS file checked " +
 	"against its SHA-256, into this instance's model cache. A download is refused when it would leave " +
 	"less than 50 GB free. A gated model needs its licence accepted on huggingface.co and HF_TOKEN set in " +
-	"the environment CloudBurrow runs in; the console never asks for the token. Serving a downloaded " +
-	"model on a local endpoint is not available yet (#1840), so no endpoint is created."
+	"the environment CloudBurrow runs in; the console never asks for the token. Deploy serves a downloaded " +
+	"model on a local endpoint, as Model Garden does: text generation on vLLM, embeddings on Text Embeddings Inference."
 
 // SetHFModels configures the Hugging Face section; nil leaves it off.
 func (s *Server) SetHFModels(m *hfmodels.Manager) { s.hfModels = m }

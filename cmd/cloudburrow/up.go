@@ -659,6 +659,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the custom prediction containers it runs (#1193), so it is started even
 	// with no model: the official aiplatform client reaches them through it.
 	localAISrv = withPredictionEndpoints(cfg, localAISrv, runSvc, ingressAddr)
+	// Model Garden's Hugging Face downloads (#1840), shared by the console
+	// and ModelGardenService.Deploy, which serves them on that endpoint.
+	hfModels, garden := modelGardenFor(cfg, localAISrv)
+	if garden != nil {
+		defer garden.Close()
+	}
 	// EmbedContent's file_data parts (#1651) read their gs:// objects
 	// from this instance's Cloud Storage.
 	if localAISrv != nil && serviceEnabled(cfg, config.ServiceStorage) {
@@ -683,6 +689,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
+		hfModels: hfModels, garden: garden,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,

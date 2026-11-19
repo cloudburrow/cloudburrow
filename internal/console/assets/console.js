@@ -35,6 +35,7 @@ const AP_PATHS = {
   studio: `${AP}/studio`,
   embeddings: `${AP}/studio/embeddings`,
   predict: `${AP}/online-prediction/endpoints`,
+  endpoints: `${AP}/endpoints`,
 };
 const AP_DOCS = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/";
 
@@ -75,6 +76,7 @@ function agentPlatformRoutes() {
     absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
       "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
     page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict" }),
+    page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
     // Notebooks.
@@ -5635,6 +5637,7 @@ function dispatch(view) {
   if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "model-garden") return renderModelGarden(view);
+  if (match.screen === "ap-endpoints") return renderHFEndpoints(view);
   if (match.screen === "agent-garden") return renderAgentGarden(view);
   if (match.screen === "not-served") return renderNotServed(view, match);
   if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);
@@ -9232,7 +9235,11 @@ async function drawHFPanel(host) {
       actions.push(el("button", { class: "secondary", text: "Cancel", "data-action": "cancel",
         onclick: () => hfAction("cancel", m.id).then(again, fail) }));
     } else {
-      actions.push(el("button", { class: "secondary danger", text: "Delete", "data-action": "delete",
+      if (m.state === "downloaded") {
+        actions.push(el("button", { class: "primary", text: "Deploy", "data-action": "deploy",
+          onclick: () => hfDeploy(m).catch(fail) }));
+      }
+      actions.push(el("button", { class: "secondary danger", text: "Delete files", "data-action": "delete",
         onclick: () => confirmDestructive({
           title: `Delete ${m.id}?`, detail: `${formatBytes(m.bytes)} in this instance's model cache. It can be downloaded again.`,
           confirmWord: m.id, consequence: "",
@@ -9262,6 +9269,140 @@ async function drawHFPanel(host) {
   if (data.models.some((m) => m.state === "downloading")) {
     HF_POLL = setTimeout(again, 1000);
   }
+}
+
+// Deploy runs ModelGardenService.Deploy on a downloaded Hugging Face model
+// (#1840) and opens its endpoint, which shows the deployment's progress
+// through to Ready. A gated model's licence is accepted here, as the
+// request's model_config.accept_eula.
+async function hfDeploy(m) {
+  const engine = /^(feature-extraction|sentence-similarity)$/.test(m.pipelineTag || "")
+    ? "Text Embeddings Inference" : "vLLM";
+  const go = async () => {
+    const resp = await fetch("/api/ai/hf-deployments/deploy", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: m.id, acceptEula: !!m.gated }),
+    });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+    const r = JSON.parse(text);
+    navigate(`${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(r.endpoint)}`);
+  };
+  if (!m.gated) return go();
+  return confirmDestructive({
+    title: `Deploy ${m.id}?`, detail: `${m.id} is gated on Hugging Face. Deploying accepts its licence (${m.license}).`,
+    confirmWord: m.id, confirmLabel: "Deploy", consequence: `It is served by ${engine} on a local endpoint.`, onConfirm: go,
+  });
+}
+
+let HF_EP_POLL = null;
+
+const HF_STATE_LABEL = { DEPLOYING: "Deploying", READY: "Ready", FAILED: "Failed" };
+
+// The Endpoints page (#1840): Model Garden's deployments with their state,
+// and the selected endpoint's details and test panel.
+async function renderHFEndpoints(view) {
+  if (HF_EP_POLL) { clearTimeout(HF_EP_POLL); HF_EP_POLL = null; }
+  const header = () => pageHeader("Endpoints", "Models deployed from Model Garden, served on this instance.");
+  let data;
+  try {
+    data = await api("/api/ai/hf-deployments");
+  } catch (err) {
+    return setChildren(view, header(), errorState("Endpoints unavailable", String(err.message), () => renderHFEndpoints(view)));
+  }
+  if (!data.configured) return setChildren(view, header(), el("div", { class: "card" }, el("p", { class: "unavailable", text: data.note })));
+  const again = () => { if (view.isConnected && location.pathname === AP_PATHS.endpoints) renderHFEndpoints(view); };
+  const message = el("p", { id: "hf-ep-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const post = async (action, body) => {
+    const resp = await fetch(`/api/ai/hf-deployments/${action}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+    return text;
+  };
+  const selected = new URLSearchParams(location.search).get("endpoint");
+  const stateOf = (e) => (e.deployed ? e.deployed.state : "UNDEPLOYED");
+  const rows = data.endpoints.map((e) => {
+    const st = stateOf(e);
+    const d = e.deployed;
+    return el("tr", { "data-endpoint": e.name, class: e.name === selected ? "selected" : null },
+      el("td", {}, el("a", { href: `${AP_PATHS.endpoints}?endpoint=${encodeURIComponent(e.name)}`, text: e.displayName,
+        onclick: (ev) => { ev.preventDefault(); navigate(ev.currentTarget.getAttribute("href")); } })),
+      el("td", { class: "mono", text: e.id }),
+      el("td", { class: "mono", text: e.model ? e.model.hfModelId : "—" }),
+      el("td", { text: e.model ? (e.model.engine === "tei" ? "Text Embeddings Inference" : "vLLM") : "—" }),
+      el("td", { "data-state": st },
+        el("span", { text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
+        st === "DEPLOYING" ? el("span", { class: "unavailable", text: ` · ${d.message}` }) : null,
+        st === "DEPLOYING" && d.progress > 0 ? el("progress", { max: "100", value: String(d.progress), "aria-label": `${e.displayName} deploy progress` }) : null,
+        st === "FAILED" ? el("p", { class: "unavailable", text: d.message }) : null));
+  });
+  const table = rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-endpoints" },
+    el("thead", {}, el("tr", {}, ...["Name", "ID", "Model", "Serving container", "State"].map((c) => el("th", { scope: "col", text: c })))),
+    el("tbody", {}, ...rows)))
+    : el("p", { class: "unavailable", text: "No endpoints yet. Download a Hugging Face model in Model Garden, then Deploy it." });
+
+  let detail = null;
+  const ep = data.endpoints.find((e) => e.name === selected);
+  if (ep) {
+    const st = stateOf(ep);
+    const rest = `/v1/${ep.name}`;
+    const actions = el("div", { class: "garden-actions" });
+    if (ep.deployed && st !== "DEPLOYING") {
+      actions.append(el("button", { class: "secondary", text: "Undeploy", "data-action": "undeploy",
+        onclick: () => post("undeploy", { endpoint: ep.name }).then(again, fail) }));
+    }
+    actions.append(el("button", { class: "secondary danger", text: "Delete", "data-action": "delete-endpoint",
+      onclick: () => confirmDestructive({
+        title: `Delete ${ep.displayName}?`, detail: "Undeploys the model, freeing its container, and deletes the endpoint and its model. The downloaded files stay in Model Garden.",
+        confirmWord: ep.displayName, onConfirm: async () => { await post("delete", { endpoint: ep.name }); navigate(AP_PATHS.endpoints); },
+      }).catch(fail) }));
+    const facts = el("dl", { id: "hf-endpoint-facts" },
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: ep.name }),
+      el("dt", { text: "State" }), el("dd", { id: "hf-endpoint-state", text: st === "UNDEPLOYED" ? "No deployed model" : HF_STATE_LABEL[st] || st }),
+      ep.model ? el("dt", { text: "Model" }) : null, ep.model ? el("dd", { class: "mono", text: `${ep.model.hfModelId} @ ${ep.model.revision.slice(0, 12)} (${ep.model.license})` }) : null,
+      ep.model ? el("dt", { text: "Container" }) : null, ep.model ? el("dd", { class: "mono", text: ep.model.image }) : null,
+      el("dt", { text: "Predict" }), el("dd", { class: "mono", text: `POST ${rest}:predict, :rawPredict, :streamRawPredict` }),
+      ep.model && ep.model.engine === "vllm" ? el("dt", { text: "OpenAI-compatible" }) : null,
+      ep.model && ep.model.engine === "vllm" ? el("dd", { class: "mono", text: `POST /v1beta1/${ep.name}/chat/completions` }) : null);
+    let test = null;
+    if (st === "READY") {
+      const tei = ep.model.engine === "tei";
+      const input = el("textarea", { id: "hf-test-input", rows: "3", "aria-label": "Test input",
+        placeholder: tei ? "Text to embed" : "Prompt" });
+      input.value = tei ? "What is deep learning?" : "What is the capital of France?";
+      const out = el("pre", { id: "hf-test-output", class: "mono", "aria-live": "polite" });
+      const run = (mode) => {
+        const text = input.value;
+        const body = mode === "chat"
+          ? { messages: [{ role: "user", content: text }], max_tokens: 64 }
+          : { instances: [tei ? { inputs: text } : { prompt: text, max_tokens: 64, temperature: 0 }] };
+        out.textContent = "…";
+        post("test", { endpoint: ep.name, mode, body }).then((t) => {
+          const r = JSON.parse(t);
+          if (mode === "chat") out.textContent = (r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : t);
+          else if (tei) {
+            const v = r.predictions[0][0];
+            out.textContent = `${v.length}-dimensional embedding: [${v.slice(0, 6).map((x) => x.toFixed(4)).join(", ")}, …]`;
+          } else out.textContent = r.predictions[0];
+        }, (err) => { out.textContent = `[error] ${err.message}`; });
+      };
+      test = el("section", { class: "card", id: "hf-test", "aria-label": "Test your model" },
+        el("h2", { text: "Test your model" }), input,
+        el("div", { class: "garden-actions" },
+          el("button", { class: "primary", text: "Predict", "data-action": "test-predict", onclick: () => run("predict") }),
+          tei ? null : el("button", { class: "secondary", text: "Chat completion", "data-action": "test-chat", onclick: () => run("chat") })),
+        out);
+    }
+    detail = el("section", { class: "card", id: "hf-endpoint", "aria-label": ep.displayName },
+      el("h2", { text: ep.displayName }), facts, actions, test);
+  }
+  // A redraw while deploying keeps the test panel's input.
+  const keptTest = view.querySelector("#hf-test");
+  setChildren(view, header(), message, el("div", { class: "card" }, table), detail);
+  if (keptTest && detail && detail.querySelector("#hf-test")) detail.querySelector("#hf-test").replaceWith(keptTest);
+  if (data.endpoints.some((e) => stateOf(e) === "DEPLOYING")) HF_EP_POLL = setTimeout(again, 2000);
 }
 
 async function renderModelGarden(view) {

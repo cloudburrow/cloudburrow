@@ -30,6 +30,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 )
 
 //go:embed assets
@@ -958,7 +959,12 @@ type Server struct {
 	// localModels, when set, offers the Local models page (#1306).
 	localModels LocalModels
 	hfModels    *hfmodels.Manager
-	metrics     MetricsSource
+	// garden and hfDeploy are Model Garden's Hugging Face deployments
+	// (#1840, hfdeploy.go); nil offers no Deploy.
+	garden    *modelgarden.Manager
+	hfDeploy  HFDeployer
+	hfProject string
+	metrics   MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -1093,6 +1099,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
 	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
 	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
+	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
+	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)

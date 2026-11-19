@@ -252,6 +252,41 @@ port is `FAILED_PRECONDITION`; see
 rest. The console's Online prediction page offers **DirectRawPredict** on such an endpoint: a method
 name and base64 input, and the output bytes or the container's status.
 
+## Model Garden: Hugging Face models (#1840)
+
+`ModelGardenService.Deploy` with a `hugging_face_model_id` (or the console's **Deploy** on a model
+downloaded in Model Garden) creates an Endpoint and a Model and serves the model with the engine
+Google's Model Garden uses for its task:
+
+| Hugging Face task | Engine | Image (pinned in `dependencies.json`) |
+|---|---|---|
+| text-generation, text2text-generation, image-text-to-text | vLLM, CPU build (Apache-2.0) | `vllm/vllm-openai-cpu:v0.34.0` (linux/arm64, linux/amd64) |
+| feature-extraction, sentence-similarity | Text Embeddings Inference, CPU build (Apache-2.0) | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9` (linux/amd64; emulated on arm64) |
+
+The arguments are Model Garden's (`--max-model-len=4096`, capped at the model's own context,
+`--dtype=auto`, `--max-num-seqs=256`, `--disable-log-stats`); the GPU-only ones have no CPU
+meaning. The container, `cloudburrow-<instance>-mg-<endpoint>`, runs in the Docker the cluster runs
+in, publishes its port on 127.0.0.1 only and mounts the downloaded files read-only; HF_TOKEN is
+never passed in (the files are already local). A model not yet downloaded is downloaded first, with
+the same SHA-256 checks and 50 GB-free rule as Model Garden's Download. A token in the request
+(`model_config.hugging_face_access_token`) is refused: set `HF_TOKEN` where CloudBurrow runs.
+
+The endpoint answers, over gRPC and JSON:
+
+- `:predict`: on vLLM, Model Garden's instances `{"prompt", "max_tokens", "temperature", "top_p",
+  "top_k", "raw_response"}`, answered as `"Prompt:\n…\nOutput:\n…"` (the text alone with
+  `raw_response`), or `{"@requestFormat": "chatCompletions", "messages": [...]}`, answered with the
+  chat completion; on TEI, `{"inputs": "..."}` instances, each answered with its vectors.
+- `:rawPredict`: an OpenAI completions (`prompt`) or chat (`messages`) body to vLLM, TEI's own
+  `{"inputs"}` to TEI, or a `{"instances"}` body answered as `:predict`.
+- `:streamRawPredict`: vLLM's server-sent events.
+- `POST /v1beta1/{endpoint}/chat/completions` (and v1beta1 `ChatCompletions`): the OpenAI-compatible
+  path; point the OpenAI client's base URL at `http://<local AI>/v1beta1/{endpoint}`.
+
+`UndeployModel` and the console's **Undeploy** remove the container; `DeleteEndpoint` and
+`DeleteModel` remove the rest. The downloaded files stay until Model Garden's **Delete files**.
+`cloudburrow stop` removes the containers and `up` starts them again.
+
 ## Accelerators
 
 **CPU only. No GPU path exists, on any platform.**

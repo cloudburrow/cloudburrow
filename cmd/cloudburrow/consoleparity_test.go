@@ -1628,6 +1628,26 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI PredictionService: streaming raw predict on a gRPC model", Service: "vertexai",
 		Methods:  []string{"PredictionService/StreamDirectRawPredict", "PredictionService/StreamingRawPredict"},
 		Excluded: "the streaming forms of the DirectRawPredict the Online prediction page sends: the same method_name and input bytes on a stream held open both ways, which a request-and-answer form has no way to hold; the page's DirectRawPredict calls the same method on the same container (#1477)"},
+	// Model Garden's Hugging Face deployments (#1840).
+	{Resource: "Model Garden: deploy a Hugging Face model", Service: "vertexai",
+		Methods: []string{"ModelGardenService/Deploy", "EndpointService/GetEndpoint", "EndpointService/ListEndpoints"},
+		Screen:  "/agent-platform/endpoints", Offers: "Model Garden: Deploy on a downloaded Hugging Face model runs Deploy (accepting a gated model's " +
+			"licence as accept_eula) and opens Endpoints, which lists the deployments with their serving container and state " +
+			"(Deploying with its step and progress, Ready, Failed with the reason) and the selected endpoint's details: its resource " +
+			"name, model, revision, licence, image and REST paths",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	{Resource: "Model Garden: test, undeploy and delete a deployment", Service: "vertexai",
+		Methods: []string{"EndpointService/UndeployModel", "EndpointService/DeleteEndpoint", "ModelService/GetModel",
+			"ModelService/ListModels", "ModelService/DeleteModel"},
+		Screen: "/agent-platform/endpoints", Offers: "Endpoints: Undeploy frees the engine container; Delete undeploys and deletes the " +
+			"endpoint and its model, keeping the downloaded files, which Model Garden's Delete files removes; the details show the " +
+			"model's container image (the Model's containerSpec)",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	{Resource: "Model Garden: chat completions", Service: "vertexaiv1beta1",
+		Methods: []string{"PredictionService/ChatCompletions"},
+		Screen:  "/agent-platform/endpoints", Offers: "Endpoints' Test your model: Predict sends Model Garden's prompt instance (or TEI's " +
+			"inputs) and shows the prediction; Chat completion sends the OpenAI chat body ChatCompletions relays and shows the reply",
+		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},
