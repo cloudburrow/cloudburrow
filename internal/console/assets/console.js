@@ -45,6 +45,10 @@ function agentPlatformRoutes() {
   // A page Google's console has and CloudBurrow does not serve.
   const absent = (path, title, group, api, about, docs, instead) =>
     page(path, title, group, { service: null, screen: "not-served", notServed: true, api, about, docs, instead });
+  // The pages that run locally keep their place in the product menu while
+  // their local backend is off (listedWhenOff), as Google's menu always has
+  // them: each draws its off state, saying how to start it, and the
+  // overview marks it "off".
   return [
     page(AP_PATHS.overview, "Overview", null, { service: null, screen: "ap-overview" }),
     page(AP_PATHS.modelGarden, "Model Garden", null, { service: null, screen: "model-garden" }),
@@ -62,20 +66,20 @@ function agentPlatformRoutes() {
     absent(`${AP}/rag`, "RAG Engine", "Agent Builder", "projects.locations.ragCorpora",
       "Corpora of your documents for retrieval-augmented generation", AP_DOCS + "build"),
     // Agent Studio.
-    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground" }),
-    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings" }),
+    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground", listedWhenOff: true }),
+    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings", listedWhenOff: true }),
     absent(`${AP}/studio/media`, "Media Studio", "Agent Studio", "Imagen, Veo and Lyria generation",
       "Generate images, video, speech and music (Agent Media Studio)", AP_DOCS + "agent-studio"),
     absent(`${AP}/studio/prompt-gallery`, "Prompt gallery", "Agent Studio", null,
       "Sample prompts to open in Studio", AP_DOCS + "agent-studio",
       "Studio sends your own prompts to the local model."),
     // Models.
-    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models" }),
+    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models", listedWhenOff: true }),
     absent(`${AP}/models`, "Model Registry", "Models", "projects.locations.models",
       "Models uploaded or trained in a project, with their versions", AP_DOCS + "models"),
     absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
       "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
-    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict" }),
+    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict", listedWhenOff: true }),
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
@@ -8206,10 +8210,12 @@ function drawProductNav() {
   if (!host) return;
 
   const here = productOfLocation();
-  // Only the pages this instance serves, as the drawer lists only those.
+  // Only the pages this instance serves, as the drawer lists only those,
+  // and the Agent Platform pages that draw their own off state
+  // (listedWhenOff), which Google's menu always lists.
   const served = new Set(SERVICES.map((sv) => sv.id));
   const pages = here
-    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r === here) && !r.navHidden &&
+    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r.listedWhenOff || r === here) && !r.navHidden &&
         (!r.requires || served.has(r.requires) || r === here))
     : [];
   if (!pages.length) {

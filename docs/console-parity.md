@@ -272,7 +272,9 @@ Logs Explorer interface); the layout below is what every category screen (#1843â
   (`aria-current="page"`). It is drawn on the product's list screens, its resources' pages and its
   create pages. Its control ("Collapse left pane" / "Expand left pane", named "Collapse
   <product> navigation menu") folds it to a rail, remembered across screens. A narrow window shows
-  it as a strip above the page. It lists only the pages this instance serves. It replaces the
+  it as a strip above the page. It lists only the pages this instance serves, and Agent Platform's
+  pages that run locally (Studio, Embeddings, Local models, Online prediction) while their backend is
+  off, as Google's menu always lists them: each draws its off state (`listedWhenOff`). It replaces the
   horizontal link bar above the page.
 - [x] **One drawer row per product.** Firestore (Data, Databases), Bigtable (Instances, Tables), Key
   Management (Key management, Autokey, EKM connections, KMS config, Key inventory, Single-tenant HSM), Memorystore (Redis, Redis
