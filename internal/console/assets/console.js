@@ -3066,7 +3066,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       ? (listActions.length || selectable
           ? el("div", { class: "action-bar" },
               ...listActions,
-              selectable ? bulk : null,
+              // A list screen's selection actions, History's Approve
+              // (#1854); Delete only where the rows can be deleted.
+              ...selectionButtons,
+              caps.delete ? bulk : null,
               selectionLabel)
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
