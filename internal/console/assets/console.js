@@ -3175,7 +3175,7 @@ async function renderDetail(view, route, resourcePath) {
       id: "logs", label: "Logs", kind: "logs",
       resource: name,
     });
-  } else if (ownLogs.kind === "logs" && !ownLogs.resource) {
+  } else if (ownLogs && ownLogs.kind === "logs" && !ownLogs.resource) {
     // A placeholder (console.KindLogs) puts the Logs tab in the provider's
     // order, as Google's service page has Metrics, SLOs, Logs (#1852).
     ownLogs.resource = name;
