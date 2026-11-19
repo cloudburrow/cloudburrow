@@ -639,6 +639,13 @@ type MemorystoreSettings struct {
 	// stops, in place of the append-only file. In persistent mode the
 	// snapshot is on the server's volume, so its data comes back with it.
 	RDBSeconds int
+	// NoPersistence, without RDBSeconds, is a created Memorystore for
+	// Redis instance's persistence_config DISABLED (#1911): even in
+	// persistent mode the server writes neither an append-only file nor a
+	// snapshot, and the files a previous run left on its volume are
+	// removed before it starts, so a restart of the server starts it
+	// empty, as Memorystore documents of an instance without persistence.
+	NoPersistence bool
 	// ReplicaOf, host:port, starts the server as a replica of it
 	// (--replicaof): a Memorystore Standard tier node (#1412).
 	ReplicaOf string
@@ -775,6 +782,7 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		dir = o.Dir
 	}
 	_, ownPersistence := settings["appendonly"]
+	forget := false
 	switch {
 	case dir != "" && ownPersistence:
 		args = append(args, "--dir", dir)
@@ -784,6 +792,11 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		args = append(args, "--dir", "/data", "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
 	case o.RDBSeconds > 0:
 		args = append(args, "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
+	case o.NoPersistence && persistent:
+		// The volume still is the server's directory, so a snapshot or an
+		// RDB persistence set later (CONFIG SET save) is written there.
+		args = append(args, "--dir", "/data", "--save", "", "--appendonly", "no")
+		forget = true
 	case persistent:
 		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
 	default:
@@ -839,6 +852,16 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
 		b.Port = tlsPort
 		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
+	}
+	if forget {
+		// Nodes do not load files made before persistence was disabled.
+		const rm = `rm -rf /data/dump.rdb /data/appendonly.aof /data/appendonlydir; `
+		if len(b.Args) > 2 && b.Args[0] == "sh" {
+			b.Args = append([]string{}, b.Args...)
+			b.Args[2] = rm + b.Args[2]
+		} else {
+			b.Args = append([]string{"sh", "-c", rm + `exec docker-entrypoint.sh "$@"`, "sh"}, b.Args...)
+		}
 	}
 	if o.PodAndLoopback6 {
 		if len(b.Args) > 2 && b.Args[0] == "sh" {

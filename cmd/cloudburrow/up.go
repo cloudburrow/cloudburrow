@@ -329,6 +329,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 		memorystoreAdminSvc.kms = kmsSvc
+		// A Redis cluster's customer-managed CA (#1907): this instance's
+		// Certificate Authority Service, in process.
+		memorystoreAdminSvc.privateca = privateCASvc
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
 		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout), comps)

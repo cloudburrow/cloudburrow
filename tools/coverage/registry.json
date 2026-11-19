@@ -267,7 +267,7 @@
   "google.cloud.redis.cluster.v1.CloudRedisCluster/GetBackupCollection": "implemented",
   "google.cloud.redis.cluster.v1.CloudRedisCluster/GetCluster": "implemented",
   "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority": "implemented",
-  "google.cloud.redis.cluster.v1.CloudRedisCluster/GetSharedRegionalCertificateAuthority": "unimplemented",
+  "google.cloud.redis.cluster.v1.CloudRedisCluster/GetSharedRegionalCertificateAuthority": "implemented",
   "google.cloud.redis.cluster.v1.CloudRedisCluster/GetTokenAuthUser": "implemented",
   "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAclPolicies": "implemented",
   "google.cloud.redis.cluster.v1.CloudRedisCluster/ListAclPolicyRevisions": "implemented",

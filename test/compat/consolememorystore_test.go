@@ -60,7 +60,7 @@ func TestConsoleMemorystoreFlush(t *testing.T) {
 		}
 	}
 	if i < 0 || l.Items[i].Status != "READY" ||
-		l.Items[i].Fields["Endpoint"] != h.Endpoint(EnvMemorystore) || l.Items[i].Fields["Version"] != "REDIS_7_2" {
+		l.Items[i].Fields["Primary endpoint"] != h.Endpoint(EnvMemorystore) || l.Items[i].Fields["Version"] != "Redis 7.2" {
 		t.Fatalf("console list = %s", body)
 	}
 	if len(l.Items[i].Actions) != 1 || l.Items[i].Actions[0].ID != "flush" {

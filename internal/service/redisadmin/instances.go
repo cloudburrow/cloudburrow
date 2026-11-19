@@ -45,6 +45,10 @@ type Spec struct {
 	// that many seconds have passed with a change, in place of the
 	// CloudBurrow instance's mode's own.
 	RDBSeconds int
+	// NoPersistence is a Memorystore for Redis instance's persistence
+	// DISABLED (#1911): its server keeps no file, whatever the CloudBurrow
+	// instance's mode, so its data is lost when the server restarts.
+	NoPersistence bool
 	// ReplicaOf, host:port, starts the server as a replica of it: a
 	// Standard tier node (#1412), which a failover or the automatic
 	// failover makes a primary.
@@ -56,6 +60,11 @@ type Spec struct {
 	// TransitTrust, PEM, are every CA server_ca_certs lists: TransitCA
 	// and the ones a rotation replaced, which still are valid (#1463).
 	TransitTrust string
+	// ServerCAPool, with TransitCA, is a Redis cluster's customer-managed
+	// CA pool (#1907): the node's certificate is issued by the pool, in
+	// Certificate Authority Service, not by TransitCA, which then is the
+	// pool's CA certificates only.
+	ServerCAPool string
 	// Dir is a Redis Cluster or Valkey node's data directory on its
 	// volume in persistent mode (#1557): one per formation, so a node
 	// formed again never loads what a previous formation left. "" is the
@@ -123,6 +132,12 @@ type record struct {
 	Scheduled *scheduledMaintenance `json:"scheduledMaintenance,omitempty"`
 	// Persistence is persistence_config, as last set; nil when never set.
 	Persistence *persistence `json:"persistence,omitempty"`
+	// AuthorizedNetwork, ConnectMode and ReservedIPRange are the
+	// instance's network, as kept (network.go, #1906); "" in a record kept
+	// before them: the default network, DIRECT_PEERING and a chosen range.
+	AuthorizedNetwork string `json:"authorizedNetwork,omitempty"`
+	ConnectMode       string `json:"connectMode,omitempty"`
+	ReservedIPRange   string `json:"reservedIpRange,omitempty"`
 
 	// Standard tier (#1385): Tier is "STANDARD_HA", "" for BASIC; Nodes
 	// are the node numbers, Primary the primary's.
@@ -140,6 +155,10 @@ type record struct {
 	// PreviousCAs are the CAs a server CA rotation replaced, PEM, still
 	// listed in server_ca_certs until they expire (#1463).
 	PreviousCAs string `json:"previousCas,omitempty"`
+	// CACreated is when TransitCA was made, by the Memorystore clock: its
+	// rotation is due five years on by that clock, while the certificate's
+	// own validity follows the wall clock (newCA).
+	CACreated time.Time `json:"caCreated,omitzero"`
 
 	// CMEK (#1463): CustomerManagedKey is customer_managed_key, WrappedKey
 	// the data key it wrapped, and Sealed the secrets above sealed with
@@ -165,7 +184,8 @@ type record struct {
 func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
 		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version(),
-		TransitCA: r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM()}
+		NoPersistence: r.Persistence.seconds() == 0,
+		TransitCA:     r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM()}
 }
 
 // binary is the prefix of the server's programs: valkey-server, ...
@@ -197,17 +217,6 @@ type instances struct {
 	// kms is Cloud KMS, for customer_managed_key; nil when it is not
 	// enabled (#1463).
 	kms KeyService
-	// aof is whether a server keeps an append-only file when it has no
-	// RDB persistence: the CloudBurrow instance's persistent mode.
-	aof bool
-}
-
-// PersistentMode says the CloudBurrow instance is persistent, so a server
-// without RDB persistence keeps an append-only file (#1384).
-func (s *Server) PersistentMode(on bool) {
-	if s.created != nil {
-		s.created.aof = on
-	}
 }
 
 // EnableCreate makes CreateInstance, UpdateInstance and DeleteInstance
@@ -218,7 +227,7 @@ func (s *Server) EnableCreate(ctx context.Context, p Provisioner, dial Dialer, d
 	if operations == nil {
 		operations = lro.NewStore(nil)
 	}
-	s.created = &instances{prov: p, dial: dial, db: db, ops: operations, now: time.Now, bg: ctx,
+	s.created = &instances{prov: p, dial: dial, db: db, ops: operations, now: s.now, bg: ctx,
 		byID: map[string]*record{}, busy: map[string]string{}, cancels: map[string]context.CancelFunc{}}
 	go s.created.watch(ctx, healthEvery)
 }
@@ -450,6 +459,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 	if r.tlsOn() {
 		inst.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
 	}
+	r.renderNetwork(inst)
 	r.renderHA(inst)
 	r.renderCMEK(inst)
 	if region == "" {
@@ -516,6 +526,9 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	loc := in.GetLocationId()
 	if loc == "" {
 		loc = m[2] + "-a"
+	} else if z := zoneRE.FindStringSubmatch(loc); z == nil || z[1] != m[2] {
+		// The zone the instance (its primary) is in (#1908).
+		return nil, apierror.InvalidArgument("location_id %q is not a zone of the instance's region %s", loc, m[2])
 	}
 	r := &record{Name: name, DisplayName: in.GetDisplayName(), Labels: copyMap(in.GetLabels()), LocationID: loc,
 		MemorySizeGB: in.GetMemorySizeGb(), RedisConfigs: copyMap(in.GetRedisConfigs()), Created: c.now(),
@@ -526,6 +539,10 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 			return nil, err
 		}
 		r.Maintenance = kept
+	}
+	var err error
+	if r.AuthorizedNetwork, r.ConnectMode, r.ReservedIPRange, err = instanceNetwork(in, name, m[1]); err != nil {
+		return nil, err
 	}
 	if err := standard(in, r); err != nil {
 		return nil, err
@@ -543,11 +560,11 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 		r.Persistence = pc
 	}
 	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
-		cert, key, err := newCA(name, c.now())
+		cert, key, err := newCA(name)
 		if err != nil {
 			return nil, apierror.Internal(err, "generate the instance's CA")
 		}
-		r.TransitCA, r.TransitCAKey = cert, key
+		r.TransitCA, r.TransitCAKey, r.CACreated = cert, key, c.now()
 	}
 	if key := in.GetCustomerManagedKey(); key != "" {
 		if err := checkKey(key, m[2]); err != nil {

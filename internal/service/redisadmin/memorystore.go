@@ -197,12 +197,13 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	if s.created == nil {
 		panic("redisadmin: EnableValkey before EnableCreate")
 	}
-	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
+	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: s.now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.valkey.autoBackups(ctx)
 	go s.valkey.maintenanceLoop(ctx)
 	// Both read here, not in the goroutine: tests swap them between runs.
 	go s.valkey.watchStandalone(ctx, healthEvery, tendEvery)
+	go s.valkey.watchClusters(ctx, healthEvery)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
@@ -299,6 +300,7 @@ func renderValkeyBase(r *clusterRecord) *memorystorepb.Instance {
 			out.ZoneDistributionConfig = z
 		}
 	}
+	out.ZoneDistributionConfig.ActiveZones = r.activeZones()
 	if v.Maintenance != "" {
 		mp := &memorystorepb.MaintenancePolicy{}
 		if protojson.Unmarshal([]byte(v.Maintenance), mp) == nil {
@@ -658,14 +660,21 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if err != nil {
 		return nil, err
 	}
+	if err := valkeyZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
+		return nil, err
+	}
 	name := req.GetParent() + "/instances/" + id
 	now := c.now()
+	mp, err := valkeyMaintenancePolicy(in.GetMaintenancePolicy(), time.Time{}, now)
+	if err != nil {
+		return nil, err
+	}
 	r := &clusterRecord{Name: name, UID: newUID(), Created: now, ShardCount: shards, ReplicaCount: in.GetReplicaCount(),
 		RedisConfigs: copyMap(in.GetEngineConfigs()), DeletionProtect: in.GetDeletionProtectionEnabled(),
 		Labels: copyMap(in.GetLabels()), state: clusterpb.Cluster_CREATING, pendingReplicas: -1,
 		Valkey: &valkeyFields{Mode: mode.String(), NodeType: nt.String(), EngineVersion: version, AuthMode: auth.String(),
 			Updated: now, Persistence: protoJSON(in.GetPersistenceConfig()), Networks: nets, Endpoints: asEndpoints,
-			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(in.GetMaintenancePolicy())}}
+			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(mp)}}
 	if auth == memorystorepb.Instance_TOKEN_AUTH || auth == memorystorepb.Instance_IAM_AUTH {
 		// IAM auth's allowed tokens are the default user's passwords
 		// beside this one (iamauth.go).
@@ -693,7 +702,7 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 		return nil, err
 	}
 	if tlsOn {
-		if r.TransitCA, r.TransitCAKey, err = newCA(id, now); err != nil {
+		if r.TransitCA, r.TransitCAKey, err = newCA(id); err != nil {
 			return nil, apierror.Internal(err, "create the CA of instance %s", name)
 		}
 	}
@@ -871,11 +880,20 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		}
 		vf.Networks, vf.Endpoints = nets, true
 	}
-	if set["zone_distribution_config"] {
-		vf.ZoneDistribution = protoJSON(in.GetZoneDistributionConfig())
+	if set["zone_distribution_config"] && !r.zoneDist().same(valkeyZoneDist(in.GetZoneDistributionConfig())) {
+		// Immutable, as the API documents it (#1908).
+		return nil, apierror.InvalidArgument("zone_distribution_config is immutable")
 	}
 	if set["maintenance_policy"] {
-		vf.Maintenance = protoJSON(in.GetMaintenancePolicy())
+		var created time.Time
+		if kept := renderValkeyBase(r).GetMaintenancePolicy(); kept.GetCreateTime() != nil {
+			created = kept.GetCreateTime().AsTime()
+		}
+		mp, err := valkeyMaintenancePolicy(in.GetMaintenancePolicy(), created, c.now())
+		if err != nil {
+			return nil, err
+		}
+		vf.Maintenance = protoJSON(mp)
 	}
 	if set["automated_backup_config"] {
 		next.AutoBackup = ""

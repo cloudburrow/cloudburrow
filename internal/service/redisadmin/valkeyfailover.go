@@ -88,7 +88,7 @@ import (
 // and answers as a primary (its pod started again) a replica of the
 // primary, re-points a secondary that replicates neither the primary
 // Service nor the primary's own, and labels each pod with its role again,
-// a new pod having none. CLUSTER mode is unchanged: its nodes fail over among themselves.
+// a new pod having none. CLUSTER mode has a watcher of its own (clusterfailover.go, #1910).
 
 // RoleRouter is a ClusterRuntime that publishes a CLUSTER_DISABLED
 // instance's roles in the cluster.
