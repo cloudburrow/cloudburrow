@@ -50,8 +50,10 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 	if f := byName(redis, "tier"); f.OptionLabels["STANDARD_HA"] != "Standard" || f.Type != "radio" {
 		t.Errorf("Tier = %+v, want Basic / Standard", f)
 	}
-	if (memorystoreProvider{}).CreateSubmit() != "Create" {
-		t.Error("Create a Redis instance does not end in Create")
+	// docs.cloud.google.com/memorystore/docs/redis/create-instance-console
+	// ends in "Click Create instance." (#1933).
+	if (memorystoreProvider{}).CreateSubmit() != "Create instance" {
+		t.Error("Create a Redis instance does not end in Create instance")
 	}
 	_, cluster := (redisClusterProvider{}).CreateForm()
 	if got, want := names(cluster), "id,region,zoneDistribution,zone,nodeType,shardCount,replicaCount,network,security,transitEncryption,caMode,caPool,"+

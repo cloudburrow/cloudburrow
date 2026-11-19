@@ -596,6 +596,16 @@ type CreateSubmitter interface {
 	CreateSubmit() string
 }
 
+// CreateHrefer is a Creator whose create flow is a page of the console's
+// own rather than the generated one: the Projects list's Create project
+// opens the New project page (/projectcreate), as the project picker's New
+// project and Manage resources' Create project do on Google's console
+// (#1932).
+type CreateHrefer interface {
+	Creator
+	CreateHref() string
+}
+
 // CreateThener is a Creator whose create page goes on to an action of the
 // resource it made, opened on that resource's page: Create key ring goes on
 // to Create key, as Google's flow does (#1851).
@@ -1121,6 +1131,11 @@ type Action struct {
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`
+	// ConfirmStyle is how a Destructive action is confirmed where Google's
+	// console confirms it otherwise than by the name typed back (#1931): a
+	// DeleteConfirm style, as BigQuery's Delete table asks for the word
+	// delete and a Datastore entity's Delete for nothing typed.
+	ConfirmStyle string `json:"confirmStyle,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//
@@ -1643,7 +1658,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -1831,7 +1846,11 @@ type capabilities struct {
 	// (DeleteLabeler), and EditRow the label of the rows' Edit item
 	// (RowEditor), empty for none.
 	DeleteLabel string `json:"deleteLabel,omitempty"`
-	EditRow     string `json:"editRow,omitempty"`
+	// DeleteConfirm is how the delete dialog is confirmed, as Google's
+	// console confirms this kind's (deleteconfirm.go): "delete", "DELETE",
+	// "confirm" (Delete alone), or empty for the name typed back.
+	DeleteConfirm string `json:"deleteConfirm,omitempty"`
+	EditRow       string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
@@ -1906,6 +1925,8 @@ type createForm struct {
 	PerProject bool `json:"perProject,omitempty"`
 	// Then is CreateThener's: the action the made resource's page opens.
 	Then string `json:"then,omitempty"`
+	// Href is CreateHrefer's: the console page the create button opens.
+	Href string `json:"href,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -1965,6 +1986,10 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		if ct, ok := p.(CreateThener); ok {
 			c.Create.Then = ct.CreateThen()
 		}
+		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
+			c.Create.Href = ch.CreateHref()
+			c.Create.Page = true
+		}
 	}
 	if e, ok := p.(Executor); ok {
 		c.Query = &queryCapability{Hint: e.QueryHint()}
@@ -1984,6 +2009,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if dl, ok := p.(DeleteLabeler); ok {
 		c.DeleteLabel = dl.DeleteLabel()
+	}
+	if c.Delete {
+		c.DeleteConfirm = deleteConfirmOf(p)
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()

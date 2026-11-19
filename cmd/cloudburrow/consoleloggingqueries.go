@@ -189,6 +189,15 @@ func (p loggingLogScopesProvider) List(_ context.Context, project string) (conso
 	return out, nil
 }
 
+// CreateOnPage implements console.PageCreator: Google's Create log scope is
+// a page, its sections (name and description, then the projects and log
+// views, each added through a dialog of its own) ending in Create log scope
+// (docs.cloud.google.com/logging/docs/log-scope/create-and-manage, #1932).
+func (loggingLogScopesProvider) CreateOnPage() bool { return true }
+
+// CreateLayout implements console.CreateLayouter: one page under headings.
+func (loggingLogScopesProvider) CreateLayout() string { return console.CreateLayoutPage }
+
 func (loggingLogScopesProvider) CreateForm() (string, []console.Field) {
 	return "Create log scope", []console.Field{
 		{Name: "id", Label: "ID", Type: "text", Required: true, Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-]{0,99}$`,

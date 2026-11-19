@@ -92,8 +92,12 @@ func (p iamGroupsProvider) ListFiltered(_ context.Context, _ string, filter stri
 // CreateForm is Google's Create group (#1864): Group name, Group email
 // and Group description, then the members to add with their Google Groups
 // role, on one page.
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Submit, as docs.cloud.google.com/iam/docs/groups-in-cloud-console words it (#1933).
+func (iamGroupsProvider) CreateSubmit() string { return "Submit" }
+
 func (iamGroupsProvider) CreateForm() (string, []console.Field) {
-	return "Create group", []console.Field{
+	return "Create", []console.Field{
 		{Name: "displayName", Label: "Group name", Type: "text", Pattern: `.{0,73}`, Section: "Group details", Help: "At most 73 characters."},
 		{Name: "email", Label: "Group email", Type: "text", Required: true, Pattern: groupEmailPattern, Section: "Group details",
 			Help: "NAME@" + resourcemanager.OrganizationDomain + ": the customer's groups are in its domain. NAME follows a username's rules: " +

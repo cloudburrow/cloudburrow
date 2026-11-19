@@ -104,8 +104,13 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 
 // CreateForm implements console.Creator: Google's create page (#1860),
 // sqlCreateForm.
+// CreateSubmit implements console.CreateSubmitter: Google's Instances page
+// has Create instance, and its create page ends in Create Instance, as
+// docs.cloud.google.com/sql/docs/mysql/create-instance words both (#1933).
+func (cloudSQLInstancesProvider) CreateSubmit() string { return "Create Instance" }
+
 func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
-	return "Create Instance", p.sqlCreateForm()
+	return "Create instance", p.sqlCreateForm()
 }
 
 // availabilityHelp explains the Zonal availability choice (#1408).

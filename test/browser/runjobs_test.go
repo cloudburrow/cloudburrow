@@ -105,20 +105,22 @@ func TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser(t *testing.T) {
 		t.Errorf("cancelling Edit job sent %v", sent)
 	}
 
-	// Delete from the row menu, confirmed by name.
+	// Delete from the row menu, confirmed as Google's is: "Click Delete.
+	// Click Confirm" (docs.cloud.google.com/run/docs/managing/jobs, #1931),
+	// nothing typed. Enter, on Cancel, sends nothing.
 	p.navigate("/run/jobs?project=" + project)
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+id)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
-	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+id))))
-	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
-	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "not-"+id), chromedp.KeyEvent(kb.Enter))
-	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
+	p.openRowDelete(id, "Delete")
+	p.confirmOnlyDialog()
+	p.run(chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 	if sent := p.sent(http.MethodDelete, "/api/resources/run-jobs"); len(sent) != 0 {
-		t.Fatalf("a delete confirmed with the wrong name was sent: %v", sent)
+		t.Fatalf("Enter on the delete dialog, focus on Cancel, sent a delete: %v", sent)
 	}
-	p.eval(`(() => { document.querySelector(".modal #confirm-input").value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), id), chromedp.KeyEvent(kb.Enter))
+	p.openRowDelete(id, "Delete")
+	p.confirmOnlyDialog()
+	p.pressDelete()
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if sent := p.sent(http.MethodDelete, "/api/resources/run-jobs"); len(sent) != 1 {
 		t.Errorf("the delete was sent %d times, want once: %v", len(sent), sent)

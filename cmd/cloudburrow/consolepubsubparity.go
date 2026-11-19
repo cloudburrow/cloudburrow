@@ -492,6 +492,10 @@ func subscriptionTopicName(project, raw string) (string, error) {
 
 // CreateForm implements console.Creator for the Subscriptions page:
 // Google's Create subscription.
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/pubsub/docs/create-subscription words it (#1933).
+func (pubsubSubscriptionsProvider) CreateSubmit() string { return "Create" }
+
 func (pubsubSubscriptionsProvider) CreateForm() (string, []console.Field) {
 	return "Create subscription", subscriptionPageFields(true)
 }
@@ -535,6 +539,10 @@ func (p pubsubSubscriptionsProvider) Create(ctx context.Context, project string,
 
 // CreateForm implements console.Creator for the Snapshots page: Google's
 // Create snapshot, an ID and the subscription it is taken of.
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/pubsub/docs/replay-overview words it (#1933).
+func (pubsubSnapshotsProvider) CreateSubmit() string { return "Create" }
+
 func (pubsubSnapshotsProvider) CreateForm() (string, []console.Field) {
 	return "Create snapshot", []console.Field{
 		{Name: "subscription", Label: "Pub/Sub subscription", Type: "text", Required: true,

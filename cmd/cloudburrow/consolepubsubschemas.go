@@ -151,6 +151,10 @@ func (p pubsubSchemasProvider) List(ctx context.Context, project string) (consol
 // CreateForm implements console.Creator: Google's Create schema, in its
 // order (#1847): Schema ID, Schema type (Avro or Protocol Buffer), Schema
 // definition.
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/pubsub/docs/create-schemas words it (#1933).
+func (pubsubSchemasProvider) CreateSubmit() string { return "Create" }
+
 func (pubsubSchemasProvider) CreateForm() (string, []console.Field) {
 	return "Create schema", []console.Field{
 		{

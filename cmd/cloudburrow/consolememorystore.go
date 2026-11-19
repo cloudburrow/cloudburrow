@@ -205,7 +205,7 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 func (memorystoreProvider) CreateTitle() string { return "Create a Redis instance" }
 
 // CreateSubmit implements console.CreateSubmitter: the page ends in Create.
-func (memorystoreProvider) CreateSubmit() string { return "Create" }
+func (memorystoreProvider) CreateSubmit() string { return "Create instance" }
 
 // CreateLayout implements console.CreateLayouter: one page, as Google's.
 func (memorystoreProvider) CreateLayout() string { return console.CreateLayoutPage }
