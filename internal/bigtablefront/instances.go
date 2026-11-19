@@ -188,7 +188,7 @@ func (s *instances) done(target string, meta, resp proto.Message) (proto.Message
 
 // --- instances ---
 
-func (s *instances) createInstance(_ context.Context, req *btapb.CreateInstanceRequest) (proto.Message, error) {
+func (s *instances) createInstance(ctx context.Context, req *btapb.CreateInstanceRequest) (proto.Message, error) {
 	if !projectRe.MatchString(req.GetParent()) {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}", req.GetParent())
 	}
@@ -220,6 +220,9 @@ func (s *instances) createInstance(_ context.Context, req *btapb.CreateInstanceR
 			return nil, err
 		}
 		in.clusters[cid] = c
+		if err := checkClusterLocation(ctx, c); err != nil {
+			return nil, err
+		}
 	}
 	in.pb = &btapb.Instance{Name: name, DisplayName: ipb.GetDisplayName(), State: btapb.Instance_READY,
 		Type: ipb.GetType(), Edition: ipb.GetEdition(), Labels: ipb.GetLabels(), CreateTime: timestamppb.New(now),
@@ -427,8 +430,11 @@ func (s *instances) deleteInstance(ctx context.Context, req *btapb.DeleteInstanc
 
 // --- clusters ---
 
-func (s *instances) createCluster(_ context.Context, req *btapb.CreateClusterRequest) (proto.Message, error) {
+func (s *instances) createCluster(ctx context.Context, req *btapb.CreateClusterRequest) (proto.Message, error) {
 	start := s.now()
+	if err := checkClusterLocation(ctx, req.GetCluster()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	in, err := s.lookup(req.GetParent())
@@ -906,4 +912,21 @@ func (s *instances) cancelOperation(ctx context.Context, req *longrunningpb.Canc
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
+}
+
+// checkClusterLocation refuses a cluster in a zone gcp.resourceLocations
+// does not allow on its project (#1891), asked of the host
+// (--resourcemanager) whatever --iam-enforcement: FAILED_PRECONDITION
+// with the constraint's documented message ("Restricting Resource
+// Locations" lists Bigtable among the services it applies to).
+func checkClusterLocation(ctx context.Context, c *btapb.Cluster) error {
+	loc := c.GetLocation()
+	project := orgpolicy.ProjectOf(loc)
+	if project == "" {
+		return nil
+	}
+	if err := orgpolicy.CheckLocations(ctx, project, project, loc[strings.LastIndex(loc, "/")+1:]); err != nil {
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return nil
 }

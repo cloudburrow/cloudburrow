@@ -5,20 +5,26 @@ package compat
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/bigtable"
+	fsadminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	admin "cloud.google.com/go/iam/admin/apiv1"
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	orgpolicy "cloud.google.com/go/orgpolicy/apiv2"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/run/apiv2/runpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -237,6 +243,20 @@ func TestOrgPolicyCustomConstraintsPubSub(t *testing.T) {
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}}); err != nil {
 		t.Errorf("an update of the labels: %v", err)
 	}
+	// The REST API gcloud and Terraform use: a topic without retention is
+	// 400 FAILED_PRECONDITION, one with it created.
+	code, out := pubsubREST(t, h, http.MethodPut, "/v1/projects/"+project+"/topics/cc-rest", `{}`)
+	if e, _ := out["error"].(map[string]any); code != http.StatusBadRequest || e["status"] != "FAILED_PRECONDITION" ||
+		e["message"] != customMessage(retention, "All topics must set a message retention duration.") {
+		t.Errorf("REST create of a topic without retention = %d %v, want 400 FAILED_PRECONDITION", code, out)
+	}
+	if code, out := pubsubREST(t, h, http.MethodPut, "/v1/projects/"+project+"/topics/cc-rest", `{"messageRetentionDuration":"3600s"}`); code != http.StatusOK {
+		t.Errorf("REST create of a topic with retention = %d %v", code, out)
+	} else {
+		t.Cleanup(func() {
+			_ = ps.TopicAdminClient.DeleteTopic(context.Background(), &pubsubpb.DeleteTopicRequest{Topic: "projects/" + project + "/topics/cc-rest"})
+		})
+	}
 	sub := "projects/" + project + "/subscriptions/cc-sub"
 	_, err = ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: sub, Topic: name, AckDeadlineSeconds: 10})
 	if st, _ := status.FromError(err); st.Code() != codes.FailedPrecondition || st.Message() != customMessage(deadline, "Ack deadlines of at least 30 seconds.") {
@@ -362,5 +382,175 @@ func TestGcloudOrgPoliciesCustomConstraints(t *testing.T) {
 	g.must("org-policies", "delete-custom-constraint", short, "--organization="+strings.TrimPrefix(localOrg, "organizations/"), "--quiet")
 	if out, err := g.run(nil, "org-policies", "describe", short, "--project="+project); err == nil {
 		t.Errorf("the policy outlived its constraint: %s", out)
+	}
+}
+
+// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/CreateInstance, google.bigtable.admin.v2.BigtableInstanceAdmin/CreateCluster
+//
+// TestOrgPolicyEnforcementBigtableLocations (#1891): gcp.resourceLocations
+// allowing in:us-locations refuses a Bigtable instance, and a cluster
+// added to one, in a europe-west1 zone, FAILED_PRECONDITION with the
+// documented message, and creates them in us-central1-b and us-east1-c.
+func TestOrgPolicyEnforcementBigtableLocations(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	t.Setenv("BIGTABLE_EMULATOR_HOST", h.Endpoint(EnvBigtable))
+	c := orgPolicyClients(t, h)["grpc"]
+	_, _, pc := foldersClientsAt(t, h, rmOptionsAt(h.Endpoint(EnvResourceManager)))
+	project := orgPolicyProject(t, h, pc, localOrg, "opb-")
+	iac, err := bigtable.NewInstanceAdminClient(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = iac.Close() })
+	setOrgPolicy(t, h, c, "projects/"+project, "gcp.resourceLocations", opValues("in:us-locations"))
+	want := "Location ZONE:europe-west1-b violates constraint constraints/gcp.resourceLocations on the resource projects/" + project + "."
+	err = iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: "op-eu-inst", DisplayName: "op eu", ClusterId: "op-eu-c1",
+		Zone: "europe-west1-b", NumNodes: 1, StorageType: bigtable.SSD})
+	if st, _ := status.FromError(err); st.Code() != codes.FailedPrecondition || st.Message() != want {
+		t.Errorf("a europe-west1-b instance = %v, want FAILED_PRECONDITION %q", err, want)
+	}
+	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: "op-us-inst", DisplayName: "op us", ClusterId: "op-us-c1",
+		Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Fatalf("a us-central1-b instance: %v", err)
+	}
+	t.Cleanup(func() { _ = iac.DeleteInstance(context.Background(), "op-us-inst") })
+	err = iac.CreateCluster(ctx, &bigtable.ClusterConfig{InstanceID: "op-us-inst", ClusterID: "op-us-c2", Zone: "europe-west1-b",
+		NumNodes: 1, StorageType: bigtable.SSD})
+	if st, _ := status.FromError(err); st.Code() != codes.FailedPrecondition || st.Message() != want {
+		t.Errorf("a europe-west1-b cluster = %v, want FAILED_PRECONDITION", err)
+	}
+	if err := iac.CreateCluster(ctx, &bigtable.ClusterConfig{InstanceID: "op-us-inst", ClusterID: "op-us-c3", Zone: "us-east1-c",
+		NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Errorf("a us-east1-c cluster: %v", err)
+	}
+}
+
+// covers: bigquery.jobs.query
+//
+// TestOrgPolicyEnforcementBigQueryDDL (#1891): gcp.resourceLocations
+// allowing in:us-locations refuses CREATE SCHEMA ... OPTIONS(location =
+// 'europe-west1'), 412 with the documented message and no dataset made,
+// and creates one in US, as datasets.insert does.
+func TestOrgPolicyEnforcementBigQueryDDL(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	endpoint := h.Endpoint(EnvBigQuery)
+	c := orgPolicyClients(t, h)["grpc"]
+	_, _, pc := foldersClientsAt(t, h, rmOptionsAt(runShardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)))
+	project := orgPolicyProject(t, h, pc, localOrg, "opq-")
+	bq, err := bigquery.NewClient(ctx, project, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bq.Close() })
+	setOrgPolicy(t, h, c, "projects/"+project, "gcp.resourceLocations", opValues("in:us-locations"))
+	run := func(sql string) error {
+		q := bq.Query(sql)
+		j, err := q.Run(ctx)
+		if err != nil {
+			return err
+		}
+		st, err := j.Wait(ctx)
+		if err != nil {
+			return err
+		}
+		return st.Err()
+	}
+	err = run("CREATE SCHEMA op_ddl_eu OPTIONS(location = 'europe-west1')")
+	want := "Location REGION:europe-west1 violates constraint constraints/gcp.resourceLocations on the resource projects/" + project + "."
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("CREATE SCHEMA in europe-west1 = %v, want %q", err, want)
+	}
+	if _, err := bq.Dataset("op_ddl_eu").Metadata(ctx); err == nil {
+		t.Error("the refused CREATE SCHEMA made its dataset")
+	}
+	if err := run("CREATE SCHEMA op_ddl_us OPTIONS(location = 'US')"); err != nil {
+		t.Fatalf("CREATE SCHEMA in US: %v", err)
+	}
+	t.Cleanup(func() { _ = bq.Dataset("op_ddl_us").Delete(context.Background()) })
+}
+
+// covers: google.firestore.admin.v1.FirestoreAdmin/CreateDatabase, google.firestore.admin.v1.FirestoreAdmin/UpdateDatabase
+//
+// TestOrgPolicyCustomConstraintsFirestore (#1891): the Firestore page's
+// example (ALLOW resource.deleteProtectionState ==
+// 'DELETE_PROTECTION_ENABLED', CREATE and UPDATE) refuses a database
+// without delete protection, FAILED_PRECONDITION "Operation denied by
+// custom org policies: [...]", creates one with it, and refuses turning
+// it off.
+func TestOrgPolicyCustomConstraintsFirestore(t *testing.T) {
+	h := New(t)
+	fc := firestoreAdmin(t, h)
+	ctx := h.Context()
+	c := orgPolicyClients(t, h)["grpc"]
+	_, _, pc := foldersClientsAt(t, h, rmOptionsAt(h.Endpoint(EnvResourceManager)))
+	project := orgPolicyProject(t, h, pc, localOrg, "ocd-")
+	protect := customName(h, "deleteprotection")
+	desc := "All databases must have delete protection enabled."
+	createCustom(t, h, c, protect, "firestore.googleapis.com/Database", "resource.deleteProtectionState == 'DELETE_PROTECTION_ENABLED'", ccAllow,
+		desc, ccCreate, ccUpdate)
+	setOrgPolicy(t, h, c, "projects/"+project, protect, opEnforce())
+	_, err := fc.CreateDatabase(ctx, &fsadminpb.CreateDatabaseRequest{Parent: "projects/" + project, DatabaseId: "cc-open",
+		Database: &fsadminpb.Database{LocationId: "us-east1", Type: fsadminpb.Database_FIRESTORE_NATIVE}})
+	wantFailedPrecondition(t, "a database without delete protection", err, customMessage(protect, desc))
+	op, err := fc.CreateDatabase(ctx, &fsadminpb.CreateDatabaseRequest{Parent: "projects/" + project, DatabaseId: "cc-safe",
+		Database: &fsadminpb.Database{LocationId: "us-east1", Type: fsadminpb.Database_FIRESTORE_NATIVE,
+			DeleteProtectionState: fsadminpb.Database_DELETE_PROTECTION_ENABLED}})
+	if err != nil {
+		t.Fatalf("a protected database: %v", err)
+	}
+	db, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("a protected database: %v", err)
+	}
+	_, err = fc.UpdateDatabase(ctx, &fsadminpb.UpdateDatabaseRequest{Database: &fsadminpb.Database{Name: db.GetName(),
+		DeleteProtectionState: fsadminpb.Database_DELETE_PROTECTION_DISABLED}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"delete_protection_state"}}})
+	wantFailedPrecondition(t, "turning delete protection off", err, customMessage(protect, desc))
+}
+
+// covers: google.cloud.run.v2.Services/CreateService
+//
+// TestOrgPolicyCustomConstraintsRun (#1891): the Cloud Run page's example
+// (ALLOW resource.metadata.annotations['run.googleapis.com/ingress'] ==
+// 'internal', read over the service's v1 shape) refuses a service open to
+// all, FAILED_PRECONDITION "Operation denied by custom org policies:
+// [...]"; an ALLOW on the containers' images refuses a Docker Hub image
+// and validates an Artifact Registry one.
+func TestOrgPolicyCustomConstraintsRun(t *testing.T) {
+	h := New(t)
+	rc := runClient(t, h)
+	ctx := h.Context()
+	c := orgPolicyClients(t, h)["grpc"]
+	_, _, pc := foldersClientsAt(t, h, rmOptionsAt(h.Endpoint(EnvResourceManager)))
+	project := orgPolicyProject(t, h, pc, localOrg, "ocr-")
+	ingress := customName(h, "ingressinternal")
+	desc := "Require ingress to be set to internal."
+	createCustom(t, h, c, ingress, "run.googleapis.com/Service", "resource.metadata.annotations['run.googleapis.com/ingress'] == 'internal'", ccAllow,
+		desc, ccCreate, ccUpdate)
+	setOrgPolicy(t, h, c, "projects/"+project, ingress, opEnforce())
+	svc := func(in runpb.IngressTraffic) *runpb.Service {
+		return &runpb.Service{Ingress: in, Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "us-docker.pkg.dev/cloudrun/container/hello"}}}}
+	}
+	parent := "projects/" + project + "/locations/us-central1"
+	_, err := rc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parent, ServiceId: "cc-open", Service: svc(runpb.IngressTraffic_INGRESS_TRAFFIC_ALL)})
+	wantFailedPrecondition(t, "a service open to all", err, customMessage(ingress, desc))
+	// An ALLOW on the containers' images, in a project of its own: an
+	// image from Docker Hub is refused, one from Artifact Registry
+	// validated.
+	other := orgPolicyProject(t, h, pc, localOrg, "ocr2-")
+	images := customName(h, "artifactimages")
+	idesc := "Images must come from Artifact Registry."
+	createCustom(t, h, c, images, "run.googleapis.com/Service",
+		"resource.spec.template.spec.containers.all(c, c.image.startsWith('us-docker.pkg.dev/'))", ccAllow, idesc, ccCreate, ccUpdate)
+	setOrgPolicy(t, h, c, "projects/"+other, images, opEnforce())
+	oparent := "projects/" + other + "/locations/us-central1"
+	hub := svc(runpb.IngressTraffic_INGRESS_TRAFFIC_ALL)
+	hub.Template.Containers[0].Image = "docker.io/library/nginx"
+	_, err = rc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: oparent, ServiceId: "cc-hub", Service: hub})
+	wantFailedPrecondition(t, "a Docker Hub image", err, customMessage(images, idesc))
+	if _, err := rc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: oparent, ServiceId: "cc-ar", ValidateOnly: true,
+		Service: svc(runpb.IngressTraffic_INGRESS_TRAFFIC_ALL)}); err != nil {
+		t.Errorf("an Artifact Registry image (validate only): %v", err)
 	}
 }

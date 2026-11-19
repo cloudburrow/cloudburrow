@@ -6695,7 +6695,24 @@ function dispatch(view) {
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
+  // Custom constraints (#1891): the list, Create custom constraint, and
+  // each one's edit page.
+  if (match.service === "iam-orgpolicies" && resourcePath[0] === "custom-constraints") {
+    if (resourcePath.length === 1) return renderOrgPolicyCustomList(view);
+    if (resourcePath.length === 2 && resourcePath[1] === "create") return renderOrgPolicyCustomEdit(view, null);
+    if (resourcePath.length === 3 && resourcePath[2] === "edit") return renderOrgPolicyCustomEdit(view, resourcePath[1]);
+  }
   if (match.service === "iam-orgpolicies" && resourcePath.length === 2 && resourcePath[1] === "edit") return renderOrgPolicyEdit(view, resourcePath[0]);
+  if (match.service === "iam-orgpolicies" && !resourcePath.length) {
+    // Google's page carries Custom constraint on its title line.
+    return Promise.resolve(renderList(view, match)).then(() => {
+      const slot = headerActions(Array.from(view.children));
+      if (slot && !view.querySelector("#orgpolicy-custom-constraints")) {
+        slot.prepend(el("a", { class: "button secondary", id: "orgpolicy-custom-constraints",
+          href: "/iam-admin/orgpolicies/custom-constraints", text: "Custom constraints" }));
+      }
+    });
+  }
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
   // The old address still works, so a link someone saved keeps resolving.
   const legacy = new URLSearchParams(location.search).get("resource");
@@ -13135,6 +13152,142 @@ function renderOrgPolicyEdit(view, constraint) {
   };
   call("policy-get", { constraint }).then(draw).catch((err) =>
     setChildren(body, errorState("Edit policy unavailable", String(err.message), () => renderOrgPolicyEdit(view, constraint))));
+}
+
+// orgPolicyCustomCall calls the Organization Policies page's custom
+// constraint methods (cmd/cloudburrow/consoleorgpolicycustom.go, #1891).
+function orgPolicyCustomCall(name, body) {
+  const project = currentProject() || "";
+  return send(`/api/studio/iam-orgpolicies?call=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}`, "POST", body || {});
+}
+
+// renderOrgPolicyCustomList is the organization's custom constraints
+// (#1891): each one's ID, display name, resource type, enforcement
+// methods, action and last update, with Edit and Delete, and Custom
+// constraint, which opens Create custom constraint.
+function renderOrgPolicyCustomList(view) {
+  const back = "/iam-admin/orgpolicies";
+  const body = el("div", { id: "orgpolicy-custom-list" }, el("p", { class: "unavailable", text: "reading…" }));
+  const header = pageHeader("Custom constraints", "Your organization's constraints: CEL conditions over a service's resources, enforced where a policy enforces them.",
+    { back, backLabel: "Organization Policies", actions: [
+      el("a", { class: "button primary", id: "orgpolicy-custom-create", href: "/iam-admin/orgpolicies/custom-constraints/create", text: "Custom constraint" })] });
+  setChildren(view, header, body);
+  announce("Custom constraints");
+  const reload = () => renderOrgPolicyCustomList(view);
+  orgPolicyCustomCall("custom-list").then((d) => {
+    if (!d.constraints.length) {
+      setChildren(body, emptyState("No custom constraints yet",
+        "Create one with Custom constraint, or with gcloud org-policies set-custom-constraint; it will appear either way."));
+      return;
+    }
+    const rows = d.constraints.map((c) => el("tr", { "data-constraint": c.id },
+      el("td", {}, el("a", { href: `/iam-admin/orgpolicies/custom-constraints/${encodeURIComponent(c.id)}/edit`, class: "mono", text: c.id })),
+      el("td", { text: c.displayName || "-" }),
+      el("td", { class: "mono", text: c.resourceType }),
+      el("td", { text: (c.methodTypes || []).join(", ") }),
+      el("td", { text: c.actionType }),
+      el("td", { class: "mono", text: c.condition }),
+      el("td", { text: c.updateTime || "" }),
+      el("td", {},
+        el("a", { class: "button secondary", href: `/iam-admin/orgpolicies/custom-constraints/${encodeURIComponent(c.id)}/edit`, text: "Edit" }),
+        el("button", { type: "button", class: "secondary danger", text: "Delete", "aria-label": `Delete ${c.id}`,
+          onclick: () => confirmDestructive({
+            title: `Delete ${c.id}?`,
+            detail: `The custom constraint and every policy set on it are deleted.`,
+            confirmWord: c.id,
+            onConfirm: async () => {
+              const op = recordOperation(`Delete custom constraint ${c.id}`);
+              try {
+                await orgPolicyCustomCall("custom-delete", { name: c.name });
+                op.succeeded("");
+              } catch (err) {
+                op.failed(err.message);
+                throw err;
+              }
+              notify(`Deleted ${c.id}`);
+              reload();
+            },
+          }) }))));
+    setChildren(body, el("table", { class: "data-table", id: "orgpolicy-custom-table" },
+      el("thead", {}, el("tr", {}, ...["Constraint ID", "Display name", "Resource type", "Enforcement method", "Action", "Condition", "Last updated", ""]
+        .map((h) => el("th", { text: h })))),
+      el("tbody", {}, ...rows)));
+  }).catch((err) => setChildren(body, errorState("Custom constraints unavailable", String(err.message), reload)));
+}
+
+// renderOrgPolicyCustomEdit is Create custom constraint (id null) or its
+// edit page (#1891), as Google lays it out: Display name, Constraint ID,
+// Description, Resource type, Enforcement method, Condition and Action.
+function renderOrgPolicyCustomEdit(view, id) {
+  const back = "/iam-admin/orgpolicies/custom-constraints";
+  const title = id ? "Edit custom constraint" : "Create custom constraint";
+  const body = el("div", { id: "orgpolicy-custom-edit" }, el("p", { class: "unavailable", text: "reading…" }));
+  setChildren(view, pageHeader(title, "", { back, backLabel: "Custom constraints" }), body);
+  announce(title);
+  const draw = (types, c) => {
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const field = (label, input, help) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }), input,
+      help ? el("span", { class: "form-help", text: help }) : null);
+    const display = el("input", { type: "text", id: "custom-display-name", value: c.displayName || "", maxlength: 200 });
+    const cid = el("input", { type: "text", id: "custom-id", value: (c.id || "").replace(/^custom\./, ""), disabled: id ? "disabled" : null });
+    const desc = el("textarea", { id: "custom-description", rows: 2, maxlength: 2000 });
+    desc.value = c.description || "";
+    const rtype = el("select", { id: "custom-resource-type" }, ...types.map((t) => el("option", { value: t, text: t, selected: t === c.resourceType ? "selected" : null })));
+    const updating = (c.methodTypes || []).includes("UPDATE");
+    const methods = el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Enforcement method" },
+      ...[["create", "Enforce on create"], ["update", "Enforce on create and update"]].map(([v, label]) => el("label", { class: "check-line", for: `custom-method-${v}` },
+        el("input", { type: "radio", name: "custom-method", value: v, id: `custom-method-${v}`, checked: (v === "update") === updating ? "checked" : null }),
+        el("span", { text: label }))));
+    const cond = el("textarea", { id: "custom-condition", rows: 4, class: "mono", maxlength: 1500 });
+    cond.value = c.condition || "";
+    const action = el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Action" },
+      ...[["ALLOW", "Allow"], ["DENY", "Deny"]].map(([v, label]) => el("label", { class: "check-line", for: `custom-action-${v}` },
+        el("input", { type: "radio", name: "custom-action", value: v, id: `custom-action-${v}`, checked: v === (c.actionType || "ALLOW") ? "checked" : null }),
+        el("span", { text: label }))));
+    const save = el("button", { type: "submit", class: "primary", id: "custom-save", text: id ? "Save" : "Create constraint" });
+    const picked = (name) => (body.querySelector(`input[name="${name}"]:checked`) || {}).value;
+    const form = el("form", { class: "create-form", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      const name = id || ("custom." + cid.value.trim());
+      if (!id && !/^[A-Za-z0-9]{1,70}$/.test(cid.value.trim())) {
+        error.textContent = "The constraint ID is up to 70 letters and digits, after custom.";
+        error.hidden = false;
+        return;
+      }
+      save.disabled = true;
+      const op = recordOperation(`${id ? "Update" : "Create"} custom constraint ${name}`);
+      try {
+        await orgPolicyCustomCall("custom-set", { name, create: !id, displayName: display.value, description: desc.value,
+          resourceType: rtype.value, methodTypes: picked("custom-method") === "update" ? ["CREATE", "UPDATE"] : ["CREATE"],
+          condition: cond.value, actionType: picked("custom-action") });
+        op.succeeded("");
+        notify(`${id ? "Saved" : "Created"} ${name}`);
+        navigate(back);
+      } catch (err) {
+        op.failed(err.message);
+        error.textContent = err.message;
+        error.hidden = false;
+        save.disabled = false;
+      }
+    } },
+      error,
+      field("Display name", display),
+      field("Constraint ID", el("div", { class: "input-prefix" }, el("span", { class: "mono", text: "custom." }), cid),
+        "Up to 70 letters and digits. It cannot be changed later."),
+      field("Description", desc, "Shown as the error message when the policy is violated."),
+      field("Resource type", rtype),
+      el("h3", { text: "Enforcement method" }), methods,
+      field("Condition", cond, "A CEL condition over the resource, such as resource.versioning.enabled == true."),
+      el("h3", { text: "Action" }), action,
+      el("div", { class: "form-actions" }, save,
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => navigate(back) })));
+    setChildren(body, form);
+  };
+  const loads = [orgPolicyCustomCall("custom-list")];
+  if (id) loads.push(orgPolicyCustomCall("custom-get", { name: id }));
+  Promise.all(loads).then(([list, c]) => draw(list.resourceTypes, c || {}))
+    .catch((err) => setChildren(body, errorState(`${title} unavailable`, String(err.message), () => renderOrgPolicyCustomEdit(view, id))));
 }
 
 // iamEnforcementNote says whether this instance enforces what the

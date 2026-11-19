@@ -47,6 +47,7 @@ const (
 	TypeTopic             = "pubsub.googleapis.com/Topic"
 	TypeSubscription      = "pubsub.googleapis.com/Subscription"
 	TypeSecret            = "secretmanager.googleapis.com/Secret"
+	TypeRunService        = "run.googleapis.com/Service"
 )
 
 // Method types.

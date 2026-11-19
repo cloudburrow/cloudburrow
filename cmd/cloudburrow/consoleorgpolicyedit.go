@@ -188,7 +188,10 @@ func (p iamOrgPoliciesProvider) constraintV2(resource, c string) (*orgpolicypb.C
 	return nil, fmt.Errorf("no constraint constraints/%s", c)
 }
 
-func (p iamOrgPoliciesProvider) StudioCall(_ context.Context, project, call string, body json.RawMessage) (any, error) {
+func (p iamOrgPoliciesProvider) StudioCall(ctx context.Context, project, call string, body json.RawMessage) (any, error) {
+	if strings.HasPrefix(call, "custom-") {
+		return p.customCall(ctx, call, body) // consoleorgpolicycustom.go
+	}
 	if project == "" {
 		return nil, errors.New("choose a project in the toolbar")
 	}
