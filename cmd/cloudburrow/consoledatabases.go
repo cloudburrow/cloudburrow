@@ -2342,6 +2342,7 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 			{ID: "properties", Label: "Properties", Listing: fields},
 			datastoreChildren(ctx, c, scope, key),
 		},
+		Edit: datastoreEntityEdit(props),
 	}, nil
 }
 

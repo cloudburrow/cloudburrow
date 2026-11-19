@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"cloud.google.com/go/datastore"
 	dsadmin "cloud.google.com/go/datastore/admin/apiv1"
 	dsadminpb "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	"cloud.google.com/go/datastore/apiv1/datastorepb"
@@ -364,4 +366,64 @@ func datastoreAggregateValue(v *datastorepb.Value) string {
 		return "null"
 	}
 	return fmt.Sprint(v)
+}
+
+// datastoreEntityEdit is an entity's Edit entity form (#1846): every
+// property a row of the Properties group, as Create entity's, saved
+// together. None when a property cannot be written back as the form shows
+// it (a key in another project or database): its own page says why.
+func datastoreEntityEdit(props datastore.PropertyList) *console.EditForm {
+	rows := make([]map[string]string, 0, len(props))
+	for _, pr := range props {
+		typ, raw, ok := formatDatastoreValue(pr.Value, pr.NoIndex)
+		if !ok {
+			return nil
+		}
+		rows = append(rows, map[string]string{"name": pr.Name, "type": typ, "value": raw,
+			"indexed": strconv.FormatBool(!pr.NoIndex)})
+	}
+	def, _ := json.Marshal(rows)
+	f := datastorePropertiesField()
+	f.Default = string(def)
+	return &console.EditForm{Label: "Edit entity", Fields: []console.Field{f},
+		Note: "Saved by writing the entity back with these properties, in a transaction: a property " +
+			"removed here is deleted. The key cannot be changed."}
+}
+
+// editDatastoreEntity saves Edit entity: the entity's properties become
+// the form's rows.
+func (p datastoreProvider) editDatastoreEntity(ctx context.Context, project string, scope datastoreScope, kind, id string, values map[string]string) error {
+	rows, err := console.ParseGroup(values["properties"])
+	if err != nil {
+		return fmt.Errorf("properties: %w", err)
+	}
+	next := map[string]*datastorepb.Value{}
+	for i, row := range rows {
+		name := strings.TrimSpace(row["name"])
+		if name == "" {
+			return fmt.Errorf("property %d has no name", i+1)
+		}
+		if _, dup := next[name]; dup {
+			return fmt.Errorf("property %q is given twice", name)
+		}
+		prop, err := datastoreProperty(name, map[string]string{"type": row["type"], "value": row["value"],
+			"excluded": strconv.FormatBool(row["indexed"] != "true")})
+		if err != nil {
+			return fmt.Errorf("property %s: %w", name, err)
+		}
+		v, err := datastorePropertyPB(prop)
+		if err != nil {
+			return fmt.Errorf("property %s: %w", name, err)
+		}
+		next[name] = v
+	}
+	return p.changeEntity(ctx, project, scope, kind, id, func(props map[string]*datastorepb.Value) error {
+		for k := range props {
+			delete(props, k)
+		}
+		for k, v := range next {
+			props[k] = v
+		}
+		return nil
+	})
 }

@@ -1597,17 +1597,23 @@ func (datastoreProvider) CreateForm() (string, []console.Field) {
 			Help:    "A numeric ID Datastore allocates, or a name of your own."},
 		{Name: "key", Label: "Custom name", Type: "text", ShowWhen: "keyType=" + datastoreKeyCustom,
 			Help: "The entity's name. As the Name/ID column shows one, name=alice is the name alice and id=123 the numeric ID 123."},
-		{Name: "properties", Label: "Properties", Type: console.GroupFieldType, AddLabel: "Add property",
-			Group: []console.Field{
-				{Name: "name", Label: "Name", Type: "text"},
-				{Name: "type", Label: "Type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
-				{Name: "value", Label: "Value", Type: "textarea"},
-				{Name: "indexed", Label: "Indexed", Type: "checkbox", Default: "true"},
-			},
-			Help: "A timestamp is RFC 3339 (2026-09-27T15:04:05Z); a key Kind/name=… or Kind/id=…, ancestors first; " +
-				"a geographical point latitude, longitude; an array or embedded entity JSON; a blob base64. " +
-				"An unindexed property cannot be filtered or ordered on; a string or blob over 1,500 bytes must be unindexed."},
+		datastorePropertiesField(),
 	}
+}
+
+// datastorePropertiesField is Create entity's and Edit entity's
+// Properties: a row each with Name, Type, Value and Indexed (#1846).
+func datastorePropertiesField() console.Field {
+	return console.Field{Name: "properties", Label: "Properties", Type: console.GroupFieldType, AddLabel: "Add property",
+		Group: []console.Field{
+			{Name: "name", Label: "Name", Type: "text"},
+			{Name: "type", Label: "Type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
+			{Name: "value", Label: "Value", Type: "textarea"},
+			{Name: "indexed", Label: "Indexed", Type: "checkbox", Default: "true"},
+		},
+		Help: "A timestamp is RFC 3339 (2026-09-27T15:04:05Z); a key Kind/name=… or Kind/id=…, ancestors first; " +
+			"a geographical point latitude, longitude; an array or embedded entity JSON; a blob base64. " +
+			"An unindexed property cannot be filtered or ordered on; a string or blob over 1,500 bytes must be unindexed."}
 }
 
 // Create entity's Key identifier choices, as Google's.
@@ -1732,6 +1738,10 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 // Edit implements console.Editor for one property of an entity.
 func (p datastoreProvider) Edit(ctx context.Context, project string, full []string, values map[string]string) error {
 	scope, path := parseDatastorePath(full)
+	if !scope.index && len(path) == 2 {
+		// Edit entity (#1846).
+		return p.editDatastoreEntity(ctx, project, scope, path[0], path[1], values)
+	}
 	if scope.index || len(path) != 3 {
 		return errors.New("a property is edited on its own page; an entity's properties are added with Add property")
 	}

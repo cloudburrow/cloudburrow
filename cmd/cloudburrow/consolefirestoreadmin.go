@@ -101,12 +101,27 @@ func (p firestoreDatabasesProvider) List(ctx context.Context, project string) (c
 			"Delete protection": enumWord(db.DeleteProtectionState, "DELETE_PROTECTION_"),
 		},
 			// Clone in the row's View more, as Google's (#1845).
-			Actions: []console.Action{cloneAction()}, ActsOn: []string{dbID(db.Name)}})
+			Actions: databaseRowActions(project, db), ActsOn: []string{dbID(db.Name)}})
 	}
 	base.Total = len(base.Items)
 	base.Note = "Data browses any database, chosen in its Database picker; each database's Query builder runs against its own documents. Every database is served by the one emulator, " +
 		"each with its own documents; deleting a database deletes its documents."
 	return base, nil
+}
+
+// databaseRowActions are a database row's View more: Clone, and, for a
+// Datastore mode database, Datastore Studio, its entities on the Datastore
+// page, which is where Google's Databases page opens one (#1846).
+func databaseRowActions(project string, db *adminpb.Database) []console.Action {
+	acts := []console.Action{cloneAction()}
+	if db.GetType() == adminpb.Database_DATASTORE_MODE {
+		q := url.Values{"project": {project}}
+		if id := dbID(db.GetName()); id != firestoreDefaultDatabase {
+			q.Set(firestoreDatabaseKey, id)
+		}
+		acts = append([]console.Action{{ID: "datastore-studio", Label: "Datastore Studio", Href: "/datastore?" + q.Encode()}}, acts...)
+	}
+	return acts
 }
 
 func databaseType(t adminpb.Database_DatabaseType) string {

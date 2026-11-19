@@ -76,6 +76,34 @@ func TestConsoleDatastoreStudio(t *testing.T) {
 	if len(made) != 2 || made[0].Name != "hours" || made[0].Value != int64(3) || !made[0].NoIndex || made[1].NoIndex {
 		t.Errorf("Create entity wrote %+v", made)
 	}
+	// Edit entity: its page's form holds every property; Save writes the
+	// rows back, a removed one deleted.
+	var entity struct {
+		Edit *struct {
+			Label  string
+			Fields []struct{ Name, Default string }
+		}
+	}
+	if err := json.Unmarshal([]byte(consoleGetDetail(t, addr, project, id, "Made", "m1")), &entity); err != nil {
+		t.Fatal(err)
+	}
+	if entity.Edit == nil || entity.Edit.Label != "Edit entity" || len(entity.Edit.Fields) != 1 ||
+		!strings.Contains(entity.Edit.Fields[0].Default, `"name":"hours"`) {
+		t.Fatalf("the entity's page offers %+v, want Edit entity with its properties", entity.Edit)
+	}
+	edit, _ := json.Marshal(map[string]any{"Path": []string{"Made", "m1"}, "Values": map[string]string{
+		"properties": `[{"name":"hours","type":"float","value":"4.5","indexed":"true"}]`}})
+	if code, out := consoleDo(t, addr, http.MethodPatch, "/api/resources/datastore"+q, string(edit)); code != http.StatusOK {
+		t.Fatalf("Edit entity = %d: %s", code, out)
+	}
+	made = nil
+	if err := dc.Get(ctx, datastore.NameKey("Made", "m1", nil), &made); err != nil {
+		t.Fatal(err)
+	}
+	if len(made) != 1 || made[0].Value != 4.5 || made[0].NoIndex {
+		t.Errorf("after Edit entity the entity holds %+v, want hours 4.5 indexed alone", made)
+	}
+
 	body, _ = json.Marshal(map[string]string{"kind": "Made", "keyType": "Numeric ID (auto-generated)", "key": "ignored"})
 	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/datastore"+q, string(body)); code != http.StatusOK {
 		t.Fatalf("Create entity with a numeric ID = %d: %s", code, out)
@@ -155,4 +183,15 @@ func TestConsoleDatastoreStudio(t *testing.T) {
 	if got := strings.Join(entityNames(t, ctx, dc), ","); got != allEntities {
 		t.Errorf("after Import of everything = %s, want %s", got, allEntities)
 	}
+}
+
+// consoleGetDetail is the Datastore page at path in a database, as JSON.
+func consoleGetDetail(t *testing.T, addr, project, database string, path ...string) string {
+	t.Helper()
+	v := url.Values{"project": {project}, "database": {database}, "name": path}
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/datastore?"+v.Encode(), "")
+	if code != http.StatusOK {
+		t.Fatalf("the Datastore page %v = %d: %s", path, code, out)
+	}
+	return out
 }

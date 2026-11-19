@@ -113,6 +113,29 @@ func TestDatastoreStudioQueryByGQLIndexesAndImportExportThroughTheBrowser(t *tes
 		t.Errorf("Create entity wrote %+v, want hours 3 unindexed and title Write indexed", made)
 	}
 
+	// Edit entity: a row each, Remove on title, Save.
+	p.navigate("/datastore/Made/m1" + q)
+	p.clickText("#view button", "Edit entity")
+	p.waitFor(`document.querySelectorAll(".group-row").length === 2`)
+	p.eval(`(() => { const r = [...document.querySelectorAll(".group-row")].find((r) => r.querySelector("input[type=text]").value === "title");
+		r.querySelector(".group-remove").click(); return true; })()`, nil)
+	p.waitFor(`document.querySelectorAll(".group-row").length === 1`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		made = nil
+		if err := dc.Get(ctx, key, &made); err == nil && len(made) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after Edit entity without title the entity holds %+v", made)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if made[0].Name != "hours" || made[0].Value != int64(3) || !made[0].NoIndex {
+		t.Errorf("Edit entity changed hours: %+v", made)
+	}
+
 	p.navigate("/datastore" + q)
 	for _, label := range []string{"Export", "Import", "Indexes"} {
 		p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view a, #view button")].some((b) => b.textContent.trim() === %q)`, label))
