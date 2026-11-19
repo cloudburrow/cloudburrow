@@ -14160,9 +14160,20 @@ function renderSpannerStudio(panel, route, segments, project) {
     }
     if (r.error) return setChildren(results, el("p", { class: "form-error", role: "alert", text: r.error }));
     if (resultTab === "explanation") {
-      if (!(r.plan || []).length) return setChildren(results, el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." }));
-      return setChildren(results, el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
-        el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") }))));
+      // Google's Explanation tab: the Query summary (PROFILE mode's
+      // statistics, after Run) above the plan, which the emulator lacks.
+      const st = r.stats;
+      const summary = st ? el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
+        el("h3", { text: "Query summary" }),
+        el("dl", { class: "resource-summary" },
+          ...[["Rows returned", st.rowsReturned], ["Elapsed time", st.elapsedTime],
+            ["CPU time", st.cpuTime || "Not reported by the Spanner emulator"], ["Rows scanned", st.rowsScanned || "Not reported by the Spanner emulator"]]
+            .flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", id: `spanner-stat-${k.toLowerCase().replaceAll(" ", "-")}`, text: v || "—" })]))) : null;
+      const plan = (r.plan || []).length
+        ? el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
+          el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") })))
+        : el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." });
+      return setChildren(results, summary, plan);
     }
     if (r.kind !== "query") {
       return setChildren(results, el("p", { class: "spanner-message", id: "spanner-message", text: `${r.message || "Done."} ${r.elapsed ? `(${r.elapsed})` : ""}` }));
@@ -14211,6 +14222,8 @@ function renderSpannerStudio(panel, route, segments, project) {
         return;
       }
       last.results = res;
+      // Run is PROFILE mode: its statistics are the Explanation tab's.
+      if (res.kind === "query") last.explanation = res;
       if (res.kind !== "query") loadExplorer();
       announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
     } catch (err) {

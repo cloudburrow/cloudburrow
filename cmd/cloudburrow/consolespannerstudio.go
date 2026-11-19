@@ -12,6 +12,19 @@ package main
 // list views, change streams and sequences, labels are kept on an instance,
 // and AnalyzeQuery (query mode PLAN) answers INTERNAL "query plan
 // unavailable", so Explain says the emulator's own words.
+//
+// Query plans stay unavailable (#1859, round 2). The emulator's README says
+// "The SQL query modes PLAN and PROFILE do not return any query plans" and
+// no release or flag up to 1.5.59 changes that: its handler
+// (frontend/handlers/queries.cc) answers PLAN and PROFILE with one node,
+// "No query plan", or none. A plan drawn here from the query's text (a scan
+// of each table, a filter per WHERE) would not be Spanner's: the operators,
+// the index chosen, the distributed unions and the join strategy are its
+// optimizer's decisions, which nothing local makes, so a tuned query could
+// look right here and run differently on Spanner. What the emulator does
+// return is PROFILE's query statistics, rows_returned and elapsed_time
+// (it reports no CPU time), so Run runs in PROFILE mode, as Google's Spanner
+// Studio does, and the Explanation tab shows them as the Query summary.
 
 import (
 	"context"
@@ -27,6 +40,7 @@ import (
 	"cloud.google.com/go/spanner"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
+	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
 	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -238,6 +252,57 @@ type spannerStudioResult struct {
 	Elapsed  string            `json:"elapsed,omitempty"`
 	Plan     []spannerPlanNode `json:"plan,omitempty"`
 	PlanNote string            `json:"planNote,omitempty"`
+	// Stats is PROFILE mode's query statistics, as the emulator returns
+	// them, for the Explanation tab's Query summary.
+	Stats *spannerQueryStats `json:"stats,omitempty"`
+}
+
+// spannerQueryStats is the query statistics PROFILE mode returns
+// (ResultSetStats.query_stats): the emulator sets rows_returned and
+// elapsed_time; Spanner's cpu_time and rows_scanned are shown when present.
+type spannerQueryStats struct {
+	RowsReturned string `json:"rowsReturned,omitempty"`
+	ElapsedTime  string `json:"elapsedTime,omitempty"`
+	CPUTime      string `json:"cpuTime,omitempty"`
+	RowsScanned  string `json:"rowsScanned,omitempty"`
+}
+
+// spannerNoPlanNote is the Explanation tab's word when the emulator has no
+// plan to give; why is in this file's comment.
+const spannerNoPlanNote = "Not available locally: the Spanner emulator returns no query plan (its documented limitation: " +
+	"\"The SQL query modes PLAN and PROFILE do not return any query plans\")."
+
+// spannerPlan is a returned plan's nodes, none when the plan is the
+// emulator's placeholder ("No query plan").
+func spannerPlan(plan *sppb.QueryPlan) []spannerPlanNode {
+	var out []spannerPlanNode
+	for _, n := range plan.GetPlanNodes() {
+		if n.GetDisplayName() == "No query plan" && n.GetKind() == sppb.PlanNode_KIND_UNSPECIFIED {
+			continue
+		}
+		node := spannerPlanNode{Index: n.GetIndex(), Name: n.GetDisplayName(), Kind: n.GetKind().String()}
+		for _, l := range n.GetChildLinks() {
+			node.Children = append(node.Children, l.GetChildIndex())
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+// spannerStats reads PROFILE's query statistics, nil when there are none.
+func spannerStats(m map[string]any) *spannerQueryStats {
+	str := func(k string) string {
+		if v, ok := m[k]; ok && v != nil {
+			return fmt.Sprint(v)
+		}
+		return ""
+	}
+	st := &spannerQueryStats{RowsReturned: str("rows_returned"), ElapsedTime: str("elapsed_time"),
+		CPUTime: str("cpu_time"), RowsScanned: str("rows_scanned")}
+	if *st == (spannerQueryStats{}) {
+		return nil
+	}
+	return st
 }
 
 type spannerPlanNode struct {
@@ -357,16 +422,24 @@ func (p spannerProvider) spannerStudioRun(ctx context.Context, dbAdmin *database
 	if len(st.Kinds) > 1 {
 		return nil, errors.New("Run runs one query at a time: select one statement, or remove everything after the first semicolon")
 	}
-	it := c.Single().Query(ctx, spanner.Statement{SQL: strings.TrimRight(sql, "; \t\r\n")})
+	// PROFILE mode, as Google's Spanner Studio runs a query: its results
+	// and its statistics. The rows past the first 1,000 are read and
+	// dropped, since the statistics come at the end of the stream.
+	it := c.Single().QueryWithStats(ctx, spanner.Statement{SQL: strings.TrimRight(sql, "; \t\r\n")})
 	defer it.Stop()
 	res := &spannerStudioResult{Kind: "query", Rows: [][]string{}}
-	for len(res.Rows) < 1000 {
+	more := false
+	for {
 		row, err := it.Next()
 		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
 			return nil, err
+		}
+		if len(res.Rows) == 1000 {
+			more = true
+			continue
 		}
 		if res.Columns == nil {
 			res.Columns = row.ColumnNames()
@@ -387,8 +460,12 @@ func (p spannerProvider) spannerStudioRun(ctx context.Context, dbAdmin *database
 		}
 	}
 	res.Elapsed = time.Since(start).Round(time.Millisecond).String()
-	if len(res.Rows) == 1000 {
+	if more {
 		res.Message = "Showing the first 1,000 rows."
+	}
+	res.Stats = spannerStats(it.QueryStats)
+	if res.Plan = spannerPlan(it.QueryPlan); len(res.Plan) == 0 {
+		res.PlanNote = spannerNoPlanNote
 	}
 	return res, nil
 }
@@ -406,19 +483,11 @@ func spannerStudioExplain(ctx context.Context, c *spanner.Client, sql string) (*
 	plan, err := c.Single().AnalyzeQuery(ctx, spanner.Statement{SQL: sql})
 	res := &spannerStudioResult{Kind: "explain"}
 	if err != nil {
-		res.PlanNote = "Not available locally: the Spanner emulator returns no query plan (AnalyzeQuery answered: " +
-			spanner.ErrDesc(err) + ")."
+		res.PlanNote = spannerNoPlanNote[:len(spannerNoPlanNote)-2] + "; AnalyzeQuery answered: " + spanner.ErrDesc(err) + ")."
 		return res, nil
 	}
-	for _, n := range plan.GetPlanNodes() {
-		node := spannerPlanNode{Index: n.GetIndex(), Name: n.GetDisplayName(), Kind: n.GetKind().String()}
-		for _, l := range n.GetChildLinks() {
-			node.Children = append(node.Children, l.GetChildIndex())
-		}
-		res.Plan = append(res.Plan, node)
-	}
-	if len(res.Plan) == 0 {
-		res.PlanNote = "The query plan has no nodes."
+	if res.Plan = spannerPlan(plan); len(res.Plan) == 0 {
+		res.PlanNote = spannerNoPlanNote
 	}
 	return res, nil
 }
