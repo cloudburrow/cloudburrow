@@ -521,3 +521,11 @@ docker run --rm -v "$PWD:/models" \
 > Layer I and II joint stereo WAVs (`internal/embedding/mp2.go`), within 1.1 16-bit steps of
 > ffmpeg 9's decode of frames of random parameters written to the standard's syntax (ffmpeg
 > encodes neither): `TestEmbedContentEmbedsMPEGLayerIAndJointStereoWAVThroughThePredictionClient`.
+
+> **Update 2026-11-18 (#1651): arithmetic-coded and 12-bit JPEG.** JPEG images are decoded by a
+> copy of Go's `image/jpeg` (`third_party/gojpeg`) extended from ITU-T T.81 to arithmetic coding
+> (SOF9, SOF10) and 12-bit samples (SOF1, SOF2, SOF9, SOF10): arithmetic-coded files decode to
+> exactly their Huffman twins' pixels, 12-bit ones within 2 twelve-bit steps of libjpeg-turbo's
+> `djpeg -dct float`. Embedded through the official client by
+> `TestEmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient`. Lossless and
+> hierarchical JPEG stay `UNIMPLEMENTED`.

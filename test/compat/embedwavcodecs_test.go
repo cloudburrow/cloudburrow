@@ -50,10 +50,17 @@ func float32WAV(f32 []byte, channels int, rate uint32) []byte {
 // 768-value unit vector.
 func embedWAV(t *testing.T, ctx context.Context, pc *aiplatform.PredictionClient, name, what string, data []byte) *aiplatformpb.EmbedContentResponse {
 	t.Helper()
+	return embedInline(t, ctx, pc, name, what, "audio/wav", data)
+}
+
+// embedInline is EmbedContent of one inline part, checked for a 768-value
+// unit vector.
+func embedInline(t *testing.T, ctx context.Context, pc *aiplatform.PredictionClient, name, what, mimeType string, data []byte) *aiplatformpb.EmbedContentResponse {
+	t.Helper()
 	r, err := pc.EmbedContent(ctx, &aiplatformpb.EmbedContentRequest{
 		Model: proto.String(name),
 		Content: &aiplatformpb.Content{Role: "user", Parts: []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{
-			InlineData: &aiplatformpb.Blob{MimeType: "audio/wav", Data: data}}}}},
+			InlineData: &aiplatformpb.Blob{MimeType: mimeType, Data: data}}}}},
 	})
 	if err != nil {
 		t.Fatalf("%s: EmbedContent: %v", what, err)
@@ -126,5 +133,44 @@ func TestEmbedContentEmbedsG726WAVThroughThePredictionClient(t *testing.T) {
 			t.Errorf("%s.wav (%d kbit/s): %d tokens at cosine %.6f to ffmpeg's decode (%d tokens); want the same vector", file, 8*bits, n, c, want)
 		}
 		t.Logf("%s.wav (%d kbit/s): %d tokens (ffmpeg's PCM decode %d), cosine %.6f", file, 8*bits, n, want, c)
+	}
+}
+
+// covers: google.cloud.aiplatform.v1.PredictionService/EmbedContent
+//
+// TestEmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient
+// (#1651) embeds, through the official aiplatform PredictionClient's
+// EmbedContent, an arithmetic-coded progressive JPEG (SOF10) and a 12-bit
+// one (12-bit SOF10), which were UNIMPLEMENTED: internal/embedding/
+// testdata/jpeg-arith-progressive.jpg, libjpeg-turbo's lossless arithmetic
+// transcode of jpeg-huffman.jpg, is that file's vector exactly (the same
+// pixels: third_party/gojpeg's TestArithmeticMatchesHuffmanTwin); and
+// jpeg-12bit-arith-progressive.jpg is within cosine 0.9999 of
+// jpeg-12bit-arith-progressive.djpeg.png, libjpeg-turbo's djpeg decode of
+// it (-dct float -nosmooth) as a 16-bit PNG (within 2 twelve-bit steps:
+// Test12Bit).
+func TestEmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient(t *testing.T) {
+	h := New(t)
+	pc := predictionClientAt(t, h, EnvEmbeddings)
+	addr := consoleAddr(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	loadEmbeddingModel2(t, ctx, addr)
+	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel2
+	for _, c := range []struct {
+		file, refFile, refType string
+		min                    float64
+	}{
+		{"jpeg-arith-progressive.jpg", "jpeg-huffman.jpg", "image/jpeg", 0.99999},
+		{"jpeg-12bit-arith-progressive.jpg", "jpeg-12bit-arith-progressive.djpeg.png", "image/png", 0.9999},
+	} {
+		got := embedInline(t, ctx, pc, name, c.file, "image/jpeg", embeddingTestdata(t, c.file))
+		ref := embedInline(t, ctx, pc, name, c.refFile, c.refType, embeddingTestdata(t, c.refFile))
+		n, want := got.GetUsageMetadata().GetPromptTokenCount(), ref.GetUsageMetadata().GetPromptTokenCount()
+		cos := cosine(got.GetEmbedding().GetValues(), ref.GetEmbedding().GetValues())
+		if n != want || cos < c.min {
+			t.Errorf("%s: %d tokens at cosine %.6f to %s (%d tokens); want the same tokens, cosine at least %v", c.file, n, cos, c.refFile, want, c.min)
+		}
+		t.Logf("%s: %d tokens (%s %d), cosine %.6f", c.file, n, c.refFile, want, cos)
 	}
 }

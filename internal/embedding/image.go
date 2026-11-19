@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/jpeg"
 	"image/png"
 	"io"
 	"math"
@@ -14,6 +13,8 @@ import (
 
 	"golang.org/x/image/bmp"
 	"golang.org/x/image/webp"
+
+	jpeg "github.com/cloudburrow/cloudburrow/third_party/gojpeg"
 )
 
 // Images for EmbeddingGemma 2's vision encoder (#1454), prepared as its
@@ -25,8 +26,9 @@ import (
 // values in (row, column, channel) order, each with its (column, row)
 // position.
 
-// ImageMIMETypes are the image types decoded here: PNG and JPEG with Go's
-// standard library, WebP (lossy, lossless, with or without alpha) and BMP
+// ImageMIMETypes are the image types decoded here: PNG with Go's standard
+// library, JPEG with a copy of Go's image/jpeg that also decodes
+// arithmetic-coded and 12-bit JPEG (third_party/gojpeg, #1651), WebP (lossy, lossless, with or without alpha) and BMP
 // with golang.org/x/image (#1651), an animated WebP as its first frame and
 // HEIC and HEIF with github.com/gen2brain/h265 (#1724), and AVIF with
 // github.com/gen2brain/gav1d (#1729, #1736, avif.go): the image types Google's
@@ -99,7 +101,7 @@ func DecodeImage(mimeType string, data []byte) (image.Image, error) {
 }
 
 // imageError is a decoder's refusal: a valid image using a feature the
-// decoder does not implement (a 12-bit or arithmetic-coded JPEG, an
+// decoder does not implement (a lossless or hierarchical JPEG, an
 // RLE-compressed BMP...) is ErrNotDecoded, anything else invalid data.
 func imageError(mt string, err error) error {
 	var jpegErr jpeg.UnsupportedError
