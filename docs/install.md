@@ -1,6 +1,7 @@
 # Installing CloudBurrow
 
-> **Current release: [v0.3.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.3.0).**
+> **Current release: [the latest](https://github.com/cloudburrow/cloudburrow/releases/latest).**
+> A new release goes out every one to two days ([docs/ci.md](ci.md#releasing)).
 > Install it with Homebrew or the install script below, or [build from source](#build-and-run).
 
 ## Install a release
@@ -60,15 +61,15 @@ archive whose checksum does not match, or that has no entry in `checksums.txt`.*
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
-# a specific release, elsewhere:
-curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version v0.3.0 --prefix /usr/local
+# a specific release (any tag on the releases page), elsewhere:
+curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh -s -- --version vX.Y.Z --prefix /usr/local
 ```
 
 **Verify a download by hand:**
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing        # shasum -a 256 -c on macOS
-gh attestation verify cloudburrow_v0.3.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+gh attestation verify cloudburrow_vX.Y.Z_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
 On macOS, see [Gatekeeper](#gatekeeper) for whether a release's binaries are signed and
@@ -95,7 +96,7 @@ it covers every other archive.
 ```sh
 codesign -dv --verbose=2 cloudburrow   # Authority=Developer ID Application: ... (J4TZ73L264), flags=0x10000(runtime), a Timestamp= line
 spctl -a -vv -t open --context context:primary-signature cloudburrow   # accepted, source=Notarized Developer ID
-gh attestation verify cloudburrow_v0.3.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
+gh attestation verify cloudburrow_vX.Y.Z_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow
 ```
 
 A command-line binary cannot carry a stapled notarization ticket (stapling works only on app

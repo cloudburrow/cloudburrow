@@ -29,7 +29,7 @@ jobs:
       # Pin the action by commit SHA, as for any third-party action.
       - uses: cloudburrow/cloudburrow@<commit-sha>
         with:
-          version: v0.3.0            # or latest, or source (needs actions/setup-go)
+          version: latest            # or a release tag (vX.Y.Z), or source (needs actions/setup-go)
           services: storage,pubsub   # default: CloudBurrow's defaults
 
       # STORAGE_EMULATOR_HOST, PUBSUB_EMULATOR_HOST, GOOGLE_CLOUD_PROJECT and the
