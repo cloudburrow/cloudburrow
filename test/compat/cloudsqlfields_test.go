@@ -58,7 +58,7 @@ func wantSQLRefusal(t *testing.T, what string, err error, field string) {
 // connectors' connectSettings is refused; enabled again it is RUNNABLE and
 // restarts. Fields CloudBurrow does not apply are refused by name: a
 // settings.connectorEnforcement REQUIRED, databaseCenterIntegrationEnabled
-// or databaseCenterIntegration ENABLED (#1700), a password validation policy, a
+// or databaseCenterIntegration ENABLED (#1700), a
 // SQL Server setting, a database role on users.insert and a PHYSICAL
 // backup run.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.restart, sql.instances.delete, sql.connect.get, sql.users.insert, sql.backupRuns.insert, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
@@ -77,9 +77,7 @@ func TestCloudSQLFieldsNeverSilentlyDropped(t *testing.T) {
 	tier := &sqladmin.Settings{Tier: "db-custom-1-3840"}
 
 	for what, in := range map[string]*sqladmin.DatabaseInstance{
-		"settings.connectorEnforcement": {Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", ConnectorEnforcement: "REQUIRED"}},
-		"settings.passwordValidationPolicy": {Settings: &sqladmin.Settings{Tier: "db-custom-1-3840",
-			PasswordValidationPolicy: &sqladmin.PasswordValidationPolicy{EnablePasswordPolicy: true, MinLength: 12}}},
+		"settings.connectorEnforcement":     {Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", ConnectorEnforcement: "REQUIRED"}},
 		"settings.timeZone":                 {Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", TimeZone: "UTC"}},
 		"databaseCenterIntegrationEnabled":  {Settings: tier, DatabaseCenterIntegrationEnabled: true},
 		"databaseCenterIntegration ENABLED": {Settings: tier, DatabaseCenterIntegration: "ENABLED"},

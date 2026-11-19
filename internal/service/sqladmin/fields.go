@@ -200,8 +200,9 @@ var settingsFields = map[string]fieldRule{
 	"connectorEnforcement": refusedValues("the server is reached directly through its host tunnel as well as through the connectors, "+
 		"and direct connections are not refused", "NOT_REQUIRED"),
 	"enableGoogleMlIntegration": refused501("the server has no Vertex AI integration (google_ml_integration)"),
-	"passwordValidationPolicy":  refused501("a user's password is not checked against a policy"),
-	"readPoolAutoScaleConfig":   refused501(readPoolWhy),
+	// passwordValidationPolicy is checked by users.insert and update (#1876).
+	"passwordValidationPolicy": kept,
+	"readPoolAutoScaleConfig":  refused501(readPoolWhy),
 }
 
 // userFields are User's properties, as users.insert and update take them.

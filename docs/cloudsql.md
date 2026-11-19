@@ -311,12 +311,33 @@ and an address the connectors reach through 3307.
 | `diskEncryptionConfiguration` | A customer-managed encryption key: see [Customer-managed encryption keys](#customer-managed-encryption-keys-1538). |
 | Every other field | Applied, recorded, ignored as output only, or refused by name: see [Request fields](#request-fields-1538). |
 | `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
+| `settings.activationPolicy` | `NEVER` stops the instance and `ALWAYS` starts it (#1875), as `gcloud sql instances patch --activation-policy=never` / `always` and the console's **Stop** / **Start** do ([start-stop-restart-instance](https://docs.cloud.google.com/sql/docs/mysql/start-stop-restart-instance)). Each is an `UPDATE` operation. A stopped instance's server is scaled to no pods (a `REGIONAL` instance's standby too), its tunnel closed and its volume kept: connections fail, and the data is there when it starts again. The API answers it `RUNNABLE` with `activationPolicy` `NEVER` ("The instance is running, or has been stopped by owner"; gcloud shows it `STOPPED`). What its server would have to serve (users, databases, `restart`, exports and imports, `backupRuns.insert`, `executeSql`, a new read replica of it, a major version upgrade, ...) is 400 "Invalid request since instance is not running."; its record (get, patch, delete, certificates, backup records) is served. An instance created with `NEVER` is initialised, then stopped. `NEVER` on a read replica is 400 ("NEVER is not supported for read replica instances"); `ON_DEMAND`, deprecated, is 400. |
+| `settings.passwordValidationPolicy` | Applied (#1876): see [Password policy](#password-policy-1876). |
 | `settings.availabilityType` | `ZONAL` (the default) or `REGIONAL`, a high-availability instance with a synchronous standby: see [High availability](#high-availability-1408). Another value is 400. |
 | `replicaConfiguration.failoverTarget`, `failoverReplica` | 400, as Cloud SQL answers (#1462): the legacy high-availability configuration, deprecated for every instance on 2025-01-13, with which "you can't create instances" ([configure-legacy-ha](https://docs.cloud.google.com/sql/docs/mysql/configure-legacy-ha)). `REGIONAL` is high availability. |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
 server, its Service and its volume. `restart` restarts its pod.
+
+### Password policy (#1876)
+
+`settings.passwordValidationPolicy` is taken on `insert`, `patch` and `update` and answered as
+set; a `patch` of some of its fields keeps the others, as `gcloud sql instances patch
+--password-policy-*` sends only the flags given. As Google documents
+([built-in-authentication](https://docs.cloud.google.com/sql/docs/postgres/built-in-authentication)),
+it acts only once `enablePasswordPolicy` is set; then `users.insert` and `users.update` refuse
+with 400 a password that is shorter than `minLength`, lacks one of `COMPLEXITY_DEFAULT`'s
+lowercase, uppercase, numeric and non-alphanumeric characters, contains the user's name
+(`disallowUsernameSubstring`, case-insensitive), is one of the user's last `reuseInterval`
+passwords, or (PostgreSQL) changes a password set less than `passwordChangeInterval` ago.
+Refused with 400: `reuseInterval` outside 0 to 100, or above 0 on `MYSQL_5_7` (8.0 and later
+only); `passwordChangeInterval` on MySQL ("only supported for PostgreSQL") or not a duration;
+another `complexity`. The previous passwords are kept only as SHA-256 hashes in the instance's
+record. Not as Google: a password set in SQL (`ALTER USER`, `ALTER ROLE ... PASSWORD`) is not
+checked, as the policy is the Admin API's here, not a server plugin; the 400's wording is
+CloudBurrow's (Google documents none). A user's own `passwordPolicy` (expiry, lockout) is still
+501.
 
 ### Request fields (#1538)
 
@@ -335,11 +356,11 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.retainBackupsOnDelete` | `true` keeps the instance's backups after `delete` (they stay listed by `Backups.ListBackups`); otherwise only a `FINAL` one is kept. |
 | `settings.finalBackupConfig` | `enabled` makes a `delete` without `enableFinalBackup` take a `FINAL` backup, kept `retentionDays` (30 when not given). |
 | `settings.databaseReplicationEnabled` | A read replica's replication state, set by `stopReplica` and `startReplica`; a different value in a patch is 400 naming those methods, and `true` on a primary is 400. |
-| `settings.dataApiAccess`, `edition`, `dataDiskSizeGb`, `backupConfiguration`, `activationPolicy`, `availabilityType` | Applied: see the sections on the Data API, point-in-time recovery, storage shrink, backups and high availability. |
+| `settings.dataApiAccess`, `edition`, `dataDiskSizeGb`, `backupConfiguration`, `activationPolicy`, `availabilityType`, `passwordValidationPolicy` | Applied: see the sections on the Data API, point-in-time recovery, storage shrink, backups, creating instances (stop and start), high availability and the password policy. |
 | `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614), and `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool` (#1834, below); `serverCertificateRotationMode` is checked and recorded. A patch whose `ipConfiguration` names none of the three keeps them. |
 | `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
-| `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
+| `settings.connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no managed pooling, Vertex AI integration or read pools. |
 | `settings.activeDirectoryConfig`, `advancedMachineFeatures`, `collation`, `entraidConfig`, `sqlServerAuditConfig`, `timeZone` | 400: SQL Server settings. |
 | `replicationCluster.failoverDrReplicaName` | Applied on a MySQL or PostgreSQL primary: see DR replicas and switchover. `drReplica` is answered on the DR replica; `psaWriteEndpoint`, a private services access DNS name, is never answered, as no instance has a private IP. |
 | `databaseCenterIntegrationEnabled`, `geminiConfig`, `maintenanceVersion`, `nodeCount`, `switchTransactionLogsToCloudStorageEnabled`, `tags` | 501 when set, each saying what is not served. |

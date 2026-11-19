@@ -426,6 +426,9 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.instances.get", nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist. "+
 			"CloudBurrow's instances are %s.", s.instanceNames())
 	}
+	if err := s.stoppedRefusal(c, r.Method, rest, verb); err != nil {
+		return "sql.instances", nil, err
+	}
 	if verb == "generateEphemeralCert" {
 		if r.Method != http.MethodPost {
 			return "sql.connect.generateEphemeral", nil, Errorf(http.StatusNotFound, "method %s is not served on generateEphemeralCert", r.Method)
@@ -875,9 +878,13 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
 				iamWhy+", so only BUILT_IN users are served")
 		}
+		if err := s.checkPassword(project, e.Instance(), u.Name, u.Host, u.Password, false); err != nil {
+			return "sql.users.insert", nil, err
+		}
 		if err := e.CreateUser(ctx, User{Name: u.Name, Host: u.Host}, u.Password); err != nil {
 			return "sql.users.insert", nil, err
 		}
+		s.notePassword(project, e.Instance(), u.Name, u.Host, u.Password)
 		return "sql.users.insert", s.done(base, project, e, "CREATE_USER", u.Name), nil
 	case http.MethodPut:
 		var u struct{ Name, Host, Password string }
@@ -892,9 +899,13 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.update", nil, err
 		}
+		if err := s.checkPassword(project, e.Instance(), cur.Name, cur.Host, u.Password, true); err != nil {
+			return "sql.users.update", nil, err
+		}
 		if err := e.UpdateUser(ctx, cur, u.Password); err != nil {
 			return "sql.users.update", nil, err
 		}
+		s.notePassword(project, e.Instance(), cur.Name, cur.Host, u.Password)
 		return "sql.users.update", s.done(base, project, e, "UPDATE_USER", name), nil
 	case http.MethodDelete:
 		cur, err := find(q.Get("name"), q.Get("host"))
@@ -904,6 +915,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err := e.DeleteUser(ctx, cur); err != nil {
 			return "sql.users.delete", nil, err
 		}
+		s.forgetPasswords(project, e.Instance(), cur.Name, cur.Host)
 		return "sql.users.delete", s.done(base, project, e, "DELETE_USER", cur.Name), nil
 	}
 	return "sql.users", nil, Errorf(http.StatusNotFound, "method %s is not served on users", r.Method)
