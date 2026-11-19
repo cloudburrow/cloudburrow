@@ -203,6 +203,7 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	go s.valkey.maintenanceLoop(ctx)
 	// Both read here, not in the goroutine: tests swap them between runs.
 	go s.valkey.watchStandalone(ctx, healthEvery, tendEvery)
+	go s.valkey.watchClusters(ctx, healthEvery)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
