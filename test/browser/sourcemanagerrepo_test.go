@@ -329,8 +329,9 @@ func lastPart(name string) string { return name[strings.LastIndex(name, "/")+1:]
 // Instances page, Create instance, an instance's page, a repository's
 // Code, Branches, Issues, Pull requests and Settings tabs, a file's page,
 // an issue's and a pull request's (its Conversation with a review and a
-// line comment, and its Files changed), Settings' Webhooks tab and a
-// webhook's page (#1927), audited as every other screen is.
+// line comment, its Files changed and its Code owners), a CODEOWNERS
+// file's page (#1928), Settings' Webhooks tab and a webhook's page
+// (#1927), audited as every other screen is.
 func TestCloudRunSourceManagerScreensMeetWCAG(t *testing.T) {
 	c := ssmClient(t)
 	ctx := context.Background()
@@ -358,7 +359,7 @@ func TestCloudRunSourceManagerScreensMeetWCAG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ssmPush(t, r.GetUris().GetGitHttps(), "main", map[string]string{"README.md": "# app\n"})
+	ssmPush(t, r.GetUris().GetGitHttps(), "main", map[string]string{"README.md": "# app\n", "CODEOWNERS": "* lead@example.com\n* @team\n"})
 	ssmPush(t, r.GetUris().GetGitHttps(), "feature", map[string]string{"NOTES.md": "notes\n"})
 	iop, err := c.CreateIssue(ctx, &ssmpb.CreateIssueRequest{Parent: r.GetName(), Issue: &ssmpb.Issue{Title: "An issue", Body: "body"}})
 	if err != nil {
@@ -412,6 +413,9 @@ func TestCloudRunSourceManagerScreensMeetWCAG(t *testing.T) {
 		screen("an issue", base+"/app/issues/"+lastPart(is.GetName()), project),
 		screen("a pull request", base+"/app/pulls/"+lastPart(pr.GetName()), project),
 		screen("a pull request's Files changed", base+"/app/pulls/"+lastPart(pr.GetName())+"?tab=files", project),
+		screen("a pull request's Code owners", base+"/app/pulls/"+lastPart(pr.GetName())+"?tab=codeowners", project),
+		screen("a CODEOWNERS file", base+"/app/tree/main/CODEOWNERS", project),
+		screen("a CODEOWNERS file's Checks", base+"/app/tree/main/CODEOWNERS?tab=codeowners", project),
 		screen("a repository's webhooks", base+"/app?tab=settings&subtab=webhooks", project),
 		screen("a webhook", base+"/app/hooks/ci", project))
 	auditScreens(t, pages)

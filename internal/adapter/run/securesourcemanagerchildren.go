@@ -258,22 +258,34 @@ func ssmMaskPaths(paths []string, updatable []string, set func(string) bool) ([]
 // ssmPreReceive is the pre-receive hook every repository gets: it refuses
 // a push that updates a branch named in the repository's protected
 // branches file, which the branch rules write (branch rules requiring a
-// pull request; securesourcemanagerbranchrules.go).
+// pull request; securesourcemanagerbranchrules.go), and has the CloudBurrow
+// executable check the CODEOWNERS files a push brings to a branch whose
+// rule requires code owner approval (#1928, securesourcemanagercodeowners.go).
 const ssmPreReceive = `#!/bin/sh
 # CloudBurrow Secure Source Manager: branches whose branch rule requires a
-# pull request take no direct push.
-protected="$(dirname "$0")/../` + ssmProtectedFile + `"
-[ -f "$protected" ] || exit 0
+# pull request take no direct push; branches whose rule requires code
+# owner review take no CODEOWNERS file with syntax errors.
+input="$(cat)"
+here="$(dirname "$0")/.."
 status=0
-while read -r old new ref; do
-	branch="${ref#refs/heads/}"
-	[ "$branch" = "$ref" ] && continue
-	if grep -Fxq -- "$branch" "$protected"; then
-		echo "error: branch $branch is protected: its branch rule requires a pull request before merging" >&2
-		status=1
-	fi
-done
-exit $status
+protected="$here/` + ssmProtectedFile + `"
+if [ -f "$protected" ]; then
+	while read -r old new ref; do
+		branch="${ref#refs/heads/}"
+		[ "$branch" = "$ref" ] && continue
+		if grep -Fxq -- "$branch" "$protected"; then
+			echo "error: branch $branch is protected: its branch rule requires a pull request before merging" >&2
+			status=1
+		fi
+	done <<END
+$input
+END
+fi
+[ $status -eq 0 ] || exit $status
+if [ -n "$` + ssmPresubmitEnv + `" ] && grep -q "	true$" "$here/` + ssmCodeOwnersBranchesFile + `" 2>/dev/null; then
+	printf '%s\n' "$input" | "$` + ssmPresubmitEnv + `" ` + SourceManagerPresubmitArg + ` "$here" || exit 1
+fi
+exit 0
 `
 
 const ssmProtectedFile = "cloudburrow-protected-branches"

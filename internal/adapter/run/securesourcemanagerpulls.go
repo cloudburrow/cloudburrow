@@ -283,7 +283,7 @@ func (m *SecureSourceManagerServer) MergePullRequest(ctx context.Context, req *s
 		return nil, apierror.FailedPrecondition("nothing to merge: %s is already in %s", headRef, baseRef)
 	}
 	rule := effectiveBranchRuleLocked(ssmRepoOf(pr.GetName()), baseRef)
-	if err := ruleAllowsMergeLocked(rule, pr.GetName(), head, baseRef); err != nil {
+	if err := ruleAllowsMergeLocked(ctx, dir, rule, pr, base, head, baseRef); err != nil {
 		return nil, err
 	}
 	merged := head

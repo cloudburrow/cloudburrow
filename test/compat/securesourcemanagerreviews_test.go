@@ -86,7 +86,7 @@ func (s *ssmHookSink) wait(t *testing.T, event string, n int) []ssmHookCall {
 func ssmClientAs(t *testing.T, h *Harness, prefix string) (*securesourcemanager.Client, string) {
 	t.Helper()
 	me, source := instanceAccount(t)
-	sa := newServiceAccount(t, h, iamProject(t, h, "ssm-"), prefix)
+	sa := newServiceAccount(t, h, iamProject(t, h, prefix+"-"), prefix) // a project per account, so a test can have several
 	grantOn(t, h, sa.GetName(), "roles/iam.serviceAccountTokenCreator", "serviceAccount:"+me)
 	tok, err := iamCredentialsAs(t, h, source).GenerateAccessToken(h.Context(), &credentialspb.GenerateAccessTokenRequest{
 		Name: "projects/-/serviceAccounts/" + sa.GetEmail(), Scope: []string{"https://www.googleapis.com/auth/cloud-platform"}})
