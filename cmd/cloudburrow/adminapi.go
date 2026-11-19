@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -59,6 +60,9 @@ type adminDeps struct {
 	// serviceUsage is the Service Usage API, for its per-project API
 	// states' reset (#1537); read at reset time for the same reason.
 	serviceUsage func() *serviceusage.Server
+	// apiKeys is the API Keys API (#1915), for its per-project keys'
+	// reset; read at reset time for the same reason.
+	apiKeys func() *apikeys.Server
 	// sqlAdmin and backupDR are the Cloud SQL Admin API and Backup and
 	// DR, for their per-project resets (#1541, #1542); built after the
 	// routes are mounted, so read at reset time.
@@ -151,6 +155,10 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		// Which APIs each project disabled, and the operations that did it
 		// (#1537), kept in the registry's store.
 		api.RegisterResetter(&serviceUsageResetter{srv: d.serviceUsage})
+	}
+	if d.apiKeys != nil {
+		// Each project's API keys (#1915), kept in the registry's store.
+		api.RegisterResetter(&apiKeysResetter{srv: d.apiKeys})
 	}
 	if d.run != nil {
 		// Repositories and projects' settings (#1543), served beside Cloud Run.

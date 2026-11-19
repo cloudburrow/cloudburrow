@@ -353,9 +353,12 @@ const ROUTES = [
   // /apis/api/<name>/<tab> (Overview, Metrics, Quotas & System Limits,
   // Credentials) with Disable API. Library is /apis/library, an API's
   // Library page /apis/library/<name> with Enable or Manage. Credentials
-  // holds Create credentials and the service accounts; the API Keys API and
-  // OAuth clients are not served, which it says. Their calls are the
-  // serviceusage provider's Studio (consoleapis.go).
+  // holds Create credentials, the API keys (#1915: Create, each key's page
+  // /apis/credentials/key/<id> with its restrictions, Show key, Rotate key
+  // and Delete, and Restore deleted credentials at
+  // /apis/credentials/restore) and the service accounts; OAuth clients are
+  // not served, which it says. Their calls are the serviceusage provider's
+  // Studio (consoleapis.go, consoleapikeys.go).
   { path: "/apis", service: "serviceusage", screen: "apis-dashboard", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
   { path: "/apis/dashboard", redirect: "/apis", title: "Enabled APIs & services" },
@@ -6725,6 +6728,8 @@ function dispatch(view) {
   if (match.screen === "apis-dashboard" && resourcePath[0] === "api" && resourcePath[1]) return renderAPIPage(view, resourcePath[1], resourcePath[2] || "overview");
   if (match.screen === "apis-library") return renderAPILibrary(view, resourcePath[0] || "");
   if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
+  if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
+  if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
   if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
   // Custom constraints (#1891): the list, Create custom constraint, and
@@ -14354,8 +14359,7 @@ function apisCredentialSections(idPrefix) {
     setChildren(accounts, el("p", { class: "unavailable", text: "Service accounts are IAM's, which this instance does not serve." }));
   }
   return el("div", { class: "api-credentials", id: idPrefix },
-    el("h2", { text: "API Keys" }),
-    el("p", { class: "unavailable", id: `${idPrefix}-api-keys`, text: "Not available locally: CloudBurrow does not serve the API Keys API (apikeys.googleapis.com). Its APIs take no key." }),
+    el("h2", { text: "API Keys" }), apiKeysTable(idPrefix),
     el("h2", { text: "OAuth 2.0 Client IDs" }),
     el("p", { class: "unavailable", id: `${idPrefix}-oauth`, text: "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve." }),
     el("h2", { text: "Service Accounts" }), accounts);
@@ -14368,7 +14372,8 @@ function renderAPICredentials(view) {
   const trigger = el("button", { type: "button", class: "header-button primary", id: "credentials-create", "aria-haspopup": "menu",
     "aria-expanded": "false", html: ICON_ADD }, el("span", { text: "Create credentials" }));
   const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
-    el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "API key — not available locally" }),
+    el("button", { type: "button", class: "overflow-item", role: "menuitem", id: "credentials-create-api-key", text: "API key",
+      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
     el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled", "aria-disabled": "true", text: "OAuth client ID — not available locally" }),
     served.has("iam-service-accounts")
       ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
@@ -14377,7 +14382,237 @@ function renderAPICredentials(view) {
     menu.hidden = !menu.hidden;
     trigger.setAttribute("aria-expanded", String(!menu.hidden));
   });
-  setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu)] }),
+  const restore = el("a", { class: "header-button", id: "credentials-restore", href: "/apis/credentials/restore" + scopeSearch(), text: "Restore deleted credentials" });
+  setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu), restore] }),
     el("p", { class: "subtitle", text: "Create credentials to access your enabled APIs." }),
     apisCredentialSections("credentials"));
+}
+
+// API keys (#1915): the Credentials page's table, Create credentials > API
+// key, each key's page (Name, Application restrictions, API restrictions,
+// Show key, Rotate key, Delete, and Delete the previous key after a
+// rotation) and Restore deleted credentials, over the local API Keys API.
+
+function apiKeyShow(title, keyString, id, extra) {
+  const { dialog, close } = openModal({ labelledBy: "api-key-shown-title" });
+  const field = el("input", { type: "text", id: "api-key-string", class: "mono", readonly: "readonly", value: keyString, "aria-label": "Your API key" });
+  const copy = el("button", { type: "button", class: "secondary", id: "api-key-copy", text: "Copy",
+    onclick: async () => { try { await navigator.clipboard.writeText(keyString); notify("Copied the API key"); } catch { field.select(); } } });
+  dialog.append(el("div", { class: "modal-body", id: "api-key-shown" },
+    el("h2", { id: "api-key-shown-title", text: title }),
+    extra ? el("p", { class: "form-help", text: extra }) : null,
+    el("label", { class: "form-field" }, el("span", { class: "form-label", text: "Your API key" }), field),
+    el("div", { class: "modal-actions" }, copy,
+      id ? el("a", { class: "button secondary", id: "api-key-edit-link", href: `/apis/credentials/key/${encodeURIComponent(id)}${scopeSearch()}`, text: "Edit API key", onclick: () => close() }) : null,
+      el("button", { type: "button", class: "primary", id: "api-key-close", text: "Close", onclick: () => close() }))));
+  field.focus();
+  field.select();
+}
+
+async function apiKeyCreate(project, after) {
+  const op = recordOperation(`Create an API key in ${project}`);
+  let k;
+  try { k = await apisCall("key-create", {}); op.succeeded(""); } catch (err) { op.failed(err.message); notify(err.message, "error"); return; }
+  apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header. " +
+    "It has no restrictions: restrict it on its page.");
+  notify("Created API key");
+  if (after) after(); else if (location.pathname === "/apis/credentials") navigate("/apis/credentials");
+}
+
+async function apiKeyReveal(id) {
+  try {
+    const d = await apisCall("key-string", { id });
+    apiKeyShow("API key", d.keyString, null, "");
+  } catch (err) { notify(err.message, "error"); }
+}
+
+function apiKeyDelete(k, after) {
+  mrForm({
+    id: "api-key-delete", title: `Delete API key ${k.displayName || k.id}?`, label: "Delete", destructive: true, fields: [],
+    note: "Applications using this key stop working. You can restore it from Restore deleted credentials for 30 days, after which it is purged.",
+    submit: async () => {
+      const op = recordOperation(`Delete API key ${k.id}`);
+      try { await apisCall("key-delete", { id: k.id }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+      notify("Deleted API key");
+      after();
+    },
+  });
+}
+
+function apiKeysTable(idPrefix) {
+  const box = el("div", { id: `${idPrefix}-api-keys` }, loadingState(2, { what: "API keys" }));
+  const load = async () => {
+    let data;
+    try { data = await apisCall("keys", {}); } catch (err) {
+      setChildren(box, el("p", { class: "unavailable", text: err.message }));
+      return;
+    }
+    const keys = data.keys || [];
+    setChildren(box, el("div", { class: "table-wrap" }, el("table", { class: "table", id: `${idPrefix}-api-keys-table` },
+      el("thead", {}, el("tr", {}, ...["Name", "Creation date", "Restrictions", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(keys.length ? keys.map((k) => el("tr", { "data-key": k.id },
+        el("td", {}, el("a", { href: `/apis/credentials/key/${encodeURIComponent(k.id)}${scopeSearch()}`, text: k.displayName || k.id })),
+        el("td", { text: new Date(k.createTime).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) }),
+        el("td", { text: k.summary }),
+        el("td", {},
+          el("button", { type: "button", class: "link-button", "data-action": "show-key", text: "Show key", onclick: () => apiKeyReveal(k.id) }),
+          el("a", { class: "link-button", "data-action": "edit-key", href: `/apis/credentials/key/${encodeURIComponent(k.id)}${scopeSearch()}`, text: "Edit API key" }),
+          el("button", { type: "button", class: "link-button", "data-action": "delete-key", text: "Delete API key", onclick: () => apiKeyDelete(k, load) }))))
+        : [el("tr", {}, el("td", { colspan: "4", text: "No API keys to display" }))])))));
+  };
+  load();
+  return box;
+}
+
+// apiKeyLines are a textarea's non-empty lines.
+const apiKeyLines = (v) => v.split("\n").map((l) => l.trim()).filter(Boolean);
+
+async function renderAPIKeyPage(view, id) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Edit API key");
+  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
+  let k, apis;
+  try {
+    k = await apisCall("key", { id });
+    apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
+  } catch (err) {
+    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
+    return;
+  }
+  const r = k.restrictions || {};
+  const app = r.browserKeyRestrictions ? "browser" : r.serverKeyRestrictions ? "server" : r.androidKeyRestrictions ? "android" : r.iosKeyRestrictions ? "ios" : "none";
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const field = (label, input, help) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }), input,
+    help ? el("span", { class: "form-help", text: help }) : null);
+  const name = el("input", { type: "text", id: "api-key-name", value: k.displayName || "", maxlength: 63 });
+  const lines = (id, values, help, label) => {
+    const t = el("textarea", { id, rows: 4, class: "mono" });
+    t.value = (values || []).join("\n");
+    return { node: field(label, t, help), t };
+  };
+  const browser = lines("api-key-referrers", (r.browserKeyRestrictions || {}).allowedReferrers, "One website per line, such as *.example.com/* or www.example.com/path.", "Website restrictions");
+  const server = lines("api-key-ips", (r.serverKeyRestrictions || {}).allowedIps, "One IPv4 or IPv6 address or subnet (CIDR) per line.", "IP address restrictions");
+  const android = lines("api-key-android", ((r.androidKeyRestrictions || {}).allowedApplications || []).map((a) => `${a.packageName},${a.sha1Fingerprint}`),
+    "One app per line: package name, comma, SHA-1 certificate fingerprint.", "Android restrictions");
+  const ios = lines("api-key-ios", (r.iosKeyRestrictions || {}).allowedBundleIds, "One bundle ID per line, such as com.example.app.", "iOS restrictions");
+  const appBoxes = { browser: browser.node, server: server.node, android: android.node, ios: ios.node };
+  const show = () => {
+    const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
+    for (const [kname, node] of Object.entries(appBoxes)) node.hidden = kname !== v;
+    const restrict = (view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict";
+    apiList.hidden = !restrict;
+  };
+  const radio = (group, value, label, current) => el("label", { class: "check-line", for: `${group}-${value}` },
+    el("input", { type: "radio", name: group, value, id: `${group}-${value}`, checked: value === current ? "checked" : null, onchange: show }),
+    el("span", { text: label }));
+  const targets = new Set((r.apiTargets || []).map((t) => t.service.toLowerCase()));
+  const apiList = el("fieldset", { class: "check-list", id: "api-key-api-list" }, el("legend", { text: "Selected APIs" }),
+    ...apis.map((a) => el("label", { class: "check-line", for: `api-key-target-${a.name}` },
+      el("input", { type: "checkbox", id: `api-key-target-${a.name}`, value: a.name, checked: targets.has(a.name) ? "checked" : null }),
+      el("span", { text: `${a.title} (${a.name})` }))));
+  const restrictions = () => {
+    const out = {};
+    const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
+    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: apiKeyLines(browser.t.value) };
+    if (v === "server") out.serverKeyRestrictions = { allowedIps: apiKeyLines(server.t.value) };
+    if (v === "android") out.androidKeyRestrictions = { allowedApplications: apiKeyLines(android.t.value).map((l) => {
+      const [packageName, sha1Fingerprint] = l.split(",").map((x) => (x || "").trim());
+      return { packageName, sha1Fingerprint };
+    }) };
+    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: apiKeyLines(ios.t.value) };
+    if ((view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict") {
+      const picked = [...apiList.querySelectorAll("input:checked")].map((c) => ({ service: c.value }));
+      // Methods already on a kept target stay as they were.
+      out.apiTargets = picked.map((t) => (r.apiTargets || []).find((o) => o.service.toLowerCase() === t.service) || t);
+    }
+    return out;
+  };
+  const save = el("button", { type: "submit", class: "primary", id: "api-key-save", text: "Save" });
+  const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const rs = restrictions();
+    if (rs.apiTargets && !rs.apiTargets.length) { error.textContent = "Select at least one API, or choose Don't restrict key."; error.hidden = false; return; }
+    save.disabled = true;
+    const op = recordOperation(`Update API key ${id}`);
+    try {
+      await apisCall("key-update", { id, displayName: name.value.trim(), restrictions: rs });
+      op.succeeded("");
+      notify("Saved API key");
+      navigate("/apis/credentials");
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = err.message;
+      error.hidden = false;
+      save.disabled = false;
+    }
+  } },
+  error,
+  field("Name", name, "A display name, at most 63 characters."),
+  el("h2", { text: "Key restrictions" }),
+  el("h3", { text: "Application restrictions" }),
+  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
+    radio("api-key-app", "none", "None", app), radio("api-key-app", "browser", "Websites", app), radio("api-key-app", "server", "IP addresses", app),
+    radio("api-key-app", "android", "Android apps", app), radio("api-key-app", "ios", "iOS apps", app)),
+  browser.node, server.node, android.node, ios.node,
+  el("h3", { text: "API restrictions" }),
+  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
+    radio("api-key-api", "none", "Don't restrict key", (r.apiTargets || []).length ? "restrict" : "none"),
+    radio("api-key-api", "restrict", "Restrict key", (r.apiTargets || []).length ? "restrict" : "none")),
+  apiList,
+  el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
+  const actions = [
+    el("button", { type: "button", class: "header-button", id: "api-key-show", text: "Show key", onclick: () => apiKeyReveal(id) }),
+    el("button", { type: "button", class: "header-button", id: "api-key-rotate", text: "Rotate key", onclick: () => mrForm({
+      id: "api-key-rotate-form", title: "Rotate key", label: "Create",
+      fields: [{ name: "displayName", label: "Name", default: `${k.displayName || k.id} (rotated)`, help: "The new key's name. It gets this key's restrictions." }],
+      note: "A new key is created with this key's restrictions. This key keeps working until you delete it from the new key's page (Delete the previous key).",
+      submit: async (v) => {
+        const op = recordOperation(`Rotate API key ${id}`);
+        let nk;
+        try { nk = await apisCall("key-rotate", { id, displayName: v.displayName }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+        navigate(`/apis/credentials/key/${encodeURIComponent(nk.id)}`);
+        apiKeyShow("API key created", nk.keyString, null, "Copy the new key into your applications, then delete the previous key.");
+      } }) }),
+    el("button", { type: "button", class: "header-button", id: "api-key-delete-button", text: "Delete", onclick: () => apiKeyDelete(k, () => navigate("/apis/credentials")) }),
+  ];
+  const previous = k.previous ? el("section", { class: "card", id: "api-key-previous" },
+    el("h2", { text: "Previous key" }),
+    el("p", { text: `${k.previous.displayName || k.previous.id}, created ${new Date(k.previous.createTime).toLocaleString()}, still works until you delete it.` }),
+    el("button", { type: "button", class: "secondary", id: "api-key-delete-previous", text: "Delete the previous key", onclick: async () => {
+      const op = recordOperation(`Delete the previous key of ${id}`);
+      try { await apisCall("key-delete-previous", { id }); op.succeeded(""); notify("Deleted the previous key"); renderAPIKeyPage(view, id); }
+      catch (err) { op.failed(err.message); notify(err.message, "error"); }
+    } })) : null;
+  setChildren(view, pageHeader("Edit API key", `${k.name} · created ${new Date(k.createTime).toLocaleString()}`, { back, actions }), previous, form);
+  show();
+  announce(`Edit API key ${k.displayName || k.id}`);
+}
+
+async function renderAPIKeysRestore(view) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Restore deleted credentials");
+  setChildren(view, pageHeader("Restore deleted credentials", "", { back }), loadingState(3, { what: "deleted credentials" }));
+  let data;
+  try { data = await apisCall("keys", { deleted: true }); } catch (err) {
+    setChildren(view, pageHeader("Restore deleted credentials", "", { back }), errorState("Could not list deleted credentials", err.message));
+    return;
+  }
+  const keys = data.keys || [];
+  setChildren(view, pageHeader("Restore deleted credentials", "Credentials deleted in the last 30 days can be restored.", { back }),
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-keys-deleted" },
+      el("thead", {}, el("tr", {}, ...["Name", "Type", "Deletion date", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(keys.length ? keys.map((k) => el("tr", { "data-key": k.id },
+        el("td", { text: k.displayName || k.id }), el("td", { text: "API key" }),
+        el("td", { text: new Date(k.deleteTime).toLocaleString() }),
+        el("td", {}, el("button", { type: "button", class: "link-button", "data-action": "restore-key", text: "Restore", onclick: async () => {
+          const op = recordOperation(`Restore API key ${k.id}`);
+          try { await apisCall("key-undelete", { id: k.id }); op.succeeded(""); notify("Restored API key"); renderAPIKeysRestore(view); }
+          catch (err) { op.failed(err.message); notify(err.message, "error"); }
+        } }))))
+        : [el("tr", {}, el("td", { colspan: "4", text: "No deleted credentials to restore" }))])))));
+  announce("Restore deleted credentials");
 }

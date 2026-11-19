@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -62,4 +64,32 @@ func useAPIEnablement(su *serviceusage.Server, rm *resourcemanager.Server, g api
 	if g.backupDR != nil {
 		g.backupDR.Wrap = func(h http.Handler) http.Handler { return apienable.Gate(su, "backupdr.googleapis.com", h) }
 	}
+}
+
+// apiKeysChecker is the API Keys server's decision on a call that carries
+// a key (#1915), as the gates ask it.
+type apiKeysChecker struct{ srv *apikeys.Server }
+
+func (c apiKeysChecker) CheckKey(_ context.Context, call apienable.KeyCall) *apienable.Refusal {
+	_, d := c.srv.Authorize(call.Key, apikeys.Request{Service: call.Service, Method: call.Method, Referrer: call.Referrer,
+		IP: call.IP, AndroidPackage: call.AndroidPackage, AndroidCert: call.AndroidCert, IOSBundle: call.IOSBundle})
+	if d == nil {
+		return nil
+	}
+	return &apienable.Refusal{HTTP: d.HTTP, Status: d.Status, Message: d.Message, Reason: d.Reason, Metadata: d.Metadata}
+}
+
+// useAPIKeys enforces API keys where Google does (#1915): a call that
+// carries one (x-goog-api-key, or key=) to any gated API is refused when
+// the key is not valid or its restrictions do not allow the call. The
+// in-process gates ask srv directly; the servers in the cluster ask it at
+// apienable.KeyPath on rm's port. A nil srv checks no key.
+func useAPIKeys(srv *apikeys.Server, rm *resourcemanager.Server) func() {
+	if srv == nil {
+		return func() {}
+	}
+	c := apiKeysChecker{srv: srv}
+	apienable.UseKeys(c)
+	rm.HandleJSON(func(r *http.Request) bool { return r.URL.Path == apienable.KeyPath }, apienable.KeyHandler(c))
+	return func() { apienable.UseKeys(nil) }
 }

@@ -63,6 +63,8 @@ var compatSections = map[string]string{
 	"sqladmin": "## Optional services",
 	// The Service Usage API (#1352), named by whole discovery ID.
 	"serviceusage": "## Service Usage — `serviceusage.googleapis.com` v1",
+	// The API Keys API (#1915), named by whole discovery ID.
+	"apikeys": "## API Keys — `apikeys.googleapis.com` v2",
 	// The Backup and DR Service (#1433), named by whole discovery ID.
 	"backupdr": "## Backup and DR Service — `backupdr.googleapis.com` v1",
 	// Cloud Identity's groups (#1812), named by whole discovery ID.
@@ -157,7 +159,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293), the
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
-	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "backupdr" ||
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "backupdr" ||
 		key == "cloudidentity" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {

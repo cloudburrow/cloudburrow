@@ -41,7 +41,7 @@ func Gate(d Decider, service string, next http.Handler, opts ...Options) http.Ha
 		if dec == nil {
 			dec = global()
 		}
-		if dec == nil || (o.Skip != nil && o.Skip(r)) || strings.HasPrefix(r.URL.Path, "/cloudburrow/") || strings.HasPrefix(r.URL.Path, "/_cloudburrow/") {
+		if (o.Skip != nil && o.Skip(r)) || strings.HasPrefix(r.URL.Path, "/cloudburrow/") || strings.HasPrefix(r.URL.Path, "/_cloudburrow/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -50,6 +50,14 @@ func Gate(d Decider, service string, next http.Handler, opts ...Options) http.Ha
 			if s := o.ServiceOf(r); s != "" {
 				svc = s
 			}
+		}
+		// An API key first, as Google's front end checks it (#1915).
+		if checkKey(w, r, svc) {
+			return
+		}
+		if dec == nil {
+			next.ServeHTTP(w, r)
+			return
 		}
 		project := ""
 		if o.ProjectOf != nil {
@@ -107,16 +115,22 @@ func global() Decider {
 // the one Use set, when the call is made.
 func UnaryInterceptor(dec Decider, service string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		// An API key first, as Google's front end checks it (#1915).
+		if err := KeyUnaryCheck(ctx, service, info.FullMethod); err != nil {
+			return nil, err
+		}
 		d := dec
 		if d == nil {
 			d = global()
 		}
 		if d != nil {
-			if m, ok := req.(proto.Message); ok {
-				if p := ProjectOfMessage(m); p != "" {
-					if denial, off := d.Disabled(ctx, p, service); off {
-						return nil, denial.Err()
-					}
+			p := projectOfContext(ctx)
+			if m, ok := req.(proto.Message); ok && p == "" {
+				p = ProjectOfMessage(m)
+			}
+			if p != "" {
+				if denial, off := d.Disabled(ctx, p, service); off {
+					return nil, denial.Err()
 				}
 			}
 		}
@@ -134,6 +148,11 @@ func StreamInterceptor(dec Decider, service string) grpc.StreamServerInterceptor
 // serviceOf names the API of a call's full method.
 func StreamInterceptorFor(dec Decider, serviceOf func(fullMethod string) string) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		service := serviceOf(info.FullMethod)
+		// An API key first, as Google's front end checks it (#1915).
+		if err := KeyUnaryCheck(ss.Context(), service, info.FullMethod); err != nil {
+			return err
+		}
 		d := dec
 		if d == nil {
 			d = global()
@@ -141,7 +160,6 @@ func StreamInterceptorFor(dec Decider, serviceOf func(fullMethod string) string)
 		if d == nil {
 			return handler(srv, ss)
 		}
-		service := serviceOf(info.FullMethod)
 		if p := projectOfContext(ss.Context()); p != "" {
 			if denial, off := d.Disabled(ss.Context(), p, service); off {
 				return denial.Err()

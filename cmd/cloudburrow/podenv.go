@@ -39,6 +39,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_SQLADMIN_ENDPOINT"
 	case "serviceusage":
 		return "CLOUDBURROW_SERVICEUSAGE_ENDPOINT"
+	case "apikeys":
+		return "CLOUDBURROW_APIKEYS_ENDPOINT"
 	case "backupdr":
 		return "CLOUDBURROW_BACKUPDR_ENDPOINT"
 	case "run":

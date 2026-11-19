@@ -126,7 +126,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// Cloud Identity's (#1812) is groups_methods.go's table, and
 		// TestCloudIdentityUnservedAre501 checks its 501s over HTTP
 		// (internal/service/resourcemanager).
-		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") ||
+		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
 			strings.HasPrefix(m, "cloudidentity.") {
 			continue
 		}
