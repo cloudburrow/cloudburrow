@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -296,6 +297,50 @@ func TestDecodeMP3WAV(t *testing.T) {
 		}
 		if _, err := DecodeAudio("audio/wav", readTestdata(t, c.file+".wav")); err != nil {
 			t.Errorf("%s: DecodeAudio: %v", c.file, err)
+		}
+	}
+}
+
+// TestDecodeMPEGLayerIIWAV (#1651): a WAV of MPEG Layer II frames
+// (WAVE_FORMAT_MPEG) decodes within 1.1 16-bit steps of ffmpeg 9's decode
+// (its mp2 decoder rounds to 16 bits) in each allocation table: MPEG-1's
+// tables a (48 kHz stereo, 192 kbit/s), b (44.1 kHz stereo, 256 kbit/s), c
+// (48 kHz mono, 32 kbit/s) and d (32 kHz mono, 48 kbit/s), and MPEG-2's
+// (24 kHz stereo, 96 kbit/s). Half a second of testdata/jfk-alaw.wav each:
+//
+//	ffmpeg -ss 1 -i jfk-alaw.wav -t 0.5 -ar 48000 -ac 2 -c:a mp2 -b:a 192k -map_metadata -1 -fflags +bitexact -f wav wav-mp2-48-st.wav
+//	ffmpeg -i wav-mp2-48-st.wav -f f32le wav-mp2-48-st.raw.f32
+//
+// Joint stereo, which no encoder at hand writes, and Layer I are
+// ErrNotDecoded.
+func TestDecodeMPEGLayerIIWAV(t *testing.T) {
+	for _, name := range []string{"wav-mp2-48-st", "wav-mp2-44-st", "wav-mp2-48-mo", "wav-mp2-32-mo", "wav-mp2-24-st"} {
+		w, err := decodeWAV(readTestdata(t, name+".wav"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if d := maxAbsDiff(t, name, w.samples, readF32(t, name+".raw.f32")); d > 1.1/32768 {
+			t.Errorf("%s: %.2f 16-bit steps from ffmpeg's decode, want at most 1.1", name, d*32768)
+		}
+		if _, err := DecodeAudio("audio/wav", readTestdata(t, name+".wav")); err != nil {
+			t.Errorf("%s: DecodeAudio: %v", name, err)
+		}
+	}
+	st := readTestdata(t, "wav-mp2-48-st.wav")
+	at := bytes.Index(st, []byte("data")) + 8
+	for _, c := range []struct {
+		name string
+		edit func(h []byte)
+		want string
+	}{
+		{"joint stereo", func(h []byte) { h[3] = h[3]&0x3F | 1<<6 }, "joint stereo"},
+		{"Layer I", func(h []byte) { h[1] = h[1]&^6 | 3<<1 }, "Layer I"},
+	} {
+		b := append([]byte(nil), st...)
+		c.edit(b[at:])
+		_, err := DecodeAudio("audio/wav", b)
+		if !errors.Is(err, ErrNotDecoded) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want ErrNotDecoded naming %q", c.name, err, c.want)
 		}
 	}
 }

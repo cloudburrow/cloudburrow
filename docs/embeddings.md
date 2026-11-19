@@ -505,5 +505,9 @@ docker run --rm -v "$PWD:/models" \
 > (`internal/embedding/gsm.go`), sample for sample as ffmpeg 9 decodes it, an out-of-range lag
 > clamped as ffmpeg does (where the synthesis overflows, this decoder saturates as the
 > specification says and ffmpeg wraps). Embedded through the official client by
-> `TestEmbedContentEmbedsGSM610WAVThroughThePredictionClient`. G.726 and MPEG Layer I/II WAVs
-> stay `UNIMPLEMENTED`.
+> `TestEmbedContentEmbedsGSM610WAVThroughThePredictionClient`. So is a WAV of MPEG-1 or MPEG-2
+> Layer II frames (`internal/embedding/mp2.go`, from ISO/IEC 11172-3 and 13818-3), within 1.1
+> 16-bit steps of ffmpeg 9 in every allocation table
+> (`TestEmbedContentEmbedsMPEGLayerIIWAVThroughThePredictionClient`). G.726, Layer I and Layer II
+> joint stereo WAVs stay `UNIMPLEMENTED` (no reference decode for the last two; the G.726 decoder
+> written is not bit-exact against ffmpeg).

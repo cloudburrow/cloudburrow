@@ -263,7 +263,8 @@ func g711(b byte, alaw bool) int {
 
 // decodeWAV reads a RIFF WAVE file of integer PCM (1 to 32 bits), IEEE
 // float (32 or 64 bits) or (#1651) G.711 A-law or µ-law, IMA or Microsoft
-// ADPCM (adpcm.go), GSM 6.10 (gsm.go) or MP3 (WAVE_FORMAT_MPEGLAYER3), plain or
+// ADPCM (adpcm.go), GSM 6.10 (gsm.go), MPEG Layer II (mp2.go) or MP3
+// (WAVE_FORMAT_MPEGLAYER3), plain or
 // WAVE_FORMAT_EXTENSIBLE, of up to 8 channels (or as many as its channel
 // mask names).
 func decodeWAV(b []byte) (wav, error) {
@@ -331,6 +332,9 @@ func decodeWAV(b []byte) (wav, error) {
 	if format == waveMP3 {
 		return decodeWAVMP3(data)
 	}
+	if format == waveMPEG {
+		return decodeWAVMPEG(data)
+	}
 	if format == waveIMAADPCM || format == waveMSADPCM || format == waveGSM610 {
 		dec := decodeIMAADPCM
 		switch format {
@@ -361,7 +365,7 @@ func decodeWAV(b []byte) (wav, error) {
 	case format == waveFloat && (bits == 32 || bits == 64):
 	case (format == waveALaw || format == waveMuLaw) && bits == 8:
 	default:
-		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 1 to 32 bits, float of 32 or 64 bits, 8-bit A-law and µ-law, 2- to 5-bit IMA ADPCM, 4-bit Microsoft ADPCM, GSM 6.10 and MP3 are", format, bits)
+		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 1 to 32 bits, float of 32 or 64 bits, 8-bit A-law and µ-law, 2- to 5-bit IMA ADPCM, 4-bit Microsoft ADPCM, GSM 6.10, MPEG Layer II and MP3 are", format, bits)
 	}
 	frame := width * int(channels)
 	n := len(data) / frame * int(channels)
