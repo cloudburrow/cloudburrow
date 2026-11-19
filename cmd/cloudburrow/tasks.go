@@ -218,3 +218,11 @@ func (t *tasksService) appEngineURL() string {
 	}
 	return t.cfg.AppEngineURL
 }
+
+// running is how many of queue's tasks are being dispatched now (#1848).
+func (t *tasksService) running(queue string) int {
+	if t == nil {
+		return 0
+	}
+	return t.worker.Running(queue)
+}
