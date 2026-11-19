@@ -56,6 +56,9 @@ type relocation struct {
 	Finalization    string    `json:"finalization"` // finalizationState
 	Expire          time.Time `json:"expire,omitempty"`
 	Updated         time.Time `json:"updated,omitempty"`
+	// DestKMS is destinationKmsKeyName (#1938): the bucket's default key
+	// once it is relocated, which its CMEK objects are re-encrypted with.
+	DestKMS string `json:"destKms,omitempty"`
 }
 
 var regionRE = regexp.MustCompile(`^[A-Z]+-[A-Z]+[0-9]+$`)
@@ -102,10 +105,13 @@ func (s *Server) bucketsRelocate(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case "destinationKmsKeyName":
-			if v != "" && v != nil {
-				writeError(w, errorf(http.StatusNotImplemented, "notImplemented",
-					"destinationKmsKeyName is not implemented: CloudBurrow does not re-encrypt a relocated bucket's objects"))
-				return
+			if v != nil {
+				s, isStr := v.(string)
+				if !isStr {
+					writeError(w, badRequest("Invalid argument: destinationKmsKeyName must be a string."))
+					return
+				}
+				rel.DestKMS = s
 			}
 		default:
 			writeError(w, badRequest("Invalid argument: %s is not a RelocateBucketRequest field", k))
@@ -119,6 +125,19 @@ func (s *Server) bucketsRelocate(w http.ResponseWriter, r *http.Request) {
 	if !validLocation(rel.Dest) {
 		writeError(w, badRequest("Invalid argument: %s is not a Cloud Storage location.", rel.Dest))
 		return
+	}
+	// The destination key must be in the destination location (gcloud
+	// storage buckets relocate --destination-kms-key: "The key must exist
+	// in the destination location").
+	if rel.DestKMS != "" {
+		if err := validKMSKeyName("destinationKmsKeyName", rel.DestKMS); err != nil {
+			writeError(w, err)
+			return
+		}
+		if err := checkKeyLocation(rel.DestKMS, rel.Dest); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 	if len(rel.DestPlacement) > 0 {
 		if _, multi := multiRegionPrefix[rel.Dest]; !multi || len(rel.DestPlacement) != 2 {
@@ -146,6 +165,12 @@ func (s *Server) bucketsRelocate(w http.ResponseWriter, r *http.Request) {
 		}
 		if zonal(b) {
 			return badRequest("Invalid argument: a Rapid storage (zonal) bucket cannot be relocated.")
+		}
+		// "This is only required when relocating a bucket that uses
+		// Customer-Managed Encryption Keys" (#1938).
+		if defaultKMSKey(b) != "" && rel.DestKMS == "" {
+			return badRequest("Invalid argument: the bucket's default Cloud KMS key is in %s; destinationKmsKeyName must name a key in %s to relocate it.",
+				defaultKMSKey(b), rel.Dest)
 		}
 		src, _ := b.Fields["location"].(string)
 		rel.Source = strings.ToUpper(src)
@@ -189,6 +214,15 @@ func (s *Server) bucketsRelocate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// The bucket's objects encrypted with a customer-managed key are
+	// encrypted with the destination key ("used to encrypt all objects in
+	// the destination bucket", RelocateBucketRequest), during the sync.
+	if rel.DestKMS != "" && !rel.ValidateOnly {
+		if err := s.reencryptBucket(r.Context(), bucket, rel.DestKMS); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
 	writeResponse(w, r, http.StatusOK, s.operationJSON(r, op))
 }
 
@@ -221,6 +255,14 @@ func (s *Server) relocated(tx Tx, op *operationRecord, now time.Time) error {
 		return nil
 	}
 	b.Fields["location"] = rel.Dest
+	if rel.DestKMS != "" {
+		enc, _ := b.Fields["encryption"].(map[string]any)
+		if enc == nil {
+			enc = map[string]any{}
+		}
+		enc["defaultKmsKeyName"] = rel.DestKMS
+		b.Fields["encryption"] = enc
+	}
 	if len(rel.DestPlacement) > 0 {
 		locs := []any{}
 		for _, l := range rel.DestPlacement {

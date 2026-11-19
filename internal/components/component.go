@@ -52,8 +52,9 @@ type LifecycleComponent struct {
 	// parents (#1532), or "".
 	resourceManager string
 	// kms is Cloud KMS's in-cluster address (host:port), through
-	// cloudburrow-host, for the Pub/Sub front's CMEK topics (#1874) and the
-	// Firestore front's customer-managed keys (#1881), or "".
+	// cloudburrow-host, for the Pub/Sub front's CMEK topics (#1874), the
+	// Firestore front's customer-managed keys (#1881) and Cloud Storage's
+	// (#1938), or "".
 	kms string
 	// iamCheck is whether the in-cluster servers ask the host's evaluator,
 	// at resourceManager's address, before serving (up
@@ -386,6 +387,16 @@ func (c *LifecycleComponent) Backends() []Backend {
 			if c.serviceAccountCerts != "" {
 				b.Args = append(b.Args, "--service-account-certs", IAMServiceAccountDomains+"=http://"+c.serviceAccountCerts)
 				if _, p, err := net.SplitHostPort(c.serviceAccountCerts); err == nil {
+					if port, err := strconv.Atoi(p); err == nil {
+						b.EgressPorts = append(b.EgressPorts, port)
+					}
+				}
+			}
+			// Customer-managed keys (#1938) encrypt through the host's
+			// Cloud KMS, through cloudburrow-host.
+			if c.kms != "" {
+				b.Args = append(b.Args, "--kms", c.kms)
+				if _, p, err := net.SplitHostPort(c.kms); err == nil {
 					if port, err := strconv.Atoi(p); err == nil {
 						b.EgressPorts = append(b.EgressPorts, port)
 					}

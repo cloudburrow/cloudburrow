@@ -149,7 +149,9 @@ compat_shard() {
       # privateca for the console's Certificate Authority Service page
       # (TestPrivateCAThroughThePage, #1834): PRIVATECA is not exported,
       # so its compat suite stays in served.
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca
+      # kms for Cloud Storage's customer-managed keys (#1938), exported as
+      # CMEK_KMS only, so the KMS suite stays in served.
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca,kms
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
@@ -167,7 +169,7 @@ compat_shard() {
       # Service Usage (#1352), always served, with the Terraform and gcloud
       # tests that need Cloud Storage beside it; and the API Keys API
       # (#1915), always served too.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,TASKS_LOGGING
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,TASKS_LOGGING,CMEK_KMS
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with

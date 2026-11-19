@@ -111,7 +111,7 @@ func (s *Server) sourceObject(q url.Values, bucket, name string) (o objectRecord
 }
 
 func refuseCopyParams(q url.Values) error {
-	for _, p := range []string{"destinationPredefinedAcl", "destinationKmsKeyName", "kmsKeyName"} {
+	for _, p := range []string{"destinationPredefinedAcl"} {
 		if q.Get(p) != "" {
 			return badRequest("%s is not supported by CloudBurrow; it is refused rather than ignored", p)
 		}
@@ -136,6 +136,8 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// The destination's kmsKeyName may come in the body (cmek.go).
+	dstKMS := bodyKMSKey(q.Get("destinationKmsKeyName"), body)
 	src, _, err := s.sourceObject(q, srcB, srcO)
 	if err != nil {
 		writeError(w, err)
@@ -156,9 +158,21 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// The destination's key: destinationKmsKeyName, else the destination
+	// bucket's default; the bytes are sealed anew when either side is
+	// customer-managed (cmek.go).
+	t, err := s.writeTarget(dstB, dstKMS, dstKey)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	o := src
 	fresh(&o)
 	o.Bucket, o.Name, o.StorageClass, o.KeySHA256 = dstB, dstO, "", dstKey
+	if err := s.resealInto(r, &o, src, t); err != nil {
+		writeError(w, err)
+		return
+	}
 	if drop {
 		o.Contexts = nil
 	}
@@ -195,6 +209,8 @@ type rewriteState struct {
 	StorageClass string `json:"storageClass,omitempty"`
 	// DstKeySHA256 is the destination's customer-supplied key (csek.go).
 	DstKeySHA256 []byte `json:"dstKeySha256,omitempty"`
+	// DstKMSKeyName is destinationKmsKeyName (cmek.go).
+	DstKMSKeyName string `json:"dstKmsKeyName,omitempty"`
 	// DropContexts is dropContextGroups=custom (contexts.go).
 	DropContexts bool      `json:"dropContexts,omitempty"`
 	Done         int64     `json:"done"`
@@ -223,6 +239,8 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	// The destination's kmsKeyName may come in the body (cmek.go).
+	dstKMS := bodyKMSKey(q.Get("destinationKmsKeyName"), body)
 	pre, err := parseObjectPreconditions(q, "if")
 	if err != nil {
 		writeError(w, err)
@@ -281,8 +299,12 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		if _, err := s.writeTarget(dstB, dstKMS, dstKey); err != nil {
+			writeError(w, err)
+			return
+		}
 		st = rewriteState{Token: newUploadID(), Source: src, DstBucket: dstB, DstName: dstO, Body: body, StorageClass: class,
-			DstKeySHA256: dstKey, DropContexts: drop, Created: s.now()}
+			DstKeySHA256: dstKey, DstKMSKeyName: dstKMS, DropContexts: drop, Created: s.now()}
 	}
 	step := st.Source.Size - st.Done
 	if per > 0 && step > per {
@@ -305,9 +327,18 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 		writeResponse(w, r, http.StatusOK, resp)
 		return
 	}
+	t, err := s.writeTarget(st.DstBucket, st.DstKMSKeyName, st.DstKeySHA256)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	o := st.Source
 	fresh(&o)
 	o.Bucket, o.Name, o.StorageClass, o.KeySHA256 = st.DstBucket, st.DstName, st.StorageClass, st.DstKeySHA256
+	if err := s.resealInto(r, &o, st.Source, t); err != nil {
+		writeError(w, err)
+		return
+	}
 	if st.DropContexts {
 		o.Contexts = nil
 	}
@@ -369,9 +400,8 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errorf(http.StatusBadRequest, "parseError", "Parse Error: the compose request is not valid JSON"))
 		return
 	}
-	if req.KMSKeyName != "" {
-		writeError(w, badRequest("kmsKeyName is not supported by CloudBurrow; it is refused rather than ignored"))
-		return
+	if k := bodyKMSKey(q.Get("kmsKeyName"), req.Destination); k != "" {
+		req.KMSKeyName = k
 	}
 	dropContexts, err := dropCustomContexts(q, req.DropContextGroups...)
 	if err != nil {
@@ -438,15 +468,20 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 			_ = c.Close()
 		}
 	}()
+	t, err := s.writeTarget(bucket, req.KMSKeyName, key)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	for _, o := range sources {
-		f, err := s.blobs.Open(o.Blob)
+		f, err := s.openObject(r.Context(), o)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
 		readers, closers = append(readers, f), append(closers, f)
 	}
-	blob, err := s.blobs.Write(io.MultiReader(readers...))
+	blob, sealed, err := t.write(r.Context(), s, io.MultiReader(readers...))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -454,7 +489,8 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 	// A composite object has no MD5 (composite-objects docs); its CRC32C is
 	// the components' combined, which is the CRC32C of the joined bytes.
 	o := objectRecord{Bucket: bucket, Name: name, Blob: blob.ID, Size: blob.Size, CRC32C: blob.CRC32C,
-		ComponentCount: components, StorageClass: sources[0].StorageClass, KeySHA256: key}
+		ComponentCount: components, StorageClass: sources[0].StorageClass, KeySHA256: key,
+		KMSKeyVersion: sealed.Version, WrappedKey: sealed.Wrapped}
 	if !dropContexts {
 		o.Contexts = mergeContexts(sources)
 	}

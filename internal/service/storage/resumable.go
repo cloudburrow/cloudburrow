@@ -91,10 +91,6 @@ func putSession(tx Tx, u uploadSession) error {
 // resumableStart begins a session.
 func (s *Server) resumableStart(w http.ResponseWriter, r *http.Request, bucket string) {
 	q := r.URL.Query()
-	if q.Get("kmsKeyName") != "" {
-		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "kmsKeyName is not implemented"))
-		return
-	}
 	if _, err := parseObjectPreconditions(q, "if"); err != nil {
 		writeError(w, err)
 		return
@@ -128,7 +124,12 @@ func (s *Server) resumableStart(w http.ResponseWriter, r *http.Request, bucket s
 		writeError(w, err)
 		return
 	}
-	if err := s.bucketExists(bucket); err != nil {
+	if k := q.Get("kmsKeyName"); k != "" {
+		meta.KMSKeyName = k
+	}
+	// The key is checked now, as Google refuses a session it could not
+	// finish; the bytes are sealed when the upload completes (cmek.go).
+	if _, err := s.writeTarget(bucket, meta.KMSKeyName, meta.KeySHA256); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -291,7 +292,12 @@ func (s *Server) resumableFinish(w http.ResponseWriter, r *http.Request, u uploa
 		}
 		readers, closers = append(readers, f), append(closers, f)
 	}
-	blob, err := s.blobs.Write(io.MultiReader(readers...))
+	t, err := s.writeTarget(u.Bucket, u.Meta.KMSKeyName, u.Meta.KeySHA256)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	blob, sealed, err := t.write(r.Context(), s, io.MultiReader(readers...))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -301,6 +307,7 @@ func (s *Server) resumableFinish(w http.ResponseWriter, r *http.Request, u uploa
 		return
 	}
 	meta := u.Meta
+	meta.sealed = sealed
 	if len(u.Headers) > 0 && meta.Metadata == nil {
 		meta.Metadata = map[string]string{}
 	}

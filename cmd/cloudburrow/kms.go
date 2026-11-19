@@ -340,6 +340,12 @@ func firestoreKMS(cfg config.Config) bool {
 	return serviceEnabled(cfg, config.ServiceFirestore) && serviceEnabled(cfg, config.ServiceKMS)
 }
 
+// storageKMS reports whether Cloud Storage's customer-managed keys (#1938)
+// encrypt through this instance's Cloud KMS.
+func storageKMS(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceStorage) && serviceEnabled(cfg, config.ServiceKMS)
+}
+
 // pinKMSPort chooses Cloud KMS's port now when it is OS-assigned (0), so
 // the Firestore front can be told it before the API binds.
 func pinKMSPort(cfg *config.Config) error {

@@ -1602,7 +1602,8 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 			Help:    "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
 		{Name: "kmsKey", Label: "Data encryption: Cloud KMS key", Type: "text", Section: protect,
 			Help: "Optional. Empty, the bucket uses a Google-managed encryption key (the default). A key name, " +
-				"projects/P/locations/L/keyRings/R/cryptoKeys/K, is stored as the default key; objects are not encrypted with it here."},
+				"projects/P/locations/L/keyRings/R/cryptoKeys/K, of this instance's Cloud KMS in the bucket's location, is the default key: " +
+				"new objects are encrypted with it, and its service agent needs the Cloud KMS CryptoKey Encrypter/Decrypter role on it."},
 	}
 }
 
@@ -3805,6 +3806,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Autoclass", Value: autoclassText(b)},
 			}},
 			{Heading: "Protection", Properties: protection},
+			{Heading: "Encryption", Properties: bucketEncryptionProperties(b)},
 			{Heading: "Lifecycle", Properties: []console.Property{
 				{Label: "Created", Value: shortTime(b.TimeCreated)},
 				{Label: "Updated", Value: shortTime(b.Updated)},

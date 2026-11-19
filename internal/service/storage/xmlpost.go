@@ -520,11 +520,18 @@ func (s *Server) xmlFormPost(w http.ResponseWriter, r *http.Request, bucket stri
 	if pol != nil && pol.hasRange {
 		body = io.LimitReader(part, pol.maxLen+1)
 	}
-	blob, err := s.blobs.Write(body)
+	// The bucket's default Cloud KMS key, if it has one (cmek.go).
+	t, err := s.writeTarget(bucket, "", meta.KeySHA256)
 	if err != nil {
 		writeXMLFromError(w, r, err, bucket)
 		return
 	}
+	blob, sealed, err := t.write(r.Context(), s, body)
+	if err != nil {
+		writeXMLFromError(w, r, err, bucket)
+		return
+	}
+	meta.sealed = sealed
 	if pol != nil && pol.hasRange {
 		// UNVERIFIED: the codes follow the XML API's interoperable ones.
 		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/reference-status

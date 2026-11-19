@@ -95,7 +95,8 @@ func xmlMeta(r *http.Request, name string) (uploadMeta, error) {
 			m.Metadata[lk[len("x-goog-meta-"):]] = v[0]
 		}
 	}
-	for _, h := range []string{"X-Goog-Copy-Source", "X-Goog-Acl", "X-Goog-Encryption-Kms-Key-Name"} {
+	m.KMSKeyName = r.Header.Get("X-Goog-Encryption-Kms-Key-Name")
+	for _, h := range []string{"X-Goog-Copy-Source", "X-Goog-Acl"} {
 		if r.Header.Get(h) != "" {
 			return m, badRequest("The XML API header %s is not supported by CloudBurrow; it is refused rather than ignored", h)
 		}
@@ -110,8 +111,9 @@ func xmlMeta(r *http.Request, name string) (uploadMeta, error) {
 // xmlPutObject is PUT /{bucket}/{object}: a whole object in the body.
 func (s *Server) xmlPutObject(w http.ResponseWriter, r *http.Request, bucket, name string) {
 	meta, err := xmlMeta(r, name)
+	var t writeTarget
 	if err == nil {
-		err = s.bucketExists(bucket)
+		t, err = s.writeTarget(bucket, meta.KMSKeyName, meta.KeySHA256)
 	}
 	var pre objectPreconditions
 	if err == nil {
@@ -126,11 +128,12 @@ func (s *Server) xmlPutObject(w http.ResponseWriter, r *http.Request, bucket, na
 		writeXMLFromError(w, r, err, bucket)
 		return
 	}
-	blob, err := s.blobs.Write(r.Body)
+	blob, sealed, err := t.write(r.Context(), s, r.Body)
 	if err != nil {
 		writeXMLFromError(w, r, err, bucket)
 		return
 	}
+	meta.sealed = sealed
 	o, err := s.finalizeObject(bucket, meta, blob, pre, wantMD5, wantCRC)
 	if err != nil {
 		writeXMLFromError(w, r, err, bucket)
@@ -259,7 +262,7 @@ func (s *Server) xmlList(w http.ResponseWriter, r *http.Request, bucket string) 
 func (s *Server) xmlResumableStart(w http.ResponseWriter, r *http.Request, bucket, name string) {
 	meta, err := xmlMeta(r, name)
 	if err == nil {
-		err = s.bucketExists(bucket)
+		_, err = s.writeTarget(bucket, meta.KMSKeyName, meta.KeySHA256)
 	}
 	if err == nil {
 		_, err = xmlPreconditions(r)

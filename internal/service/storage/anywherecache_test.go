@@ -164,7 +164,7 @@ func TestBucketRelocation(t *testing.T) {
 		`{"destinationLocation":"US-CENTRAL1"}`: 400,
 		`{"destinationLocation":"ME-WEST1"}`:    400,
 		`{"destinationLocation":"NOWHERE"}`:     400,
-		`{"destinationLocation":"US-EAST1","destinationKmsKeyName":"k"}`: 501,
+		`{"destinationLocation":"US-EAST1","destinationKmsKeyName":"k"}`: 400,
 	} {
 		if st, _ := doJSON(t, "POST", base+"/rbk/relocate", body); st != want {
 			t.Errorf("relocate %s = %d; want %d", body, st, want)

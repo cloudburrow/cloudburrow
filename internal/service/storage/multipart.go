@@ -96,7 +96,7 @@ func (s *Server) mpuInitiate(w http.ResponseWriter, r *http.Request, bucket, nam
 	}
 	meta, err := xmlMeta(r, name)
 	if err == nil {
-		err = s.bucketExists(bucket)
+		_, err = s.writeTarget(bucket, meta.KMSKeyName, meta.KeySHA256)
 	}
 	if err != nil {
 		writeXMLFromError(w, r, err, bucket)
@@ -232,14 +232,21 @@ func (s *Server) mpuComplete(w http.ResponseWriter, r *http.Request, bucket, nam
 		sum, _ := hex.DecodeString(p.MD5)
 		hashes.Write(sum)
 	}
-	blob, err := s.blobs.Write(io.MultiReader(readers...))
+	t, err := s.writeTarget(bucket, u.Meta.KMSKeyName, u.Meta.KeySHA256)
+	if err != nil {
+		writeXMLFromError(w, r, err, bucket)
+		return
+	}
+	blob, sealed, err := t.write(r.Context(), s, io.MultiReader(readers...))
 	if err != nil {
 		writeXMLFromError(w, r, err, bucket)
 		return
 	}
 	// "MD5 hashes don't exist for objects uploaded using this method."
 	blob.MD5 = nil
-	o, err := s.finalizeObject(bucket, u.Meta, blob, objectPreconditions{}, nil, nil)
+	meta := u.Meta
+	meta.sealed = sealed
+	o, err := s.finalizeObject(bucket, meta, blob, objectPreconditions{}, nil, nil)
 	if err != nil {
 		writeXMLFromError(w, r, err, bucket)
 		return
